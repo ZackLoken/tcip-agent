@@ -1,0 +1,1100 @@
+# ============================================================
+# TCIP Trait Catalog
+# 180 canonical traits organized by pipeline configuration.
+#
+# Each group defines: image_perspective, sensor_type,
+# isolation_task, ml_task.  Every trait in that group shares
+# those four fields.  Non-automatable traits sit at the end.
+# ============================================================
+
+# aerial | lidar | point_cloud_analysis
+aerial_lidar_point_cloud_analysis:
+  image_perspective: aerial
+  sensor_type: lidar
+  isolation_task: instance_segmentation
+  ml_task: point_cloud_analysis
+  traits:
+    - name: dbh
+      definition: Diameter at breast height (4.5 feet above ground) in meters
+      format: numeric
+      category: morphology
+      units: m
+      crops: [black_locust, persimmon]
+    - name: plant_biomass
+      definition: Total above-ground biomass estimated from canopy volume via allometric equation
+      format: numeric
+      category: morphology
+      units: kg
+      crops: [hazelnut]
+    - name: plant_height
+      definition: Height of plant from crown to canopy top
+      format: numeric
+      category: morphology
+      units: m
+      crops: [black_locust, chestnut, currant, elderberry, hazelnut, persimmon]
+    - name: plant_height_width_ratio
+      definition: Ratio of height/width of the bush
+      format: numeric
+      category: morphology
+      crops: [currant, elderberry]
+    - name: plant_max_height
+      definition: Plant height from crown to tallest point
+      format: numeric
+      category: morphology
+      units: cm
+      crops: [hazelnut]
+    - name: plant_volume
+      definition: 3-D crown volume
+      format: numeric
+      category: morphology
+      crops: [chestnut, currant, elderberry, hazelnut]
+    - name: stem_branching_frequency
+      definition: Number of subdivisions per unit stem length
+      format: numeric
+      category: morphology
+      crops: [hazelnut]
+    - name: stem_vertical_angle
+      definition: Change in branch angle before and after nut crop but before harvest
+      format: numeric
+      category: morphology
+      crops: [hazelnut]
+
+# aerial | multispectral | classification
+aerial_multispectral_classification:
+  image_perspective: aerial
+  sensor_type: multispectral
+  isolation_task: instance_segmentation
+  ml_task: classification
+  traits:
+    - name: phytophthora_cinnamomi
+      definition: Phytophthora root rot rating
+      format: ordinal
+      category: disease
+      crops: [chestnut]
+
+# aerial | rgb | change_detection
+aerial_rgb_change_detection:
+  image_perspective: aerial
+  sensor_type: rgb
+  isolation_task: instance_segmentation
+  ml_task: change_detection
+  traits:
+    - name: bloom_05per_date
+      definition: "Date when 5% of the bush's inflorescences have opened"
+      format: date
+      category: phenology
+      crops: [currant, elderberry]
+    - name: bloom_50per_date
+      definition: Date of 50% bloom
+      format: date
+      category: phenology
+      crops: [black_locust, currant, elderberry, persimmon]
+    - name: bloom_95per_date
+      definition: "Date when 95% of the bush's inflorescences have opened"
+      format: date
+      category: phenology
+      crops: [currant, elderberry]
+    - name: burr_drop_date
+      definition: Date of burr drop
+      format: date
+      category: phenology
+      crops: [chestnut]
+    - name: catkin_bloom_date
+      definition: Date of catkin bloom
+      format: date
+      category: phenology
+      crops: [chestnut]
+    - name: fruit_ripe_05per_date
+      definition: "Date when 5% of the bush's fruit has ripened to eating stage"
+      format: date
+      category: phenology
+      crops: [currant, elderberry]
+    - name: fruit_ripe_50per_date
+      definition: Date of 50% fruit ripe
+      format: date
+      category: phenology
+      crops: [currant, elderberry, persimmon]
+    - name: fruit_ripe_95per_date
+      definition: "Date when 95% of the bush's fruit has ripened to eating stage"
+      format: date
+      category: phenology
+      crops: [currant, elderberry]
+    - name: leaf_out_05per_date
+      definition: Date where 5% of leaves have unfurled from buds
+      format: date
+      category: phenology
+      crops: [currant, elderberry]
+    - name: leaf_out_50per_date
+      definition: Date where 50% of leaves have unfurled from buds
+      format: date
+      category: phenology
+      crops: [currant, elderberry]
+    - name: leaf_senescence_95per_date
+      definition: Date where 95% of leaves on plant have senesced
+      format: date
+      category: phenology
+      crops: [currant, elderberry]
+
+# aerial | rgb | classification
+aerial_rgb_classification:
+  image_perspective: aerial
+  sensor_type: rgb
+  isolation_task: instance_segmentation
+  ml_task: classification
+  traits:
+    - name: bloom_frost_tolerance
+      definition: Ordinal assessment of the damage to bloom after frost event
+      format: ordinal
+      category: disease
+      crops: [currant, elderberry]
+    - name: borer_damage
+      definition: Ordinal rating of locust borer damage
+      format: ordinal
+      category: disease
+      crops: [black_locust]
+    - name: chestnut_anthracnose
+      definition: Anthracnose disease rating
+      format: ordinal
+      category: disease
+      crops: [chestnut]
+    - name: cropload
+      definition: Broad rating of total fruit production of tree
+      format: ordinal
+      category: yield
+      crops: [persimmon]
+    - name: efb_damage
+      definition: 1-5 ordinal scale of EFB damage
+      format: ordinal
+      category: disease
+      crops: [hazelnut]
+    - name: efb_presence
+      definition: Presence or absence of Eastern Filbert Blight cankers
+      format: binary
+      category: disease
+      crops: [hazelnut]
+    - name: fruit_drop
+      definition: Proportion of ripe fruit that drop to ground (as opposed to being retained on the tree)
+      format: ordinal
+      category: yield
+      crops: [persimmon]
+    - name: fruit_sun_scorch
+      definition: Ordinal assessment of the damage to fruit from sun scorch
+      format: ordinal
+      category: disease
+      crops: [currant]
+    - name: leaf_spot_presence
+      definition: Ordinal gauge of the presence of leaf spot
+      format: ordinal
+      category: disease
+      crops: [currant]
+    - name: overall_disease
+      definition: Broad rating of overall disease on the tree
+      format: ordinal
+      category: disease
+      crops: [persimmon]
+    - name: plant_borer
+      definition: Ordinal assessment of the borer damage to the stem
+      format: ordinal
+      category: disease
+      crops: [elderberry]
+    - name: plant_dieback_presence
+      definition: Ordinal assessment of cane dieback presence
+      format: ordinal
+      category: disease
+      crops: [currant]
+    - name: plant_eriophyid_mites
+      definition: Ordinal assessment of presence and damage of eriophyid mite damage
+      format: ordinal
+      category: disease
+      crops: [elderberry]
+    - name: plant_growth_habit
+      definition: Growth form classification
+      format: nominal
+      category: morphology
+      crops: [black_locust, currant]
+    - name: plant_jbeetle
+      definition: Ordinal assessment of Japanese beetle presence (Popillia japonica) and damage
+      format: ordinal
+      category: disease
+      crops: [elderberry]
+    - name: plant_powderymildew_presence
+      definition: Ordinal assessment of powdery mildew presence
+      format: ordinal
+      category: disease
+      crops: [currant, elderberry]
+    - name: plant_wpbr_presence
+      definition: Ordinal assessment of white pine blister rust presence
+      format: ordinal
+      category: disease
+      crops: [currant]
+    - name: suckers
+      definition: Ordinal rating of tree suckering
+      format: ordinal
+      category: morphology
+      crops: [black_locust]
+
+# aerial | rgb | object_detection
+aerial_rgb_object_detection:
+  image_perspective: aerial
+  sensor_type: rgb
+  isolation_task: instance_segmentation
+  ml_task: object_detection
+  traits:
+    - name: burrs_density
+      definition: Burrs per unit canopy area
+      format: numeric
+      category: yield
+      crops: [chestnut]
+    - name: catkin_sex_ratio
+      definition: Ratio of male to female catkins
+      format: numeric
+      category: phenology
+      crops: [chestnut]
+    - name: fruit_set
+      definition: Percentage of flowers that develop into fruit
+      format: numeric
+      category: yield
+      crops: [persimmon]
+    - name: inflorescence_count
+      definition: Total number of inflorescences per bush
+      format: numeric
+      category: yield
+      crops: [currant, elderberry]
+    - name: n_burrs
+      definition: Total number of burrs per tree
+      format: numeric
+      category: yield
+      crops: [chestnut]
+    - name: plant_basal_shoots
+      definition: Number of basal shoots on the bush
+      format: numeric
+      category: morphology
+      crops: [currant, elderberry]
+    - name: stem_count
+      definition: Total number of stems
+      format: numeric
+      category: morphology
+      crops: [hazelnut]
+
+# aerial | rgb | regression
+aerial_rgb_regression:
+  image_perspective: aerial
+  sensor_type: rgb
+  isolation_task: instance_segmentation
+  ml_task: regression
+  traits:
+    - name: burr_yield
+      definition: Total burr yield
+      format: numeric
+      category: yield
+      units: kg
+      crops: [chestnut]
+    - name: plant_yield
+      definition: Weight of ripe berries from single bush
+      format: numeric
+      category: yield
+      units: kg
+      crops: [currant, elderberry]
+    - name: ttl_inshell_weight
+      definition: Total weight of dried nuts on a bush
+      format: numeric
+      category: yield
+      units: g
+      crops: [hazelnut]
+
+# aerial | sfm | point_cloud_analysis
+aerial_sfm_point_cloud_analysis:
+  image_perspective: aerial
+  sensor_type: sfm
+  isolation_task: instance_segmentation
+  ml_task: point_cloud_analysis
+  traits:
+    - name: plant_max_width
+      definition: Width of the bush at widest point
+      format: numeric
+      category: morphology
+      crops: [hazelnut]
+    - name: plant_min_width
+      definition: Width of the bush at most narrow point
+      format: numeric
+      category: morphology
+      crops: [hazelnut]
+    - name: plant_surface_area
+      definition: Planimetric crown area derived from 3D canopy model (overhead projection)
+      format: numeric
+      category: morphology
+      crops: [chestnut, hazelnut]
+    - name: plant_width_betweenrow
+      definition: Plant width perpendicular to the rows
+      format: numeric
+      category: morphology
+      crops: [chestnut, currant, elderberry, hazelnut]
+    - name: plant_width_inrow
+      definition: Plant width parallel to the rows
+      format: numeric
+      category: morphology
+      crops: [chestnut, currant, elderberry, hazelnut]
+
+# ground | radar | point_cloud_analysis
+ground_radar_point_cloud_analysis:
+  image_perspective: ground
+  sensor_type: radar
+  isolation_task: object_detection
+  ml_task: point_cloud_analysis
+  traits:
+    - name: root_crown_betweenrow_width
+      definition: Width of the root crown perpendicular to the row
+      format: numeric
+      category: morphology
+      crops: [hazelnut]
+    - name: root_crown_inrow_width
+      definition: Width of the root crown parallel to the rows
+      format: numeric
+      category: morphology
+      crops: [hazelnut]
+
+# ground | rgb | classification
+ground_rgb_classification:
+  image_perspective: ground
+  sensor_type: rgb
+  isolation_task: object_detection
+  ml_task: classification
+  traits:
+    - name: big_bud_mite_damage
+      definition: 1-5 ordinal scale of big bud mite damage
+      format: ordinal
+      category: disease
+      crops: [hazelnut]
+    - name: calyx
+      definition: Ordinal rating of calyx retention in ripe fruit
+      format: ordinal
+      category: quality
+      crops: [persimmon]
+    - name: cryphonectria_parasitica
+      definition: Chestnut blight rating
+      format: ordinal
+      category: disease
+      crops: [chestnut]
+    - name: cyme_orientation
+      definition: Ordinal assessment of the cyme direction with ripe fruit
+      format: ordinal
+      category: yield
+      crops: [elderberry]
+    - name: fruit_calyx_size
+      definition: Ordinal assessment of the size of the calyx attached to the fruit
+      format: ordinal
+      category: quality
+      crops: [currant]
+    - name: fruit_configuration
+      definition: Infructescence Type
+      format: nominal
+      category: morphology
+      crops: [currant]
+    - name: fruit_glossiness
+      definition: Ordinal assessment of the glossiness or dustiness of fruit
+      format: ordinal
+      category: quality
+      crops: [currant, elderberry]
+    - name: fruit_swd_presence
+      definition: Presence or absence of SWD damage
+      format: binary
+      category: disease
+      crops: [currant, elderberry]
+    - name: leaf_spot_photo
+      definition: Leaf spot disease classification from ground-level photo
+      format: ordinal
+      category: disease
+      crops: [currant]
+    - name: plant_wpbr_photo
+      definition: White pine blister rust classification from ground-level photo
+      format: ordinal
+      category: disease
+      crops: [currant]
+    - name: seeds
+      definition: Presence or absence of seeds
+      format: binary
+      category: quality
+      crops: [black_locust, persimmon]
+    - name: sex
+      definition: Sex of flowers on tree
+      format: nominal
+      category: phenology
+      crops: [persimmon]
+    - name: stem_bud_position
+      definition: Vegetative Bud Position in Relation to Shoot
+      format: nominal
+      category: morphology
+      crops: [currant]
+    - name: stem_bud_shape
+      definition: Vegetative Bud Shape of Apex
+      format: nominal
+      category: morphology
+      crops: [currant]
+    - name: stem_thorniness
+      definition: Ordinal measurement of thorns on plant stems
+      format: ordinal
+      category: morphology
+      crops: [currant]
+    - name: terminal_bearing
+      definition: 1-5 ordinal scale of terminal bearing
+      format: ordinal
+      category: morphology
+      crops: [hazelnut]
+    - name: thorns
+      definition: Ordinal rating of thorn presence
+      format: ordinal
+      category: morphology
+      crops: [black_locust]
+    - name: weevil_damage
+      definition: 1-5 ordinal scale of weevil damage
+      format: ordinal
+      category: disease
+      crops: [chestnut, hazelnut]
+
+# ground | rgb | color_analysis
+ground_rgb_color_analysis:
+  image_perspective: ground
+  sensor_type: rgb
+  isolation_task: object_detection
+  ml_task: color_analysis
+  traits:
+    - name: bloom_color
+      definition: Color of flower petals
+      format: string
+      category: color
+      crops: [currant, elderberry]
+    - name: bloom_ovary_color
+      definition: Flower Ovary Anthocyanin Coloration
+      format: string
+      category: color
+      crops: [currant]
+    - name: bloom_sepal_color
+      definition: Flower Sepal Anthocyanin Coloration
+      format: string
+      category: color
+      crops: [currant]
+    - name: fruit_color_descriptive
+      definition: Color of fruit
+      format: nominal
+      category: color
+      crops: [currant, elderberry]
+    - name: fruit_color_rgb
+      definition: RGB measurements of color
+      format: numeric
+      category: color
+      crops: [currant, elderberry]
+    - name: leaf_color_fall
+      definition: Color of leaves in the fall
+      format: string
+      category: color
+      crops: [currant, elderberry]
+    - name: leaf_color_green
+      definition: Leaf Blade Intensity of Green Color (Upper Side)
+      format: string
+      category: color
+      crops: [currant, elderberry]
+    - name: leaf_glossiness
+      definition: Leaf Blade Glossiness (Upper Side)
+      format: string
+      category: color
+      crops: [currant, elderberry]
+    - name: leaf_petiole_color
+      definition: Petiole Anthocyanin Coloration on Upper Side
+      format: string
+      category: color
+      crops: [currant]
+    - name: stem_bud_color
+      definition: Vegetative Bud Anthocyanin Coloration
+      format: string
+      category: color
+      crops: [currant]
+    - name: stem_shoot_color
+      definition: Young Shoot Anthocyanin Coloration
+      format: string
+      category: color
+      crops: [currant, elderberry]
+
+# ground | rgb | motion_tracking
+ground_rgb_motion_tracking:
+  image_perspective: ground
+  sensor_type: rgb
+  isolation_task: object_detection
+  ml_task: motion_tracking
+  traits:
+    - name: cyme_shatter_resistance
+      definition: Ordinal assessment of ripe berry retention on cyme
+      format: ordinal
+      category: yield
+      crops: [elderberry]
+
+# ground | rgb | object_detection
+ground_rgb_object_detection:
+  image_perspective: ground
+  sensor_type: rgb
+  isolation_task: object_detection
+  ml_task: object_detection
+  traits:
+    - name: bloom_per_axil
+      definition: Number of Inflorescences Per Axil
+      format: numeric
+      category: yield
+      crops: [currant]
+    - name: catkin_05per_date
+      definition: "Date when 5% of the bush's catkins have opened"
+      format: date
+      category: phenology
+      crops: [hazelnut]
+    - name: catkin_50per_date
+      definition: "Date when 50% of the bush's catkins have opened"
+      format: date
+      category: phenology
+      crops: [hazelnut]
+    - name: catkin_95per_date
+      definition: "Date when 95% of the bush's catkins have opened"
+      format: date
+      category: phenology
+      crops: [hazelnut]
+    - name: catkin_elongation_date
+      definition: Date when most catkins have elongated
+      format: date
+      category: phenology
+      crops: [hazelnut]
+    - name: cluster_nut_count
+      definition: Average number of nuts per cluster in subsample
+      format: numeric
+      category: yield
+      crops: [hazelnut]
+    - name: fruit_per_cyme
+      definition: Estimated number of berries on a cyme head
+      format: numeric
+      category: yield
+      crops: [elderberry]
+    - name: fruit_per_strig
+      definition: Number of fruit on each cluster/strig
+      format: numeric
+      category: yield
+      crops: [currant]
+    - name: pistillate_05per_date
+      definition: "Date when 5% of the bush's pistillate flowers have opened"
+      format: date
+      category: phenology
+      crops: [hazelnut]
+    - name: pistillate_50per_date
+      definition: "Date when 50% of the bush's pistillate flowers have opened"
+      format: date
+      category: phenology
+      crops: [hazelnut]
+    - name: pistillate_95per_date
+      definition: "Date when 95% of the bush's pistillate flowers have opened"
+      format: date
+      category: phenology
+      crops: [hazelnut]
+    - name: pistillate_flowering_date
+      definition: Date when most pistillate flowers have opened
+      format: date
+      category: phenology
+      crops: [hazelnut]
+
+# ground | rgb | regression
+ground_rgb_regression:
+  image_perspective: ground
+  sensor_type: rgb
+  isolation_task: object_detection
+  ml_task: regression
+  traits:
+    - name: bloom_length
+      definition: Flower Inflorescence Length
+      format: numeric
+      category: morphology
+      crops: [currant]
+    - name: efb_canker_length
+      definition: Length of Eastern Filbert Blight cankers in cm
+      format: numeric
+      category: disease
+      units: cm
+      crops: [hazelnut]
+    - name: stem_bud_length
+      definition: Vegetative Bud Length
+      format: numeric
+      category: morphology
+      crops: [currant]
+    - name: stem_internode_length
+      definition: Average distance between buds, or buds per unit branch length
+      format: numeric
+      category: morphology
+      crops: [currant, elderberry, hazelnut]
+
+# lab | hyperspectral | regression
+lab_hyperspectral_regression:
+  image_perspective: lab
+  sensor_type: hyperspectral
+  isolation_task: instance_segmentation
+  ml_task: regression
+  traits:
+    - name: kernel_oleic_acid_content
+      definition: Average content of oleic acid in hazelnut kernel
+      format: numeric
+      category: quality
+      crops: [hazelnut]
+
+# lab | nirs | regression
+lab_nirs_regression:
+  image_perspective: lab
+  sensor_type: nirs
+  isolation_task: instance_segmentation
+  ml_task: regression
+  traits:
+    - name: fruit_anthocyanin_content
+      definition: Total anthocyanin in fruit measured with a spectrophotometer
+      format: numeric
+      category: quality
+      crops: [currant, elderberry]
+    - name: fruit_cyanide_content
+      definition: Cyanide content per unit pulp
+      format: numeric
+      category: quality
+      crops: [elderberry]
+    - name: fruit_juice_TA
+      definition: Titratable acidity of berry juice
+      format: numeric
+      category: quality
+      crops: [currant, elderberry]
+    - name: fruit_juice_brix
+      definition: Brix of berry juice
+      format: numeric
+      category: quality
+      crops: [currant, elderberry]
+    - name: fruit_juice_pH
+      definition: pH of berry juice
+      format: numeric
+      category: quality
+      crops: [currant, elderberry]
+    - name: kernel_dry_matter_perc
+      definition: "% moisture of ground kernel by weight, after freeze drying"
+      format: numeric
+      category: quality
+      crops: [hazelnut]
+    - name: kernel_fiber
+      definition: 1-4 rating for fiber
+      format: ordinal
+      category: quality
+      crops: [hazelnut]
+    - name: kernel_perc_oil
+      definition: Average percent oil of hazelnut kernel
+      format: numeric
+      category: quality
+      crops: [hazelnut]
+    - name: soluble_tannins
+      definition: Soluble tannins per 1g of pulp in micrograms
+      format: numeric
+      category: quality
+      units: ug/g
+      crops: [persimmon]
+    - name: total_tannins
+      definition: Total tannins per 1g of pulp in micrograms
+      format: numeric
+      category: quality
+      units: ug/g
+      crops: [persimmon]
+
+# lab | rgb | classification
+lab_rgb_classification:
+  image_perspective: lab
+  sensor_type: rgb
+  isolation_task: instance_segmentation
+  ml_task: classification
+  traits:
+    - name: fruit_storage_6week
+      definition: Ordinal assessment of visible mold after 6 weeks of fridge storage
+      format: ordinal
+      category: quality
+      crops: [currant]
+    - name: kernel_pellicle
+      definition: 1-7 ordinal scale with 1 no pellicle
+      format: ordinal
+      category: quality
+      crops: [hazelnut]
+
+# lab | rgb | instance_segmentation
+lab_rgb_instance_segmentation:
+  image_perspective: lab
+  sensor_type: rgb
+  isolation_task: instance_segmentation
+  ml_task: instance_segmentation
+  traits:
+    - name: burr_size
+      definition: Average burr diameter
+      format: numeric
+      category: yield
+      units: mm
+      crops: [chestnut]
+    - name: cyme_diameter
+      definition: Width of cyme at widest point in mm
+      format: numeric
+      category: yield
+      units: mm
+      crops: [elderberry]
+    - name: fruit_diameter
+      definition: Average diameter of fruit at widest part in mm
+      format: numeric
+      category: quality
+      units: mm
+      crops: [currant, elderberry, persimmon]
+    - name: fruit_diameter_range
+      definition: Range of Fruit Size
+      format: numeric
+      category: quality
+      crops: [currant, elderberry]
+    - name: fruit_height
+      definition: Height in mm from tip to calyx scar
+      format: numeric
+      category: quality
+      units: mm
+      crops: [persimmon]
+    - name: inshell_height
+      definition: Average height of nuts in subsample
+      format: numeric
+      category: quality
+      units: mm
+      crops: [hazelnut]
+    - name: inshell_length
+      definition: Average length of nuts in subsample
+      format: numeric
+      category: quality
+      units: mm
+      crops: [hazelnut]
+    - name: inshell_width
+      definition: Average width of nuts in subsample
+      format: numeric
+      category: quality
+      units: mm
+      crops: [hazelnut]
+    - name: kernel_height
+      definition: Average height of kernels in subsample
+      format: numeric
+      category: quality
+      units: mm
+      crops: [hazelnut]
+    - name: kernel_length
+      definition: Average length of kernels in subsample
+      format: numeric
+      category: quality
+      units: mm
+      crops: [hazelnut]
+    - name: kernel_width
+      definition: Average width of kernels in subsample
+      format: numeric
+      category: quality
+      units: mm
+      crops: [hazelnut]
+    - name: leaf_length
+      definition: Length of leaf from petiole to tip in mm
+      format: numeric
+      category: morphology
+      units: mm
+      crops: [currant, elderberry]
+    - name: leaf_width
+      definition: Width of leaf at widest part in mm
+      format: numeric
+      category: morphology
+      units: mm
+      crops: [currant, elderberry]
+    - name: nut_height
+      definition: Nut height
+      format: numeric
+      category: quality
+      units: mm
+      crops: [chestnut]
+    - name: nut_length
+      definition: Nut length
+      format: numeric
+      category: quality
+      units: mm
+      crops: [chestnut]
+    - name: nut_width
+      definition: Nut width
+      format: numeric
+      category: quality
+      units: mm
+      crops: [chestnut]
+
+# lab | rgb | object_detection
+lab_rgb_object_detection:
+  image_perspective: lab
+  sensor_type: rgb
+  isolation_task: instance_segmentation
+  ml_task: object_detection
+  traits:
+    - name: fruit_seed_count
+      definition: Average seed count per fruit
+      format: numeric
+      category: quality
+      crops: [currant, elderberry]
+    - name: fruit_swd_larvae
+      definition: Number of SWD larvae per fruit
+      format: numeric
+      category: disease
+      crops: [currant, elderberry]
+    - name: ttl_inshell_count
+      definition: Total number of nuts on a bush
+      format: numeric
+      category: yield
+      crops: [hazelnut]
+
+# lab | rgb | regression
+lab_rgb_regression:
+  image_perspective: lab
+  sensor_type: rgb
+  isolation_task: instance_segmentation
+  ml_task: regression
+  traits:
+    - name: burr_weight
+      definition: Average burr weight
+      format: numeric
+      category: yield
+      units: g
+      crops: [chestnut]
+    - name: cluster_mass
+      definition: Average mass of clusters in subsample
+      format: numeric
+      category: yield
+      units: g
+      crops: [hazelnut]
+    - name: cyme_weight
+      definition: Weight of a cyme of ripe berries in g
+      format: numeric
+      category: yield
+      units: g
+      crops: [elderberry]
+    - name: fruit_averageweight
+      definition: Average weight of single fruit in g
+      format: numeric
+      category: quality
+      units: g
+      crops: [currant, elderberry]
+    - name: fruit_batch_weight
+      definition: Mass of 25 berries in g
+      format: numeric
+      category: quality
+      units: g
+      crops: [currant, elderberry]
+    - name: fruitsample_weight
+      definition: Weight in grams of subsample
+      format: numeric
+      category: quality
+      units: g
+      crops: [persimmon]
+    - name: inshell_weight
+      definition: Average weight per nut in subsample
+      format: numeric
+      category: quality
+      units: g
+      crops: [hazelnut]
+    - name: kernel_perc_grav
+      definition: Average percent kernel by weight in subsample
+      format: numeric
+      category: quality
+      crops: [hazelnut]
+    - name: kernel_perc_vol
+      definition: Average percent kernel by volume in subsample
+      format: numeric
+      category: quality
+      crops: [hazelnut]
+    - name: kernel_weight
+      definition: Average weight per kernel in subsample
+      format: numeric
+      category: quality
+      units: g
+      crops: [hazelnut]
+    - name: leaf_25weight_dry
+      definition: Weight of 25 leaves when fully dried
+      format: numeric
+      category: morphology
+      crops: [currant, elderberry]
+    - name: leaf_25weight_fresh
+      definition: Weight of 25 leaves when fresh
+      format: numeric
+      category: morphology
+      crops: [currant, elderberry]
+    - name: leaf_aveweight_dry
+      definition: Average weight of single, fully dried leaf, calculated from 25 leaf measurement
+      format: numeric
+      category: morphology
+      crops: [currant, elderberry]
+    - name: leaf_aveweight_fresh
+      definition: Average weight of single, fresh leaf, calculated from 25 leaf measurement
+      format: numeric
+      category: morphology
+      crops: [currant, elderberry]
+
+# non-automatable
+non_automatable:
+  automatable: false
+  traits:
+    - name: astringency
+      definition: Astringency rating of ripe fruit
+      format: ordinal
+      category: quality
+      crops: [persimmon]
+    - name: bark_thickness
+      definition: Thickness of bark in mm
+      format: numeric
+      category: morphology
+      units: mm
+      crops: [black_locust]
+    - name: bloom_05per_julian
+      definition: "Number of days from January 1st until 5% of the bush's inflorescences have opened"
+      format: numeric
+      category: phenology
+      crops: [currant, elderberry]
+    - name: bloom_50per_julian
+      definition: "Number of days from January 1st until 50% of the bush's inflorescences have opened"
+      format: numeric
+      category: phenology
+      crops: [currant, elderberry]
+    - name: bloom_95per_julian
+      definition: "Number of days from January 1st until 95% of the bush's inflorescences have opened"
+      format: numeric
+      category: phenology
+      crops: [currant, elderberry]
+    - name: catkin_05per_julian
+      definition: "Number of days from January 1st until 5% of the bush's catkins have opened"
+      format: numeric
+      category: phenology
+      crops: [hazelnut]
+    - name: catkin_50per_julian
+      definition: "Number of days from January 1st until 50% of the bush's catkins have opened"
+      format: numeric
+      category: phenology
+      crops: [hazelnut]
+    - name: catkin_95per_julian
+      definition: "Number of days from January 1st until 95% of the bush's catkins have opened"
+      format: numeric
+      category: phenology
+      crops: [hazelnut]
+    - name: cluster_detachment_force
+      definition: Average force required to detach cluster from bush
+      format: numeric
+      category: yield
+      crops: [hazelnut]
+    - name: flavor_rating
+      definition: Overall flavor rating
+      format: ordinal
+      category: quality
+      crops: [chestnut, currant, elderberry, hazelnut, persimmon]
+    - name: fruit_crispness
+      definition: Texture of fruit to mouth
+      format: ordinal
+      category: quality
+      crops: [currant]
+    - name: fruit_firmness
+      definition: Firmness of fruit measured with FirmTechII
+      format: numeric
+      category: quality
+      crops: [currant, elderberry]
+    - name: fruit_flavor_description
+      definition: Descriptive flavor notes of fresh fruit
+      format: string
+      category: quality
+      crops: [currant, elderberry]
+    - name: fruit_hand_harvest
+      definition: Ordinal assessment of how easy or difficult it is to harvest the fruit off the bush
+      format: ordinal
+      category: yield
+      crops: [currant]
+    - name: fruit_machine_harvest
+      definition: Ordinal assessment of the ability for the plant to be harvested by machine
+      format: ordinal
+      category: yield
+      crops: [currant, elderberry]
+    - name: fruit_ripe_05per_julian
+      definition: "Number of days from January 1st until 5% of the bush's fruit has ripened to eating stage"
+      format: numeric
+      category: phenology
+      crops: [currant, elderberry]
+    - name: fruit_ripe_50per_julian
+      definition: "Number of days from January 1st until 50% of the bush's fruit has ripened to eating stage"
+      format: numeric
+      category: phenology
+      crops: [currant, elderberry]
+    - name: fruit_ripe_95per_julian
+      definition: "Number of days from January 1st until 95% of the bush's fruit has ripened to eating stage"
+      format: numeric
+      category: phenology
+      crops: [currant, elderberry]
+    - name: fruitsample_n
+      definition: Number of fruit sampled from tree
+      format: numeric
+      category: quality
+      crops: [persimmon]
+    - name: leaf_blade_base
+      definition: Leaf Blade Base
+      format: string
+      category: morphology
+      crops: [currant]
+    - name: leaf_length_width_ratio
+      definition: Ratio of leaf length to width
+      format: numeric
+      category: morphology
+      crops: [currant, elderberry]
+    - name: leaf_thickness
+      definition: Thickness of leaf in mm
+      format: numeric
+      category: morphology
+      units: mm
+      crops: [currant, elderberry]
+    - name: nut_husk_rating
+      definition: Ease of husk removal rating
+      format: ordinal
+      category: quality
+      crops: [hazelnut]
+    - name: nut_perc_blanks
+      definition: Percentage of blanks or number in 10-nut sample
+      format: numeric
+      category: quality
+      crops: [hazelnut]
+    - name: parent_pollen
+      definition: The pollen parent or father of the plant
+      format: string
+      category: quality
+      crops: [currant, elderberry]
+    - name: parent_seed
+      definition: The seed parent or mother of the plant
+      format: string
+      category: quality
+      crops: [currant, elderberry]
+    - name: pistillate_05per_julian
+      definition: "Number of days from January 1st until 5% of the bush's pistillate flowers have opened"
+      format: numeric
+      category: phenology
+      crops: [hazelnut]
+    - name: pistillate_50per_julian
+      definition: "Number of days from January 1st until 50% of the bush's pistillate flowers have opened"
+      format: numeric
+      category: phenology
+      crops: [hazelnut]
+    - name: pistillate_95per_julian
+      definition: "Number of days from January 1st until 95% of the bush's pistillate flowers have opened"
+      format: numeric
+      category: phenology
+      crops: [hazelnut]
+    - name: plant_selection_points
+      definition: A point for every time the plant was marked for selection
+      format: numeric
+      category: quality
+      crops: [currant]
+    - name: plant_selection_reason
+      definition: Description of why the plant has selection points
+      format: string
+      category: quality
+      crops: [currant]
+    - name: plant_self_compatibility
+      definition: Self-fertility of cultivar
+      format: ordinal
+      category: quality
+      crops: [currant, elderberry]
+    - name: ploidy
+      definition: Chromosome ploidy level
+      format: ordinal
+      category: quality
+      crops: [black_locust, persimmon]

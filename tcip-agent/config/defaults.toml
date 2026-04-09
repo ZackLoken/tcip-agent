@@ -1,0 +1,9 @@
+# TCIP Agent default configuration
+model = "claude-sonnet-4-20250514"
+max_tokens = 4096
+temperature = 0.0
+permission_mode = "WorkspaceWrite"
+
+# MCP server (uncomment to auto-launch)
+# mcp_command = "python"
+# mcp_args = ["-m", "tcip_mcp"]

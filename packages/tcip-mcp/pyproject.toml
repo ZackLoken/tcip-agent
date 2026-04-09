@@ -1,0 +1,26 @@
+[project]
+name = "tcip-mcp"
+version = "0.1.0"
+description = "MCP server exposing TCIP phenotyping domain tools"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0",
+    "pyyaml>=6.0",
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "numpy",
+    "pillow>=9.0",
+    "shapely>=2.0",
+    "tcip-annotation",
+]
+
+[project.optional-dependencies]
+hpo = ["optuna>=3.0"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tcip_mcp"]
