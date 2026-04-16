@@ -5,3 +5,5 @@
 .vscode/settings.json
 *.pyc
 /tcip-agent/target/debug
+/packages/tcip-gui/.tcip
+/.tcip
