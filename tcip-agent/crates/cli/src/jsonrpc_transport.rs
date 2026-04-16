@@ -90,6 +90,8 @@ where
 
                 match runtime.run_turn(text).await {
                     Ok(summary) => {
+                        debug!("run_turn OK: text_len={}, tool_calls={}",
+                               summary.assistant_text.len(), summary.tool_calls.len());
                         // Emit text done
                         if !summary.assistant_text.is_empty() {
                             emit(
@@ -136,6 +138,7 @@ where
                         );
                     }
                     Err(e) => {
+                        error!("run_turn FAILED: {e}");
                         emit_error(-32000, &format!("Runtime error: {e}"));
                     }
                 }
