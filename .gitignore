@@ -4,3 +4,4 @@
 /data/predictions
 .vscode/settings.json
 *.pyc
+/tcip-agent/target/debug
