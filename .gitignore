@@ -8,3 +8,4 @@
 /packages/tcip-gui/.tcip
 /.tcip
 /tcip-agent/target/debug
+/packages/tcip-gui/src/tcip_gui.egg-info
