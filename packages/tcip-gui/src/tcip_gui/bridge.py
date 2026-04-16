@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from PyQt6.QtCore import QObject, QProcess, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QProcess, pyqtSignal
 
 from .protocol import (
     ControlCancel,
@@ -18,38 +18,6 @@ from .protocol import (
 )
 
 log = logging.getLogger(__name__)
-
-
-class AgentReaderThread(QThread):
-    """Reads newline-delimited JSON-RPC from the agent's stdout in a background thread."""
-
-    message_received = pyqtSignal(object)  # parsed protocol message
-    error_occurred = pyqtSignal(str)
-
-    def __init__(self, process: QProcess, parent: QObject | None = None) -> None:
-        super().__init__(parent)
-        self._process = process
-        self._running = True
-
-    def run(self) -> None:
-        while self._running:
-            if self._process.state() == QProcess.ProcessState.NotRunning:
-                break
-            if self._process.waitForReadyRead(200):
-                while self._process.canReadLine():
-                    raw = self._process.readLine().data().decode("utf-8", errors="replace").strip()
-                    if not raw:
-                        continue
-                    try:
-                        msg = JsonRpcMessage.from_line(raw)
-                        parsed = parse_agent_message(msg)
-                        self.message_received.emit(parsed)
-                    except (json.JSONDecodeError, KeyError) as exc:
-                        log.warning("Malformed message from agent: %s", exc)
-
-    def stop(self) -> None:
-        self._running = False
-        self.wait(2000)
 
 
 class AgentBridge(QObject):
@@ -86,7 +54,6 @@ class AgentBridge(QObject):
         self._command = agent_command
         self._args = agent_args
         self._process: QProcess | None = None
-        self._reader: AgentReaderThread | None = None
 
     def start(self) -> None:
         """Spawn the agent process and start reading."""
@@ -96,28 +63,29 @@ class AgentBridge(QObject):
 
         self._process = QProcess(self)
         self._process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+
+        # Inherit the full system environment and ensure agent tracing
+        from PyQt6.QtCore import QProcessEnvironment
+        env = QProcessEnvironment.systemEnvironment()
+        if not env.contains("RUST_LOG"):
+            env.insert("RUST_LOG", "info")
+        self._process.setProcessEnvironment(env)
+
         self._process.finished.connect(self._on_process_finished)
         self._process.errorOccurred.connect(self._on_process_error)
         self._process.readyReadStandardError.connect(self._on_stderr)
+        self._process.readyReadStandardOutput.connect(self._on_stdout)
 
         self._process.start(self._command, self._args)
         if not self._process.waitForStarted(5000):
             log.error("Failed to start agent process")
             return
 
-        self._reader = AgentReaderThread(self._process, self)
-        self._reader.message_received.connect(self._dispatch_message)
-        self._reader.start()
-
         self.agent_started.emit()
         log.info("Agent process started: %s %s", self._command, self._args)
 
     def stop(self) -> None:
         """Gracefully shut down the agent."""
-        if self._reader:
-            self._reader.stop()
-            self._reader = None
-
         if self._process and self._process.state() != QProcess.ProcessState.NotRunning:
             self._send(ControlShutdown().to_rpc())
             if not self._process.waitForFinished(5000):
@@ -207,13 +175,25 @@ class AgentBridge(QObject):
     def _on_process_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:
         status_str = "normal" if exit_status == QProcess.ExitStatus.NormalExit else "crashed"
         log.info("Agent exited: code=%d status=%s", exit_code, status_str)
-        if self._reader:
-            self._reader.stop()
-            self._reader = None
         self.agent_stopped.emit(exit_code, status_str)
 
     def _on_process_error(self, error: QProcess.ProcessError) -> None:
         log.error("Agent process error: %s", error)
+
+    def _on_stdout(self) -> None:
+        """Read complete lines from agent stdout and dispatch as JSON-RPC messages."""
+        if not self._process:
+            return
+        while self._process.canReadLine():
+            raw = self._process.readLine().data().decode("utf-8", errors="replace").strip()
+            if not raw:
+                continue
+            try:
+                msg = JsonRpcMessage.from_line(raw)
+                parsed = parse_agent_message(msg)
+                self._dispatch_message(parsed)
+            except (json.JSONDecodeError, KeyError) as exc:
+                log.warning("Malformed message from agent: %s", exc)
 
     def _on_stderr(self) -> None:
         if self._process:
