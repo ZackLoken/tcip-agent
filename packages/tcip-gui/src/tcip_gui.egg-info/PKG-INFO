@@ -1,7 +1,0 @@
-Metadata-Version: 2.4
-Name: tcip-gui
-Version: 0.1.0
-Summary: PyQt6 desktop shell for TCIP agent
-Requires-Python: >=3.11
-Requires-Dist: PyQt6>=6.5
-Requires-Dist: PyQt6-WebEngine>=6.5
