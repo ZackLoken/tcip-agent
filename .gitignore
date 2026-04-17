@@ -1,11 +1,31 @@
+# Data
 /data/images
 /data/labels/detect
 /data/labels
 /data/predictions
-.vscode/settings.json
+
+# Python
 *.pyc
-/tcip-agent/target/debug
-/packages/tcip-gui/.tcip
+__pycache__/
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Rust
+/tcip-agent/target/
+
+# Runtime / sessions
 /.tcip
-/tcip-agent/target/debug
-/packages/tcip-gui/src/tcip_gui.egg-info
+/tcip-agent/.tcip/
+/packages/tcip-gui/.tcip
+
+# Editor / OS
+*.bak
+*.orig
+*.tmp
+.env
+.venv
+
+# Node
+node_modules/
