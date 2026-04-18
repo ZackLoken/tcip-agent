@@ -1,0 +1,111 @@
+---
+name: training
+description: "Training configuration, progressive unfreezing, early stopping, HPO, and experiment tracking for ML model training."
+---
+
+# Training Configuration
+
+## Progressive Unfreezing
+
+Multi-stage training for transfer learning:
+
+```yaml
+stages:
+  - freeze_to: -1    # Freeze entire backbone, train head only
+    epochs: 5
+    lr: 1e-3
+  - freeze_to: 2     # Unfreeze last 2 backbone layers
+    epochs: 10
+    lr: 1e-4
+  - freeze_to: 0     # Full fine-tuning
+    epochs: 10
+    lr: 1e-5
+```
+
+Each stage has its own learning rate, epoch count, and freeze depth. The optimizer is rebuilt between stages.
+
+## Early Stopping
+
+```yaml
+early_stopping:
+  enabled: true
+  patience: 7        # Epochs without improvement before stopping
+  metric: val_loss   # Metric to monitor
+  mode: min          # min for loss, max for mAP
+```
+
+## Config Structure
+
+```python
+config = {
+    "model_spec": {
+        "backbone": {"name": "resnet50", "pretrained": True},
+        "neck": {"name": "fpn"},
+        "heads": [{"name": "detection_head", "task": "detection", "num_classes": 3}],
+        "loss": {"name": "focal_loss"}
+    },
+    "data": {
+        "images_dir": "data/images",
+        "labels_dir": "data/labels/detect",
+        "task": "detection"
+    },
+    "training": {
+        "batch_size": 4,
+        "stages": [...],
+        "mixed_precision": True,
+        "device": "cuda"
+    },
+    "augmentation": {
+        "horizontal_flip": 0.5,
+        "random_crop": {"min_scale": 0.8}
+    }
+}
+```
+
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| `validate_config` | Validate config before training |
+| `launch_training` | Start async training run (auto-launches TensorBoard) |
+| `check_training_status` | Check run progress, metrics, and TensorBoard URL |
+| `list_training_runs` | List all runs in session |
+| `run_hpo` | HPO via random search or Optuna with TensorBoard logging |
+| `get_training_metrics_path` | Get path to live metrics JSONL |
+| `get_worst_predictions` | Find images with worst prediction quality |
+| `create_experiment` | Track training run with full lineage |
+
+## TensorBoard
+
+- `launch_training` automatically starts a TensorBoard process and returns the URL
+- Scalars logged: `train/loss`, `train/lr`, `val/*` per epoch
+- `check_training_status` includes `tensorboard_url` if TB is still running
+- Training panel has an iframe that loads the TensorBoard URL
+
+## HPO
+
+`run_hpo` supports two modes:
+
+### Random Search (default)
+```python
+run_hpo(base_config=config, n_trials=10)
+```
+- Generates trial configs from discrete param space
+- Returns configs ready for `launch_training`
+
+### Optuna + TensorBoard (recommended)
+```python
+run_hpo(base_config=config, n_trials=20, use_optuna=True, output_dir="runs/hpo_1")
+```
+- TPE sampler with ASHA/MedianPruner for early trial termination
+- Per-trial TensorBoard logs in `output_dir/hpo_tensorboard/trial_{n}/`
+- HParams plugin logs for side-by-side param comparison
+- Auto-launches TensorBoard pointing at HPO log directory
+- Returns `best_params`, `best_value`, `all_trials`, and `tensorboard` URL
+
+## Dataset Splits
+
+Use `split_dataset` to create train/val/test splits:
+- Default: 70/20/10
+- Stratified by class distribution
+- Reproducible with random seed
