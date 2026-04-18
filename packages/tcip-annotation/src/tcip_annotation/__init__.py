@@ -25,6 +25,12 @@ from tcip_annotation.format_io import (
 )
 from tcip_annotation.matching import compute_matches, box_iou, polygon_iou, point_in_polygon
 
+# SAM wrapper — lazy-import safe (requires segment-anything optional dep)
+try:
+    from tcip_annotation.sam_wrapper import auto_mask, grid_to_pixel
+except ImportError:
+    pass
+
 __all__ = [
     "AnnotationState",
     "BBox",
@@ -59,4 +65,7 @@ __all__ = [
     "box_iou",
     "polygon_iou",
     "point_in_polygon",
+    # SAM wrapper
+    "auto_mask",
+    "grid_to_pixel",
 ]
