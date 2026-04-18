@@ -39,10 +39,41 @@ Use `load_annotations` / `save_annotations` from `format_io` for format-agnostic
 
 ## SAM-Assisted Labeling
 
+### Manual Prompting
 1. User clicks a point or draws a rough box on the annotation canvas
 2. `sam_predict` generates a precise polygon mask
 3. Polygon is saved in the project's configured annotation format
 4. Supports point prompts (positive/negative) and box prompts
+
+### Vision-Guided Auto-Labeling (SAM as "Hands", Agent as "Eyes")
+
+The agent can autonomously label images by using SAM for geometry generation
+and its multimodal vision for classification and QA.
+
+**Full workflow:**
+1. `sam_auto_label(image_path)` → SAM generates candidate masks, renders numbered overlay
+2. Agent `view_image` on overlay → identifies and classifies each candidate
+3. `accept_candidates(image_path, assignments=[{candidate_id: 0, class_id: 1}, ...])` → saves accepted candidates as annotations
+4. Agent `view_image` on the saved result → visual QA pass
+
+**Corrective loop (for missed objects):**
+1. `visualize_grid_overlay(image_path)` → labeled grid (A1–H6) for spatial reference
+2. Agent `view_image` → identifies missed regions by grid cell
+3. `sam_predict(image_path, grid_cells=["B3", "D5"])` → SAM segments at those locations
+4. Save new annotations via `save_annotations`
+
+**Grid cell system:**
+- 8 columns (A–H) × 6 rows (1–6) by default
+- Agent references cells like "B3" or "F5" instead of pixel coordinates
+- `grid_to_pixel()` in `sam_wrapper.py` converts to center pixel coords
+
+| Tool | Role | Phase |
+|------|------|-------|
+| `sam_auto_label` | Generate all candidate masks | Discovery |
+| `accept_candidates` | Save classified candidates | Classification |
+| `visualize_grid_overlay` | Spatial reference for corrections | Correction |
+| `sam_predict(grid_cells=...)` | Targeted segmentation | Correction |
+| `view_image` | Agent visual review | All phases |
 
 ## Review Protocol
 
