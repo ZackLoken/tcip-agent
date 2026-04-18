@@ -41,7 +41,7 @@ def test_append_session_event(tmp_path: Path):
     session = create_session(str(tmp_path))
     result = append_session_event(
         str(tmp_path), session["session_id"], "tool_call",
-        {"tool": "list_crops", "result": "ok"},
+        {"tool": "load_dataset", "result": "ok"},
     )
     assert result["event_type"] == "tool_call"
 

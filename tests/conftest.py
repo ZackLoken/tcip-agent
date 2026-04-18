@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import os
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -42,47 +39,3 @@ def data_dir(tmp_path: Path) -> Path:
         (preds_dir / f"{name}.txt").write_text("\n".join(pred_lines) + "\n")
 
     return tmp_path
-
-
-@pytest.fixture
-def registry_path(tmp_path: Path) -> Path:
-    """Create a minimal crops.yml for testing."""
-    registry_dir = tmp_path / "registry"
-    registry_dir.mkdir()
-    yml = registry_dir / "crops.yml"
-    yml.write_text(textwrap.dedent("""\
-        ground_rgb_object_detection:
-          image_perspective: ground
-          sensor_type: rgb
-          isolation_task: bush_isolation
-          ml_task: object_detection
-          traits:
-            - name: catkin_05per_date
-              definition: Date at which 5% of catkins are emerged
-              format: date
-              category: phenology
-              crops: [hazelnut]
-            - name: catkin_50per_date
-              definition: Date at which 50% of catkins are emerged
-              format: date
-              category: phenology
-              crops: [hazelnut]
-        non_automatable:
-          traits:
-            - name: flavor_score
-              definition: Subjective flavor rating
-              format: ordinal_1_9
-              category: quality
-              crops: [hazelnut, chestnut]
-    """))
-    return yml
-
-
-@pytest.fixture(autouse=True)
-def set_registry_env(registry_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the registry loader to the test registry."""
-    monkeypatch.setenv("TCIP_REGISTRY_PATH", str(registry_path))
-    # Clear cached registry
-    import tcip_mcp.tools.registry_tools as rt
-    rt._REGISTRY = None
-    rt._REGISTRY_PATH = None

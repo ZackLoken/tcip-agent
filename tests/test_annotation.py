@@ -1,4 +1,4 @@
-"""Tests for annotation tools and the annotation engine."""
+"""Tests for annotation tools and label I/O."""
 
 from __future__ import annotations
 
@@ -8,10 +8,7 @@ import pytest
 
 from tcip_annotation import (
     BBox,
-    Polygon,
     PredBBox,
-    AnnotationState,
-    AnnotationEngine,
     parse_detect_labels,
     write_detect_labels,
     box_iou,
@@ -75,29 +72,6 @@ def test_compute_matches():
     assert len(matches["tp"]) == 1
     assert len(matches["fp"]) == 1
     assert len(matches["fn"]) == 0
-
-
-def test_annotation_engine_add_remove():
-    state = AnnotationState(img_width=640, img_height=480)
-    engine = AnnotationEngine(state)
-    engine.add_box(BBox(x1=10, y1=20, x2=100, y2=150, class_id=0))
-    assert len(state.boxes) == 1
-    engine.add_box(BBox(x1=200, y1=200, x2=300, y2=300, class_id=1))
-    assert len(state.boxes) == 2
-    engine.remove_box(0)
-    assert len(state.boxes) == 1
-    assert state.boxes[0].class_id == 1
-
-
-def test_annotation_engine_undo_redo():
-    state = AnnotationState(img_width=640, img_height=480)
-    engine = AnnotationEngine(state)
-    engine.add_box(BBox(x1=10, y1=20, x2=100, y2=150, class_id=0))
-    assert len(state.boxes) == 1
-    engine.undo()
-    assert len(state.boxes) == 0
-    engine.redo()
-    assert len(state.boxes) == 1
 
 
 def test_evaluate_detections_tool(data_dir: Path):

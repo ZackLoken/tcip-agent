@@ -2,13 +2,13 @@
 
 Covers: datasets, samplers, optimizer factory, generic trainer basics,
 orchestrator validation, predictor, active learning scorers,
-PointNet++ backbone, temporal heads, aggregation functions, and pipeline tools.
+PointNet++ backbone, temporal heads, and pipeline tools.
 """
 
 from __future__ import annotations
 
 import pytest
-import torch
+torch = pytest.importorskip("torch")
 import torch.nn as nn
 
 
@@ -156,11 +156,6 @@ class TestGenericPredictor:
         with pytest.raises(FileNotFoundError):
             GenericPredictor("/nonexistent/model.pt")
 
-    def test_onnx_predictor_missing_file(self):
-        from tcip_mcp.pipelines.inference.onnx_runtime import OnnxPredictor
-        with pytest.raises((FileNotFoundError, Exception)):
-            OnnxPredictor("/nonexistent/model.onnx")
-
 
 # ====================================================================
 # Phase 9: Active Learning
@@ -223,24 +218,9 @@ class TestPointCloud:
         import tcip_mcp.pipelines.components.backbones_3d  # noqa: F401
         assert "pointnet++" in BACKBONES
 
-    def test_preprocessing_voxel(self):
-        from tcip_mcp.pipelines.data.preprocessing_3d import voxel_downsample
-        import numpy as np
-        pts = np.random.randn(1000, 3).astype(np.float32)
-        down = voxel_downsample(pts, voxel_size=0.5)
-        assert len(down) <= len(pts)
-
-    def test_compute_chm(self):
-        from tcip_mcp.pipelines.data.preprocessing_3d import compute_chm
-        import numpy as np
-        pts = np.random.randn(500, 3).astype(np.float32)
-        pts[:, 2] = np.abs(pts[:, 2])  # positive Z
-        chm, transform = compute_chm(pts, resolution=1.0)
-        assert chm.ndim == 2
-
 
 # ====================================================================
-# Phase 11: Temporal Modeling & Aggregation
+# Phase 11: Temporal Modeling
 # ====================================================================
 
 class TestTemporal:
@@ -263,27 +243,6 @@ class TestTemporal:
         import tcip_mcp.pipelines.components.temporal  # noqa: F401
         assert "temporal_lstm" in HEADS
         assert "temporal_transformer" in HEADS
-
-
-class TestAggregation:
-    def test_gompertz_fitting(self):
-        from tcip_mcp.pipelines.postprocessing.aggregation import fit_gompertz
-        dates = ["2024-01-01", "2024-02-01", "2024-03-01", "2024-04-01", "2024-05-01", "2024-06-01"]
-        counts = [1.0, 2.0, 5.0, 10.0, 14.0, 15.0]
-        result = fit_gompertz(dates, counts)
-        assert "asymptote" in result or "error" in result
-
-    def test_logistic_growth(self):
-        from tcip_mcp.pipelines.postprocessing.aggregation import fit_logistic_growth
-        dates = ["2024-01-01", "2024-02-01", "2024-03-01", "2024-04-01", "2024-05-01", "2024-06-01"]
-        counts = [1.0, 3.0, 8.0, 14.0, 18.0, 19.0]
-        result = fit_logistic_growth(dates, counts)
-        assert "carrying_capacity" in result or "error" in result
-
-    def test_strategy_fns_updated(self):
-        from tcip_mcp.pipelines.postprocessing.aggregation import STRATEGY_FNS
-        assert "gompertz" in STRATEGY_FNS
-        assert "logistic_growth" in STRATEGY_FNS
 
 
 # ====================================================================

@@ -10,8 +10,9 @@ import json
 from pathlib import Path
 
 import pytest
-import torch
+torch = pytest.importorskip("torch")
 from torch.utils.data import DataLoader
+torchvision = pytest.importorskip("torchvision")
 from torchvision.utils import save_image
 
 # Trigger component registration (side-effect imports)
