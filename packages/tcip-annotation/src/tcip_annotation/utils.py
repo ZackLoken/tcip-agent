@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from PIL import Image, ExifTags
+
+logger = logging.getLogger(__name__)
 
 
 def auto_orient_image(img: Image.Image) -> Image.Image:
@@ -31,7 +34,7 @@ def auto_orient_image(img: Image.Image) -> Image.Image:
         if orientation in ops:
             img = ops[orientation](img)
     except Exception:
-        pass
+        logger.debug("EXIF orientation correction failed", exc_info=True)
     return img
 
 

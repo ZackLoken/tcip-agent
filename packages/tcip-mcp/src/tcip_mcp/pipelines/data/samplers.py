@@ -7,7 +7,6 @@ dataset.class_distribution, so the agent just picks a strategy name.
 from __future__ import annotations
 
 import math
-from collections import Counter
 
 import torch
 from torch.utils.data import Sampler, WeightedRandomSampler as _TorchWeightedRandom

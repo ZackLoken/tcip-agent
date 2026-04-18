@@ -105,7 +105,7 @@ def validate_pipeline(spec: dict) -> list[str]:
 def _run_training_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> PhaseResult:
     """Train a model for this phase."""
     from tcip_mcp.pipelines.training.generic_trainer import (
-        TrainConfig, create_run, train, task_collate,
+        create_run, train, task_collate,
     )
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from torch.utils.data import DataLoader
@@ -293,21 +293,118 @@ def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
 
 
 def _run_aggregation_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> PhaseResult:
-    """Temporal/spatial aggregation (delegates to existing aggregation module)."""
+    """Temporal/spatial aggregation — per-image results to per-plant CSV."""
     result = PhaseResult(phase_name=phase["name"], status="running")
     t0 = time.time()
 
     try:
-        strategy = phase.get("strategy", "sigmoid")
+        from tcip_mcp.pipelines.postprocessing.aggregation import (
+            aggregate_per_plant,
+            export_aggregated_csv,
+        )
+
+        strategy = phase.get("strategy", "count")
+        value_key = phase.get("value_key", "count")
+        trait_name = phase.get("trait_name", "trait")
+        crop = phase.get("crop", "")
+
         input_ref = phase.get("input")
 
+        # Collect per-image results from the prior phase
+        image_results: list[dict] = []
+        if input_ref and input_ref in context:
+            prev = context[input_ref]
+            preds_dir = prev.get("predictions_dir")
+            if preds_dir:
+                preds_path = Path(preds_dir)
+                for txt_path in sorted(preds_path.glob("*.txt")):
+                    lines = txt_path.read_text().strip().splitlines()
+                    image_results.append({
+                        "image": txt_path.stem,
+                        "count": len(lines),
+                    })
+            # Also check for pre-computed results list
+            if "results" in prev:
+                image_results = prev["results"]
+
+        if not image_results:
+            # No input data — produce empty CSV and complete gracefully
+            per_plant = []
+        else:
+            # Aggregate
+            per_plant = aggregate_per_plant(image_results, strategy=strategy, value_key=value_key)
+
+        # Export CSV
         out_csv = work_dir / phase["name"] / "aggregated.csv"
         out_csv.parent.mkdir(parents=True, exist_ok=True)
+        export_aggregated_csv(per_plant, str(out_csv), trait_name=trait_name, crop=crop)
 
-        # Placeholder — actual implementation would call postprocessing/aggregation.py
         result.status = "completed"
-        result.artifacts = {"csv_path": str(out_csv), "strategy": strategy}
-        result.metrics = {"strategy": strategy}
+        result.artifacts = {
+            "csv_path": str(out_csv),
+            "strategy": strategy,
+            "n_plants": len(per_plant),
+        }
+        result.metrics = {
+            "strategy": strategy,
+            "n_plants": len(per_plant),
+            "n_images": len(image_results),
+        }
+
+    except Exception as e:
+        result.status = "failed"
+        result.error = str(e)
+
+    result.elapsed_seconds = time.time() - t0
+    return result
+
+
+def _run_export_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> PhaseResult:
+    """Export results to CSV or other delivery formats."""
+    result = PhaseResult(phase_name=phase["name"], status="running")
+    t0 = time.time()
+
+    try:
+        from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+        input_ref = phase.get("input")
+        if not input_ref or input_ref not in context:
+            raise ValueError("Export phase needs an input reference")
+
+        prev = context[input_ref]
+        out_path = work_dir / phase["name"] / "results.csv"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # If previous phase produced a CSV, just copy/reference it
+        if "csv_path" in prev:
+            import shutil
+            shutil.copy2(prev["csv_path"], str(out_path))
+        elif "predictions_dir" in prev:
+            # Build image_results from predictions dir
+            preds_path = Path(prev["predictions_dir"])
+            image_results = []
+            for txt_path in sorted(preds_path.glob("*.txt")):
+                lines = txt_path.read_text().strip().splitlines()
+                scores = []
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 6:
+                        try:
+                            scores.append(float(parts[5]))
+                        except ValueError:
+                            pass
+                image_results.append({
+                    "image": txt_path.stem,
+                    "count": len(lines),
+                    "scores": scores,
+                })
+            export_detection_csv(image_results, str(out_path))
+        else:
+            raise ValueError("Export phase: no compatible input artifacts")
+
+        result.status = "completed"
+        result.artifacts = {"csv_path": str(out_path)}
+        result.metrics = {"output_path": str(out_path)}
 
     except Exception as e:
         result.status = "failed"
@@ -322,6 +419,7 @@ _PHASE_RUNNERS = {
     "inference": _run_inference_phase,
     "cropping": _run_cropping_phase,
     "aggregation": _run_aggregation_phase,
+    "export": _run_export_phase,
 }
 
 
@@ -332,6 +430,8 @@ def _infer_phase_type(phase: dict) -> str:
     task = phase.get("task", "")
     if task == "aggregation":
         return "aggregation"
+    if task == "export":
+        return "export"
     if "model_spec" in phase:
         return "training"
     if "checkpoint" in phase:
@@ -344,13 +444,22 @@ def _infer_phase_type(phase: dict) -> str:
 # ====================================================================
 
 class PipelineOrchestrator:
-    """Executes multi-phase pipelines with artifact passing."""
+    """Executes multi-phase pipelines with artifact passing, checkpoint/resume, and retry."""
+
+    MAX_RETRIES = 2
+    RETRY_BACKOFF = [2.0, 5.0]  # seconds between retries
 
     def __init__(self, work_dir: str = "./pipeline_runs") -> None:
         self.work_dir = Path(work_dir)
 
-    def run_pipeline(self, spec: dict) -> PipelineResult:
-        """Execute all phases sequentially, passing artifacts between them."""
+    def run_pipeline(self, spec: dict, resume_from: str | None = None) -> PipelineResult:
+        """Execute all phases sequentially, passing artifacts between them.
+
+        Args:
+            spec: Pipeline specification dict.
+            resume_from: If set, skip phases up to and including this phase name,
+                         restoring context from the checkpoint file.
+        """
         issues = validate_pipeline(spec)
         if issues:
             pr = PipelineResult(pipeline_name=spec.get("name", "unknown"), status="failed")
@@ -364,14 +473,36 @@ class PipelineOrchestrator:
         pr = PipelineResult(pipeline_name=name, status="running", start_time=time.time())
         context: dict[str, Any] = {}
 
+        # Resume: load checkpoint and skip completed phases
+        skip_until_after: str | None = None
+        if resume_from:
+            checkpoint = self._load_checkpoint(spec, resume_from)
+            if checkpoint:
+                context = checkpoint.get("context", {})
+                skip_until_after = resume_from
+                for phase_info in checkpoint.get("completed_phases", []):
+                    pr.phases.append(PhaseResult(
+                        phase_name=phase_info["name"],
+                        status="completed",
+                        artifacts=phase_info.get("artifacts", {}),
+                        metrics=phase_info.get("metrics", {}),
+                    ))
+                logger.info("Resuming pipeline '%s' after phase '%s'", name, resume_from)
+
         for phase in spec["phases"]:
+            # Skip already-completed phases on resume
+            if skip_until_after:
+                if phase["name"] == skip_until_after:
+                    skip_until_after = None
+                continue
+
             phase_type = _infer_phase_type(phase)
             runner = _PHASE_RUNNERS.get(phase_type)
             if runner is None:
                 result = PhaseResult(phase_name=phase["name"], status="failed", error=f"Unknown phase type: {phase_type}")
             else:
                 logger.info("Running phase '%s' (type=%s)", phase["name"], phase_type)
-                result = runner(phase, context, run_dir)
+                result = self._run_with_retry(runner, phase, context, run_dir)
 
             pr.phases.append(result)
 
@@ -380,10 +511,16 @@ class PipelineOrchestrator:
             if output_name and result.status == "completed":
                 context[output_name] = result.artifacts
 
+            # Checkpoint after each completed phase
+            if result.status == "completed":
+                self._save_checkpoint(spec, pr, context, run_dir)
+
             # Stop on failure
             if result.status == "failed":
                 pr.status = "failed"
                 logger.error("Pipeline '%s' failed at phase '%s': %s", name, phase["name"], result.error)
+                # Save checkpoint so user can resume
+                self._save_checkpoint(spec, pr, context, run_dir)
                 break
 
         if pr.status != "failed":
@@ -395,6 +532,96 @@ class PipelineOrchestrator:
         self._save_result(pr, result_path)
 
         return pr
+
+    def _run_with_retry(
+        self,
+        runner,
+        phase: dict,
+        context: dict[str, Any],
+        run_dir: Path,
+    ) -> PhaseResult:
+        """Run a phase with retry for transient failures."""
+        last_result: PhaseResult | None = None
+
+        for attempt in range(1 + self.MAX_RETRIES):
+            result = runner(phase, context, run_dir)
+            if result.status != "failed":
+                return result
+
+            last_result = result
+
+            # Don't retry if we've exhausted attempts
+            if attempt >= self.MAX_RETRIES:
+                break
+
+            # Only retry on likely-transient errors
+            if not self._is_transient(result.error):
+                break
+
+            wait = self.RETRY_BACKOFF[min(attempt, len(self.RETRY_BACKOFF) - 1)]
+            logger.warning(
+                "Phase '%s' failed (attempt %d/%d), retrying in %.1fs: %s",
+                phase["name"], attempt + 1, 1 + self.MAX_RETRIES, wait, result.error,
+            )
+            time.sleep(wait)
+
+        return last_result or PhaseResult(phase_name=phase.get("name", "?"), status="failed", error="No result")
+
+    @staticmethod
+    def _is_transient(error: str) -> bool:
+        """Heuristic: is this error likely transient (worth retrying)?"""
+        transient_patterns = ["CUDA out of memory", "ConnectionError", "TimeoutError", "OSError"]
+        return any(p.lower() in error.lower() for p in transient_patterns)
+
+    def _save_checkpoint(
+        self,
+        spec: dict,
+        pr: PipelineResult,
+        context: dict[str, Any],
+        run_dir: Path,
+    ) -> None:
+        """Save checkpoint for resume capability."""
+        checkpoint_path = run_dir / "checkpoint.json"
+        completed = [
+            {
+                "name": p.phase_name,
+                "status": p.status,
+                "artifacts": p.artifacts,
+                "metrics": p.metrics,
+            }
+            for p in pr.phases
+            if p.status == "completed"
+        ]
+        data = {
+            "pipeline_name": spec.get("name"),
+            "spec": spec,
+            "completed_phases": completed,
+            "context": context,
+            "last_completed": completed[-1]["name"] if completed else None,
+            "timestamp": time.time(),
+        }
+        checkpoint_path.write_text(json.dumps(data, indent=2, default=str))
+
+    def _load_checkpoint(self, spec: dict, resume_from: str) -> dict | None:
+        """Find the latest checkpoint for a pipeline."""
+        name = spec.get("name", "")
+        if not self.work_dir.exists():
+            return None
+
+        # Find most recent run directory for this pipeline
+        candidates = sorted(
+            [d for d in self.work_dir.iterdir() if d.is_dir() and d.name.startswith(name)],
+            key=lambda d: d.stat().st_mtime,
+            reverse=True,
+        )
+        for d in candidates:
+            cp = d / "checkpoint.json"
+            if cp.exists():
+                data = json.loads(cp.read_text())
+                completed_names = [p["name"] for p in data.get("completed_phases", [])]
+                if resume_from in completed_names:
+                    return data
+        return None
 
     def run_phase(self, phase: dict, context: dict[str, Any] | None = None) -> PhaseResult:
         """Run a single phase (for testing or re-runs)."""

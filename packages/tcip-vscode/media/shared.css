@@ -1,0 +1,278 @@
+/* TCIP VS Code Extension — shared dark theme using VS Code CSS variables */
+
+:root {
+  --tcip-accent: #507754;
+  --tcip-accent-hover: #5e8b62;
+  --tcip-danger: #c75050;
+  --tcip-success: #4ec96e;
+  --tcip-warning: #e6a817;
+  --tcip-border: var(--vscode-panel-border, #3c3c3c);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground, #cccccc);
+  background-color: var(--vscode-editor-background, #1e1e1e);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background, #4e4e4e80);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, #646464b3);
+}
+
+/* ── Layout helpers ── */
+.panel-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border-bottom: 1px solid var(--tcip-border);
+  flex-shrink: 0;
+}
+
+.content {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+/* ── Buttons ── */
+button, .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--tcip-border);
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #cccccc);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button:hover, .btn:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+button.primary, .btn-primary {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #ffffff);
+  border-color: var(--vscode-button-background, #0e639c);
+}
+
+button.primary:hover, .btn-primary:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+button.accent, .btn-accent {
+  background: var(--tcip-accent);
+  color: #ffffff;
+  border-color: var(--tcip-accent);
+}
+
+button.accent:hover, .btn-accent:hover {
+  background: var(--tcip-accent-hover);
+}
+
+button.danger, .btn-danger {
+  background: var(--tcip-danger);
+  color: #ffffff;
+  border-color: var(--tcip-danger);
+}
+
+button:disabled, .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Active/toggled toolbar buttons */
+button.active {
+  background: var(--tcip-accent);
+  color: #ffffff;
+  border-color: var(--tcip-accent);
+}
+
+/* ── Inputs ── */
+input, select {
+  padding: 4px 8px;
+  border: 1px solid var(--tcip-border);
+  border-radius: 4px;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #cccccc);
+  font-size: 12px;
+}
+
+input:focus, select:focus {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+/* Slider / range */
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 120px;
+  height: 4px;
+  background: var(--vscode-scrollbarSlider-background, #4e4e4e80);
+  border-radius: 2px;
+  border: none;
+  padding: 0;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--tcip-accent);
+  cursor: pointer;
+}
+
+/* ── Tables ── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+th, td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--tcip-border);
+}
+
+th {
+  background: var(--vscode-editorWidget-background, #252526);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+tr:hover td {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+/* ── Labels / badges ── */
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badge-success { background: #2d5a30; color: var(--tcip-success); }
+.badge-danger  { background: #5a2d2d; color: var(--tcip-danger); }
+.badge-warning { background: #5a4e2d; color: var(--tcip-warning); }
+.badge-info    { background: #2d3e5a; color: #6db3f2; }
+
+/* ── Progress bar ── */
+.progress-bar {
+  height: 4px;
+  background: var(--vscode-progressBar-background, #0e70c0);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.progress-track {
+  width: 100%;
+  height: 4px;
+  background: var(--tcip-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* ── Thumbnail grid ── */
+.thumb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 8px;
+}
+
+.thumb-grid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.thumb-grid img:hover {
+  border-color: var(--tcip-accent);
+}
+
+.thumb-grid img.selected {
+  border-color: var(--vscode-focusBorder, #007fd4);
+}
+
+/* ── Split pane helper ── */
+.split-h {
+  display: flex;
+  height: 100%;
+}
+
+.split-h > .pane {
+  flex: 1;
+  overflow: auto;
+  min-width: 0;
+}
+
+.split-h > .divider {
+  width: 4px;
+  cursor: col-resize;
+  background: var(--tcip-border);
+  flex-shrink: 0;
+}
+
+/* ── Status text ── */
+.status-text {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #858585);
+}
+
+/* ── Empty state ── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: var(--vscode-descriptionForeground, #858585);
+  text-align: center;
+  padding: 24px;
+}
+
+.empty-state .icon {
+  font-size: 48px;
+  opacity: 0.3;
+}

@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 # Import tool modules to register their handlers with the server.
 # Non-torch tools always load; torch-dependent tools load when torch is available.
-import tcip_mcp.tools.registry_tools  # noqa: F401, E402
 import tcip_mcp.tools.data_tools  # noqa: F401, E402
 import tcip_mcp.tools.project_tools  # noqa: F401, E402
+import tcip_mcp.tools.experiment_tools  # noqa: F401, E402
 
 try:
     import tcip_mcp.tools.annotation_tools  # noqa: F401, E402

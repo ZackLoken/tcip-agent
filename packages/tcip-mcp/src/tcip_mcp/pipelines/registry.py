@@ -5,8 +5,7 @@ scheduler, sampler, augmentation) registers into a typed registry with
 self-describing metadata so the agent can query, reason about, and
 compose components at runtime.
 
-Inspired by oh-my-claudecode's tool registry and claw-code's layered
-capability pools.
+Uses a plugin-style registry with layered capability pools.
 """
 
 from __future__ import annotations

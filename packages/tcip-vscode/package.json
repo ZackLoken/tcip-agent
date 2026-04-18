@@ -1,0 +1,86 @@
+{
+  "name": "tcip-agent",
+  "displayName": "TCIP — ML/CV for Tree Crop Breeding",
+  "description": "Webview panels for tree crop phenotyping — annotation, review, training, HPO, inference, results.",
+  "version": "0.2.0",
+  "publisher": "tcip",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Visualization"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tcip-explorer",
+          "title": "TCIP",
+          "icon": "media/icon-tree.svg"
+        }
+      ]
+    },
+    "views": {
+      "tcip-explorer": [
+        {
+          "id": "tcip-dataset",
+          "name": "Dataset",
+          "icon": "media/icon-tree.svg",
+          "contextualTitle": "TCIP Dataset Browser"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "tcip-agent.openAnnotation", "title": "TCIP: Open Annotation Canvas", "icon": "$(edit)" },
+      { "command": "tcip-agent.openReview", "title": "TCIP: Open Review Panel", "icon": "$(checklist)" },
+      { "command": "tcip-agent.openTraining", "title": "TCIP: Open Training Dashboard", "icon": "$(graph)" },
+      { "command": "tcip-agent.openHpo", "title": "TCIP: Open HPO Panel", "icon": "$(settings-gear)" },
+      { "command": "tcip-agent.openInference", "title": "TCIP: Open Inference Panel", "icon": "$(play)" },
+      { "command": "tcip-agent.openResults", "title": "TCIP: Open Results Panel", "icon": "$(table)" },
+      { "command": "tcip-agent.refreshDataset", "title": "TCIP: Refresh Dataset", "icon": "$(refresh)" },
+      { "command": "tcip-agent.openInAnnotation", "title": "Open in Annotation Canvas" },
+      { "command": "tcip-agent.openInReview", "title": "Open in Review Panel" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "tcip-agent.refreshDataset", "when": "view == tcip-dataset", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "tcip-agent.openInAnnotation", "when": "view == tcip-dataset && viewItem == imageFile", "group": "tcip@1" },
+        { "command": "tcip-agent.openInReview", "when": "view == tcip-dataset && viewItem == imageFile", "group": "tcip@2" }
+      ],
+      "commandPalette": [
+        { "command": "tcip-agent.openInAnnotation", "when": "false" },
+        { "command": "tcip-agent.openInReview", "when": "false" }
+      ]
+    },
+    "keybindings": [
+      { "command": "tcip-agent.openAnnotation", "key": "ctrl+shift+a", "when": "workspaceFolderCount > 0" },
+      { "command": "tcip-agent.openReview", "key": "ctrl+shift+r", "when": "workspaceFolderCount > 0" },
+      { "command": "tcip-agent.openTraining", "key": "ctrl+shift+t", "when": "workspaceFolderCount > 0" }
+    ],
+    "configuration": {
+      "title": "TCIP",
+      "properties": {}
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src/",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "fabric": "^6.0.0",
+    "chart.js": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.99.0",
+    "typescript": "^5.5.0"
+  }
+}

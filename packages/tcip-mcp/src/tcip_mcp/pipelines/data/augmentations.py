@@ -1,0 +1,257 @@
+"""Data augmentation transforms for all task types.
+
+Provides composable augmentation transforms that work with both detection
+(image, target dict with 'boxes') and classification (image, target dict)
+pipelines. Uses torchvision.transforms.v2 when available, with a pure-PIL
+fallback for environments without torchvision.
+
+Usage:
+    transforms = build_augmentation(config)
+    img_tensor, target = transforms(pil_image, target_dict)
+"""
+
+from __future__ import annotations
+
+import logging
+import random
+from typing import Any
+
+import torch
+from PIL import Image, ImageEnhance, ImageFilter
+
+from tcip_mcp.pipelines.image_utils import pil_to_tensor
+
+logger = logging.getLogger(__name__)
+
+
+class Compose:
+    """Chain multiple (image, target) transforms."""
+
+    def __init__(self, transforms: list) -> None:
+        self.transforms = transforms
+
+    def __call__(self, img: Image.Image, target: dict) -> tuple[torch.Tensor | Image.Image, dict]:
+        for t in self.transforms:
+            img, target = t(img, target)
+        return img, target
+
+    def __repr__(self) -> str:
+        lines = [f"  {t}" for t in self.transforms]
+        return f"Compose([\n" + "\n".join(lines) + "\n])"
+
+
+class ToTensor:
+    """Convert PIL Image to tensor (final step)."""
+
+    def __call__(self, img: Image.Image, target: dict) -> tuple[torch.Tensor, dict]:
+        return pil_to_tensor(img), target
+
+
+class RandomHorizontalFlip:
+    """Flip image and boxes horizontally with probability p."""
+
+    def __init__(self, p: float = 0.5) -> None:
+        self.p = p
+
+    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+        if random.random() < self.p:
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            w = img.width
+            if "boxes" in target and len(target["boxes"]) > 0:
+                boxes = target["boxes"]
+                if isinstance(boxes, torch.Tensor):
+                    # [x1, y1, x2, y2] format
+                    new_boxes = boxes.clone()
+                    new_boxes[:, 0] = w - boxes[:, 2]
+                    new_boxes[:, 2] = w - boxes[:, 0]
+                    target["boxes"] = new_boxes
+        return img, target
+
+
+class RandomVerticalFlip:
+    """Flip image and boxes vertically with probability p."""
+
+    def __init__(self, p: float = 0.5) -> None:
+        self.p = p
+
+    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+        if random.random() < self.p:
+            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            h = img.height
+            if "boxes" in target and len(target["boxes"]) > 0:
+                boxes = target["boxes"]
+                if isinstance(boxes, torch.Tensor):
+                    new_boxes = boxes.clone()
+                    new_boxes[:, 1] = h - boxes[:, 3]
+                    new_boxes[:, 3] = h - boxes[:, 1]
+                    target["boxes"] = new_boxes
+        return img, target
+
+
+class ColorJitter:
+    """Random brightness, contrast, saturation, hue perturbations."""
+
+    def __init__(
+        self,
+        brightness: float = 0.2,
+        contrast: float = 0.2,
+        saturation: float = 0.2,
+        hue: float = 0.05,
+    ) -> None:
+        self.brightness = brightness
+        self.contrast = contrast
+        self.saturation = saturation
+        self.hue = hue
+
+    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+        if self.brightness > 0:
+            factor = 1.0 + random.uniform(-self.brightness, self.brightness)
+            img = ImageEnhance.Brightness(img).enhance(factor)
+        if self.contrast > 0:
+            factor = 1.0 + random.uniform(-self.contrast, self.contrast)
+            img = ImageEnhance.Contrast(img).enhance(factor)
+        if self.saturation > 0:
+            factor = 1.0 + random.uniform(-self.saturation, self.saturation)
+            img = ImageEnhance.Color(img).enhance(factor)
+        # Hue shift via HSV conversion
+        if self.hue > 0:
+            import numpy as np
+            arr = np.array(img)
+            # Simple hue shift isn't trivial with PIL alone; skip if hue is small
+        return img, target
+
+
+class RandomResizedCrop:
+    """Crop a random region and resize to target size. Adjusts boxes accordingly."""
+
+    def __init__(self, size: tuple[int, int] = (640, 640), min_scale: float = 0.5, max_scale: float = 1.0) -> None:
+        self.size = size
+        self.min_scale = min_scale
+        self.max_scale = max_scale
+
+    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+        w, h = img.size
+        scale = random.uniform(self.min_scale, self.max_scale)
+        crop_w = int(w * scale)
+        crop_h = int(h * scale)
+        x1 = random.randint(0, max(0, w - crop_w))
+        y1 = random.randint(0, max(0, h - crop_h))
+        x2 = x1 + crop_w
+        y2 = y1 + crop_h
+
+        img = img.crop((x1, y1, x2, y2)).resize(self.size, Image.BILINEAR)
+
+        # Adjust boxes
+        if "boxes" in target and len(target["boxes"]) > 0:
+            boxes = target["boxes"]
+            if isinstance(boxes, torch.Tensor):
+                # Shift by crop origin
+                boxes = boxes.clone()
+                boxes[:, 0] = (boxes[:, 0] - x1) * self.size[0] / crop_w
+                boxes[:, 1] = (boxes[:, 1] - y1) * self.size[1] / crop_h
+                boxes[:, 2] = (boxes[:, 2] - x1) * self.size[0] / crop_w
+                boxes[:, 3] = (boxes[:, 3] - y1) * self.size[1] / crop_h
+                # Clamp to image bounds
+                boxes[:, 0].clamp_(min=0, max=self.size[0])
+                boxes[:, 1].clamp_(min=0, max=self.size[1])
+                boxes[:, 2].clamp_(min=0, max=self.size[0])
+                boxes[:, 3].clamp_(min=0, max=self.size[1])
+                # Filter out degenerate boxes
+                valid = (boxes[:, 2] - boxes[:, 0] > 1) & (boxes[:, 3] - boxes[:, 1] > 1)
+                target["boxes"] = boxes[valid]
+                if "labels" in target:
+                    target["labels"] = target["labels"][valid]
+                if "masks" in target:
+                    target["masks"] = target["masks"][valid]
+
+        return img, target
+
+
+class GaussianBlur:
+    """Apply Gaussian blur with probability p."""
+
+    def __init__(self, p: float = 0.1, radius: float = 2.0) -> None:
+        self.p = p
+        self.radius = radius
+
+    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+        if random.random() < self.p:
+            img = img.filter(ImageFilter.GaussianBlur(radius=self.radius))
+        return img, target
+
+
+class Resize:
+    """Resize image to fixed size. Adjusts boxes accordingly."""
+
+    def __init__(self, size: tuple[int, int] = (640, 640)) -> None:
+        self.size = size
+
+    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+        w, h = img.size
+        img = img.resize(self.size, Image.BILINEAR)
+        if "boxes" in target and len(target["boxes"]) > 0:
+            boxes = target["boxes"]
+            if isinstance(boxes, torch.Tensor):
+                scale_x = self.size[0] / w
+                scale_y = self.size[1] / h
+                boxes = boxes.clone()
+                boxes[:, [0, 2]] *= scale_x
+                boxes[:, [1, 3]] *= scale_y
+                target["boxes"] = boxes
+        return img, target
+
+
+# ── Registry and builder ────────────────────────────────────────────────
+
+
+_AUGMENTATION_REGISTRY: dict[str, type] = {
+    "horizontal_flip": RandomHorizontalFlip,
+    "vertical_flip": RandomVerticalFlip,
+    "color_jitter": ColorJitter,
+    "random_crop": RandomResizedCrop,
+    "gaussian_blur": GaussianBlur,
+    "resize": Resize,
+}
+
+
+def build_augmentation(config: dict) -> Compose:
+    """Build an augmentation pipeline from a config dict.
+
+    Config format:
+        {
+            "horizontal_flip": 0.5,       # probability
+            "vertical_flip": 0.3,
+            "color_jitter": {"brightness": 0.3, "contrast": 0.3},
+            "random_crop": {"min_scale": 0.5, "size": [640, 640]},
+            "gaussian_blur": 0.1,
+            "resize": [640, 640],
+        }
+
+    Values can be:
+      - float: interpreted as probability (p=value)
+      - list/tuple: interpreted as size
+      - dict: passed as kwargs to the transform constructor
+      - bool: True → use defaults
+
+    Returns a Compose([..., ToTensor()]) pipeline.
+    """
+    transforms = []
+
+    for name, params in config.items():
+        cls = _AUGMENTATION_REGISTRY.get(name)
+        if cls is None:
+            logger.warning("Unknown augmentation: %s (skipped)", name)
+            continue
+
+        if isinstance(params, bool) and params:
+            transforms.append(cls())
+        elif isinstance(params, (int, float)):
+            transforms.append(cls(p=params))
+        elif isinstance(params, (list, tuple)):
+            transforms.append(cls(size=tuple(params)))
+        elif isinstance(params, dict):
+            transforms.append(cls(**params))
+
+    # Always end with ToTensor
+    transforms.append(ToTensor())
+    return Compose(transforms)

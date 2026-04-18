@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_mcp.server import mcp
+from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
 
 @mcp.tool()
+@audited
 def run_inference(
     checkpoint_path: str,
     image_paths: list[str] | None = None,
@@ -59,6 +61,7 @@ def run_inference(
 
 
 @mcp.tool()
+@audited
 def export_predictions_yolo(
     checkpoint_path: str,
     images_dir: str,
@@ -110,6 +113,7 @@ def export_predictions_yolo(
 
 
 @mcp.tool()
+@audited
 def export_results_csv(
     checkpoint_path: str,
     images_dir: str,

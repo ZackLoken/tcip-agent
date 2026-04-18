@@ -1,14 +1,16 @@
-"""HPO — hyperparameter optimization with Optuna integration.
+"""HPO — hyperparameter optimization with Optuna integration + TensorBoard logging.
 
 Supports:
   - Random search (always available, no dependencies)
   - Optuna TPE/ASHA (optional, requires `pip install optuna`)
+  - Per-trial TensorBoard logging (each trial gets its own subdirectory)
 """
 
 from __future__ import annotations
 
 import logging
 import random
+from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,13 @@ try:
     HAS_OPTUNA = True
 except ImportError:
     HAS_OPTUNA = False
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    HAS_TB = True
+except ImportError:
+    SummaryWriter = None  # type: ignore[misc,assignment]
+    HAS_TB = False
 
 
 def random_search(
@@ -122,6 +131,7 @@ def optuna_search(
     storage: str | None = None,
     seed: int = 42,
     pruning: bool = True,
+    tb_logdir: str | None = None,
 ) -> dict:
     """Run HPO using Optuna with TPE sampler and optional ASHA pruning.
 
@@ -136,10 +146,12 @@ def optuna_search(
         storage: Optional database URL for persistent study (e.g. 'sqlite:///hpo.db').
         seed: Random seed for reproducibility.
         pruning: Whether to use MedianPruner for early stopping of poor trials.
+        tb_logdir: Optional base directory for TensorBoard logs. Each trial writes
+                  to tb_logdir/trial_{n}/. If None, TensorBoard logging is skipped.
 
     Returns:
         Dict with 'best_params', 'best_value', 'n_trials', 'study_name',
-        and 'all_trials' (list of trial summaries).
+        'all_trials', and 'tensorboard_logdir' (if TB logging enabled).
 
     Raises:
         ImportError: If optuna is not installed.
@@ -169,7 +181,26 @@ def optuna_search(
         for name, spec in param_space.items():
             config[name] = _suggest_param(trial, name, spec)
         logger.info("Trial %d: %s", trial.number, config)
-        return objective_fn(config)
+
+        value = objective_fn(config)
+
+        # Log trial result to TensorBoard
+        if tb_logdir and HAS_TB:
+            trial_dir = str(Path(tb_logdir) / f"trial_{trial.number}")
+            writer = SummaryWriter(log_dir=trial_dir)
+            # Log each param as a scalar at step=trial.number
+            for pname, pval in config.items():
+                if isinstance(pval, (int, float)):
+                    writer.add_scalar(f"hpo/params/{pname}", pval, trial.number)
+            writer.add_scalar("hpo/objective", value, trial.number)
+            # Log params as hparams for TensorBoard HParams plugin
+            writer.add_hparams(
+                {k: v for k, v in config.items() if isinstance(v, (int, float, str, bool))},
+                {"hpo/objective": value},
+            )
+            writer.close()
+
+        return value
 
     study.optimize(wrapped_objective, n_trials=n_trials)
 
@@ -182,10 +213,13 @@ def optuna_search(
             "state": str(t.state),
         })
 
-    return {
+    result = {
         "best_params": study.best_params,
         "best_value": study.best_value,
         "n_trials": len(study.trials),
         "study_name": study_name,
         "all_trials": all_trials,
     }
+    if tb_logdir:
+        result["tensorboard_logdir"] = tb_logdir
+    return result

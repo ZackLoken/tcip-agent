@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 
 from tcip_mcp.server import mcp
+from tcip_mcp.audit import audited
+
+logger = logging.getLogger(__name__)
 
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
 
 @mcp.tool()
+@audited
 def validate_config(config: dict) -> dict:
     """Validate a training configuration before launching.
 
@@ -66,6 +71,7 @@ def validate_config(config: dict) -> dict:
 
 
 @mcp.tool()
+@audited
 def launch_training(config: dict, output_dir: str) -> dict:
     """Launch a training run asynchronously using the composable model system.
 
@@ -110,8 +116,16 @@ def launch_training(config: dict, output_dir: str) -> dict:
     from tcip_mcp.pipelines.training.generic_trainer import task_collate
     from torch.utils.data import DataLoader
 
+    # Build augmentation transforms if config specifies them
+    aug_config = config.get("augmentation", {})
+    transforms = None
+    if aug_config:
+        from tcip_mcp.pipelines.data.augmentations import build_augmentation
+        transforms = build_augmentation(aug_config)
+
     train_ds = build_dataset(task, images_dir=data_cfg.get("images_dir", ""),
-                             labels_dir=data_cfg.get("labels_dir", ""))
+                             labels_dir=data_cfg.get("labels_dir", ""),
+                             transforms=transforms)
     sampler = build_sampler(train_config.sampler, train_ds)
     train_loader = DataLoader(
         train_ds, batch_size=train_config.batch_size,
@@ -120,19 +134,41 @@ def launch_training(config: dict, output_dir: str) -> dict:
         num_workers=train_config.num_workers,
     )
 
+    # Auto-create experiment if not already tracked
+    experiment_id = config.get("experiment_id") or run.run_id
+    try:
+        from tcip_mcp.experiments import create_experiment, update_status
+
+        create_experiment(experiment_id, config, data_source=data_cfg.get("images_dir"))
+        update_status(experiment_id, "running")
+    except Exception:
+        pass  # Experiment tracking is best-effort
+
     thread = threading.Thread(
         target=train, args=(run, train_loader, None, task), daemon=True
     )
     thread.start()
 
+    # Launch TensorBoard for live monitoring
+    tb_info = {}
+    try:
+        from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
+        tb_dir = str(Path(output_dir) / "tensorboard")
+        tb_info = launch_tensorboard(tb_dir, run_id=run.run_id)
+    except Exception:
+        pass  # TensorBoard launch is best-effort
+
     return {
         "run_id": run.run_id,
+        "experiment_id": experiment_id,
         "status": "launched",
         "output_dir": output_dir,
+        "tensorboard": tb_info,
     }
 
 
 @mcp.tool()
+@audited
 def check_training_status(run_id: str) -> dict:
     """Check the status of a training run.
 
@@ -143,16 +179,29 @@ def check_training_status(run_id: str) -> dict:
     run = get_run(run_id)
     if run is None:
         return {"error": f"Run not found: {run_id}"}
+
+    # Check for running TensorBoard
+    tb_url = None
+    try:
+        from tcip_mcp.pipelines.training.tensorboard_manager import _TB_PROCESSES
+        proc = _TB_PROCESSES.get(run_id)
+        if proc and proc.poll() is None:
+            tb_url = f"http://localhost:{proc._tb_port}"
+    except Exception:
+        pass
+
     return {
         "run_id": run.run_id,
         "status": run.status,
-        "epoch": run.epoch,
+        "epoch": run.current_epoch,
         "best_metric": run.best_metric,
-        "output_dir": run.config.output_dir,
+        "output_dir": run.output_dir,
+        "tensorboard_url": tb_url,
     }
 
 
 @mcp.tool()
+@audited
 def list_training_runs() -> dict:
     """List all training runs in this session."""
     from tcip_mcp.pipelines.training.generic_trainer import list_runs
@@ -160,23 +209,115 @@ def list_training_runs() -> dict:
 
 
 @mcp.tool()
+@audited
 def run_hpo(
     base_config: dict,
     param_space: dict | None = None,
     n_trials: int = 5,
     output_dir: str = "",
+    use_optuna: bool = False,
+    direction: str = "maximize",
 ) -> dict:
-    """Generate HPO trial configurations using random search.
+    """Run hyperparameter optimization with optional TensorBoard logging.
 
-    Returns a list of configs. Actual training for each trial must be
-    launched separately.
+    Two modes:
+      - Random search (default): generates trial configs for separate training runs.
+      - Optuna (use_optuna=True): runs TPE/ASHA search with per-trial TensorBoard logging.
+
+    TensorBoard logs are written to output_dir/hpo_tensorboard/trial_{n}/ for
+    each trial, enabling side-by-side comparison in the TensorBoard HParams plugin.
 
     Args:
         base_config: Base training config to modify.
-        param_space: Dict mapping param names to candidate values.
-        n_trials: Number of trials to generate.
+        param_space: Dict mapping param names to candidate values (random) or
+                    Optuna space dicts (optuna).
+        n_trials: Number of trials to generate/run.
         output_dir: Base output directory for trial results.
+        use_optuna: If True, use Optuna TPE search with TensorBoard logging.
+        direction: 'maximize' (for mAP) or 'minimize' (for loss). Only for Optuna.
     """
+    if use_optuna:
+        from tcip_mcp.pipelines.training.hpo import optuna_search, get_default_optuna_space
+
+        if param_space is None:
+            param_space = get_default_optuna_space()
+
+        tb_logdir = str(Path(output_dir) / "hpo_tensorboard") if output_dir else None
+
+        def objective_fn(trial_params: dict) -> float:
+            """Run a full training trial and return the objective metric."""
+            merged = _deep_merge(base_config, _param_dict_to_config(trial_params))
+
+            # Build training components
+            from tcip_mcp.pipelines.training.generic_trainer import (
+                TrainConfig, create_run, train, task_collate,
+            )
+            from tcip_mcp.pipelines.data.datasets import build_dataset
+            from tcip_mcp.pipelines.data.samplers import build_sampler
+            from torch.utils.data import DataLoader
+
+            model_spec = merged.get("model_spec") or merged.get("model")
+            if not model_spec:
+                return float("inf") if direction == "minimize" else 0.0
+
+            data_cfg = merged.get("data", {})
+            train_cfg = merged.get("training", {})
+            heads = (model_spec.get("heads") or [{}])
+            task = heads[0].get("task", "detection") if heads else "detection"
+
+            trial_dir = str(Path(output_dir) / f"trial_{len(_RUNS) if '_RUNS' in dir() else 0}")
+            run = create_run(merged, trial_dir)
+
+            try:
+                train_ds = build_dataset(
+                    task,
+                    images_dir=data_cfg.get("images_dir", ""),
+                    labels_dir=data_cfg.get("labels_dir", ""),
+                )
+                sampler = build_sampler(
+                    merged.get("sampler", "random"), train_ds
+                )
+                train_loader = DataLoader(
+                    train_ds,
+                    batch_size=train_cfg.get("batch_size", trial_params.get("batch_size", 4)),
+                    shuffle=(sampler is None),
+                    sampler=sampler,
+                    collate_fn=task_collate(task),
+                    num_workers=train_cfg.get("num_workers", 0),
+                )
+                train(run, train_loader, None, task=task)
+
+                # Return the best metric from the run
+                if direction == "minimize":
+                    return run.best_metric if run.best_metric != float("inf") else 999.0
+                else:
+                    # For maximize, invert since we track best val_loss (lower=better)
+                    return -run.best_metric if run.best_metric != float("inf") else 0.0
+            except Exception as e:
+                logger.warning("HPO trial failed: %s", e)
+                return float("inf") if direction == "minimize" else 0.0
+
+        result = optuna_search(
+            objective_fn=objective_fn,
+            param_space=param_space,
+            n_trials=n_trials,
+            direction=direction,
+            tb_logdir=tb_logdir,
+        )
+
+        # Auto-launch TensorBoard for HPO results
+        tb_info = {}
+        if tb_logdir:
+            try:
+                from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
+                tb_info = launch_tensorboard(tb_logdir, run_id=f"hpo_{result.get('study_name', 'search')}")
+            except Exception:
+                pass
+
+        result["tensorboard"] = tb_info
+        return result
+
+    # Random search fallback
     from tcip_mcp.pipelines.training.hpo import (
         random_search, validate_param_space, get_default_param_space,
     )
@@ -243,6 +384,7 @@ def _param_dict_to_config(params: dict) -> dict:
 
 
 @mcp.tool()
+@audited
 def get_training_metrics_path(run_id: str) -> dict:
     """Return the path to the live metrics JSONL file for a training run.
 
@@ -252,6 +394,8 @@ def get_training_metrics_path(run_id: str) -> dict:
     Args:
         run_id: Training run identifier.
     """
+    from tcip_mcp.pipelines.training.generic_trainer import get_run
+
     run = get_run(run_id)
     if run is None:
         return {"error": f"Run not found: {run_id}"}
@@ -264,6 +408,7 @@ def get_training_metrics_path(run_id: str) -> dict:
 
 
 @mcp.tool()
+@audited
 def get_worst_predictions(
     predictions_dir: str,
     labels_dir: str,

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from tcip_mcp.server import mcp
+from tcip_mcp.audit import audited
 
 
 @mcp.tool()
+@audited
 def list_components() -> dict:
     """List all registered ML components across all registries.
 
@@ -43,6 +45,7 @@ def list_components() -> dict:
 
 
 @mcp.tool()
+@audited
 def recommend_model(
     task: str,
     dataset_size: int = 500,
@@ -67,6 +70,7 @@ def recommend_model(
 
 
 @mcp.tool()
+@audited
 def validate_model_spec(spec: dict) -> dict:
     """Validate a model specification before building.
 
@@ -81,6 +85,7 @@ def validate_model_spec(spec: dict) -> dict:
 
 
 @mcp.tool()
+@audited
 def validate_pipeline_spec(spec: dict) -> dict:
     """Validate a multi-phase pipeline specification.
 
@@ -96,19 +101,21 @@ def validate_pipeline_spec(spec: dict) -> dict:
 
 
 @mcp.tool()
-def run_pipeline(spec: dict, work_dir: str = "./pipeline_runs") -> dict:
+@audited
+def run_pipeline(spec: dict, work_dir: str = "./pipeline_runs", resume_from: str = "") -> dict:
     """Execute a multi-phase pipeline.
 
-    Phases run sequentially, passing artifacts between them.
-    Results are saved to work_dir.
+    Phases run sequentially, passing artifacts between them. If a phase fails,
+    a checkpoint is saved so you can resume later with resume_from.
 
     Args:
         spec: Pipeline spec dict (name + phases).
         work_dir: Directory for pipeline artifacts.
+        resume_from: Optional phase name to resume after (skips completed phases).
     """
     from tcip_mcp.pipelines.orchestrator import PipelineOrchestrator
     orch = PipelineOrchestrator(work_dir=work_dir)
-    result = orch.run_pipeline(spec)
+    result = orch.run_pipeline(spec, resume_from=resume_from or None)
     return {
         "pipeline": result.pipeline_name,
         "status": result.status,
@@ -128,6 +135,7 @@ def run_pipeline(spec: dict, work_dir: str = "./pipeline_runs") -> dict:
 
 
 @mcp.tool()
+@audited
 def compose_and_summarize(spec: dict) -> dict:
     """Build a ComposedModel from spec and return its summary.
 

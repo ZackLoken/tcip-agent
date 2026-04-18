@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.geometry import Point as ShapelyPoint
 from shapely.validation import make_valid
 
 from tcip_annotation.state import BBox, Polygon, PredBBox, PredPolygon
@@ -171,3 +172,11 @@ def compute_matches(
             fn_list.append({"gt_type": gt_type, "gt_idx": gt_idx, "class_id": gt_cid})
 
     return {"tp": tp_list, "fp": fp_list, "fn": fn_list}
+
+
+def point_in_polygon(x: float, y: float, polygon: Polygon) -> bool:
+    """Test whether a point lies inside a polygon using Shapely."""
+    geom = ShapelyPolygon(polygon.points)
+    if not geom.is_valid:
+        geom = make_valid(geom)
+    return geom.contains(ShapelyPoint(x, y))

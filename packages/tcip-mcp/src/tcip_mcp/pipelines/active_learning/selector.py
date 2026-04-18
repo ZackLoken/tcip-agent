@@ -8,8 +8,6 @@ Also provides auto-accept (high-confidence) and review-queue
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any
 
 import torch
 

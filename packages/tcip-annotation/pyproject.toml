@@ -1,11 +1,18 @@
 [project]
 name = "tcip-annotation"
 version = "0.1.0"
-description = "Headless annotation and review engine for YOLO-format data"
+description = "Headless annotation and review engine — YOLO, COCO, PASCAL VOC, and LabelMe formats"
 requires-python = ">=3.10"
 dependencies = [
     "pillow>=9.0",
     "shapely>=2.0",
+]
+
+[project.optional-dependencies]
+sam = [
+    "segment-anything",
+    "torch>=2.0",
+    "opencv-python>=4.5",
 ]
 
 [build-system]

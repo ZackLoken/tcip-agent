@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_mcp.server import mcp
+from tcip_mcp.audit import audited
 
 
 @mcp.tool()
+@audited
 def score_unlabeled(
     checkpoint_path: str,
     unlabeled_dir: str,
@@ -26,7 +28,6 @@ def score_unlabeled(
         task: Task type for uncertainty scoring.
         budget: Number of images to select.
     """
-    import torch
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.pipelines.active_learning.scorer import (
         UncertaintyScorer, DiversityScorer, CombinedScorer,
@@ -64,6 +65,7 @@ def score_unlabeled(
 
 
 @mcp.tool()
+@audited
 def get_review_queue(
     checkpoint_path: str,
     images_dir: str,

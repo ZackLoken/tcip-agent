@@ -20,7 +20,7 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader
 
-from tcip_mcp.pipelines.composer import compose_model, ComposedModel, DetectionModel
+from tcip_mcp.pipelines.composer import compose_model, ComposedModel
 from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
 
 logger = logging.getLogger(__name__)
@@ -163,8 +163,16 @@ def _build_scheduler(optimizer, config: dict, epochs: int):
 
 @torch.no_grad()
 def _validate(model: ComposedModel, val_loader: DataLoader, device: torch.device, task: str) -> dict:
-    """Task-agnostic validation — computes loss on val set."""
+    """Task-agnostic validation — computes loss on val set.
+
+    Sets all submodules to eval mode (preserving BN running stats), then
+    overrides model.training = True so ComposedModel.forward returns losses.
+    For detection heads that require train mode for loss computation,
+    we also set head.training = True.
+    """
     model.eval()
+    # Override top-level training flag so forward() enters the loss branch
+    model.training = True
     total_loss = 0.0
     n = 0
 
@@ -173,23 +181,25 @@ def _validate(model: ComposedModel, val_loader: DataLoader, device: torch.device
             images, targets = batch
             images = [img.to(device) for img in images]
             targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+            # Detection heads may need training flag for loss computation
+            for head in model.heads:
+                head.training = True
         else:
             images, targets = batch
             images = images.to(device)
             targets = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in targets.items()}
 
-        # ComposedModel.forward returns loss dict when targets given
-        model.train()  # needed for loss computation in some heads
-        with torch.no_grad():
-            loss_dict = model(images, targets)
-            if isinstance(loss_dict, dict):
-                loss = sum(loss_dict.values())
-            else:
-                loss = loss_dict
-            total_loss += loss.item()
-            n += 1
+        loss_dict = model(images, targets)
+        if isinstance(loss_dict, dict):
+            loss = sum(loss_dict.values())
+        else:
+            loss = loss_dict
+        total_loss += loss.item()
+        n += 1
 
+    # Restore eval mode fully
     model.eval()
+
     return {"val_loss": round(total_loss / max(n, 1), 6)}
 
 

@@ -8,7 +8,6 @@ format is task-specific but always dict-based. A factory function
 from __future__ import annotations
 
 import csv
-import json
 import logging
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -20,14 +19,11 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from tcip_mcp.pipelines.image_utils import pil_to_tensor
+
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-
-
-def _pil_to_tensor(img: Image.Image) -> torch.Tensor:
-    arr = np.array(img, dtype=np.float32) / 255.0
-    return torch.from_numpy(arr).permute(2, 0, 1)
 
 
 def _find_image(images_dir: Path, stem: str) -> Path:
@@ -141,7 +137,7 @@ class DetectionDataset(BaseDataset):
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         else:
-            img = _pil_to_tensor(img)
+            img = pil_to_tensor(img)
         return img, target
 
 
@@ -221,7 +217,7 @@ class InstanceSegDataset(BaseDataset):
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         else:
-            img = _pil_to_tensor(img)
+            img = pil_to_tensor(img)
         return img, target
 
 
@@ -268,7 +264,7 @@ class SemanticSegDataset(BaseDataset):
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         else:
-            img = _pil_to_tensor(img)
+            img = pil_to_tensor(img)
         return img, target
 
 
@@ -345,7 +341,7 @@ class ClassificationDataset(BaseDataset):
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         else:
-            img = _pil_to_tensor(img)
+            img = pil_to_tensor(img)
         return img, target
 
 
@@ -397,7 +393,7 @@ class OrdinalDataset(BaseDataset):
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         else:
-            img = _pil_to_tensor(img)
+            img = pil_to_tensor(img)
         return img, target
 
 
@@ -443,7 +439,7 @@ class RegressionDataset(BaseDataset):
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         else:
-            img = _pil_to_tensor(img)
+            img = pil_to_tensor(img)
         return img, target
 
 

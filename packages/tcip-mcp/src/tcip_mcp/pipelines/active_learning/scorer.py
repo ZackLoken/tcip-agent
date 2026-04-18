@@ -9,7 +9,6 @@ Scorers:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -37,7 +36,7 @@ class UncertaintyScorer(BaseScorer):
 
     @torch.no_grad()
     def score(self, image_paths: list[str], model: torch.nn.Module, device: torch.device) -> list[tuple[str, float]]:
-        from tcip_mcp.pipelines.inference.generic_predictor import _pil_to_tensor
+        from tcip_mcp.pipelines.image_utils import pil_to_tensor
         from PIL import Image
 
         model.eval()
@@ -45,7 +44,7 @@ class UncertaintyScorer(BaseScorer):
 
         for path in image_paths:
             img = Image.open(path).convert("RGB")
-            tensor = _pil_to_tensor(img).unsqueeze(0).to(device)
+            tensor = pil_to_tensor(img).unsqueeze(0).to(device)
 
             if self.task in ("detection", "instance_seg"):
                 outputs = model([tensor[0]])
@@ -91,7 +90,7 @@ class DiversityScorer(BaseScorer):
 
     @torch.no_grad()
     def score(self, image_paths: list[str], model: torch.nn.Module, device: torch.device) -> list[tuple[str, float]]:
-        from tcip_mcp.pipelines.inference.generic_predictor import _pil_to_tensor
+        from tcip_mcp.pipelines.image_utils import pil_to_tensor
         from PIL import Image
 
         model.eval()
@@ -100,11 +99,12 @@ class DiversityScorer(BaseScorer):
         embeddings = []
         for path in image_paths:
             img = Image.open(path).convert("RGB")
-            tensor = _pil_to_tensor(img).unsqueeze(0).to(device)
+            tensor = pil_to_tensor(img).unsqueeze(0).to(device)
 
             # Get backbone features if model is ComposedModel
             if hasattr(model, "backbone"):
-                feats = model.backbone(tensor)
+                backbone: torch.nn.Module = model.backbone  # type: ignore[assignment]
+                feats = backbone(tensor)
                 if isinstance(feats, dict):
                     feat = list(feats.values())[-1]  # last scale
                 else:

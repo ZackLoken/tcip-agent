@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 
 from tcip_mcp.server import mcp
+from tcip_mcp.audit import audited
 
 
 def _project_dir(project_path: str) -> Path:
@@ -25,6 +26,7 @@ def _sessions_dir(project_path: str) -> Path:
 
 
 @mcp.tool()
+@audited
 def init_project(project_path: str) -> dict:
     """Initialise a TCIP project directory.
 
@@ -62,6 +64,7 @@ def init_project(project_path: str) -> dict:
 
 
 @mcp.tool()
+@audited
 def create_session(project_path: str, description: str = "") -> dict:
     """Start a new agent session for this project.
 
@@ -86,6 +89,7 @@ def create_session(project_path: str, description: str = "") -> dict:
 
 
 @mcp.tool()
+@audited
 def append_session_event(project_path: str, session_id: str, event_type: str, data: dict) -> dict:
     """Append an event to a session log.
 
@@ -107,6 +111,7 @@ def append_session_event(project_path: str, session_id: str, event_type: str, da
 
 
 @mcp.tool()
+@audited
 def list_sessions(project_path: str) -> dict:
     """List all sessions for a project.
 
@@ -135,6 +140,7 @@ def list_sessions(project_path: str) -> dict:
 
 
 @mcp.tool()
+@audited
 def get_session(project_path: str, session_id: str) -> dict:
     """Get all events from a session.
 
@@ -156,6 +162,7 @@ def get_session(project_path: str, session_id: str) -> dict:
 
 
 @mcp.tool()
+@audited
 def get_project_status(project_path: str) -> dict:
     """Get an overview of a TCIP project.
 
@@ -202,6 +209,7 @@ def get_project_status(project_path: str) -> dict:
 
 
 @mcp.tool()
+@audited
 def export_project(project_path: str, output_path: str = "", include_models: bool = False) -> dict:
     """Export an annotation project as a portable ZIP archive.
 
@@ -269,6 +277,7 @@ def export_project(project_path: str, output_path: str = "", include_models: boo
 
 
 @mcp.tool()
+@audited
 def import_project(zip_path: str, destination: str) -> dict:
     """Import an annotation project from a ZIP archive.
 

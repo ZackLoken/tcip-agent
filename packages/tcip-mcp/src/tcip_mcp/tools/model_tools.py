@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from tcip_mcp.server import mcp
+from tcip_mcp.audit import audited
 from tcip_mcp.model_registry import ModelRegistry
 
 
 @mcp.tool()
+@audited
 def list_available_models() -> dict:
     """List all available model architectures and configurations.
 
@@ -31,6 +33,7 @@ def list_available_models() -> dict:
 
 
 @mcp.tool()
+@audited
 def register_model(
     project_path: str,
     name: str,
@@ -54,6 +57,7 @@ def register_model(
 
 
 @mcp.tool()
+@audited
 def list_registered_models(project_path: str, tag: str | None = None) -> dict:
     """List models in the project registry.
 
@@ -67,6 +71,7 @@ def list_registered_models(project_path: str, tag: str | None = None) -> dict:
 
 
 @mcp.tool()
+@audited
 def get_best_model(project_path: str, metric: str = "mAP") -> dict:
     """Get the best model by a specific metric.
 

@@ -15,20 +15,55 @@ from tcip_annotation import (
     BBox,
     Polygon,
 )
+from tcip_annotation.format_io import (
+    detect_format,
+    load_annotations as format_load,
+    save_annotations as format_save,
+    AnnotFormat,
+)
 from tcip_annotation.utils import get_image_dimensions
 
 from tcip_mcp.server import mcp
+from tcip_mcp.audit import audited
+
+
+def _find_label_path(root: Path, stem: str, task: str = "detect", fmt: str | None = None) -> Path | None:
+    """Find a label file for the given image stem in any supported format."""
+    subdir = "detect" if task == "detect" else "segment"
+    search_dirs = [root / "labels" / subdir, root / "labels"]
+
+    # If format is specified, search for matching extension first
+    fmt_ext_map = {"yolo": ".txt", "voc": ".xml", "coco": ".json", "labelme": ".json"}
+    if fmt and fmt in fmt_ext_map:
+        preferred_ext = fmt_ext_map[fmt]
+        for d in search_dirs:
+            if not d.is_dir():
+                continue
+            candidate = d / f"{stem}{preferred_ext}"
+            if candidate.is_file():
+                return candidate
+
+    for d in search_dirs:
+        if not d.is_dir():
+            continue
+        for ext in (".txt", ".xml", ".json"):
+            candidate = d / f"{stem}{ext}"
+            if candidate.is_file():
+                return candidate
+    return None
 
 
 @mcp.tool()
-def load_annotations(image_path: str) -> dict:
-    """Load YOLO labels and predictions for a single image.
+@audited
+def load_annotations(image_path: str, fmt: str | None = None) -> dict:
+    """Load labels and predictions for a single image.
 
-    Looks for label/prediction .txt files at conventional YOLO paths
-    relative to the image directory.
+    Supports YOLO (.txt), PASCAL VOC (.xml), COCO (.json), and LabelMe (.json).
+    Format is auto-detected from file extension unless fmt is specified.
 
     Args:
         image_path: Absolute path to the image file.
+        fmt: Force annotation format ('yolo', 'voc', 'coco', 'labelme'). Auto-detects if omitted.
     """
     img = Path(image_path)
     if not img.is_file():
@@ -36,38 +71,39 @@ def load_annotations(image_path: str) -> dict:
 
     w, h = get_image_dimensions(image_path)
     stem = img.stem
+    root = img.parent.parent  # e.g. data/ if images are in data/images/
 
     result: dict = {"image": image_path, "width": w, "height": h}
 
-    # Look for labels in conventional locations
-    root = img.parent.parent  # e.g. data/ if images are in data/images/
-    for label_dir in (root / "labels" / "detect", root / "labels"):
-        txt = label_dir / f"{stem}.txt"
-        if txt.is_file():
-            boxes, class_ids = parse_detect_labels(str(txt), w, h)
-            result["detect_labels"] = {
-                "path": str(txt),
-                "count": len(boxes),
-                "class_ids": sorted(class_ids),
-                "boxes": [
-                    {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
-                    for b in boxes
-                ],
-            }
-            break
+    # Find and load detection labels
+    det_path = _find_label_path(root, stem, "detect", fmt=fmt)
+    if det_path is not None:
+        file_fmt = fmt or detect_format(str(det_path))
+        boxes, class_ids = format_load(str(det_path), w, h, task="detect", fmt=file_fmt)
+        result["detect_labels"] = {
+            "path": str(det_path),
+            "format": file_fmt,
+            "count": len(boxes),
+            "class_ids": sorted(class_ids),
+            "boxes": [
+                {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
+                for b in boxes
+            ],
+        }
 
-    for label_dir in (root / "labels" / "segment",):
-        txt = label_dir / f"{stem}.txt"
-        if txt.is_file():
-            polys, class_ids = parse_segment_labels(str(txt), w, h)
-            result["segment_labels"] = {
-                "path": str(txt),
-                "count": len(polys),
-                "class_ids": sorted(class_ids),
-            }
-            break
+    # Find and load segment labels
+    seg_path = _find_label_path(root, stem, "segment", fmt=fmt)
+    if seg_path is not None:
+        file_fmt = fmt or detect_format(str(seg_path))
+        polys, class_ids = format_load(str(seg_path), w, h, task="segment", fmt=file_fmt)
+        result["segment_labels"] = {
+            "path": str(seg_path),
+            "format": file_fmt,
+            "count": len(polys),
+            "class_ids": sorted(class_ids),
+        }
 
-    # Look for predictions
+    # Look for predictions (YOLO format — predictions are always YOLO)
     for pred_dir in (root / "predictions" / "detect",):
         txt = pred_dir / f"{stem}.txt"
         if txt.is_file():
@@ -101,17 +137,22 @@ def load_annotations(image_path: str) -> dict:
 
 
 @mcp.tool()
+@audited
 def save_annotations(
     image_path: str,
     boxes: list[dict] | None = None,
     polygons: list[dict] | None = None,
+    fmt: str = "yolo",
 ) -> dict:
-    """Write YOLO label files for an image.
+    """Write annotation label files for an image.
+
+    Supports YOLO (.txt), PASCAL VOC (.xml), and LabelMe (.json).
 
     Args:
         image_path: Absolute path to the image file.
         boxes: List of dicts with x1, y1, x2, y2, class_id (pixel coords).
         polygons: List of dicts with points and class_id (pixel coords).
+        fmt: Output format — 'yolo' (default), 'voc', 'labelme', 'coco'.
     """
     img = Path(image_path)
     if not img.is_file():
@@ -121,14 +162,17 @@ def save_annotations(
     stem = img.stem
     root = img.parent.parent
 
+    ext_map = {"yolo": ".txt", "voc": ".xml", "labelme": ".json", "coco": ".json"}
+    ext = ext_map.get(fmt, ".txt")
+
     written: list[str] = []
 
     if boxes is not None:
         typed_boxes = [BBox(x1=b["x1"], y1=b["y1"], x2=b["x2"], y2=b["y2"], class_id=b["class_id"]) for b in boxes]
         out_dir = root / "labels" / "detect"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{stem}.txt"
-        write_detect_labels(str(out_path), typed_boxes, w, h)
+        out_path = out_dir / f"{stem}{ext}"
+        format_save(str(out_path), typed_boxes, w, h, task="detect", fmt=fmt, file_name=img.name)
         written.append(str(out_path))
 
     if polygons is not None:
@@ -138,14 +182,15 @@ def save_annotations(
         ]
         out_dir = root / "labels" / "segment"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{stem}.txt"
-        write_segment_labels(str(out_path), typed_polys, w, h)
+        out_path = out_dir / f"{stem}{ext}"
+        format_save(str(out_path), typed_polys, w, h, task="segment", fmt=fmt, file_name=img.name)
         written.append(str(out_path))
 
-    return {"written": written, "count": len(written)}
+    return {"written": written, "format": fmt, "count": len(written)}
 
 
 @mcp.tool()
+@audited
 def evaluate_detections(
     image_path: str,
     iou_threshold: float = 0.5,
@@ -217,6 +262,7 @@ def evaluate_detections(
 
 
 @mcp.tool()
+@audited
 def evaluate_dataset(
     folder_path: str,
     iou_threshold: float = 0.5,
@@ -264,3 +310,233 @@ def evaluate_dataset(
         "f1": round(f1, 4),
         "per_image": per_image,
     }
+
+
+@mcp.tool()
+@audited
+def sam_predict(
+    image_path: str,
+    points: list[dict] | None = None,
+    box: dict | None = None,
+    model_type: str = "vit_b",
+) -> dict:
+    """Run SAM (Segment Anything) prediction on an image.
+
+    Provide either point prompts or a box prompt. Returns polygon vertices
+    in pixel coordinates that can be added as a segment annotation.
+
+    Args:
+        image_path: Absolute path to the image file.
+        points: List of point prompts, each with x, y, and label (1=fg, 0=bg).
+        box: Box prompt with x1, y1, x2, y2 in pixel coordinates.
+        model_type: SAM variant — vit_b (default, 375MB), vit_l, or vit_h.
+    """
+    img = Path(image_path)
+    if not img.is_file():
+        return {"error": f"Image not found: {image_path}"}
+
+    if points is None and box is None:
+        return {"error": "Provide either points or box prompt"}
+
+    try:
+        from tcip_annotation.sam_wrapper import (
+            predict_from_box,
+            predict_from_point,
+            predict_from_points,
+        )
+    except ImportError as e:
+        return {"error": f"SAM dependencies not available: {e}"}
+
+    try:
+        if box is not None:
+            polygon = predict_from_box(
+                image_path,
+                box["x1"], box["y1"], box["x2"], box["y2"],
+                model_type=model_type,
+            )
+        elif points is not None and len(points) == 1:
+            p = points[0]
+            polygon = predict_from_point(
+                image_path,
+                p["x"], p["y"],
+                label=p.get("label", 1),
+                model_type=model_type,
+            )
+        else:
+            pts = [(p["x"], p["y"]) for p in (points or [])]
+            lbls = [p.get("label", 1) for p in (points or [])]
+            polygon = predict_from_points(
+                image_path, pts, lbls,
+                model_type=model_type,
+            )
+
+        if not polygon:
+            return {"error": "SAM produced empty mask", "polygon": []}
+
+        return {
+            "polygon": [{"x": x, "y": y} for x, y in polygon],
+            "vertex_count": len(polygon),
+        }
+    except FileNotFoundError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"SAM prediction failed: {e}"}
+
+
+@mcp.tool()
+@audited
+def run_matching(
+    image_path: str,
+    iou_threshold: float = 0.5,
+    conf_threshold: float = 0.25,
+) -> dict:
+    """Run GT-vs-prediction matching for a single image.
+
+    Returns detailed match data including per-detection TP/FP/FN classification
+    with bounding box coordinates, class IDs, IoU values, and confidence scores.
+
+    This is the low-level matching tool — use for annotation review,
+    quality assessment, or feeding match data to the review panel.
+
+    Args:
+        image_path: Absolute path to the image file.
+        iou_threshold: IoU threshold for matching (default 0.5).
+        conf_threshold: Confidence threshold for filtering predictions (default 0.25).
+    """
+    from tcip_annotation import (
+        parse_detect_labels,
+        parse_detect_predictions,
+        parse_segment_labels,
+        parse_segment_predictions,
+        compute_matches,
+    )
+
+    img = Path(image_path)
+    if not img.is_file():
+        return {"error": f"Image not found: {image_path}"}
+
+    root = img.parent.parent
+
+    # Get image dimensions
+    img_w, img_h = get_image_dimensions(image_path)
+
+    stem = img.stem
+    gt_det = str(root / "labels" / "detect" / f"{stem}.txt")
+    gt_seg = str(root / "labels" / "segment" / f"{stem}.txt")
+    pred_det = str(root / "predictions" / "detect" / f"{stem}.txt")
+    pred_seg = str(root / "predictions" / "segment" / f"{stem}.txt")
+
+    gt_boxes, _ = parse_detect_labels(gt_det, img_w, img_h)
+    gt_polys, _ = parse_segment_labels(gt_seg, img_w, img_h)
+    pred_boxes, _ = parse_detect_predictions(pred_det, img_w, img_h)
+    pred_polys, _ = parse_segment_predictions(pred_seg, img_w, img_h)
+
+    matches = compute_matches(gt_boxes, gt_polys, pred_boxes, pred_polys,
+                              iou_threshold, conf_threshold)
+
+    # Build detailed per-detection records with coordinates
+    detections = []
+    for m in matches["tp"]:
+        d = {
+            "tag": "tp", "class_id": m["class_id"],
+            "iou": m["iou"], "confidence": m["conf"],
+            "gt_type": m["gt_type"], "gt_idx": m["gt_idx"],
+            "pred_type": m["pred_type"], "pred_idx": m["pred_idx"],
+        }
+        if m["pred_type"] == "box":
+            b = pred_boxes[m["pred_idx"]]
+            d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
+        else:
+            p = pred_polys[m["pred_idx"]]
+            d["polygon"] = [[pt[0], pt[1]] for pt in p.points]
+        detections.append(d)
+
+    for m in matches["fp"]:
+        d = {
+            "tag": "fp", "class_id": m["class_id"],
+            "confidence": m["conf"],
+            "pred_type": m["pred_type"], "pred_idx": m["pred_idx"],
+        }
+        if m["pred_type"] == "box":
+            b = pred_boxes[m["pred_idx"]]
+            d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
+        else:
+            p = pred_polys[m["pred_idx"]]
+            d["polygon"] = [[pt[0], pt[1]] for pt in p.points]
+        detections.append(d)
+
+    for m in matches["fn"]:
+        d = {
+            "tag": "fn", "class_id": m["class_id"], "confidence": 0,
+            "gt_type": m["gt_type"], "gt_idx": m["gt_idx"],
+        }
+        if m["gt_type"] == "box":
+            b = gt_boxes[m["gt_idx"]]
+            d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
+        else:
+            p = gt_polys[m["gt_idx"]]
+            d["polygon"] = [[pt[0], pt[1]] for pt in p.points]
+        detections.append(d)
+
+    return {
+        "image": str(img),
+        "img_w": img_w,
+        "img_h": img_h,
+        "tp_count": len(matches["tp"]),
+        "fp_count": len(matches["fp"]),
+        "fn_count": len(matches["fn"]),
+        "iou_threshold": iou_threshold,
+        "conf_threshold": conf_threshold,
+        "detections": detections,
+    }
+
+
+@mcp.tool()
+@audited
+def push_panel_data(
+    panel: str,
+    event_type: str,
+    data: dict,
+) -> dict:
+    """Push structured data to a VS Code webview panel.
+
+    This writes a JSON event file that the VS Code extension watches and
+    forwards to the appropriate webview panel. Used by the agent to send
+    data (metrics, match results, training updates) to the GUI.
+
+    Args:
+        panel: Target panel name — 'review', 'training', 'hpo', 'inference', 'annotation'.
+        event_type: Event type string the panel will switch on (e.g. 'load_matches', 'metrics_update').
+        data: Arbitrary JSON data payload for the event.
+    """
+    import json, os, tempfile
+
+    valid_panels = {"review", "training", "hpo", "inference", "annotation"}
+    if panel not in valid_panels:
+        return {"error": f"Unknown panel: {panel}. Valid: {sorted(valid_panels)}"}
+
+    # Write to a well-known event directory the extension monitors
+    event_dir = Path(os.environ.get("TCIP_EVENTS_DIR", ".tcip/events"))
+    event_dir.mkdir(parents=True, exist_ok=True)
+
+    event = {
+        "panel": panel,
+        "event_type": event_type,
+        "data": data,
+    }
+
+    # Atomic write
+    fd, tmp = tempfile.mkstemp(dir=str(event_dir), suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(event, f)
+        target = event_dir / f"{panel}_{event_type}.json"
+        os.replace(tmp, str(target))
+    except Exception as e:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return {"error": f"Failed to write event: {e}"}
+
+    return {"status": "ok", "panel": panel, "event_type": event_type}

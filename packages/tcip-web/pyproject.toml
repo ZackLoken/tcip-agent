@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tcip-web"
+version = "0.1.0"
+description = "FastAPI web server for TCIP ML pipeline — REST API + WebSocket for training progress"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "tcip-mcp",
+]
+
+[project.optional-dependencies]
+dev = ["httpx", "pytest", "pytest-asyncio"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tcip_web"]

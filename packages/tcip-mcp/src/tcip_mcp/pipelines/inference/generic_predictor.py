@@ -7,20 +7,14 @@ batch, and ONNX export.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
-import numpy as np
 import torch
 from PIL import Image
 
 from tcip_mcp.pipelines.composer import compose_model
+from tcip_mcp.pipelines.image_utils import pil_to_tensor
 
 logger = logging.getLogger(__name__)
-
-
-def _pil_to_tensor(img: Image.Image) -> torch.Tensor:
-    arr = np.array(img, dtype=np.float32) / 255.0
-    return torch.from_numpy(arr).permute(2, 0, 1)
 
 
 class GenericPredictor:
@@ -57,7 +51,7 @@ class GenericPredictor:
         """Run inference on a single image."""
         img = Image.open(image_path).convert("RGB")
         w, h = img.size
-        tensor = _pil_to_tensor(img).to(self.device)
+        tensor = pil_to_tensor(img).to(self.device)
 
         if self.task in ("anchor_detection", "anchor_free_detection"):
             outputs = self.model([tensor])
