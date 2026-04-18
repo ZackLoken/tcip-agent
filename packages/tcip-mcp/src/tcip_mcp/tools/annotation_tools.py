@@ -318,25 +318,41 @@ def sam_predict(
     image_path: str,
     points: list[dict] | None = None,
     box: dict | None = None,
+    grid_cells: list[str] | None = None,
     model_type: str = "vit_b",
 ) -> dict:
     """Run SAM (Segment Anything) prediction on an image.
 
-    Provide either point prompts or a box prompt. Returns polygon vertices
-    in pixel coordinates that can be added as a segment annotation.
+    Provide point prompts, a box prompt, OR grid cell references.
+    Grid cells (e.g. ['B3', 'D5']) are converted to pixel coordinates
+    using the grid overlay system (8 cols x 6 rows by default).
 
     Args:
         image_path: Absolute path to the image file.
         points: List of point prompts, each with x, y, and label (1=fg, 0=bg).
         box: Box prompt with x1, y1, x2, y2 in pixel coordinates.
+        grid_cells: List of grid cell references like ['B3', 'D5']. Each
+            cell is treated as a foreground point prompt at the cell center.
         model_type: SAM variant — vit_b (default, 375MB), vit_l, or vit_h.
     """
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    if points is None and box is None:
-        return {"error": "Provide either points or box prompt"}
+    if points is None and box is None and grid_cells is None:
+        return {"error": "Provide either points, box, or grid_cells prompt"}
+
+    # Convert grid cells to point prompts
+    if grid_cells is not None:
+        from tcip_annotation.sam_wrapper import grid_to_pixel
+        w, h = get_image_dimensions(image_path)
+        points = []
+        for cell in grid_cells:
+            try:
+                cx, cy = grid_to_pixel(cell, w, h)
+                points.append({"x": cx, "y": cy, "label": 1})
+            except ValueError as e:
+                return {"error": f"Invalid grid cell {cell!r}: {e}"}
 
     try:
         from tcip_annotation.sam_wrapper import (
