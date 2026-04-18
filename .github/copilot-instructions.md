@@ -58,6 +58,7 @@ The annotation engine supports four formats. The agent auto-detects format from 
 - **Inference**: `run_inference` → `export_predictions_yolo` → `export_results_csv`
 - **Pipelines**: `recommend_model` → `validate_pipeline_spec` → `run_pipeline`
 - **Panels**: Use `push_panel_data` to send data to VS Code webview panels
+- **Vision**: `visualize_dataset_sample` or `visualize_comparison` → `view_image` → describe findings
 
 ## Composable ML System
 
@@ -104,3 +105,22 @@ Every crop analysis follows: **Isolation → Task → Post-processing**
 1. Isolation: Segment/detect individual plants or plant parts from aerial/ground imagery
 2. Task: Classify, detect, segment, regress, or track traits per plant
 3. Post-processing: Aggregate to per-plant CSV deliverables
+
+## Visual Analysis
+
+The agent can visually inspect images using `view_image` after rendering annotations or predictions with visualization MCP tools. Rendered images are saved to `.tcip/artifacts/viz/`.
+
+**Pattern:**
+1. Call a `visualize_*` MCP tool → returns `image_path` in the result dict
+2. Call `view_image` on that path → model sees the rendered image
+3. Describe findings and recommend actions
+
+**Tools:**
+- `visualize_annotations` — render GT labels on a single image
+- `visualize_predictions` — render model predictions on a single image
+- `visualize_comparison` — overlay GT (green) vs predictions (red) with match stats
+- `visualize_worst_predictions` — grid of top-K failure cases
+- `visualize_dataset_sample` — random grid of annotated dataset samples
+- `sam_auto_label` — generate SAM candidate masks, render numbered overlay for review
+- `accept_candidates` — save agent-classified candidates as annotations
+- `visualize_grid_overlay` — labeled grid (A1–H6) for spatial referencing
