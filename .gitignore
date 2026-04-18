@@ -1,29 +1,61 @@
-# Data
-/data/images
-/data/labels/detect
-/data/labels
-/data/predictions
+# ── Data (images & labels are large / user-specific) ──────────────────────
+/data/images/
+/data/labels/
+/data/predictions/
 
-# Python
-*.pyc
+# ── Python ────────────────────────────────────────────────────────────────
 __pycache__/
+*.pyc
+*.pyo
 *.egg-info/
 dist/
 build/
 *.whl
+.eggs/
 
-# VS Code extension build output
+# ── Virtual environments ─────────────────────────────────────────────────
+.env
+.venv/
+env/
+venv/
+
+# ── Project runtime state ────────────────────────────────────────────────
+/.tcip/
+
+# ── VS Code extension build output ──────────────────────────────────────
 packages/tcip-vscode/out/
 
-# Runtime / sessions
-/.tcip
+# ── Node ─────────────────────────────────────────────────────────────────
+node_modules/
+package-lock.json
 
-# Editor / OS
+# ── Tool / cache directories ────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.cover
+htmlcov/
+.coverage
+
+# ── Rust (if agent shell is rebuilt) ─────────────────────────────────────
+/tcip-agent/target/
+
+# ── Editor / OS ──────────────────────────────────────────────────────────
 *.bak
 *.orig
 *.tmp
-.env
-.venv
+*.swp
+*~
+.DS_Store
+Thumbs.db
 
-# Node
-node_modules/
+# ── Model weights & checkpoints (large binaries) ────────────────────────
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+
+# ── Logs ─────────────────────────────────────────────────────────────────
+*.log
+tensorboard_runs/
