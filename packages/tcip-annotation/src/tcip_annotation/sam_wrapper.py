@@ -10,9 +10,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import cv2
-import numpy as np
-
 logger = logging.getLogger(__name__)
 
 # Lazy-loaded model cache
@@ -80,11 +77,12 @@ def _set_image(predictor: object, image_path: str) -> None:
     if _current_image_path == image_path:
         return  # embedding already cached
 
+    import cv2
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Cannot read image: {image_path}")
 
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # noqa: F811
     predictor.set_image(img_rgb)  # type: ignore[union-attr]
     _current_image_path = image_path
     logger.info("SAM image embedding computed for %s", image_path)
@@ -99,6 +97,8 @@ def mask_to_polygon(mask: np.ndarray) -> list[tuple[float, float]]:
     Returns:
         List of (x, y) tuples in pixel coordinates.
     """
+    import cv2
+    import numpy as np
     mask_uint8 = (mask.astype(np.uint8)) * 255
     contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)
 
@@ -139,6 +139,7 @@ def predict_from_point(
     Returns:
         List of (x, y) polygon vertices in pixel coordinates.
     """
+    import numpy as np
     predictor = _get_predictor(model_type)
     _set_image(predictor, image_path)
 
@@ -174,6 +175,7 @@ def predict_from_box(
     Returns:
         List of (x, y) polygon vertices in pixel coordinates.
     """
+    import numpy as np
     predictor = _get_predictor(model_type)
     _set_image(predictor, image_path)
 
@@ -186,6 +188,131 @@ def predict_from_box(
 
     best_idx = int(np.argmax(scores))
     return mask_to_polygon(masks[best_idx])
+
+
+def auto_mask(
+    image_path: str,
+    model_type: str = "vit_b",
+    points_per_side: int = 32,
+    pred_iou_thresh: float = 0.86,
+    stability_score_thresh: float = 0.92,
+    min_mask_region_area: int = 100,
+) -> list[dict]:
+    """Generate all candidate masks in an image using SAM auto-mask generator.
+
+    Returns a list of candidate dicts sorted by area (largest first), each with:
+      - candidate_id: int (0-based index)
+      - bbox: [x1, y1, x2, y2] in pixel coordinates
+      - area: int (pixel count)
+      - stability_score: float
+      - predicted_iou: float
+      - polygon: list of (x, y) tuples in pixel coordinates
+
+    Args:
+        image_path: Absolute path to the image.
+        model_type: SAM model variant (vit_b, vit_l, vit_h).
+        points_per_side: Grid density for auto-mask generation.
+        pred_iou_thresh: Minimum predicted IoU to keep a mask.
+        stability_score_thresh: Minimum stability score to keep a mask.
+        min_mask_region_area: Minimum mask area in pixels.
+    """
+    try:
+        from segment_anything import SamAutomaticMaskGenerator
+    except ImportError:
+        raise ImportError(
+            "segment-anything is not installed. "
+            "Install with: pip install segment-anything"
+        )
+
+    # Get the underlying SAM model from the predictor
+    predictor = _get_predictor(model_type)
+    sam_model = predictor.model  # type: ignore[union-attr]
+
+    generator = SamAutomaticMaskGenerator(
+        model=sam_model,
+        points_per_side=points_per_side,
+        pred_iou_thresh=pred_iou_thresh,
+        stability_score_thresh=stability_score_thresh,
+        min_mask_region_area=min_mask_region_area,
+    )
+
+    import cv2
+    img = cv2.imread(image_path)
+    if img is None:
+        raise FileNotFoundError(f"Cannot read image: {image_path}")
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    logger.info("Running SAM auto-mask generation on %s", image_path)
+    masks = generator.generate(img_rgb)
+
+    # Sort by area descending
+    masks.sort(key=lambda m: m["area"], reverse=True)
+
+    candidates = []
+    for i, m in enumerate(masks):
+        polygon = mask_to_polygon(m["segmentation"])
+        if len(polygon) < 3:
+            continue
+        x, y, w, h = m["bbox"]  # XYWH format from SAM
+        candidates.append({
+            "candidate_id": i,
+            "bbox": [float(x), float(y), float(x + w), float(y + h)],
+            "area": int(m["area"]),
+            "stability_score": float(m["stability_score"]),
+            "predicted_iou": float(m["predicted_iou"]),
+            "polygon": polygon,
+        })
+
+    logger.info("Auto-mask generated %d candidates for %s", len(candidates), image_path)
+    return candidates
+
+
+def grid_to_pixel(
+    cell: str,
+    img_w: int,
+    img_h: int,
+    cols: int = 8,
+    rows: int = 6,
+) -> tuple[float, float]:
+    """Convert a grid cell reference (e.g. 'B3') to pixel coordinates (center of cell).
+
+    Grid uses letter columns (A-H) and number rows (1-6) by default.
+
+    Args:
+        cell: Grid reference like 'B3', 'D5', etc.
+        img_w: Image width in pixels.
+        img_h: Image height in pixels.
+        cols: Number of grid columns.
+        rows: Number of grid rows.
+
+    Returns:
+        (x, y) center of the referenced cell in pixel coordinates.
+    """
+    cell = cell.strip().upper()
+    if len(cell) < 2:
+        raise ValueError(f"Invalid cell reference: {cell!r}. Expected format like 'B3'.")
+
+    col_letter = cell[0]
+    row_str = cell[1:]
+
+    col_idx = ord(col_letter) - ord("A")
+    if col_idx < 0 or col_idx >= cols:
+        raise ValueError(
+            f"Column '{col_letter}' out of range. Use A-{chr(ord('A') + cols - 1)}."
+        )
+
+    try:
+        row_idx = int(row_str) - 1  # 1-based to 0-based
+    except ValueError:
+        raise ValueError(f"Invalid row number: {row_str!r}. Expected integer.")
+    if row_idx < 0 or row_idx >= rows:
+        raise ValueError(f"Row {row_str} out of range. Use 1-{rows}.")
+
+    cell_w = img_w / cols
+    cell_h = img_h / rows
+    cx = (col_idx + 0.5) * cell_w
+    cy = (row_idx + 0.5) * cell_h
+    return cx, cy
 
 
 def predict_from_points(
@@ -205,6 +332,7 @@ def predict_from_points(
     Returns:
         List of (x, y) polygon vertices in pixel coordinates.
     """
+    import numpy as np
     predictor = _get_predictor(model_type)
     _set_image(predictor, image_path)
 
