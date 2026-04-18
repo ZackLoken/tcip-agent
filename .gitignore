@@ -12,13 +12,11 @@ dist/
 build/
 *.whl
 
-# Rust
-/tcip-agent/target/
+# VS Code extension build output
+packages/tcip-vscode/out/
 
 # Runtime / sessions
 /.tcip
-/tcip-agent/.tcip/
-/packages/tcip-gui/.tcip
 
 # Editor / OS
 *.bak
