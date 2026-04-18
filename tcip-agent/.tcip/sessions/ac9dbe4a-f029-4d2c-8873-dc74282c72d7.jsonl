@@ -1,3 +1,0 @@
-{"record_type":"meta","session_id":"ac9dbe4a-f029-4d2c-8873-dc74282c72d7","created_at":"2026-04-07T02:58:49.831421200Z","crop":null,"traits":[],"pipeline_stage":null}
-{"record_type":"message","role":"user","blocks":[{"type":"text","text":"test message"}],"timestamp":"2026-04-07T02:58:49.832282500Z"}
-{"record_type":"message","role":"assistant","blocks":[{"type":"text","text":"**[Offline Mode]** No ANTHROPIC_API_KEY set — running without an LLM backend.\n\nYour message: \"test message\"\n\nThe GUI, tools, and MCP server are fully functional. Set `ANTHROPIC_API_KEY` to enable the AI agent."}],"usage":{"input_tokens":0,"output_tokens":0},"timestamp":"2026-04-07T02:58:49.832777700Z"}
