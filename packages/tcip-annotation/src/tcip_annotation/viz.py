@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Sequence
 
 from PIL import Image, ImageDraw, ImageFont
+from tcip_annotation.utils import auto_orient_image, get_image_dimensions
 
 # 20-class color palette (RGB) — consistent with webview annotation canvas
 COLOR_PALETTE: list[tuple[int, int, int]] = [
@@ -48,12 +49,15 @@ def _default_output(func_name: str, suffix: str = ".png") -> str:
     viz_dir = Path(".tcip") / "artifacts" / "viz"
     viz_dir.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
-    return str(viz_dir / f"{ts}_{func_name}{suffix}")
+    # Include microseconds to avoid collision when many images render in one second
+    us = time.time_ns() % 1_000_000
+    return str(viz_dir / f"{ts}_{us:06d}_{func_name}{suffix}")
 
 
 def _load_and_resize(image_path: str) -> Image.Image:
-    """Load image and resize if larger than MAX_RENDER_EDGE."""
+    """Load image, apply EXIF orientation, and resize if larger than MAX_RENDER_EDGE."""
     img = Image.open(image_path)
+    img = auto_orient_image(img)
     img = img.convert("RGB")
     w, h = img.size
     if max(w, h) > MAX_RENDER_EDGE:
@@ -115,8 +119,7 @@ def render_detections(
     output_path = output_path or _default_output("detections")
     class_names = class_names or {}
 
-    orig = Image.open(image_path).convert("RGB")
-    orig_w, orig_h = orig.size
+    orig_w, orig_h = get_image_dimensions(image_path)
     img = _load_and_resize(image_path)
     draw = ImageDraw.Draw(img)
     font = _try_font(12)
@@ -167,8 +170,7 @@ def render_segmentations(
     output_path = output_path or _default_output("segmentations")
     class_names = class_names or {}
 
-    orig = Image.open(image_path).convert("RGB")
-    orig_w, orig_h = orig.size
+    orig_w, orig_h = get_image_dimensions(image_path)
     img = _load_and_resize(image_path)
     overlay = img.copy()
     draw = ImageDraw.Draw(overlay)
@@ -216,8 +218,7 @@ def render_comparison(
     output_path = output_path or _default_output("comparison")
     class_names = class_names or {}
 
-    orig = Image.open(image_path).convert("RGB")
-    orig_w, orig_h = orig.size
+    orig_w, orig_h = get_image_dimensions(image_path)
     img = _load_and_resize(image_path)
     draw = ImageDraw.Draw(img)
     font = _try_font(11)
@@ -296,7 +297,9 @@ def render_grid(
     for i, path in enumerate(image_paths):
         row, col = divmod(i, cols)
         try:
-            thumb = Image.open(path).convert("RGB")
+            thumb = Image.open(path)
+            thumb = auto_orient_image(thumb)
+            thumb = thumb.convert("RGB")
             thumb.thumbnail((cell_size, cell_size), Image.LANCZOS)
             # Center in cell
             x_off = col * cell_size + (cell_size - thumb.size[0]) // 2
@@ -393,8 +396,7 @@ def render_candidates(
     """
     output_path = output_path or _default_output("candidates")
 
-    orig = Image.open(image_path).convert("RGB")
-    orig_w, orig_h = orig.size
+    orig_w, orig_h = get_image_dimensions(image_path)
     img = _load_and_resize(image_path)
     rw, rh = img.size
     sx, sy = _get_scale(orig_w, orig_h, rw, rh)
