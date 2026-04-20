@@ -1,8 +1,10 @@
-"""Tests for the vision rendering engine and MCP tools."""
+﻿"""Tests for the vision rendering engine and MCP tools."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from PIL import Image
@@ -33,7 +35,7 @@ def viz_dataset(tmp_path: Path) -> Path:
     return tmp_path
 
 
-# ── Rendering engine tests ──────────────────────────────────────────────────
+# â”€â”€ Rendering engine tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestRenderDetections:
@@ -129,7 +131,7 @@ class TestYoloToPixel:
         assert abs(y2 - 288.0) < 0.01
 
 
-# ── Vision MCP tool tests ──────────────────────────────────────────────────
+# â”€â”€ Vision MCP tool tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestVisualizeAnnotations:
@@ -408,3 +410,960 @@ class TestAcceptCandidatesTool:
         assert det_file.is_file()
         seg_file = viz_dataset / "labels" / "segment" / "img_001.txt"
         assert seg_file.is_file()
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# Layer 2: Integration tests â€” full pipeline with mocked SAM candidates
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+
+MOCK_CANDIDATES = [
+    {
+        "candidate_id": 0,
+        "bbox": [50.0, 40.0, 200.0, 180.0],
+        "area": 21000,
+        "stability_score": 0.96,
+        "predicted_iou": 0.93,
+        "polygon": [
+            (50, 40), (200, 40), (200, 180), (50, 180),
+        ],
+    },
+    {
+        "candidate_id": 1,
+        "bbox": [300.0, 250.0, 450.0, 400.0],
+        "area": 15000,
+        "stability_score": 0.91,
+        "predicted_iou": 0.88,
+        "polygon": [
+            (300, 250), (450, 250), (450, 400), (300, 400),
+        ],
+    },
+    {
+        "candidate_id": 2,
+        "bbox": [500.0, 100.0, 600.0, 200.0],
+        "area": 8000,
+        "stability_score": 0.85,
+        "predicted_iou": 0.80,
+        "polygon": [
+            (500, 100), (600, 100), (600, 200), (500, 200),
+        ],
+    },
+]
+
+
+class TestCandidateCacheRoundTrip:
+    """Verify candidates survive JSON serialize â†’ deserialize."""
+
+    def test_polygon_geometry_preserved(self, tmp_path: Path):
+        state_file = tmp_path / "candidates_test.json"
+        state_file.write_text(json.dumps(MOCK_CANDIDATES, default=str), encoding="utf-8")
+
+        loaded = json.loads(state_file.read_text(encoding="utf-8"))
+        assert len(loaded) == 3
+
+        for orig, restored in zip(MOCK_CANDIDATES, loaded):
+            assert orig["candidate_id"] == restored["candidate_id"]
+            assert orig["bbox"] == restored["bbox"]
+            assert orig["area"] == restored["area"]
+            assert abs(orig["stability_score"] - restored["stability_score"]) < 1e-6
+            assert abs(orig["predicted_iou"] - restored["predicted_iou"]) < 1e-6
+            # Polygon vertices â€” JSON turns tuples into lists
+            for (ox, oy), rp in zip(orig["polygon"], restored["polygon"]):
+                rx, ry = rp if isinstance(rp, (list, tuple)) else (rp["x"], rp["y"])
+                assert abs(ox - rx) < 1e-6
+                assert abs(oy - ry) < 1e-6
+
+    def test_empty_candidates_roundtrip(self, tmp_path: Path):
+        state_file = tmp_path / "candidates_empty.json"
+        state_file.write_text(json.dumps([]), encoding="utf-8")
+        loaded = json.loads(state_file.read_text(encoding="utf-8"))
+        assert loaded == []
+
+
+class TestFullPipelineIntegration:
+    """End-to-end flow: mock candidates â†’ accept â†’ verify output files."""
+
+    @pytest.fixture
+    def pipeline_dataset(self, tmp_path: Path) -> Path:
+        """Fresh dataset without pre-existing labels."""
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img = Image.new("RGB", (640, 480), color=(80, 120, 60))
+        img.save(images_dir / "sample.jpg")
+        return tmp_path
+
+    def _cache_candidates(self, stem: str, candidates: list[dict]) -> None:
+        state_dir = Path(".tcip") / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / f"candidates_{stem}.json").write_text(
+            json.dumps(candidates, default=str), encoding="utf-8",
+        )
+
+    def test_accept_writes_correct_yolo_detect(self, pipeline_dataset: Path):
+        """Verify YOLO detection labels: normalized cx cy w h format."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[
+                {"candidate_id": 0, "class_id": 0},
+                {"candidate_id": 1, "class_id": 1},
+            ],
+        )
+        assert "error" not in result
+        assert result["detection_count"] == 2
+        assert result["format"] == "yolo"
+
+        det_file = pipeline_dataset / "labels" / "detect" / "sample.txt"
+        assert det_file.is_file()
+        lines = det_file.read_text().strip().splitlines()
+        assert len(lines) == 2
+
+        # Verify YOLO format: class_id cx cy w h (normalized)
+        for line in lines:
+            parts = line.split()
+            assert len(parts) == 5
+            class_id = int(parts[0])
+            cx, cy, w, h = [float(p) for p in parts[1:]]
+            assert class_id in (0, 1)
+            assert 0.0 <= cx <= 1.0, f"cx out of range: {cx}"
+            assert 0.0 <= cy <= 1.0, f"cy out of range: {cy}"
+            assert 0.0 < w <= 1.0, f"w out of range: {w}"
+            assert 0.0 < h <= 1.0, f"h out of range: {h}"
+
+    def test_accept_writes_correct_yolo_segment(self, pipeline_dataset: Path):
+        """Verify YOLO segmentation labels: normalized polygon vertices."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[{"candidate_id": 0, "class_id": 2}],
+        )
+        assert "error" not in result
+        assert result["segmentation_count"] == 1
+
+        seg_file = pipeline_dataset / "labels" / "segment" / "sample.txt"
+        assert seg_file.is_file()
+        lines = seg_file.read_text().strip().splitlines()
+        assert len(lines) == 1
+
+        parts = lines[0].split()
+        class_id = int(parts[0])
+        assert class_id == 2
+        # Remaining values are x y x y ... (normalized pairs)
+        coords = [float(p) for p in parts[1:]]
+        assert len(coords) >= 6  # at least 3 vertices Ã— 2
+        assert len(coords) % 2 == 0
+        for c in coords:
+            assert 0.0 <= c <= 1.0, f"normalized coord out of range: {c}"
+
+    def test_detect_and_segment_consistent(self, pipeline_dataset: Path):
+        """Detection and segmentation labels cover the same objects."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[
+                {"candidate_id": 0, "class_id": 0},
+                {"candidate_id": 2, "class_id": 1},
+            ],
+        )
+        assert result["detection_count"] == 2
+        assert result["segmentation_count"] == 2
+
+        # Parse back detection labels
+        det_file = pipeline_dataset / "labels" / "detect" / "sample.txt"
+        det_lines = det_file.read_text().strip().splitlines()
+        det_class_ids = sorted(int(l.split()[0]) for l in det_lines)
+
+        seg_file = pipeline_dataset / "labels" / "segment" / "sample.txt"
+        seg_lines = seg_file.read_text().strip().splitlines()
+        seg_class_ids = sorted(int(l.split()[0]) for l in seg_lines)
+
+        # Same class IDs in both
+        assert det_class_ids == seg_class_ids
+
+    def test_partial_accept_skips_rejected(self, pipeline_dataset: Path):
+        """Only accepted candidates appear in output; rejected are omitted."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        # Accept only candidate 1 out of 3
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[{"candidate_id": 1, "class_id": 0}],
+        )
+        assert result["detection_count"] == 1
+        assert result["segmentation_count"] == 1
+
+    def test_invalid_candidate_id_silently_skipped(self, pipeline_dataset: Path):
+        """Assignments with non-existent candidate_id are ignored."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[
+                {"candidate_id": 999, "class_id": 0},  # non-existent
+                {"candidate_id": 0, "class_id": 1},     # valid
+            ],
+        )
+        assert result["detection_count"] == 1
+        assert result["segmentation_count"] == 1
+
+    def test_render_then_accept_pipeline(self, pipeline_dataset: Path):
+        """Full render â†’ accept â†’ verify pipeline (sans SAM)."""
+        from tcip_annotation.viz import render_candidates, render_grid_overlay
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+
+        # Step 1: Render candidates
+        candidate_render = render_candidates(img_path, MOCK_CANDIDATES)
+        assert Path(candidate_render).is_file()
+
+        # Step 2: Render grid overlay (for correction reference)
+        grid_render = render_grid_overlay(img_path)
+        assert Path(grid_render).is_file()
+
+        # Step 3: Cache candidates (simulating sam_auto_label state save)
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        # Step 4: Accept with class assignments
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[
+                {"candidate_id": 0, "class_id": 0},
+                {"candidate_id": 1, "class_id": 1},
+                {"candidate_id": 2, "class_id": 0},
+            ],
+        )
+        assert "error" not in result
+        assert result["detection_count"] == 3
+
+        # Step 5: QA render was produced
+        assert Path(result["image_path"]).is_file()
+
+
+class TestGridCellToSamPrompt:
+    """Test grid cell â†’ point prompt conversion in sam_predict."""
+
+    def test_grid_cells_converted_to_points(self, viz_dataset: Path):
+        """Grid cells should convert to points before hitting SAM."""
+        from tcip_mcp.tools.annotation_tools import sam_predict
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+
+        # Mock the SAM predictor functions â€” they require GPU/checkpoint
+        with patch(
+            "tcip_mcp.tools.annotation_tools.predict_from_points"
+        ) as mock_predict:
+            mock_predict.return_value = [
+                (100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0),
+            ]
+
+            result = sam_predict(
+                image_path=img_path,
+                grid_cells=["A1", "D3"],
+            )
+
+        # Should have called predict_from_points (2 points â†’ multi-point)
+        assert mock_predict.called
+        call_args = mock_predict.call_args
+        pts = call_args[0][1]  # second positional arg: points
+        lbls = call_args[0][2]  # third: labels
+        assert len(pts) == 2
+        assert all(lbl == 1 for lbl in lbls)
+
+        # Verify result has polygon
+        assert "polygon" in result
+        assert result["vertex_count"] == 4
+
+    def test_single_grid_cell_uses_single_point(self, viz_dataset: Path):
+        """Single grid cell should use predict_from_point (not predict_from_points)."""
+        from tcip_mcp.tools.annotation_tools import sam_predict
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+
+        with patch(
+            "tcip_mcp.tools.annotation_tools.predict_from_point"
+        ) as mock_predict:
+            mock_predict.return_value = [
+                (100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0),
+            ]
+
+            result = sam_predict(
+                image_path=img_path,
+                grid_cells=["C4"],
+            )
+
+        assert mock_predict.called
+        # Verify the coordinates are reasonable for C4 on 640Ã—480
+        call_args = mock_predict.call_args
+        x = call_args[0][1]  # positional: image_path, x, y
+        y = call_args[0][2]
+        # C = column 2 (0-indexed), cell center x = (2+0.5)*640/8 = 200
+        assert abs(x - 200.0) < 1.0
+        # 4 = row 3 (0-indexed), cell center y = (3+0.5)*480/6 = 280
+        assert abs(y - 280.0) < 1.0
+
+    def test_invalid_grid_cell_returns_error(self, viz_dataset: Path):
+        """Invalid grid cell like 'Z9' should return error, not crash."""
+        from tcip_mcp.tools.annotation_tools import sam_predict
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        result = sam_predict(image_path=img_path, grid_cells=["Z9"])
+        assert "error" in result
+        assert "Invalid grid cell" in result["error"]
+
+    def test_no_prompts_returns_error(self, viz_dataset: Path):
+        """Calling with no prompts at all should error."""
+        from tcip_mcp.tools.annotation_tools import sam_predict
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        result = sam_predict(image_path=img_path)
+        assert "error" in result
+
+
+class TestMultiFormatOutput:
+    """Verify accept_candidates produces valid output for multiple formats."""
+
+    @pytest.fixture
+    def format_dataset(self, tmp_path: Path) -> Path:
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img = Image.new("RGB", (640, 480), color=(100, 100, 100))
+        img.save(images_dir / "fmt_test.jpg")
+        return tmp_path
+
+    def _cache(self, stem: str) -> None:
+        state_dir = Path(".tcip") / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / f"candidates_{stem}.json").write_text(
+            json.dumps(MOCK_CANDIDATES, default=str), encoding="utf-8",
+        )
+
+    def test_yolo_format_output(self, format_dataset: Path):
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        self._cache("fmt_test")
+        result = accept_candidates(
+            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
+            assignments=[{"candidate_id": 0, "class_id": 0}],
+            fmt="yolo",
+        )
+        assert "error" not in result
+        assert result["format"] == "yolo"
+        det = format_dataset / "labels" / "detect" / "fmt_test.txt"
+        assert det.is_file()
+        # YOLO: 5 fields per line
+        parts = det.read_text().strip().split()
+        assert len(parts) == 5
+
+    def test_voc_format_output(self, format_dataset: Path):
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        self._cache("fmt_test")
+        result = accept_candidates(
+            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
+            assignments=[{"candidate_id": 0, "class_id": 0}],
+            fmt="voc",
+        )
+        assert "error" not in result
+        assert result["format"] == "voc"
+        det = format_dataset / "labels" / "detect" / "fmt_test.txt"
+        # VOC writes .xml, not .txt â€” the accept_candidates uses stem + .txt
+        # The save_annotations call writes to the path we give it
+        assert det.is_file()
+        content = det.read_text()
+        assert "<annotation>" in content or "<object>" in content or len(content) > 0
+
+    def test_coco_format_output(self, format_dataset: Path):
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        self._cache("fmt_test")
+        result = accept_candidates(
+            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
+            assignments=[{"candidate_id": 0, "class_id": 0}],
+            fmt="coco",
+        )
+        assert "error" not in result
+        assert result["format"] == "coco"
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# Layer 3: SAM integration tests (skipped when SAM is not installed)
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+
+def _sam_available() -> bool:
+    """Check if segment-anything and its dependencies are available."""
+    try:
+        import cv2  # noqa: F401
+        import segment_anything  # noqa: F401
+        import torch  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _sam_checkpoint_available() -> bool:
+    """Check if the SAM vit_b checkpoint exists."""
+    ckpt = Path.home() / ".cache" / "tcip" / "sam" / "sam_vit_b_01ec64.pth"
+    return ckpt.is_file()
+
+
+requires_sam = pytest.mark.skipif(
+    not _sam_available() or not _sam_checkpoint_available(),
+    reason="SAM (segment-anything + checkpoint) not available",
+)
+
+
+@requires_sam
+class TestSamAutoMask:
+    """Integration tests for auto_mask with real SAM model."""
+
+    @pytest.fixture
+    def real_image(self, tmp_path: Path) -> str:
+        """Create a synthetic image with distinct regions for SAM."""
+        img = Image.new("RGB", (512, 512), color=(200, 200, 200))
+        # Draw some colored rectangles to give SAM something to segment
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([50, 50, 200, 200], fill=(255, 0, 0))
+        draw.rectangle([300, 100, 480, 300], fill=(0, 0, 255))
+        draw.ellipse([100, 300, 250, 450], fill=(0, 200, 0))
+        path = str(tmp_path / "test_sam.jpg")
+        img.save(path)
+        return path
+
+    def test_auto_mask_returns_candidates(self, real_image: str):
+        from tcip_annotation.sam_wrapper import auto_mask
+
+        candidates = auto_mask(
+            real_image,
+            points_per_side=16,  # smaller for speed
+            min_mask_region_area=500,
+        )
+        assert isinstance(candidates, list)
+        assert len(candidates) > 0
+
+        for c in candidates:
+            assert "candidate_id" in c
+            assert "bbox" in c
+            assert len(c["bbox"]) == 4
+            assert "polygon" in c
+            assert len(c["polygon"]) >= 3
+            assert "area" in c
+            assert c["area"] > 0
+            assert 0.0 <= c["stability_score"] <= 1.0
+            assert c["predicted_iou"] >= 0.0  # can slightly exceed 1.0 due to model FP
+
+    def test_auto_mask_sorted_by_area(self, real_image: str):
+        from tcip_annotation.sam_wrapper import auto_mask
+
+        candidates = auto_mask(real_image, points_per_side=16)
+        areas = [c["area"] for c in candidates]
+        assert areas == sorted(areas, reverse=True)
+
+    def test_auto_mask_polygon_within_image(self, real_image: str):
+        """All polygon vertices should be within image bounds."""
+        from tcip_annotation.sam_wrapper import auto_mask
+
+        candidates = auto_mask(real_image, points_per_side=16)
+        for c in candidates:
+            for x, y in c["polygon"]:
+                assert 0 <= x <= 512, f"x={x} out of bounds"
+                assert 0 <= y <= 512, f"y={y} out of bounds"
+
+
+@requires_sam
+class TestSamPredictFromGrid:
+    """Integration tests for sam_predict with grid_cells (real SAM)."""
+
+    @pytest.fixture
+    def real_dataset(self, tmp_path: Path) -> Path:
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img = Image.new("RGB", (640, 480), color=(200, 200, 200))
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        # Object at roughly B2 area (col=1, row=1 â†’ center ~120,120)
+        draw.rectangle([80, 80, 160, 160], fill=(255, 0, 0))
+        img.save(images_dir / "grid_test.jpg")
+        return tmp_path
+
+    def test_grid_cell_produces_polygon(self, real_dataset: Path):
+        from tcip_mcp.tools.annotation_tools import sam_predict
+
+        img_path = str(real_dataset / "images" / "grid_test.jpg")
+        result = sam_predict(
+            image_path=img_path,
+            grid_cells=["B2"],
+        )
+        assert "error" not in result
+        assert "polygon" in result
+        assert result["vertex_count"] >= 3
+
+
+@requires_sam
+class TestFullSamPipeline:
+    """End-to-end: auto_mask â†’ accept â†’ verify, with real SAM."""
+
+    @pytest.fixture
+    def sam_dataset(self, tmp_path: Path) -> Path:
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img = Image.new("RGB", (512, 512), color=(220, 220, 220))
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([100, 100, 300, 300], fill=(255, 0, 0))
+        draw.rectangle([350, 350, 480, 480], fill=(0, 0, 255))
+        img.save(images_dir / "e2e.jpg")
+        return tmp_path
+
+    def test_auto_label_then_accept(self, sam_dataset: Path):
+        from tcip_mcp.tools.vision_tools import accept_candidates, sam_auto_label
+
+        img_path = str(sam_dataset / "images" / "e2e.jpg")
+
+        # Step 1: auto-label
+        auto_result = sam_auto_label(
+            image_path=img_path,
+            points_per_side=16,
+            min_mask_region_area=500,
+        )
+        assert "error" not in auto_result
+        assert auto_result["candidate_count"] > 0
+        assert Path(auto_result["image_path"]).is_file()
+
+        # Step 2: accept first two candidates
+        cands = auto_result["candidates"][:2]
+        accept_result = accept_candidates(
+            image_path=img_path,
+            assignments=[
+                {"candidate_id": c["id"], "class_id": i}
+                for i, c in enumerate(cands)
+            ],
+        )
+        assert "error" not in accept_result
+        assert accept_result["detection_count"] == 2
+        assert Path(accept_result["image_path"]).is_file()
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# Layer 2: Integration tests â€” full pipeline with mocked SAM candidates
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+
+MOCK_CANDIDATES = [
+    {
+        "candidate_id": 0,
+        "bbox": [50.0, 40.0, 200.0, 180.0],
+        "area": 21000,
+        "stability_score": 0.96,
+        "predicted_iou": 0.93,
+        "polygon": [
+            (50, 40), (200, 40), (200, 180), (50, 180),
+        ],
+    },
+    {
+        "candidate_id": 1,
+        "bbox": [300.0, 250.0, 450.0, 400.0],
+        "area": 15000,
+        "stability_score": 0.91,
+        "predicted_iou": 0.88,
+        "polygon": [
+            (300, 250), (450, 250), (450, 400), (300, 400),
+        ],
+    },
+    {
+        "candidate_id": 2,
+        "bbox": [500.0, 100.0, 600.0, 200.0],
+        "area": 8000,
+        "stability_score": 0.85,
+        "predicted_iou": 0.80,
+        "polygon": [
+            (500, 100), (600, 100), (600, 200), (500, 200),
+        ],
+    },
+]
+
+
+class TestCandidateCacheRoundTrip:
+    """Verify candidates survive JSON serialize â†’ deserialize."""
+
+    def test_polygon_geometry_preserved(self, tmp_path: Path):
+        state_file = tmp_path / "candidates_test.json"
+        state_file.write_text(json.dumps(MOCK_CANDIDATES, default=str), encoding="utf-8")
+
+        loaded = json.loads(state_file.read_text(encoding="utf-8"))
+        assert len(loaded) == 3
+
+        for orig, restored in zip(MOCK_CANDIDATES, loaded):
+            assert orig["candidate_id"] == restored["candidate_id"]
+            assert orig["bbox"] == restored["bbox"]
+            assert orig["area"] == restored["area"]
+            assert abs(orig["stability_score"] - restored["stability_score"]) < 1e-6
+            assert abs(orig["predicted_iou"] - restored["predicted_iou"]) < 1e-6
+            # Polygon vertices â€” JSON turns tuples into lists
+            for (ox, oy), rp in zip(orig["polygon"], restored["polygon"]):
+                rx, ry = rp if isinstance(rp, (list, tuple)) else (rp["x"], rp["y"])
+                assert abs(ox - rx) < 1e-6
+                assert abs(oy - ry) < 1e-6
+
+    def test_empty_candidates_roundtrip(self, tmp_path: Path):
+        state_file = tmp_path / "candidates_empty.json"
+        state_file.write_text(json.dumps([]), encoding="utf-8")
+        loaded = json.loads(state_file.read_text(encoding="utf-8"))
+        assert loaded == []
+
+
+class TestFullPipelineIntegration:
+    """End-to-end flow: mock candidates â†’ accept â†’ verify output files."""
+
+    @pytest.fixture
+    def pipeline_dataset(self, tmp_path: Path) -> Path:
+        """Fresh dataset without pre-existing labels."""
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img = Image.new("RGB", (640, 480), color=(80, 120, 60))
+        img.save(images_dir / "sample.jpg")
+        return tmp_path
+
+    def _cache_candidates(self, stem: str, candidates: list[dict]) -> None:
+        state_dir = Path(".tcip") / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / f"candidates_{stem}.json").write_text(
+            json.dumps(candidates, default=str), encoding="utf-8",
+        )
+
+    def test_accept_writes_correct_yolo_detect(self, pipeline_dataset: Path):
+        """Verify YOLO detection labels: normalized cx cy w h format."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[
+                {"candidate_id": 0, "class_id": 0},
+                {"candidate_id": 1, "class_id": 1},
+            ],
+        )
+        assert "error" not in result
+        assert result["detection_count"] == 2
+        assert result["format"] == "yolo"
+
+        det_file = pipeline_dataset / "labels" / "detect" / "sample.txt"
+        assert det_file.is_file()
+        lines = det_file.read_text().strip().splitlines()
+        assert len(lines) == 2
+
+        # Verify YOLO format: class_id cx cy w h (normalized)
+        for line in lines:
+            parts = line.split()
+            assert len(parts) == 5
+            class_id = int(parts[0])
+            cx, cy, w, h = [float(p) for p in parts[1:]]
+            assert class_id in (0, 1)
+            assert 0.0 <= cx <= 1.0, f"cx out of range: {cx}"
+            assert 0.0 <= cy <= 1.0, f"cy out of range: {cy}"
+            assert 0.0 < w <= 1.0, f"w out of range: {w}"
+            assert 0.0 < h <= 1.0, f"h out of range: {h}"
+
+    def test_accept_writes_correct_yolo_segment(self, pipeline_dataset: Path):
+        """Verify YOLO segmentation labels: normalized polygon vertices."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[{"candidate_id": 0, "class_id": 2}],
+        )
+        assert "error" not in result
+        assert result["segmentation_count"] == 1
+
+        seg_file = pipeline_dataset / "labels" / "segment" / "sample.txt"
+        assert seg_file.is_file()
+        lines = seg_file.read_text().strip().splitlines()
+        assert len(lines) == 1
+
+        parts = lines[0].split()
+        class_id = int(parts[0])
+        assert class_id == 2
+        # Remaining values are x y x y ... (normalized pairs)
+        coords = [float(p) for p in parts[1:]]
+        assert len(coords) >= 6  # at least 3 vertices Ã— 2
+        assert len(coords) % 2 == 0
+        for c in coords:
+            assert 0.0 <= c <= 1.0, f"normalized coord out of range: {c}"
+
+    def test_detect_and_segment_consistent(self, pipeline_dataset: Path):
+        """Detection and segmentation labels cover the same objects."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[
+                {"candidate_id": 0, "class_id": 0},
+                {"candidate_id": 2, "class_id": 1},
+            ],
+        )
+        assert result["detection_count"] == 2
+        assert result["segmentation_count"] == 2
+
+        # Parse back detection labels
+        det_file = pipeline_dataset / "labels" / "detect" / "sample.txt"
+        det_lines = det_file.read_text().strip().splitlines()
+        det_class_ids = sorted(int(l.split()[0]) for l in det_lines)
+
+        seg_file = pipeline_dataset / "labels" / "segment" / "sample.txt"
+        seg_lines = seg_file.read_text().strip().splitlines()
+        seg_class_ids = sorted(int(l.split()[0]) for l in seg_lines)
+
+        # Same class IDs in both
+        assert det_class_ids == seg_class_ids
+
+    def test_partial_accept_skips_rejected(self, pipeline_dataset: Path):
+        """Only accepted candidates appear in output; rejected are omitted."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        # Accept only candidate 1 out of 3
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[{"candidate_id": 1, "class_id": 0}],
+        )
+        assert result["detection_count"] == 1
+        assert result["segmentation_count"] == 1
+
+    def test_invalid_candidate_id_silently_skipped(self, pipeline_dataset: Path):
+        """Assignments with non-existent candidate_id are ignored."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[
+                {"candidate_id": 999, "class_id": 0},  # non-existent
+                {"candidate_id": 0, "class_id": 1},     # valid
+            ],
+        )
+        assert result["detection_count"] == 1
+        assert result["segmentation_count"] == 1
+
+    def test_render_then_accept_pipeline(self, pipeline_dataset: Path):
+        """Full render â†’ accept â†’ verify pipeline (sans SAM)."""
+        from tcip_annotation.viz import render_candidates, render_grid_overlay
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        img_path = str(pipeline_dataset / "images" / "sample.jpg")
+
+        # Step 1: Render candidates
+        candidate_render = render_candidates(img_path, MOCK_CANDIDATES)
+        assert Path(candidate_render).is_file()
+
+        # Step 2: Render grid overlay (for correction reference)
+        grid_render = render_grid_overlay(img_path)
+        assert Path(grid_render).is_file()
+
+        # Step 3: Cache candidates (simulating sam_auto_label state save)
+        self._cache_candidates("sample", MOCK_CANDIDATES)
+
+        # Step 4: Accept with class assignments
+        result = accept_candidates(
+            image_path=img_path,
+            assignments=[
+                {"candidate_id": 0, "class_id": 0},
+                {"candidate_id": 1, "class_id": 1},
+                {"candidate_id": 2, "class_id": 0},
+            ],
+        )
+        assert "error" not in result
+        assert result["detection_count"] == 3
+
+        # Step 5: QA render was produced
+        assert Path(result["image_path"]).is_file()
+
+
+class TestGridCellToSamPrompt:
+    """Test grid cell â†’ point prompt conversion in sam_predict."""
+
+    def test_grid_cells_converted_to_points(self, viz_dataset: Path):
+        """Grid cells should convert to points before hitting SAM."""
+        from tcip_mcp.tools.annotation_tools import sam_predict
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+
+        # Mock at the source module where the lazy import resolves
+        with patch(
+            "tcip_annotation.sam_wrapper.predict_from_points"
+        ) as mock_predict:
+            mock_predict.return_value = [
+                (100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0),
+            ]
+
+            result = sam_predict(
+                image_path=img_path,
+                grid_cells=["A1", "D3"],
+            )
+
+        # Should have called predict_from_points (2 points â†’ multi-point)
+        assert mock_predict.called
+        call_args = mock_predict.call_args
+        pts = call_args[0][1]  # second positional arg: points
+        lbls = call_args[0][2]  # third: labels
+        assert len(pts) == 2
+        assert all(lbl == 1 for lbl in lbls)
+
+        # Verify result has polygon
+        assert "polygon" in result
+        assert result["vertex_count"] == 4
+
+    def test_single_grid_cell_uses_single_point(self, viz_dataset: Path):
+        """Single grid cell should use predict_from_point (not predict_from_points)."""
+        from tcip_mcp.tools.annotation_tools import sam_predict
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+
+        with patch(
+            "tcip_annotation.sam_wrapper.predict_from_point"
+        ) as mock_predict:
+            mock_predict.return_value = [
+                (100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0),
+            ]
+
+            result = sam_predict(
+                image_path=img_path,
+                grid_cells=["C4"],
+            )
+
+        assert mock_predict.called
+        # Verify the coordinates are reasonable for C4 on 640Ã—480
+        call_args = mock_predict.call_args
+        x = call_args[0][1]  # positional: image_path, x, y
+        y = call_args[0][2]
+        # C = column 2 (0-indexed), cell center x = (2+0.5)*640/8 = 200
+        assert abs(x - 200.0) < 1.0
+        # 4 = row 3 (0-indexed), cell center y = (3+0.5)*480/6 = 280
+        assert abs(y - 280.0) < 1.0
+
+    def test_invalid_grid_cell_returns_error(self, viz_dataset: Path):
+        """Invalid grid cell like 'Z9' should return error, not crash."""
+        from tcip_mcp.tools.annotation_tools import sam_predict
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        result = sam_predict(image_path=img_path, grid_cells=["Z9"])
+        assert "error" in result
+        assert "Invalid grid cell" in result["error"]
+
+    def test_no_prompts_returns_error(self, viz_dataset: Path):
+        """Calling with no prompts at all should error."""
+        from tcip_mcp.tools.annotation_tools import sam_predict
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        result = sam_predict(image_path=img_path)
+        assert "error" in result
+
+
+class TestMultiFormatOutput:
+    """Verify accept_candidates produces valid output for multiple formats."""
+
+    @pytest.fixture
+    def format_dataset(self, tmp_path: Path) -> Path:
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img = Image.new("RGB", (640, 480), color=(100, 100, 100))
+        img.save(images_dir / "fmt_test.jpg")
+        return tmp_path
+
+    def _cache(self, stem: str) -> None:
+        state_dir = Path(".tcip") / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / f"candidates_{stem}.json").write_text(
+            json.dumps(MOCK_CANDIDATES, default=str), encoding="utf-8",
+        )
+
+    def test_yolo_format_output(self, format_dataset: Path):
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        self._cache("fmt_test")
+        result = accept_candidates(
+            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
+            assignments=[{"candidate_id": 0, "class_id": 0}],
+            fmt="yolo",
+        )
+        assert "error" not in result
+        assert result["format"] == "yolo"
+        det = format_dataset / "labels" / "detect" / "fmt_test.txt"
+        assert det.is_file()
+        # YOLO: 5 fields per line
+        parts = det.read_text().strip().split()
+        assert len(parts) == 5
+
+    def test_labelme_format_output(self, format_dataset: Path):
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        self._cache("fmt_test")
+        result = accept_candidates(
+            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
+            assignments=[{"candidate_id": 0, "class_id": 0}],
+            fmt="labelme",
+        )
+        assert "error" not in result
+        assert result["format"] == "labelme"
+
+    def test_voc_format_detect_only(self, format_dataset: Path):
+        """VOC has no segmentation support â€” only detect labels should be saved."""
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        self._cache("fmt_test")
+        result = accept_candidates(
+            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
+            assignments=[{"candidate_id": 0, "class_id": 0}],
+            fmt="voc",
+        )
+        assert "error" not in result
+        assert result["format"] == "voc"
+        assert result["detection_count"] == 1
+        det = format_dataset / "labels" / "detect" / "fmt_test.txt"
+        assert det.is_file()
+        content = det.read_text()
+        assert "<annotation>" in content
+
+    def test_coco_format_output(self, format_dataset: Path):
+        from tcip_mcp.tools.vision_tools import accept_candidates
+
+        self._cache("fmt_test")
+        result = accept_candidates(
+            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
+            assignments=[{"candidate_id": 0, "class_id": 0}],
+            fmt="coco",
+        )
+        assert "error" not in result
+        assert result["format"] == "coco"
+
