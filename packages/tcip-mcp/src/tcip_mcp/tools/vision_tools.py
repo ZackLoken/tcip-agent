@@ -80,7 +80,7 @@ def visualize_annotations(
     else:
         polys, class_ids = format_load(str(label_path), w, h, task="segment", fmt=fmt)
         poly_dicts = [
-            {"points": [(pt.x, pt.y) for pt in p.points], "class_id": p.class_id}
+            {"points": [(pt[0], pt[1]) for pt in p.points], "class_id": p.class_id}
             for p in polys
         ]
         out = render_segmentations(image_path, poly_dicts, class_names=name_map)
@@ -143,7 +143,7 @@ def visualize_predictions(
     else:
         pred_polys, class_ids = parse_segment_predictions(str(pred_file), w, h)
         poly_dicts = [
-            {"points": [(pt.x, pt.y) for pt in p.points], "class_id": p.class_id}
+            {"points": [(pt[0], pt[1]) for pt in p.points], "class_id": p.class_id}
             for p in pred_polys
         ]
         out = render_segmentations(image_path, poly_dicts, class_names=name_map)
@@ -418,7 +418,7 @@ def visualize_dataset_sample(
             else:
                 polys, _ = format_load(str(label_path), w, h, task="segment", fmt=fmt)
                 poly_dicts = [
-                    {"points": [(pt.x, pt.y) for pt in p.points], "class_id": p.class_id}
+                    {"points": [(pt[0], pt[1]) for pt in p.points], "class_id": p.class_id}
                     for p in polys
                 ]
                 out = render_segmentations(str(img_path), poly_dicts, class_names=name_map)
@@ -446,7 +446,7 @@ def visualize_dataset_sample(
 def sam_auto_label(
     image_path: str,
     model_type: str = "vit_b",
-    points_per_side: int = 32,
+    points_per_side: int = 16,
     pred_iou_thresh: float = 0.86,
     stability_score_thresh: float = 0.92,
     min_mask_region_area: int = 100,
@@ -593,7 +593,8 @@ def accept_candidates(
             str(det_dir / f"{img.stem}.txt"), boxes, w, h,
             task="detect", fmt=fmt,
         )
-    if polygons:
+    if polygons and fmt != "voc":
+        # VOC has no native polygon/segmentation support
         seg_dir = root / "labels" / "segment"
         seg_dir.mkdir(parents=True, exist_ok=True)
         format_save(
