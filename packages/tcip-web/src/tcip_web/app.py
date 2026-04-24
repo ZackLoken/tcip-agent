@@ -1,20 +1,103 @@
-"""FastAPI application — REST API for MCP tools + WebSocket for training progress."""
+"""FastAPI application — REST API for MCP tools + WebSocket for GUI state sync.
+
+This backend is the single source of truth for live GUI state across the
+TCIP tabs (Annotate / Review / Training / Tuning / Inference / Results).
+Claude agent and browser clients both connect through here.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0")
+
+# CORS is not enabled by default — browser is expected to hit the same origin
+# via the Vite dev proxy. If we ever serve the frontend elsewhere, add
+# fastapi.middleware.cors.CORSMiddleware here.
+
+# ── Tab routes ──
+from tcip_web.routes import register_all as _register_routes
+_register_routes(app)
+
+# ── State snapshot + WS ──
+from tcip_web.state import store as _gui_store
+_state_watchers: set[WebSocket] = set()
+
+
+async def _broadcast_state_snapshot(snapshot: dict[str, Any]) -> None:
+    """Push the new state to every connected browser."""
+    msg = {"type": "state_snapshot", "state": snapshot}
+    dead: list[WebSocket] = []
+    for ws in list(_state_watchers):
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _state_watchers.discard(ws)
+
+
+_gui_store.subscribe(_broadcast_state_snapshot)
+
+
+@app.get("/api/state")
+def get_state() -> dict:
+    return _gui_store.snapshot()
+
+
+@app.websocket("/ws/state")
+async def state_ws(websocket: WebSocket) -> None:
+    """Receive live GuiState deltas. Replays the current snapshot on connect."""
+    await websocket.accept()
+    _state_watchers.add(websocket)
+    try:
+        await websocket.send_json({"type": "state_snapshot", "state": _gui_store.snapshot()})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _state_watchers.discard(websocket)
+
+
+# ── Panel event hub (replaces .tcip/events/ file bridge) ──
+
+VALID_PANELS = {"annotate", "review", "training", "tuning", "inference", "results"}
+
+# Recent events per panel, kept in memory for replay on reconnect.
+_recent_events: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=64))
+# Open WebSocket subscribers per panel.
+_panel_subscribers: dict[str, set[WebSocket]] = defaultdict(set)
+
+
+class PanelEvent(BaseModel):
+    panel: str | None = None
+    event_type: str
+    data: dict[str, Any] = {}
+
+
+async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
+    """Fan out an event to every WebSocket currently subscribed to a panel."""
+    dead: list[WebSocket] = []
+    for ws in list(_panel_subscribers.get(panel, ())):
+        try:
+            await ws.send_json(event)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _panel_subscribers[panel].discard(ws)
 
 # Serve static files (web frontend)
 STATIC_DIR = Path(__file__).parent.parent.parent / "static"
@@ -191,3 +274,58 @@ def index():
     if index_path.exists():
         return FileResponse(str(index_path))
     return {"message": "TCIP Pipeline API", "docs": "/docs"}
+
+
+# ── Panel events: POST endpoint (MCP tools) + WS subscription (browsers) ──
+
+
+@app.post("/api/events/{panel}")
+async def post_panel_event(panel: str, event: PanelEvent):
+    """Accept an event pushed from an MCP tool and broadcast to subscribers.
+
+    Replaces the legacy ``.tcip/events/`` file-bridge. The payload schema
+    matches the old file format: ``{panel, event_type, data}``.
+    """
+    if panel not in VALID_PANELS:
+        return {"error": f"unknown panel: {panel}", "valid": sorted(VALID_PANELS)}
+    payload = {
+        "panel": panel,
+        "event_type": event.event_type,
+        "data": event.data,
+    }
+    _recent_events[panel].append(payload)
+    await _broadcast_to_panel(panel, payload)
+    return {"status": "ok", "panel": panel, "event_type": event.event_type}
+
+
+@app.get("/api/events/{panel}/recent")
+def get_recent_panel_events(panel: str, limit: int = 16):
+    """Return the last N events for a panel (useful on browser reconnect)."""
+    if panel not in VALID_PANELS:
+        return {"error": f"unknown panel: {panel}", "valid": sorted(VALID_PANELS)}
+    events = list(_recent_events.get(panel, ()))
+    return {"panel": panel, "events": events[-limit:]}
+
+
+@app.websocket("/ws/panel/{panel}")
+async def panel_ws(websocket: WebSocket, panel: str):
+    """Stream panel events to a browser client."""
+    if panel not in VALID_PANELS:
+        await websocket.close(code=1008, reason=f"unknown panel: {panel}")
+        return
+    await websocket.accept()
+    _panel_subscribers[panel].add(websocket)
+    # Replay recent events so late-joining browsers see the current state
+    for event in list(_recent_events.get(panel, ())):
+        try:
+            await websocket.send_json(event)
+        except Exception:
+            break
+    try:
+        while True:
+            # Keep the socket open; clients are read-only subscribers here.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _panel_subscribers[panel].discard(websocket)
