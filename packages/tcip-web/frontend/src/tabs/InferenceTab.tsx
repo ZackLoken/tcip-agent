@@ -1,10 +1,285 @@
+import { useEffect, useRef, useState } from "react";
+
+import {
+  inferenceApi,
+  openInferenceStream,
+  resultsApi,
+  type InferenceJob,
+} from "@/api/inference";
+import { useStore } from "@/store";
+
 export function InferenceTab() {
+  const dataset = useStore((s) => s.gui.dataset);
+  const projectRoot = dataset.project_root;
+  const datasetRoot = dataset.dataset_root;
+
+  const [models, setModels] = useState<{ name: string; path: string; tag?: string }[]>([]);
+  const [modelPath, setModelPath] = useState<string>("");
+  const [imagesDir, setImagesDir] = useState<string>("");
+  const [outputDir, setOutputDir] = useState<string>("");
+  const [sahi, setSahi] = useState<boolean>(true);
+  const [conf, setConf] = useState<number>(0.25);
+  const [iou, setIou] = useState<number>(0.7);
+  const [sliceH, setSliceH] = useState<number>(640);
+  const [sliceW, setSliceW] = useState<number>(640);
+  const [overlap, setOverlap] = useState<number>(0.2);
+  const [jobs, setJobs] = useState<InferenceJob[]>([]);
+  const [activeJob, setActiveJob] = useState<InferenceJob | null>(null);
+  const streamRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!projectRoot) return;
+    void resultsApi
+      .registeredModels(projectRoot)
+      .then((r) => setModels(r.models ?? []))
+      .catch(() => setModels([]));
+  }, [projectRoot]);
+
+  useEffect(() => {
+    const refresh = () =>
+      inferenceApi.listJobs().then((r) => setJobs(r.jobs)).catch(() => {});
+    void refresh();
+    const t = setInterval(refresh, 3000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    if (!activeJob) return;
+    streamRef.current?.();
+    streamRef.current = openInferenceStream(activeJob.job_id, (msg) => {
+      if (msg.type === "progress" || msg.type === "final") {
+        setActiveJob((prev) =>
+          prev && prev.job_id === activeJob.job_id
+            ? ({ ...prev, done: Number(msg.done) ?? prev.done, total: Number(msg.total) ?? prev.total, status: (msg.status as InferenceJob["status"]) ?? prev.status } as InferenceJob)
+            : prev,
+        );
+      }
+    });
+    return () => streamRef.current?.();
+  }, [activeJob?.job_id]);
+
+  function prefillFromDataset() {
+    if (!datasetRoot || !dataset.date) return;
+    setImagesDir(`${datasetRoot}/images/${dataset.date}`);
+    setOutputDir(`${datasetRoot}/models/live/predictions/detect`);
+  }
+
+  async function onLaunch() {
+    if (!modelPath || !imagesDir || !outputDir) return;
+    const res = await inferenceApi.launch({
+      checkpoint_path: modelPath,
+      images_dir: imagesDir,
+      output_dir: outputDir,
+      sahi,
+      conf,
+      iou,
+      slice_h: sliceH,
+      slice_w: sliceW,
+      overlap,
+    });
+    if (res.job_id) {
+      const stub: InferenceJob = {
+        job_id: res.job_id,
+        status: "pending",
+        done: 0,
+        total: 0,
+        images_dir: imagesDir,
+        output_dir: outputDir,
+        error: null,
+      };
+      setJobs((prev) => [stub, ...prev]);
+      setActiveJob(stub);
+    }
+  }
+
   return (
-    <div className="flex-1 p-6">
-      <div className="text-xl font-semibold mb-2">Inference</div>
-      <div className="text-[12px] text-tcip-muted">
-        Slice 3: model selector, image-folder picker, SAHI tile settings, live progress,
-        preview grid.
+    <div className="flex-1 grid grid-cols-[440px_1fr] overflow-hidden">
+      <div className="border-r border-tcip-border p-4 overflow-auto">
+        <div className="font-semibold text-[13px] mb-3">Inference config</div>
+
+        <label className="block text-[11px] text-tcip-muted mb-1">Model checkpoint</label>
+        {models.length > 0 ? (
+          <select
+            className="tcip-select w-full mb-2"
+            value={modelPath}
+            onChange={(e) => setModelPath(e.target.value)}
+          >
+            <option value="">Select a registered model…</option>
+            {models.map((m) => (
+              <option key={m.path} value={m.path}>
+                {m.name} {m.tag ? `(${m.tag})` : ""} — {m.path.split(/[/\\]/).slice(-3).join("/")}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            className="tcip-input w-full mb-2"
+            placeholder="Path to .pt checkpoint"
+            value={modelPath}
+            onChange={(e) => setModelPath(e.target.value)}
+          />
+        )}
+
+        <label className="block text-[11px] text-tcip-muted mb-1">Images directory</label>
+        <input
+          className="tcip-input w-full mb-1"
+          value={imagesDir}
+          onChange={(e) => setImagesDir(e.target.value)}
+          placeholder="…/Valley_Farm/images/2-11-26"
+        />
+        <button className="tcip-btn text-[11px] mb-3" onClick={prefillFromDataset}>
+          Prefill from current dataset
+        </button>
+
+        <label className="block text-[11px] text-tcip-muted mb-1">Output directory (YOLO txt)</label>
+        <input
+          className="tcip-input w-full mb-3"
+          value={outputDir}
+          onChange={(e) => setOutputDir(e.target.value)}
+          placeholder="…/Valley_Farm/models/live/predictions/detect"
+        />
+
+        <div className="flex items-center gap-2 mb-3">
+          <label className="flex items-center gap-2 text-[12px]">
+            <input type="checkbox" checked={sahi} onChange={(e) => setSahi(e.target.checked)} />
+            SAHI tiled inference
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px]">
+          <label>
+            Conf
+            <input
+              className="tcip-input w-full"
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={conf}
+              onChange={(e) => setConf(parseFloat(e.target.value))}
+            />
+          </label>
+          <label>
+            IoU
+            <input
+              className="tcip-input w-full"
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={iou}
+              onChange={(e) => setIou(parseFloat(e.target.value))}
+            />
+          </label>
+          <label>
+            Slice H
+            <input
+              className="tcip-input w-full"
+              type="number"
+              value={sliceH}
+              onChange={(e) => setSliceH(parseInt(e.target.value, 10) || 640)}
+            />
+          </label>
+          <label>
+            Slice W
+            <input
+              className="tcip-input w-full"
+              type="number"
+              value={sliceW}
+              onChange={(e) => setSliceW(parseInt(e.target.value, 10) || 640)}
+            />
+          </label>
+          <label className="col-span-2">
+            Overlap
+            <input
+              className="tcip-input w-full"
+              type="number"
+              step="0.05"
+              min="0"
+              max="0.9"
+              value={overlap}
+              onChange={(e) => setOverlap(parseFloat(e.target.value))}
+            />
+          </label>
+        </div>
+
+        <button
+          className="tcip-btn-primary w-full"
+          onClick={onLaunch}
+          disabled={!modelPath || !imagesDir || !outputDir}
+        >
+          ▶ Launch inference
+        </button>
+      </div>
+
+      <div className="p-4 overflow-auto">
+        <div className="font-semibold text-[13px] mb-2">Jobs</div>
+        {jobs.length === 0 ? (
+          <div className="text-[11px] text-tcip-muted">No jobs yet.</div>
+        ) : (
+          <table className="w-full text-[11px]">
+            <thead className="text-tcip-muted text-left">
+              <tr>
+                <th className="py-1">Job</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th>Images dir</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.map((j) => (
+                <tr key={j.job_id} className="border-t border-tcip-border">
+                  <td className="font-mono">{j.job_id}</td>
+                  <td>
+                    <span
+                      className={`tcip-badge ${
+                        j.status === "completed"
+                          ? "bg-tcip-tp/20 text-tcip-tp"
+                          : j.status === "failed"
+                          ? "bg-tcip-fp/20 text-tcip-fp"
+                          : "bg-tcip-fn/20 text-tcip-fn"
+                      }`}
+                    >
+                      {j.status}
+                    </span>
+                  </td>
+                  <td>
+                    {j.total > 0 ? `${j.done} / ${j.total}` : j.done}
+                    {j.total > 0 && (
+                      <div className="h-1 mt-1 bg-tcip-border rounded overflow-hidden">
+                        <div
+                          className="h-full bg-tcip-accent"
+                          style={{ width: `${(j.done / j.total) * 100}%` }}
+                        />
+                      </div>
+                    )}
+                  </td>
+                  <td className="truncate max-w-xs text-tcip-muted">{j.images_dir}</td>
+                  <td>
+                    <button className="tcip-btn text-[11px]" onClick={() => setActiveJob(j)}>
+                      Watch
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {activeJob && (
+          <div className="mt-4 tcip-panel p-3">
+            <div className="font-semibold text-[12px] mb-1">Active: {activeJob.job_id}</div>
+            <div className="text-[11px] text-tcip-muted">
+              Output: {activeJob.output_dir}
+            </div>
+            <div className="text-[11px] mt-1">
+              Status: {activeJob.status} · {activeJob.done} / {activeJob.total}
+            </div>
+            {activeJob.error && (
+              <div className="text-[11px] text-tcip-fp mt-1">Error: {activeJob.error}</div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
