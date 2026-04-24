@@ -319,7 +319,7 @@ def sam_predict(
     points: list[dict] | None = None,
     box: dict | None = None,
     grid_cells: list[str] | None = None,
-    model_type: str = "vit_b",
+    model_type: str = "hiera_b+",
 ) -> dict:
     """Run SAM (Segment Anything) prediction on an image.
 
@@ -333,7 +333,7 @@ def sam_predict(
         box: Box prompt with x1, y1, x2, y2 in pixel coordinates.
         grid_cells: List of grid cell references like ['B3', 'D5']. Each
             cell is treated as a foreground point prompt at the cell center.
-        model_type: SAM variant — vit_b (default, 375MB), vit_l, or vit_h.
+        model_type: SAM2 variant — hiera_t / hiera_s / hiera_b+ (default) / hiera_l.
     """
     img = Path(image_path)
     if not img.is_file():
@@ -514,45 +514,37 @@ def push_panel_data(
     event_type: str,
     data: dict,
 ) -> dict:
-    """Push structured data to a VS Code webview panel.
+    """Push structured data to a TCIP GUI panel via the tcip-web backend.
 
-    This writes a JSON event file that the VS Code extension watches and
-    forwards to the appropriate webview panel. Used by the agent to send
-    data (metrics, match results, training updates) to the GUI.
+    Sends an HTTP POST to the running FastAPI server (see
+    :mod:`tcip_mcp.web_client`); the backend broadcasts to any connected
+    browsers via WebSocket. Replaces the legacy ``.tcip/events/`` file
+    bridge.
+
+    If the backend is not running the call returns
+    ``{"status": "no_subscribers"}`` so the agent can proceed.
 
     Args:
-        panel: Target panel name — 'review', 'training', 'hpo', 'inference', 'annotation'.
-        event_type: Event type string the panel will switch on (e.g. 'load_matches', 'metrics_update').
-        data: Arbitrary JSON data payload for the event.
+        panel: Target panel — 'annotate', 'review', 'training', 'tuning',
+            'inference', or 'results'. The legacy name 'hpo' is aliased to
+            'tuning' for backwards compatibility.
+        event_type: Event type the panel switches on (e.g. 'load_matches',
+            'metrics_update').
+        data: Arbitrary JSON data payload.
     """
-    import json, os, tempfile
+    from tcip_mcp.web_client import post_panel_event
 
-    valid_panels = {"review", "training", "hpo", "inference", "annotation"}
+    valid_panels = {"annotate", "annotation", "review", "training", "tuning", "hpo", "inference", "results"}
     if panel not in valid_panels:
         return {"error": f"Unknown panel: {panel}. Valid: {sorted(valid_panels)}"}
 
-    # Write to a well-known event directory the extension monitors
-    event_dir = Path(os.environ.get("TCIP_EVENTS_DIR", ".tcip/events"))
-    event_dir.mkdir(parents=True, exist_ok=True)
+    # Normalise legacy aliases
+    if panel == "annotation":
+        panel = "annotate"
+    if panel == "hpo":
+        panel = "tuning"
 
-    event = {
-        "panel": panel,
-        "event_type": event_type,
-        "data": data,
-    }
-
-    # Atomic write
-    fd, tmp = tempfile.mkstemp(dir=str(event_dir), suffix=".json")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(event, f)
-        target = event_dir / f"{panel}_{event_type}.json"
-        os.replace(tmp, str(target))
-    except Exception as e:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        return {"error": f"Failed to write event: {e}"}
-
-    return {"status": "ok", "panel": panel, "event_type": event_type}
+    result = post_panel_event(panel, event_type, data)
+    result.setdefault("panel", panel)
+    result.setdefault("event_type", event_type)
+    return result

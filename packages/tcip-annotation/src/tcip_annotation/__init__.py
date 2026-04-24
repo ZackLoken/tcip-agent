@@ -24,6 +24,8 @@ from tcip_annotation.format_io import (
     write_labelme,
 )
 from tcip_annotation.matching import compute_matches, box_iou, polygon_iou, point_in_polygon
+from tcip_annotation.annotation_engine import AnnotationEngine
+from tcip_annotation.review_engine import ReviewEngine, ReviewDetection, ReviewContext
 
 # SAM wrapper — lazy-import safe (requires segment-anything optional dep)
 try:
@@ -68,4 +70,9 @@ __all__ = [
     # SAM wrapper
     "auto_mask",
     "grid_to_pixel",
+    # Engines
+    "AnnotationEngine",
+    "ReviewEngine",
+    "ReviewDetection",
+    "ReviewContext",
 ]

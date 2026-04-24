@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Scrollbar polish matching yolo-annotator dark theme */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #1A1A1A; }
+::-webkit-scrollbar-thumb { background: #3A3A3A; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #4A4A4A; }
+
+@layer components {
+  .tcip-btn {
+    @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded border border-tcip-border bg-tcip-panel text-tcip-fg text-[12px]
+           hover:bg-tcip-accent-hover hover:border-tcip-accent-hover transition-colors disabled:opacity-40 disabled:hover:bg-tcip-panel
+           disabled:hover:border-tcip-border disabled:cursor-not-allowed;
+  }
+
+  .tcip-btn-primary {
+    @apply tcip-btn bg-tcip-accent border-tcip-accent text-white
+           hover:bg-tcip-accent-hover hover:border-tcip-accent-hover;
+  }
+
+  .tcip-btn-danger {
+    @apply tcip-btn bg-tcip-warn/20 border-tcip-warn/40 text-tcip-warn
+           hover:bg-tcip-warn/30 hover:border-tcip-warn;
+  }
+
+  .tcip-input {
+    @apply h-8 px-2 rounded bg-tcip-panel border border-tcip-border text-tcip-fg text-[12px]
+           focus:outline-none focus:border-tcip-accent;
+  }
+
+  .tcip-select {
+    @apply tcip-input pr-6 appearance-none cursor-pointer;
+  }
+
+  .tcip-panel {
+    @apply bg-tcip-panel border border-tcip-border rounded;
+  }
+
+  .tcip-badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium;
+  }
+}
