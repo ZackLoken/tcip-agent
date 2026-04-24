@@ -8,7 +8,16 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from tcip_web.routes import annotate, dataset, images, inference, results, review, training
+from tcip_web.routes import (
+    annotate,
+    dataset,
+    images,
+    inference,
+    results,
+    review,
+    training,
+    tuning,
+)
 
 
 def register_all(app: FastAPI) -> None:
@@ -19,3 +28,4 @@ def register_all(app: FastAPI) -> None:
     app.include_router(training.router)
     app.include_router(inference.router)
     app.include_router(results.router)
+    app.include_router(tuning.router)

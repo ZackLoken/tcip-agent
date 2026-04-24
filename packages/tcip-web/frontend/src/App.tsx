@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { DatasetPicker } from "@/components/DatasetPicker";
+import { HelpOverlay } from "@/components/HelpOverlay";
 import { StatusBar } from "@/components/StatusBar";
 import { TopBar } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
@@ -37,6 +38,7 @@ function App() {
         <DatasetPicker />
       )}
       <StatusBar />
+      <HelpOverlay activeTab={activeTab} />
     </div>
   );
 }
