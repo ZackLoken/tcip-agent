@@ -102,6 +102,12 @@ async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
 # Serve static files (web frontend)
 STATIC_DIR = Path(__file__).parent.parent.parent / "static"
 if STATIC_DIR.exists():
+    # The built frontend references absolute /assets/... paths (Vite's default
+    # base="/"), so mount that subdirectory at /assets. Keep /static available
+    # for any ad-hoc static resources.
+    assets_dir = STATIC_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
