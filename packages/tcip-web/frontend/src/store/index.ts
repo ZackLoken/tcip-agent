@@ -1,5 +1,6 @@
 import { create } from "zustand";
 
+import { autoColor, type ClassEntry, type ImageStatus } from "@/api/classes";
 import type {
   Box,
   DatasetSelection,
@@ -84,6 +85,33 @@ interface ReviewTabState {
   loading: boolean;
 }
 
+interface ClassesState {
+  /** Ordered list of classes (id, name, color). Source of truth for class colors. */
+  list: ClassEntry[];
+  /** Set after first successful load for the current project (prevents double-save on hydrate). */
+  loaded: boolean;
+}
+
+interface AnnotateUiState {
+  /** Show annotation overlays (Visible checkbox). */
+  visible: boolean;
+  /** Snap toggle (polygon mode). */
+  snap: boolean;
+  /** Stream toggle (polygon mode). */
+  stream: boolean;
+  /** Currently hovered polygon index (for vertex-handle rendering). */
+  hoveredPolygonIdx: number | null;
+  /** Active vertex drag: [polygonIdx, vertexIdx]. */
+  draggingVertex: [number, number] | null;
+}
+
+interface PerImageStatusState {
+  /** Loaded from backend on dataset select. */
+  byImage: Record<string, ImageStatus>;
+  /** Filter applied in top bar. */
+  activeFilter: "all" | ImageStatus;
+}
+
 export interface AppState {
   /** Server-synchronized state (mirrors backend GuiState). */
   gui: GuiState;
@@ -95,6 +123,11 @@ export interface AppState {
   /** Review tab derived state. */
   review: ReviewTabState;
 
+  /** Class registry + per-image status + annotate ui. */
+  classes: ClassesState;
+  imageStatus: PerImageStatusState;
+  annotateUi: AnnotateUiState;
+
   /** Setters. */
   setGui: (next: GuiState) => void;
   patchGui: (partial: Partial<GuiState>) => void;
@@ -104,6 +137,25 @@ export interface AppState {
   setMode: (mode: "box" | "polygon") => void;
   setActiveClass: (cid: number) => void;
   setPredReference: (p: PredictionReference | null) => void;
+
+  /** Class helpers. */
+  setClasses: (list: ClassEntry[]) => void;
+  upsertClass: (entry: ClassEntry) => void;
+  removeClass: (id: number) => void;
+  classColor: (cid: number) => string;
+  className: (cid: number) => string;
+
+  /** Per-image status helpers. */
+  setImageStatuses: (byImage: Record<string, ImageStatus>) => void;
+  setImageStatus: (image: string, status: ImageStatus) => void;
+  setStatusFilter: (filter: "all" | ImageStatus) => void;
+
+  /** Annotate UI flags. */
+  setVisible: (v: boolean) => void;
+  setSnap: (v: boolean) => void;
+  setStream: (v: boolean) => void;
+  setHoveredPolygon: (idx: number | null) => void;
+  setDraggingVertex: (v: [number, number] | null) => void;
 
   /** Canvas helpers. */
   loadLabelsIntoCanvas: (labels: ImageLabels) => void;
@@ -142,6 +194,15 @@ export const useStore = create<AppState>()((set, get) => ({
   wsStatus: "disconnected",
   canvas: EMPTY_CANVAS,
   review: { matches: null, loading: false },
+  classes: { list: [], loaded: false },
+  imageStatus: { byImage: {}, activeFilter: "all" },
+  annotateUi: {
+    visible: true,
+    snap: false,
+    stream: false,
+    hoveredPolygonIdx: null,
+    draggingVertex: null,
+  },
 
   setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
@@ -151,6 +212,56 @@ export const useStore = create<AppState>()((set, get) => ({
   setMode: (mode) => set((s) => ({ gui: { ...s.gui, mode } })),
   setActiveClass: (active_class) => set((s) => ({ gui: { ...s.gui, active_class } })),
   setPredReference: (pred_reference) => set((s) => ({ gui: { ...s.gui, pred_reference } })),
+
+  setClasses: (list) =>
+    set(() => ({
+      classes: { list: list.slice().sort((a, b) => a.id - b.id), loaded: true },
+    })),
+
+  upsertClass: (entry) =>
+    set((s) => {
+      const map = new Map(s.classes.list.map((c) => [c.id, c]));
+      map.set(entry.id, entry);
+      const list = Array.from(map.values()).sort((a, b) => a.id - b.id);
+      return { classes: { list, loaded: true } };
+    }),
+
+  removeClass: (id) =>
+    set((s) => ({
+      classes: {
+        list: s.classes.list.filter((c) => c.id !== id),
+        loaded: true,
+      },
+    })),
+
+  classColor: (cid) => {
+    const entry = get().classes.list.find((c) => c.id === cid);
+    return entry?.color ?? autoColor(cid);
+  },
+
+  className: (cid) => {
+    const entry = get().classes.list.find((c) => c.id === cid);
+    return entry?.name ?? `class_${cid}`;
+  },
+
+  setImageStatuses: (byImage) => set(() => ({ imageStatus: { byImage, activeFilter: "all" } })),
+  setImageStatus: (image, status) =>
+    set((s) => ({
+      imageStatus: {
+        ...s.imageStatus,
+        byImage: { ...s.imageStatus.byImage, [image]: status },
+      },
+    })),
+  setStatusFilter: (activeFilter) =>
+    set((s) => ({ imageStatus: { ...s.imageStatus, activeFilter } })),
+
+  setVisible: (visible) => set((s) => ({ annotateUi: { ...s.annotateUi, visible } })),
+  setSnap: (snap) => set((s) => ({ annotateUi: { ...s.annotateUi, snap } })),
+  setStream: (stream) => set((s) => ({ annotateUi: { ...s.annotateUi, stream } })),
+  setHoveredPolygon: (hoveredPolygonIdx) =>
+    set((s) => ({ annotateUi: { ...s.annotateUi, hoveredPolygonIdx } })),
+  setDraggingVertex: (draggingVertex) =>
+    set((s) => ({ annotateUi: { ...s.annotateUi, draggingVertex } })),
 
   loadLabelsIntoCanvas: (labels) =>
     set(() => ({

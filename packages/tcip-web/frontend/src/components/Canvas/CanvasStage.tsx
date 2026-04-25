@@ -20,10 +20,31 @@ export interface CanvasStageProps {
   onPixelMove?: (x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) => void;
   onPixelDown?: (x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) => void;
   onPixelUp?: (x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) => void;
+  onPixelDoubleClick?: (x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) => void;
+  onPixelContextMenu?: (x: number, y: number, ev: Konva.KonvaEventObject<PointerEvent>) => void;
 }
 
-const MIN_SCALE = 0.05;
-const MAX_SCALE = 20;
+// Discrete zoom levels mirror yolo-annotator (5% .. 1000%, 20 stops)
+export const ZOOM_LEVELS = [
+  0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.33, 0.5, 0.67,
+  0.75, 0.85, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0,
+];
+
+function nearestZoomIndex(scale: number): number {
+  let bestIdx = 0;
+  let bestDiff = Math.abs(ZOOM_LEVELS[0] - scale);
+  for (let i = 1; i < ZOOM_LEVELS.length; i++) {
+    const diff = Math.abs(ZOOM_LEVELS[i] - scale);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+const MIN_SCALE = ZOOM_LEVELS[0];
+const MAX_SCALE = ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
 
 export function CanvasStage(props: CanvasStageProps) {
   const wrapper = useRef<HTMLDivElement | null>(null);
@@ -106,10 +127,14 @@ export function CanvasStage(props: CanvasStageProps) {
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
     const [ix, iy] = toPixel(pointer.x, pointer.y);
-    const factor = e.evt.deltaY < 0 ? 1.15 : 1 / 1.15;
-    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, view.scale * factor));
+    // Snap to discrete zoom levels (yolo-annotator parity)
+    const direction = e.evt.deltaY < 0 ? 1 : -1;
+    const currentIdx = nearestZoomIndex(view.scale);
+    const newIdx = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, currentIdx + direction));
+    if (newIdx === currentIdx) return;
+    const newScale = ZOOM_LEVELS[newIdx];
     setView({
-      scale: newScale,
+      scale: Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale)),
       offset_x: pointer.x - ix * newScale,
       offset_y: pointer.y - iy * newScale,
     });
@@ -171,6 +196,25 @@ export function CanvasStage(props: CanvasStageProps) {
     props.onPixelClick?.(ix, iy, e);
   };
 
+  const handleDoubleClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const p = stage.getPointerPosition();
+    if (!p) return;
+    const [ix, iy] = toPixel(p.x, p.y);
+    props.onPixelDoubleClick?.(ix, iy, e);
+  };
+
+  const handleContextMenu = (e: Konva.KonvaEventObject<PointerEvent>) => {
+    e.evt.preventDefault();
+    const stage = stageRef.current;
+    if (!stage) return;
+    const p = stage.getPointerPosition();
+    if (!p) return;
+    const [ix, iy] = toPixel(p.x, p.y);
+    props.onPixelContextMenu?.(ix, iy, e);
+  };
+
   return (
     <div ref={wrapper} className="relative flex-1 bg-tcip-canvas overflow-hidden">
       <Stage
@@ -184,6 +228,8 @@ export function CanvasStage(props: CanvasStageProps) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onClick={handleClick}
+        onDblClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
       >
         <Layer x={view.offset_x} y={view.offset_y} scaleX={view.scale} scaleY={view.scale}>
           {img ? (

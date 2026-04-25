@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from "react";
-import { Line, Rect } from "react-konva";
+import { useEffect, useMemo, useState } from "react";
+import { Line, Rect, Text } from "react-konva";
 
 import { api } from "@/api/client";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
@@ -16,7 +16,11 @@ import type {
   PredictionReference,
 } from "@/store/types";
 
-const TAG_COLORS = { tp: "#4CAF50", fp: "#EF5350", fn: "#FFA726" } as const;
+const TAG_COLORS: Record<"tp" | "fp" | "fn", string> = {
+  tp: "#4CAF50",
+  fp: "#EF5350",
+  fn: "#FFA726",
+};
 
 function currentImagePath(
   dataset: DatasetSelection,
@@ -24,10 +28,7 @@ function currentImagePath(
   if (!dataset.dataset_root || !dataset.date) return { path: null, name: null };
   const name = dataset.image_list[dataset.current_image_index];
   if (!name) return { path: null, name: null };
-  return {
-    path: `${dataset.dataset_root}/images/${dataset.date}/${name}`,
-    name,
-  };
+  return { path: `${dataset.dataset_root}/images/${dataset.date}/${name}`, name };
 }
 
 function labelPaths(dataset: DatasetSelection, name: string | null) {
@@ -50,6 +51,8 @@ function labelPaths(dataset: DatasetSelection, name: string | null) {
   };
 }
 
+const TYPE_ORDER: ("tp" | "fp" | "fn")[] = ["tp", "fp", "fn"];
+
 export function ReviewTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const patchGui = useStore((s) => s.patchGui);
@@ -63,11 +66,15 @@ export function ReviewTab() {
   const setActiveTab = useStore((s) => s.setActiveTab);
   const setMode = useStore((s) => s.setMode);
   const setPredReference = useStore((s) => s.setPredReference);
+  const className = useStore((s) => s.className);
 
   const detectionIdx = gui.review.detection_idx;
   const filters = gui.review;
   const { path: imgPath, name: imgName } = currentImagePath(dataset);
   const paths = useMemo(() => labelPaths(dataset, imgName), [dataset, imgName]);
+
+  const [showGT, setShowGT] = useState(true);
+  const [showPred, setShowPred] = useState(true);
 
   async function reloadMatches(indexHint?: number) {
     if (!dataset.project_root || !imgPath || !imgName) return;
@@ -88,37 +95,37 @@ export function ReviewTab() {
         status_filter: filters.status_filter,
       });
       setMatches(res);
-      setDetectionIdx(Math.max(0, Math.min(res.detections.length - 1, indexHint ?? 0)));
-      // Ensure first-unreviewed is visible
-      zoomToDetection(res.detections[indexHint ?? 0]?.bbox, res.img_width, res.img_height);
+      // jump to first unreviewed if no hint
+      if (indexHint === undefined) {
+        const firstUnreviewed = res.detections.findIndex((d) => !d.reviewed);
+        const target = firstUnreviewed >= 0 ? firstUnreviewed : 0;
+        setDetectionIdx(target);
+        zoomToDetection(res.detections[target]?.bbox);
+      } else {
+        setDetectionIdx(Math.max(0, Math.min(res.detections.length - 1, indexHint)));
+        zoomToDetection(res.detections[indexHint]?.bbox);
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  function zoomToDetection(
-    bbox: [number, number, number, number] | undefined,
-    imgW: number,
-    imgH: number,
-  ) {
+  function zoomToDetection(bbox: [number, number, number, number] | undefined) {
     if (!bbox) return;
     const [x1, y1, x2, y2] = bbox;
     const dw = Math.max(1, x2 - x1);
     const dh = Math.max(1, y2 - y1);
-    // Canvas-local dims — approximate from viewport; this is just the zoom
-    const cw = (document.querySelector(".flex-1.bg-tcip-canvas") as HTMLElement)?.clientWidth ?? 1200;
-    const ch = (document.querySelector(".flex-1.bg-tcip-canvas") as HTMLElement)?.clientHeight ?? 800;
+    const wrapper = document.querySelector(".flex-1.bg-tcip-canvas") as HTMLElement | null;
+    const cw = wrapper?.clientWidth ?? 1200;
+    const ch = wrapper?.clientHeight ?? 800;
     const scale = Math.max(0.05, Math.min(20, Math.min(cw / (dw * 3), ch / (dh * 3))));
     setView({
       scale,
       offset_x: cw / 2 - ((x1 + x2) / 2) * scale,
       offset_y: ch / 2 - ((y1 + y2) / 2) * scale,
     });
-    void imgW;
-    void imgH;
   }
 
-  // Load matches when image or filters change
   useEffect(() => {
     void reloadMatches();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,11 +153,47 @@ export function ReviewTab() {
     if (!matches) return;
     const next = Math.max(0, Math.min(matches.detections.length - 1, detectionIdx + delta));
     setDetectionIdx(next);
-    zoomToDetection(
-      matches.detections[next]?.bbox,
-      matches.img_width,
-      matches.img_height,
-    );
+    zoomToDetection(matches.detections[next]?.bbox);
+  }
+
+  /**
+   * Find the next unreviewed detection. Mirrors yolo-annotator's
+   * filter-exhaustion auto-switch: if the active type filter has no more
+   * unreviewed detections, try the next type, and if nothing remains on
+   * the image at all, advance to the next image.
+   */
+  function advanceToNextUnreviewed() {
+    if (!matches) return;
+    const dets = matches.detections;
+    // Same filter, next unreviewed
+    for (let i = 0; i < dets.length; i++) {
+      const j = (detectionIdx + 1 + i) % dets.length;
+      if (!dets[j].reviewed) {
+        setDetectionIdx(j);
+        zoomToDetection(dets[j].bbox);
+        return;
+      }
+    }
+    // Filter type exhausted — try other types under "all" filter context
+    if (filters.filter_type !== "all") {
+      const otherTypes = TYPE_ORDER.filter((t) => t !== filters.filter_type);
+      for (const t of otherTypes) {
+        // The current `dets` list reflects the current filter; we can use the
+        // counts from matches (n_tp/n_fp/n_fn) only as a hint that there's
+        // more to look at. The cleanest path is to relax the type filter to
+        // "all" and reload; reloadMatches will jump to the first unreviewed.
+        if (
+          (t === "tp" && matches.n_tp > 0) ||
+          (t === "fp" && matches.n_fp > 0) ||
+          (t === "fn" && matches.n_fn > 0)
+        ) {
+          patchGui({ review: { ...filters, filter_type: "all" } });
+          return; // reload will fire via the deps effect
+        }
+      }
+    }
+    // No more on this image — go to next image.
+    stepImage(1);
   }
 
   const current = matches?.detections[detectionIdx] ?? null;
@@ -177,21 +220,7 @@ export function ReviewTab() {
       action,
     });
     markDetReviewed(detectionIdx, action);
-    // Advance to next unreviewed detection
-    const dets = useStore.getState().review.matches?.detections ?? [];
-    const start = detectionIdx + 1;
-    let next = -1;
-    for (let i = 0; i < dets.length; i++) {
-      const j = (start + i) % dets.length;
-      if (!dets[j].reviewed) {
-        next = j;
-        break;
-      }
-    }
-    if (next >= 0) {
-      setDetectionIdx(next);
-      zoomToDetection(dets[next].bbox, matches!.img_width, matches!.img_height);
-    }
+    advanceToNextUnreviewed();
   }
 
   function editInAnnotate() {
@@ -199,10 +228,8 @@ export function ReviewTab() {
     const predRef = buildPredReference(current, matches);
     setPredReference(predRef);
     setActiveTab("annotate");
-    // Prefer polygon mode if polygons are in play
     if (current.gt_type === "polygon" || current.pred_type === "polygon") setMode("polygon");
     else setMode("box");
-    // Notify backend so MCP audit sees the switch
     void api.annotate.openImage({
       image_path: imgPath,
       image_index: dataset.current_image_index,
@@ -212,11 +239,41 @@ export function ReviewTab() {
       mode: current.gt_type === "polygon" || current.pred_type === "polygon" ? "polygon" : "box",
       pred_reference: predRef,
     });
+    // Mark editing pending so when the user returns to Review we offer a
+    // confirm dialog.
+    sessionStorage.setItem(
+      "tcip.review_edit_pending",
+      JSON.stringify({ image_name: imgName, detection_idx: detectionIdx }),
+    );
   }
 
+  // On Review-tab activation, if we just returned from an Edit flow, offer
+  // a confirm dialog to record the edit.
+  useEffect(() => {
+    if (gui.active_tab !== "review") return;
+    const raw = sessionStorage.getItem("tcip.review_edit_pending");
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { image_name: string; detection_idx: number };
+      if (parsed.image_name !== imgName) return;
+      sessionStorage.removeItem("tcip.review_edit_pending");
+      const ok = window.confirm(
+        "Save this annotation edit to the GT dataset?\n\nOK to record as edited and advance.\nCancel to discard.",
+      );
+      if (ok && matches) {
+        markDetReviewed(parsed.detection_idx, "edited");
+        // Refresh matches so any GT changes are picked up
+        void reloadMatches(parsed.detection_idx);
+      }
+    } catch {
+      sessionStorage.removeItem("tcip.review_edit_pending");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gui.active_tab, imgName]);
+
   useKeyboardShortcuts([
-    { keys: "a", action: () => recordAction("accepted"), when: () => !!current },
-    { keys: "r", action: () => recordAction("rejected"), when: () => !!current },
+    { keys: "a", action: () => void recordAction("accepted"), when: () => !!current },
+    { keys: "r", action: () => void recordAction("rejected"), when: () => !!current },
     { keys: "e", action: () => editInAnnotate(), when: () => !!current },
     { keys: "arrowleft", action: () => stepDetection(-1) },
     { keys: "arrowright", action: () => stepDetection(1) },
@@ -227,6 +284,19 @@ export function ReviewTab() {
   const imageUrl = imgPath ? api.images.url(imgPath) : null;
   const imgW = matches?.img_width ?? 0;
   const imgH = matches?.img_height ?? 0;
+
+  const acceptLabel =
+    current?.det_type === "tp"
+      ? "Confirm (A)"
+      : current?.det_type === "fp"
+      ? "Add to GT (A)"
+      : "Keep GT (A)";
+  const rejectLabel =
+    current?.det_type === "tp"
+      ? "Delete GT (R)"
+      : current?.det_type === "fp"
+      ? "Dismiss (R)"
+      : "Delete GT (R)";
 
   return (
     <div className="flex-1 flex flex-col">
@@ -286,6 +356,15 @@ export function ReviewTab() {
           <option value="reviewed">Reviewed</option>
         </select>
 
+        <label className="flex items-center gap-1 ml-3">
+          <input type="checkbox" checked={showGT} onChange={(e) => setShowGT(e.target.checked)} />
+          GT
+        </label>
+        <label className="flex items-center gap-1">
+          <input type="checkbox" checked={showPred} onChange={(e) => setShowPred(e.target.checked)} />
+          Pred
+        </label>
+
         <span className="flex-1" />
 
         <button className="tcip-btn" onClick={() => stepImage(-1)}>◀ Prev img</button>
@@ -296,7 +375,15 @@ export function ReviewTab() {
       </div>
 
       <CanvasStage imageUrl={imageUrl} imgWidth={imgW} imgHeight={imgH}>
-        {matches && <ReviewOverlays matches={matches} focusedIdx={detectionIdx} />}
+        {matches && (
+          <ReviewOverlays
+            matches={matches}
+            focusedIdx={detectionIdx}
+            showGT={showGT}
+            showPred={showPred}
+            classNameLookup={className}
+          />
+        )}
       </CanvasStage>
 
       <div className="flex items-center gap-2 px-3 py-1.5 border-t border-tcip-border bg-tcip-panel text-[11px]">
@@ -304,15 +391,19 @@ export function ReviewTab() {
         <button className="tcip-btn" onClick={() => stepDetection(1)}>Next ▶</button>
         {current && (
           <>
-            <span className={`tcip-badge bg-transparent border ${
-              current.det_type === "tp" ? "border-tcip-tp text-tcip-tp" :
-              current.det_type === "fp" ? "border-tcip-fp text-tcip-fp" :
-              "border-tcip-fn text-tcip-fn"
-            }`}>
+            <span
+              className={`tcip-badge bg-transparent border ${
+                current.det_type === "tp"
+                  ? "border-tcip-tp text-tcip-tp"
+                  : current.det_type === "fp"
+                  ? "border-tcip-fp text-tcip-fp"
+                  : "border-tcip-fn text-tcip-fn"
+              }`}
+            >
               {current.det_type.toUpperCase()}
             </span>
             <span className="text-tcip-muted">
-              cid {current.class_id}
+              cid {current.class_id}: {className(current.class_id)}
               {current.conf !== null && ` · conf ${current.conf.toFixed(2)}`}
               {current.iou !== null && ` · iou ${current.iou.toFixed(2)}`}
             </span>
@@ -326,14 +417,14 @@ export function ReviewTab() {
 
         {current && (
           <>
-            <button className="tcip-btn-primary" onClick={() => recordAction("accepted")}>
-              ✓ Accept (A)
+            <button className="tcip-btn-primary" onClick={() => void recordAction("accepted")}>
+              ✓ {acceptLabel}
             </button>
             <button className="tcip-btn" onClick={editInAnnotate}>
               ✎ Edit (E)
             </button>
-            <button className="tcip-btn-danger" onClick={() => recordAction("rejected")}>
-              ✕ Reject (R)
+            <button className="tcip-btn-danger" onClick={() => void recordAction("rejected")}>
+              ✕ {rejectLabel}
             </button>
           </>
         )}
@@ -373,91 +464,277 @@ function buildPredReference(
 interface OverlayProps {
   matches: MatchesResponse;
   focusedIdx: number;
+  showGT: boolean;
+  showPred: boolean;
+  classNameLookup: (cid: number) => string;
 }
 
-function ReviewOverlays({ matches, focusedIdx }: OverlayProps) {
+function ReviewOverlays({ matches, focusedIdx, showGT, showPred, classNameLookup }: OverlayProps) {
   const scale = useStore((s) => s.gui.view.scale);
   const lw = 1 / (scale || 1);
   const focused = matches.detections[focusedIdx];
-  const color: string = focused ? TAG_COLORS[focused.det_type] : "#E0E0E0";
+  const focusedColor = focused ? TAG_COLORS[focused.det_type] : "#E0E0E0";
+
+  // Build a lookup for which (gt_type, gt_idx) and (pred_type, pred_idx)
+  // belong to a reviewed detection — used to draw stippled / faded GT.
+  const reviewedGtKeys = new Set<string>();
+  matches.detections.forEach((d) => {
+    if (d.reviewed && d.gt_type && d.gt_idx !== null) {
+      reviewedGtKeys.add(`${d.gt_type}:${d.gt_idx}`);
+    }
+  });
+
+  const focusedGt =
+    focused && focused.gt_type && focused.gt_idx !== null
+      ? `${focused.gt_type}:${focused.gt_idx}`
+      : null;
+
+  const tagColor = focused ? TAG_COLORS[focused.det_type] : null;
 
   return (
     <>
-      {matches.gt_boxes.map((b: Box, i: number) =>
-        renderBox(b, i, false, lw, i === focused?.gt_idx && focused?.gt_type === "box"),
+      {showGT &&
+        matches.gt_boxes.map((b: Box, i: number) => {
+          const key = `box:${i}`;
+          const isFocused = focusedGt === key;
+          const isReviewed = reviewedGtKeys.has(key);
+          return (
+            <GtBox
+              key={`gt-b-${i}`}
+              box={b}
+              focused={isFocused}
+              reviewed={isReviewed}
+              lw={lw}
+              label={`GT ${b.class_id}: ${classNameLookup(b.class_id)}`}
+            />
+          );
+        })}
+      {showGT &&
+        matches.gt_polygons.map((p: PolygonShape, i: number) => {
+          const key = `polygon:${i}`;
+          const isFocused = focusedGt === key;
+          const isReviewed = reviewedGtKeys.has(key);
+          return (
+            <GtPolygon
+              key={`gt-p-${i}`}
+              polygon={p}
+              focused={isFocused}
+              reviewed={isReviewed}
+              lw={lw}
+              label={`GT ${p.class_id}: ${classNameLookup(p.class_id)}`}
+            />
+          );
+        })}
+
+      {/* Focused prediction (only the active detection) */}
+      {showPred && focused && tagColor && focused.pred_type === "box" && focused.pred_idx !== null &&
+        matches.pred_boxes[focused.pred_idx] && (
+          <FocusedPredBox
+            b={matches.pred_boxes[focused.pred_idx]}
+            color={tagColor}
+            lw={lw}
+            label={`Pred ${focused.class_id}: ${classNameLookup(focused.class_id)}${
+              focused.conf !== null ? ` (${focused.conf.toFixed(2)})` : ""
+            }`}
+            isFp={focused.det_type === "fp"}
+          />
+        )}
+      {showPred && focused && tagColor && focused.pred_type === "polygon" && focused.pred_idx !== null &&
+        matches.pred_polygons[focused.pred_idx] && (
+          <FocusedPredPoly
+            p={matches.pred_polygons[focused.pred_idx]}
+            color={tagColor}
+            lw={lw}
+            label={`Pred ${focused.class_id}: ${classNameLookup(focused.class_id)}${
+              focused.conf !== null ? ` (${focused.conf.toFixed(2)})` : ""
+            }`}
+            isFp={focused.det_type === "fp"}
+          />
+        )}
+
+      {/* Detection-type badge (top-right of screen, fixed canvas coords). */}
+      {focused && (
+        <DetTypeBadge
+          color={focusedColor}
+          label={focused.det_type.toUpperCase()}
+          imgWidth={matches.img_width}
+        />
       )}
-      {matches.gt_polygons.map((p: PolygonShape, i: number) =>
-        renderPolygon(p, `g${i}`, lw, i === focused?.gt_idx && focused?.gt_type === "polygon"),
-      )}
-      {focused &&
-        focused.pred_type === "box" &&
-        focused.pred_idx !== null &&
-        matches.pred_boxes[focused.pred_idx] &&
-        renderPredBox(matches.pred_boxes[focused.pred_idx], "pred-focus", lw, color)}
-      {focused &&
-        focused.pred_type === "polygon" &&
-        focused.pred_idx !== null &&
-        matches.pred_polygons[focused.pred_idx] &&
-        renderPredPoly(matches.pred_polygons[focused.pred_idx], "pp-focus", lw, color)}
     </>
   );
 }
 
-function renderBox(b: Box, i: number, _dashed: boolean, lw: number, focused: boolean) {
+function GtBox({
+  box,
+  focused,
+  reviewed,
+  lw,
+  label,
+}: {
+  box: Box;
+  focused: boolean;
+  reviewed: boolean;
+  lw: number;
+  label: string;
+}) {
+  const stroke = focused ? "#FFD700" : "#4CAF50";
+  const fill = reviewed ? "rgba(76, 175, 80, 0.18)" : "";
   return (
-    <Rect
-      key={`gt-${i}`}
-      x={b.x1}
-      y={b.y1}
-      width={b.x2 - b.x1}
-      height={b.y2 - b.y1}
-      stroke={focused ? "#FFD700" : "#4CAF50"}
-      strokeWidth={(focused ? 3 : 2) * lw}
-    />
+    <>
+      <Rect
+        x={box.x1}
+        y={box.y1}
+        width={box.x2 - box.x1}
+        height={box.y2 - box.y1}
+        stroke={stroke}
+        strokeWidth={(focused ? 3 : 2) * lw}
+        fill={fill}
+      />
+      {focused && <HaloLabel x={box.x1} y={box.y1} text={label} fill={stroke} size={11 * lw} />}
+    </>
   );
 }
 
-function renderPolygon(
-  p: PolygonShape,
-  key: string,
-  lw: number,
-  focused: boolean,
-) {
+function GtPolygon({
+  polygon,
+  focused,
+  reviewed,
+  lw,
+  label,
+}: {
+  polygon: PolygonShape;
+  focused: boolean;
+  reviewed: boolean;
+  lw: number;
+  label: string;
+}) {
+  const stroke = focused ? "#FFD700" : "#4CAF50";
+  const fill = reviewed ? "rgba(76, 175, 80, 0.18)" : "";
+  if (polygon.points.length < 2) return null;
+  const [x0, y0] = polygon.points[0];
   return (
-    <Line
-      key={key}
-      points={p.points.flat()}
-      closed
-      stroke={focused ? "#FFD700" : "#4CAF50"}
-      strokeWidth={(focused ? 3 : 2) * lw}
-    />
+    <>
+      <Line
+        points={polygon.points.flat()}
+        closed
+        stroke={stroke}
+        strokeWidth={(focused ? 3 : 2) * lw}
+        fill={fill}
+      />
+      {focused && <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={11 * lw} />}
+    </>
   );
 }
 
-function renderPredBox(b: PredBox, key: string, lw: number, color: string) {
+function FocusedPredBox({
+  b,
+  color,
+  lw,
+  label,
+  isFp,
+}: {
+  b: PredBox;
+  color: string;
+  lw: number;
+  label: string;
+  isFp: boolean;
+}) {
   return (
-    <Rect
-      key={key}
-      x={b.x1}
-      y={b.y1}
-      width={b.x2 - b.x1}
-      height={b.y2 - b.y1}
-      stroke={color}
-      strokeWidth={3 * lw}
-      dash={[8 * lw, 4 * lw]}
-    />
+    <>
+      <Rect
+        x={b.x1}
+        y={b.y1}
+        width={b.x2 - b.x1}
+        height={b.y2 - b.y1}
+        stroke={color}
+        strokeWidth={3 * lw}
+        dash={[8 * lw, 4 * lw]}
+        fill={isFp ? `${color}33` : ""}
+      />
+      <HaloLabel x={b.x1} y={b.y1 + (b.y2 - b.y1)} text={label} fill={color} size={11 * lw} />
+    </>
   );
 }
 
-function renderPredPoly(p: PredPolygon, key: string, lw: number, color: string) {
+function FocusedPredPoly({
+  p,
+  color,
+  lw,
+  label,
+  isFp,
+}: {
+  p: PredPolygon;
+  color: string;
+  lw: number;
+  label: string;
+  isFp: boolean;
+}) {
+  if (p.points.length < 2) return null;
+  const [x0, y0] = p.points[p.points.length - 1];
   return (
-    <Line
-      key={key}
-      points={p.points.flat()}
-      closed
-      stroke={color}
-      strokeWidth={3 * lw}
-      dash={[8 * lw, 4 * lw]}
-    />
+    <>
+      <Line
+        points={p.points.flat()}
+        closed
+        stroke={color}
+        strokeWidth={3 * lw}
+        dash={[8 * lw, 4 * lw]}
+        fill={isFp ? `${color}33` : ""}
+      />
+      <HaloLabel x={x0} y={y0} text={label} fill={color} size={11 * lw} />
+    </>
+  );
+}
+
+function DetTypeBadge({ color, label, imgWidth }: { color: string; label: string; imgWidth: number }) {
+  // Anchor the badge to image-coords near top-right (like yolo-annotator's
+  // canvas overlay; sticks with the image as you pan/zoom).
+  const x = Math.max(0, imgWidth - 80);
+  const y = 4;
+  return (
+    <>
+      <Rect x={x} y={y} width={70} height={28} fill="#1A1A1A" stroke="#444444" strokeWidth={1} cornerRadius={4} />
+      <Text
+        x={x}
+        y={y + 6}
+        width={70}
+        align="center"
+        text={`[${label}]`}
+        fill={color}
+        fontSize={14}
+        fontStyle="bold"
+      />
+    </>
+  );
+}
+
+function HaloLabel({
+  x,
+  y,
+  text,
+  fill,
+  size,
+}: {
+  x: number;
+  y: number;
+  text: string;
+  fill: string;
+  size: number;
+}) {
+  return (
+    <>
+      <Text
+        x={x + 2}
+        y={y - size - 2}
+        text={text}
+        fill="#000000"
+        fontSize={size}
+        fontStyle="bold"
+        shadowColor="#000000"
+        shadowBlur={size * 0.2}
+        shadowOpacity={0.9}
+      />
+      <Text x={x + 2} y={y - size - 2} text={text} fill={fill} fontSize={size} fontStyle="bold" />
+    </>
   );
 }

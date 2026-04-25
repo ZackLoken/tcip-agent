@@ -1,29 +1,57 @@
-import { useEffect, useRef, useState } from "react";
-import { Circle, Line, Rect } from "react-konva";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Circle, Line, Rect, Text } from "react-konva";
 import Konva from "konva";
 
 import { api } from "@/api/client";
+import { classesApi } from "@/api/classes";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useStore } from "@/store";
-import type { Box, DatasetSelection, PredictionReference } from "@/store/types";
+import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@/store/types";
 
-const CLASS_COLORS: Record<number, string> = {
-  0: "#4CAF50",
-  1: "#E6976B",
-  2: "#00BFFF",
-  3: "#FFD700",
-};
-
-function colorFor(cid: number): string {
-  return CLASS_COLORS[cid] ?? "#E0E0E0";
-}
+const SNAP_RADIUS_CANVAS = 15;
+const VERTEX_HANDLE_RADIUS = 4;
+const EDGE_INSERT_THRESHOLD = 6;
+const MIN_BOX_SIDE = 3;
 
 function currentImagePath(dataset: DatasetSelection): string | null {
   if (!dataset.dataset_root || !dataset.date) return null;
   const name = dataset.image_list[dataset.current_image_index];
   if (!name) return null;
   return `${dataset.dataset_root}/images/${dataset.date}/${name}`;
+}
+
+function pointToSegmentDist(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): { dist: number; t: number; proj: [number, number] } {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len_sq = dx * dx + dy * dy;
+  if (len_sq === 0) {
+    const d = Math.hypot(px - ax, py - ay);
+    return { dist: d, t: 0, proj: [ax, ay] };
+  }
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len_sq));
+  const proj: [number, number] = [ax + t * dx, ay + t * dy];
+  const d = Math.hypot(px - proj[0], py - proj[1]);
+  return { dist: d, t, proj };
+}
+
+function pointInPolygon(pt: [number, number], poly: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }
 
 export function AnnotateTab() {
@@ -33,12 +61,15 @@ export function AnnotateTab() {
   const mode = useStore((s) => s.gui.mode);
   const activeClass = useStore((s) => s.gui.active_class);
   const predRef = useStore((s) => s.gui.pred_reference);
+  const classColor = useStore((s) => s.classColor);
+  const className = useStore((s) => s.className);
 
   const canvas = useStore((s) => s.canvas);
   const loadLabels = useStore((s) => s.loadLabelsIntoCanvas);
   const addBox = useStore((s) => s.addBox);
   const deleteBox = useStore((s) => s.deleteBox);
   const deletePolygon = useStore((s) => s.deletePolygon);
+  const updatePolygon = useStore((s) => s.updatePolygon);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const setCurrentPolygon = useStore((s) => s.setCurrentPolygon);
@@ -46,14 +77,34 @@ export function AnnotateTab() {
   const selectPolygon = useStore((s) => s.selectPolygon);
   const markClean = useStore((s) => s.markClean);
   const setPredReference = useStore((s) => s.setPredReference);
+  const pushUndo = useStore((s) => s.pushUndo);
+  const setActiveClass = useStore((s) => s.setActiveClass);
+
+  const annotateUi = useStore((s) => s.annotateUi);
+  const setHoveredPolygon = useStore((s) => s.setHoveredPolygon);
+  const imageStatus = useStore((s) => s.imageStatus);
+  const setImageStatus = useStore((s) => s.setImageStatus);
 
   const [drawing, setDrawing] = useState<Box | null>(null);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
 
   const imgPath = currentImagePath(dataset);
+  const currentImageName =
+    dataset.image_list[dataset.current_image_index] ?? null;
 
-  // Load labels for current image
+  // Filtered image list (Status filter)
+  const filteredIndices = useMemo(() => {
+    if (imageStatus.activeFilter === "all") return dataset.image_list.map((_, i) => i);
+    return dataset.image_list
+      .map((name, i) =>
+        imageStatus.byImage[name] === imageStatus.activeFilter ? i : -1,
+      )
+      .filter((i) => i >= 0);
+  }, [dataset.image_list, imageStatus]);
+
+  // ── Label load + save ───────────────────────────────────────────────
+
   useEffect(() => {
     let cancelled = false;
     async function run() {
@@ -80,14 +131,14 @@ export function AnnotateTab() {
           });
       }
     }
-    run();
+    void run();
     return () => {
       cancelled = true;
     };
   }, [imgPath, dataset, loadLabels]);
 
   async function save() {
-    if (!imgPath) return;
+    if (!imgPath || !canvas.dirty) return;
     const name = dataset.image_list[dataset.current_image_index];
     const stem = name.replace(/\.[^.]+$/, "");
     const det = dataset.annotations_detect_dir
@@ -104,24 +155,69 @@ export function AnnotateTab() {
       polygons: canvas.polygons,
     });
     markClean();
+
+    // Update image status to "partial" or "unannotated" unless marked complete.
+    if (dataset.project_root && name) {
+      const current = imageStatus.byImage[name];
+      if (current !== "complete") {
+        const newStatus = canvas.boxes.length + canvas.polygons.length > 0 ? "partial" : "unannotated";
+        if (current !== newStatus) {
+          setImageStatus(name, newStatus);
+          void classesApi.setImageStatus(dataset.project_root, name, newStatus);
+        }
+      }
+    }
   }
+
+  // Auto-save on image change: when the dataset index changes we've already
+  // swapped imgPath; save() runs before the next image loads if dirty.
+  const dirtyRef = useRef(canvas.dirty);
+  dirtyRef.current = canvas.dirty;
+  const lastImage = useRef<string | null>(null);
+  useEffect(() => {
+    return () => {
+      // Fires on unmount + before next effect run when deps change
+      if (dirtyRef.current && lastImage.current) {
+        // Fire-and-forget; save() is closed over current state
+        void save();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentImageName]);
+  useEffect(() => {
+    lastImage.current = currentImageName;
+  }, [currentImageName]);
 
   function stepImage(delta: number) {
     if (!dataset.image_list.length) return;
-    const next = Math.max(
-      0,
-      Math.min(dataset.image_list.length - 1, dataset.current_image_index + delta),
-    );
+    const indices = filteredIndices.length > 0 ? filteredIndices : dataset.image_list.map((_, i) => i);
+    const pos = indices.indexOf(dataset.current_image_index);
+    let nextPos = pos >= 0 ? pos + delta : 0;
+    nextPos = Math.max(0, Math.min(indices.length - 1, nextPos));
+    const next = indices[nextPos];
     if (next === dataset.current_image_index) return;
+    // Save before nav
+    if (canvas.dirty) void save();
     patchGui({ dataset: { ...dataset, current_image_index: next } });
     setPredReference(null);
+    selectPolygon(null);
+  }
+
+  function selectClassByNumberKey(key: number) {
+    // pick by ID if present in class registry
+    const entries = useStore.getState().classes.list;
+    const target = entries.find((c) => c.id === key);
+    if (target) setActiveClass(key);
   }
 
   useKeyboardShortcuts([
     { keys: "ctrl+z", action: () => undo() },
     { keys: "ctrl+shift+z", action: () => redo() },
-    { keys: "ctrl+s", action: () => save() },
+    { keys: "ctrl+y", action: () => redo() },
+    { keys: "ctrl+s", action: () => void save() },
     { keys: "m", action: () => useStore.getState().setMode(mode === "box" ? "polygon" : "box") },
+    { keys: "v", action: () => useStore.getState().setStream(!annotateUi.stream), when: () => mode === "polygon" },
+    { keys: "s", action: () => useStore.getState().setSnap(!annotateUi.snap), when: () => mode === "polygon" },
     { keys: "delete", action: () => {
         if (canvas.selectedPolygonIdx !== null) deletePolygon(canvas.selectedPolygonIdx);
     }},
@@ -135,26 +231,137 @@ export function AnnotateTab() {
     { keys: "enter", action: () => {
       if (mode === "polygon" && canvas.currentPolygon.length >= 3) commitCurrentPolygon();
     }},
+    { keys: "0", action: () => selectClassByNumberKey(0) },
+    { keys: "1", action: () => selectClassByNumberKey(1) },
+    { keys: "2", action: () => selectClassByNumberKey(2) },
+    { keys: "3", action: () => selectClassByNumberKey(3) },
+    { keys: "4", action: () => selectClassByNumberKey(4) },
+    { keys: "5", action: () => selectClassByNumberKey(5) },
+    { keys: "6", action: () => selectClassByNumberKey(6) },
+    { keys: "7", action: () => selectClassByNumberKey(7) },
+    { keys: "8", action: () => selectClassByNumberKey(8) },
+    { keys: "9", action: () => selectClassByNumberKey(9) },
   ]);
+
+  // ── Snap helper (image-space) ───────────────────────────────────────
+
+  function snapImagePoint(ix: number, iy: number, excludePolyVi?: [number, number]): [number, number] {
+    if (!annotateUi.snap) return [ix, iy];
+    const sc = view.scale || 1;
+    const thr = SNAP_RADIUS_CANVAS / sc; // image-space radius
+    let best: [number, number] | null = null;
+    let bestD = thr;
+    canvas.polygons.forEach((poly, pi) => {
+      poly.points.forEach(([px, py], vi) => {
+        if (excludePolyVi && excludePolyVi[0] === pi && excludePolyVi[1] === vi) return;
+        const d = Math.hypot(px - ix, py - iy);
+        if (d < bestD) {
+          bestD = d;
+          best = [px, py];
+        }
+      });
+    });
+    return best ?? [ix, iy];
+  }
+
+  // ── Mouse handlers ──────────────────────────────────────────────────
 
   const onDown = (ix: number, iy: number) => {
     if (mode === "box") {
-      setDrawing({
-        x1: ix,
-        y1: iy,
-        x2: ix,
-        y2: iy,
-        class_id: activeClass,
-      });
+      setDrawing({ x1: ix, y1: iy, x2: ix, y2: iy, class_id: activeClass });
+      return;
+    }
+    // Polygon: button press starts either a vertex drag (if clicked within
+    // handle radius of a vertex on the selected polygon), an edge insert,
+    // or a new vertex add.
+    if (canvas.currentPolygon.length === 0 && canvas.selectedPolygonIdx !== null) {
+      const pi = canvas.selectedPolygonIdx;
+      const poly = canvas.polygons[pi];
+      if (!poly) return;
+      const sc = view.scale || 1;
+      const vertThr = 8 / sc;
+      // Try vertex grab
+      for (let vi = 0; vi < poly.points.length; vi++) {
+        const [px, py] = poly.points[vi];
+        if (Math.hypot(px - ix, py - iy) < vertThr) {
+          useStore.getState().setDraggingVertex([pi, vi]);
+          return;
+        }
+      }
+      // Try edge insert
+      const edgeThr = EDGE_INSERT_THRESHOLD / sc;
+      let bestEdge = -1;
+      let bestDist = edgeThr;
+      let bestProj: [number, number] | null = null;
+      for (let ei = 0; ei < poly.points.length; ei++) {
+        const [ax, ay] = poly.points[ei];
+        const [bx, by] = poly.points[(ei + 1) % poly.points.length];
+        const { dist, proj } = pointToSegmentDist(ix, iy, ax, ay, bx, by);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestEdge = ei;
+          bestProj = proj;
+        }
+      }
+      if (bestEdge >= 0 && bestProj) {
+        const newPts = poly.points.slice();
+        newPts.splice(bestEdge + 1, 0, bestProj);
+        updatePolygon(pi, { ...poly, points: newPts });
+        useStore.getState().setDraggingVertex([pi, bestEdge + 1]);
+        return;
+      }
+      // Click missed vertex + edge while polygon selected — check if still inside to keep selected
+      if (!pointInPolygon([ix, iy], poly.points)) {
+        selectPolygon(null);
+      }
     }
   };
 
   const onMove = (ix: number, iy: number) => {
     setCursor([ix, iy]);
-    if (drawing) setDrawing({ ...drawing, x2: ix, y2: iy });
+
+    // Vertex drag
+    const dragging = annotateUi.draggingVertex;
+    if (dragging) {
+      const [pi, vi] = dragging;
+      const poly = canvas.polygons[pi];
+      if (poly) {
+        const [sx, sy] = snapImagePoint(ix, iy, [pi, vi]);
+        const clamped: [number, number] = [
+          Math.max(0, Math.min(canvas.imgWidth || sx, sx)),
+          Math.max(0, Math.min(canvas.imgHeight || sy, sy)),
+        ];
+        const newPts = poly.points.slice();
+        newPts[vi] = clamped;
+        updatePolygon(pi, { ...poly, points: newPts });
+      }
+      return;
+    }
+
+    // Box drag
+    if (drawing) {
+      setDrawing({ ...drawing, x2: ix, y2: iy });
+      return;
+    }
+
+    // Polygon hover detection
+    if (mode === "polygon" && canvas.currentPolygon.length === 0) {
+      let hover: number | null = null;
+      for (let pi = 0; pi < canvas.polygons.length; pi++) {
+        if (pointInPolygon([ix, iy], canvas.polygons[pi].points)) {
+          hover = pi;
+          break;
+        }
+      }
+      if (hover !== annotateUi.hoveredPolygonIdx) setHoveredPolygon(hover);
+    }
   };
 
   const onUp = (ix: number, iy: number) => {
+    if (annotateUi.draggingVertex) {
+      useStore.getState().setDraggingVertex(null);
+      return;
+    }
     if (mode === "box" && drawing) {
       const box: Box = {
         x1: Math.min(drawing.x1, ix),
@@ -163,51 +370,222 @@ export function AnnotateTab() {
         y2: Math.max(drawing.y1, iy),
         class_id: activeClass,
       };
-      if (box.x2 - box.x1 > 1 && box.y2 - box.y1 > 1) addBox(box);
+      if (box.x2 - box.x1 > MIN_BOX_SIDE && box.y2 - box.y1 > MIN_BOX_SIDE) addBox(box);
       setDrawing(null);
     }
   };
 
   const onClick = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
-    if (mode === "polygon" && !ev.evt.ctrlKey) {
-      setCurrentPolygon([...canvas.currentPolygon, [ix, iy]]);
+    if (ev.evt.button !== 0) return;
+    if (mode !== "polygon") return;
+    if (annotateUi.draggingVertex) return;
+
+    // Placing vertices into a new polygon
+    if (canvas.currentPolygon.length > 0) {
+      const [sx, sy] = snapImagePoint(ix, iy);
+      setCurrentPolygon([...canvas.currentPolygon, [sx, sy]]);
       return;
     }
-    // Selection: click a polygon vertex area
-    if (mode === "polygon") {
-      // Ctrl+click on polygon = select
-      const hit = canvas.polygons.findIndex((p) =>
-        pointInPolygon([ix, iy], p.points),
-      );
-      selectPolygon(hit >= 0 ? hit : null);
+
+    // Not currently drawing — clicking on a polygon selects it
+    for (let pi = 0; pi < canvas.polygons.length; pi++) {
+      if (pointInPolygon([ix, iy], canvas.polygons[pi].points)) {
+        selectPolygon(pi);
+        return;
+      }
+    }
+    // Clicked empty space with nothing selected: start a new polygon
+    if (canvas.selectedPolygonIdx === null) {
+      const [sx, sy] = snapImagePoint(ix, iy);
+      setCurrentPolygon([[sx, sy]]);
+    } else {
+      // Already had a selection and click didn't land on a polygon → deselect
+      selectPolygon(null);
     }
   };
 
-  const scaleLineW = 1 / (view.scale || 1);
+  const onDoubleClick = (_ix: number, _iy: number) => {
+    if (mode !== "polygon") return;
+    if (canvas.currentPolygon.length >= 3) {
+      commitCurrentPolygon();
+    }
+  };
+
+  const onContextMenu = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
+    ev.evt.preventDefault();
+    // Right-click cancels in-progress polygon first
+    if (mode === "polygon" && canvas.currentPolygon.length > 0) {
+      setCurrentPolygon([]);
+      return;
+    }
+    // Polygon mode + selected polygon: try vertex delete, then polygon delete
+    if (mode === "polygon" && canvas.selectedPolygonIdx !== null) {
+      const pi = canvas.selectedPolygonIdx;
+      const poly = canvas.polygons[pi];
+      if (poly) {
+        const sc = view.scale || 1;
+        const vertThr = 10 / sc;
+        for (let vi = 0; vi < poly.points.length; vi++) {
+          const [px, py] = poly.points[vi];
+          if (Math.hypot(px - ix, py - iy) < vertThr) {
+            pushUndo();
+            if (poly.points.length <= 3) {
+              deletePolygon(pi);
+            } else {
+              const newPts = poly.points.slice();
+              newPts.splice(vi, 1);
+              updatePolygon(pi, { ...poly, points: newPts });
+            }
+            return;
+          }
+        }
+        if (pointInPolygon([ix, iy], poly.points)) {
+          deletePolygon(pi);
+          return;
+        }
+      }
+      selectPolygon(null);
+      return;
+    }
+    // Box right-click delete
+    for (let i = 0; i < canvas.boxes.length; i++) {
+      const b = canvas.boxes[i];
+      if (ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
+        deleteBox(i);
+        return;
+      }
+    }
+    // Non-selected polygon right-click delete (polygon mode)
+    if (mode === "polygon") {
+      for (let pi = 0; pi < canvas.polygons.length; pi++) {
+        if (pointInPolygon([ix, iy], canvas.polygons[pi].points)) {
+          deletePolygon(pi);
+          return;
+        }
+      }
+    }
+  };
+
+  // ── Symbology (scale-dependent) ─────────────────────────────────────
+
+  const s = view.scale || 1;
+  const scaleLineW = 1 / s;
+  const boxStroke = Math.max(1, Math.min(2 + s * 0.5, 6)) * scaleLineW;
+  const polyStroke = Math.max(1, Math.min(2.5 + s * 0.5, 7)) * scaleLineW;
+  const vertR = Math.max(3, Math.min(VERTEX_HANDLE_RADIUS * (1.6 - s * 0.2), 12)) * scaleLineW;
+  const selVertR = Math.max(vertR, Math.min(VERTEX_HANDLE_RADIUS * (2.2 - s * 0.2), 16)) * scaleLineW;
+  const labelSize = Math.max(8, Math.min(Math.round(9 * (0.6 + s * 0.4)), 18)) * scaleLineW;
+
   const imageUrl = imgPath ? api.images.url(imgPath) : null;
+
+  const renderLabels = annotateUi.visible;
+  const hoveredIdx = annotateUi.hoveredPolygonIdx;
+  const draggingIdx = annotateUi.draggingVertex?.[0];
 
   return (
     <div className="flex-1 flex flex-col">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-tcip-border bg-tcip-panel text-[11px]">
-        <button className="tcip-btn" onClick={() => stepImage(-1)} disabled={!dataset.image_list.length}>
-          ◀ Prev
-        </button>
-        <button className="tcip-btn" onClick={() => stepImage(1)} disabled={!dataset.image_list.length}>
-          Next ▶
-        </button>
-        <span className="mx-1 text-tcip-muted">|</span>
-        <button className="tcip-btn" onClick={() => undo()} title="Ctrl+Z">
+      <CanvasStage
+        imageUrl={imageUrl}
+        imgWidth={canvas.imgWidth}
+        imgHeight={canvas.imgHeight}
+        onStageRef={(st) => (stageRef.current = st)}
+        onPixelDown={onDown}
+        onPixelMove={onMove}
+        onPixelUp={onUp}
+        onPixelClick={onClick}
+        onPixelDoubleClick={onDoubleClick}
+        onPixelContextMenu={onContextMenu}
+      >
+        {/* Boxes (only active class in box mode, like yolo-annotator) */}
+        {renderLabels && mode === "box" &&
+          canvas.boxes.map((b, i) =>
+            b.class_id === activeClass ? (
+              <BoxOverlay
+                key={`box-${i}`}
+                box={b}
+                stroke={classColor(b.class_id)}
+                width={boxStroke}
+                labelSize={labelSize}
+                label={`${b.class_id}: ${className(b.class_id)}`}
+              />
+            ) : null,
+          )}
+
+        {/* Polygons */}
+        {renderLabels &&
+          canvas.polygons.map((p, i) => {
+            const selected = canvas.selectedPolygonIdx === i;
+            const hovered = hoveredIdx === i;
+            const dragging = draggingIdx === i;
+            // In box mode only show the selected polygon; in polygon mode show all
+            if (mode === "box" && !selected) return null;
+            // In polygon mode filter to active class unless selected
+            if (mode === "polygon" && !selected && p.class_id !== activeClass) return null;
+            const showVerts = selected || hovered || dragging;
+            return (
+              <PolygonOverlay
+                key={`poly-${i}`}
+                polygon={p}
+                stroke={selected ? "#00BFFF" : classColor(p.class_id)}
+                width={polyStroke}
+                vertexRadius={selected ? selVertR : vertR}
+                showVertices={showVerts}
+                labelSize={labelSize}
+                label={`${p.class_id}: ${className(p.class_id)}`}
+              />
+            );
+          })}
+
+        {/* In-progress polygon */}
+        {mode === "polygon" && canvas.currentPolygon.length > 0 && (
+          <InProgressPolygon
+            points={canvas.currentPolygon}
+            cursor={cursor}
+            stroke={classColor(activeClass)}
+            strokeW={polyStroke}
+            vertR={vertR}
+          />
+        )}
+
+        {/* Box draft */}
+        {drawing && (
+          <Rect
+            x={Math.min(drawing.x1, drawing.x2)}
+            y={Math.min(drawing.y1, drawing.y2)}
+            width={Math.abs(drawing.x2 - drawing.x1)}
+            height={Math.abs(drawing.y2 - drawing.y1)}
+            stroke={classColor(activeClass)}
+            strokeWidth={boxStroke}
+            dash={[6 * scaleLineW, 4 * scaleLineW]}
+          />
+        )}
+
+        {/* Snap indicator */}
+        {annotateUi.snap && cursor && mode === "polygon" && (
+          <SnapIndicator
+            cursor={cursor}
+            polygons={canvas.polygons}
+            scale={s}
+          />
+        )}
+
+        {/* Prediction reference */}
+        {predRef && <PredReferenceOverlay pred={predRef} lineW={scaleLineW} />}
+      </CanvasStage>
+
+      <div className="flex items-center gap-2 px-3 py-1.5 border-t border-tcip-border bg-tcip-panel text-[11px]">
+        <button className="tcip-btn text-[11px]" onClick={() => undo()} title="Ctrl+Z">
           ↶ Undo
         </button>
-        <button className="tcip-btn" onClick={() => redo()} title="Ctrl+Shift+Z">
+        <button className="tcip-btn text-[11px]" onClick={() => redo()} title="Ctrl+Shift+Z">
           ↷ Redo
         </button>
         {mode === "polygon" && (
           <button
-            className="tcip-btn"
+            className="tcip-btn text-[11px]"
             onClick={() => commitCurrentPolygon()}
             disabled={canvas.currentPolygon.length < 3}
-            title="Enter"
+            title="Double-click or Enter"
           >
             ✓ Close polygon
           </button>
@@ -218,101 +596,171 @@ export function AnnotateTab() {
         </span>
         <button
           className={canvas.dirty ? "tcip-btn-primary" : "tcip-btn"}
-          onClick={save}
+          onClick={() => void save()}
           disabled={!imgPath}
-          title="Ctrl+S"
+          title="Ctrl+S (auto-save on image change)"
         >
           {canvas.dirty ? "💾 Save" : "Saved"}
         </button>
       </div>
+    </div>
+  );
+}
 
-      <CanvasStage
-        imageUrl={imageUrl}
-        imgWidth={canvas.imgWidth}
-        imgHeight={canvas.imgHeight}
-        onStageRef={(s) => (stageRef.current = s)}
-        onPixelDown={onDown}
-        onPixelMove={onMove}
-        onPixelUp={onUp}
-        onPixelClick={onClick}
-      >
-        {/* Existing boxes */}
-        {canvas.boxes.map((b, i) => (
-          <Rect
-            key={`box-${i}`}
-            x={b.x1}
-            y={b.y1}
-            width={b.x2 - b.x1}
-            height={b.y2 - b.y1}
-            stroke={colorFor(b.class_id)}
-            strokeWidth={2 * scaleLineW}
-            onDblClick={() => deleteBox(i)}
-          />
-        ))}
+/* ── Subcomponents ───────────────────────────────────────────────────── */
 
-        {/* Existing polygons */}
-        {canvas.polygons.map((p, i) => {
-          const flat = p.points.flat();
-          const selected = canvas.selectedPolygonIdx === i;
-          return (
-            <Line
-              key={`poly-${i}`}
-              points={flat}
-              closed
-              stroke={selected ? "#FFD700" : colorFor(p.class_id)}
-              strokeWidth={(selected ? 3 : 2) * scaleLineW}
-              onDblClick={() => deletePolygon(i)}
-            />
-          );
-        })}
+function BoxOverlay({
+  box,
+  stroke,
+  width,
+  labelSize,
+  label,
+}: {
+  box: Box;
+  stroke: string;
+  width: number;
+  labelSize: number;
+  label: string;
+}) {
+  return (
+    <>
+      <Rect
+        x={box.x1}
+        y={box.y1}
+        width={box.x2 - box.x1}
+        height={box.y2 - box.y1}
+        stroke={stroke}
+        strokeWidth={width}
+      />
+      <HaloLabel x={box.x1} y={box.y1} text={label} fill={stroke} size={labelSize} />
+    </>
+  );
+}
 
-        {/* In-progress polygon */}
-        {mode === "polygon" && canvas.currentPolygon.length > 0 && (
-          <Line
-            points={canvas.currentPolygon.flat()}
-            stroke={colorFor(activeClass)}
-            strokeWidth={2 * scaleLineW}
-            dash={[6 * scaleLineW, 4 * scaleLineW]}
-          />
-        )}
-        {mode === "polygon" && canvas.currentPolygon.length > 0 && cursor && (
-          <Line
-            points={[
-              ...canvas.currentPolygon[canvas.currentPolygon.length - 1],
-              ...cursor,
-            ]}
-            stroke={colorFor(activeClass)}
-            strokeWidth={scaleLineW}
-            dash={[4 * scaleLineW, 4 * scaleLineW]}
-          />
-        )}
-        {mode === "polygon" && canvas.currentPolygon.map(([x, y], i) => (
+function PolygonOverlay({
+  polygon,
+  stroke,
+  width,
+  vertexRadius,
+  showVertices,
+  labelSize,
+  label,
+}: {
+  polygon: PolygonShape;
+  stroke: string;
+  width: number;
+  vertexRadius: number;
+  showVertices: boolean;
+  labelSize: number;
+  label: string;
+}) {
+  if (polygon.points.length < 2) return null;
+  const flat = polygon.points.flat();
+  const [x0, y0] = polygon.points[0];
+  return (
+    <>
+      <Line points={flat} closed stroke={stroke} strokeWidth={width} />
+      {showVertices &&
+        polygon.points.map(([x, y], i) => (
           <Circle
-            key={`pv-${i}`}
+            key={`v-${i}`}
             x={x}
             y={y}
-            radius={3 * scaleLineW}
-            fill={colorFor(activeClass)}
+            radius={vertexRadius}
+            fill={stroke}
+            stroke="#ffffff"
+            strokeWidth={width * 0.5}
           />
         ))}
+      <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={labelSize} />
+    </>
+  );
+}
 
-        {/* Draft box preview */}
-        {drawing && (
-          <Rect
-            x={Math.min(drawing.x1, drawing.x2)}
-            y={Math.min(drawing.y1, drawing.y2)}
-            width={Math.abs(drawing.x2 - drawing.x1)}
-            height={Math.abs(drawing.y2 - drawing.y1)}
-            stroke={colorFor(activeClass)}
-            strokeWidth={2 * scaleLineW}
-            dash={[6 * scaleLineW, 4 * scaleLineW]}
-          />
-        )}
+function InProgressPolygon({
+  points,
+  cursor,
+  stroke,
+  strokeW,
+  vertR,
+}: {
+  points: [number, number][];
+  cursor: [number, number] | null;
+  stroke: string;
+  strokeW: number;
+  vertR: number;
+}) {
+  const dash = [strokeW * 4, strokeW * 4];
+  return (
+    <>
+      <Line points={points.flat()} stroke={stroke} strokeWidth={strokeW} dash={dash} />
+      {cursor && (
+        <Line
+          points={[...points[points.length - 1], ...cursor]}
+          stroke={stroke}
+          strokeWidth={strokeW * 0.6}
+          dash={dash}
+        />
+      )}
+      {points.map(([x, y], i) => (
+        <Circle key={`cp-${i}`} x={x} y={y} radius={vertR} fill={stroke} stroke="#ffffff" strokeWidth={strokeW * 0.5} />
+      ))}
+    </>
+  );
+}
 
-        {/* Prediction reference (dashed blue) */}
-        {predRef && <PredReferenceOverlay pred={predRef} lineW={scaleLineW} />}
-      </CanvasStage>
-    </div>
+function SnapIndicator({
+  cursor,
+  polygons,
+  scale,
+}: {
+  cursor: [number, number];
+  polygons: PolygonShape[];
+  scale: number;
+}) {
+  const thr = SNAP_RADIUS_CANVAS / scale;
+  let best: [number, number] | null = null;
+  let bestD = thr;
+  for (const poly of polygons) {
+    for (const [x, y] of poly.points) {
+      const d = Math.hypot(x - cursor[0], y - cursor[1]);
+      if (d < bestD) {
+        bestD = d;
+        best = [x, y];
+      }
+    }
+  }
+  if (!best) return null;
+  const r = 12 / scale;
+  return (
+    <Circle
+      x={best[0]}
+      y={best[1]}
+      radius={r}
+      stroke="#FFE7B1"
+      strokeWidth={2 / scale}
+      dash={[3 / scale, 3 / scale]}
+    />
+  );
+}
+
+function HaloLabel({ x, y, text, fill, size }: { x: number; y: number; text: string; fill: string; size: number }) {
+  return (
+    <>
+      <Text
+        x={x + 2}
+        y={y - size - 2}
+        text={text}
+        fill="#000000"
+        fontSize={size}
+        fontStyle="bold"
+        shadowColor="#000000"
+        shadowBlur={size * 0.2}
+        shadowOffset={{ x: 0, y: 0 }}
+        shadowOpacity={0.9}
+      />
+      <Text x={x + 2} y={y - size - 2} text={text} fill={fill} fontSize={size} fontStyle="bold" />
+    </>
   );
 }
 
@@ -340,16 +788,4 @@ function PredReferenceOverlay({ pred, lineW }: { pred: PredictionReference; line
       dash={[8 * lineW, 4 * lineW]}
     />
   );
-}
-
-function pointInPolygon(pt: [number, number], poly: [number, number][]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i];
-    const [xj, yj] = poly[j];
-    if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
 }
