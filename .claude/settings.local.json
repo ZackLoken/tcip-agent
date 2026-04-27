@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep *)",
+      "Bash(conda run *)",
+      "Bash(python -c \"import sam2; print\\('sam2 version:', getattr\\(sam2, '__version__', 'unknown'\\)\\); print\\('sam2 location:', sam2.__file__\\)\")",
+      "Bash(python -c \"import segment_anything; print\\('segment_anything location:', segment_anything.__file__\\)\")",
+      "Bash(python -m py_compile \"c:/Users/exx/Documents/GitHub/tcip-agent/packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py\")",
+      "Bash(conda env *)",
+      "mcp__tcip__load_retrospectives",
+      "mcp__tcip__get_project_status",
+      "Bash(python -c \"from PIL import Image; import os; p='c:/Users/exx/Documents/GitHub/tcip-agent/data/images/IMG_0133.JPG'; im=Image.open\\(p\\); print\\(im.size, os.path.getsize\\(p\\)//1024,'KB'\\)\")",
+      "mcp__tcip__claude_reports",
+      "mcp__tcip__create_session",
+      "mcp__tcip__append_session_event",
+      "Bash(python -c \"import torch; print\\(torch.__version__, torch.__file__\\)\")",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe -c \"import torch, ultralytics; print\\('torch', torch.__version__\\); print\\('ultralytics', ultralytics.__version__\\)\")",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe -c \"import torch; print\\('torch', torch.__version__\\)\")",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe -m pip list)",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe -c ' *)",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe -m pip install ultralytics)",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe scripts/inspect_baseline_weights.py)",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe scripts/rerun_baseline_inference.py)",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe -m pip install sahi)",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe scripts/compute_disagreements.py)",
+      "mcp__tcip__create_experiment",
+      "mcp__tcip__record_artifact",
+      "mcp__tcip__visualize_comparison",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe scripts/render_gt_pred_overlay.py IMG_0133 --crop center)",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe scripts/render_gt_pred_overlay.py IMG_0133 --crop q3)",
+      "Bash(/c/Users/exx/.conda/envs/tcip-agent/python.exe scripts/render_gt_pred_overlay.py IMG_0134 --mode fg --pad 0.02)"
+    ]
+  }
+}
