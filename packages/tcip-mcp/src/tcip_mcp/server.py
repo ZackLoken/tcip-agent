@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 import tcip_mcp.tools.data_tools  # noqa: F401, E402
 import tcip_mcp.tools.project_tools  # noqa: F401, E402
 import tcip_mcp.tools.experiment_tools  # noqa: F401, E402
+import tcip_mcp.tools.meta_tools  # noqa: F401, E402
 
 try:
     import tcip_mcp.tools.annotation_tools  # noqa: F401, E402

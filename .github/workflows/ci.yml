@@ -23,6 +23,7 @@ jobs:
         run: |
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev]"
+          pip install -e "packages/tcip-web[dev]"
 
       - name: Run tests
         run: pytest tests/ -x --timeout=120 -v
@@ -36,10 +37,14 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install dependencies
-        working-directory: packages/tcip-vscode
-        run: npm ci
+      - name: Install frontend dependencies
+        working-directory: packages/tcip-web/frontend
+        run: npm install --no-fund --no-audit
 
       - name: Type check
-        working-directory: packages/tcip-vscode
-        run: npx tsc --noEmit
+        working-directory: packages/tcip-web/frontend
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: packages/tcip-web/frontend
+        run: npm run build

@@ -129,7 +129,12 @@ export function TopBar() {
 
   return (
     <div className="h-topbar flex items-center gap-2 px-3 border-b border-tcip-border bg-tcip-panel shrink-0">
-      <div className="font-semibold tracking-wide mr-2 text-tcip-fg">TCIP</div>
+      <img
+        src="/assets/si_logo.png"
+        alt="Savanna Institute"
+        className="h-9 w-auto mr-2 select-none"
+        draggable={false}
+      />
 
       {/* Tabs */}
       <div className="flex items-center gap-1 mr-4">

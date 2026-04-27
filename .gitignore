@@ -1,7 +1,5 @@
 # ── Data (images & labels are large / user-specific) ──────────────────────
-/data/images/
-/data/labels/
-/data/predictions/
+/data
 
 # ── Python ────────────────────────────────────────────────────────────────
 __pycache__/
@@ -21,9 +19,6 @@ venv/
 
 # ── Project runtime state ────────────────────────────────────────────────
 /.tcip/
-
-# ── VS Code extension build output ──────────────────────────────────────
-packages/tcip-vscode/out/
 
 # ── Node ─────────────────────────────────────────────────────────────────
 node_modules/
@@ -59,3 +54,4 @@ Thumbs.db
 # ── Logs ─────────────────────────────────────────────────────────────────
 *.log
 tensorboard_runs/
+*.zip

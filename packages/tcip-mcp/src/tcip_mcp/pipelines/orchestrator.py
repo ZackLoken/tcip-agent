@@ -1,13 +1,24 @@
 """Multi-phase pipeline orchestrator.
 
-Chains training → inference → cropping → aggregation → export phases.
-The agent designs a PipelineSpec; the orchestrator validates and executes it.
+Chains phases that pass artifacts to each other. The agent designs a
+PipelineSpec; the orchestrator validates structure (not content) and executes it.
 
-Example pipeline (hazelnut catkin phenology):
+Five built-in phase runners are provided: training, inference, cropping,
+aggregation, export. These cover common multi-phase ML shapes but are NOT
+the only allowed phase types. Pipelines can declare custom phase types and
+register runners for them via ``register_phase_runner``. The orchestrator
+does not gate on a closed set of phase or task names.
+
+Example pipeline (hazelnut catkin phenology — uses built-in runners):
   1. isolate_bushes  (instance_seg) → bush_crops
   2. detect_catkins  (detection)    → catkin_detections (input: bush_crops)
   3. classify_catkins (classification) → catkin_classes (input: catkin_detections)
   4. temporal_aggregation (aggregation) → phenology_csv
+
+For patterns that don't fit a multi-phase ML structure at all (e.g. a single
+whole-plant classifier, or an NIR spectral regression), skip the orchestrator
+entirely and write a Python script. The orchestrator is a convenience for
+multi-phase artifact passing, not a required scaffold.
 """
 
 from __future__ import annotations
@@ -49,12 +60,26 @@ class PipelineResult:
 # Validation
 # ====================================================================
 
-VALID_PHASE_TYPES = {"training", "inference", "cropping", "aggregation", "export"}
-VALID_TASKS = {"detection", "instance_seg", "semantic_seg", "classification", "ordinal", "regression", "aggregation"}
+# Reference list of tasks the built-in phase runners know how to handle.
+# This is a hint for autocomplete and documentation, NOT a gate — custom
+# phase runners registered via register_phase_runner() can use any task name.
+KNOWN_TASKS = {
+    "detection",
+    "instance_seg",
+    "semantic_seg",
+    "classification",
+    "ordinal",
+    "regression",
+    "aggregation",
+}
 
 
 def validate_pipeline(spec: dict) -> list[str]:
-    """Check a PipelineSpec for issues before execution.
+    """Check a PipelineSpec for structural issues before execution.
+
+    Only catches wiring errors (missing names, dangling input references,
+    duplicate output names). Does NOT gate on a closed set of phase types
+    or tasks — runners can be extended via register_phase_runner().
 
     Returns list of human-readable issue strings (empty = valid).
     """
@@ -76,8 +101,6 @@ def validate_pipeline(spec: dict) -> list[str]:
             issues.append(f"{prefix}: missing 'name'")
         if "task" not in phase:
             issues.append(f"{prefix}: missing 'task'")
-        elif phase["task"] not in VALID_TASKS:
-            issues.append(f"{prefix}: unknown task '{phase['task']}'. Valid: {VALID_TASKS}")
 
         # Check input references exist
         input_ref = phase.get("input")
@@ -90,10 +113,9 @@ def validate_pipeline(spec: dict) -> list[str]:
                 issues.append(f"{prefix}: duplicate output name '{output_ref}'")
             output_names.add(output_ref)
 
-        # Training phases need model_spec
-        task = phase.get("task", "")
-        if task not in ("aggregation",) and "model_spec" not in phase and "checkpoint" not in phase:
-            issues.append(f"{prefix}: needs 'model_spec' or 'checkpoint'")
+        # Phase-type-specific requirements (model_spec for training, etc.)
+        # are enforced by the runners themselves, not here — custom phase
+        # types may not need either of those fields.
 
     return issues
 
@@ -112,6 +134,11 @@ def _run_training_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
 
     result = PhaseResult(phase_name=phase["name"], status="running")
     t0 = time.time()
+
+    if "model_spec" not in phase:
+        result.status = "failed"
+        result.error = "Training phase needs 'model_spec'"
+        return result
 
     try:
         task = phase["task"]
@@ -414,7 +441,7 @@ def _run_export_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> P
     return result
 
 
-_PHASE_RUNNERS = {
+_PHASE_RUNNERS: dict[str, Any] = {
     "training": _run_training_phase,
     "inference": _run_inference_phase,
     "cropping": _run_cropping_phase,
@@ -423,8 +450,28 @@ _PHASE_RUNNERS = {
 }
 
 
+def register_phase_runner(phase_type: str, runner) -> None:
+    """Register a custom phase runner.
+
+    Lets pipelines use phase types beyond the five built-in ones. The runner
+    signature is ``(phase: dict, context: dict, work_dir: Path) -> PhaseResult``.
+
+    Example:
+        def run_spectral_regression(phase, context, work_dir):
+            ...
+            return PhaseResult(phase_name=phase["name"], status="completed", ...)
+
+        register_phase_runner("spectral_regression", run_spectral_regression)
+    """
+    _PHASE_RUNNERS[phase_type] = runner
+
+
 def _infer_phase_type(phase: dict) -> str:
-    """Infer phase type from task and contents."""
+    """Infer phase type from explicit type field, then task, then contents.
+
+    An explicit ``type`` field always wins — this is the escape hatch for
+    custom phase types registered via register_phase_runner().
+    """
     if phase.get("type"):
         return phase["type"]
     task = phase.get("task", "")
@@ -499,7 +546,17 @@ class PipelineOrchestrator:
             phase_type = _infer_phase_type(phase)
             runner = _PHASE_RUNNERS.get(phase_type)
             if runner is None:
-                result = PhaseResult(phase_name=phase["name"], status="failed", error=f"Unknown phase type: {phase_type}")
+                known = sorted(_PHASE_RUNNERS.keys())
+                result = PhaseResult(
+                    phase_name=phase["name"],
+                    status="failed",
+                    error=(
+                        f"No runner for phase type '{phase_type}'. "
+                        f"Known types: {known}. "
+                        f"Register a custom runner via register_phase_runner() "
+                        f"or omit 'type' to let it be inferred."
+                    ),
+                )
             else:
                 logger.info("Running phase '%s' (type=%s)", phase["name"], phase_type)
                 result = self._run_with_retry(runner, phase, context, run_dir)
@@ -629,7 +686,12 @@ class PipelineOrchestrator:
         phase_type = _infer_phase_type(phase)
         runner = _PHASE_RUNNERS.get(phase_type)
         if runner is None:
-            return PhaseResult(phase_name=phase.get("name", "?"), status="failed", error=f"Unknown type: {phase_type}")
+            known = sorted(_PHASE_RUNNERS.keys())
+            return PhaseResult(
+                phase_name=phase.get("name", "?"),
+                status="failed",
+                error=f"No runner for phase type '{phase_type}'. Known types: {known}. Use register_phase_runner() to add custom runners.",
+            )
         run_dir = self.work_dir / f"single_{int(time.time())}"
         run_dir.mkdir(parents=True, exist_ok=True)
         return runner(phase, context, run_dir)

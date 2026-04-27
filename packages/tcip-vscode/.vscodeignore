@@ -1,6 +1,0 @@
-.vscode-test/
-out/
-node_modules/
-src/
-tsconfig.json
-*.map

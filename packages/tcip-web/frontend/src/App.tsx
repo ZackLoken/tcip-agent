@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { classesApi } from "@/api/classes";
+import { sessionsApi } from "@/api/sessions";
 import { DatasetPicker } from "@/components/DatasetPicker";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { StatusBar } from "@/components/StatusBar";
@@ -32,6 +33,27 @@ function App() {
     stateSocket.connect();
     return () => stateSocket.close();
   }, []);
+
+  // Session start / end.  Browser identifier is "web" since we don't have
+  // OS user; the backend can rewrite this from a header later if needed.
+  useEffect(() => {
+    if (!projectRoot) return;
+    const user = localStorage.getItem("tcip.user") || "web";
+    void sessionsApi.start(projectRoot, user);
+    function endSession() {
+      // beacon-style fire-and-forget on tab close
+      try {
+        void sessionsApi.end(projectRoot);
+      } catch {
+        /* ignore */
+      }
+    }
+    window.addEventListener("beforeunload", endSession);
+    return () => {
+      window.removeEventListener("beforeunload", endSession);
+      void sessionsApi.end(projectRoot);
+    };
+  }, [projectRoot]);
 
   // Hydrate classes + per-image status whenever the dataset selection changes.
   useEffect(() => {

@@ -1,0 +1,66 @@
+"""Print GPS EXIF for a sample of images per acquisition date.
+
+Tells us whether RTK was actually used (centimeter precision, HPositioningError
+~0.01-0.10) or whether it's iPhone internal GPS (~3-10 m precision).
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from PIL import Image
+from PIL.ExifTags import GPSTAGS, TAGS
+
+ROOT = Path(r"c:/Users/exx/Documents/GitHub/tcip-agent/data/hazelnut/catkin_05-50-95-per_date/Valley_Farm/images")
+
+
+def read_gps(path: Path) -> dict:
+    im = Image.open(path)
+    raw = im._getexif() or {}
+    for tag_id, value in raw.items():
+        if TAGS.get(tag_id) == "GPSInfo":
+            return {GPSTAGS.get(k, k): v for k, v in value.items()}
+    return {}
+
+
+def to_decimal(dms, ref) -> float | None:
+    if not dms:
+        return None
+    d, m, s = (float(x) for x in dms)
+    val = d + m / 60 + s / 3600
+    if ref in ("S", "W"):
+        val = -val
+    return val
+
+
+def summarize(path: Path) -> None:
+    gps = read_gps(path)
+    lat = to_decimal(gps.get("GPSLatitude"), gps.get("GPSLatitudeRef"))
+    lon = to_decimal(gps.get("GPSLongitude"), gps.get("GPSLongitudeRef"))
+    print(f"\n{path.name}")
+    print(f"  lat/lon:   {lat!r}, {lon!r}")
+    print(f"  altitude:  {gps.get('GPSAltitude')!r}")
+    print(f"  DOP:       {gps.get('GPSDOP')!r}")
+    print(f"  HPosErr:   {gps.get('GPSHPositioningError')!r}")
+    print(f"  ProcMeth:  {gps.get('GPSProcessingMethod')!r}")
+    print(f"  all keys:  {sorted(gps.keys())}")
+
+
+def main() -> None:
+    for date_dir in sorted(ROOT.iterdir()):
+        if not date_dir.is_dir():
+            continue
+        imgs = sorted(p for p in date_dir.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".heic"})
+        if not imgs:
+            continue
+        print(f"\n=== {date_dir.name} ({len(imgs)} images) ===")
+        sample = [imgs[0], imgs[len(imgs) // 2], imgs[-1]]
+        for p in sample:
+            try:
+                summarize(p)
+            except Exception as e:
+                print(f"  [error on {p.name}: {e}]")
+
+
+if __name__ == "__main__":
+    main()

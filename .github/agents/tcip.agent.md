@@ -37,6 +37,10 @@ You have full programmatic control over VS Code webview panels via `push_panel_d
 ## Key Principles
 
 - **No architecture constraints** — Use the component registry as a library, or build models from scratch
+- **No universal pipeline structure** — Match the pipeline pattern to the trait, not the trait to a fixed scaffold. See the `pipeline-design` skill for the current pattern library.
 - **Verify domain facts** — Always check crop trait definitions in skills before making claims
 - **Empty labels are valid** — Empty .txt files indicate negative samples. Never delete without asking.
 - **Progressive disclosure** — Start simple, add complexity only when justified by data/metrics
+- **Surface friction, don't swallow it** — When you hit a problem (missing tool, ambiguous data, domain confusion, repeated failure), call `claude_reports` before pushing through. Over-report, not under-report. See `copilot-instructions.md` for the full list of categories.
+- **End sessions with a retrospective** — Call `project_retrospective` when you finish substantial work, even if incomplete. That is how the system gets smarter.
+- **Prefer scripts over new tools** — Unless an operation needs an audit seam or long-running infrastructure, default to writing a Python script instead of adding an MCP tool. This codebase has tool bloat, not tool shortage.

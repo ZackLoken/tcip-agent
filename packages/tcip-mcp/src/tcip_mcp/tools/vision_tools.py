@@ -445,7 +445,7 @@ def visualize_dataset_sample(
 @audited
 def sam_auto_label(
     image_path: str,
-    model_type: str = "vit_b",
+    model_type: str = "hiera_b+",
     points_per_side: int = 16,
     pred_iou_thresh: float = 0.86,
     stability_score_thresh: float = 0.92,
@@ -460,7 +460,7 @@ def sam_auto_label(
 
     Args:
         image_path: Absolute path to the image file.
-        model_type: SAM model variant (vit_b, vit_l, vit_h).
+        model_type: SAM2 variant (hiera_t / hiera_s / hiera_b+ / hiera_l).
         points_per_side: Grid density for auto-mask generation.
         pred_iou_thresh: Minimum predicted IoU to keep a mask.
         stability_score_thresh: Minimum stability score to keep a mask.
