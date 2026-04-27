@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tcip": {
+      "command": "conda",
+      "args": ["run", "-n", "tcip-agent", "--no-capture-output", "python", "-m", "tcip_mcp"]
+    }
+  }
+}

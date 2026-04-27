@@ -2,16 +2,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Launch TCIP Extension",
-      "type": "extensionHost",
+      "name": "Run tcip-web (FastAPI + frontend)",
+      "type": "debugpy",
       "request": "launch",
-      "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/packages/tcip-vscode",
-        "${workspaceFolder}/tcip-agent.code-workspace"
-      ],
-      "outFiles": [
-        "${workspaceFolder}/packages/tcip-vscode/out/**/*.js"
-      ]
+      "module": "tcip_web",
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
   ]
 }

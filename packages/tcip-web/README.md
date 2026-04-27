@@ -87,6 +87,5 @@ Matches yolo-annotator; `?` opens the full help overlay in the browser.
 
 ## VS Code extension
 
-`packages/tcip-vscode/` remains on disk but its webview panels are no longer
-the primary GUI. Retirement decision deferred to post-Phase-1 (see
-[docs/gui_design.md §10.10](../../docs/gui_design.md#10-open-risks-and-mitigations)).
+The legacy `packages/tcip-vscode/` extension was retired in favour of this web
+GUI. See git history for the old webview-panel implementation if needed.

@@ -4,13 +4,13 @@ Agentic ML/CV system for tree crop breeding programs. Automates pipeline design,
 
 ## Architecture
 
-Two-layer system powered by VS Code Copilot:
+Three-process system:
 
-1. **Copilot custom agent** (`.github/agents/tcip.agent.md`) — ML/CV engineer persona with progressive domain knowledge via agent skills
+1. **Copilot / Claude agent** (`.github/agents/tcip.agent.md`) — ML/CV engineer persona with progressive domain knowledge via agent skills
 2. **Python MCP server** (`packages/tcip-mcp/`) — 40+ domain tools over MCP stdio (data, annotation, training, inference, pipelines, active learning, experiments)
-3. **VS Code extension** (`packages/tcip-vscode/`) — 6 webview panels (annotation, review, training, HPO, inference, results) with FileSystemWatcher event routing
+3. **FastAPI + React GUI** (`packages/tcip-web/`) — browser app with Annotate / Review / Training / Tuning / Inference / Results tabs; mirrors the yolo-annotator desktop UX. Backend persists state at `<project_root>/.tcip/state/`; agent and browser both mutate it through the same routes.
 
-Supporting library: `packages/tcip-annotation/` — Headless annotation/review engine for data.
+Supporting library: `packages/tcip-annotation/` — Headless annotation/review engine (label I/O, matching, AnnotationEngine, ReviewEngine, SAM wrapper).
 
 ## Build & Test
 
@@ -19,8 +19,14 @@ Supporting library: `packages/tcip-annotation/` — Headless annotation/review e
 conda activate tcip-agent
 pytest tests/ -v --tb=short
 
-# TypeScript
-cd packages/tcip-vscode && npx tsc --noEmit
+# Frontend (Vite + React + TS + Tailwind + Konva)
+cd packages/tcip-web/frontend
+npm install
+npm run typecheck
+npm run build      # outputs into ../static/
+
+# Backend
+python -m tcip_web   # http://127.0.0.1:8765
 ```
 
 ## Key Directories
@@ -30,10 +36,9 @@ cd packages/tcip-vscode && npx tsc --noEmit
 | `.github/agents/` | Copilot custom agent definition |
 | `.github/skills/` | Agent skills — progressive domain knowledge (loaded when relevant) |
 | `.github/prompts/` | Prompt files — slash commands for common tasks |
-| `packages/tcip-mcp/` | MCP server — 40+ tools across 8 modules |
-| `packages/tcip-annotation/` | Label I/O, matching, annotation engine, SAM wrapper |
-| `packages/tcip-vscode/` | VS Code extension — panels, event routing, webview JS |
-| `packages/tcip-web/` | FastAPI web server — REST API, WebSocket, static frontend |
+| `packages/tcip-mcp/` | MCP server — tools across data, annotation, training, inference, etc. |
+| `packages/tcip-annotation/` | Label I/O, matching, AnnotationEngine, ReviewEngine, SAM wrapper |
+| `packages/tcip-web/` | FastAPI backend + React frontend (the GUI) |
 | `tests/` | Python test suite |
 | `data/` | Sample images, labels, predictions |
 
@@ -45,7 +50,7 @@ Traits are defined in per-crop agent skills under `.github/skills/crops/`. Alway
 
 ## Conventions
 
-- **Webview JS** (`media/*.js`): Use `var` and function expressions (not `const`/`let`/arrow) for VS Code webview compat
+- **Frontend**: React + TypeScript (strict). Source under `packages/tcip-web/frontend/src/`; production build emits to `packages/tcip-web/static/`.
 - **Python imports**: Lazy imports for heavy deps (torch, torchvision) inside function bodies
 - **MCP tools**: Decorated with `@mcp.tool()`, registered in `packages/tcip-mcp/src/tcip_mcp/tools/`
 - **Audit logging**: All tools wrapped with `@audited` decorator, logs to `.tcip/audit.jsonl`
