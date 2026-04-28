@@ -1,9 +1,0 @@
-{
-  "servers": {
-    "tcip-pipeline": {
-      "command": "C:\\Users\\exx\\.conda\\envs\\tcip-agent\\python.exe",
-      "args": ["-m", "tcip_mcp"],
-      "cwd": "${workspaceFolder}"
-    }
-  }
-}
