@@ -46,6 +46,7 @@ The annotation engine supports four formats. The agent auto-detects format from 
 - `.txt` files → YOLO
 - `.json` files → COCO or LabelMe (auto-detected by content)
 - Use `detect_format()` from `tcip_annotation.format_io` for programmatic detection
+- **`load_annotations` returns `"format_confident": false` and a `"warning"` key when format detection fell back to YOLO without a clear match.** Stop and ask the user to confirm the correct format before proceeding — do not train or evaluate on data loaded under an uncertain format guess. An undetected mismatch means empty annotations are silently treated as negatives.
 
 ## Tool Usage Patterns
 
