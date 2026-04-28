@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { classesApi } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
@@ -28,6 +28,7 @@ function App() {
   const annSegDir = useStore((s) => s.gui.dataset.annotations_segment_dir);
   const setClasses = useStore((s) => s.setClasses);
   const setImageStatuses = useStore((s) => s.setImageStatuses);
+  const endedSessionForRoot = useRef<string | null>(null);
 
   useEffect(() => {
     stateSocket.connect();
@@ -40,18 +41,41 @@ function App() {
     if (!projectRoot) return;
     const user = localStorage.getItem("tcip.user") || "web";
     void sessionsApi.start(projectRoot, user);
+    endedSessionForRoot.current = null;
+
     function endSession() {
-      // beacon-style fire-and-forget on tab close
+      if (endedSessionForRoot.current === projectRoot) return;
+      endedSessionForRoot.current = projectRoot;
+
+      const payload = JSON.stringify({ project_root: projectRoot });
       try {
-        void sessionsApi.end(projectRoot);
+        if (navigator.sendBeacon) {
+          const blob = new Blob([payload], { type: "application/json" });
+          navigator.sendBeacon("/api/sessions/end", blob);
+          return;
+        }
       } catch {
-        /* ignore */
+        // Fall through to fetch keepalive.
+      }
+
+      try {
+        void fetch("/api/sessions/end", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          keepalive: true,
+        });
+      } catch {
+        // Best-effort telemetry only.
       }
     }
+
+    window.addEventListener("pagehide", endSession);
     window.addEventListener("beforeunload", endSession);
     return () => {
+      window.removeEventListener("pagehide", endSession);
       window.removeEventListener("beforeunload", endSession);
-      void sessionsApi.end(projectRoot);
+      endSession();
     };
   }, [projectRoot]);
 

@@ -80,6 +80,14 @@ const EMPTY_CANVAS: CanvasState = {
   dirty: false,
 };
 
+const EMPTY_SESSION_TRACKING: SessionTrackingState = {
+  currentImageName: null,
+  imageEnterTimeMs: null,
+  loadedAnnotationCount: 0,
+  annotationsAddedDelta: 0,
+  lastFlushedKey: null,
+};
+
 interface ReviewTabState {
   matches: MatchesResponse | null;
   loading: boolean;
@@ -105,6 +113,19 @@ interface AnnotateUiState {
   draggingVertex: [number, number] | null;
 }
 
+interface SessionTrackingState {
+  /** Active image for per-image annotation timing. */
+  currentImageName: string | null;
+  /** Epoch ms when the annotator entered this image. */
+  imageEnterTimeMs: number | null;
+  /** Count loaded from disk on image entry. */
+  loadedAnnotationCount: number;
+  /** Number of new annotations created during this image visit. */
+  annotationsAddedDelta: number;
+  /** Signature of the last flushed event to avoid duplicate emits. */
+  lastFlushedKey: string | null;
+}
+
 interface PerImageStatusState {
   /** Loaded from backend on dataset select. */
   byImage: Record<string, ImageStatus>;
@@ -127,6 +148,7 @@ export interface AppState {
   classes: ClassesState;
   imageStatus: PerImageStatusState;
   annotateUi: AnnotateUiState;
+  sessionTracking: SessionTrackingState;
 
   /** Setters. */
   setGui: (next: GuiState) => void;
@@ -156,6 +178,16 @@ export interface AppState {
   setStream: (v: boolean) => void;
   setHoveredPolygon: (idx: number | null) => void;
   setDraggingVertex: (v: [number, number] | null) => void;
+
+  /** Per-image session telemetry helpers. */
+  startImageSessionTracking: (
+    imageName: string,
+    loadedAnnotationCount: number,
+    imageEnterTimeMs?: number,
+  ) => void;
+  incrementAnnotationsAdded: (delta?: number) => void;
+  markSessionFlushed: (key: string) => void;
+  clearSessionTracking: () => void;
 
   /** Canvas helpers. */
   loadLabelsIntoCanvas: (labels: ImageLabels) => void;
@@ -203,6 +235,7 @@ export const useStore = create<AppState>()((set, get) => ({
     hoveredPolygonIdx: null,
     draggingVertex: null,
   },
+  sessionTracking: EMPTY_SESSION_TRACKING,
 
   setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
@@ -263,6 +296,49 @@ export const useStore = create<AppState>()((set, get) => ({
   setDraggingVertex: (draggingVertex) =>
     set((s) => ({ annotateUi: { ...s.annotateUi, draggingVertex } })),
 
+  startImageSessionTracking: (imageName, loadedAnnotationCount, imageEnterTimeMs) =>
+    set((s) => ({
+      sessionTracking: {
+        ...s.sessionTracking,
+        currentImageName: imageName,
+        imageEnterTimeMs: imageEnterTimeMs ?? Date.now(),
+        loadedAnnotationCount: Math.max(0, loadedAnnotationCount),
+        annotationsAddedDelta: 0,
+        lastFlushedKey: null,
+      },
+    })),
+
+  incrementAnnotationsAdded: (delta = 1) =>
+    set((s) => {
+      if (!s.sessionTracking.currentImageName) return s;
+      return {
+        sessionTracking: {
+          ...s.sessionTracking,
+          annotationsAddedDelta:
+            s.sessionTracking.annotationsAddedDelta + Math.max(0, delta),
+        },
+      };
+    }),
+
+  markSessionFlushed: (key) =>
+    set((s) => ({
+      sessionTracking: {
+        ...s.sessionTracking,
+        lastFlushedKey: key,
+      },
+    })),
+
+  clearSessionTracking: () =>
+    set((s) => ({
+      sessionTracking: {
+        ...s.sessionTracking,
+        currentImageName: null,
+        imageEnterTimeMs: null,
+        loadedAnnotationCount: 0,
+        annotationsAddedDelta: 0,
+      },
+    })),
+
   loadLabelsIntoCanvas: (labels) =>
     set(() => ({
       canvas: {
@@ -291,6 +367,14 @@ export const useStore = create<AppState>()((set, get) => ({
 
   undo: () =>
     set((s) => {
+      if (s.canvas.currentPolygon.length > 0) {
+        return {
+          canvas: {
+            ...s.canvas,
+            currentPolygon: s.canvas.currentPolygon.slice(0, -1),
+          },
+        };
+      }
       const last = s.canvas.undoStack[s.canvas.undoStack.length - 1];
       if (!last) return s;
       return {

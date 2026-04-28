@@ -4,6 +4,7 @@ import Konva from "konva";
 
 import { api } from "@/api/client";
 import { classesApi } from "@/api/classes";
+import { sessionsApi } from "@/api/sessions";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useStore } from "@/store";
@@ -84,6 +85,10 @@ export function AnnotateTab() {
   const setHoveredPolygon = useStore((s) => s.setHoveredPolygon);
   const imageStatus = useStore((s) => s.imageStatus);
   const setImageStatus = useStore((s) => s.setImageStatus);
+  const startImageSessionTracking = useStore((s) => s.startImageSessionTracking);
+  const incrementAnnotationsAdded = useStore((s) => s.incrementAnnotationsAdded);
+  const markSessionFlushed = useStore((s) => s.markSessionFlushed);
+  const clearSessionTracking = useStore((s) => s.clearSessionTracking);
 
   const [drawing, setDrawing] = useState<Box | null>(null);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
@@ -92,6 +97,7 @@ export function AnnotateTab() {
   const imgPath = currentImagePath(dataset);
   const currentImageName =
     dataset.image_list[dataset.current_image_index] ?? null;
+  const isLocked = currentImageName ? imageStatus.byImage[currentImageName] === "complete" : false;
 
   // Filtered image list (Status filter)
   const filteredIndices = useMemo(() => {
@@ -119,9 +125,12 @@ export function AnnotateTab() {
         : null;
       try {
         const labels = await api.annotate.load(imgPath, det, seg);
-        if (!cancelled) loadLabels(labels);
+        if (!cancelled) {
+          loadLabels(labels);
+          startImageSessionTracking(name, labels.boxes.length + labels.polygons.length);
+        }
       } catch {
-        if (!cancelled)
+        if (!cancelled) {
           loadLabels({
             image_path: imgPath,
             img_width: 0,
@@ -129,13 +138,15 @@ export function AnnotateTab() {
             boxes: [],
             polygons: [],
           });
+          startImageSessionTracking(name, 0);
+        }
       }
     }
     void run();
     return () => {
       cancelled = true;
     };
-  }, [imgPath, dataset, loadLabels]);
+  }, [imgPath, dataset, loadLabels, startImageSessionTracking]);
 
   async function save() {
     if (!imgPath || !canvas.dirty) return;
@@ -169,23 +180,51 @@ export function AnnotateTab() {
     }
   }
 
-  // Auto-save on image change: when the dataset index changes we've already
-  // swapped imgPath; save() runs before the next image loads if dirty.
+  function emitImageSessionEvent(imageName: string) {
+    const state = useStore.getState();
+    const tracking = state.sessionTracking;
+    const projectRoot = state.gui.dataset.project_root;
+    if (!projectRoot) return;
+    if (tracking.currentImageName !== imageName || tracking.imageEnterTimeMs === null) return;
+
+    const finalAnnotationCount = state.canvas.boxes.length + state.canvas.polygons.length;
+    const elapsedSeconds = Math.max(0, (Date.now() - tracking.imageEnterTimeMs) / 1000);
+    const key = `${imageName}|${tracking.imageEnterTimeMs}|${tracking.annotationsAddedDelta}|${finalAnnotationCount}`;
+    if (tracking.lastFlushedKey === key) return;
+
+    markSessionFlushed(key);
+    clearSessionTracking();
+    void sessionsApi
+      .imageEvent({
+        project_root: projectRoot,
+        image_name: imageName,
+        session_seconds_delta: Number(elapsedSeconds.toFixed(2)),
+        annotations_added_delta: tracking.annotationsAddedDelta,
+        final_annotation_count: finalAnnotationCount,
+        loaded_annotation_count: tracking.loadedAnnotationCount,
+      })
+      .catch(() => {
+        // Best-effort telemetry; annotation flow should never block on this.
+      });
+  }
+
+  function commitPolygonAndTrack() {
+    if (isLocked) return;
+    if (commitCurrentPolygon()) incrementAnnotationsAdded(1);
+  }
+
+  // Auto-save + telemetry flush on image change and tab leave.
   const dirtyRef = useRef(canvas.dirty);
   dirtyRef.current = canvas.dirty;
-  const lastImage = useRef<string | null>(null);
   useEffect(() => {
     return () => {
-      // Fires on unmount + before next effect run when deps change
-      if (dirtyRef.current && lastImage.current) {
-        // Fire-and-forget; save() is closed over current state
+      if (!currentImageName) return;
+      emitImageSessionEvent(currentImageName);
+      if (dirtyRef.current) {
         void save();
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentImageName]);
-  useEffect(() => {
-    lastImage.current = currentImageName;
   }, [currentImageName]);
 
   function stepImage(delta: number) {
@@ -196,7 +235,6 @@ export function AnnotateTab() {
     nextPos = Math.max(0, Math.min(indices.length - 1, nextPos));
     const next = indices[nextPos];
     if (next === dataset.current_image_index) return;
-    // Save before nav
     if (canvas.dirty) void save();
     patchGui({ dataset: { ...dataset, current_image_index: next } });
     setPredReference(null);
@@ -211,16 +249,16 @@ export function AnnotateTab() {
   }
 
   useKeyboardShortcuts([
-    { keys: "ctrl+z", action: () => undo() },
-    { keys: "ctrl+shift+z", action: () => redo() },
-    { keys: "ctrl+y", action: () => redo() },
-    { keys: "ctrl+s", action: () => void save() },
+    { keys: "ctrl+z", action: () => undo(), when: () => !isLocked },
+    { keys: "ctrl+shift+z", action: () => redo(), when: () => !isLocked },
+    { keys: "ctrl+y", action: () => redo(), when: () => !isLocked },
+    { keys: "ctrl+s", action: () => void save(), when: () => !isLocked },
     { keys: "m", action: () => useStore.getState().setMode(mode === "box" ? "polygon" : "box") },
     { keys: "v", action: () => useStore.getState().setStream(!annotateUi.stream), when: () => mode === "polygon" },
     { keys: "s", action: () => useStore.getState().setSnap(!annotateUi.snap), when: () => mode === "polygon" },
     { keys: "delete", action: () => {
         if (canvas.selectedPolygonIdx !== null) deletePolygon(canvas.selectedPolygonIdx);
-    }},
+    }, when: () => !isLocked },
     { keys: "escape", action: () => {
         setCurrentPolygon([]);
         setDrawing(null);
@@ -229,8 +267,8 @@ export function AnnotateTab() {
     { keys: "arrowleft", action: () => stepImage(-1) },
     { keys: "arrowright", action: () => stepImage(1) },
     { keys: "enter", action: () => {
-      if (mode === "polygon" && canvas.currentPolygon.length >= 3) commitCurrentPolygon();
-    }},
+      if (mode === "polygon" && canvas.currentPolygon.length >= 3) commitPolygonAndTrack();
+    }, when: () => !isLocked },
     { keys: "0", action: () => selectClassByNumberKey(0) },
     { keys: "1", action: () => selectClassByNumberKey(1) },
     { keys: "2", action: () => selectClassByNumberKey(2) },
@@ -267,6 +305,7 @@ export function AnnotateTab() {
   // ── Mouse handlers ──────────────────────────────────────────────────
 
   const onDown = (ix: number, iy: number) => {
+    if (isLocked) return;
     if (mode === "box") {
       setDrawing({ x1: ix, y1: iy, x2: ix, y2: iy, class_id: activeClass });
       return;
@@ -319,6 +358,7 @@ export function AnnotateTab() {
 
   const onMove = (ix: number, iy: number) => {
     setCursor([ix, iy]);
+    if (isLocked) return;
 
     // Vertex drag
     const dragging = annotateUi.draggingVertex;
@@ -358,6 +398,7 @@ export function AnnotateTab() {
   };
 
   const onUp = (ix: number, iy: number) => {
+    if (isLocked) return;
     if (annotateUi.draggingVertex) {
       useStore.getState().setDraggingVertex(null);
       return;
@@ -370,12 +411,16 @@ export function AnnotateTab() {
         y2: Math.max(drawing.y1, iy),
         class_id: activeClass,
       };
-      if (box.x2 - box.x1 > MIN_BOX_SIDE && box.y2 - box.y1 > MIN_BOX_SIDE) addBox(box);
+      if (box.x2 - box.x1 > MIN_BOX_SIDE && box.y2 - box.y1 > MIN_BOX_SIDE) {
+        addBox(box);
+        incrementAnnotationsAdded(1);
+      }
       setDrawing(null);
     }
   };
 
   const onClick = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
+    if (isLocked) return;
     if (ev.evt.button !== 0) return;
     if (mode !== "polygon") return;
     if (annotateUi.draggingVertex) return;
@@ -405,14 +450,16 @@ export function AnnotateTab() {
   };
 
   const onDoubleClick = (_ix: number, _iy: number) => {
+    if (isLocked) return;
     if (mode !== "polygon") return;
     if (canvas.currentPolygon.length >= 3) {
-      commitCurrentPolygon();
+      commitPolygonAndTrack();
     }
   };
 
   const onContextMenu = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     ev.evt.preventDefault();
+    if (isLocked) return;
     // Right-click cancels in-progress polygon first
     if (mode === "polygon" && canvas.currentPolygon.length > 0) {
       setCurrentPolygon([]);
@@ -476,6 +523,21 @@ export function AnnotateTab() {
   const selVertR = Math.max(vertR, Math.min(VERTEX_HANDLE_RADIUS * (2.2 - s * 0.2), 16)) * scaleLineW;
   const labelSize = Math.max(8, Math.min(Math.round(9 * (0.6 + s * 0.4)), 18)) * scaleLineW;
 
+  if (!imgPath || !currentImageName) {
+    return (
+      <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
+          <div className="max-w-lg rounded-lg border border-tcip-border bg-tcip-panel px-5 py-4 text-center">
+            <p className="text-sm font-semibold text-tcip-fg">No image loaded</p>
+            <p className="mt-1 text-xs text-tcip-muted">
+              Pick a dataset/date with images, then use Prev/Next and the image counter to navigate.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const imageUrl = imgPath ? api.images.url(imgPath) : null;
 
   const renderLabels = annotateUi.visible;
@@ -484,107 +546,115 @@ export function AnnotateTab() {
 
   return (
     <div className="flex-1 flex flex-col">
-      <CanvasStage
-        imageUrl={imageUrl}
-        imgWidth={canvas.imgWidth}
-        imgHeight={canvas.imgHeight}
-        onStageRef={(st) => (stageRef.current = st)}
-        onPixelDown={onDown}
-        onPixelMove={onMove}
-        onPixelUp={onUp}
-        onPixelClick={onClick}
-        onPixelDoubleClick={onDoubleClick}
-        onPixelContextMenu={onContextMenu}
-      >
-        {/* Boxes (only active class in box mode, like yolo-annotator) */}
-        {renderLabels && mode === "box" &&
-          canvas.boxes.map((b, i) =>
-            b.class_id === activeClass ? (
-              <BoxOverlay
-                key={`box-${i}`}
-                box={b}
-                stroke={classColor(b.class_id)}
-                width={boxStroke}
-                labelSize={labelSize}
-                label={`${b.class_id}: ${className(b.class_id)}`}
-              />
-            ) : null,
+      <div className="relative flex-1">
+        <CanvasStage
+          imageUrl={imageUrl}
+          imgWidth={canvas.imgWidth}
+          imgHeight={canvas.imgHeight}
+          onStageRef={(st) => (stageRef.current = st)}
+          onPixelDown={onDown}
+          onPixelMove={onMove}
+          onPixelUp={onUp}
+          onPixelClick={onClick}
+          onPixelDoubleClick={onDoubleClick}
+          onPixelContextMenu={onContextMenu}
+        >
+          {/* Boxes (only active class in box mode, like yolo-annotator) */}
+          {renderLabels && mode === "box" &&
+            canvas.boxes.map((b, i) =>
+              b.class_id === activeClass ? (
+                <BoxOverlay
+                  key={`box-${i}`}
+                  box={b}
+                  stroke={classColor(b.class_id)}
+                  width={boxStroke}
+                  labelSize={labelSize}
+                  label={`${b.class_id}: ${className(b.class_id)}`}
+                />
+              ) : null,
+            )}
+
+          {/* Polygons */}
+          {renderLabels &&
+            canvas.polygons.map((p, i) => {
+              const selected = canvas.selectedPolygonIdx === i;
+              const hovered = hoveredIdx === i;
+              const dragging = draggingIdx === i;
+              // In box mode only show the selected polygon; in polygon mode show all
+              if (mode === "box" && !selected) return null;
+              // In polygon mode filter to active class unless selected
+              if (mode === "polygon" && !selected && p.class_id !== activeClass) return null;
+              const showVerts = selected || hovered || dragging;
+              return (
+                <PolygonOverlay
+                  key={`poly-${i}`}
+                  polygon={p}
+                  stroke={selected ? "#00BFFF" : classColor(p.class_id)}
+                  width={polyStroke}
+                  vertexRadius={selected ? selVertR : vertR}
+                  showVertices={showVerts}
+                  labelSize={labelSize}
+                  label={`${p.class_id}: ${className(p.class_id)}`}
+                />
+              );
+            })}
+
+          {/* In-progress polygon */}
+          {mode === "polygon" && canvas.currentPolygon.length > 0 && (
+            <InProgressPolygon
+              points={canvas.currentPolygon}
+              cursor={cursor}
+              stroke={classColor(activeClass)}
+              strokeW={polyStroke}
+              vertR={vertR}
+            />
           )}
 
-        {/* Polygons */}
-        {renderLabels &&
-          canvas.polygons.map((p, i) => {
-            const selected = canvas.selectedPolygonIdx === i;
-            const hovered = hoveredIdx === i;
-            const dragging = draggingIdx === i;
-            // In box mode only show the selected polygon; in polygon mode show all
-            if (mode === "box" && !selected) return null;
-            // In polygon mode filter to active class unless selected
-            if (mode === "polygon" && !selected && p.class_id !== activeClass) return null;
-            const showVerts = selected || hovered || dragging;
-            return (
-              <PolygonOverlay
-                key={`poly-${i}`}
-                polygon={p}
-                stroke={selected ? "#00BFFF" : classColor(p.class_id)}
-                width={polyStroke}
-                vertexRadius={selected ? selVertR : vertR}
-                showVertices={showVerts}
-                labelSize={labelSize}
-                label={`${p.class_id}: ${className(p.class_id)}`}
-              />
-            );
-          })}
+          {/* Box draft */}
+          {drawing && (
+            <Rect
+              x={Math.min(drawing.x1, drawing.x2)}
+              y={Math.min(drawing.y1, drawing.y2)}
+              width={Math.abs(drawing.x2 - drawing.x1)}
+              height={Math.abs(drawing.y2 - drawing.y1)}
+              stroke={classColor(activeClass)}
+              strokeWidth={boxStroke}
+              dash={[6 * scaleLineW, 4 * scaleLineW]}
+            />
+          )}
 
-        {/* In-progress polygon */}
-        {mode === "polygon" && canvas.currentPolygon.length > 0 && (
-          <InProgressPolygon
-            points={canvas.currentPolygon}
-            cursor={cursor}
-            stroke={classColor(activeClass)}
-            strokeW={polyStroke}
-            vertR={vertR}
-          />
+          {/* Snap indicator */}
+          {annotateUi.snap && cursor && mode === "polygon" && (
+            <SnapIndicator
+              cursor={cursor}
+              polygons={canvas.polygons}
+              scale={s}
+            />
+          )}
+
+          {/* Prediction reference */}
+          {predRef && <PredReferenceOverlay pred={predRef} lineW={scaleLineW} />}
+        </CanvasStage>
+
+        {isLocked && (
+          <div className="absolute top-3 right-3 rounded-md border border-tcip-border bg-tcip-panel/95 px-2 py-1 text-[11px] text-tcip-muted pointer-events-none">
+            Locked (Complete). Uncheck Complete to edit.
+          </div>
         )}
-
-        {/* Box draft */}
-        {drawing && (
-          <Rect
-            x={Math.min(drawing.x1, drawing.x2)}
-            y={Math.min(drawing.y1, drawing.y2)}
-            width={Math.abs(drawing.x2 - drawing.x1)}
-            height={Math.abs(drawing.y2 - drawing.y1)}
-            stroke={classColor(activeClass)}
-            strokeWidth={boxStroke}
-            dash={[6 * scaleLineW, 4 * scaleLineW]}
-          />
-        )}
-
-        {/* Snap indicator */}
-        {annotateUi.snap && cursor && mode === "polygon" && (
-          <SnapIndicator
-            cursor={cursor}
-            polygons={canvas.polygons}
-            scale={s}
-          />
-        )}
-
-        {/* Prediction reference */}
-        {predRef && <PredReferenceOverlay pred={predRef} lineW={scaleLineW} />}
-      </CanvasStage>
+      </div>
 
       <div className="flex items-center gap-2 px-3 py-1.5 border-t border-tcip-border bg-tcip-panel text-[11px]">
-        <button className="tcip-btn text-[11px]" onClick={() => undo()} title="Ctrl+Z">
+        <button className="tcip-btn text-[11px]" onClick={() => undo()} title="Ctrl+Z" disabled={isLocked}>
           ↶ Undo
         </button>
-        <button className="tcip-btn text-[11px]" onClick={() => redo()} title="Ctrl+Shift+Z">
+        <button className="tcip-btn text-[11px]" onClick={() => redo()} title="Ctrl+Shift+Z" disabled={isLocked}>
           ↷ Redo
         </button>
         {mode === "polygon" && (
           <button
             className="tcip-btn text-[11px]"
-            onClick={() => commitCurrentPolygon()}
-            disabled={canvas.currentPolygon.length < 3}
+            onClick={() => commitPolygonAndTrack()}
+            disabled={isLocked || canvas.currentPolygon.length < 3}
             title="Double-click or Enter"
           >
             ✓ Close polygon
@@ -597,7 +667,7 @@ export function AnnotateTab() {
         <button
           className={canvas.dirty ? "tcip-btn-primary" : "tcip-btn"}
           onClick={() => void save()}
-          disabled={!imgPath}
+          disabled={!imgPath || isLocked}
           title="Ctrl+S (auto-save on image change)"
         >
           {canvas.dirty ? "💾 Save" : "Saved"}
