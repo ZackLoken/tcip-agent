@@ -281,8 +281,10 @@ class TestComposer:
 
     def test_recommend_classification(self):
         from tcip_mcp.pipelines.composer import recommend_model_spec
+        from tcip_mcp.pipelines.components.backbones import HAS_TIMM
         spec = recommend_model_spec("classification", dataset_size=300, num_classes=5)
-        assert spec["backbone"]["name"] == "efficientnet_b0"
+        expected_bb = "efficientnet_b0" if HAS_TIMM else "resnet18"
+        assert spec["backbone"]["name"] == expected_bb
         assert spec["neck"]["name"] == "gap"
         assert spec["heads"][0]["name"] == "classification"
 
