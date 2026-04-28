@@ -1,6 +1,9 @@
 # ── Data (images & labels are large / user-specific) ──────────────────────
 /data
 
+# ── Design docs (working notes, not for version control) ────────────────────
+/docs
+
 # ── Python ────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
