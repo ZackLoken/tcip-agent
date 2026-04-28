@@ -14,6 +14,7 @@ import torch.nn as nn
 
 from tcip_mcp.pipelines.registry import BACKBONES, NECKS, HEADS
 from tcip_mcp.pipelines.components.heads import BaseHead
+from tcip_mcp.pipelines.components.backbones import HAS_TIMM
 
 _DETECTION_HEADS = {"anchor_detection"}
 
@@ -333,7 +334,7 @@ def recommend_model_spec(
     """
     # Backbone selection by dataset size
     if dataset_size < 500:
-        bb = "efficientnet_b0"
+        bb = "efficientnet_b0" if HAS_TIMM else "resnet18"
     elif dataset_size < 2000:
         bb = "resnet50"
     else:
