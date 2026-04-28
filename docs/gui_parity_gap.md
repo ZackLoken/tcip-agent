@@ -31,11 +31,11 @@ already shipped.
 | Color picker button (class-colored swatch) | — | **T1** |
 | Class dropdown with counts `0: catkin (281)` | Class dropdown with name only | **T1** |
 | `<New Class>` sentinel in class dropdown → input dialog | — | **T1** |
-| Status bar: per-image timer (`Image time: 1:23` / `Review time: 0:45`) | — | T2 |
+| Status bar: per-image timer (`Image time: 1:23` / `Review time: 0:45`) | **[done]** (Annotate timer shipped) | — |
 | Status bar: `User: <osuser>` | — | T2 |
 | Status bar: `Zoom: 100%` live | **[done]** | — |
 | Status bar (review): Class / Type / Status filter + GT/Pred checkboxes + A/E/R buttons + ◀ det-count ▶ | Partial — has filters but flat toolbar, no GT/Pred toggles, no A/E/R in status bar | **T1** |
-| Welcome screen ("Click Open Folder to load images") | — | T2 |
+| Welcome screen ("Click Open Folder to load images") | Partial — DatasetPicker + annotate no-image overlay shipped | T2 |
 | Tab switch records review time and resets annotate timer | — | T2 |
 | Tab switch syncs scale/offset Review → Annotate | Partial — only on Edit/FP-Accept, not on plain tab switch | T2 |
 | Default mode = polygon if segment labels exist, else box | — | T2 |
@@ -71,7 +71,7 @@ already shipped.
 | Auto-save on image navigation (Prev/Next) | Only on Ctrl+S | **T1** |
 | 0-9 hotkey → select class by ID | — | **T1** |
 | Undo stack capped at 30, per-image | **[done]** | — |
-| In-progress polygon vertex undo (Ctrl+Z pops one vertex before popping full-snapshot) | Snapshot-only | T2 |
+| In-progress polygon vertex undo (Ctrl+Z pops one vertex before popping full-snapshot) | **[done]** | — |
 | Prediction reference overlay in Annotate (dashed blue) when editing from Review | **[done]** | — |
 | `Enter` closes in-progress polygon | **[done]** (in addition to double-click, which is missing) | — |
 
@@ -147,7 +147,7 @@ already shipped.
 **Tier 2 (strong polish):**
 
 - Streaming vertex mode (`v`).
-- Per-image timer in status bar + session tracking (annotation_stats.json).
+- Session tracking persistence and aggregation validation (annotation_stats.json).
 - Welcome state when no dataset loaded.
 - Auto-zoom-to-first-unreviewed on review tab activation.
 - First-time backup of labels (wire UI trigger).
@@ -159,7 +159,6 @@ already shipped.
 
 - SI logo + Archivo font + "YoloLabeler" branding.
 - Spacebar = synthetic left-click.
-- In-progress polygon vertex undo (one-vertex pops before full snapshot).
 - Editable class name.
 - Tab switch behaviours (sync scale, restart timer, etc.).
 
