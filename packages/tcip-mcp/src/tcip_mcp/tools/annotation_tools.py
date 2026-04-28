@@ -17,6 +17,7 @@ from tcip_annotation import (
 )
 from tcip_annotation.format_io import (
     detect_format,
+    detect_format_confident,
     load_annotations as format_load,
     save_annotations as format_save,
     AnnotFormat,
@@ -78,11 +79,15 @@ def load_annotations(image_path: str, fmt: str | None = None) -> dict:
     # Find and load detection labels
     det_path = _find_label_path(root, stem, "detect", fmt=fmt)
     if det_path is not None:
-        file_fmt = fmt or detect_format(str(det_path))
+        if fmt:
+            file_fmt, confident = fmt, True
+        else:
+            file_fmt, confident = detect_format_confident(str(det_path))
         boxes, class_ids = format_load(str(det_path), w, h, task="detect", fmt=file_fmt)
         result["detect_labels"] = {
             "path": str(det_path),
             "format": file_fmt,
+            "format_confident": confident,
             "count": len(boxes),
             "class_ids": sorted(class_ids),
             "boxes": [
@@ -90,18 +95,32 @@ def load_annotations(image_path: str, fmt: str | None = None) -> dict:
                 for b in boxes
             ],
         }
+        if not confident:
+            result["warning"] = (
+                f"Annotation format could not be confidently detected for {det_path.name}; "
+                "defaulted to YOLO. If this is wrong, re-call with fmt='coco', 'voc', or 'labelme'."
+            )
 
     # Find and load segment labels
     seg_path = _find_label_path(root, stem, "segment", fmt=fmt)
     if seg_path is not None:
-        file_fmt = fmt or detect_format(str(seg_path))
+        if fmt:
+            file_fmt, confident = fmt, True
+        else:
+            file_fmt, confident = detect_format_confident(str(seg_path))
         polys, class_ids = format_load(str(seg_path), w, h, task="segment", fmt=file_fmt)
         result["segment_labels"] = {
             "path": str(seg_path),
             "format": file_fmt,
+            "format_confident": confident,
             "count": len(polys),
             "class_ids": sorted(class_ids),
         }
+        if not confident and "warning" not in result:
+            result["warning"] = (
+                f"Annotation format could not be confidently detected for {seg_path.name}; "
+                "defaulted to YOLO. If this is wrong, re-call with fmt='coco', 'voc', or 'labelme'."
+            )
 
     # Look for predictions (YOLO format — predictions are always YOLO)
     for pred_dir in (root / "predictions" / "detect",):
