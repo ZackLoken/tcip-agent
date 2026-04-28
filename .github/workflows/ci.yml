@@ -21,6 +21,7 @@ jobs:
 
       - name: Install packages
         run: |
+          pip install pytest-timeout
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev]"
           pip install -e "packages/tcip-web[dev]"
