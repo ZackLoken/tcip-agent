@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from pathlib import Path
 from typing import Literal
 from xml.etree import ElementTree as ET
@@ -40,43 +41,57 @@ Task = Literal["detect", "segment"]
 
 
 def detect_format(path: str) -> AnnotFormat:
-    """Infer annotation format from file extension and content.
+    """Infer annotation format from file extension and content. Returns yolo as fallback."""
+    fmt, _ = detect_format_confident(path)
+    return fmt
+
+
+def detect_format_confident(path: str) -> tuple[AnnotFormat, bool]:
+    """Infer annotation format and whether the result was a confident match.
+
+    Returns (format, confident) where confident=False means the format is a
+    best-guess fallback (YOLO) rather than a definitive detection. Callers that
+    need to surface uncertainty to a user or agent should check this flag.
 
     Rules:
-      - .xml → voc (PASCAL VOC)
-      - .txt → yolo
-      - .json → inspect content: 'shapes' key → labelme, else → coco
-      - directory → inspect files inside
+      - .xml  → ("voc", True)
+      - .txt  → ("yolo", True)
+      - .json with recognized keys → (format, True)
+      - .json without recognized keys → ("yolo", False)
+      - directory: xml wins (True); recognized JSON wins (True);
+                   txt → ("yolo", True); nothing matches → ("yolo", False)
     """
     p = Path(path)
 
     if p.suffix == ".xml":
-        return "voc"
+        return "voc", True
 
     if p.suffix == ".txt":
-        return "yolo"
+        return "yolo", True
 
     if p.suffix == ".json":
-        return _detect_json_format(p)
+        fmt = _detect_json_format(p)
+        return (fmt, True) if fmt is not None else ("yolo", False)
 
     if p.is_dir():
-        has_xml = any(p.glob("*.xml"))
-        has_json = any(p.glob("*.json"))
-        has_txt = any(p.glob("*.txt"))
-        if has_xml:
-            return "voc"
-        if has_json and not has_txt:
-            # Check first JSON to distinguish COCO vs LabelMe
-            first_json = next(p.glob("*.json"))
-            return _detect_json_format(first_json)
-        if has_txt:
-            return "yolo"
+        if any(p.glob("*.xml")):
+            return "voc", True
+        for json_path in sorted(p.glob("*.json")):
+            fmt = _detect_json_format(json_path)
+            if fmt is not None:
+                return fmt, True
+        if any(p.glob("*.txt")):
+            return "yolo", True
 
-    return "yolo"  # default fallback
+    return "yolo", False
 
 
-def _detect_json_format(path: Path) -> AnnotFormat:
-    """Distinguish COCO from LabelMe by inspecting JSON keys."""
+def _detect_json_format(path: Path) -> AnnotFormat | None:
+    """Inspect JSON keys to distinguish COCO from LabelMe.
+
+    Returns None if the file does not look like a known annotation format,
+    so the caller can fall through to the next candidate.
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -87,7 +102,7 @@ def _detect_json_format(path: Path) -> AnnotFormat:
                 return "coco"
     except (json.JSONDecodeError, OSError):
         pass
-    return "coco"  # default for unknown JSON
+    return None
 
 
 # ── COCO JSON parsing ──────────────────────────────────────────────────────
@@ -497,7 +512,10 @@ def load_annotations(
             boxes, class_ids, _ = parse_voc_detect(path)
             return boxes, class_ids
         else:
-            # VOC has no native polygon support — return empty
+            warnings.warn(
+                "PASCAL VOC format has no segmentation support; returning empty annotations.",
+                stacklevel=2,
+            )
             return [], set()
     elif fmt == "labelme":
         if task == "detect":
