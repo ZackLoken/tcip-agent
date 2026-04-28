@@ -4,6 +4,8 @@ Prototype (in progress) of an agentic ML/CV system for automated phenotyping in 
 
 Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology from ground imagery.
 
+Currently working on reducing tool bloat and building out the GUI annotate and review tabs. 
+
 ## Architecture
 
 ```
@@ -47,7 +49,7 @@ packages/
     src/tcip_web/
       routes/                  # annotate, review, training, tuning, inference, results, ...
     frontend/src/              # Vite + React 18 + TypeScript + Tailwind + Konva
-scripts/                       # one-off ingestion and analysis scripts
+scripts/                       # one-off ingestion scripts (created by agent)
 tests/                         # pytest suite
 data/                          # sample hazelnut dataset (gitignored)
 ```
