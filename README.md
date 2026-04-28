@@ -1,80 +1,95 @@
 # TCIP Agent
 
-Agentic ML/CV system for tree crop breeding programs. Automates pipeline design, training, annotation, review, inference, and per-plant CSV delivery.
+Prototype (in progress) of an agentic ML/CV system for automated phenotyping in tree crop breeding programs. A Claude Code / GitHub Copilot agent (ML/CV engineer persona) drives annotation, model training, inference, and per-plant result delivery through an MCP tool server, while a browser-based GUI supports human annotation, review, and training oversight.
+
+Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology from ground imagery.
 
 ## Architecture
 
-Three-process system:
-
-1. **Copilot / Claude agent** (`.github/agents/tcip.agent.md`) — ML/CV engineer persona with progressive domain knowledge via agent skills
-2. **Python MCP server** (`packages/tcip-mcp/`) — 40+ domain tools over MCP stdio (data, annotation, training, inference, pipelines, active learning, experiments)
-3. **FastAPI + React GUI** (`packages/tcip-web/`) — browser app with Annotate / Review / Training / Tuning / Inference / Results tabs; mirrors the yolo-annotator desktop UX. Backend persists state at `<project_root>/.tcip/state/`; agent and browser both mutate it through the same routes.
-
-Supporting library: `packages/tcip-annotation/` — Headless annotation/review engine (label I/O, matching, AnnotationEngine, ReviewEngine, SAM wrapper).
-
-## Build & Test
-
-```bash
-# Python (conda env: tcip-agent, Python 3.11)
-conda activate tcip-agent
-pytest tests/ -v --tb=short
-
-# Frontend (Vite + React + TS + Tailwind + Konva)
-cd packages/tcip-web/frontend
-npm install
-npm run typecheck
-npm run build      # outputs into ../static/
-
-# Backend
-python -m tcip_web   # http://127.0.0.1:8765
+```
+┌──────────────────────────────┐
+│  Claude Code / Copilot agent │  ML/CV engineer persona
+│  (.github/agents/tcip.agent) │  designs pipelines, trains, evaluates
+└──────────┬───────────────────┘
+           │ MCP (stdio)
+           ▼
+┌──────────────────────────────┐
+│  Python MCP server           │  54 domain tools: data, annotation,
+│  (packages/tcip-mcp)         │  training, inference, experiments, viz
+└──────────┬───────────────────┘
+           │ HTTP / WebSocket
+           ▼
+┌──────────────────────────────┐
+│  FastAPI + React GUI         │  Annotate / Review / Training /
+│  (packages/tcip-web)         │  Tuning / Inference / Results tabs
+└──────────────────────────────┘
 ```
 
-## Key Directories
+All three processes share `.tcip/` on disk (experiment state, model registry, audit log, GUI state).
 
-| Path | Contents |
-|------|----------|
-| `.github/agents/` | Copilot custom agent definition |
-| `.github/skills/` | Agent skills — progressive domain knowledge (loaded when relevant) |
-| `.github/prompts/` | Prompt files — slash commands for common tasks |
-| `packages/tcip-mcp/` | MCP server — tools across data, annotation, training, inference, etc. |
-| `packages/tcip-annotation/` | Label I/O, matching, AnnotationEngine, ReviewEngine, SAM wrapper |
-| `packages/tcip-web/` | FastAPI backend + React frontend (the GUI) |
-| `tests/` | Python test suite |
-| `data/` | Sample images, labels, predictions |
+Supporting library: `packages/tcip-annotation` — headless annotation engine (label I/O, format conversion, IoU matching, SAM wrapper). No dependency on the other packages.
 
-## Crops
+## Repository layout
 
-Six tree crop species: `black_locust`, `chestnut`, `currant`, `elderberry`, `hazelnut`, `persimmon`.
+```
+.github/
+  agents/tcip.agent.md         # agent persona and workflow
+  copilot-instructions.md      # primary agent system prompt
+  skills/                      # domain knowledge modules (crops, annotation, training, ...)
+  prompts/                     # slash-command templates
+packages/
+  tcip-mcp/                    # MCP server (python -m tcip_mcp)
+    src/tcip_mcp/
+      tools/                   # 10 files, 54 tools
+      pipelines/               # composable ML: registry, composer, trainer, predictor
+  tcip-annotation/             # headless annotation library
+  tcip-web/                    # FastAPI backend + React frontend
+    src/tcip_web/
+      routes/                  # annotate, review, training, tuning, inference, results, ...
+    frontend/src/              # Vite + React 18 + TypeScript + Tailwind + Konva
+scripts/                       # one-off ingestion and analysis scripts
+tests/                         # pytest suite
+data/                          # sample hazelnut dataset (gitignored)
+```
 
-Traits are defined in per-crop agent skills under `.github/skills/crops/`. Always verify trait names against these files — never assume.
+## Setup
+
+```bash
+# Python — create env from lockfile, then install packages in editable mode
+conda env create -f environment.yml
+conda activate tcip-agent
+pip install -e packages/tcip-annotation
+pip install -e packages/tcip-mcp
+pip install -e packages/tcip-web
+
+# Frontend
+cd packages/tcip-web/frontend
+npm install
+```
+
+## Running
+
+```bash
+# Web backend (serves pre-built React app at http://127.0.0.1:8765)
+conda activate tcip-agent
+python -m tcip_web
+
+# Frontend dev server (proxies /api and /ws to backend)
+cd packages/tcip-web/frontend
+npm run dev        # http://127.0.0.1:5173
+npm run build      # rebuild production bundle → ../static/
+
+# Tests
+pytest tests/ -v --tb=short
+npm run typecheck  # from packages/tcip-web/frontend
+```
+
+The MCP server starts automatically when Claude Code connects (see `.mcp.json`).
 
 ## Conventions
 
-- **Frontend**: React + TypeScript (strict). Source under `packages/tcip-web/frontend/src/`; production build emits to `packages/tcip-web/static/`.
-- **Python imports**: Lazy imports for heavy deps (torch, torchvision) inside function bodies
-- **MCP tools**: Decorated with `@mcp.tool()`, registered in `packages/tcip-mcp/src/tcip_mcp/tools/`
-- **Audit logging**: All tools wrapped with `@audited` decorator, logs to `.tcip/audit.jsonl`
-- **Experiments**: Training runs tracked in `.tcip/experiments/` with config, metrics, artifacts, lineage
-
-## Composable ML System
-
-The ML pipeline uses a composable architecture with NO constraints on model architectures:
-- `pipelines/components/` — Registered backbones, necks, heads, losses
-- `pipelines/registry.py` — `ComponentRegistry` for plugin-style registration (library, not a constraint)
-- `pipelines/composer.py` — `compose_model()` builds models from spec dicts
-- `pipelines/training/generic_trainer.py` — Generic training loop
-- `pipelines/inference/generic_predictor.py` — Generic inference
-- `pipelines/data/datasets.py` — Dataset builders (classification, detection, segmentation, point cloud)
-
-## MCP Tools
-
-The system provides 40+ MCP tools organized by domain:
-- **Data**: `load_dataset`, `validate_data_quality`, `split_dataset`
-- **Annotation**: `load_annotations`, `save_annotations`, `evaluate_detections`, `run_matching`, `sam_predict`, `push_panel_data`
-- **Training**: `validate_config`, `launch_training`, `check_training_status`, `run_hpo`, `get_worst_predictions`
-- **Inference**: `run_inference`, `export_predictions_yolo`, `export_results_csv`
-- **Models**: `list_available_models`, `register_model`, `get_best_model`
-- **Pipelines**: `list_components`, `recommend_model`, `validate_pipeline_spec`, `run_pipeline`
-- **Projects**: `init_project`, `create_session`, `get_project_status`, `export_project`
-- **Experiments**: `create_experiment`, `log_metrics`, `compare_experiments`, `get_experiment_lineage`
-- **Active Learning**: `score_unlabeled`, `get_review_queue`
+- **Annotations**: YOLO by default. Auto-detects YOLO / COCO / PASCAL VOC / LabelMe. Empty label files are valid negatives.
+- **Experiments**: tracked in `.tcip/experiments/<id>/` with config, metrics JSONL, artifacts, lineage.
+- **Audit log**: all MCP tool calls logged to `.tcip/audit.jsonl` via `@audited` decorator.
+- **Lazy imports**: heavy deps (torch, torchvision) imported inside function bodies for fast MCP startup.
+- **Crop traits**: controlled vocabulary defined in `.github/skills/crops/`.
