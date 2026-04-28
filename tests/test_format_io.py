@@ -59,9 +59,27 @@ def test_detect_format_dir_txt(tmp_path):
     assert detect_format(str(tmp_path)) == "yolo"
 
 
-def test_detect_format_dir_json(tmp_path):
-    (tmp_path / "data.json").write_text("{}")
+def test_detect_format_dir_json_coco(tmp_path):
+    (tmp_path / "annotations.json").write_text('{"images": [], "annotations": []}')
     assert detect_format(str(tmp_path)) == "coco"
+
+
+def test_detect_format_dir_json_labelme(tmp_path):
+    (tmp_path / "img0.json").write_text('{"shapes": [], "imagePath": "img0.jpg"}')
+    assert detect_format(str(tmp_path)) == "labelme"
+
+
+def test_detect_format_dir_json_with_txt_coexisting(tmp_path):
+    # COCO/LabelMe JSON should win over stray .txt files in the same directory
+    (tmp_path / "annotations.json").write_text('{"images": [], "annotations": []}')
+    (tmp_path / "classes.txt").write_text("catkin\nbush\n")
+    assert detect_format(str(tmp_path)) == "coco"
+
+
+def test_detect_format_dir_unknown_json_falls_back_to_yolo(tmp_path):
+    # An unrecognized JSON (no annotation keys) should not force coco
+    (tmp_path / "data.json").write_text("{}")
+    assert detect_format(str(tmp_path)) == "yolo"
 
 
 # ── COCO detect parse/write round-trip ──────────────────────────────────────
