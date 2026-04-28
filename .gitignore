@@ -26,6 +26,26 @@ venv/
 # ── Node ─────────────────────────────────────────────────────────────────
 node_modules/
 package-lock.json
+*.tsbuildinfo
+
+# ── Frontend build output (keep static assets, ignore generated bundles) ──
+packages/tcip-web/static/index.html
+packages/tcip-web/static/assets/*.js
+packages/tcip-web/static/assets/*.js.map
+packages/tcip-web/static/assets/*.css
+
+# ── Retired VS Code extension build output ───────────────────────────────
+packages/tcip-vscode/out/
+
+# ── Claude Code local settings ───────────────────────────────────────────
+.claude/
+
+# ── Editor workspace files ────────────────────────────────────────────────
+.vscode/
+*.code-workspace
+
+# ── Planning and working documents ───────────────────────────────────────
+VISION_AGENT_PLAN.md
 
 # ── Tool / cache directories ────────────────────────────────────────────
 .pytest_cache/
