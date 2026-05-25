@@ -4,7 +4,7 @@ Prototype (in progress) of an agentic ML/CV system for automated phenotyping in 
 
 Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology from ground imagery.
 
-Currently working on reducing tool bloat and building out the GUI annotate and review tabs. 
+Active development: consolidating the MCP tool surface and building out the Annotate and Review tabs of the GUI. 
 
 ## Architecture
 
