@@ -202,7 +202,7 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
                 update_status(experiment_id, "completed")
                 register_model_from_experiment(experiment_id, weights)
             else:
-                update_status(experiment_id, "failed")
+                update_status(experiment_id, run.status or "failed")  # "failed" or "cancelled"
         except Exception as exc:
             logger.warning("Experiment completion wiring failed for %s: %s", experiment_id, exc)
 
@@ -266,6 +266,25 @@ def list_training_runs() -> dict:
     """List all training runs in this session."""
     from tcip_mcp.pipelines.training.generic_trainer import list_runs
     return {"runs": list_runs()}
+
+
+@mcp.tool()
+@audited
+def cancel_training(run_id: str) -> dict:
+    """Request graceful cancellation of a running training run.
+
+    The trainer stops at the next batch/epoch boundary, still saves ``model_final.pt``
+    (so partial progress is recoverable), and sets the run + its experiment to
+    'cancelled'. Status updates asynchronously, so the returned status may still read
+    'running' immediately after the request.
+
+    Args:
+        run_id: Training run identifier (from launch_training).
+    """
+    from tcip_mcp.pipelines.training.generic_trainer import cancel_run, get_run
+    if not cancel_run(run_id):
+        return {"error": f"Run not found: {run_id}"}
+    return {"run_id": run_id, "status": get_run(run_id).status, "cancel_requested": True}
 
 
 @mcp.tool()
