@@ -59,3 +59,29 @@ def test_build_detector_unknown_name_raises():
     from tcip_mcp.pipelines.components.detectors import build_detector
     with pytest.raises(KeyError):
         build_detector("does_not_exist", object(), 1, featmap_names=["0"], num_levels=1)
+
+
+def test_detection_head_markers_raise_when_run_standalone():
+    # 2.1b: the dead standalone-detector path is gone; the head markers (which exist only
+    # for name validation / spec kwargs) fail loudly if anyone runs them directly.
+    from tcip_mcp.pipelines.components.heads import AnchorDetectionHead, AnchorFreeDetectionHead
+    for cls in (AnchorDetectionHead, AnchorFreeDetectionHead):
+        with pytest.raises(NotImplementedError):
+            cls(in_channels=256, num_classes=1).forward(None)
+
+
+def test_composed_and_detection_models_share_base_and_inherit_freeze():
+    from tcip_mcp.pipelines.composer import (
+        ComposedModel, DetectionModel, _ComposedModule, compose_model,
+    )
+    det = compose_model(_det_spec("faster_rcnn"))
+    assert isinstance(det, (_ComposedModule, DetectionModel))
+    det.freeze_backbone(2)  # inherited from the shared base
+
+    clf = compose_model({
+        "backbone": {"name": "tv_resnet50"},
+        "neck": {"name": "gap"},
+        "heads": [{"name": "classification", "num_classes": 3}],
+    })
+    assert isinstance(clf, (_ComposedModule, ComposedModel))
+    clf.freeze_backbone(1)
