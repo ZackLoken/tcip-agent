@@ -16,7 +16,6 @@ from PIL import Image
 from pydantic import BaseModel
 
 from tcip_annotation import (
-    AnnotationState,
     BBox,
     Polygon,
     parse_detect_labels,
