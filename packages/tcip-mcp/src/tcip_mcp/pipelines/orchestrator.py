@@ -113,6 +113,13 @@ def validate_pipeline(spec: dict) -> list[str]:
                 issues.append(f"{prefix}: duplicate output name '{output_ref}'")
             output_names.add(output_ref)
 
+        # W7: validate a dict model_spec's components / channel compatibility.
+        model_spec = phase.get("model_spec")
+        if isinstance(model_spec, dict):
+            from tcip_mcp.pipelines.composer import validate_model_spec
+            for m in validate_model_spec(model_spec):
+                issues.append(f"{prefix}: {m}")
+
         # Phase-type-specific requirements (model_spec for training, etc.)
         # are enforced by the runners themselves, not here — custom phase
         # types may not need either of those fields.
