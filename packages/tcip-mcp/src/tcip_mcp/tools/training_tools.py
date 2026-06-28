@@ -179,10 +179,34 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     except Exception as exc:  # Experiment tracking is best-effort, but failures must be visible.
         logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
 
-    thread = threading.Thread(
-        target=train, args=(run, train_loader, val_loader, task),
-        kwargs={"resume_from": resume_from}, daemon=True,
-    )
+    def _run_with_tracking() -> None:
+        """Run training and wire its lifecycle into the experiment + model registry."""
+        from tcip_mcp.experiments import (
+            log_metrics, register_model_from_experiment, update_status,
+        )
+
+        def _epoch_cb(epoch: int, epoch_metrics: dict) -> None:
+            try:
+                log_metrics(experiment_id, epoch, epoch_metrics)
+            except Exception as exc:
+                logger.warning("Experiment metric log failed (%s epoch %s): %s", experiment_id, epoch, exc)
+
+        train(run, train_loader, val_loader, task, epoch_callback=_epoch_cb, resume_from=resume_from)
+
+        # train() set run.status to completed/failed (it does not re-raise normal failures).
+        try:
+            if run.status == "completed":
+                out = Path(run.output_dir)
+                best = out / "model_best.pt"
+                weights = str(best if best.is_file() else out / "model_final.pt")
+                update_status(experiment_id, "completed")
+                register_model_from_experiment(experiment_id, weights)
+            else:
+                update_status(experiment_id, "failed")
+        except Exception as exc:
+            logger.warning("Experiment completion wiring failed for %s: %s", experiment_id, exc)
+
+    thread = threading.Thread(target=_run_with_tracking, daemon=True)
     thread.start()
 
     # Launch TensorBoard for live monitoring
