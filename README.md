@@ -1,6 +1,8 @@
 # TCIP Agent
 
-Prototype (in progress) of an agentic ML/CV system for automated phenotyping in tree crop breeding programs. A Claude Code / GitHub Copilot agent (ML/CV engineer persona) drives annotation, model training, inference, and per-plant result delivery through an MCP tool server, while a browser-based GUI supports human annotation, review, and training oversight.
+Prototype (in progress) of an agentic ML/CV system for automated phenotyping in tree crop breeding programs. A Claude agent (ML/CV engineer persona) drives annotation, model training, inference, and per-plant result delivery through an MCP tool server, while a browser-based GUI supports human annotation, review, and training oversight. The system is freestanding — the MCP server is a transport-neutral stdio server (any MCP client) and the GUI is a standalone browser app; no editor required.
+
+**Current scope: RGB imagery, object detection first.** The data layer loads RGB images only; multispectral / depth / 3D point-cloud support is not built yet (see [Roadmap](#roadmap)).
 
 Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology from ground imagery.
 
@@ -10,13 +12,13 @@ Active development: consolidating the MCP tool surface and building out the Anno
 
 ```
 ┌──────────────────────────────┐
-│  Claude Code / Copilot agent │  ML/CV engineer persona
-│  (.github/agents/tcip.agent) │  designs pipelines, trains, evaluates
+│  Claude agent (any MCP host) │  ML/CV engineer persona
+│  (see CLAUDE.md)             │  designs pipelines, trains, evaluates
 └──────────┬───────────────────┘
            │ MCP (stdio)
            ▼
 ┌──────────────────────────────┐
-│  Python MCP server           │  54 domain tools: data, annotation,
+│  Python MCP server           │  domain tools: data, annotation,
 │  (packages/tcip-mcp)         │  training, inference, experiments, viz
 └──────────┬───────────────────┘
            │ HTTP / WebSocket
@@ -34,15 +36,14 @@ Supporting library: `packages/tcip-annotation` — headless annotation engine (l
 ## Repository layout
 
 ```
+CLAUDE.md                      # agent operating contract (persona, invariants, conventions)
 .github/
-  agents/tcip.agent.md         # agent persona and workflow
-  copilot-instructions.md      # primary agent system prompt
   skills/                      # domain knowledge modules (crops, annotation, training, ...)
   prompts/                     # slash-command templates
 packages/
   tcip-mcp/                    # MCP server (python -m tcip_mcp)
     src/tcip_mcp/
-      tools/                   # 10 files, 54 tools
+      tools/                   # domain tools (run scripts/list_tools.py for the current list)
       pipelines/               # composable ML: registry, composer, trainer, predictor
   tcip-annotation/             # headless annotation library
   tcip-web/                    # FastAPI backend + React frontend
@@ -57,12 +58,11 @@ data/                          # sample hazelnut dataset (gitignored)
 ## Setup
 
 ```bash
-# Python — create env from lockfile, then install packages in editable mode
+# Python — creates the env and installs the three packages (editable). Run from
+# the repo root. Installs a CPU/-or-platform torch wheel; see environment.yml for
+# the CUDA option.
 conda env create -f environment.yml
 conda activate tcip-agent
-pip install -e packages/tcip-annotation
-pip install -e packages/tcip-mcp
-pip install -e packages/tcip-web
 
 # Frontend
 cd packages/tcip-web/frontend
@@ -86,7 +86,7 @@ pytest tests/ -v --tb=short
 npm run typecheck  # from packages/tcip-web/frontend
 ```
 
-The MCP server starts automatically when Claude Code connects (see `.mcp.json`).
+The MCP server starts automatically when an MCP client connects (see `.mcp.json`).
 
 ## Conventions
 
@@ -95,3 +95,22 @@ The MCP server starts automatically when Claude Code connects (see `.mcp.json`).
 - **Audit log**: all MCP tool calls logged to `.tcip/audit.jsonl` via `@audited` decorator.
 - **Lazy imports**: heavy deps (torch, torchvision) imported inside function bodies for fast MCP startup.
 - **Crop traits**: controlled vocabulary defined in `.github/skills/crops/`.
+
+## Roadmap
+
+The pitch above describes the long-term target. What's actually built today is a
+narrower slice; this section keeps the two honest.
+
+**Working now:** RGB-image tasks end to end — detection, instance/semantic
+segmentation, classification, ordinal, regression — via the composable
+backbone/neck/head spec, with experiment tracking, annotation/review, SAM-assisted
+labeling, and per-plant CSV export.
+
+**Not built yet (contributions/experiments welcome):**
+- Non-RGB data paths: multispectral / hyperspectral, depth, and 3D point clouds.
+  The dataset layer currently loads RGB images only. A `pointnet++` backbone is
+  registered as an **experimental component** but has no point-cloud dataset/loader,
+  so it is not trainable through the normal pipeline yet.
+- N-channel input for 2D backbones (the timm builder does not yet thread `in_chans`).
+- Temporal / phenology-sequence and relational pipeline patterns beyond the
+  per-image case.
