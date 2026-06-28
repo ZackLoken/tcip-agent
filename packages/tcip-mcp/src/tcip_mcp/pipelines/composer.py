@@ -28,6 +28,12 @@ _FPN_BASE_LEVELS = 4
 # Backbone output_format values that are single-scale (incompatible with a pyramid neck).
 _SINGLE_SCALE_FORMATS = {"single", "flat", "flat_vector", "pooled", "vector"}
 
+# Sensor hint -> input channel count, used by recommend_model_spec to set backbone.in_chans.
+_SENSOR_CHANNELS = {
+    "rgb": 3, "grayscale": 1, "gray": 1, "depth": 1, "nir": 1,
+    "rgbd": 4, "rgbn": 4, "multispectral": 5,
+}
+
 
 class _ComposedModule(nn.Module):
     """Shared interface for composed models (``ComposedModel`` and ``DetectionModel``).
@@ -182,8 +188,10 @@ class DetectionModel(_ComposedModule):
 
         adapter = _BackboneNeckAdapter(backbone, neck)
 
-        # Determine feature map names from the neck output.
-        dummy = torch.zeros(1, 3, 64, 64)
+        # Determine feature map names from the neck output (channel-aware probe).
+        bb_spec = self.spec.get("backbone", {})
+        in_chans = bb_spec.get("in_chans", 3) if isinstance(bb_spec, dict) else 3
+        dummy = torch.zeros(1, in_chans, 64, 64)
         with torch.no_grad():
             sample_out = adapter(dummy)
         featmap_names = list(sample_out.keys())
@@ -443,8 +451,13 @@ def recommend_model_spec(
         neck = {"name": "gap"}
         head = {"name": "classification", "num_classes": num_classes}
 
+    backbone_spec = {"name": bb, "pretrained": True}
+    # Use the `sensor` hint to set input channels (timm/tv backbones thread in_chans).
+    in_chans = _SENSOR_CHANNELS.get(sensor.lower(), 3)
+    if in_chans != 3:
+        backbone_spec["in_chans"] = in_chans
     return {
-        "backbone": {"name": bb, "pretrained": True},
+        "backbone": backbone_spec,
         "neck": neck,
         "heads": [head],
     }
