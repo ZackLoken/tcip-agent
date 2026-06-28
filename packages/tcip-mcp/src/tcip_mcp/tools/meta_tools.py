@@ -1,7 +1,8 @@
 """Meta-loop tools for self-improvement.
 
-Three tools that let Claude sessions leave the system smarter than they started:
+Tools that let Claude sessions leave the system smarter than they started:
 - claude_reports: structured friction logging when Claude hits a problem
+- load_reports: read recent friction reports at session start (closes the loop)
 - project_retrospective: end-of-project reflection written to markdown
 - load_retrospectives: read recent retrospectives at session start
 
@@ -105,6 +106,78 @@ def claude_reports(
         "report_path": str(report_path),
         "category": category,
         "timestamp": entry["timestamp"],
+    }
+
+
+@mcp.tool()
+@audited
+def load_reports(
+    project_path: str,
+    limit: int = 5,
+    category: str = "",
+    filter_substring: str = "",
+) -> dict:
+    """Read recent friction reports so open problems aren't lost between sessions.
+
+    The counterpart to ``claude_reports``: that tool writes friction to
+    ``.tcip/reports/``; this one reads it back. Call it early in a session
+    (alongside ``load_retrospectives``) to pick up problems a previous session
+    surfaced but did not resolve. Returns the most recently written reports first.
+
+    Args:
+        project_path: Root directory of the project.
+        limit: Maximum number of reports to return (default 5).
+        category: Optional exact category filter (e.g. 'missing_tool'). One of the
+            ``claude_reports`` categories; empty means all categories.
+        filter_substring: Optional case-insensitive substring matched against the
+            report's filename or its detail/context text.
+    """
+    reports_dir = Path(project_path) / ".tcip" / "reports"
+    if not reports_dir.exists():
+        return {
+            "reports": [],
+            "count": 0,
+            "note": f"{reports_dir} does not exist yet — no friction reports.",
+        }
+
+    files = sorted(
+        reports_dir.glob("*.jsonl"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    cat = category.strip()
+    needle = filter_substring.lower().strip()
+    results: list[dict] = []
+    for path in files:
+        raw = path.read_text(encoding="utf-8").strip()
+        try:
+            entry = json.loads(raw.splitlines()[0]) if raw else {}
+        except (json.JSONDecodeError, IndexError):
+            entry = {"detail": raw, "category": "", "malformed": True}
+
+        if cat and entry.get("category") != cat:
+            continue
+        if needle:
+            haystack = (path.name + " " + json.dumps(entry)).lower()
+            if needle not in haystack:
+                continue
+
+        results.append({
+            "file": path.name,
+            "path": str(path),
+            "timestamp": entry.get("timestamp"),
+            "category": entry.get("category", ""),
+            "detail": entry.get("detail", ""),
+            "context": entry.get("context", {}),
+        })
+        if len(results) >= limit:
+            break
+
+    return {
+        "reports": results,
+        "count": len(results),
+        "total_available": len(files),
     }
 
 
