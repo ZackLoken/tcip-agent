@@ -140,6 +140,13 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
             collate_fn=task_collate(task),
             num_workers=train_config.num_workers,
         )
+    if val_loader is None and task in ("detection", "instance_seg"):
+        logger.warning(
+            "No validation loader for %s run %s: best-model selection and early "
+            "stopping will fall back to training loss (no val mAP/composite). "
+            "Provide a val split (data.val_images_dir) or enable auto_val.",
+            task, run.run_id,
+        )
 
     # W8: inject imbalance loss + (auto) class weights into image-level head specs.
     # train() composes the model from run.config["model_spec"] (== config), so editing
@@ -169,8 +176,8 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
 
         create_experiment(experiment_id, config, data_source=data_cfg.get("images_dir"))
         update_status(experiment_id, "running")
-    except Exception:
-        pass  # Experiment tracking is best-effort
+    except Exception as exc:  # Experiment tracking is best-effort, but failures must be visible.
+        logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
 
     thread = threading.Thread(
         target=train, args=(run, train_loader, val_loader, task),
