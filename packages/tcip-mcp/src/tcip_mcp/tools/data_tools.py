@@ -157,6 +157,9 @@ def validate_data_quality(folder_path: str) -> dict:
     Args:
         folder_path: Path to the dataset root directory.
     """
+    if not Path(folder_path).is_dir():
+        return {"error": f"Directory not found: {folder_path}"}
+
     scan = _scan_dataset(folder_path)
     issues: list[dict] = []
     fmt = scan.get("format", "yolo")
