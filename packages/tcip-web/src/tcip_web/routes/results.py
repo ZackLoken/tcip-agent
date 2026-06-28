@@ -16,9 +16,7 @@ Results tab calls.
 from __future__ import annotations
 
 import csv
-import json
 import logging
-import math
 from io import StringIO
 from pathlib import Path
 from typing import Optional
