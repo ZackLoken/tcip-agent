@@ -27,11 +27,11 @@ app = FastAPI(title="TCIP Pipeline", version="0.1.0")
 # fastapi.middleware.cors.CORSMiddleware here.
 
 # ── Tab routes ──
-from tcip_web.routes import register_all as _register_routes
+from tcip_web.routes import register_all as _register_routes  # noqa: E402  (needs `app`)
 _register_routes(app)
 
 # ── State snapshot + WS ──
-from tcip_web.state import store as _gui_store
+from tcip_web.state import store as _gui_store  # noqa: E402  (needs `app`)
 _state_watchers: set[WebSocket] = set()
 
 
