@@ -10,6 +10,7 @@ from pathlib import Path
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
+from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_text
 
 
 def _project_dir(project_path: str) -> Path:
@@ -42,7 +43,8 @@ def init_project(project_path: str) -> dict:
 
     config_path = tcip / "config.toml"
     if not config_path.exists():
-        config_path.write_text(
+        atomic_write_text(
+            config_path,
             "# TCIP project configuration\n"
             "[project]\n"
             'name = ""\n'
@@ -82,8 +84,7 @@ def create_session(project_path: str, description: str = "") -> dict:
         "timestamp": time.time(),
         "description": description,
     }
-    with open(session_file, "w") as f:
-        f.write(json.dumps(entry) + "\n")
+    atomic_write_text(session_file, json.dumps(entry) + "\n")
 
     return {"session_id": session_id, "path": str(session_file)}
 
@@ -104,8 +105,7 @@ def append_session_event(project_path: str, session_id: str, event_type: str, da
         return {"error": f"Session not found: {session_id}"}
 
     entry = {"type": event_type, "timestamp": time.time(), **data}
-    with open(session_file, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    append_jsonl(session_file, entry)
 
     return {"session_id": session_id, "event_type": event_type}
 
