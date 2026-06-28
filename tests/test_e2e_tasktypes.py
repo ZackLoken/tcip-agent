@@ -77,17 +77,20 @@ def _assert_trained(run, output_dir: Path) -> None:
     assert (output_dir / "model_best.pt").is_file()
 
 
-def _detection_backbone_spec(head_name: str, num_classes: int) -> dict:
+def _detection_backbone_spec(head_name: str, num_classes: int, detector: str | None = None) -> dict:
     # Small input sizes keep the torchvision detector fast on CPU.
+    head = {
+        "name": head_name,
+        "num_classes": num_classes,
+        "min_size": IMG,
+        "max_size": IMG * 2,
+    }
+    if detector:
+        head["detector"] = detector
     return {
         "backbone": {"name": "resnet18", "pretrained": False},
         "neck": {"name": "fpn", "out_channels": 256},
-        "heads": [{
-            "name": head_name,
-            "num_classes": num_classes,
-            "min_size": IMG,
-            "max_size": IMG * 2,
-        }],
+        "heads": [head],
     }
 
 
@@ -138,13 +141,12 @@ def test_instance_seg_e2e(tmp_path: Path):
     dataset = build_dataset(
         "instance_seg", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1
     )
-    # Guard the polygon -> mask rasterization path (datasets.py): instance_seg
-    # trains box-only via the detection head, so masks never reach the loss and
-    # would otherwise be untested here.
+    # Guard the polygon -> mask rasterization path (datasets.py). With the mask_rcnn
+    # detector these masks now reach the Mask R-CNN mask loss during training.
     assert dataset[0][1]["masks"].shape[0] > 0
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("instance_seg"))
 
-    spec = _detection_backbone_spec("anchor_detection", num_classes=1)
+    spec = _detection_backbone_spec("anchor_detection", num_classes=1, detector="mask_rcnn")
     compose_model(spec)
     run = create_run(_train_config(spec), str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="instance_seg")
