@@ -18,7 +18,6 @@ from tcip_annotation.viz import (
     render_grid,
     render_grid_overlay,
     render_segmentations,
-    yolo_to_pixel,
 )
 
 from tcip_mcp.audit import audited
@@ -27,20 +26,52 @@ from tcip_mcp.server import mcp
 
 @mcp.tool()
 @audited
-def visualize_annotations(
+def visualize(
+    source: str,
+    path: str,
+    task: str = "detect",
+    class_names: str = "",
+    conf_threshold: float = 0.0,
+    n: int = 16,
+) -> dict:
+    """Render annotations, predictions, or a dataset-sample grid for view_image.
+
+    One entry point for the three common renders (replaces the former
+    visualize_annotations / visualize_predictions / visualize_dataset_sample).
+    Saves to .tcip/artifacts/viz/ and returns ``image_path`` for view_image.
+
+    Args:
+        source: What to render —
+            'annotations' = ground-truth labels on a single image (path = image file);
+            'predictions' = model predictions on a single image (path = image file);
+            'dataset'     = grid of n random annotated samples (path = dataset folder
+            containing images/ and labels/).
+        path: Image file (annotations/predictions) or dataset folder (dataset).
+        task: 'detect' or 'segment'.
+        class_names: Comma-separated class names (e.g. "catkin,nut,bud").
+        conf_threshold: Minimum confidence to display (source='predictions' only).
+        n: Number of samples in the grid (source='dataset' only).
+    """
+    if source == "annotations":
+        return _viz_annotations(path, task=task, class_names=class_names)
+    if source == "predictions":
+        return _viz_predictions(
+            path, task=task, class_names=class_names, conf_threshold=conf_threshold
+        )
+    if source == "dataset":
+        return _viz_dataset_sample(path, n=n, task=task, class_names=class_names)
+    return {
+        "error": f"Unknown source '{source}'. "
+        "Use 'annotations', 'predictions', or 'dataset'."
+    }
+
+
+def _viz_annotations(
     image_path: str,
     task: str = "detect",
     class_names: str = "",
 ) -> dict:
-    """Render annotations on an image for visual inspection.
-
-    Returns path to rendered image suitable for view_image analysis.
-
-    Args:
-        image_path: Absolute path to the image file.
-        task: 'detect' or 'segment'.
-        class_names: Comma-separated class names (e.g. "catkin,nut,bud").
-    """
+    """Render ground-truth annotations on a single image. See ``visualize``."""
     from tcip_annotation.format_io import (
         detect_format,
         load_annotations as format_load,
@@ -94,22 +125,13 @@ def visualize_annotations(
     }
 
 
-@mcp.tool()
-@audited
-def visualize_predictions(
+def _viz_predictions(
     image_path: str,
     task: str = "detect",
     class_names: str = "",
     conf_threshold: float = 0.0,
 ) -> dict:
-    """Render model predictions on an image.
-
-    Args:
-        image_path: Absolute path to the image file.
-        task: 'detect' or 'segment'.
-        class_names: Comma-separated class names.
-        conf_threshold: Minimum confidence to display.
-    """
+    """Render model predictions on a single image. See ``visualize``."""
     from tcip_annotation import parse_detect_predictions, parse_segment_predictions
 
     img = Path(image_path)
@@ -354,25 +376,13 @@ def visualize_worst_predictions(
     }
 
 
-@mcp.tool()
-@audited
-def visualize_dataset_sample(
+def _viz_dataset_sample(
     folder_path: str,
     n: int = 16,
     task: str = "detect",
     class_names: str = "",
 ) -> dict:
-    """Render a grid of sample annotated images from a dataset.
-
-    Randomly samples up to n images and renders them with annotations
-    into a single grid overview image.
-
-    Args:
-        folder_path: Dataset root directory (containing images/ and labels/).
-        n: Number of sample images to include.
-        task: 'detect' or 'segment'.
-        class_names: Comma-separated class names.
-    """
+    """Render a grid of random annotated dataset samples. See ``visualize``."""
     from tcip_annotation.format_io import (
         detect_format,
         load_annotations as format_load,
@@ -603,7 +613,7 @@ def accept_candidates(
         )
 
     # Render final result for QA
-    from tcip_annotation.viz import render_detections, render_segmentations
+    from tcip_annotation.viz import render_detections
     box_dicts = [
         {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
         for b in boxes
