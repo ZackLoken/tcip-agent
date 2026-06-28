@@ -331,20 +331,24 @@ def train(
         ckpt = None
         if resume_from:
             ckpt = torch.load(resume_from, map_location=device, weights_only=False)
-            if "optimizer_state_dict" not in ckpt:
-                logger.error("Resume checkpoint %s lacks optimizer_state_dict; cannot resume.", resume_from)
-                ckpt = None
-            else:
-                model.load_state_dict(ckpt["model_state_dict"])
-                resume_stage = ckpt.get("stage", 0)
-                resume_stage_epoch = ckpt.get("stage_epoch", 0)
-                run.current_epoch = ckpt.get("epoch", 0)
-                run.best_metric = ckpt.get("best_metric", run.best_metric)
-                es_best = ckpt.get("es_best", es_best)
-                es_counter = ckpt.get("es_counter", es_counter)
-                global_step = ckpt.get("global_step", 0)
-                logger.info("Resuming from %s at stage %d, stage_epoch %d (global epoch %d)",
-                            resume_from, resume_stage, resume_stage_epoch, run.current_epoch)
+            missing = [k for k in ("model_state_dict", "optimizer_state_dict") if k not in ckpt]
+            if missing:
+                # Fail loudly instead of silently restarting from scratch (the old behavior).
+                raise ValueError(
+                    f"Cannot resume from {resume_from}: checkpoint is missing {missing} "
+                    "(likely a legacy or non-resumable checkpoint, e.g. model_best.pt). Resume "
+                    "from a periodic checkpoint_epoch_*.pt, or start a fresh run."
+                )
+            model.load_state_dict(ckpt["model_state_dict"])
+            resume_stage = ckpt.get("stage", 0)
+            resume_stage_epoch = ckpt.get("stage_epoch", 0)
+            run.current_epoch = ckpt.get("epoch", 0)
+            run.best_metric = ckpt.get("best_metric", run.best_metric)
+            es_best = ckpt.get("es_best", es_best)
+            es_counter = ckpt.get("es_counter", es_counter)
+            global_step = ckpt.get("global_step", 0)
+            logger.info("Resuming from %s at stage %d, stage_epoch %d (global epoch %d)",
+                        resume_from, resume_stage, resume_stage_epoch, run.current_epoch)
 
         for stage_idx, stage in enumerate(stages):
             if stopped_early:
