@@ -85,7 +85,7 @@ class TestE2EPipeline:
         root = str(project_dir)
 
         # ── Step 1: Init project ─────────────────────────────────────
-        result = init_project(root)
+        init_project(root)
         assert (project_dir / ".tcip").is_dir()
         assert (project_dir / ".tcip" / "sessions").is_dir()
         assert (project_dir / ".tcip" / "config.toml").is_file()
