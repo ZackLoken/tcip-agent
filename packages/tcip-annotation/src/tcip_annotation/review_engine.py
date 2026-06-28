@@ -67,6 +67,9 @@ class ReviewContext:
     gt_polygons: list[Polygon] = field(default_factory=list)
     pred_boxes: list[PredBBox] = field(default_factory=list)
     pred_polygons: list[PredPolygon] = field(default_factory=list)
+    # Source annotation format ("yolo" | "voc" | "labelme" | "coco"); save_gt writes back
+    # in this format so a review→retrain round-trip preserves the user's label format.
+    source_format: str = "yolo"
 
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -487,11 +490,26 @@ class ReviewEngine:
         self.save_review_state()
 
     def save_gt(self, ctx: ReviewContext, *, detect_path: Optional[str] = None, segment_path: Optional[str] = None) -> bool:
-        """Write the current GT from ``ctx`` to YOLO label files.
+        """Write the current GT from ``ctx`` back in its source format.
 
-        Either path may be omitted; omitted tasks are skipped. Returns
-        ``True`` on full success, ``False`` if any write failed.
+        ``ctx.source_format`` selects the writer:
+          - ``yolo`` (default): the ``detect_path`` / ``segment_path`` YOLO label files
+            (either may be omitted).
+          - ``voc`` / ``labelme``: a single per-image annotation file (extension derived
+            from the given path), preserving the original format.
+          - ``coco``: a single shared file, not a per-image save — falls back to YOLO with
+            a warning (round-tripping COCO needs a batch export).
+
+        Returns ``True`` on full success, ``False`` if any write failed.
         """
+        fmt = (getattr(ctx, "source_format", "yolo") or "yolo").lower()
+        if fmt in ("voc", "labelme"):
+            return self._save_gt_format(ctx, fmt, detect_path or segment_path)
+        if fmt == "coco":
+            logger.warning(
+                "Per-image COCO save is unsupported (COCO is one shared file); writing YOLO "
+                "labels for %s instead. Use a batch COCO export to round-trip.", ctx.img_name)
+
         ok = True
         if detect_path is not None:
             try:
@@ -508,3 +526,27 @@ class ReviewEngine:
                 logger.exception("Could not save segment labels to %s", segment_path)
                 ok = False
         return ok
+
+    def _save_gt_format(self, ctx: ReviewContext, fmt: str, base_path: Optional[str]) -> bool:
+        """Write GT to a single per-image VOC/LabelMe file (extension from ``fmt``)."""
+        if not base_path:
+            return False
+        from tcip_annotation import format_io
+
+        id_to_name = self.class_names or {}
+        out = os.path.splitext(base_path)[0] + (".xml" if fmt == "voc" else ".json")
+        try:
+            os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+            if fmt == "voc":
+                format_io.write_voc_detect(
+                    out, ctx.gt_boxes, ctx.img_width, ctx.img_height,
+                    file_name=ctx.img_name, id_to_name=id_to_name)
+            else:  # labelme: both boxes (rectangles) and polygons in one file
+                format_io.write_labelme(
+                    out, list(ctx.gt_boxes) + list(ctx.gt_polygons),
+                    ctx.img_width, ctx.img_height,
+                    file_name=ctx.img_name, id_to_name=id_to_name)
+            return True
+        except OSError:
+            logger.exception("Could not save %s labels for %s", fmt, ctx.img_name)
+            return False
