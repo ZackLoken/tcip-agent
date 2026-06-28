@@ -36,6 +36,23 @@ except (ImportError, OSError) as e:
     logger.warning("Torch-dependent tools unavailable: %s", e)
 
 
+def list_registered_tools() -> list[str]:
+    """Return the sorted names of all tools currently registered on the server.
+
+    This is the single source of truth for "how many tools are there" — docs and
+    tests read it instead of hard-coding a number. Note the count reflects what
+    actually imported in this environment: torch-dependent tool modules only
+    register when their dependencies are present (see the guarded imports above).
+    """
+    manager = getattr(mcp, "_tool_manager", None)
+    if manager is not None and hasattr(manager, "list_tools"):
+        return sorted(t.name for t in manager.list_tools())
+    # Fallback for SDK versions without the sync tool-manager accessor.
+    import asyncio
+
+    return sorted(t.name for t in asyncio.run(mcp.list_tools()))
+
+
 def main() -> None:
     """Start the MCP server on stdio transport."""
     mcp.run(transport="stdio")
