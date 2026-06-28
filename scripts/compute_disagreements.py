@@ -68,7 +68,7 @@ def center_covered(points: np.ndarray, boxes: np.ndarray, expand: float = 1.0) -
 
 
 def main() -> None:
-    print(f"{'image':<14} {'n_gt':>6} {'n_pred':>7}   " + "   ".join(f"FN@{c:.1f}" for c in CONF_THRESHOLDS) + f"   FP(no_lowconf)")
+    print(f"{'image':<14} {'n_gt':>6} {'n_pred':>7}   " + "   ".join(f"FN@{c:.1f}" for c in CONF_THRESHOLDS) + "   FP(no_lowconf)")
     print("-" * 80)
 
     totals = {"gt": 0, "pred_all": 0}
