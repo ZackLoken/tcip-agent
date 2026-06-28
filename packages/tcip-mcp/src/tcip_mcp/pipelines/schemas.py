@@ -43,9 +43,13 @@ class ModelSpecSchema(BaseModel):
 
 
 class StageSpec(BaseModel):
+    # A stage is a progressive-unfreeze step. The trainer reads ``freeze_to`` and
+    # ``epochs``; ``lr`` is an optional per-stage override. Kept consistent with
+    # ``generic_trainer.TrainConfig``'s stage defaults (the runtime canonical).
     model_config = ConfigDict(extra="allow")
-    lr: float
     epochs: int
+    freeze_to: int | None = None
+    lr: float | None = None
 
 
 class TrainingSection(BaseModel):
@@ -60,6 +64,20 @@ class TrainConfigSchema(BaseModel):
     model: ModelSpecSchema | None = None
     data: dict | None = None
     training: TrainingSection | None = None
+
+
+def normalize_train_config(config: dict) -> dict:
+    """Resolve the ``model`` / ``model_spec`` alias in one place.
+
+    ``model_spec`` is the runtime-canonical key (``generic_trainer.train`` reads
+    ``config["model_spec"]``); ``model`` is accepted as an alias. Returns a shallow
+    copy with ``model_spec`` populated from whichever was provided.
+    """
+    cfg = dict(config)
+    spec = cfg.get("model_spec") or cfg.get("model")
+    if spec is not None:
+        cfg["model_spec"] = spec
+    return cfg
 
 
 def validate_train_config_schema(config: dict) -> list[str]:
