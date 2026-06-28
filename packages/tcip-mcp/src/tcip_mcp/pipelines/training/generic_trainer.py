@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -35,6 +37,22 @@ try:
     from torch.utils.tensorboard import SummaryWriter
 except ImportError:
     SummaryWriter = None  # type: ignore[misc,assignment]
+
+
+def set_seed(seed: int, deterministic: bool = False) -> None:
+    """Seed random / numpy / torch (+ cuda) for reproducible runs (W7).
+
+    ``deterministic`` additionally forces cuDNN deterministic algorithms
+    (``cudnn.deterministic=True``, ``cudnn.benchmark=False``).
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 # ====================================================================
@@ -67,6 +85,8 @@ class TrainConfig:
         "enabled": False, "reference_effective_batch": 64, "scale_power": 0.5, "max_lr": None})
     enforce_monotonic_unfreeze: bool = True
     evaluation: dict = field(default_factory=dict)  # W1 eval params (doc-only; train() reads run.config)
+    seed: int | None = None          # W7: serialization-only; runtime seeding reads run.config
+    deterministic: bool = False      # W7: serialization-only
 
 
 # ====================================================================
@@ -115,6 +135,35 @@ def get_run(run_id: str) -> TrainRun | None:
 
 def list_runs() -> list[dict]:
     return [r.to_dict() for r in _RUNS.values()]
+
+
+def _save_checkpoint(
+    path: Path, *, model, optimizer, scheduler, scaler, config: dict,
+    stage_idx: int, stage_epoch: int, run: "TrainRun",
+    es_best: float, es_counter: int, global_step: int, seed, metrics: dict,
+) -> None:
+    """Write a resumable periodic checkpoint (W7).
+
+    Superset of the previous payload — ``GenericPredictor`` reads only
+    ``model_spec``/``model_state_dict`` and stays compatible.
+    """
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
+        "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
+        "model_spec": config["model_spec"],
+        "config": config,
+        "stage": stage_idx,
+        "stage_epoch": stage_epoch,
+        "epoch": run.current_epoch,
+        "best_metric": run.best_metric,
+        "es_best": es_best,
+        "es_counter": es_counter,
+        "global_step": global_step,
+        "seed": seed,
+        "metrics": metrics,
+    }, path)
 
 
 # ====================================================================
@@ -210,6 +259,7 @@ def train(
     val_loader: DataLoader | None = None,
     task: str = "detection",
     epoch_callback=None,
+    resume_from: str = "",
 ) -> TrainRun:
     """Execute a task-agnostic training run.
 
@@ -244,6 +294,13 @@ def train(
 
     try:
         device = torch.device(config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
+
+        # W7: seed before model build so pretrained=False init + shuffle are reproducible.
+        seed = config.get("seed", config.get("training", {}).get("seed"))
+        if seed is not None:
+            set_seed(int(seed), deterministic=config.get(
+                "deterministic", config.get("training", {}).get("deterministic", False)))
+
         model = compose_model(config["model_spec"])
         model.to(device)
 
@@ -268,10 +325,35 @@ def train(
         global_step = 0
         stopped_early = False
 
+        # W7: resume from a periodic checkpoint (model + optimizer + scheduler + scaler).
+        resume_stage = -1
+        resume_stage_epoch = 0
+        ckpt = None
+        if resume_from:
+            ckpt = torch.load(resume_from, map_location=device, weights_only=False)
+            if "optimizer_state_dict" not in ckpt:
+                logger.error("Resume checkpoint %s lacks optimizer_state_dict; cannot resume.", resume_from)
+                ckpt = None
+            else:
+                model.load_state_dict(ckpt["model_state_dict"])
+                resume_stage = ckpt.get("stage", 0)
+                resume_stage_epoch = ckpt.get("stage_epoch", 0)
+                run.current_epoch = ckpt.get("epoch", 0)
+                run.best_metric = ckpt.get("best_metric", run.best_metric)
+                es_best = ckpt.get("es_best", es_best)
+                es_counter = ckpt.get("es_counter", es_counter)
+                global_step = ckpt.get("global_step", 0)
+                logger.info("Resuming from %s at stage %d, stage_epoch %d (global epoch %d)",
+                            resume_from, resume_stage, resume_stage_epoch, run.current_epoch)
+
         for stage_idx, stage in enumerate(stages):
             if stopped_early:
                 break
             run.current_stage = stage_idx
+
+            # W7: skip stages already completed before the resume checkpoint.
+            if stage_idx < resume_stage:
+                continue
 
             # Progressive unfreezing
             freeze_to = stage.get("freeze_to", 0)
@@ -339,7 +421,22 @@ def train(
             stage_best = float("inf")
             stage_snapshot = None
 
-            for epoch in range(stage_epochs):
+            # W7: for the resumed stage, restore optimizer/scheduler/scaler and start
+            # mid-stage; later stages keep fresh state (and W2's handoff).
+            start_epoch = 0
+            if stage_idx == resume_stage and ckpt is not None:
+                start_epoch = resume_stage_epoch
+                try:
+                    optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+                    if scheduler is not None and ckpt.get("scheduler_state_dict") is not None:
+                        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+                    if scaler is not None and ckpt.get("scaler_state_dict") is not None:
+                        scaler.load_state_dict(ckpt["scaler_state_dict"])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Resume: optimizer/scheduler restore failed (%s); using fresh state.", exc)
+                ckpt = None
+
+            for epoch in range(start_epoch, stage_epochs):
                 if stopped_early:
                     break
                 run.current_epoch += 1
@@ -459,13 +556,13 @@ def train(
                     stage_snapshot = snapshot_optimizer_state(optimizer, model)
 
                 if ckpt_every > 0 and run.current_epoch % ckpt_every == 0:
-                    torch.save({
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "model_spec": config["model_spec"],
-                        "config": config,
-                        "stage": stage_idx, "epoch": run.current_epoch,
-                    }, out_dir / f"checkpoint_epoch_{run.current_epoch}.pt")
+                    _save_checkpoint(
+                        out_dir / f"checkpoint_epoch_{run.current_epoch}.pt",
+                        model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
+                        config=config, stage_idx=stage_idx, stage_epoch=epoch + 1, run=run,
+                        es_best=es_best, es_counter=es_counter, global_step=global_step,
+                        seed=seed, metrics=epoch_metrics,
+                    )
 
                 # Early stopping — on the same selection objective.
                 if es_enabled and val_loader is not None:
