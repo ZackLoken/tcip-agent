@@ -27,17 +27,15 @@ def validate_config(config: dict) -> dict:
     Args:
         config: Full training configuration dict.
     """
-    from tcip_mcp.pipelines.composer import validate_model_spec
+    from tcip_mcp.pipelines.schemas import validate_train_config_schema
 
-    issues: list[str] = []
+    # Pydantic schema: type/structure + (via ModelSpecSchema) registry/channel-compat.
+    issues: list[str] = list(validate_train_config_schema(config))
 
-    # Model spec validation via composable system
+    # Model spec presence (keep the exact alias callers/tests rely on).
     model_spec = config.get("model_spec") or config.get("model")
     if not model_spec:
         issues.append("Missing 'model_spec' section")
-    else:
-        spec_issues = validate_model_spec(model_spec)
-        issues.extend(spec_issues)
 
     # Data config validation
     data_cfg = config.get("data")
@@ -72,7 +70,7 @@ def validate_config(config: dict) -> dict:
 
 @mcp.tool()
 @audited
-def launch_training(config: dict, output_dir: str) -> dict:
+def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dict:
     """Launch a training run asynchronously using the composable model system.
 
     The run will proceed in a background thread. Use check_training_status
@@ -81,6 +79,8 @@ def launch_training(config: dict, output_dir: str) -> dict:
     Args:
         config: Full training configuration dict with model_spec, data, training sections.
         output_dir: Directory for checkpoints and logs.
+        resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
+            (restores model + optimizer + scheduler + scaler and continues).
     """
     validation = validate_config(config)
     if not validation["valid"]:
@@ -102,6 +102,8 @@ def launch_training(config: dict, output_dir: str) -> dict:
         mixed_precision=train_cfg.get("mixed_precision", True),
         batch_size=train_cfg.get("batch_size", 2),
         num_workers=train_cfg.get("num_workers", 0),
+        seed=train_cfg.get("seed"),
+        deterministic=train_cfg.get("deterministic", False),
     )
 
     run = create_run(config, output_dir)
@@ -171,7 +173,8 @@ def launch_training(config: dict, output_dir: str) -> dict:
         pass  # Experiment tracking is best-effort
 
     thread = threading.Thread(
-        target=train, args=(run, train_loader, val_loader, task), daemon=True
+        target=train, args=(run, train_loader, val_loader, task),
+        kwargs={"resume_from": resume_from}, daemon=True,
     )
     thread.start()
 
