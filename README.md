@@ -2,7 +2,7 @@
 
 Prototype (in progress) of an agentic ML/CV system for automated phenotyping in tree crop breeding programs. A Claude agent (ML/CV engineer persona) drives annotation, model training, inference, and per-plant result delivery through an MCP tool server, while a browser-based GUI supports human annotation, review, and training oversight. The system is freestanding — the MCP server is a transport-neutral stdio server (any MCP client) and the GUI is a standalone browser app; no editor required.
 
-**Current scope: RGB imagery, object detection first.** The data layer loads RGB images only; multispectral / depth / 3D point-cloud support is not built yet (see [Roadmap](#roadmap)).
+**Current scope: 2D imagery (RGB + N-channel), object detection first.** The data layer reads RGB and multi-band 2D rasters (GeoTIFF / NPZ / grayscale); 3D point-cloud (LiDAR / SfM) support is not built yet (see [Roadmap](#roadmap)).
 
 Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology from ground imagery.
 
@@ -101,10 +101,13 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 The pitch above describes the long-term target. What's actually built today is a
 narrower slice; this section keeps the two honest.
 
-**Working now:** RGB-image tasks end to end — detection, instance/semantic
+**Working now:** 2D-image tasks end to end — detection, instance/semantic
 segmentation, classification, ordinal, regression — via the composable
-backbone/neck/head spec, with experiment tracking, annotation/review, SAM-assisted
-labeling, and per-plant CSV export.
+backbone/neck/head spec (detectors built through a registry-driven `DETECTORS`
+factory; `instance_seg` via Mask R-CNN), on **RGB and N-channel imagery** (multi-band
+GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`), with
+training that loads YOLO / COCO / PASCAL VOC / LabelMe labels directly, experiment
+tracking, annotation/review, SAM-assisted labeling, and per-plant CSV export.
 
 The detection training pipeline mirrors a production drone-phenotyping workflow:
 
@@ -128,11 +131,11 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   prioritize the next review batch by active-learning score.
 
 **Not built yet (contributions/experiments welcome):**
-- Non-RGB data paths: multispectral / hyperspectral, depth, and 3D point clouds.
-  The dataset layer currently loads RGB images only. A `pointnet++` backbone is
-  registered as an **experimental component** but has no point-cloud dataset/loader,
-  so it is not trainable through the normal pipeline yet.
-- N-channel input for 2D backbones (the timm builder does not yet thread `in_chans`).
+- 3D point clouds (LiDAR / SfM). A `pointnet++` backbone is included as an
+  **experimental component** but is intentionally *unregistered* — there is no
+  point-cloud dataset/loader or task type, so it is not trainable through the normal
+  pipeline yet. (Multispectral / hyperspectral / depth as additional 2D channels *is*
+  now supported via the N-channel path above.)
 - Temporal / phenology-sequence and relational pipeline patterns beyond the
   per-image case.
 
