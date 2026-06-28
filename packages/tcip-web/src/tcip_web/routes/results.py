@@ -225,9 +225,6 @@ def _crossing_date(
             # Interpolate between d1 and d2
             y1, m1, day1 = _date_key(d1)
             y2, m2, day2 = _date_key(d2)
-            # Convert to days-from-epoch-ish for a simple lerp
-            ord1 = y1 * 10000 + m1 * 100 + day1
-            ord2 = y2 * 10000 + m2 * 100 + day2
             # Straight interpolation using the ordinal delta as days is fine
             # for our tight ~6-week window (no month boundaries to worry about)
             if r2 == r1:
