@@ -115,12 +115,22 @@ def export_predictions_yolo(
     results = predictor.predict_batch(image_paths)
     for img_path, result in zip(image_paths, results):
         out_txt = out / f"{Path(img_path).stem}.txt"
+        w = result.get("width") or 1
+        h = result.get("height") or 1
         lines = []
-        for det in result.get("detections", []):
-            cls = det.get("class", 0)
-            box = det.get("box", [0, 0, 0, 0])
-            conf = det.get("score", 0.0)
-            lines.append(f"{cls} {box[0]} {box[1]} {box[2]} {box[3]} {conf:.4f}")
+        # Detector output: boxes (pixel xyxy), 1-indexed labels (background=0), scores.
+        # Write standard YOLO prediction lines: "cls conf cx cy w h" (normalized) so the
+        # output round-trips through parse_detect_predictions / evaluate_detections.
+        for box, score, label in zip(
+            result.get("boxes", []), result.get("scores", []), result.get("labels", [])
+        ):
+            x1, y1, x2, y2 = box
+            cls = max(int(label) - 1, 0)
+            cx = ((x1 + x2) / 2) / w
+            cy = ((y1 + y2) / 2) / h
+            bw = (x2 - x1) / w
+            bh = (y2 - y1) / h
+            lines.append(f"{cls} {float(score):.4f} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
         out_txt.write_text("\n".join(lines))
         written.append(str(out_txt))
 
