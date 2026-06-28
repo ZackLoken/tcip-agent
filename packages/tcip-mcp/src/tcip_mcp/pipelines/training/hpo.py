@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import optuna
-    from optuna.pruners import MedianPruner
+    from optuna.pruners import MedianPruner, SuccessiveHalvingPruner, HyperbandPruner
     from optuna.samplers import TPESampler
 
     HAS_OPTUNA = True
@@ -107,6 +107,37 @@ def get_default_optuna_space() -> dict:
     }
 
 
+def get_default_baseline_params() -> dict:
+    """A known-good baseline to warm-start trial 0 (subset of the default space)."""
+    return {
+        "lr": 3e-4,
+        "batch_size": 4,
+        "weight_decay": 1e-4,
+        "head": "faster_rcnn",
+        "backbone": "resnet50",
+    }
+
+
+def _build_pruner(
+    name: str = "asha", *, grace_period: int = 5, reduction_factor: int = 3,
+    n_startup_trials: int = 3, n_warmup_steps: int = 5,
+):
+    """Build an Optuna pruner. ``asha``/``successive_halving`` -> ASHA;
+    ``hyperband`` -> Hyperband; ``median`` -> MedianPruner; else/``none`` -> NopPruner.
+
+    Switching the default to ASHA is safe: with no intermediate ``trial.report``
+    calls ``SuccessiveHalvingPruner`` never prunes.
+    """
+    name = (name or "none").lower()
+    if name in ("asha", "successive_halving"):
+        return SuccessiveHalvingPruner(min_resource=grace_period, reduction_factor=reduction_factor)
+    if name == "hyperband":
+        return HyperbandPruner(min_resource=grace_period, reduction_factor=reduction_factor)
+    if name == "median":
+        return MedianPruner(n_startup_trials=n_startup_trials, n_warmup_steps=n_warmup_steps)
+    return optuna.pruners.NopPruner()
+
+
 def _suggest_param(trial: Any, name: str, spec: dict) -> Any:
     """Suggest a single parameter from an Optuna trial."""
     ptype = spec["type"]
@@ -131,6 +162,11 @@ def optuna_search(
     storage: str | None = None,
     seed: int = 42,
     pruning: bool = True,
+    pruner: str = "asha",
+    grace_period: int = 5,
+    reduction_factor: int = 3,
+    warm_start: bool = False,
+    baseline_params: dict | None = None,
     tb_logdir: str | None = None,
 ) -> dict:
     """Run HPO using Optuna with TPE sampler and optional ASHA pruning.
@@ -165,16 +201,25 @@ def optuna_search(
         param_space = get_default_optuna_space()
 
     sampler = TPESampler(seed=seed)
-    pruner = MedianPruner(n_startup_trials=3, n_warmup_steps=5) if pruning else optuna.pruners.NopPruner()
+    pruner_obj = _build_pruner(
+        pruner, grace_period=grace_period, reduction_factor=reduction_factor,
+    ) if pruning else optuna.pruners.NopPruner()
 
     study = optuna.create_study(
         study_name=study_name,
         direction=direction,
         sampler=sampler,
-        pruner=pruner,
+        pruner=pruner_obj,
         storage=storage,
         load_if_exists=True,
     )
+
+    # Warm-start trial 0 with a known-good baseline (filtered to the search space).
+    if warm_start:
+        baseline = baseline_params or get_default_baseline_params()
+        enqueued = {k: v for k, v in baseline.items() if k in param_space}
+        if enqueued:
+            study.enqueue_trial(enqueued)
 
     def wrapped_objective(trial: optuna.Trial) -> float:
         config = {}
@@ -182,7 +227,9 @@ def optuna_search(
             config[name] = _suggest_param(trial, name, spec)
         logger.info("Trial %d: %s", trial.number, config)
 
-        value = objective_fn(config, trial.number)
+        # Pass the trial (not just its number) so the objective can report
+        # intermediate values for ASHA pruning (trial.report / should_prune).
+        value = objective_fn(config, trial)
 
         # Log trial result to TensorBoard
         if tb_logdir and HAS_TB:
@@ -219,6 +266,9 @@ def optuna_search(
         "n_trials": len(study.trials),
         "study_name": study_name,
         "all_trials": all_trials,
+        "pruner": pruner,
+        "warm_start": warm_start,
+        "baseline_params": (baseline_params or get_default_baseline_params()) if warm_start else None,
     }
     if tb_logdir:
         result["tensorboard_logdir"] = tb_logdir
