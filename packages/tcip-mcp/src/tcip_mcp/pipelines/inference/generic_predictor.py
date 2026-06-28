@@ -63,9 +63,91 @@ class GenericPredictor:
             return self._format_other(outputs, image_path, w, h)
 
     @torch.no_grad()
-    def predict_batch(self, image_paths: list[str]) -> list[dict]:
-        """Run inference on multiple images."""
+    def predict_batch(
+        self, image_paths: list[str], tile: bool = False, tile_size: int = 224,
+        overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = 0.3,
+    ) -> list[dict]:
+        """Run inference on multiple images (optionally tiled for small objects)."""
+        if tile:
+            return [
+                self.predict_tiled(p, tile_size=tile_size, overlap=overlap,
+                                   tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou)
+                for p in image_paths
+            ]
         return [self.predict(p) for p in image_paths]
+
+    @torch.no_grad()
+    def predict_tiled(
+        self, image_path: str, tile_size: int = 224, overlap: float = 0.2,
+        tile_batch_size: int = 96, global_nms_iou: float = 0.3,
+    ) -> dict:
+        """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict ->
+        core-region reconstruction -> single global NMS -> full-image detections.
+
+        Falls back to :meth:`predict` for non-detection heads.
+        """
+        if self.task not in ("anchor_detection", "anchor_free_detection"):
+            return self.predict(image_path)
+
+        import numpy as np
+        from tcip_mcp.pipelines.data.tiling import (
+            compute_stride, tile_positions, reconstruct_core, global_nms,
+        )
+
+        img = Image.open(image_path).convert("RGB")
+        w, h = img.size
+        stride = compute_stride(tile_size, overlap)
+        positions = tile_positions(h, w, tile_size, stride)
+
+        min_size = self.model_spec.get("heads", [{}])[0].get("min_size")
+        if min_size and abs(int(min_size) - tile_size) > tile_size:
+            logger.warning("predict_tiled: model min_size=%s differs greatly from tile_size=%s "
+                           "(tiles will be rescaled).", min_size, tile_size)
+
+        per_tile_boxes, per_tile_scores, per_tile_labels, tile_info = [], [], [], []
+        batch_tiles: list = []
+        batch_meta: list = []
+
+        def _flush() -> None:
+            if not batch_tiles:
+                return
+            outputs = self.model(batch_tiles)
+            for out, meta in zip(outputs, batch_meta):
+                keep = out["scores"] >= self.score_threshold
+                per_tile_boxes.append(out["boxes"][keep].cpu().numpy())
+                per_tile_scores.append(out["scores"][keep].cpu().numpy())
+                per_tile_labels.append(out["labels"][keep].cpu().numpy())
+                tile_info.append(meta)
+            batch_tiles.clear()
+            batch_meta.clear()
+
+        for tile_x, tile_y in positions:
+            crop = img.crop((tile_x, tile_y, min(tile_x + tile_size, w), min(tile_y + tile_size, h)))
+            if crop.size != (tile_size, tile_size):
+                padded = Image.new("RGB", (tile_size, tile_size), (0, 0, 0))
+                padded.paste(crop, (0, 0))  # zero-pad bottom/right
+                crop = padded
+            batch_tiles.append(pil_to_tensor(crop).to(self.device))
+            batch_meta.append({"tile_x": tile_x, "tile_y": tile_y, "original_width": w, "original_height": h})
+            if len(batch_tiles) >= tile_batch_size:
+                _flush()
+        _flush()
+
+        boxes, scores, labels = reconstruct_core(
+            per_tile_boxes, per_tile_scores, per_tile_labels, tile_info, tile_size, stride)
+        keep = global_nms(boxes, scores, labels, global_nms_iou) if len(boxes) else np.zeros((0,), dtype=np.int64)
+        boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+
+        return {
+            "image": image_path,
+            "width": w,
+            "height": h,
+            "boxes": boxes.tolist(),
+            "scores": scores.tolist(),
+            "labels": labels.tolist(),
+            "count": int(len(boxes)),
+            "tiles": len(positions),
+        }
 
     def export_onnx(self, output_path: str, opset: int = 17) -> str:
         """Export model to ONNX format with dynamic batch size."""
