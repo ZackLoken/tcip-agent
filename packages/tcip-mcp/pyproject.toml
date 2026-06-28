@@ -2,7 +2,7 @@
 name = "tcip-mcp"
 version = "0.1.0"
 description = "MCP server exposing TCIP phenotyping domain tools"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.0",
     "pyyaml>=6.0",
