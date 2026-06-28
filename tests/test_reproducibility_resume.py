@@ -129,3 +129,22 @@ def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
     assert run2.status == "completed"
     assert run2.current_stage == 1          # stage 0 skipped, stage 1 ran
     assert run2.current_epoch == 2          # restored optimizer + ran stage 1's epoch
+
+
+def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
+    # 2.3: resuming a checkpoint without optimizer state (e.g. model_best.pt) must fail
+    # loudly, not silently restart from scratch.
+    images_dir, csv_path = _classification_data(tmp_path)
+    ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
+    loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
+    cfg = _cfg([{"freeze_to": -1, "epochs": 1}])
+
+    train(create_run(cfg, str(tmp_path / "out")), loader, task="classification")
+    best = tmp_path / "out" / "model_best.pt"   # has model_state_dict but no optimizer_state_dict
+    assert best.is_file()
+
+    run2 = create_run(cfg, str(tmp_path / "out2"))
+    run2 = train(run2, loader, task="classification", resume_from=str(best))
+    assert run2.status == "failed"
+    assert "resume" in (run2.error or "").lower()
+    assert not (tmp_path / "out2" / "model_final.pt").is_file()  # did not silently train
