@@ -11,6 +11,7 @@ dependencies = [
     "numpy",
     "pillow>=9.0",
     "shapely>=2.0",
+    "pycocotools>=2.0.7",
     "tcip-annotation",
 ]
 
