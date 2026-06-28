@@ -2,9 +2,26 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
+
+
+def pytest_collection_modifyitems(config, items):
+    """Guardrail: fail loudly when far fewer tests collect than expected.
+
+    Catches the failure mode where a missing dependency makes ~15 files module-level
+    ``importorskip`` at collection time, shrinking the suite, while CI still reports
+    green. CI sets ``TCIP_MIN_TESTS`` to a floor safely below the real count; a large
+    shortfall means a core dep (torch/torchvision/pycocotools/...) is absent.
+    """
+    floor = os.environ.get("TCIP_MIN_TESTS")
+    if floor and len(items) < int(floor):
+        raise pytest.UsageError(
+            f"Collected only {len(items)} tests (< TCIP_MIN_TESTS={floor}). A core "
+            "dependency is likely missing — module-level importorskip silently skipped files."
+        )
 
 
 @pytest.fixture
