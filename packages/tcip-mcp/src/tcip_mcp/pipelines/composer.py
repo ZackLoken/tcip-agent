@@ -18,6 +18,11 @@ from tcip_mcp.pipelines.components.backbones import HAS_TIMM
 
 _DETECTION_HEADS = {"anchor_detection", "anchor_free_detection"}
 
+# An FPN over a standard 4-stage CNN backbone yields 4 pyramid levels; add_p2 adds one.
+_FPN_BASE_LEVELS = 4
+# Backbone output_format values that are single-scale (incompatible with a pyramid neck).
+_SINGLE_SCALE_FORMATS = {"single", "flat", "flat_vector", "pooled", "vector"}
+
 
 def _default_anchor_sizes(num_levels: int, base: int = 32) -> tuple[tuple[int, ...], ...]:
     """One anchor size per pyramid level, doubling each level.
@@ -375,6 +380,28 @@ def _channel_compat_issues(spec: dict) -> list[str]:
             issues.append(
                 f"heads[{i}] '{h['name']}' in_channels={h['in_channels']} != "
                 f"neck '{neck_name}' out_channels={neck_out}")
+
+    # Backbone-stage compatibility: pyramid necks (fpn/pan) need a multi-scale backbone.
+    backbone = spec.get("backbone")
+    if (isinstance(backbone, dict) and backbone.get("name") in BACKBONES
+            and neck_name in ("fpn", "pan")):
+        bb_fmt = BACKBONES.describe(backbone["name"]).get("output_format")
+        if bb_fmt in _SINGLE_SCALE_FORMATS:
+            issues.append(
+                f"neck '{neck_name}' needs a multi-scale backbone but backbone "
+                f"'{backbone['name']}' outputs single-scale '{bb_fmt}'")
+
+    # Pyramid-level compatibility: add_p2 adds an extra finer (P2) level; a head that
+    # caps the level count below the produced count would break at forward().
+    if isinstance(neck, dict) and neck.get("add_p2"):
+        produced = _FPN_BASE_LEVELS + 1
+        for i, h in enumerate(heads):
+            if isinstance(h, dict) and h.get("name") in HEADS:
+                cap = HEADS.describe(h["name"]).get("max_pyramid_levels")
+                if isinstance(cap, int) and cap < produced:
+                    issues.append(
+                        f"heads[{i}] '{h['name']}' supports at most {cap} pyramid levels "
+                        f"but neck '{neck_name}' with add_p2 produces {produced}")
     return issues
 
 
