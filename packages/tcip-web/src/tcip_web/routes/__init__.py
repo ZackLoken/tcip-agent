@@ -14,6 +14,7 @@ from tcip_web.routes import (
     dataset,
     images,
     inference,
+    meta,
     results,
     review,
     sessions,
@@ -33,3 +34,4 @@ def register_all(app: FastAPI) -> None:
     app.include_router(tuning.router)
     app.include_router(classes.router)
     app.include_router(sessions.router)
+    app.include_router(meta.router)
