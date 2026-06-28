@@ -23,6 +23,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction, read_json
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
@@ -97,7 +99,7 @@ def save_classes(payload: SaveClassesPayload) -> dict:
     for entry in payload.classes:
         data[str(entry.id)] = {"name": entry.name, "color": entry.color}
     try:
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        atomic_write_json(path, data)
     except OSError as exc:
         raise HTTPException(500, f"could not write {path}: {exc}") from exc
     return {"status": "ok", "n_classes": len(payload.classes)}
@@ -138,15 +140,12 @@ def set_image_status(payload: ImageStatusPayload) -> dict:
     if payload.status not in ("complete", "partial", "unannotated"):
         raise HTTPException(400, f"invalid status: {payload.status}")
     path = _image_status_path(payload.project_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    raw: dict[str, str] = {}
-    if path.exists():
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+    with file_transaction(path):
+        raw = read_json(path, default={})
+        if not isinstance(raw, dict):
             raw = {}
-    raw[payload.image_name] = payload.status
-    path.write_text(json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8")
+        raw[payload.image_name] = payload.status
+        atomic_write_json(path, {k: raw[k] for k in sorted(raw)})
     return {"status": "ok"}
 
 
@@ -158,17 +157,14 @@ class ImageStatusBulkPayload(BaseModel):
 @router.post("/image_status/bulk")
 def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
     path = _image_status_path(payload.project_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    raw: dict[str, str] = {}
-    if path.exists():
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+    with file_transaction(path):
+        raw = read_json(path, default={})
+        if not isinstance(raw, dict):
             raw = {}
-    for name, st in payload.statuses.items():
-        if st in ("complete", "partial", "unannotated"):
-            raw[name] = st
-    path.write_text(json.dumps(raw, indent=2, sort_keys=True), encoding="utf-8")
+        for name, st in payload.statuses.items():
+            if st in ("complete", "partial", "unannotated"):
+                raw[name] = st
+        atomic_write_json(path, {k: raw[k] for k in sorted(raw)})
     return {"status": "ok", "n": len(payload.statuses)}
 
 
