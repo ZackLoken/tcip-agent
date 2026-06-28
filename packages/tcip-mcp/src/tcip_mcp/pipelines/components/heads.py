@@ -47,17 +47,27 @@ class ClassificationHead(BaseHead):
     task_type = "classification"
     default_loss = "cross_entropy"
 
-    def __init__(self, in_channels: int, num_classes: int, dropout: float = 0.0) -> None:
+    def __init__(self, in_channels: int, num_classes: int, dropout: float = 0.0,
+                 loss: str | None = None, class_weights: list | None = None) -> None:
         super().__init__()
         self.fc = nn.Linear(in_channels, num_classes)
         self.drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.num_classes = num_classes
+        # Opt-in registry loss (e.g. focal / weighted_ce) as a submodule so its
+        # class-weight buffer follows the model to device. None -> today's behavior.
+        self._loss = None
+        if loss is not None:
+            from tcip_mcp.pipelines.components.losses import build_loss
+            weight = torch.tensor(class_weights, dtype=torch.float32) if class_weights is not None else None
+            self._loss = build_loss(loss, weight=weight)
 
     def forward(self, features: torch.Tensor, targets: Any = None) -> dict[str, torch.Tensor]:
         logits = self.fc(self.drop(features))
         return {"logits": logits}
 
     def compute_loss(self, outputs, targets):
+        if self._loss is not None:
+            return {"cls_loss": self._loss(outputs["logits"], targets["labels"])}
         return {"cls_loss": F.cross_entropy(outputs["logits"], targets["labels"])}
 
     def decode(self, outputs):
@@ -300,15 +310,20 @@ class SemanticSegHead(BaseHead):
     task_type = "semantic_seg"
     default_loss = "ce+dice"
 
-    def __init__(self, in_channels: int, num_classes: int) -> None:
+    def __init__(self, in_channels: int, num_classes: int,
+                 loss: str | None = None, class_weights: list | None = None) -> None:
         super().__init__()
         self.num_classes = num_classes
+        self._loss_name = loss  # informational; semantic_seg always blends CE + Dice
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, 256, 3, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
             nn.Conv2d(256, num_classes, 1),
         )
+        # Optional per-class weight applied to the CE term (Dice term is unweighted).
+        weight = torch.tensor(class_weights, dtype=torch.float32) if class_weights is not None else None
+        self.register_buffer("ce_weight", weight)
 
     def forward(self, features, targets=None):
         # Use highest-resolution pyramid level
@@ -325,7 +340,7 @@ class SemanticSegHead(BaseHead):
         # Resize logits to match target
         if logits.shape[-2:] != mask.shape[-2:]:
             logits = F.interpolate(logits, size=mask.shape[-2:], mode="bilinear", align_corners=False)
-        ce = F.cross_entropy(logits, mask.long())
+        ce = F.cross_entropy(logits, mask.long(), weight=self.ce_weight)
         # Dice loss
         probs = F.softmax(logits, dim=1)
         flat_probs = probs.flatten(2)
