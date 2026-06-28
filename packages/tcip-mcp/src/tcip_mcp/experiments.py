@@ -193,8 +193,15 @@ def register_model_from_experiment(
     }
 
 
-def get_experiment(experiment_id: str) -> dict[str, Any]:
-    """Read full experiment state."""
+def get_experiment(
+    experiment_id: str, *, metrics_limit: int | None = None, metrics_offset: int = 0,
+) -> dict[str, Any]:
+    """Read full experiment state.
+
+    ``metrics`` can be paginated for long runs: ``metrics_offset`` skips epochs and
+    ``metrics_limit`` caps how many are returned (only the requested window is JSON-parsed;
+    ``n_epochs`` is always the true total). Defaults return all metrics (unchanged).
+    """
     d = _exp_dir(experiment_id)
     if not d.exists():
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -206,12 +213,14 @@ def get_experiment(experiment_id: str) -> dict[str, Any]:
         if p.exists():
             result[name] = json.loads(p.read_text())
 
-    # Read last N metrics
     metrics_path = d / "metrics.jsonl"
     if metrics_path.exists():
         lines = metrics_path.read_text().strip().splitlines()
-        result["metrics"] = [json.loads(line) for line in lines]
         result["n_epochs"] = len(lines)
+        end = (metrics_offset + metrics_limit) if metrics_limit is not None else None
+        window = lines[metrics_offset:end]
+        result["metrics"] = [json.loads(line) for line in window]
+        result["metrics_offset"] = metrics_offset
 
     return result
 
