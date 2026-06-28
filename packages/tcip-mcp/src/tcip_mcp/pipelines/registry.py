@@ -300,9 +300,11 @@ OPTIMIZERS = ComponentRegistry("optimizers")
 SCHEDULERS = ComponentRegistry("schedulers")
 SAMPLERS = ComponentRegistry("samplers")
 AUGMENTATIONS = ComponentRegistry("augmentations")
+DETECTORS = ComponentRegistry("detectors")
 
 _ALL_REGISTRIES = (
     BACKBONES, NECKS, HEADS, LOSSES, OPTIMIZERS, SCHEDULERS, SAMPLERS, AUGMENTATIONS,
+    DETECTORS,
 )
 
 # Setuptools entry-point group external packages publish component-registering hooks under.
