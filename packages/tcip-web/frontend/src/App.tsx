@@ -10,6 +10,7 @@ import { stateSocket } from "@/api/ws";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import { InferenceTab } from "@/tabs/InferenceTab";
+import { MetaTab } from "@/tabs/MetaTab";
 import { ResultsTab } from "@/tabs/ResultsTab";
 import { ReviewTab } from "@/tabs/ReviewTab";
 import { TrainingTab } from "@/tabs/TrainingTab";
@@ -128,6 +129,7 @@ function App() {
           {activeTab === "tuning" && <TuningTab />}
           {activeTab === "inference" && <InferenceTab />}
           {activeTab === "results" && <ResultsTab />}
+          {activeTab === "meta" && <MetaTab />}
         </>
       ) : (
         <DatasetPicker />
