@@ -17,11 +17,17 @@ def run_inference(
     images_dir: str | None = None,
     score_threshold: float = 0.5,
     device: str | None = None,
+    tile: bool = False,
+    tile_size: int = 224,
+    overlap: float = 0.2,
+    tile_batch_size: int = 96,
+    global_nms_iou: float = 0.3,
 ) -> dict:
     """Run a trained model on images.
 
     Provide either image_paths (specific images) or images_dir (all images
-    in a directory).
+    in a directory). Set ``tile=True`` for SAHI-style sliding-window detection on
+    high-resolution imagery with many small objects (detection heads only).
 
     Args:
         checkpoint_path: Path to model .pt checkpoint.
@@ -29,6 +35,11 @@ def run_inference(
         images_dir: Directory containing images to process.
         score_threshold: Minimum confidence score.
         device: Device to use ('cuda' or 'cpu').
+        tile: Enable tiled (SAHI-style) detection inference.
+        tile_size: Sliding-window tile edge (px).
+        overlap: Fractional tile overlap (stride = tile_size*(1-overlap)).
+        tile_batch_size: Tiles per forward batch.
+        global_nms_iou: Cross-tile global NMS IoU threshold.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -49,13 +60,17 @@ def run_inference(
         image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
         image_paths = sorted(str(f) for f in p.iterdir() if f.suffix.lower() in image_exts)
 
-    results = predictor.predict_batch(image_paths)
+    results = predictor.predict_batch(
+        image_paths, tile=tile, tile_size=tile_size, overlap=overlap,
+        tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
+    )
     total_detections = sum(r["count"] for r in results)
 
     return {
         "checkpoint": checkpoint_path,
         "image_count": len(results),
         "total_detections": total_detections,
+        "tiled": tile,
         "results": results,
     }
 
