@@ -12,6 +12,7 @@ const TABS: { id: TabName; label: string }[] = [
   { id: "tuning", label: "Tuning" },
   { id: "inference", label: "Inference" },
   { id: "results", label: "Results" },
+  { id: "meta", label: "Meta" },
 ];
 
 const STATUS_FILTERS: { value: "all" | ImageStatus; label: string }[] = [
