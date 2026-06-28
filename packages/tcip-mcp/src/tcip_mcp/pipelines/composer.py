@@ -29,7 +29,38 @@ _FPN_BASE_LEVELS = 4
 _SINGLE_SCALE_FORMATS = {"single", "flat", "flat_vector", "pooled", "vector"}
 
 
-class ComposedModel(nn.Module):
+class _ComposedModule(nn.Module):
+    """Shared interface for composed models (``ComposedModel`` and ``DetectionModel``).
+
+    Forward contract:
+      - **train** (``self.training`` and ``targets`` given) -> a ``dict[str, Tensor]`` of
+        named loss terms; the trainer sums ``loss_dict.values()``.
+      - **eval** -> task-appropriate predictions: a ``dict[str, Tensor]`` of decoded head
+        outputs (``ComposedModel``), or torchvision's ``list[dict]`` of per-image
+        boxes/scores/labels (``DetectionModel``). The return type differs by design —
+        detection produces variable-length per-image outputs — and the predictor branches
+        on task; this is the one place that divergence is documented.
+
+    Subclasses set ``self.backbone`` and implement ``forward`` + ``get_param_groups``.
+    """
+
+    backbone: nn.Module
+
+    def freeze_backbone(self, to_stage: int) -> None:
+        """Freeze backbone up to ``to_stage`` (0=none; >0 freezes all if no ``freeze_to``)."""
+        if hasattr(self.backbone, "freeze_to"):
+            self.backbone.freeze_to(to_stage)
+        elif to_stage > 0:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+
+    def unfreeze_all(self) -> None:
+        """Unfreeze all parameters."""
+        for p in self.parameters():
+            p.requires_grad = True
+
+
+class ComposedModel(_ComposedModule):
     """A model assembled from composable backbone + neck + head(s).
 
     Supports multi-head models (shared backbone, multiple task heads).
@@ -77,19 +108,6 @@ class ComposedModel(nn.Module):
                     all_outputs[f"head{i}_{k}"] = v
 
         return all_outputs
-
-    def freeze_backbone(self, to_stage: int) -> None:
-        """Freeze backbone up to stage index (0=none, num_stages=all)."""
-        if hasattr(self.backbone, "freeze_to"):
-            self.backbone.freeze_to(to_stage)
-        elif to_stage > 0:
-            for p in self.backbone.parameters():
-                p.requires_grad = False
-
-    def unfreeze_all(self) -> None:
-        """Unfreeze all parameters."""
-        for p in self.parameters():
-            p.requires_grad = True
 
     def get_param_groups(
         self,
@@ -141,11 +159,12 @@ class _BackboneNeckAdapter(nn.Module):
         return OrderedDict({"0": neck_out})
 
 
-class DetectionModel(nn.Module):
-    """Detection model using composed backbone+neck fed into torchvision Faster R-CNN.
+class DetectionModel(_ComposedModule):
+    """Detection model using composed backbone+neck fed into a torchvision detector.
 
-    Exposes the same interface as ComposedModel (freeze_backbone, get_param_groups, etc.)
-    so the trainer can use it interchangeably.
+    Shares the ``_ComposedModule`` interface with ComposedModel (freeze_backbone,
+    unfreeze_all, forward signature) so the trainer can use them interchangeably; the
+    actual detector is built by the DETECTORS factory (``components/detectors.py``).
     """
 
     def __init__(
@@ -192,17 +211,6 @@ class DetectionModel(nn.Module):
         if self.training and targets is not None:
             return self.detector(images, targets)
         return self.detector(images)
-
-    def freeze_backbone(self, to_stage: int) -> None:
-        if hasattr(self.backbone, "freeze_to"):
-            self.backbone.freeze_to(to_stage)
-        elif to_stage > 0:
-            for p in self.backbone.parameters():
-                p.requires_grad = False
-
-    def unfreeze_all(self) -> None:
-        for p in self.parameters():
-            p.requires_grad = True
 
     def get_param_groups(
         self,
