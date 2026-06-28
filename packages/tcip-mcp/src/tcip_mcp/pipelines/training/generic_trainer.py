@@ -306,7 +306,7 @@ def train(
 
         stages = config.get("stages", [{"freeze_to": 0, "epochs": 10}])
         use_amp = config.get("mixed_precision", True) and device.type == "cuda"
-        scaler = torch.amp.GradScaler("cuda") if use_amp else None
+        scaler = torch.amp.GradScaler(device.type) if use_amp else None
 
         opt_cfg = config.get("optimizer", {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 1e-4})
         sched_cfg = config.get("scheduler", {"type": "cosine"})
@@ -464,7 +464,7 @@ def train(
                         targets = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in targets.items()}
 
                     if use_amp:
-                        with torch.amp.autocast("cuda"):
+                        with torch.amp.autocast(device.type):
                             loss_dict = model(images, targets)
                             loss = sum(loss_dict.values()) if isinstance(loss_dict, dict) else loss_dict
                         scaled = loss / stage_accum
