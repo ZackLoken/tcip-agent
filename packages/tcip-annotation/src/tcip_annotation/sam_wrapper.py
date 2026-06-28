@@ -22,7 +22,9 @@ Public API:
 
 from __future__ import annotations
 
+import functools
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,21 @@ logger = logging.getLogger(__name__)
 _predictor: Any = None
 _current_model_type: str | None = None
 _current_image_path: str | None = None
+
+# Serializes the shared predictor + current-image globals. Concurrent callers (e.g. the
+# web review engine handling multiple requests on different threads) must not interleave
+# set-image / predict, which would return masks computed against the wrong image.
+_SAM_LOCK = threading.RLock()
+
+
+def _serialized(fn):
+    """Run ``fn`` while holding the SAM predictor lock."""
+    @functools.wraps(fn)
+    def _wrapped(*args: Any, **kwargs: Any) -> Any:
+        with _SAM_LOCK:
+            return fn(*args, **kwargs)
+
+    return _wrapped
 
 # SAM 2.1 model variants: (hydra config, checkpoint filename).
 _MODEL_MAP = {
@@ -118,6 +135,7 @@ def mask_to_polygon(mask: Any) -> list[tuple[float, float]]:
     return [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
 
 
+@_serialized
 def predict_from_point(
     image_path: str,
     x: float,
@@ -150,6 +168,7 @@ def predict_from_point(
     return mask_to_polygon(masks[best_idx])
 
 
+@_serialized
 def predict_from_points(
     image_path: str,
     points: list[tuple[float, float]],
@@ -170,6 +189,7 @@ def predict_from_points(
     return mask_to_polygon(masks[best_idx])
 
 
+@_serialized
 def predict_from_box(
     image_path: str,
     x1: float,
@@ -191,6 +211,7 @@ def predict_from_box(
     return mask_to_polygon(masks[best_idx])
 
 
+@_serialized
 def auto_mask(
     image_path: str,
     model_type: str = "hiera_b+",
