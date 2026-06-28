@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -10,10 +9,8 @@ import pytest
 from tcip_annotation import (
     BBox,
     PredBBox,
-    PredPolygon,
     Polygon,
     ReviewContext,
-    ReviewDetection,
     ReviewEngine,
     compute_matches,
 )
