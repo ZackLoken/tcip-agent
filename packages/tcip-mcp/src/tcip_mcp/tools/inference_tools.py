@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+from tcip_mcp.pipelines.postprocessing.export import export_detection_csv, result_to_yolo_lines
 
 
 @mcp.tool()
@@ -115,23 +115,7 @@ def export_predictions_yolo(
     results = predictor.predict_batch(image_paths)
     for img_path, result in zip(image_paths, results):
         out_txt = out / f"{Path(img_path).stem}.txt"
-        w = result.get("width") or 1
-        h = result.get("height") or 1
-        lines = []
-        # Detector output: boxes (pixel xyxy), 1-indexed labels (background=0), scores.
-        # Write standard YOLO prediction lines: "cls conf cx cy w h" (normalized) so the
-        # output round-trips through parse_detect_predictions / evaluate_detections.
-        for box, score, label in zip(
-            result.get("boxes", []), result.get("scores", []), result.get("labels", [])
-        ):
-            x1, y1, x2, y2 = box
-            cls = max(int(label) - 1, 0)
-            cx = ((x1 + x2) / 2) / w
-            cy = ((y1 + y2) / 2) / h
-            bw = (x2 - x1) / w
-            bh = (y2 - y1) / h
-            lines.append(f"{cls} {float(score):.4f} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
-        out_txt.write_text("\n".join(lines))
+        out_txt.write_text("\n".join(result_to_yolo_lines(result)))
         written.append(str(out_txt))
 
     return {"image_count": len(written), "output_dir": output_dir, "files": written}
