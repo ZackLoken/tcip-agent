@@ -213,10 +213,13 @@ class TestPointCloud:
         assert "sa3" in out
         assert out["sa3"].shape[0] == 2
 
-    def test_pointnet_registered(self):
+    def test_pointnet_not_registered(self):
+        # Phase 0.3 task-honesty: PointNet++/3D is deferred and intentionally NOT
+        # registered (no point-cloud dataset/task/inference path exists yet). The
+        # backbone class still works in isolation (see test_pointnet_backbone_forward).
         from tcip_mcp.pipelines.registry import BACKBONES
         import tcip_mcp.pipelines.components.backbones_3d  # noqa: F401
-        assert "pointnet++" in BACKBONES
+        assert "pointnet++" not in BACKBONES
 
 
 # ====================================================================
