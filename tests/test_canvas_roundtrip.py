@@ -20,7 +20,6 @@ from tcip_annotation import (
     BBox,
     Polygon,
     PredBBox,
-    PredPolygon,
     compute_matches,
     parse_detect_labels,
     parse_segment_labels,
