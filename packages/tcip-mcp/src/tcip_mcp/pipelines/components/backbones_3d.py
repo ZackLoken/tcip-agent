@@ -15,7 +15,6 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from tcip_mcp.pipelines.registry import BACKBONES
 
 
 class SetAbstraction(nn.Module):
@@ -130,10 +129,16 @@ def _build_pointnetpp(in_channels: int = 0, **kwargs):
     return PointNetPPBackbone(in_channels=in_channels)
 
 
-BACKBONES.register_factory("pointnet++", _build_pointnetpp, category="3d", metadata={
-    "description": "PointNet++ with 3 set abstraction layers",
-    "valid_tasks": ["point_cloud_seg", "point_cloud_regression"],
-    "input_format": "point_cloud",
-    "output_format": "multi_scale_features",
-    "params_M": 1.7,
-})
+# DEFERRED (Phase 0.3 task-honesty): PointNet++/3D is intentionally NOT registered.
+# There is no point-cloud dataset, `point_cloud` task in build_dataset, or inference
+# path yet, so registering it would advertise an unusable backbone. The class and
+# builder above are retained for the future 3D epic — re-enable this registration
+# once the point-cloud data path exists.
+#
+# BACKBONES.register_factory("pointnet++", _build_pointnetpp, category="3d", metadata={
+#     "description": "PointNet++ with 3 set abstraction layers",
+#     "valid_tasks": ["point_cloud_seg", "point_cloud_regression"],
+#     "input_format": "point_cloud",
+#     "output_format": "multi_scale_features",
+#     "params_M": 1.7,
+# })
