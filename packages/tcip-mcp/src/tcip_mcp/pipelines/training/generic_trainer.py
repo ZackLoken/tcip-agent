@@ -249,6 +249,29 @@ def _selection_value(task: str, val_metrics: dict, avg_loss: float) -> float:
     return val_metrics.get("val_loss", avg_loss)
 
 
+def _validate_input_channels(model_spec: dict, loader: DataLoader) -> None:
+    """Fail loudly if the data's channel count doesn't match the backbone's ``in_chans``.
+
+    Catches an N-channel/RGB mismatch up front with a clear message instead of an opaque
+    conv-shape error deep in the first forward pass.
+    """
+    bb = model_spec.get("backbone", {})
+    expected = bb.get("in_chans", 3) if isinstance(bb, dict) else 3
+    batch = next(iter(loader), None)
+    if batch is None:
+        return
+    imgs = batch[0]
+    sample = imgs[0] if isinstance(imgs, (list, tuple)) else imgs
+    if not hasattr(sample, "dim") or sample.dim() < 3:
+        return
+    channels = int(sample.shape[-3])
+    if channels != expected:
+        raise ValueError(
+            f"Input images have {channels} channels but the model's backbone expects "
+            f"in_chans={expected}. Set backbone.in_chans={channels} (or provide matching data)."
+        )
+
+
 # ====================================================================
 # Main train loop
 # ====================================================================
@@ -303,6 +326,7 @@ def train(
 
         model = compose_model(config["model_spec"])
         model.to(device)
+        _validate_input_channels(config["model_spec"], train_loader)
 
         stages = config.get("stages", [{"freeze_to": 0, "epochs": 10}])
         use_amp = config.get("mixed_precision", True) and device.type == "cuda"
