@@ -7,7 +7,41 @@ project root.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path, PurePosixPath
+
+
+def allowed_image_roots() -> list[Path]:
+    """Allowed roots for absolute file reads, from ``TCIP_IMAGE_ROOTS`` (os.pathsep list).
+
+    Empty (the default) means unrestricted — appropriate for a local single-user GUI.
+    Set it to lock an exposed/networked deployment down to specific dataset directories.
+    """
+    raw = os.environ.get("TCIP_IMAGE_ROOTS", "").strip()
+    if not raw:
+        return []
+    return [Path(r).resolve() for r in raw.split(os.pathsep) if r.strip()]
+
+
+def assert_path_allowed(path: str | Path) -> Path:
+    """Resolve ``path`` and ensure it sits under an allowed root (if any are configured).
+
+    Routes that read an absolute, client-supplied path (image serving, dimensions) call
+    this so an exposed server can be restricted via ``TCIP_IMAGE_ROOTS``. Raises
+    :class:`ValueError` if an allow-list is set and the path escapes it; with no allow-list
+    the resolved path is returned unchanged.
+    """
+    resolved = Path(path).resolve()
+    roots = allowed_image_roots()
+    if not roots:
+        return resolved
+    for root in roots:
+        try:
+            resolved.relative_to(root)
+            return resolved
+        except ValueError:
+            continue
+    raise ValueError(f"path {resolved} is outside the allowed image roots")
 
 
 def safe_join(root: Path | str, *parts: str) -> Path:
