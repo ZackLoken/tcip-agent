@@ -27,6 +27,11 @@ except ImportError as e:
     logger.warning("Vision tools unavailable: %s", e)
 
 try:
+    import tcip_mcp.tools.feedback_tools  # noqa: F401, E402
+except ImportError as e:
+    logger.warning("Feedback tools unavailable: %s", e)
+
+try:
     import tcip_mcp.tools.training_tools  # noqa: F401, E402
     import tcip_mcp.tools.inference_tools  # noqa: F401, E402
     import tcip_mcp.tools.model_tools  # noqa: F401, E402
