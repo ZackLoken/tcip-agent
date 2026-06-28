@@ -22,16 +22,20 @@ class FPN(nn.Module):
     multi-scale features via lateral connections and top-down pathway.
     """
 
-    def __init__(self, in_channels_list: list[int], out_channels: int = 256) -> None:
+    def __init__(self, in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False) -> None:
         super().__init__()
         self.out_channels = out_channels
-        self.num_levels = len(in_channels_list)
+        self.add_p2 = add_p2
+        self.num_levels = len(in_channels_list) + int(add_p2)
 
         self.lateral_convs = nn.ModuleList()
         self.output_convs = nn.ModuleList()
         for in_ch in in_channels_list:
             self.lateral_convs.append(nn.Conv2d(in_ch, out_channels, 1))
             self.output_convs.append(nn.Conv2d(out_channels, out_channels, 3, padding=1))
+        # Opt-in extra finer level (yolo11-p2 analog): 2x upsample of the finest lateral.
+        if add_p2:
+            self.p2_conv = nn.Conv2d(out_channels, out_channels, 3, padding=1)
 
     def forward(self, features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         keys = sorted(features.keys())
@@ -45,11 +49,12 @@ class FPN(nn.Module):
             up = F.interpolate(laterals[i + 1], size=laterals[i].shape[-2:], mode="nearest")
             laterals[i] = laterals[i] + up
 
-        # 3x3 convs to remove aliasing
-        out = {}
-        for i, conv in enumerate(self.output_convs):
-            out[f"p{i}"] = conv(laterals[i])
-        return out
+        # 3x3 convs to remove aliasing, finest -> coarsest.
+        outs = [conv(laterals[i]) for i, conv in enumerate(self.output_convs)]
+        if self.add_p2:
+            extra = self.p2_conv(F.interpolate(laterals[0], scale_factor=2, mode="nearest"))
+            outs.insert(0, extra)  # new finest level at index 0
+        return {f"p{i}": f for i, f in enumerate(outs)}
 
 
 class PAN(nn.Module):
@@ -58,12 +63,12 @@ class PAN(nn.Module):
     Adds bottom-up pathway after FPN top-down for better low-level features.
     """
 
-    def __init__(self, in_channels_list: list[int], out_channels: int = 256) -> None:
+    def __init__(self, in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False) -> None:
         super().__init__()
         self.out_channels = out_channels
-        self.fpn = FPN(in_channels_list, out_channels)
+        self.fpn = FPN(in_channels_list, out_channels, add_p2=add_p2)
         self.bottom_up_convs = nn.ModuleList()
-        for _ in range(len(in_channels_list) - 1):
+        for _ in range(len(in_channels_list) + int(add_p2) - 1):
             self.bottom_up_convs.append(
                 nn.Conv2d(out_channels, out_channels, 3, stride=2, padding=1)
             )
@@ -118,12 +123,12 @@ class GlobalAvgPoolNeck(nn.Module):
 # Build helpers
 # ---------------------------------------------------------------------------
 
-def _build_fpn(in_channels_list: list[int], out_channels: int = 256, **_: Any) -> FPN:
-    return FPN(in_channels_list, out_channels)
+def _build_fpn(in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False, **_: Any) -> FPN:
+    return FPN(in_channels_list, out_channels, add_p2=add_p2)
 
 
-def _build_pan(in_channels_list: list[int], out_channels: int = 256, **_: Any) -> PAN:
-    return PAN(in_channels_list, out_channels)
+def _build_pan(in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False, **_: Any) -> PAN:
+    return PAN(in_channels_list, out_channels, add_p2=add_p2)
 
 
 def _build_identity(in_channels_list: list[int], **kw: Any) -> IdentityNeck:
@@ -142,11 +147,13 @@ NECKS.register_factory("fpn", _build_fpn, category="pyramid", metadata={
     "description": "Feature Pyramid Network — multi-scale uniform-channel features",
     "valid_tasks": ["detection", "instance_seg", "semantic_seg"],
     "output_format": "multi_scale_dict",
+    "options": {"add_p2": "opt-in extra finer (stride-2) pyramid level for tiny objects"},
 })
 NECKS.register_factory("pan", _build_pan, category="pyramid", metadata={
     "description": "Path Aggregation Network — bidirectional FPN",
     "valid_tasks": ["detection", "instance_seg", "semantic_seg"],
     "output_format": "multi_scale_dict",
+    "options": {"add_p2": "opt-in extra finer (stride-2) pyramid level for tiny objects"},
 })
 NECKS.register_factory("identity", _build_identity, category="passthrough", metadata={
     "description": "Identity pass-through — no feature transformation",
