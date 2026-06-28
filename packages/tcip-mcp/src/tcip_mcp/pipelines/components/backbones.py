@@ -117,11 +117,19 @@ def _build_timm_backbone(
 # Torchvision fallback builders
 # ---------------------------------------------------------------------------
 
-def _build_tv_resnet(variant: str, pretrained: bool = True, **_: Any) -> BackboneWrapper:
+def _build_tv_resnet(variant: str, pretrained: bool = True, in_chans: int = 3, **_: Any) -> BackboneWrapper:
     import torchvision.models as tvm
     factory = getattr(tvm, variant)
     weights = "DEFAULT" if pretrained else None
     base = factory(weights=weights)
+    if in_chans != 3:
+        # Adapt the stem conv to N input channels (timm does this for its backbones;
+        # torchvision doesn't, so the new conv1 is randomly initialized).
+        old = base.conv1
+        base.conv1 = nn.Conv2d(
+            in_chans, old.out_channels, kernel_size=old.kernel_size,
+            stride=old.stride, padding=old.padding, bias=old.bias is not None,
+        )
     # Extract stage modules (layer1 … layer4)
     stages = nn.ModuleList([
         nn.Sequential(base.conv1, base.bn1, base.relu, base.maxpool, base.layer1),
@@ -224,6 +232,7 @@ for _name, _info in _TIMM_BACKBONES.items():
         "dataset_size_hint": _info["dataset_size"],
         "valid_tasks": _info["tasks"].split(","),
         "requires": "timm",
+        "supported_channels": "any",  # timm threads in_chans into the stem conv
     }
     BACKBONES.register_factory(
         _name,
@@ -243,5 +252,6 @@ for _tv_name in ("resnet50", "resnet101"):
             "description": f"{_tv_name} via torchvision (no timm required)",
             "valid_tasks": ["all"],
             "requires": "torchvision",
+            "supported_channels": "any",  # stem conv adapted to in_chans
         },
     )
