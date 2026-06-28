@@ -45,8 +45,8 @@ class ClassBalancedSampler(Sampler):
             # Detect which key holds the class info
             if "label" in target:
                 cid = target["label"]
-            elif "rank" in target:
-                cid = target["rank"]
+            elif "ranks" in target:
+                cid = target["ranks"]
             elif "labels" in target and len(target["labels"]) > 0:
                 cid = target["labels"][0].item()
             else:
@@ -82,8 +82,8 @@ class OverSampler(Sampler):
             _, target = dataset[i]
             if "label" in target:
                 cid = target["label"]
-            elif "rank" in target:
-                cid = target["rank"]
+            elif "ranks" in target:
+                cid = target["ranks"]
             elif "labels" in target and len(target["labels"]) > 0:
                 cid = target["labels"][0].item()
             else:
