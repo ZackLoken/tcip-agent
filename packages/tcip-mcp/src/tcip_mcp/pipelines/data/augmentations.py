@@ -200,6 +200,65 @@ class Resize:
         return img, target
 
 
+class RandomRotation:
+    """Rotate image (and detection boxes/masks) by a uniform angle in
+    ``[-degrees, degrees]`` with probability ``p``.
+
+    Nadir/aerial imagery has no canonical "up", so free rotation is a valid
+    augmentation. Boxes are rotated as 4 corners about the image center and taken
+    as their axis-aligned envelope, then clamped + degenerate-filtered exactly like
+    ``RandomResizedCrop`` (filtering ``labels``/``masks`` in lockstep). Non-detection
+    targets (classification/ordinal/regression) pass through untouched.
+    """
+
+    def __init__(self, degrees: float = 180.0, p: float = 1.0) -> None:
+        self.degrees = degrees
+        self.p = p
+
+    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+        if random.random() >= self.p:
+            return img, target
+        import math
+
+        angle = random.uniform(-self.degrees, self.degrees)
+        w, h = img.size
+        out = img.rotate(angle, resample=Image.BILINEAR, expand=False)
+
+        boxes = target.get("boxes")
+        if isinstance(boxes, torch.Tensor) and len(boxes) > 0:
+            cx, cy = w / 2.0, h / 2.0
+            theta = math.radians(angle)
+            cos_t, sin_t = math.cos(theta), math.sin(theta)
+            new_boxes = []
+            for x1, y1, x2, y2 in boxes.tolist():
+                xs, ys = [], []
+                for px, py in ((x1, y1), (x2, y1), (x2, y2), (x1, y2)):
+                    dx, dy = px - cx, py - cy
+                    xs.append(cx + dx * cos_t - dy * sin_t)
+                    ys.append(cy + dx * sin_t + dy * cos_t)
+                new_boxes.append([min(xs), min(ys), max(xs), max(ys)])
+            nb = torch.tensor(new_boxes, dtype=boxes.dtype)
+            nb[:, [0, 2]] = nb[:, [0, 2]].clamp(min=0, max=w)
+            nb[:, [1, 3]] = nb[:, [1, 3]].clamp(min=0, max=h)
+            valid = (nb[:, 2] - nb[:, 0] > 1) & (nb[:, 3] - nb[:, 1] > 1)
+            target["boxes"] = nb[valid]
+            if "labels" in target and torch.is_tensor(target["labels"]):
+                target["labels"] = target["labels"][valid]
+            masks = target.get("masks")
+            if torch.is_tensor(masks) and masks.ndim == 3 and len(masks) == len(valid):
+                import numpy as np
+                rotated = [
+                    torch.tensor(
+                        np.array(Image.fromarray(m.cpu().numpy().astype("uint8")).rotate(
+                            angle, resample=Image.NEAREST, expand=False)),
+                        dtype=masks.dtype,
+                    )
+                    for m in masks
+                ]
+                target["masks"] = torch.stack(rotated)[valid] if rotated else masks[valid]
+        return out, target
+
+
 # ── Registry and builder ────────────────────────────────────────────────
 
 
@@ -210,14 +269,46 @@ _AUGMENTATION_REGISTRY: dict[str, type] = {
     "random_crop": RandomResizedCrop,
     "gaussian_blur": GaussianBlur,
     "resize": Resize,
+    "rotation": RandomRotation,
 }
 
 
-def build_augmentation(config: dict) -> Compose:
-    """Build an augmentation pipeline from a config dict.
+def get_augmentation_preset(name: str, image_size: tuple[int, int] = (640, 640)) -> dict:
+    """Return a ``build_augmentation``-ready config dict for a named preset.
+
+    ``nadir_rotation`` mirrors the chestnut-burr small-object policy (training.py
+    317-320): free rotation + h/v flips + mild jitter, with mosaic/copy-paste/mixup
+    intentionally OMITTED (they shrink small objects / stitch unnatural composites).
+    """
+    presets: dict[str, dict] = {
+        "nadir_rotation": {
+            "rotation": {"degrees": 180, "p": 1.0},
+            "horizontal_flip": 0.5,
+            "vertical_flip": 0.5,
+            "color_jitter": {"brightness": 0.2, "contrast": 0.2, "saturation": 0.2, "hue": 0.0},
+            "resize": list(image_size),
+        },
+        "default": {
+            "horizontal_flip": 0.5,
+            "color_jitter": {"brightness": 0.2, "contrast": 0.2},
+            "resize": list(image_size),
+        },
+        "none": {"resize": list(image_size)},
+    }
+    if name not in presets:
+        raise ValueError(f"Unknown augmentation preset '{name}'. Available: {sorted(presets)}")
+    return presets[name]
+
+
+def build_augmentation(config: dict | str, backend: str = "pil") -> Compose:
+    """Build an augmentation pipeline from a config dict or a preset name.
+
+    ``config`` may be a dict (as below) or a preset-name string
+    (e.g. ``"nadir_rotation"``) resolved via :func:`get_augmentation_preset`.
 
     Config format:
         {
+            "rotation": {"degrees": 180, "p": 1.0},
             "horizontal_flip": 0.5,       # probability
             "vertical_flip": 0.3,
             "color_jitter": {"brightness": 0.3, "contrast": 0.3},
@@ -232,8 +323,21 @@ def build_augmentation(config: dict) -> Compose:
       - dict: passed as kwargs to the transform constructor
       - bool: True → use defaults
 
+    ``backend="albumentations"`` is accepted for forward-compatibility but currently
+    falls back to the PIL pipeline (with a warning) — the PIL transforms preserve the
+    ``(PIL, target) -> (tensor, target)`` contract.
+
     Returns a Compose([..., ToTensor()]) pipeline.
     """
+    if isinstance(config, str):
+        config = get_augmentation_preset(config)
+    if backend == "albumentations":
+        try:
+            import albumentations  # noqa: F401
+            logger.warning("albumentations backend not yet wired; using the PIL pipeline.")
+        except ImportError:
+            logger.warning("albumentations requested but not installed; using the PIL pipeline.")
+
     transforms = []
 
     for name, params in config.items():
