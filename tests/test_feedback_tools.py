@@ -1,0 +1,85 @@
+"""W5 — review->retrain MCP tools (materialize + queue + lineage + registration)."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from tcip_mcp.tools.feedback_tools import materialize_review_dataset, prioritize_review_queue
+
+
+def _setup(tmp_path: Path):
+    from PIL import Image
+    state_dir = tmp_path / "state"
+    src = tmp_path / "src"
+    state_dir.mkdir()
+    src.mkdir()
+    for name in ("imgA.png", "imgB.png"):
+        Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
+    state = {"image": {
+        "imgA.png": {"img_status": "completed", "detections": [
+            {"action": "accepted", "class_id": 0, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+        "imgB.png": {"img_status": "completed", "detections": [
+            {"action": "rejected", "class_id": 0, "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
+    }}
+    (state_dir / "review_stats.json").write_text(json.dumps(state))
+    return state_dir, src
+
+
+def test_materialize_review_dataset_end_to_end(tmp_path):
+    state_dir, src = _setup(tmp_path)
+    out = tmp_path / "out"
+    r = materialize_review_dataset(str(state_dir), str(src), str(out))
+    assert "error" not in r
+    assert r["positive"] == 1 and r["hard_negative"] == 1
+    assert (out / "images" / "imgA.png").is_file()
+    assert (out / "labels" / "detect" / "imgA.txt").is_file()
+
+
+def test_materialize_review_dataset_records_lineage(tmp_path, monkeypatch):
+    import tcip_mcp.experiments as experiments
+    monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
+    experiments.create_experiment("exp1", {"x": 1})
+
+    state_dir, src = _setup(tmp_path)
+    out = tmp_path / "out"
+    r = materialize_review_dataset(str(state_dir), str(src), str(out), experiment_id="exp1")
+    assert r["experiment_id"] == "exp1"
+
+    lineage = json.loads((tmp_path / "exp" / "exp1" / "lineage.json").read_text())
+    assert lineage["data_source"] == str(state_dir)
+    assert "review_session" in lineage
+    artifacts = json.loads((tmp_path / "exp" / "exp1" / "artifacts.json").read_text())
+    assert artifacts["curated_dataset"]["path"] == str(out)
+
+
+def test_materialize_creates_experiment_when_absent(tmp_path, monkeypatch):
+    import tcip_mcp.experiments as experiments
+    monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
+
+    state_dir, src = _setup(tmp_path)
+    r = materialize_review_dataset(str(state_dir), str(src), str(tmp_path / "out"), experiment_id="new1")
+    assert r["experiment_id"] == "new1"
+    lineage = json.loads((tmp_path / "exp" / "new1" / "lineage.json").read_text())
+    assert "review_session" in lineage
+
+
+def test_materialize_invalid_inputs_error(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()  # no review_stats.json
+    assert "error" in materialize_review_dataset(str(empty), str(tmp_path), str(tmp_path / "o1"))
+
+    state_dir, _src = _setup(tmp_path)
+    assert "error" in materialize_review_dataset(str(state_dir), str(tmp_path / "nope"), str(tmp_path / "o2"))
+
+
+def test_prioritize_review_queue_checkpoint_missing(tmp_path):
+    r = prioritize_review_queue(str(tmp_path / "nope.pt"), str(tmp_path))
+    assert "error" in r  # early guard, no torch import needed
+
+
+def test_feedback_tools_register_in_manifest():
+    from tcip_mcp.server import list_registered_tools
+    names = list_registered_tools()
+    assert "materialize_review_dataset" in names
+    assert "prioritize_review_queue" in names
