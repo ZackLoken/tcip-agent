@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, file_transaction
+
 logger = logging.getLogger(__name__)
 
 EXPERIMENTS_DIR = Path(".tcip/experiments")
@@ -40,7 +42,7 @@ def create_experiment(
     d.mkdir(parents=True, exist_ok=True)
 
     # Config snapshot
-    (d / "config.json").write_text(json.dumps(config, indent=2, default=str))
+    atomic_write_json(d / "config.json", config)
 
     # Initial status
     status = {
@@ -49,7 +51,7 @@ def create_experiment(
         "started": None,
         "ended": None,
     }
-    (d / "status.json").write_text(json.dumps(status, indent=2))
+    atomic_write_json(d / "status.json", status)
 
     # Lineage
     lineage = {
@@ -58,10 +60,10 @@ def create_experiment(
         "model_weights": None,
         "predictions": None,
     }
-    (d / "lineage.json").write_text(json.dumps(lineage, indent=2))
+    atomic_write_json(d / "lineage.json", lineage)
 
     # Empty artifacts
-    (d / "artifacts.json").write_text(json.dumps({}, indent=2))
+    atomic_write_json(d / "artifacts.json", {})
 
     return {
         "experiment_id": experiment_id,
@@ -77,16 +79,17 @@ def update_status(experiment_id: str, state: str) -> dict[str, Any]:
         return {"error": f"Experiment not found: {experiment_id}"}
 
     status_path = d / "status.json"
-    status = json.loads(status_path.read_text())
-    status["state"] = state
+    with file_transaction(status_path):
+        status = json.loads(status_path.read_text())
+        status["state"] = state
 
-    now = datetime.now(timezone.utc).isoformat()
-    if state == "running" and not status.get("started"):
-        status["started"] = now
-    if state in ("completed", "failed"):
-        status["ended"] = now
+        now = datetime.now(timezone.utc).isoformat()
+        if state == "running" and not status.get("started"):
+            status["started"] = now
+        if state in ("completed", "failed"):
+            status["ended"] = now
 
-    status_path.write_text(json.dumps(status, indent=2))
+        atomic_write_json(status_path, status)
     return {"experiment_id": experiment_id, "state": state}
 
 
@@ -105,8 +108,7 @@ def log_metrics(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **metrics,
     }
-    with open(d / "metrics.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, default=str) + "\n")
+    append_jsonl(d / "metrics.jsonl", entry)
 
     return {"experiment_id": experiment_id, "epoch": epoch, "logged": True}
 
@@ -122,9 +124,10 @@ def record_artifact(
         return {"error": f"Experiment not found: {experiment_id}"}
 
     artifacts_path = d / "artifacts.json"
-    artifacts = json.loads(artifacts_path.read_text())
-    artifacts[name] = {"path": path, "recorded": datetime.now(timezone.utc).isoformat()}
-    artifacts_path.write_text(json.dumps(artifacts, indent=2))
+    with file_transaction(artifacts_path):
+        artifacts = json.loads(artifacts_path.read_text())
+        artifacts[name] = {"path": path, "recorded": datetime.now(timezone.utc).isoformat()}
+        atomic_write_json(artifacts_path, artifacts)
 
     return {"experiment_id": experiment_id, "artifact": name, "path": path}
 
@@ -139,9 +142,10 @@ def update_lineage(
         return {"error": f"Experiment not found: {experiment_id}"}
 
     lineage_path = d / "lineage.json"
-    lineage = json.loads(lineage_path.read_text())
-    lineage.update(updates)
-    lineage_path.write_text(json.dumps(lineage, indent=2))
+    with file_transaction(lineage_path):
+        lineage = json.loads(lineage_path.read_text())
+        lineage.update(updates)
+        atomic_write_json(lineage_path, lineage)
 
     return {"experiment_id": experiment_id, "lineage": lineage}
 
