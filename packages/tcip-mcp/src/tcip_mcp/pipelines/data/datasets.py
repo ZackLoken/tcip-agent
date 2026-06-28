@@ -260,7 +260,8 @@ class SemanticSegDataset(BaseDataset):
         img = Image.open(_find_image(self.images_dir, stem)).convert("RGB")
         mask_path = self.masks_dir / f"{stem}.png"
         mask = np.array(Image.open(mask_path).convert("L")) if mask_path.exists() else np.zeros(img.size[::-1], dtype=np.int64)
-        target = {"mask": torch.tensor(mask, dtype=torch.int64)}
+        # Key matches the SemanticSegHead loss contract.
+        target = {"masks": torch.tensor(mask, dtype=torch.int64)}
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         else:
@@ -389,7 +390,8 @@ class OrdinalDataset(BaseDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self._stems[idx]
         img = Image.open(_find_image(self.images_dir, stem)).convert("RGB")
-        target = {"rank": self._ranks[idx], "num_ranks": self._num_ranks}
+        # Key matches the OrdinalHead loss contract (plural, like "labels"/"masks").
+        target = {"ranks": self._ranks[idx], "num_ranks": self._num_ranks}
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         else:
@@ -435,7 +437,8 @@ class RegressionDataset(BaseDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self._stems[idx]
         img = Image.open(_find_image(self.images_dir, stem)).convert("RGB")
-        target = {"value": self._values[idx]}
+        # Key matches the RegressionHead loss contract.
+        target = {"values": self._values[idx]}
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         else:
