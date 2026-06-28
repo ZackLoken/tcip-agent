@@ -11,9 +11,20 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from tcip_web.paths import safe_join
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/training", tags=["training"])
+
+
+def _metrics_path(project_root: str, run_id: str) -> Path:
+    """``<project_root>/.tcip/experiments/<run_id>/metrics.jsonl`` with traversal guarded.
+
+    ``run_id`` is an untrusted path component, so it is joined via ``safe_join`` (which
+    rejects ``..`` / absolute paths) — raises ``ValueError`` on an attempted escape.
+    """
+    return safe_join(Path(project_root) / ".tcip" / "experiments", run_id, "metrics.jsonl")
 
 
 class ConfigPayload(BaseModel):
@@ -59,7 +70,10 @@ def get_run(run_id: str) -> dict:
 @router.get("/runs/{run_id}/metrics")
 def get_run_metrics(project_root: str, run_id: str) -> dict:
     """Read the full metrics.jsonl for a run."""
-    metrics_path = Path(project_root) / ".tcip" / "experiments" / run_id / "metrics.jsonl"
+    try:
+        metrics_path = _metrics_path(project_root, run_id)
+    except ValueError:
+        raise HTTPException(400, f"invalid run_id: {run_id}") from None
     if not metrics_path.exists():
         return {"metrics": [], "exists": False}
     rows: list[dict] = []
@@ -135,7 +149,11 @@ def _read_metrics_after(path: Path, after_line: int) -> tuple[list[dict], int]:
 async def _stream_metrics(
     ws: WebSocket, project_root: str, run_id: str, poll_seconds: float = 1.0
 ) -> None:
-    metrics_path = Path(project_root) / ".tcip" / "experiments" / run_id / "metrics.jsonl"
+    try:
+        metrics_path = _metrics_path(project_root, run_id)
+    except ValueError:
+        await ws.send_json({"type": "error", "error": f"invalid run_id: {run_id}"})
+        return
     cursor = 0
 
     while True:
