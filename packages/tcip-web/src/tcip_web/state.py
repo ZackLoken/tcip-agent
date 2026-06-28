@@ -185,11 +185,10 @@ class StateStore:
 
     def _flush_sync(self, state_dir: Path) -> None:
         try:
+            from tcip_mcp.utils.atomic_io import atomic_write_json
+
             state_dir.mkdir(parents=True, exist_ok=True)
-            (state_dir / STATE_FILENAME).write_text(
-                json.dumps(self.snapshot(), indent=2),
-                encoding="utf-8",
-            )
+            atomic_write_json(state_dir / STATE_FILENAME, self.snapshot())
         except OSError:
             logger.exception("Could not write %s", state_dir / STATE_FILENAME)
 
