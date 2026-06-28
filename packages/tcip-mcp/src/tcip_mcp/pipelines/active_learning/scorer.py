@@ -18,6 +18,12 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 
+def _entropy(logits: "torch.Tensor") -> float:
+    """Mean softmax entropy of a ``[B, C]`` logits tensor (classification uncertainty)."""
+    probs = F.softmax(logits, dim=-1)
+    return -(probs * probs.clamp(min=1e-8).log()).sum(-1).mean().item()
+
+
 class BaseScorer(ABC):
     """Rank images by how valuable they'd be to label next."""
 
@@ -62,13 +68,15 @@ class UncertaintyScorer(BaseScorer):
             else:
                 outputs = model(tensor)
                 if isinstance(outputs, dict):
-                    logits = next(iter(outputs.values()))
-                else:
-                    logits = outputs
-                if isinstance(logits, torch.Tensor) and logits.dim() >= 2:
-                    probs = F.softmax(logits, dim=-1)
-                    entropy = -(probs * probs.clamp(min=1e-8).log()).sum(-1).mean().item()
-                    uncertainty = entropy
+                    # Multi-head: average classification-style entropy across all heads
+                    # (was first-head-only, which ignored every other head's uncertainty).
+                    entropies = [
+                        _entropy(v) for v in outputs.values()
+                        if isinstance(v, torch.Tensor) and v.dim() >= 2
+                    ]
+                    uncertainty = sum(entropies) / len(entropies) if entropies else 0.5
+                elif isinstance(outputs, torch.Tensor) and outputs.dim() >= 2:
+                    uncertainty = _entropy(outputs)
                 else:
                     uncertainty = 0.5
 
