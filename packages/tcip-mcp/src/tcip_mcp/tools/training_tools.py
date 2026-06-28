@@ -110,8 +110,7 @@ def launch_training(config: dict, output_dir: str) -> dict:
     heads = model_spec.get("heads", [{}])
     task = heads[0].get("task", "detection") if heads else "detection"
 
-    # Build data loaders
-    from tcip_mcp.pipelines.data.datasets import build_dataset
+    # Build data loaders (build_dataset is used inside _auto_train_val).
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.training.generic_trainer import task_collate
     from torch.utils.data import DataLoader
@@ -123,9 +122,7 @@ def launch_training(config: dict, output_dir: str) -> dict:
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
         transforms = build_augmentation(aug_config)
 
-    train_ds = build_dataset(task, images_dir=data_cfg.get("images_dir", ""),
-                             labels_dir=data_cfg.get("labels_dir", ""),
-                             transforms=transforms)
+    train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
     sampler = build_sampler(train_config.sampler, train_ds)
     train_loader = DataLoader(
         train_ds, batch_size=train_config.batch_size,
@@ -133,6 +130,14 @@ def launch_training(config: dict, output_dir: str) -> dict:
         collate_fn=task_collate(task),
         num_workers=train_config.num_workers,
     )
+    val_loader = None
+    if val_ds is not None:
+        val_loader = DataLoader(
+            val_ds, batch_size=train_config.batch_size,
+            shuffle=False,
+            collate_fn=task_collate(task),
+            num_workers=train_config.num_workers,
+        )
 
     # Auto-create experiment if not already tracked
     experiment_id = config.get("experiment_id") or run.run_id
@@ -145,7 +150,7 @@ def launch_training(config: dict, output_dir: str) -> dict:
         pass  # Experiment tracking is best-effort
 
     thread = threading.Thread(
-        target=train, args=(run, train_loader, None, task), daemon=True
+        target=train, args=(run, train_loader, val_loader, task), daemon=True
     )
     thread.start()
 
@@ -381,6 +386,106 @@ def _param_dict_to_config(params: dict) -> dict:
             if len(parts) == 2:
                 config.setdefault(parts[0], {})[parts[1]] = value
     return config
+
+
+def _auto_train_val(task: str, data_cfg: dict, transforms):
+    """Build ``(train_ds, val_ds)`` for a run, deriving a leakage-free val split.
+
+    Resolution order:
+      1. ``data.val_images_dir`` set -> build val from it explicitly.
+      2. ``data.auto_val`` (default True) and a stem-capable task
+         (detection / instance_seg / semantic_seg / classification) -> derive a
+         group-aware train/val split (no held-out test) so the trainer receives
+         a real validation loader. Train keeps augmentation; val gets none.
+      3. ordinal / regression, ``auto_val`` disabled, a tiny/single-group set, or
+         any failure -> ``(full_train_ds, None)``. Never raises into the caller.
+
+    Reads ``auto_val`` / ``val_*`` / ``split.*`` from ``data_cfg`` (== config["data"]).
+    """
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.splits import (
+        group_balanced_split, count_label_lines, GROUP_KEY_FNS, default_group_key,
+    )
+
+    STEM_TASKS = {"detection", "instance_seg", "semantic_seg", "classification"}
+
+    def _source_kwargs() -> dict:
+        if task in ("detection", "instance_seg"):
+            return {"images_dir": data_cfg.get("images_dir", ""),
+                    "labels_dir": data_cfg.get("labels_dir", "")}
+        if task == "semantic_seg":
+            return {"images_dir": data_cfg.get("images_dir", ""),
+                    "masks_dir": data_cfg.get("masks_dir", data_cfg.get("labels_dir", ""))}
+        kw = {"images_dir": data_cfg.get("images_dir", "")}
+        if data_cfg.get("csv_path"):
+            kw["csv_path"] = data_cfg["csv_path"]
+        return kw
+
+    src = _source_kwargs()
+
+    # 1. Explicit validation source.
+    val_images = data_cfg.get("val_images_dir")
+    if val_images:
+        try:
+            train_ds = build_dataset(task, **src, transforms=transforms)
+            val_src = dict(src)
+            val_src["images_dir"] = val_images
+            if task in ("detection", "instance_seg"):
+                val_src["labels_dir"] = data_cfg.get("val_labels_dir", data_cfg.get("labels_dir", ""))
+            elif task == "semantic_seg":
+                val_src["masks_dir"] = data_cfg.get("val_masks_dir", data_cfg.get("masks_dir", ""))
+            return train_ds, build_dataset(task, **val_src, transforms=None)
+        except Exception as exc:
+            logger.warning("Explicit val build failed (%s); training without validation.", exc)
+            return build_dataset(task, **src, transforms=transforms), None
+
+    if not data_cfg.get("auto_val", True) or task not in STEM_TASKS:
+        return build_dataset(task, **src, transforms=transforms), None
+
+    # 2. Auto group-aware train/val split.
+    try:
+        full_ds = build_dataset(task, **src, transforms=transforms)
+        stems = list(getattr(full_ds, "stems", None) or getattr(full_ds, "_stems", []))
+        if len(stems) < 2:
+            return full_ds, None
+
+        split_cfg = data_cfg.get("split", {})
+        val_ratio = float(split_cfg.get("val_ratio", 0.2))
+        seed = int(split_cfg.get("seed", 42))
+        group_by = split_cfg.get("group_by", "tile_prefix")
+        stratify = split_cfg.get("stratify_foreground", True)
+        group_key_fn = GROUP_KEY_FNS.get(group_by, default_group_key)
+
+        annotation_counts = None
+        if stratify and task in ("detection", "instance_seg"):
+            labels_dir = data_cfg.get("labels_dir", "")
+            annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+
+        parts = group_balanced_split(
+            stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
+            splits=(1.0 - val_ratio, val_ratio, 0.0), seed=seed,
+        )
+        train_stems, val_stems = parts["train"], parts["val"]
+        if not val_stems or not train_stems:
+            return full_ds, None
+
+        if task == "classification":
+            stem_to_label = dict(zip(getattr(full_ds, "_stems", []), getattr(full_ds, "_labels", [])))
+            train_ds = build_dataset(
+                task, images_dir=src["images_dir"], transforms=transforms,
+                stems=train_stems, labels=[stem_to_label[s] for s in train_stems])
+            val_ds = build_dataset(
+                task, images_dir=src["images_dir"], transforms=None,
+                stems=val_stems, labels=[stem_to_label[s] for s in val_stems])
+        else:
+            train_ds = build_dataset(task, **src, transforms=transforms, stems=train_stems)
+            val_ds = build_dataset(task, **src, transforms=None, stems=val_stems)
+        logger.info("Auto train/val split for %s: %d train / %d val stems.",
+                    task, len(train_stems), len(val_stems))
+        return train_ds, val_ds
+    except Exception as exc:
+        logger.warning("Auto train/val split failed (%s); training without validation.", exc)
+        return build_dataset(task, **src, transforms=transforms), None
 
 
 @mcp.tool()
