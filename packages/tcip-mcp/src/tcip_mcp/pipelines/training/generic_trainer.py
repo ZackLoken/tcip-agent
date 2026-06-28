@@ -21,7 +21,13 @@ import torch
 from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.composer import compose_model, ComposedModel
-from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
+from tcip_mcp.pipelines.training.evaluation import evaluate
+from tcip_mcp.pipelines.training.optimizer_factory import (
+    build_optimizer,
+    compute_lr_scale,
+    restore_optimizer_state,
+    snapshot_optimizer_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +61,12 @@ class TrainConfig:
     batch_size: int = 4
     num_workers: int = 2
     scheduler: dict = field(default_factory=lambda: {"type": "cosine"})
+    # W2 knobs (documentation/serialization only — train() reads run.config).
+    stage_warmup_epochs: int = 0
+    lr_scaling: dict = field(default_factory=lambda: {
+        "enabled": False, "reference_effective_batch": 64, "scale_power": 0.5, "max_lr": None})
+    enforce_monotonic_unfreeze: bool = True
+    evaluation: dict = field(default_factory=dict)  # W1 eval params (doc-only; train() reads run.config)
 
 
 # ====================================================================
@@ -68,7 +80,7 @@ class TrainRun:
     status: str = "created"
     current_epoch: int = 0
     current_stage: int = 0
-    best_metric: float = float("inf")  # best val loss (lower=better)
+    best_metric: float = float("inf")  # best selection objective (composite for detection/instance_seg, else val_loss; lower=better)
     metrics_history: list[dict] = field(default_factory=list)
     start_time: float = 0.0
     end_time: float = 0.0
@@ -162,63 +174,30 @@ def _build_scheduler(optimizer, config: dict, epochs: int):
 # ====================================================================
 
 @torch.no_grad()
-def _validate(model: ComposedModel, val_loader: DataLoader, device: torch.device, task: str) -> dict:
-    """Task-agnostic validation — computes loss on val set.
+def _validate(
+    model: ComposedModel, val_loader: DataLoader, device: torch.device, task: str, *,
+    conf_threshold: float = 0.25, iou_threshold: float = 0.5,
+    iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
+) -> dict:
+    """Task-aware validation — delegates to ``evaluation.evaluate`` and ``val_``-prefixes.
 
-    Sets all submodules to eval mode (preserving BN running stats), then
-    overrides model.training = True so ComposedModel.forward returns losses.
-    For detection heads that require train mode for loss computation,
-    we also set head.training = True.
+    detection/instance_seg → precision/recall/F1/mAP50/mAP + composite objective;
+    classification → accuracy/F1; ordinal → MAE/rank_acc; regression → MAE/RMSE;
+    semantic_seg stays loss-only. Always returns ``val_loss``.
     """
-    model.eval()
-    # Override top-level training flag so forward() enters the loss branch
-    model.training = True
-    total_loss = 0.0
-    n = 0
+    metrics = evaluate(
+        model, val_loader, device, task,
+        conf_threshold=conf_threshold, iou_threshold=iou_threshold,
+        iou_type=iou_type, max_dets=max_dets, score_weights=score_weights,
+    )
+    return {f"val_{k}": v for k, v in metrics.items()}
 
-    for batch in val_loader:
-        if task in ("detection", "instance_seg"):
-            images, targets = batch
-            images = [img.to(device) for img in images]
-            targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
-            detector = getattr(model, "detector", None)
-            if detector is not None:
-                # DetectionModel wraps a torchvision FasterRCNN whose loss branch
-                # is gated on the *detector's own* training flag and asserts on
-                # empty/degenerate boxes. Put the detector in train mode (but keep
-                # BatchNorm in eval so val data does not move running stats), drop
-                # box-less images, and call it directly to get the loss dict.
-                keep = [(im, t) for im, t in zip(images, targets)
-                        if isinstance(t.get("boxes"), torch.Tensor) and t["boxes"].numel() > 0]
-                if not keep:
-                    continue
-                detector.train()
-                for m in detector.modules():
-                    if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-                        m.eval()
-                loss_dict = detector([im for im, _ in keep], [t for _, t in keep])
-            else:
-                # ComposedModel-based path (no torchvision detector wrapper).
-                for head in getattr(model, "heads", []):
-                    head.training = True
-                loss_dict = model(images, targets)
-        else:
-            images, targets = batch
-            images = images.to(device)
-            targets = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in targets.items()}
-            loss_dict = model(images, targets)
 
-        if isinstance(loss_dict, dict):
-            loss = sum(loss_dict.values())
-        else:
-            loss = loss_dict
-        total_loss += float(loss.item()) if torch.is_tensor(loss) else float(loss)
-        n += 1
-
-    # Restore eval mode fully
-    model.eval()
-
-    return {"val_loss": round(total_loss / max(n, 1), 6)}
+def _selection_value(task: str, val_metrics: dict, avg_loss: float) -> float:
+    """Best-model/early-stopping driver: composite objective for detection, else val_loss."""
+    if task in ("detection", "instance_seg") and "val_objective" in val_metrics:
+        return val_metrics["val_objective"]
+    return val_metrics.get("val_loss", avg_loss)
 
 
 # ====================================================================
@@ -271,6 +250,17 @@ def train(
         opt_cfg = config.get("optimizer", {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 1e-4})
         sched_cfg = config.get("scheduler", {"type": "cosine"})
 
+        # W2: progressive-unfreezing fidelity setup.
+        base_backbone_lr = opt_cfg.get("backbone_lr", 1e-4)
+        base_head_lr = opt_cfg.get("head_lr", 1e-3)
+        lr_scaling_cfg = config.get("lr_scaling", {})
+        stage_warmup_epochs = int(config.get("stage_warmup_epochs", 0))
+        enforce_monotonic_unfreeze = config.get("enforce_monotonic_unfreeze", True)
+        physical_batch = getattr(train_loader, "batch_size", None) or config.get("batch_size") or 1
+        pending_snapshot = None   # best optimizer state from the previous stage
+        prev_trainable = None     # trainable param count of the previous stage
+        eval_cfg = config.get("evaluation", {})  # W1 metric / selection params
+
         global_step = 0
         stopped_early = False
 
@@ -290,17 +280,60 @@ def train(
             else:
                 model.freeze_backbone(freeze_to)
 
+            # W2: progressive unfreezing must only ever grow the trainable set.
+            trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            if enforce_monotonic_unfreeze and prev_trainable is not None and trainable < prev_trainable:
+                raise RuntimeError(
+                    f"Non-decreasing unfreeze violated at stage {stage_idx}: "
+                    f"{trainable} < {prev_trainable} trainable params"
+                )
+            prev_trainable = trainable
+
+            # W2: per-stage accumulation + optional effective-batch LR scaling.
+            stage_accum = stage.get("gradient_accumulation_steps", accum_steps)
+            eff_batch = physical_batch * stage_accum
+            stage_backbone_lr, stage_head_lr = base_backbone_lr, base_head_lr
+            if lr_scaling_cfg.get("enabled", False):
+                mult = compute_lr_scale(
+                    eff_batch,
+                    lr_scaling_cfg.get("reference_effective_batch", 64),
+                    lr_scaling_cfg.get("scale_power", 0.5),
+                )
+                stage_backbone_lr *= mult
+                stage_head_lr *= mult
+                max_lr = lr_scaling_cfg.get("max_lr")
+                if max_lr is not None:
+                    stage_backbone_lr = min(stage_backbone_lr, max_lr)
+                    stage_head_lr = min(stage_head_lr, max_lr)
+
             optimizer = build_optimizer(
                 opt_cfg.get("name", "adamw"),
                 model,
-                backbone_lr=opt_cfg.get("backbone_lr", 1e-4),
-                head_lr=opt_cfg.get("head_lr", 1e-3),
+                backbone_lr=stage_backbone_lr,
+                head_lr=stage_head_lr,
                 weight_decay=opt_cfg.get("weight_decay", 1e-4),
             )
 
+            # W2: hand off momentum from the previous stage's best epoch.
+            if pending_snapshot is not None:
+                restored = restore_optimizer_state(optimizer, model, pending_snapshot)
+                logger.info("Stage %d: restored optimizer state for %d params", stage_idx, restored)
+
+            target_lrs = [g["lr"] for g in optimizer.param_groups]
+            prev_end_lrs = pending_snapshot.get("end_lrs") if pending_snapshot else None
+
             stage_epochs = stage.get("epochs", 10)
-            scheduler = _build_scheduler(optimizer, sched_cfg, stage_epochs)
+            # W2: inter-stage LR warmup (boundaries only; default off).
+            warmup_n = (
+                min(stage_warmup_epochs, stage_epochs)
+                if (stage_idx > 0 and pending_snapshot is not None)
+                else 0
+            )
+            sched_epochs = max(1, stage_epochs - warmup_n)
+            scheduler = _build_scheduler(optimizer, sched_cfg, sched_epochs)
             is_plateau = isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
+            stage_best = float("inf")
+            stage_snapshot = None
 
             for epoch in range(stage_epochs):
                 if stopped_early:
@@ -310,6 +343,14 @@ def train(
                 epoch_loss = 0.0
                 n_batches = 0
                 optimizer.zero_grad()
+
+                # W2: per-group linear LR warmup at the stage boundary.
+                in_warmup = warmup_n > 0 and epoch < warmup_n
+                if in_warmup:
+                    alpha = (epoch + 1) / warmup_n
+                    for gi, group in enumerate(optimizer.param_groups):
+                        start = prev_end_lrs[gi] if (prev_end_lrs and gi < len(prev_end_lrs)) else 0.0
+                        group["lr"] = start + alpha * (target_lrs[gi] - start)
 
                 for batch_idx, batch in enumerate(train_loader):
                     if task in ("detection", "instance_seg"):
@@ -325,18 +366,18 @@ def train(
                         with torch.amp.autocast("cuda"):
                             loss_dict = model(images, targets)
                             loss = sum(loss_dict.values()) if isinstance(loss_dict, dict) else loss_dict
-                        scaled = loss / accum_steps
+                        scaled = loss / stage_accum
                         scaler.scale(scaled).backward()
-                        if (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_loader):
+                        if (batch_idx + 1) % stage_accum == 0 or (batch_idx + 1) == len(train_loader):
                             scaler.step(optimizer)
                             scaler.update()
                             optimizer.zero_grad()
                     else:
                         loss_dict = model(images, targets)
                         loss = sum(loss_dict.values()) if isinstance(loss_dict, dict) else loss_dict
-                        scaled = loss / accum_steps
+                        scaled = loss / stage_accum
                         scaled.backward()
-                        if (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_loader):
+                        if (batch_idx + 1) % stage_accum == 0 or (batch_idx + 1) == len(train_loader):
                             optimizer.step()
                             optimizer.zero_grad()
 
@@ -352,18 +393,31 @@ def train(
 
                 val_metrics = {}
                 if val_loader is not None:
-                    val_metrics = _validate(model, val_loader, device, task)
+                    val_metrics = _validate(
+                        model, val_loader, device, task,
+                        conf_threshold=eval_cfg.get("conf_threshold", 0.25),
+                        iou_threshold=eval_cfg.get("iou_threshold", 0.5),
+                        iou_type=eval_cfg.get("iou_type"),
+                        max_dets=eval_cfg.get("max_dets", 100),
+                        score_weights=eval_cfg.get("score_weights"),
+                    )
+                sel = _selection_value(task, val_metrics, avg_loss)
 
-                if is_plateau:
-                    scheduler.step(val_metrics.get("val_loss", avg_loss))
-                else:
-                    scheduler.step()
+                # W2: suppress the scheduler during warmup epochs.
+                if not in_warmup:
+                    if is_plateau:
+                        scheduler.step(val_metrics.get("val_loss", avg_loss))
+                    else:
+                        scheduler.step()
 
                 epoch_metrics = {
                     "epoch": run.current_epoch,
                     "stage": stage_idx,
                     "train_loss": round(avg_loss, 6),
                     "lr": current_lr,
+                    "eff_batch": eff_batch,
+                    "trainable_params": trainable,
+                    "selection": round(sel, 6),
                     **val_metrics,
                 }
                 run.metrics_history.append(epoch_metrics)
@@ -381,10 +435,9 @@ def train(
                 logger.info("Epoch %d stage %d loss=%.4f val_loss=%.4f lr=%.2e",
                     run.current_epoch, stage_idx, avg_loss, val_metrics.get("val_loss", 0), current_lr)
 
-                # Best model checkpoint
-                val_loss = val_metrics.get("val_loss", avg_loss)
-                if val_loss < run.best_metric:
-                    run.best_metric = val_loss
+                # Best model checkpoint — selected by the W1 selection objective.
+                if sel < run.best_metric:
+                    run.best_metric = sel
                     torch.save({
                         "model_state_dict": model.state_dict(),
                         "model_spec": config["model_spec"],
@@ -392,6 +445,11 @@ def train(
                         "metrics": epoch_metrics,
                         "stage": stage_idx, "epoch": run.current_epoch,
                     }, out_dir / "model_best.pt")
+
+                # W2: remember this stage's best optimizer state for the handoff.
+                if sel < stage_best:
+                    stage_best = sel
+                    stage_snapshot = snapshot_optimizer_state(optimizer, model)
 
                 if ckpt_every > 0 and run.current_epoch % ckpt_every == 0:
                     torch.save({
@@ -402,17 +460,20 @@ def train(
                         "stage": stage_idx, "epoch": run.current_epoch,
                     }, out_dir / f"checkpoint_epoch_{run.current_epoch}.pt")
 
-                # Early stopping
+                # Early stopping — on the same selection objective.
                 if es_enabled and val_loader is not None:
-                    current_val = val_metrics.get("val_loss", float("inf"))
-                    if current_val < es_best - es_min_delta:
-                        es_best = current_val
+                    if sel < es_best - es_min_delta:
+                        es_best = sel
                         es_counter = 0
                     else:
                         es_counter += 1
                         if es_counter >= es_patience:
                             logger.info("Early stopping at epoch %d", run.current_epoch)
                             stopped_early = True
+
+            # W2: carry this stage's best optimizer state into the next stage.
+            if stage_snapshot is not None:
+                pending_snapshot = stage_snapshot
 
         # Final checkpoint
         torch.save({
