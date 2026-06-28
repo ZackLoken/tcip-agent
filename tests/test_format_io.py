@@ -2,9 +2,7 @@
 
 import json
 import os
-import tempfile
 
-import pytest
 
 from tcip_annotation.state import BBox, Polygon
 from tcip_annotation.format_io import (
@@ -23,7 +21,6 @@ from tcip_annotation.format_io import (
 )
 from tcip_annotation.label_io import (
     parse_detect_labels,
-    write_detect_labels,
 )
 
 
