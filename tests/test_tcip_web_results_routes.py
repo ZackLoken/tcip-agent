@@ -86,7 +86,7 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
     preds_324.mkdir()
     # PLANT_A on 2-11 → 4 detections, none elongated (h < 0.02)
     (preds_211 / "IMG_A.txt").write_text(
-        "\n".join(f"0 0.9 0.5 0.5 0.01 0.01" for _ in range(4)), encoding="utf-8"
+        "\n".join("0 0.9 0.5 0.5 0.01 0.01" for _ in range(4)), encoding="utf-8"
     )
     # PLANT_B on 2-11 → 2 detections, both elongated
     (preds_211 / "IMG_B.txt").write_text(
