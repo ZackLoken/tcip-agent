@@ -55,6 +55,7 @@ class BaseDataset(Dataset, ABC):
     """Abstract base for all task-specific datasets."""
 
     task_type: str = ""
+    expected_channels: int = 3  # input channels the dataset yields (3=RGB; set by build_dataset)
 
     @property
     @abstractmethod
@@ -566,19 +567,22 @@ def build_dataset(task: str, **kwargs) -> BaseDataset:
     :class:`TiledDetectionDataset` (W3). Ignored for non-detection tasks.
     """
     tiling = kwargs.pop("tiling", None)
+    num_channels = kwargs.pop("num_channels", 3)
     cls = _DATASET_MAP.get(task)
     if cls is None:
         raise ValueError(f"Unknown task '{task}'. Available: {list(_DATASET_MAP.keys())}")
 
-    if tiling and tiling.get("enabled", True):
-        if task != "detection":
+    if tiling and tiling.get("enabled", True) and task == "detection":
+        transforms = kwargs.pop("transforms", None)
+        base = cls(**kwargs)
+        tile_kwargs = {k: tiling[k] for k in
+                       ("tile_size", "overlap", "min_edge_keep_frac", "dedup_iou", "skip_empty")
+                       if k in tiling}
+        ds = TiledDetectionDataset(base, transforms=transforms, **tile_kwargs)
+    else:
+        if tiling and tiling.get("enabled", True) and task != "detection":
             logger.warning("tiling is only supported for task='detection'; ignoring for task=%r", task)
-        else:
-            transforms = kwargs.pop("transforms", None)
-            base = cls(**kwargs)
-            tile_kwargs = {k: tiling[k] for k in
-                           ("tile_size", "overlap", "min_edge_keep_frac", "dedup_iou", "skip_empty")
-                           if k in tiling}
-            return TiledDetectionDataset(base, transforms=transforms, **tile_kwargs)
+        ds = cls(**kwargs)
 
-    return cls(**kwargs)
+    ds.expected_channels = num_channels
+    return ds
