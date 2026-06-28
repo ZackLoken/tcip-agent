@@ -23,7 +23,7 @@ class TestAuditLogging:
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_audited_logs_success(self):
-        from tcip_mcp.audit import audited, AUDIT_PATH
+        from tcip_mcp.audit import audited
 
         with patch.object(
             __import__("tcip_mcp.audit", fromlist=["AUDIT_PATH"]),
