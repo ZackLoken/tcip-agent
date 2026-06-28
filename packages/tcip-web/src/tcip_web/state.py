@@ -84,7 +84,7 @@ class InferenceJob(BaseModel):
 class GuiState(BaseModel):
     """Complete GUI state — persisted to gui.json and broadcast to browsers."""
 
-    active_tab: str = "annotate"  # annotate|review|training|tuning|inference|results
+    active_tab: str = "annotate"  # annotate|review|training|tuning|inference|results|meta
     dataset: DatasetSelection = Field(default_factory=DatasetSelection)
     view: ViewState = Field(default_factory=ViewState)
     class_names: dict[int, str] = Field(default_factory=dict)
