@@ -10,26 +10,15 @@ from tcip_mcp.model_registry import ModelRegistry
 @mcp.tool()
 @audited
 def list_available_models() -> dict:
-    """List all available model architectures and configurations.
+    """List available model architectures (backbones / necks / heads / losses).
 
-    Queries the composable component registries for backbones, necks,
-    heads, and losses.
+    A focused view over the component registries. Delegates to ``list_components`` (the
+    full set — also optimizers/detectors with metadata) so there is one source of truth;
+    the previous standalone version crashed on ``sorted()`` over metadata dicts.
     """
-    from tcip_mcp.pipelines.registry import (
-        BACKBONES, NECKS, HEADS, LOSSES,
-    )
-    # Trigger registration side-effects
-    import tcip_mcp.pipelines.components.backbones  # noqa: F401
-    import tcip_mcp.pipelines.components.necks  # noqa: F401
-    import tcip_mcp.pipelines.components.heads  # noqa: F401
-    import tcip_mcp.pipelines.components.losses  # noqa: F401
-
-    return {
-        "backbones": sorted(BACKBONES.list()),
-        "necks": sorted(NECKS.list()),
-        "heads": sorted(HEADS.list()),
-        "losses": sorted(LOSSES.list()),
-    }
+    from tcip_mcp.tools.pipeline_tools import list_components
+    full = list_components()
+    return {key: full.get(key, []) for key in ("backbones", "necks", "heads", "losses")}
 
 
 @mcp.tool()
