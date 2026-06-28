@@ -6,6 +6,31 @@ import csv
 from pathlib import Path
 
 
+def result_to_yolo_lines(result: dict) -> list[str]:
+    """Convert a ``GenericPredictor`` detection result to YOLO prediction lines.
+
+    ``result`` carries pixel-xyxy ``boxes``, 1-indexed ``labels`` (background=0),
+    ``scores``, and image ``width``/``height``. Returns ``"cls conf cx cy w h"`` lines
+    (normalized) — the single format that ``parse_detect_predictions`` / the Review tab
+    consume. Shared by the MCP ``export_predictions_yolo`` tool and the web inference job
+    so there is exactly one detection→YOLO conversion.
+    """
+    w = result.get("width") or 1
+    h = result.get("height") or 1
+    lines: list[str] = []
+    for box, score, label in zip(
+        result.get("boxes", []), result.get("scores", []), result.get("labels", [])
+    ):
+        x1, y1, x2, y2 = box
+        cls = max(int(label) - 1, 0)
+        cx = ((x1 + x2) / 2) / w
+        cy = ((y1 + y2) / 2) / h
+        bw = (x2 - x1) / w
+        bh = (y2 - y1) / h
+        lines.append(f"{cls} {float(score):.4f} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+    return lines
+
+
 def export_phenology_csv(
     results: list[dict],
     output_path: str,
