@@ -145,13 +145,13 @@ def _build_gap(in_channels_list: list[int], **kw: Any) -> GlobalAvgPoolNeck:
 
 NECKS.register_factory("fpn", _build_fpn, category="pyramid", metadata={
     "description": "Feature Pyramid Network — multi-scale uniform-channel features",
-    "valid_tasks": ["detection", "semantic_seg"],
+    "valid_tasks": ["detection", "instance_seg", "semantic_seg"],
     "output_format": "multi_scale_dict",
     "options": {"add_p2": "opt-in extra finer (stride-2) pyramid level for tiny objects"},
 })
 NECKS.register_factory("pan", _build_pan, category="pyramid", metadata={
     "description": "Path Aggregation Network — bidirectional FPN",
-    "valid_tasks": ["detection", "semantic_seg"],
+    "valid_tasks": ["detection", "instance_seg", "semantic_seg"],
     "output_format": "multi_scale_dict",
     "options": {"add_p2": "opt-in extra finer (stride-2) pyramid level for tiny objects"},
 })
