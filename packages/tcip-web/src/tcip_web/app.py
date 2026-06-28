@@ -8,7 +8,6 @@ Claude agent and browser clients both connect through here.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections import defaultdict, deque
 from pathlib import Path
