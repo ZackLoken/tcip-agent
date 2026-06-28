@@ -26,6 +26,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
+# Composite-objective weights. Note: in compute_composite_objective the F1 and
+# mAP50 terms are multiplied by 10 to lift them onto the same scale as val_loss,
+# so a weight here acts on that *scaled* term (a 0.35 f1 weight ~ 3.5 loss-units
+# of pull at f1=0). See compute_composite_objective for the exact formula.
 DEFAULT_SCORE_WEIGHTS: dict[str, float] = {"loss": 0.45, "f1": 0.35, "map50": 0.20}
 
 
