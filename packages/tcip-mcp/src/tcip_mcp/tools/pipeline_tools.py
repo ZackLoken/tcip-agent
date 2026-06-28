@@ -52,6 +52,7 @@ def recommend_model(
     sensor: str = "rgb",
     num_classes: int = 1,
     num_ranks: int = 5,
+    object_size: str = "medium",
 ) -> dict:
     """Recommend a model spec for a given task and dataset characteristics.
 
@@ -64,9 +65,11 @@ def recommend_model(
         sensor: Sensor type (rgb, multispectral, lidar).
         num_classes: Number of output classes.
         num_ranks: Number of ordinal ranks (only for ordinal task).
+        object_size: Detection object scale (tiny/small/medium/large) — tiny/small pick
+            the anchor-free FCOS detector with smaller anchors; medium/large keep Faster R-CNN.
     """
     from tcip_mcp.pipelines.composer import recommend_model_spec
-    return recommend_model_spec(task, dataset_size, sensor, num_classes, num_ranks)
+    return recommend_model_spec(task, dataset_size, sensor, num_classes, num_ranks, object_size)
 
 
 @mcp.tool()
