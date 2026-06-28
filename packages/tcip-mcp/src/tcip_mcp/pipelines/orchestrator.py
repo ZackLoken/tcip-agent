@@ -113,11 +113,16 @@ def validate_pipeline(spec: dict) -> list[str]:
                 issues.append(f"{prefix}: duplicate output name '{output_ref}'")
             output_names.add(output_ref)
 
-        # W7: validate a dict model_spec's components / channel compatibility.
+        # Validate a dict model_spec's components/channel compatibility (composer)
+        # and the phase config's types/structure (pydantic schema), deduplicated —
+        # a single validation path so the orchestrator doesn't skip type checks (1.3).
         model_spec = phase.get("model_spec")
         if isinstance(model_spec, dict):
             from tcip_mcp.pipelines.composer import validate_model_spec
-            for m in validate_model_spec(model_spec):
+            from tcip_mcp.pipelines.schemas import validate_train_config_schema
+            phase_issues = list(validate_model_spec(model_spec))
+            phase_issues += validate_train_config_schema(phase)
+            for m in dict.fromkeys(phase_issues):
                 issues.append(f"{prefix}: {m}")
 
         # Phase-type-specific requirements (model_spec for training, etc.)
