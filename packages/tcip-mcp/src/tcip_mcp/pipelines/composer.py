@@ -338,6 +338,43 @@ def validate_model_spec(spec: dict) -> list[str]:
             elif h["name"] not in HEADS:
                 issues.append(f"Unknown head: {h['name']}. Available: {HEADS.names()}")
 
+    issues.extend(_channel_compat_issues(spec))
+    return issues
+
+
+def _channel_compat_issues(spec: dict) -> list[str]:
+    """Flag neck/head format + channel mismatches (W7).
+
+    Fully defensive: a no-op unless both ``neck`` and ``head`` are dicts whose
+    names resolve in the registries (so existence reporting and string-typed specs
+    are unaffected). Catches e.g. a flat-vector ``gap`` neck feeding a multi-scale
+    detection/segmentation head, or an explicit ``in_channels`` that disagrees with
+    an FPN/PAN neck's ``out_channels``.
+    """
+    issues: list[str] = []
+    if not isinstance(spec, dict):
+        return issues
+    neck = spec.get("neck", {"name": "gap"})
+    heads = spec.get("heads", [])
+    if not isinstance(neck, dict) or neck.get("name") not in NECKS or not isinstance(heads, list):
+        return issues
+
+    neck_name = neck["name"]
+    neck_fmt = NECKS.describe(neck_name).get("output_format")
+    neck_out = neck.get("out_channels", 256)
+    for i, h in enumerate(heads):
+        if not isinstance(h, dict) or h.get("name") not in HEADS:
+            continue
+        head_fmt = HEADS.describe(h["name"]).get("input_format")
+        if neck_fmt and head_fmt and neck_fmt != head_fmt:
+            issues.append(
+                f"heads[{i}] '{h['name']}' expects {head_fmt} input but neck "
+                f"'{neck_name}' outputs {neck_fmt}")
+        if (neck_name in ("fpn", "pan") and h["name"] not in _DETECTION_HEADS
+                and "in_channels" in h and h["in_channels"] != neck_out):
+            issues.append(
+                f"heads[{i}] '{h['name']}' in_channels={h['in_channels']} != "
+                f"neck '{neck_name}' out_channels={neck_out}")
     return issues
 
 
