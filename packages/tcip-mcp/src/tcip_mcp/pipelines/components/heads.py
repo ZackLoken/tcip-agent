@@ -222,6 +222,75 @@ class AnchorDetectionHead(BaseHead):
 
 
 # ====================================================================
+# Anchor-free / single-stage Detection Head (FCOS / RetinaNet)
+# ====================================================================
+
+class AnchorFreeDetectionHead(BaseHead):
+    """Anchor-free (FCOS) or single-stage (RetinaNet) detection via torchvision.
+
+    Like ``AnchorDetectionHead``, the real wiring is ``compose_model`` routing this
+    head name to ``DetectionModel`` (which builds the detector over the shared
+    backbone+neck). This standalone path exists only for registry/validation parity.
+    """
+
+    task_type = "detection"
+    default_loss = "focal+giou+ctrness"
+
+    def __init__(
+        self,
+        in_channels: int,
+        num_classes: int,
+        detector: str = "fcos",
+        min_size: int = 800,
+        max_size: int = 1333,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__()
+        self.num_classes = num_classes
+        self.in_channels = in_channels
+        self.detector = detector
+        self._min_size = min_size
+        self._max_size = max_size
+        self._model = None  # Lazy init — needs torchvision
+        self._kwargs = kwargs
+
+    def _ensure_model(self) -> None:
+        if self._model is not None:
+            return
+        if self.detector == "retinanet":
+            from torchvision.models.detection import retinanet_resnet50_fpn
+            self._model = retinanet_resnet50_fpn(
+                weights=None, num_classes=self.num_classes + 1,
+                min_size=self._min_size, max_size=self._max_size,
+            )
+        else:
+            from torchvision.models.detection import fcos_resnet50_fpn
+            self._model = fcos_resnet50_fpn(
+                weights=None, num_classes=self.num_classes + 1,
+                min_size=self._min_size, max_size=self._max_size,
+            )
+
+    def forward(self, features, targets=None):
+        self._ensure_model()
+        if isinstance(features, (list, tuple)) and isinstance(features[0], torch.Tensor):
+            if targets is not None:
+                return self._model(features, targets)
+            return self._model(features)
+        return {"features": features}
+
+    def compute_loss(self, outputs, targets):
+        # FCOS / RetinaNet return their loss dict directly in training mode.
+        if isinstance(outputs, dict) and ("classification" in outputs or "bbox_regression" in outputs):
+            return outputs
+        return {}
+
+    def decode(self, outputs):
+        if isinstance(outputs, list):
+            return outputs[0] if outputs else {}
+        return outputs
+
+
+# ====================================================================
 # Semantic Segmentation Head
 # ====================================================================
 
@@ -305,6 +374,15 @@ HEADS.register_factory("anchor_detection", lambda **kw: AnchorDetectionHead(**kw
         "valid_tasks": ["detection"],
         "input_format": "multi_scale_dict",
         "required_params": ["in_channels", "num_classes"],
+    })
+
+HEADS.register_factory("anchor_free_detection", lambda **kw: AnchorFreeDetectionHead(**kw),
+    category="detection", metadata={
+        "description": "Anchor-free / single-stage detector (FCOS or RetinaNet)",
+        "valid_tasks": ["detection"],
+        "input_format": "multi_scale_dict",
+        "required_params": ["in_channels", "num_classes"],
+        "when_to_use": "Tiny/dense objects (FCOS, anchor-free) or a lighter single-stage detector",
     })
 
 HEADS.register_factory("semantic_seg", lambda **kw: SemanticSegHead(**kw),
