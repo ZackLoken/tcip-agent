@@ -393,6 +393,15 @@ def recommend_model_spec(
     tiny/small objects get the anchor-free FCOS detector with smaller anchors (and
     an extra ``add_p2`` pyramid level for tiny); medium/large keep Faster R-CNN.
     """
+    if task == "instance_seg":
+        # Deferred (Phase 0.3 task-honesty): instance_seg would route to a box-only
+        # detector and silently discard mask labels. Refuse to recommend it until the
+        # Mask R-CNN mask head lands rather than hand back a model that drops masks.
+        raise ValueError(
+            "instance_seg is not a supported recommended task yet: it currently trains "
+            "box-only and discards mask ground truth. Use 'detection', or wait for the "
+            "Mask R-CNN mask head (deferred)."
+        )
     # Backbone selection by dataset size. Without timm, fall back to the
     # torchvision-only backbones (resnet18/50/101 and efficientnet_* are all
     # timm-only — recommending them with no timm yields an unbuildable spec).
@@ -403,8 +412,8 @@ def recommend_model_spec(
     else:
         bb = "resnet101" if HAS_TIMM else "tv_resnet101"
 
-    # Neck and head by task
-    if task in ("detection", "instance_seg"):
+    # Neck and head by task (instance_seg is rejected above pending a mask head)
+    if task == "detection":
         if object_size in ("tiny", "small"):
             neck = {"name": "fpn", "out_channels": 256}
             if object_size == "tiny":
