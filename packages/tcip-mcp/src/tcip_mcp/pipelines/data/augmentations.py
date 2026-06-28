@@ -36,7 +36,7 @@ class Compose:
 
     def __repr__(self) -> str:
         lines = [f"  {t}" for t in self.transforms]
-        return f"Compose([\n" + "\n".join(lines) + "\n])"
+        return "Compose([\n" + "\n".join(lines) + "\n])"
 
 
 class ToTensor:
@@ -114,9 +114,8 @@ class ColorJitter:
             img = ImageEnhance.Color(img).enhance(factor)
         # Hue shift via HSV conversion
         if self.hue > 0:
-            import numpy as np
-            arr = np.array(img)
-            # Simple hue shift isn't trivial with PIL alone; skip if hue is small
+            # Simple hue shift isn't trivial with PIL alone; skip (no-op for now).
+            pass
         return img, target
 
 
