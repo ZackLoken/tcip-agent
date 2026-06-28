@@ -1,13 +1,13 @@
 """3D point cloud backbones for LiDAR data.
 
 PointNet++ set abstraction layers for tree structure analysis.
-Registered into BACKBONES registry (via ``tcip_mcp.tools.pipeline_tools``)
-alongside 2D CNN/ViT backbones.
 
-EXPERIMENTAL — component only, not usable end-to-end. There is no point-cloud
-dataset/loader in ``pipelines.data`` and ``build_dataset`` has no point-cloud
-task type, so this backbone cannot be trained through the normal pipeline yet.
-Wiring a 3D data path is future work; see the Roadmap in the repo README.
+EXPERIMENTAL — component only, not usable end-to-end, and **intentionally NOT
+registered** into the BACKBONES registry (``tcip_mcp.tools.pipeline_tools`` skips
+importing this module on purpose). There is no point-cloud dataset/loader in
+``pipelines.data`` and ``build_dataset`` has no point-cloud task type, so this
+backbone cannot be trained through the normal pipeline. Wiring a 3D data path is
+deferred future work; see the Roadmap in the repo README.
 """
 
 from __future__ import annotations
