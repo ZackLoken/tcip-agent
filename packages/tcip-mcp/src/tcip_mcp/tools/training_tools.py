@@ -244,13 +244,13 @@ def run_hpo(
 
         tb_logdir = str(Path(output_dir) / "hpo_tensorboard") if output_dir else None
 
-        def objective_fn(trial_params: dict) -> float:
+        def objective_fn(trial_params: dict, trial_number: int = 0) -> float:
             """Run a full training trial and return the objective metric."""
             merged = _deep_merge(base_config, _param_dict_to_config(trial_params))
 
             # Build training components
             from tcip_mcp.pipelines.training.generic_trainer import (
-                TrainConfig, create_run, train, task_collate,
+                create_run, train, task_collate,
             )
             from tcip_mcp.pipelines.data.datasets import build_dataset
             from tcip_mcp.pipelines.data.samplers import build_sampler
@@ -265,7 +265,7 @@ def run_hpo(
             heads = (model_spec.get("heads") or [{}])
             task = heads[0].get("task", "detection") if heads else "detection"
 
-            trial_dir = str(Path(output_dir) / f"trial_{len(_RUNS) if '_RUNS' in dir() else 0}")
+            trial_dir = str(Path(output_dir) / f"trial_{trial_number}")
             run = create_run(merged, trial_dir)
 
             try:
