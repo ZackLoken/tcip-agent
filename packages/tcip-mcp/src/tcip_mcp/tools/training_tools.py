@@ -581,3 +581,66 @@ def get_worst_predictions(
         "worst_images": [{"stem": s, "error_score": round(sc, 3)} for s, sc in worst],
         "total_evaluated": len(scores),
     }
+
+
+@mcp.tool()
+@audited
+def evaluate_model(
+    run_id_or_ckpt: str,
+    images_dir: str,
+    labels_dir: str = "",
+    task: str = "detection",
+    conf_threshold: float = 0.25,
+    iou_threshold: float = 0.5,
+    iou_type: str = "bbox",
+    max_dets: int = 100,
+) -> dict:
+    """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
+
+    Computes the same per-task metrics as validation — detection/instance_seg get
+    pycocotools mAP + precision/recall/F1; classification/ordinal/regression get the
+    in-house scalar metrics — and writes ``test_results.json`` beside the checkpoint.
+
+    Args:
+        run_id_or_ckpt: A training run id (uses its ``model_best.pt``) or a checkpoint path.
+        images_dir: Images directory for the evaluation split.
+        labels_dir: Labels dir (detection/instance_seg) or masks dir (semantic_seg).
+        task: Task type.
+        conf_threshold: Operating confidence for P/R/F1.
+        iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
+        iou_type: 'bbox' or 'segm'.
+        max_dets: COCOeval max detections per image.
+    """
+    import torch
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.training.generic_trainer import get_run, task_collate
+    from tcip_mcp.pipelines.training.evaluation import run_test_evaluation
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    ckpt = run_id_or_ckpt
+    if not Path(ckpt).is_file():
+        run = get_run(run_id_or_ckpt)
+        if run is None:
+            return {"error": f"Not a checkpoint path or known run id: {run_id_or_ckpt}"}
+        ckpt = str(Path(run.output_dir) / "model_best.pt")
+    if not Path(ckpt).is_file():
+        return {"error": f"Checkpoint not found: {ckpt}"}
+
+    ds_kwargs = {"images_dir": images_dir}
+    if task in ("detection", "instance_seg"):
+        ds_kwargs["labels_dir"] = labels_dir
+    elif task == "semantic_seg":
+        ds_kwargs["masks_dir"] = labels_dir
+    try:
+        dataset = build_dataset(task, **ds_kwargs)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"Failed to build dataset: {exc}"}
+
+    loader = DataLoader(dataset, batch_size=4, collate_fn=task_collate(task))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return run_test_evaluation(
+        ckpt, loader, device, task, str(Path(ckpt).parent),
+        conf_threshold=conf_threshold, iou_threshold=iou_threshold,
+        iou_type=iou_type, max_dets=max_dets,
+    )
