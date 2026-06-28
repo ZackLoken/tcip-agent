@@ -380,3 +380,97 @@ def split_dataset(
         "output_dir": str(out_dir),
         "structure": f"{out_dir}/{{train,val,test}}/{{images,labels}}/",
     }
+
+
+@mcp.tool()
+@audited
+def make_splits(
+    folder_path: str,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.2,
+    test_ratio: float = 0.1,
+    seed: int = 42,
+    group_by: str = "tile_prefix",
+    stratify_foreground: bool = True,
+    output_path: str | None = None,
+) -> dict:
+    """Compute a leakage-free, annotation-stratified train/val/test split.
+
+    Unlike ``split_dataset`` (which copies/symlinks files into a YOLO directory
+    tree), this is a lightweight, non-destructive complement: it only emits
+    ``{train,val,test}.json`` stem manifests plus a stats dict. Sibling tiles of
+    one source image are kept in the same split (no tree-/canopy-level leakage),
+    and — when ``stratify_foreground`` is set — splits are balanced by annotation
+    count so dense and sparse sources are proportionally represented.
+
+    Args:
+        folder_path: Path to the dataset root directory.
+        train_ratio: Fraction for training set.
+        val_ratio: Fraction for validation set.
+        test_ratio: Fraction for test set.
+        seed: Random seed for reproducibility.
+        group_by: Group selector — ``"tile_prefix"`` (strip a trailing
+            ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per image).
+        stratify_foreground: Balance splits by foreground annotation count.
+        output_path: When set, write ``{train,val,test}.json`` manifests there.
+    """
+    if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
+        return {"error": "Ratios must sum to 1.0"}
+    if not Path(folder_path).is_dir():
+        return {"error": f"Directory not found: {folder_path}"}
+
+    from tcip_mcp.pipelines.data.splits import (
+        group_balanced_split,
+        count_lines,
+        GROUP_KEY_FNS,
+        default_group_key,
+    )
+
+    scan = _scan_dataset(folder_path)
+    image_map = {Path(p).stem: p for p in scan["images"]}
+    label_map = {Path(p).stem: p for p in scan["labels_detect"]}
+
+    stratified = bool(stratify_foreground and label_map)
+    if stratified:
+        stems = sorted(set(image_map) & set(label_map))
+    else:
+        stems = sorted(image_map)
+    if not stems:
+        return {"error": "No images found to split"}
+
+    annotation_counts = None
+    if stratified:
+        annotation_counts = {s: count_lines(label_map[s]) for s in stems}
+
+    group_key_fn = GROUP_KEY_FNS.get(group_by, default_group_key)
+    parts = group_balanced_split(
+        stems,
+        annotation_counts=annotation_counts,
+        group_key_fn=group_key_fn,
+        splits=(train_ratio, val_ratio, test_ratio),
+        seed=seed,
+    )
+
+    counts = annotation_counts or {}
+    manifest_dir = None
+    if output_path:
+        out = Path(output_path)
+        out.mkdir(parents=True, exist_ok=True)
+        for split_name, split_stems in parts.items():
+            with open(out / f"{split_name}.json", "w") as f:
+                json.dump(sorted(split_stems), f, indent=2)
+        manifest_dir = str(out)
+
+    return {
+        "splits": {k: len(v) for k, v in parts.items()},
+        "foreground_annotations": {
+            k: sum(int(counts.get(s, 0)) for s in v) for k, v in parts.items()
+        },
+        "total_stems": len(stems),
+        "total_annotations": sum(int(v) for v in counts.values()),
+        "groups": len({group_key_fn(s) for s in stems}),
+        "seed": seed,
+        "group_by": group_by,
+        "stratified": stratified,
+        "manifest_dir": manifest_dir,
+    }
