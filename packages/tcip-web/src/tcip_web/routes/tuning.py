@@ -33,6 +33,18 @@ _sweeps: dict[str, HPOJob] = {}
 _lock = threading.Lock()
 
 
+def _summary(job: HPOJob) -> dict:
+    return {"sweep_id": job.sweep_id, "status": job.status,
+            "error": job.error, "has_result": bool(job.result)}
+
+
+def _persist() -> None:
+    from tcip_web import jobstore
+    with _lock:
+        summaries = [_summary(j) for j in _sweeps.values()]
+    jobstore.persist("hpo_sweeps", summaries)
+
+
 class LaunchHPOPayload(BaseModel):
     base_config: dict[str, Any]
     param_space: Optional[dict[str, Any]] = None
@@ -45,6 +57,7 @@ class LaunchHPOPayload(BaseModel):
 def _worker(job: HPOJob, payload: LaunchHPOPayload) -> None:
     try:
         job.status = "running"
+        _persist()
         from tcip_mcp.tools.training_tools import run_hpo
 
         res = run_hpo(
@@ -61,13 +74,19 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload) -> None:
         logger.exception("HPO sweep %s failed", job.sweep_id)
         job.status = "failed"
         job.error = str(exc)
+    finally:
+        _persist()
 
 
 @router.post("/launch")
 def launch_hpo(payload: LaunchHPOPayload) -> dict:
+    from tcip_web import jobstore
+
     job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
     with _lock:
         _sweeps[job.sweep_id] = job
+        jobstore.evict_terminal(_sweeps)  # bound the registry (drop oldest terminal sweeps)
+    _persist()
     t = threading.Thread(target=_worker, args=(job, payload), daemon=True)
     job.thread = t
     t.start()
