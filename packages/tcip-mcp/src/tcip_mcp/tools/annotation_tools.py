@@ -204,6 +204,43 @@ def save_annotations(
     return {"written": written, "format": fmt, "count": len(written)}
 
 
+def _load_image_annotations(image_path: str):
+    """Load GT + predictions for one image and build a COCO per-image record.
+
+    Returns ``(iou_type, record, raw, width, height)`` where
+    ``raw = (gt_boxes, gt_polys, pred_boxes, pred_polys)``; ``None`` if unreadable.
+    """
+    from tcip_mcp.pipelines.training.evaluation import records_from_annotation
+
+    img = Path(image_path)
+    if not img.is_file():
+        return None
+    w, h = get_image_dimensions(image_path)
+    stem = img.stem
+    root = img.parent.parent
+
+    gt_boxes: list[BBox] = []
+    gt_polys: list[Polygon] = []
+    pred_boxes: list = []
+    pred_polys: list = []
+
+    detect_label = root / "labels" / "detect" / f"{stem}.txt"
+    if detect_label.is_file():
+        gt_boxes, _ = parse_detect_labels(str(detect_label), w, h)
+    segment_label = root / "labels" / "segment" / f"{stem}.txt"
+    if segment_label.is_file():
+        gt_polys, _ = parse_segment_labels(str(segment_label), w, h)
+    detect_pred = root / "predictions" / "detect" / f"{stem}.txt"
+    if detect_pred.is_file():
+        pred_boxes, _ = parse_detect_predictions(str(detect_pred), w, h)
+    segment_pred = root / "predictions" / "segment" / f"{stem}.txt"
+    if segment_pred.is_file():
+        pred_polys, _ = parse_segment_predictions(str(segment_pred), w, h)
+
+    iou_type, record = records_from_annotation(gt_boxes, gt_polys, pred_boxes, pred_polys, width=w, height=h)
+    return iou_type, record, (gt_boxes, gt_polys, pred_boxes, pred_polys), w, h
+
+
 @mcp.tool()
 @audited
 def evaluate_detections(
@@ -211,65 +248,38 @@ def evaluate_detections(
     iou_threshold: float = 0.5,
     conf_threshold: float = 0.25,
 ) -> dict:
-    """Match predictions against ground truth for a single image.
+    """Match predictions against ground truth for a single image (COCOeval).
+
+    mAP / TP / FP / FN come from pycocotools; the ``matches`` block is a
+    per-box overlay for the GUI review panel (``compute_matches``).
 
     Args:
         image_path: Absolute path to the image file.
         iou_threshold: IoU threshold for a positive match.
         conf_threshold: Minimum confidence to consider a prediction.
     """
-    img = Path(image_path)
-    if not img.is_file():
+    loaded = _load_image_annotations(image_path)
+    if loaded is None:
         return {"error": f"Image not found: {image_path}"}
+    iou_type, record, (gt_boxes, gt_polys, pred_boxes, pred_polys), _w, _h = loaded
 
-    w, h = get_image_dimensions(image_path)
-    stem = img.stem
-    root = img.parent.parent
-
-    gt_boxes: list[BBox] = []
-    gt_polys: list[Polygon] = []
-    pred_boxes = []
-    pred_polys = []
-
-    # Load GT
-    detect_label = root / "labels" / "detect" / f"{stem}.txt"
-    if detect_label.is_file():
-        gt_boxes, _ = parse_detect_labels(str(detect_label), w, h)
-
-    segment_label = root / "labels" / "segment" / f"{stem}.txt"
-    if segment_label.is_file():
-        gt_polys, _ = parse_segment_labels(str(segment_label), w, h)
-
-    # Load predictions
-    detect_pred = root / "predictions" / "detect" / f"{stem}.txt"
-    if detect_pred.is_file():
-        pred_boxes, _ = parse_detect_predictions(str(detect_pred), w, h)
-
-    segment_pred = root / "predictions" / "segment" / f"{stem}.txt"
-    if segment_pred.is_file():
-        pred_polys, _ = parse_segment_predictions(str(segment_pred), w, h)
-
+    from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics
+    m = coco_detection_metrics([record], iou_type=iou_type,
+                               iou_threshold=iou_threshold, conf_threshold=conf_threshold)
     matches = compute_matches(
         gt_boxes, gt_polys, pred_boxes, pred_polys,
-        iou_threshold=iou_threshold,
-        conf_threshold=conf_threshold,
+        iou_threshold=iou_threshold, conf_threshold=conf_threshold,
     )
-
-    tp = len(matches["tp"])
-    fp = len(matches["fp"])
-    fn = len(matches["fn"])
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-
     return {
         "image": image_path,
-        "tp": tp,
-        "fp": fp,
-        "fn": fn,
-        "precision": round(precision, 4),
-        "recall": round(recall, 4),
-        "f1": round(f1, 4),
+        "tp": m["tp"],
+        "fp": m["fp"],
+        "fn": m["fn"],
+        "precision": round(m["precision"], 4),
+        "recall": round(m["recall"], 4),
+        "f1": round(m["f1"], 4),
+        "map50": round(m["map50"], 4),
+        "iou_type": iou_type,
         "iou_threshold": iou_threshold,
         "conf_threshold": conf_threshold,
         "matches": matches,
@@ -298,31 +308,47 @@ def evaluate_dataset(
     image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
     images = sorted(f for f in images_dir.iterdir() if f.suffix.lower() in image_exts)
 
-    total_tp = total_fp = total_fn = 0
-    per_image: list[dict] = []
+    from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics, records_from_annotation
 
+    collected = []  # (iou_type, record, raw, w, h, img)
     for img in images:
-        r = evaluate_detections(str(img), iou_threshold, conf_threshold)
-        if "error" in r:
+        loaded = _load_image_annotations(str(img))
+        if loaded is None:
             continue
-        total_tp += r["tp"]
-        total_fp += r["fp"]
-        total_fn += r["fn"]
-        per_image.append({"image": img.name, "tp": r["tp"], "fp": r["fp"], "fn": r["fn"]})
+        iou_type, record, raw, w, h = loaded
+        collected.append((iou_type, record, raw, w, h, img))
 
-    precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
-    recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    any_segm = any(c[0] == "segm" for c in collected)
+    dataset_iou_type = "segm" if any_segm else "bbox"
+    # When mixed, rebuild every record forcing segmentation so one COCOeval pass works.
+    if any_segm:
+        records = [records_from_annotation(*raw, width=w, height=h, force_segm=True)[1]
+                   for (_it, _rec, raw, w, h, _img) in collected]
+    else:
+        records = [c[1] for c in collected]
+    valid_images = [c[5] for c in collected]
+
+    m = coco_detection_metrics(records, iou_type=dataset_iou_type,
+                               iou_threshold=iou_threshold, conf_threshold=conf_threshold)
+
+    counts_by_id = {c["image_id"]: c for c in m["per_image_counts"]}
+    per_image = []
+    for idx, img in enumerate(valid_images, start=1):
+        c = counts_by_id.get(idx, {"tp": 0, "fp": 0, "fn": 0})
+        per_image.append({"image": img.name, "tp": c["tp"], "fp": c["fp"], "fn": c["fn"]})
 
     return {
         "path": folder_path,
         "image_count": len(images),
-        "total_tp": total_tp,
-        "total_fp": total_fp,
-        "total_fn": total_fn,
-        "precision": round(precision, 4),
-        "recall": round(recall, 4),
-        "f1": round(f1, 4),
+        "map": round(m["map"], 4),
+        "map50": round(m["map50"], 4),
+        "total_tp": m["tp"],
+        "total_fp": m["fp"],
+        "total_fn": m["fn"],
+        "precision": round(m["precision"], 4),
+        "recall": round(m["recall"], 4),
+        "f1": round(m["f1"], 4),
+        "iou_type": dataset_iou_type,
         "per_image": per_image,
     }
 
