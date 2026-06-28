@@ -17,8 +17,20 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from PIL import Image
 
 from tcip_annotation.utils import auto_orient_image
+from tcip_web.paths import assert_path_allowed
 
 router = APIRouter(prefix="/api/images", tags=["images"])
+
+
+def _checked(path: str) -> Path:
+    """Resolve + allow-list check an absolute client-supplied image path."""
+    try:
+        src = assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    if not src.is_file():
+        raise HTTPException(404, f"not a file: {path}")
+    return src
 
 
 @router.get("")
@@ -33,9 +45,7 @@ def serve_image(
     thumbnail grids and the lo-res background layer. Full-res is served
     by omitting ``max_width``.
     """
-    src = Path(path)
-    if not src.is_file():
-        raise HTTPException(404, f"not a file: {path}")
+    src = _checked(path)
 
     try:
         with Image.open(src) as raw:
@@ -58,9 +68,7 @@ def serve_image(
 @router.get("/dimensions")
 def get_dimensions(path: str = Query(...)) -> dict:
     """Return the EXIF-oriented (width, height) of an image."""
-    src = Path(path)
-    if not src.is_file():
-        raise HTTPException(404, f"not a file: {path}")
+    src = _checked(path)
     with Image.open(src) as raw:
         im = auto_orient_image(raw)
         w, h = im.size
