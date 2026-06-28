@@ -13,11 +13,16 @@ ML/CV engineer driving it. It is **freestanding**: the MCP server is a transport
 neutral stdio server (any MCP client), and the GUI is a standalone browser app — no
 editor required.
 
-**Scope today: RGB imagery, object detection first** (Phase 1: hazelnut catkin
-phenology). The dataset layer loads RGB images only; multispectral / depth / 3D
-point-cloud data paths are **not** built (a `pointnet++` backbone exists as an
-experimental, unwired component — see Roadmap in README). Do not assume non-RGB
-support; if a task needs it, that's new work, not a config flag.
+**Scope today: 2D imagery (RGB + N-channel), object detection first** (Phase 1:
+hazelnut catkin phenology). The dataset layer reads RGB and multi-band 2D rasters
+(GeoTIFF / NPZ / grayscale); `num_channels` threads through `build_dataset` →
+`model_spec.in_chans` → the backbone, and inference is channel-aware — so
+multispectral 2D is a config choice, not new work. Detectors are built through a
+registry-driven `DETECTORS` factory (torchvision wrappers + external builders), and
+`instance_seg` is real (Mask R-CNN). **3D point clouds (LiDAR / SfM) are not built**:
+a `pointnet++` backbone exists but is intentionally *unregistered* with no
+point-cloud dataset/loader or task type — that's new work, not a config flag. See
+Roadmap in README.
 
 Three processes, one shared `.tcip/` state dir:
 
