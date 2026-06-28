@@ -84,3 +84,28 @@ def get_best_model(project_path: str, metric: str = "mAP") -> dict:
     if best is None:
         return {"error": "No models registered"}
     return best
+
+
+@mcp.tool()
+@audited
+def register_model_from_experiment(
+    experiment_id: str,
+    checkpoint_path: str,
+    project_path: str = ".",
+    name: str | None = None,
+) -> dict:
+    """Register a completed experiment's model into the project registry.
+
+    Pulls the experiment's config + final metrics, registers the checkpoint with an
+    ``experiment:<id>`` back-reference, and records it in the experiment's lineage.
+    (Training already does this automatically on completion; use this for manual /
+    re-registration.)
+
+    Args:
+        experiment_id: The experiment to register from.
+        checkpoint_path: Path to the model checkpoint (e.g. model_best.pt).
+        project_path: Project root (the registry lives at ``<project_path>/.tcip/models``).
+        name: Registry name (defaults to the experiment id).
+    """
+    from tcip_mcp.experiments import register_model_from_experiment as _reg
+    return _reg(experiment_id, checkpoint_path, project_path=project_path, name=name)
