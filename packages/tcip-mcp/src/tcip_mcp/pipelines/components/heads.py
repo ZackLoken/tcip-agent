@@ -171,63 +171,31 @@ class RegressionHead(BaseHead):
 # ====================================================================
 
 class AnchorDetectionHead(BaseHead):
-    """Two-stage anchor-based detection (Faster R-CNN style).
+    """Registry/validation marker for two-stage anchor-based detection (Faster R-CNN).
 
-    Wraps torchvision's detection pipeline behind the BaseHead interface.
-    The backbone+neck features are passed through separately, so this head
-    builds its own RPN + ROI heads.
+    NOT run standalone: ``compose_model`` routes a single ``anchor_detection`` head to
+    ``DetectionModel``, which builds the actual detector over the shared backbone+neck via
+    the DETECTORS factory (``components/detectors.py``). This class exists so the head name
+    validates and so a spec can carry detection kwargs (detector, min_size, ...).
     """
 
     task_type = "detection"
     default_loss = "focal+smooth_l1"
 
-    def __init__(
-        self,
-        in_channels: int,
-        num_classes: int,
-        min_size: int = 800,
-        max_size: int = 1333,
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, in_channels: int, num_classes: int, **kwargs: Any) -> None:
         super().__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
-        self._min_size = min_size
-        self._max_size = max_size
-        self._model = None  # Lazy init — needs torchvision
-        self._kwargs = kwargs
-
-    def _ensure_model(self) -> None:
-        if self._model is not None:
-            return
-        from torchvision.models.detection import fasterrcnn_resnet50_fpn
-        from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
-        m = fasterrcnn_resnet50_fpn(
-            weights=None, min_size=self._min_size, max_size=self._max_size,
-        )
-        in_features = m.roi_heads.box_predictor.cls_score.in_features
-        m.roi_heads.box_predictor = FastRCNNPredictor(in_features, self.num_classes + 1)
-        self._model = m
 
     def forward(self, features, targets=None):
-        self._ensure_model()
-        # In composed mode the backbone is already run; for standalone
-        # compatibility, pass images directly if list[Tensor]
-        if isinstance(features, (list, tuple)) and isinstance(features[0], torch.Tensor):
-            if targets is not None:
-                return self._model(features, targets)
-            return self._model(features)
-        return {"features": features}
+        raise NotImplementedError(
+            "AnchorDetectionHead is composed into DetectionModel (see compose_model and "
+            "components/detectors.py); it is not run standalone.")
 
     def compute_loss(self, outputs, targets):
-        # torchvision returns loss dict directly in training mode
-        if isinstance(outputs, dict) and "loss_classifier" in outputs:
-            return outputs
         return {}
 
     def decode(self, outputs):
-        if isinstance(outputs, list):
-            return outputs[0] if outputs else {}
         return outputs
 
 
@@ -236,67 +204,32 @@ class AnchorDetectionHead(BaseHead):
 # ====================================================================
 
 class AnchorFreeDetectionHead(BaseHead):
-    """Anchor-free (FCOS) or single-stage (RetinaNet) detection via torchvision.
+    """Registry/validation marker for anchor-free (FCOS) / single-stage (RetinaNet) detection.
 
-    Like ``AnchorDetectionHead``, the real wiring is ``compose_model`` routing this
-    head name to ``DetectionModel`` (which builds the detector over the shared
-    backbone+neck). This standalone path exists only for registry/validation parity.
+    Like ``AnchorDetectionHead``, the real wiring is ``compose_model`` routing this head
+    name to ``DetectionModel`` (which builds the detector via the DETECTORS factory). Not
+    run standalone.
     """
 
     task_type = "detection"
     default_loss = "focal+giou+ctrness"
 
-    def __init__(
-        self,
-        in_channels: int,
-        num_classes: int,
-        detector: str = "fcos",
-        min_size: int = 800,
-        max_size: int = 1333,
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, in_channels: int, num_classes: int, detector: str = "fcos",
+                 **kwargs: Any) -> None:
         super().__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.detector = detector
-        self._min_size = min_size
-        self._max_size = max_size
-        self._model = None  # Lazy init — needs torchvision
-        self._kwargs = kwargs
-
-    def _ensure_model(self) -> None:
-        if self._model is not None:
-            return
-        if self.detector == "retinanet":
-            from torchvision.models.detection import retinanet_resnet50_fpn
-            self._model = retinanet_resnet50_fpn(
-                weights=None, num_classes=self.num_classes + 1,
-                min_size=self._min_size, max_size=self._max_size,
-            )
-        else:
-            from torchvision.models.detection import fcos_resnet50_fpn
-            self._model = fcos_resnet50_fpn(
-                weights=None, num_classes=self.num_classes + 1,
-                min_size=self._min_size, max_size=self._max_size,
-            )
 
     def forward(self, features, targets=None):
-        self._ensure_model()
-        if isinstance(features, (list, tuple)) and isinstance(features[0], torch.Tensor):
-            if targets is not None:
-                return self._model(features, targets)
-            return self._model(features)
-        return {"features": features}
+        raise NotImplementedError(
+            "AnchorFreeDetectionHead is composed into DetectionModel (see compose_model "
+            "and components/detectors.py); it is not run standalone.")
 
     def compute_loss(self, outputs, targets):
-        # FCOS / RetinaNet return their loss dict directly in training mode.
-        if isinstance(outputs, dict) and ("classification" in outputs or "bbox_regression" in outputs):
-            return outputs
         return {}
 
     def decode(self, outputs):
-        if isinstance(outputs, list):
-            return outputs[0] if outputs else {}
         return outputs
 
 
