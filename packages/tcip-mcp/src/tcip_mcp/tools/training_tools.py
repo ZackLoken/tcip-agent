@@ -278,6 +278,7 @@ def run_hpo(
                     task,
                     images_dir=data_cfg.get("images_dir", ""),
                     labels_dir=data_cfg.get("labels_dir", ""),
+                    tiling=data_cfg.get("tiling"),
                 )
                 sampler = build_sampler(
                     merged.get("sampler", "random"), train_ds
@@ -422,25 +423,26 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         return kw
 
     src = _source_kwargs()
+    tiling = data_cfg.get("tiling")  # W3: detection tiling (None for other tasks/configs)
 
     # 1. Explicit validation source.
     val_images = data_cfg.get("val_images_dir")
     if val_images:
         try:
-            train_ds = build_dataset(task, **src, transforms=transforms)
+            train_ds = build_dataset(task, **src, transforms=transforms, tiling=tiling)
             val_src = dict(src)
             val_src["images_dir"] = val_images
             if task in ("detection", "instance_seg"):
                 val_src["labels_dir"] = data_cfg.get("val_labels_dir", data_cfg.get("labels_dir", ""))
             elif task == "semantic_seg":
                 val_src["masks_dir"] = data_cfg.get("val_masks_dir", data_cfg.get("masks_dir", ""))
-            return train_ds, build_dataset(task, **val_src, transforms=None)
+            return train_ds, build_dataset(task, **val_src, transforms=None, tiling=tiling)
         except Exception as exc:
             logger.warning("Explicit val build failed (%s); training without validation.", exc)
-            return build_dataset(task, **src, transforms=transforms), None
+            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
 
     if not data_cfg.get("auto_val", True) or task not in STEM_TASKS:
-        return build_dataset(task, **src, transforms=transforms), None
+        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
 
     # 2. Auto group-aware train/val split.
     try:
@@ -478,14 +480,14 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                 task, images_dir=src["images_dir"], transforms=None,
                 stems=val_stems, labels=[stem_to_label[s] for s in val_stems])
         else:
-            train_ds = build_dataset(task, **src, transforms=transforms, stems=train_stems)
-            val_ds = build_dataset(task, **src, transforms=None, stems=val_stems)
+            train_ds = build_dataset(task, **src, transforms=transforms, stems=train_stems, tiling=tiling)
+            val_ds = build_dataset(task, **src, transforms=None, stems=val_stems, tiling=tiling)
         logger.info("Auto train/val split for %s: %d train / %d val stems.",
                     task, len(train_stems), len(val_stems))
         return train_ds, val_ds
     except Exception as exc:
         logger.warning("Auto train/val split failed (%s); training without validation.", exc)
-        return build_dataset(task, **src, transforms=transforms), None
+        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
 
 
 @mcp.tool()
