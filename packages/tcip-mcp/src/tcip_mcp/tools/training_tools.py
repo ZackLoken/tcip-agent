@@ -139,6 +139,27 @@ def launch_training(config: dict, output_dir: str) -> dict:
             num_workers=train_config.num_workers,
         )
 
+    # W8: inject imbalance loss + (auto) class weights into image-level head specs.
+    # train() composes the model from run.config["model_spec"] (== config), so editing
+    # the head specs here before the thread starts reaches the model.
+    loss_cfg = config.get("loss")
+    if isinstance(loss_cfg, dict):
+        cw = loss_cfg.get("class_weights")
+        for h in model_spec.get("heads", []):
+            if h.get("name") not in ("classification", "semantic_seg"):
+                continue
+            h["loss"] = loss_cfg.get("name", "weighted_ce")
+            if cw == "auto":
+                from tcip_mcp.pipelines.components.losses import compute_class_weights
+                weights = compute_class_weights(
+                    getattr(train_ds, "class_distribution", {}),
+                    num_classes=h.get("num_classes"),
+                    scheme=loss_cfg.get("weight_scheme", "balanced"),
+                )
+                h["class_weights"] = weights.tolist()
+            elif isinstance(cw, list):
+                h["class_weights"] = cw
+
     # Auto-create experiment if not already tracked
     experiment_id = config.get("experiment_id") or run.run_id
     try:
@@ -222,6 +243,11 @@ def run_hpo(
     output_dir: str = "",
     use_optuna: bool = False,
     direction: str = "maximize",
+    pruner: str = "asha",
+    grace_period: int = 5,
+    reduction_factor: int = 3,
+    warm_start: bool = False,
+    baseline_params: dict | None = None,
 ) -> dict:
     """Run hyperparameter optimization with optional TensorBoard logging.
 
@@ -249,15 +275,18 @@ def run_hpo(
 
         tb_logdir = str(Path(output_dir) / "hpo_tensorboard") if output_dir else None
 
-        def objective_fn(trial_params: dict, trial_number: int = 0) -> float:
-            """Run a full training trial and return the objective metric."""
+        import optuna
+
+        def objective_fn(trial_params: dict, trial) -> float:
+            """Run a full training trial; report per-epoch for ASHA pruning.
+
+            ``run.best_metric`` is the composite selection objective (W1, lower=better)
+            for detection when a val_loader exists, else val/train loss; ``maximize``
+            inverts it (``-best_metric``), so the existing direction handling stays correct.
+            """
             merged = _deep_merge(base_config, _param_dict_to_config(trial_params))
 
-            # Build training components
-            from tcip_mcp.pipelines.training.generic_trainer import (
-                create_run, train, task_collate,
-            )
-            from tcip_mcp.pipelines.data.datasets import build_dataset
+            from tcip_mcp.pipelines.training.generic_trainer import create_run, train, task_collate
             from tcip_mcp.pipelines.data.samplers import build_sampler
             from torch.utils.data import DataLoader
 
@@ -270,35 +299,41 @@ def run_hpo(
             heads = (model_spec.get("heads") or [{}])
             task = heads[0].get("task", "detection") if heads else "detection"
 
-            trial_dir = str(Path(output_dir) / f"trial_{trial_number}")
+            trial_dir = str(Path(output_dir) / f"trial_{trial.number}")
             run = create_run(merged, trial_dir)
 
             try:
-                train_ds = build_dataset(
-                    task,
-                    images_dir=data_cfg.get("images_dir", ""),
-                    labels_dir=data_cfg.get("labels_dir", ""),
-                    tiling=data_cfg.get("tiling"),
-                )
-                sampler = build_sampler(
-                    merged.get("sampler", "random"), train_ds
-                )
+                # W4 auto-val gives the val_loader that W1's composite / ASHA need.
+                train_ds, val_ds = _auto_train_val(task, data_cfg, None)
+                sampler = build_sampler(merged.get("sampler", "random"), train_ds)
+                batch_size = train_cfg.get("batch_size", trial_params.get("batch_size", 4))
+                num_workers = train_cfg.get("num_workers", 0)
                 train_loader = DataLoader(
-                    train_ds,
-                    batch_size=train_cfg.get("batch_size", trial_params.get("batch_size", 4)),
-                    shuffle=(sampler is None),
-                    sampler=sampler,
-                    collate_fn=task_collate(task),
-                    num_workers=train_cfg.get("num_workers", 0),
+                    train_ds, batch_size=batch_size, shuffle=(sampler is None),
+                    sampler=sampler, collate_fn=task_collate(task), num_workers=num_workers,
                 )
-                train(run, train_loader, None, task=task)
+                val_loader = None
+                if val_ds is not None:
+                    val_loader = DataLoader(
+                        val_ds, batch_size=batch_size, shuffle=False,
+                        collate_fn=task_collate(task), num_workers=num_workers,
+                    )
 
-                # Return the best metric from the run
+                def epoch_cb(epoch: int, metrics: dict) -> None:
+                    value = metrics.get("val_objective", metrics.get("val_loss"))
+                    if value is None:
+                        return
+                    trial.report(value, epoch)
+                    if trial.should_prune():
+                        raise optuna.TrialPruned()
+
+                train(run, train_loader, val_loader, task=task, epoch_callback=epoch_cb)
+
                 if direction == "minimize":
                     return run.best_metric if run.best_metric != float("inf") else 999.0
-                else:
-                    # For maximize, invert since we track best val_loss (lower=better)
-                    return -run.best_metric if run.best_metric != float("inf") else 0.0
+                return -run.best_metric if run.best_metric != float("inf") else 0.0
+            except optuna.TrialPruned:
+                raise
             except Exception as e:
                 logger.warning("HPO trial failed: %s", e)
                 return float("inf") if direction == "minimize" else 0.0
@@ -308,6 +343,11 @@ def run_hpo(
             param_space=param_space,
             n_trials=n_trials,
             direction=direction,
+            pruner=pruner,
+            grace_period=grace_period,
+            reduction_factor=reduction_factor,
+            warm_start=warm_start,
+            baseline_params=baseline_params,
             tb_logdir=tb_logdir,
         )
 
