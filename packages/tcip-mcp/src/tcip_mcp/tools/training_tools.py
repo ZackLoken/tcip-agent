@@ -294,7 +294,7 @@ def run_hpo(
             for detection when a val_loader exists, else val/train loss; ``maximize``
             inverts it (``-best_metric``), so the existing direction handling stays correct.
             """
-            merged = _deep_merge(base_config, _param_dict_to_config(trial_params))
+            merged = _apply_hpo_params(base_config, trial_params)
 
             from tcip_mcp.pipelines.training.generic_trainer import create_run, train, task_collate
             from tcip_mcp.pipelines.data.samplers import build_sampler
@@ -389,7 +389,7 @@ def run_hpo(
     # Merge each trial's params into the base config
     configs = []
     for i, trial_params in enumerate(trials):
-        config = _deep_merge(base_config, _param_dict_to_config(trial_params))
+        config = _apply_hpo_params(base_config, trial_params)
         config["_trial_id"] = i
         config["_trial_params"] = trial_params
         configs.append(config)
@@ -402,41 +402,65 @@ def run_hpo(
     }
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge override into base."""
-    result = dict(base)
-    for k, v in override.items():
-        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
-            result[k] = _deep_merge(result[k], v)
-        else:
-            result[k] = v
-    return result
+def _apply_hpo_params(base_config: dict, params: dict) -> dict:
+    """Apply flat HPO params onto a deep copy of ``base_config``, in the right places.
 
+    Architecture params actually reach the model so an Optuna sweep varies the
+    architecture (the prior implementation dropped ``backbone`` entirely and wrote
+    ``head`` / ``min_size`` to an unread ``config["model"]`` key, so every trial
+    trained the same model):
 
-def _param_dict_to_config(params: dict) -> dict:
-    """Map flat HPO params to nested config structure."""
-    config: dict = {}
-    mapping = {
-        "lr": ("training", "stages"),  # handled specially
-        "batch_size": ("training", "batch_size"),
-        "head": ("model", "head"),
-        "weight_decay": ("training", "weight_decay"),
-        "min_size": ("model", "min_size"),
-    }
+      - ``backbone``  -> ``model_spec["backbone"]["name"]``
+      - ``head``      -> ``model_spec["heads"][0]["detector"]`` (faster_rcnn/fcos/retinanet)
+      - ``min_size``  -> ``model_spec["heads"][0]["min_size"]``
+      - ``lr``        -> a 3-stage ``freeze_to`` progressive-unfreeze schedule (the trainer
+                         reads ``freeze_to``; the old stages used ``freeze_backbone``, which
+                         the trainer ignores)
+      - anything else (``batch_size``, ``weight_decay``, ...) -> ``training``
+    """
+    import copy
+
+    from tcip_mcp.pipelines.schemas import normalize_train_config
+
+    cfg = normalize_train_config(copy.deepcopy(base_config))
+    spec = cfg.get("model_spec")
+    training = cfg.setdefault("training", {})
+
+    def _first_head() -> dict:
+        heads = spec.get("heads") or [{}]
+        if not isinstance(heads[0], dict):
+            heads[0] = {}
+        spec["heads"] = heads
+        return heads[0]
+
     for key, value in params.items():
         if key == "lr":
-            # Apply LR to default 3-stage schedule
-            stages = [
-                {"lr": value, "epochs": 5, "freeze_backbone": True},
-                {"lr": value * 0.1, "epochs": 10, "freeze_backbone": False},
-                {"lr": value * 0.01, "epochs": 5, "freeze_backbone": False},
+            lr = float(value)
+            training["stages"] = [
+                {"freeze_to": -1, "lr": lr, "epochs": 5},        # heads only
+                {"freeze_to": 2, "lr": lr * 0.1, "epochs": 10},  # unfreeze top stages
+                {"freeze_to": 0, "lr": lr * 0.01, "epochs": 5},  # full fine-tune
             ]
-            config.setdefault("training", {})["stages"] = stages
-        elif key in mapping:
-            parts = mapping[key]
-            if len(parts) == 2:
-                config.setdefault(parts[0], {})[parts[1]] = value
-    return config
+        elif key == "batch_size":
+            training["batch_size"] = value
+        elif key == "weight_decay":
+            training["weight_decay"] = value
+        elif spec is None:
+            # No model spec to mutate — keep scalar params on training as a fallback.
+            training[key] = value
+        elif key == "backbone":
+            bb = spec.get("backbone")
+            if isinstance(bb, dict):
+                bb["name"] = value
+            else:
+                spec["backbone"] = {"name": value}
+        elif key == "head":
+            _first_head()["detector"] = value
+        elif key == "min_size":
+            _first_head()["min_size"] = value
+        else:
+            training[key] = value
+    return cfg
 
 
 def _auto_train_val(task: str, data_cfg: dict, transforms):
