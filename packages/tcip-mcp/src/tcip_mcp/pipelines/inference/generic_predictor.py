@@ -70,15 +70,40 @@ class GenericPredictor:
     def predict_batch(
         self, image_paths: list[str], tile: bool = False, tile_size: int = 224,
         overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = 0.3,
+        batch_size: int = 16,
     ) -> list[dict]:
-        """Run inference on multiple images (optionally tiled for small objects)."""
+        """Run inference on multiple images (optionally tiled for small objects).
+
+        For detection, images are run through the detector in batches of ``batch_size``
+        (one GPU forward per batch — torchvision detectors take a list of variable-size
+        images), instead of one forward per image. Non-detection heads stay per-image
+        since their inputs are native-resolution (can't be stacked without resizing).
+        """
         if tile:
             return [
                 self.predict_tiled(p, tile_size=tile_size, overlap=overlap,
                                    tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou)
                 for p in image_paths
             ]
+        if self.task in ("anchor_detection", "anchor_free_detection"):
+            return self._predict_batch_detection(image_paths, batch_size)
         return [self.predict(p) for p in image_paths]
+
+    @torch.no_grad()
+    def _predict_batch_detection(self, image_paths: list[str], batch_size: int) -> list[dict]:
+        results: list[dict] = []
+        for start in range(0, len(image_paths), max(1, batch_size)):
+            chunk = image_paths[start:start + max(1, batch_size)]
+            tensors, meta = [], []
+            for p in chunk:
+                img = load_image(p, self.in_chans)
+                w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
+                tensors.append(pil_to_tensor(img).to(self.device))
+                meta.append((p, w, h))
+            outputs = self.model(tensors)  # one forward over the whole chunk
+            for (p, w, h), out in zip(meta, outputs):
+                results.append(self._format_detection(out, p, w, h))
+        return results
 
     @torch.no_grad()
     def predict_tiled(
