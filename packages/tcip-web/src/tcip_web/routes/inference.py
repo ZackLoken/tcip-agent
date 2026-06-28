@@ -1,13 +1,13 @@
-"""Inference routes: async SAHI-tiled runs + live progress WebSocket.
+"""Inference routes: async tiled runs + live progress WebSocket.
 
 Jobs run on a background thread. Each job writes YOLO-format predictions
 (one ``<stem>.txt`` per image, ``class conf cx cy w h``) to ``output_dir``
 so they plug straight into the Review tab and the per-plant curve pipeline.
 
-The existing ``run_inference`` MCP tool does plain ultralytics predict; for
-Phase 1 we need SAHI tiling to preserve small-object recall, so this module
-runs SAHI directly when ``sahi=true``. Plain mode falls back to the MCP
-tool.
+Inference goes through the tcip pipeline ``GenericPredictor`` — the same code path as
+the MCP ``run_inference`` tool — with native SAHI-style tiling when ``sahi=true``. There
+is no separate ultralytics/SAHI stack. Checkpoints are tcip composed-model checkpoints
+(``model_spec`` + ``model_state_dict``) produced by the training pipeline.
 """
 
 from __future__ import annotations
@@ -80,38 +80,6 @@ def _list_images(images_dir: Path) -> list[Path]:
     return sorted(p for p in images_dir.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
 
 
-def _run_sahi_on_image(det_model, image_path: Path, slice_h: int, slice_w: int, overlap: float):
-    from PIL import Image
-
-    from sahi.predict import get_sliced_prediction
-
-    with Image.open(image_path) as im:
-        w, h = im.size
-    result = get_sliced_prediction(
-        image=str(image_path),
-        detection_model=det_model,
-        slice_height=slice_h,
-        slice_width=slice_w,
-        overlap_height_ratio=overlap,
-        overlap_width_ratio=overlap,
-        verbose=0,
-        postprocess_type="NMS",
-        postprocess_match_threshold=0.5,
-    )
-    lines: list[str] = []
-    for pred in result.object_prediction_list:
-        bbox = pred.bbox
-        x1, y1, x2, y2 = bbox.minx, bbox.miny, bbox.maxx, bbox.maxy
-        cx = (x1 + x2) / 2 / w
-        cy = (y1 + y2) / 2 / h
-        ww = (x2 - x1) / w
-        hh = (y2 - y1) / h
-        cls = int(pred.category.id)
-        conf = float(pred.score.value)
-        lines.append(f"{cls} {conf:.6f} {cx:.6f} {cy:.6f} {ww:.6f} {hh:.6f}")
-    return lines
-
-
 def _worker(job: InferenceJob) -> None:
     try:
         job.status = "running"
@@ -121,43 +89,30 @@ def _worker(job: InferenceJob) -> None:
         images = _list_images(Path(job.images_dir))
         job.total = len(images)
 
-        if job.sahi:
-            from sahi import AutoDetectionModel
+        # One inference code path: the tcip pipeline predictor (same as MCP run_inference),
+        # with native sliding-window tiling when sahi=true. No ultralytics/SAHI stack.
+        from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+        from tcip_mcp.pipelines.postprocessing.export import result_to_yolo_lines
 
-            det_model = AutoDetectionModel.from_pretrained(
-                model_type="ultralytics",
-                model_path=job.checkpoint_path,
-                confidence_threshold=job.conf,
-                device="cuda:0",
+        predictor = GenericPredictor(
+            checkpoint_path=job.checkpoint_path,
+            device=None,  # auto: cuda if available, else cpu
+            score_threshold=job.conf,
+        )
+
+        for img in images:
+            results = predictor.predict_batch(
+                [str(img)],
+                tile=job.sahi,
+                tile_size=job.slice_hw[0],
+                overlap=job.overlap,
+                global_nms_iou=job.iou,
             )
-
-            for img in images:
-                lines = _run_sahi_on_image(
-                    det_model, img, job.slice_hw[0], job.slice_hw[1], job.overlap
-                )
-                out = output_dir / f"{img.stem}.txt"
-                out.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-                job.results.append({"image": img.name, "n_detections": len(lines)})
-                job.done += 1
-        else:
-            from ultralytics import YOLO
-
-            model = YOLO(job.checkpoint_path)
-            for img in images:
-                result = model.predict(source=str(img), conf=job.conf, iou=job.iou, verbose=False)[0]
-                lines: list[str] = []
-                if result.boxes is not None:
-                    xywhn = result.boxes.xywhn.cpu().numpy()
-                    conf = result.boxes.conf.cpu().numpy()
-                    cls = result.boxes.cls.cpu().numpy().astype(int)
-                    for (cx, cy, w, h), c, k in zip(xywhn, conf, cls):
-                        lines.append(
-                            f"{int(k)} {float(c):.6f} {float(cx):.6f} {float(cy):.6f} {float(w):.6f} {float(h):.6f}"
-                        )
-                out = output_dir / f"{img.stem}.txt"
-                out.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-                job.results.append({"image": img.name, "n_detections": len(lines)})
-                job.done += 1
+            lines = result_to_yolo_lines(results[0])
+            out = output_dir / f"{img.stem}.txt"
+            out.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            job.results.append({"image": img.name, "n_detections": len(lines)})
+            job.done += 1
 
         job.status = "completed"
     except Exception as exc:
