@@ -12,7 +12,7 @@ import torch
 from PIL import Image
 
 from tcip_mcp.pipelines.composer import compose_model
-from tcip_mcp.pipelines.image_utils import pil_to_tensor
+from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +46,15 @@ class GenericPredictor:
         heads = self.model_spec.get("heads", [])
         self.task = heads[0]["name"] if heads else "unknown"
 
+        # Input channels the model expects (matches the backbone's in_chans).
+        bb = self.model_spec.get("backbone", {})
+        self.in_chans = bb.get("in_chans", 3) if isinstance(bb, dict) else 3
+
     @torch.no_grad()
     def predict(self, image_path: str) -> dict:
         """Run inference on a single image."""
-        img = Image.open(image_path).convert("RGB")
-        w, h = img.size
+        img = load_image(image_path, self.in_chans)
+        w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
         tensor = pil_to_tensor(img).to(self.device)
 
         if self.task in ("anchor_detection", "anchor_free_detection"):
@@ -94,8 +98,8 @@ class GenericPredictor:
             compute_stride, tile_positions, reconstruct_core, global_nms,
         )
 
-        img = Image.open(image_path).convert("RGB")
-        w, h = img.size
+        img = load_image(image_path, self.in_chans)
+        w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
         stride = compute_stride(tile_size, overlap)
         positions = tile_positions(h, w, tile_size, stride)
 
