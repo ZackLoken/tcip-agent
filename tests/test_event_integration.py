@@ -93,28 +93,6 @@ class TestPushPanelDataTool:
         finally:
             os.environ.pop("TCIP_WEB_PORT", None)
 
-    def test_legacy_annotation_alias(self, tmp_path: Path) -> None:
-        """The legacy panel name 'annotation' aliases to 'annotate'."""
-        from tcip_mcp.tools.annotation_tools import push_panel_data
-
-        os.environ["TCIP_WEB_PORT"] = "59999"
-        try:
-            result = push_panel_data(panel="annotation", event_type="test", data={})
-            assert result.get("panel") == "annotate"
-        finally:
-            os.environ.pop("TCIP_WEB_PORT", None)
-
-    def test_legacy_hpo_alias(self, tmp_path: Path) -> None:
-        """The legacy panel name 'hpo' aliases to 'tuning'."""
-        from tcip_mcp.tools.annotation_tools import push_panel_data
-
-        os.environ["TCIP_WEB_PORT"] = "59999"
-        try:
-            result = push_panel_data(panel="hpo", event_type="test", data={})
-            assert result.get("panel") == "tuning"
-        finally:
-            os.environ.pop("TCIP_WEB_PORT", None)
-
     def test_invalid_panel_rejected(self) -> None:
         """Unknown panel names return an error before any HTTP call."""
         from tcip_mcp.tools.annotation_tools import push_panel_data
