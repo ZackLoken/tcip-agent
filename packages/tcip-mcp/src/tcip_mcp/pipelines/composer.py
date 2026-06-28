@@ -16,7 +16,17 @@ from tcip_mcp.pipelines.registry import BACKBONES, NECKS, HEADS
 from tcip_mcp.pipelines.components.heads import BaseHead
 from tcip_mcp.pipelines.components.backbones import HAS_TIMM
 
-_DETECTION_HEADS = {"anchor_detection"}
+_DETECTION_HEADS = {"anchor_detection", "anchor_free_detection"}
+
+
+def _default_anchor_sizes(num_levels: int, base: int = 32) -> tuple[tuple[int, ...], ...]:
+    """One anchor size per pyramid level, doubling each level.
+
+    ``base=32, num_levels=4`` -> ``((32,),(64,),(128,),(256,))`` (the historical
+    default), but now correct for any level count (the old ``[32,64,128,256][:n]``
+    silently truncated and crashed ``AnchorGenerator`` for >4 levels).
+    """
+    return tuple((base * 2 ** i,) for i in range(num_levels))
 
 
 class ComposedModel(nn.Module):
@@ -151,7 +161,7 @@ class DetectionModel(nn.Module):
         self.neck = neck
         self.spec = spec or {}
 
-        from torchvision.models.detection import FasterRCNN
+        from torchvision.models.detection import FasterRCNN, FCOS, RetinaNet
         from torchvision.models.detection.rpn import AnchorGenerator
         from torchvision.ops import MultiScaleRoIAlign
 
@@ -164,29 +174,38 @@ class DetectionModel(nn.Module):
         featmap_names = list(sample_out.keys())
         num_levels = len(featmap_names)
 
-        anchor_sizes = kwargs.get(
-            "anchor_sizes",
-            tuple((s,) for s in [32, 64, 128, 256][:num_levels]),
-        )
-        aspect_ratios = kwargs.get(
-            "aspect_ratios",
-            ((0.5, 1.0, 2.0),) * num_levels,
-        )
-        anchor_generator = AnchorGenerator(
-            sizes=anchor_sizes, aspect_ratios=aspect_ratios,
-        )
-        roi_pool = MultiScaleRoIAlign(
-            featmap_names=featmap_names, output_size=7, sampling_ratio=2,
-        )
+        detector = kwargs.get("detector", "faster_rcnn")
+        base = kwargs.get("anchor_base_size", 32)
+        min_size = kwargs.get("min_size", 800)
+        max_size = kwargs.get("max_size", 1333)
+        sizes = _default_anchor_sizes(num_levels, base)
 
-        self.detector = FasterRCNN(
-            adapter,
-            num_classes=num_classes + 1,  # +1 for background
-            rpn_anchor_generator=anchor_generator,
-            box_roi_pool=roi_pool,
-            min_size=kwargs.get("min_size", 800),
-            max_size=kwargs.get("max_size", 1333),
-        )
+        if detector == "fcos":
+            # FCOS is anchor-free: exactly one point/anchor per location (ratio 1.0).
+            anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=((1.0,),) * num_levels)
+            self.detector = FCOS(
+                adapter, num_classes=num_classes + 1,
+                anchor_generator=anchor_generator, min_size=min_size, max_size=max_size,
+            )
+        elif detector == "retinanet":
+            # RetinaNet: 3 octave scales x 3 ratios = 9 anchors/location.
+            octave_sizes = tuple(tuple(int(s[0] * 2 ** (k / 3)) for k in range(3)) for s in sizes)
+            anchor_generator = AnchorGenerator(
+                sizes=octave_sizes, aspect_ratios=((0.5, 1.0, 2.0),) * num_levels)
+            self.detector = RetinaNet(
+                adapter, num_classes=num_classes + 1,
+                anchor_generator=anchor_generator, min_size=min_size, max_size=max_size,
+            )
+        else:  # faster_rcnn (default)
+            anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=((0.5, 1.0, 2.0),) * num_levels)
+            roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=7, sampling_ratio=2)
+            self.detector = FasterRCNN(
+                adapter,
+                num_classes=num_classes + 1,  # +1 for background
+                rpn_anchor_generator=anchor_generator,
+                box_roi_pool=roi_pool,
+                min_size=min_size, max_size=max_size,
+            )
 
     def forward(
         self,
@@ -268,6 +287,7 @@ def compose_model(spec: dict) -> ComposedModel | DetectionModel:
     if len(head_specs) == 1 and head_specs[0]["name"] in _DETECTION_HEADS:
         h = head_specs[0]
         det_kwargs = {k: v for k, v in h.items() if k not in ("name", "in_channels")}
+        det_kwargs.setdefault("detector", "fcos" if h["name"] == "anchor_free_detection" else "faster_rcnn")
         return DetectionModel(backbone, neck, spec=spec, **det_kwargs)
 
     # Non-detection: build heads normally
@@ -327,10 +347,14 @@ def recommend_model_spec(
     sensor: str = "rgb",
     num_classes: int = 1,
     num_ranks: int | None = None,
+    object_size: str = "medium",
 ) -> dict:
     """Generate a recommended ModelSpec from task parameters.
 
     The agent can use this as a starting point and customize further.
+    ``object_size`` (tiny/small/medium/large) tunes the detection recommendation:
+    tiny/small objects get the anchor-free FCOS detector with smaller anchors (and
+    an extra ``add_p2`` pyramid level for tiny); medium/large keep Faster R-CNN.
     """
     # Backbone selection by dataset size
     if dataset_size < 500:
@@ -342,8 +366,17 @@ def recommend_model_spec(
 
     # Neck and head by task
     if task in ("detection", "instance_seg"):
-        neck = {"name": "fpn", "out_channels": 256}
-        head = {"name": "anchor_detection", "num_classes": num_classes}
+        if object_size in ("tiny", "small"):
+            neck = {"name": "fpn", "out_channels": 256}
+            if object_size == "tiny":
+                neck["add_p2"] = True
+            head = {
+                "name": "anchor_free_detection", "num_classes": num_classes,
+                "detector": "fcos", "anchor_base_size": 8 if object_size == "tiny" else 16,
+            }
+        else:
+            neck = {"name": "fpn", "out_channels": 256}
+            head = {"name": "anchor_detection", "num_classes": num_classes}
     elif task == "semantic_seg":
         neck = {"name": "fpn", "out_channels": 256}
         head = {"name": "semantic_seg", "num_classes": num_classes}
