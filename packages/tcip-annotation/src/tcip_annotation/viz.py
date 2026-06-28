@@ -9,15 +9,13 @@ normalized YOLO coords.
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
-from typing import Sequence
 
 from PIL import Image, ImageDraw, ImageFont
 from tcip_annotation.utils import auto_orient_image, get_image_dimensions
 
-# 20-class color palette (RGB) — consistent with webview annotation canvas
+# 20-class color palette (RGB) — consistent with the GUI annotation canvas
 COLOR_PALETTE: list[tuple[int, int, int]] = [
     (255, 0, 0),       # red
     (0, 255, 0),       # green
