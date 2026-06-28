@@ -9,7 +9,8 @@ export type TabName =
   | "training"
   | "tuning"
   | "inference"
-  | "results";
+  | "results"
+  | "meta";
 
 export type Mode = "box" | "polygon";
 
