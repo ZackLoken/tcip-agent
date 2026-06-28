@@ -27,7 +27,6 @@ class ClassBalancedSampler(Sampler):
             self._length = len(dataset)
             return
 
-        max_count = max(dist.values())
         # Build per-sample weight: inverse class frequency
         # We need per-sample classes — iterate dataset target dicts
         self._weights = self._compute_weights(dataset, dist)
