@@ -15,6 +15,11 @@ import torch.nn as nn
 from tcip_mcp.pipelines.registry import BACKBONES, NECKS, HEADS
 from tcip_mcp.pipelines.components.heads import BaseHead
 from tcip_mcp.pipelines.components.backbones import HAS_TIMM
+# Side-effect imports: registering necks + detectors makes the composer self-contained
+# (BACKBONES/HEADS already register via the imports above), so validate/compose never
+# see an empty registry regardless of import order.
+import tcip_mcp.pipelines.components.necks  # noqa: F401
+import tcip_mcp.pipelines.components.detectors  # noqa: F401
 
 _DETECTION_HEADS = {"anchor_detection", "anchor_free_detection"}
 
@@ -22,16 +27,6 @@ _DETECTION_HEADS = {"anchor_detection", "anchor_free_detection"}
 _FPN_BASE_LEVELS = 4
 # Backbone output_format values that are single-scale (incompatible with a pyramid neck).
 _SINGLE_SCALE_FORMATS = {"single", "flat", "flat_vector", "pooled", "vector"}
-
-
-def _default_anchor_sizes(num_levels: int, base: int = 32) -> tuple[tuple[int, ...], ...]:
-    """One anchor size per pyramid level, doubling each level.
-
-    ``base=32, num_levels=4`` -> ``((32,),(64,),(128,),(256,))`` (the historical
-    default), but now correct for any level count (the old ``[32,64,128,256][:n]``
-    silently truncated and crashed ``AnchorGenerator`` for >4 levels).
-    """
-    return tuple((base * 2 ** i,) for i in range(num_levels))
 
 
 class ComposedModel(nn.Module):
@@ -166,51 +161,26 @@ class DetectionModel(nn.Module):
         self.neck = neck
         self.spec = spec or {}
 
-        from torchvision.models.detection import FasterRCNN, FCOS, RetinaNet
-        from torchvision.models.detection.rpn import AnchorGenerator
-        from torchvision.ops import MultiScaleRoIAlign
-
         adapter = _BackboneNeckAdapter(backbone, neck)
 
-        # Determine feature map names from neck output
+        # Determine feature map names from the neck output.
         dummy = torch.zeros(1, 3, 64, 64)
         with torch.no_grad():
             sample_out = adapter(dummy)
         featmap_names = list(sample_out.keys())
         num_levels = len(featmap_names)
 
-        detector = kwargs.get("detector", "faster_rcnn")
-        base = kwargs.get("anchor_base_size", 32)
-        min_size = kwargs.get("min_size", 800)
-        max_size = kwargs.get("max_size", 1333)
-        sizes = _default_anchor_sizes(num_levels, base)
+        # Registry-driven detector construction (see components/detectors.py): add a new
+        # detector (Mask R-CNN, DETR, external framework) by registering a builder, not
+        # by editing this class.
+        from tcip_mcp.pipelines.components.detectors import build_detector
 
-        if detector == "fcos":
-            # FCOS is anchor-free: exactly one point/anchor per location (ratio 1.0).
-            anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=((1.0,),) * num_levels)
-            self.detector = FCOS(
-                adapter, num_classes=num_classes + 1,
-                anchor_generator=anchor_generator, min_size=min_size, max_size=max_size,
-            )
-        elif detector == "retinanet":
-            # RetinaNet: 3 octave scales x 3 ratios = 9 anchors/location.
-            octave_sizes = tuple(tuple(int(s[0] * 2 ** (k / 3)) for k in range(3)) for s in sizes)
-            anchor_generator = AnchorGenerator(
-                sizes=octave_sizes, aspect_ratios=((0.5, 1.0, 2.0),) * num_levels)
-            self.detector = RetinaNet(
-                adapter, num_classes=num_classes + 1,
-                anchor_generator=anchor_generator, min_size=min_size, max_size=max_size,
-            )
-        else:  # faster_rcnn (default)
-            anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=((0.5, 1.0, 2.0),) * num_levels)
-            roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=7, sampling_ratio=2)
-            self.detector = FasterRCNN(
-                adapter,
-                num_classes=num_classes + 1,  # +1 for background
-                rpn_anchor_generator=anchor_generator,
-                box_roi_pool=roi_pool,
-                min_size=min_size, max_size=max_size,
-            )
+        detector = kwargs.get("detector", "faster_rcnn")
+        det_kwargs = {k: v for k, v in kwargs.items() if k != "detector"}
+        self.detector = build_detector(
+            detector, adapter, num_classes,
+            featmap_names=featmap_names, num_levels=num_levels, **det_kwargs,
+        )
 
     def forward(
         self,
