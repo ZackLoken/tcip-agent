@@ -911,7 +911,7 @@ class TestGridCellToSamPrompt:
                 (100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0),
             ]
 
-            result = sam_predict(
+            sam_predict(
                 image_path=img_path,
                 grid_cells=["C4"],
             )
