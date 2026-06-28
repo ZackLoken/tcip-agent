@@ -7,7 +7,6 @@ arguments, result status, and duration. Append-only JSONL format.
 from __future__ import annotations
 
 import functools
-import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -31,11 +30,11 @@ def _redact(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _write_entry(entry: dict[str, Any]) -> None:
-    """Append a single audit entry to the JSONL file."""
+    """Append a single audit entry to the JSONL file (lock-guarded + fsync'd)."""
     try:
-        AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(AUDIT_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, default=str) + "\n")
+        from tcip_mcp.utils.atomic_io import append_jsonl
+
+        append_jsonl(AUDIT_PATH, entry)
     except Exception:
         logger.debug("Failed to write audit entry", exc_info=True)
 
