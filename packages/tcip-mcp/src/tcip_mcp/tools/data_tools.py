@@ -122,7 +122,6 @@ def load_dataset(folder_path: str) -> dict:
     # Build stem-based pairing
     image_stems = {Path(p).stem: p for p in scan["images"]}
     label_stems = {Path(p).stem: p for p in scan["labels_detect"]}
-    pred_stems = {Path(p).stem: p for p in scan["predictions_detect"]}
 
     paired = 0
     unlabelled = 0
