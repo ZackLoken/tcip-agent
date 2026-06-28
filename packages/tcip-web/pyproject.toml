@@ -15,6 +15,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["httpx", "pytest", "pytest-asyncio"]
+# The SAHI/ultralytics inference route (routes/inference.py) lazily imports these.
+inference = ["ultralytics>=8.3", "sahi>=0.11", "opencv-python>=4.5"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tcip_web"]
