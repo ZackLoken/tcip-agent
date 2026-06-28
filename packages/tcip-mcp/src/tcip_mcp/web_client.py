@@ -81,10 +81,11 @@ def post_panel_event(
 ) -> dict[str, Any]:
     """POST a panel event to the running tcip-web backend.
 
-    Returns one of:
-      * ``{"status": "ok", "url": ...}`` on 2xx response.
-      * ``{"status": "no_subscribers"}`` if the backend is not running.
-      * ``{"error": ...}`` on any HTTP or serialization failure.
+    Every return carries a ``delivered`` bool so callers don't mistake "backend down"
+    for success. Returns one of:
+      * ``{"status": "ok", "delivered": True, ...}`` on 2xx response.
+      * ``{"status": "no_subscribers", "delivered": False, ...}`` if the backend is down.
+      * ``{"error": ..., "delivered": False, ...}`` on any HTTP/serialization failure.
     """
     import json
     import urllib.error
@@ -102,14 +103,14 @@ def post_panel_event(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             code = getattr(resp, "status", 200)
             if 200 <= code < 300:
-                return {"status": "ok", "url": url}
-            return {"error": f"backend returned HTTP {code}", "url": url}
+                return {"status": "ok", "delivered": True, "url": url}
+            return {"error": f"backend returned HTTP {code}", "delivered": False, "url": url}
     except urllib.error.URLError as exc:
         # ConnectionRefusedError or similar -> backend not running
         reason = getattr(exc, "reason", exc)
         if isinstance(reason, (ConnectionRefusedError, OSError)):
-            return {"status": "no_subscribers", "url": url}
-        return {"error": f"URL error: {reason}", "url": url}
+            return {"status": "no_subscribers", "delivered": False, "url": url}
+        return {"error": f"URL error: {reason}", "delivered": False, "url": url}
     except Exception as exc:  # pragma: no cover
         logger.exception("post_panel_event failed")
-        return {"error": str(exc), "url": url}
+        return {"error": str(exc), "delivered": False, "url": url}
