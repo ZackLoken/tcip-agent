@@ -307,10 +307,6 @@ def visualize_worst_predictions(
     if not worst_items:
         return {"summary": "No prediction errors found", "image_path": None}
 
-    name_map = {}
-    if class_names:
-        name_map = {i: n.strip() for i, n in enumerate(class_names.split(","))}
-
     # Build failure case data for render_confusion_examples
     failure_cases = []
     img_dir = Path(images_dir)
