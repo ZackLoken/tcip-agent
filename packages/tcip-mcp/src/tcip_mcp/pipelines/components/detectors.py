@@ -103,6 +103,33 @@ DETECTORS.register_factory("retinanet", _build_retinanet, category="anchor_based
 })
 
 
+def _build_mask_rcnn(
+    adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
+    anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333, **_: Any,
+) -> Any:
+    from torchvision.models.detection import MaskRCNN
+    from torchvision.models.detection.rpn import AnchorGenerator
+    from torchvision.ops import MultiScaleRoIAlign
+
+    sizes = _default_anchor_sizes(num_levels, anchor_base_size)
+    anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=((0.5, 1.0, 2.0),) * num_levels)
+    box_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=7, sampling_ratio=2)
+    mask_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=14, sampling_ratio=2)
+    return MaskRCNN(
+        adapter, num_classes=num_classes + 1,  # +1 for background
+        rpn_anchor_generator=anchor_generator,
+        box_roi_pool=box_roi_pool, mask_roi_pool=mask_roi_pool,
+        min_size=min_size, max_size=max_size,
+    )
+
+
+DETECTORS.register_factory("mask_rcnn", _build_mask_rcnn, category="instance_seg", metadata={
+    **_BASE_META, "valid_tasks": ["instance_seg"], "output_format": "boxes+masks",
+    "description": "torchvision Mask R-CNN (instance segmentation) over a composed backbone+neck",
+    "anchor_free": False,
+})
+
+
 def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> Any:
     """Look up a registered detector builder by name and instantiate it.
 
