@@ -19,7 +19,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from tcip_mcp.pipelines.image_utils import pil_to_tensor
+from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +77,46 @@ class BaseDataset(Dataset, ABC):
         return self.num_samples
 
 
+class BaseImageDataset(BaseDataset):
+    """Base for image datasets — centralizes channel-aware loading + finalization.
+
+    Subclasses set ``self.images_dir`` and ``self.transforms`` (and inherit
+    ``expected_channels`` from build_dataset), then build only the task-specific target.
+    """
+
+    images_dir: Path
+    transforms: Any = None
+
+    def _resolve_path(self, stem: str) -> Path:
+        """A ``stem`` may be a literal path (classification folder mode) or a stem in images_dir."""
+        p = Path(stem)
+        if p.is_absolute() or p.exists():
+            return p
+        return _find_image(self.images_dir, stem)
+
+    def _open_image(self, stem: str):
+        """Open an image honoring ``expected_channels`` (PIL for 1/3/4 ch, else ndarray)."""
+        return load_image(self._resolve_path(stem), self.expected_channels)
+
+    @staticmethod
+    def _image_size(img) -> tuple[int, int]:
+        """Return ``(width, height)`` for a PIL image or an ``[H, W, C]`` array."""
+        if isinstance(img, Image.Image):
+            return img.size
+        return int(img.shape[1]), int(img.shape[0])
+
+    def _finalize(self, img, target: dict) -> tuple[torch.Tensor, dict]:
+        """Apply PIL transforms (when applicable) or convert straight to a tensor."""
+        if self.transforms is not None and isinstance(img, Image.Image):
+            return self.transforms(img, target)
+        return pil_to_tensor(img), target
+
+
 # ====================================================================
 # Detection
 # ====================================================================
 
-class DetectionDataset(BaseDataset):
+class DetectionDataset(BaseImageDataset):
     """YOLO-format detection: ``cls cx cy w h`` per line."""
 
     task_type = "detection"
@@ -128,19 +163,15 @@ class DetectionDataset(BaseDataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
-        img = Image.open(_find_image(self.images_dir, stem)).convert("RGB")
-        w, h = img.size
+        img = self._open_image(stem)
+        w, h = self._image_size(img)
         boxes, labels = _read_det_boxes_px(self.labels_dir / f"{stem}.txt", w, h)
         target = {
             "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
             "labels": torch.tensor(labels, dtype=torch.int64),
             "image_id": idx,
         }
-        if self.transforms is not None:
-            img, target = self.transforms(img, target)
-        else:
-            img = pil_to_tensor(img)
-        return img, target
+        return self._finalize(img, target)
 
 
 # ====================================================================
@@ -244,7 +275,7 @@ class TiledDetectionDataset(BaseDataset):
 # Instance Segmentation
 # ====================================================================
 
-class InstanceSegDataset(BaseDataset):
+class InstanceSegDataset(BaseImageDataset):
     """YOLO polygon format: ``cls x1 y1 x2 y2 ...`` per line."""
 
     task_type = "instance_seg"
@@ -276,8 +307,8 @@ class InstanceSegDataset(BaseDataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
-        img = Image.open(_find_image(self.images_dir, stem)).convert("RGB")
-        w, h = img.size
+        img = self._open_image(stem)
+        w, h = self._image_size(img)
 
         boxes, labels, masks = [], [], []
         lp = self.labels_dir / f"{stem}.txt"
@@ -313,18 +344,14 @@ class InstanceSegDataset(BaseDataset):
             "masks": torch.tensor(np.stack(masks) if masks else np.zeros((0, h, w)), dtype=torch.uint8),
             "image_id": idx,
         }
-        if self.transforms is not None:
-            img, target = self.transforms(img, target)
-        else:
-            img = pil_to_tensor(img)
-        return img, target
+        return self._finalize(img, target)
 
 
 # ====================================================================
 # Semantic Segmentation
 # ====================================================================
 
-class SemanticSegDataset(BaseDataset):
+class SemanticSegDataset(BaseImageDataset):
     """PNG mask images where pixel values are class IDs."""
 
     task_type = "semantic_seg"
@@ -356,23 +383,20 @@ class SemanticSegDataset(BaseDataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
-        img = Image.open(_find_image(self.images_dir, stem)).convert("RGB")
+        img = self._open_image(stem)
+        w, h = self._image_size(img)
         mask_path = self.masks_dir / f"{stem}.png"
-        mask = np.array(Image.open(mask_path).convert("L")) if mask_path.exists() else np.zeros(img.size[::-1], dtype=np.int64)
+        mask = np.array(Image.open(mask_path).convert("L")) if mask_path.exists() else np.zeros((h, w), dtype=np.int64)
         # Key matches the SemanticSegHead loss contract.
         target = {"masks": torch.tensor(mask, dtype=torch.int64)}
-        if self.transforms is not None:
-            img, target = self.transforms(img, target)
-        else:
-            img = pil_to_tensor(img)
-        return img, target
+        return self._finalize(img, target)
 
 
 # ====================================================================
 # Classification
 # ====================================================================
 
-class ClassificationDataset(BaseDataset):
+class ClassificationDataset(BaseImageDataset):
     """Image classification from CSV (image_stem, label) or folder structure."""
 
     task_type = "classification"
@@ -433,23 +457,16 @@ class ClassificationDataset(BaseDataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self._stems[idx]
-        if Path(stem).is_absolute() or Path(stem).exists():
-            img = Image.open(stem).convert("RGB")
-        else:
-            img = Image.open(_find_image(self.images_dir, stem)).convert("RGB")
+        img = self._open_image(stem)
         target = {"labels": self._labels[idx]}
-        if self.transforms is not None:
-            img, target = self.transforms(img, target)
-        else:
-            img = pil_to_tensor(img)
-        return img, target
+        return self._finalize(img, target)
 
 
 # ====================================================================
 # Ordinal
 # ====================================================================
 
-class OrdinalDataset(BaseDataset):
+class OrdinalDataset(BaseImageDataset):
     """Ordinal regression from CSV (image_stem, rank). E.g., disease severity 0-4."""
 
     task_type = "ordinal"
@@ -488,21 +505,17 @@ class OrdinalDataset(BaseDataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self._stems[idx]
-        img = Image.open(_find_image(self.images_dir, stem)).convert("RGB")
+        img = self._open_image(stem)
         # Key matches the OrdinalHead loss contract (plural, like "labels"/"masks").
         target = {"ranks": self._ranks[idx], "num_ranks": self._num_ranks}
-        if self.transforms is not None:
-            img, target = self.transforms(img, target)
-        else:
-            img = pil_to_tensor(img)
-        return img, target
+        return self._finalize(img, target)
 
 
 # ====================================================================
 # Regression
 # ====================================================================
 
-class RegressionDataset(BaseDataset):
+class RegressionDataset(BaseImageDataset):
     """Continuous-value regression from CSV (image_stem, value)."""
 
     task_type = "regression"
@@ -535,14 +548,10 @@ class RegressionDataset(BaseDataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self._stems[idx]
-        img = Image.open(_find_image(self.images_dir, stem)).convert("RGB")
+        img = self._open_image(stem)
         # Key matches the RegressionHead loss contract.
         target = {"values": self._values[idx]}
-        if self.transforms is not None:
-            img, target = self.transforms(img, target)
-        else:
-            img = pil_to_tensor(img)
-        return img, target
+        return self._finalize(img, target)
 
 
 # ====================================================================
