@@ -27,7 +27,7 @@ jobs:
           pip install -e "packages/tcip-web[dev]"
 
       - name: Run tests
-        run: pytest tests/ -x --timeout=120 -v
+        run: pytest tests/ --timeout=120 -v
 
   typescript:
     runs-on: ubuntu-latest
