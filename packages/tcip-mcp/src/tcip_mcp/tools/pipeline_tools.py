@@ -14,13 +14,16 @@ def list_components() -> dict:
     Returns backbones, necks, heads, losses, and optimizers with metadata.
     The agent uses this to reason about available primitives for model design.
     """
-    from tcip_mcp.pipelines.registry import BACKBONES, NECKS, HEADS, LOSSES, OPTIMIZERS
+    from tcip_mcp.pipelines.registry import (
+        BACKBONES, NECKS, HEADS, LOSSES, OPTIMIZERS, DETECTORS,
+    )
 
     # Import component modules to trigger registration
     import tcip_mcp.pipelines.components.backbones  # noqa: F401
     import tcip_mcp.pipelines.components.necks  # noqa: F401
     import tcip_mcp.pipelines.components.heads  # noqa: F401
     import tcip_mcp.pipelines.components.losses  # noqa: F401
+    import tcip_mcp.pipelines.components.detectors  # noqa: F401
 
     try:
         import tcip_mcp.pipelines.components.temporal  # noqa: F401
@@ -37,6 +40,7 @@ def list_components() -> dict:
         "backbones": BACKBONES.list(),
         "necks": NECKS.list(),
         "heads": HEADS.list(),
+        "detectors": DETECTORS.list(),
         "losses": LOSSES.list(),
         "optimizers": OPTIMIZERS.list(),
     }
