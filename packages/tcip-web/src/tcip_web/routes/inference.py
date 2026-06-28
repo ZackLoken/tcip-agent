@@ -46,19 +46,37 @@ class InferenceJob:
     overlap: float
     total: int = 0
     done: int = 0
-    status: str = "pending"  # pending | running | completed | failed
+    status: str = "pending"  # pending | running | completed | failed | cancelled
     error: Optional[str] = None
     results: list[dict] = field(default_factory=list)  # [{image, n_detections}]
     thread: Optional[threading.Thread] = field(default=None, repr=False)
+    cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
 
 _jobs: dict[str, InferenceJob] = {}
 _job_lock = threading.Lock()
 
 
+def _summary(job: InferenceJob) -> dict:
+    return {
+        "job_id": job.job_id, "status": job.status, "done": job.done, "total": job.total,
+        "images_dir": job.images_dir, "output_dir": job.output_dir, "error": job.error,
+    }
+
+
+def _persist() -> None:
+    from tcip_web import jobstore
+    with _job_lock:
+        summaries = [_summary(j) for j in _jobs.values()]
+    jobstore.persist("inference_jobs", summaries)
+
+
 def _register(job: InferenceJob) -> None:
+    from tcip_web import jobstore
     with _job_lock:
         _jobs[job.job_id] = job
+        jobstore.evict_terminal(_jobs)  # bound the registry (drop oldest terminal jobs)
+    _persist()
 
 
 def _get(job_id: str) -> Optional[InferenceJob]:
@@ -83,6 +101,7 @@ def _list_images(images_dir: Path) -> list[Path]:
 def _worker(job: InferenceJob) -> None:
     try:
         job.status = "running"
+        _persist()
         output_dir = Path(job.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -101,6 +120,8 @@ def _worker(job: InferenceJob) -> None:
         )
 
         for img in images:
+            if job.cancel_event.is_set():
+                break
             results = predictor.predict_batch(
                 [str(img)],
                 tile=job.sahi,
@@ -114,11 +135,13 @@ def _worker(job: InferenceJob) -> None:
             job.results.append({"image": img.name, "n_detections": len(lines)})
             job.done += 1
 
-        job.status = "completed"
+        job.status = "cancelled" if job.cancel_event.is_set() else "completed"
     except Exception as exc:
         logger.exception("inference job %s failed", job.job_id)
         job.status = "failed"
         job.error = str(exc)
+    finally:
+        _persist()
 
 
 # ── Request/response ───────────────────────────────────────────────────
@@ -210,6 +233,16 @@ def get_preview(job_id: str, limit: int = 12) -> dict:
         "output_dir": j.output_dir,
         "preview": preview,
     }
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    """Request graceful cancellation; the worker stops at the next image boundary."""
+    j = _get(job_id)
+    if j is None:
+        raise HTTPException(404, f"job not found: {job_id}")
+    j.cancel_event.set()
+    return {"job_id": job_id, "status": j.status, "cancel_requested": True}
 
 
 @router.websocket("/jobs/{job_id}/stream")
