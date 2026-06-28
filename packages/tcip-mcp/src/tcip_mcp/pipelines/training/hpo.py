@@ -123,7 +123,7 @@ def _suggest_param(trial: Any, name: str, spec: dict) -> Any:
 
 
 def optuna_search(
-    objective_fn: Callable[[dict], float],
+    objective_fn: Callable[..., float],
     param_space: dict | None = None,
     n_trials: int = 20,
     direction: str = "maximize",
@@ -136,7 +136,7 @@ def optuna_search(
     """Run HPO using Optuna with TPE sampler and optional ASHA pruning.
 
     Args:
-        objective_fn: Callable that takes a config dict and returns a scalar metric.
+        objective_fn: Callable taking (config dict, trial number) and returning a scalar metric.
                      For detection, this should return val mAP50.
         param_space: Optuna-compatible space dict (see get_default_optuna_space).
                     If None, uses default space.
@@ -182,7 +182,7 @@ def optuna_search(
             config[name] = _suggest_param(trial, name, spec)
         logger.info("Trial %d: %s", trial.number, config)
 
-        value = objective_fn(config)
+        value = objective_fn(config, trial.number)
 
         # Log trial result to TensorBoard
         if tb_logdir and HAS_TB:
