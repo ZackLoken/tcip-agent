@@ -209,10 +209,14 @@ def train(
     train_loader: DataLoader,
     val_loader: DataLoader | None = None,
     task: str = "detection",
+    epoch_callback=None,
 ) -> TrainRun:
     """Execute a task-agnostic training run.
 
     The model is built from run.config["model_spec"] via compose_model().
+    ``epoch_callback(epoch:int, epoch_metrics:dict)`` (optional) is invoked after
+    each epoch's metrics are recorded — used by HPO to report intermediate values
+    for pruning. It may raise to abort the run (e.g. ``optuna.TrialPruned``).
     """
     config = run.config
     run.status = "running"
@@ -432,6 +436,9 @@ def train(
                 with open(metrics_path, "a") as f:
                     f.write(json.dumps(epoch_metrics) + "\n")
 
+                if epoch_callback is not None:
+                    epoch_callback(run.current_epoch, epoch_metrics)
+
                 logger.info("Epoch %d stage %d loss=%.4f val_loss=%.4f lr=%.2e",
                     run.current_epoch, stage_idx, avg_loss, val_metrics.get("val_loss", 0), current_lr)
 
@@ -486,6 +493,9 @@ def train(
         run.status = "completed"
 
     except Exception as e:
+        # Let HPO pruning signals propagate to Optuna (duck-typed to avoid the dep).
+        if type(e).__name__ == "TrialPruned":
+            raise
         run.status = "failed"
         run.error = str(e)
         logger.exception("Training failed: %s", e)
