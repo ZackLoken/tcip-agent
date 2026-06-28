@@ -29,6 +29,7 @@ from tcip_annotation import (
     parse_segment_predictions,
 )
 from tcip_annotation.utils import auto_orient_image
+from tcip_web.paths import assert_path_allowed
 
 router = APIRouter(prefix="/api/review", tags=["review"])
 
@@ -49,7 +50,10 @@ def _get_engine(project_root: str, class_names: Optional[dict[int, str]] = None)
 
 
 def _image_dims(path: str) -> tuple[int, int]:
-    p = Path(path)
+    try:
+        p = assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
     if not p.is_file():
         raise HTTPException(404, f"image not found: {path}")
     with Image.open(p) as raw:
