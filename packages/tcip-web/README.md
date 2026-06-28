@@ -15,7 +15,7 @@ packages/tcip-web/
   src/tcip_web/
     app.py              # FastAPI app
     state.py            # in-memory GuiState + debounced .tcip/state/gui.json
-    paths.py            # safe_join (traversal-safe relative joins)
+    paths.py            # safe_join + image-root allow-list (traversal/LFI guards)
     plant_mapping.py    # EXIF GPS + sequence → plant_locations.csv matching
     routes/
       annotate.py       # label CRUD, Annotate-tab commands
