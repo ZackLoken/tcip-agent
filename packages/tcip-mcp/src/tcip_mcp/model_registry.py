@@ -7,6 +7,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction
+
 
 def _compute_sha256(filepath: str | Path) -> str:
     """Compute SHA-256 checksum of a file."""
@@ -33,8 +35,7 @@ class ModelRegistry:
         return []
 
     def _save_index(self) -> None:
-        with open(self._index_path, "w") as f:
-            json.dump(self._index, f, indent=2)
+        atomic_write_json(self._index_path, self._index)
 
     def register_model(
         self,
@@ -67,10 +68,13 @@ class ModelRegistry:
             "metrics": metrics or {},
             "tags": tags or [],
         }
-        # Replace if same name exists
-        self._index = [e for e in self._index if e["name"] != name]
-        self._index.append(entry)
-        self._save_index()
+        # Lock-guarded read-modify-write: re-read the on-disk index under the lock so a
+        # concurrent writer's entries aren't clobbered, replace-by-name, then atomic save.
+        with file_transaction(self._index_path):
+            self._index = self._load_index()
+            self._index = [e for e in self._index if e["name"] != name]
+            self._index.append(entry)
+            self._save_index()
         return entry
 
     def verify_model(self, name: str) -> dict:
