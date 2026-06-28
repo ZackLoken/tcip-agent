@@ -181,20 +181,38 @@ def _validate(model: ComposedModel, val_loader: DataLoader, device: torch.device
             images, targets = batch
             images = [img.to(device) for img in images]
             targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
-            # Detection heads may need training flag for loss computation
-            for head in model.heads:
-                head.training = True
+            detector = getattr(model, "detector", None)
+            if detector is not None:
+                # DetectionModel wraps a torchvision FasterRCNN whose loss branch
+                # is gated on the *detector's own* training flag and asserts on
+                # empty/degenerate boxes. Put the detector in train mode (but keep
+                # BatchNorm in eval so val data does not move running stats), drop
+                # box-less images, and call it directly to get the loss dict.
+                keep = [(im, t) for im, t in zip(images, targets)
+                        if isinstance(t.get("boxes"), torch.Tensor) and t["boxes"].numel() > 0]
+                if not keep:
+                    continue
+                detector.train()
+                for m in detector.modules():
+                    if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                        m.eval()
+                loss_dict = detector([im for im, _ in keep], [t for _, t in keep])
+            else:
+                # ComposedModel-based path (no torchvision detector wrapper).
+                for head in getattr(model, "heads", []):
+                    head.training = True
+                loss_dict = model(images, targets)
         else:
             images, targets = batch
             images = images.to(device)
             targets = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in targets.items()}
+            loss_dict = model(images, targets)
 
-        loss_dict = model(images, targets)
         if isinstance(loss_dict, dict):
             loss = sum(loss_dict.values())
         else:
             loss = loss_dict
-        total_loss += loss.item()
+        total_loss += float(loss.item()) if torch.is_tensor(loss) else float(loss)
         n += 1
 
     # Restore eval mode fully
