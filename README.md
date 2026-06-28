@@ -138,6 +138,7 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   now supported via the N-channel path above.)
 - Temporal / phenology-sequence and relational pipeline patterns beyond the
   per-image case.
+- Fully automated active learning loop without human-in-the-loop. 
 
 ## License
 
