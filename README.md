@@ -106,6 +106,27 @@ segmentation, classification, ordinal, regression — via the composable
 backbone/neck/head spec, with experiment tracking, annotation/review, SAM-assisted
 labeling, and per-plant CSV export.
 
+The detection training pipeline mirrors a production drone-phenotyping workflow:
+
+- **Metrics & selection** — real per-task validation metrics (detection/instance-seg
+  mAP via `pycocotools` `COCOeval`; accuracy/F1; MAE/rank-acc) and a composite
+  best-model objective (blends loss, F1, mAP50) instead of raw `val_loss`.
+- **Progressive unfreezing** — multi-stage training with optimizer-momentum handoff
+  between stages, optional inter-stage LR warmup, and effective-batch LR scaling.
+- **Small objects** — opt-in SAHI-style sliding-window tiling at train and inference
+  time (core-region reconstruction + global NMS), plus an FCOS/RetinaNet anchor-free
+  detector option and an extra high-resolution (P2) pyramid level.
+- **Honest splits** — group-aware, annotation-stratified train/val/test splitting
+  (no source-image leakage) with automatic validation loaders.
+- **Imbalance & augmentation** — class-weighted / focal losses and a nadir-imagery
+  augmentation preset (free rotation + flips; mosaic/copy-paste intentionally off).
+- **HPO** — Optuna search with ASHA pruning + known-good warm start on the composite.
+- **Reproducibility** — global seeding, checkpoint resume (model + optimizer +
+  scheduler), and pydantic + neck/head channel-compatibility config validation.
+- **Review → retrain** — turn human review verdicts into a curated training set
+  (accepted/edited → labels, rejected → hard negatives) with experiment lineage, and
+  prioritize the next review batch by active-learning score.
+
 **Not built yet (contributions/experiments welcome):**
 - Non-RGB data paths: multispectral / hyperspectral, depth, and 3D point clouds.
   The dataset layer currently loads RGB images only. A `pointnet++` backbone is
@@ -114,3 +135,9 @@ labeling, and per-plant CSV export.
 - N-channel input for 2D backbones (the timm builder does not yet thread `in_chans`).
 - Temporal / phenology-sequence and relational pipeline patterns beyond the
   per-image case.
+
+## License
+
+TCIP Agent is released under the [PolyForm Noncommercial License 1.0.0](LICENSE)
+(© Zack Loken). Bundled third-party components (e.g. timm, SAM2 under Apache-2.0)
+are attributed in [NOTICE](NOTICE).
