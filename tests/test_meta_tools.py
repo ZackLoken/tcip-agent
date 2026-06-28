@@ -7,6 +7,7 @@ from pathlib import Path
 
 from tcip_mcp.tools.meta_tools import (
     claude_reports,
+    load_reports,
     project_retrospective,
     load_retrospectives,
 )
@@ -178,3 +179,59 @@ def test_load_retrospectives_filter_substring(tmp_path: Path):
     result = load_retrospectives(str(tmp_path), filter_substring="bur detection")
     assert result["count"] == 1
     assert result["retrospectives"][0]["project_id"] == "chestnut-bur"
+
+
+def test_load_reports_returns_empty_when_dir_missing(tmp_path: Path):
+    result = load_reports(str(tmp_path))
+    assert result["count"] == 0
+    assert result["reports"] == []
+    assert "does not exist yet" in result["note"]
+
+
+def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
+    claude_reports(
+        str(tmp_path),
+        category="missing_tool",
+        detail="needed get_trait_profile",
+        context={"crop": "hazelnut"},
+    )
+    result = load_reports(str(tmp_path))
+    assert result["count"] == 1
+    rep = result["reports"][0]
+    assert rep["category"] == "missing_tool"
+    assert rep["detail"] == "needed get_trait_profile"
+    assert rep["context"]["crop"] == "hazelnut"
+    assert rep["timestamp"]
+
+
+def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
+    import time
+
+    for i in range(4):
+        claude_reports(str(tmp_path), category="unexpected_behavior", detail=f"r{i}")
+        time.sleep(0.02)
+
+    result = load_reports(str(tmp_path), limit=2)
+    assert result["count"] == 2
+    assert result["total_available"] == 4
+    # Most recent first
+    assert result["reports"][0]["detail"] == "r3"
+    assert result["reports"][1]["detail"] == "r2"
+
+
+def test_load_reports_filters_by_category(tmp_path: Path):
+    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    claude_reports(str(tmp_path), category="ambiguous_data", detail="b")
+
+    result = load_reports(str(tmp_path), category="ambiguous_data")
+    assert result["count"] == 1
+    assert result["reports"][0]["detail"] == "b"
+
+
+def test_load_reports_filter_substring(tmp_path: Path):
+    claude_reports(str(tmp_path), category="missing_tool", detail="trait profile lookup")
+    claude_reports(str(tmp_path), category="missing_tool", detail="something else entirely")
+
+    result = load_reports(str(tmp_path), filter_substring="trait profile")
+    assert result["count"] == 1
+    assert result["reports"][0]["detail"] == "trait profile lookup"
