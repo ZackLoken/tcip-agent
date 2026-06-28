@@ -9,18 +9,14 @@ from tcip_annotation import (
     parse_detect_predictions,
     parse_segment_labels,
     parse_segment_predictions,
-    write_detect_labels,
-    write_segment_labels,
     compute_matches,
     BBox,
     Polygon,
 )
 from tcip_annotation.format_io import (
-    detect_format,
     detect_format_confident,
     load_annotations as format_load,
     save_annotations as format_save,
-    AnnotFormat,
 )
 from tcip_annotation.utils import get_image_dimensions
 
@@ -545,23 +541,16 @@ def push_panel_data(
 
     Args:
         panel: Target panel — 'annotate', 'review', 'training', 'tuning',
-            'inference', or 'results'. The legacy name 'hpo' is aliased to
-            'tuning' for backwards compatibility.
+            'inference', or 'results'.
         event_type: Event type the panel switches on (e.g. 'load_matches',
             'metrics_update').
         data: Arbitrary JSON data payload.
     """
     from tcip_mcp.web_client import post_panel_event
 
-    valid_panels = {"annotate", "annotation", "review", "training", "tuning", "hpo", "inference", "results"}
+    valid_panels = {"annotate", "review", "training", "tuning", "inference", "results"}
     if panel not in valid_panels:
         return {"error": f"Unknown panel: {panel}. Valid: {sorted(valid_panels)}"}
-
-    # Normalise legacy aliases
-    if panel == "annotation":
-        panel = "annotate"
-    if panel == "hpo":
-        panel = "tuning"
 
     result = post_panel_event(panel, event_type, data)
     result.setdefault("panel", panel)
