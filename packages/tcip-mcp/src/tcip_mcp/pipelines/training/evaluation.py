@@ -208,22 +208,47 @@ def coco_detection_metrics(
 
 # ---- converters -----------------------------------------------------
 
-def records_from_detector(target: dict, output: dict, *, width: int, height: int) -> dict:
-    """torchvision GT target + detector output -> one COCO per-image record."""
+def _mask_to_rle(mask) -> dict:
+    """Encode a binary/soft mask (``[H,W]`` or ``[1,H,W]``) as COCO RLE for segm metrics."""
+    from pycocotools import mask as mask_utils
+
+    m = mask.detach().cpu().numpy() if hasattr(mask, "detach") else np.asarray(mask)
+    if m.ndim == 3:  # predicted masks arrive as [1, H, W] soft probabilities
+        m = m[0]
+    binary = np.asfortranarray((m >= 0.5).astype(np.uint8))
+    return mask_utils.encode(binary)
+
+
+def records_from_detector(target: dict, output: dict, *, width: int, height: int,
+                          include_masks: bool = False) -> dict:
+    """torchvision GT target + detector output -> one COCO per-image record.
+
+    With ``include_masks`` (instance_seg / Mask R-CNN) each GT and prediction also carries
+    an RLE ``segmentation``, so the record can be scored with ``iou_type='segm'``.
+    """
     gt = []
     gboxes = target.get("boxes")
+    gmasks = target.get("masks") if include_masks else None
     if gboxes is not None and len(gboxes):
         glabels = target["labels"].detach().cpu().tolist()
-        for (x1, y1, x2, y2), c in zip(gboxes.detach().cpu().tolist(), glabels):
-            gt.append({"category_id": int(c), "bbox": _xyxy_to_xywh(x1, y1, x2, y2),
-                       "area": float((x2 - x1) * (y2 - y1)), "iscrowd": 0})
+        for i, ((x1, y1, x2, y2), c) in enumerate(zip(gboxes.detach().cpu().tolist(), glabels)):
+            ann = {"category_id": int(c), "bbox": _xyxy_to_xywh(x1, y1, x2, y2),
+                   "area": float((x2 - x1) * (y2 - y1)), "iscrowd": 0}
+            if gmasks is not None and i < len(gmasks):
+                ann["segmentation"] = _mask_to_rle(gmasks[i])
+            gt.append(ann)
     dt = []
     pboxes = output.get("boxes")
+    pmasks = output.get("masks") if include_masks else None
     if pboxes is not None and len(pboxes):
         plabels = output["labels"].detach().cpu().tolist()
         pscores = output["scores"].detach().cpu().tolist()
-        for (x1, y1, x2, y2), c, s in zip(pboxes.detach().cpu().tolist(), plabels, pscores):
-            dt.append({"category_id": int(c), "bbox": _xyxy_to_xywh(x1, y1, x2, y2), "score": float(s)})
+        for i, ((x1, y1, x2, y2), c, s) in enumerate(
+                zip(pboxes.detach().cpu().tolist(), plabels, pscores)):
+            res = {"category_id": int(c), "bbox": _xyxy_to_xywh(x1, y1, x2, y2), "score": float(s)}
+            if pmasks is not None and i < len(pmasks):
+                res["segmentation"] = _mask_to_rle(pmasks[i])
+            dt.append(res)
     return build_coco_image_record(width, height, gt, dt)
 
 
@@ -331,7 +356,8 @@ def evaluate(
 ) -> dict:
     """Compute per-task validation/test metrics. Returns BARE metric keys."""
     is_detection = task in ("detection", "instance_seg")
-    eff_iou_type = iou_type or "bbox"  # training detector is box-only
+    is_instance_seg = task == "instance_seg"
+    eff_iou_type = iou_type or ("segm" if is_instance_seg else "bbox")
 
     model.eval()
     total_loss = 0.0
@@ -369,7 +395,8 @@ def evaluate(
             outputs = model(images)
             for img, t, out in zip(images, targets, outputs):
                 h, w = int(img.shape[-2]), int(img.shape[-1])
-                per_image.append(records_from_detector(t, out, width=w, height=h))
+                per_image.append(records_from_detector(
+                    t, out, width=w, height=h, include_masks=is_instance_seg))
         else:
             images, targets = batch
             images = images.to(device)
