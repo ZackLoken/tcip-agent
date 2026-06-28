@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -106,6 +107,8 @@ class TrainRun:
     end_time: float = 0.0
     error: str = ""
     output_dir: str = ""
+    # Set by cancel_run() to request a graceful stop; the train loop polls it.
+    cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def to_dict(self) -> dict:
         return {
@@ -135,6 +138,15 @@ def get_run(run_id: str) -> TrainRun | None:
 
 def list_runs() -> list[dict]:
     return [r.to_dict() for r in _RUNS.values()]
+
+
+def cancel_run(run_id: str) -> bool:
+    """Request a graceful cancellation of a training run. Returns False if unknown."""
+    run = _RUNS.get(run_id)
+    if run is None:
+        return False
+    run.cancel_event.set()
+    return True
 
 
 def _save_checkpoint(
@@ -465,7 +477,7 @@ def train(
                 ckpt = None
 
             for epoch in range(start_epoch, stage_epochs):
-                if stopped_early:
+                if stopped_early or run.cancel_event.is_set():
                     break
                 run.current_epoch += 1
                 model.train()
@@ -482,6 +494,8 @@ def train(
                         group["lr"] = start + alpha * (target_lrs[gi] - start)
 
                 for batch_idx, batch in enumerate(train_loader):
+                    if run.cancel_event.is_set():
+                        break
                     if task in ("detection", "instance_seg"):
                         images, targets = batch
                         images = [img.to(device) for img in images]
@@ -607,7 +621,10 @@ def train(
             if stage_snapshot is not None:
                 pending_snapshot = stage_snapshot
 
-        # Final checkpoint
+            if run.cancel_event.is_set():
+                break  # stop before starting the next stage
+
+        # Final checkpoint (saved even on cancellation so partial progress is recoverable).
         torch.save({
             "model_state_dict": model.state_dict(),
             "model_spec": config["model_spec"],
@@ -615,7 +632,11 @@ def train(
             "metrics": run.metrics_history,
         }, out_dir / "model_final.pt")
 
-        run.status = "completed"
+        if run.cancel_event.is_set():
+            run.status = "cancelled"
+            logger.info("Training run %s cancelled at epoch %d", run.run_id, run.current_epoch)
+        else:
+            run.status = "completed"
 
     except Exception as e:
         # Let HPO pruning signals propagate to Optuna (duck-typed to avoid the dep).
