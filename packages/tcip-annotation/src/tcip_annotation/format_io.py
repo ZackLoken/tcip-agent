@@ -166,22 +166,23 @@ def parse_coco_segment(
     """Parse COCO segmentation annotations for one image into Polygon objects.
 
     COCO segmentation format: list of [x1,y1,x2,y2,...] polygon arrays (pixel coords).
-    Only the first polygon per annotation is used (no RLE support yet).
+    All polygon parts of an annotation are kept (multi-part / disjoint masks); RLE
+    segmentations (a dict, not a list) are skipped (no RLE support yet).
     """
     anns, _, _ = _coco_image_annotations(coco, image_id, file_name)
     polygons: list[Polygon] = []
     class_ids: set[int] = set()
     for ann in anns:
         segs = ann.get("segmentation")
-        if not segs or not isinstance(segs, list) or not isinstance(segs[0], list):
-            continue
-        coords = segs[0]  # first polygon
-        if len(coords) < 6:
-            continue
+        if not segs or not isinstance(segs, list):
+            continue  # missing, or RLE (dict)
         cid = ann.get("category_id", 0)
-        points = [(coords[i], coords[i + 1]) for i in range(0, len(coords), 2)]
-        polygons.append(Polygon(points, cid))
-        class_ids.add(cid)
+        for coords in segs:  # every polygon part, not just the first
+            if not isinstance(coords, list) or len(coords) < 6:
+                continue
+            points = [(coords[i], coords[i + 1]) for i in range(0, len(coords), 2)]
+            polygons.append(Polygon(points, cid))
+            class_ids.add(cid)
     return polygons, class_ids
 
 
@@ -351,10 +352,12 @@ def write_voc_detect(
         obj = ET.SubElement(annotation, "object")
         ET.SubElement(obj, "name").text = id_to_name.get(box.class_id, str(box.class_id))
         bndbox = ET.SubElement(obj, "bndbox")
-        ET.SubElement(bndbox, "xmin").text = str(round(box.x1))
-        ET.SubElement(bndbox, "ymin").text = str(round(box.y1))
-        ET.SubElement(bndbox, "xmax").text = str(round(box.x2))
-        ET.SubElement(bndbox, "ymax").text = str(round(box.y2))
+        # ``:g`` keeps integer coords clean ("123") while preserving sub-pixel precision
+        # ("123.45") — the old ``round()`` silently truncated float boxes to whole pixels.
+        ET.SubElement(bndbox, "xmin").text = f"{box.x1:g}"
+        ET.SubElement(bndbox, "ymin").text = f"{box.y1:g}"
+        ET.SubElement(bndbox, "xmax").text = f"{box.x2:g}"
+        ET.SubElement(bndbox, "ymax").text = f"{box.y2:g}"
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tree_out = ET.ElementTree(annotation)
