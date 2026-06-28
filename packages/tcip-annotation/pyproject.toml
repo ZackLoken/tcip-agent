@@ -2,7 +2,7 @@
 name = "tcip-annotation"
 version = "0.1.0"
 description = "Headless annotation and review engine — YOLO, COCO, PASCAL VOC, and LabelMe formats"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "pillow>=9.0",
     "shapely>=2.0",
