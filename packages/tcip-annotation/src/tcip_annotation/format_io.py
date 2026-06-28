@@ -23,12 +23,10 @@ from pathlib import Path
 from typing import Literal
 from xml.etree import ElementTree as ET
 
-from tcip_annotation.state import BBox, Polygon, PredBBox, PredPolygon
+from tcip_annotation.state import BBox, Polygon
 from tcip_annotation.label_io import (
     parse_detect_labels,
     parse_segment_labels,
-    parse_detect_predictions,
-    parse_segment_predictions,
     write_detect_labels,
     write_segment_labels,
 )
