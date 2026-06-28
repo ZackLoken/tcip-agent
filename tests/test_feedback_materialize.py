@@ -1,0 +1,111 @@
+"""W5 — review-verdict materialization (pure, torch-free)."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from tcip_mcp.pipelines.feedback.materialize import (
+    materialize_dataset,
+    partition_review_verdicts,
+    reviewed_image_names,
+    select_unreviewed,
+)
+
+
+def _review_state():
+    # Keys match tcip_annotation.review_engine.record_detection_action entries.
+    return {"image": {
+        "imgA.png": {"img_status": "completed", "detections": [
+            {"action": "accepted", "match_type": "TP", "class_id": 0,
+             "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": [0.5, 0.5, 0.2, 0.2]},
+            {"action": "rejected", "match_type": "FP", "class_id": 0,
+             "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]},
+        ]},
+        "imgB.png": {"img_status": "completed", "detections": [
+            {"action": "rejected", "match_type": "FP", "class_id": 0,
+             "gt_bbox_norm": None, "pred_bbox_norm": [0.3, 0.3, 0.1, 0.1]},
+        ]},
+        "imgC.png": {"img_status": "started", "detections": [
+            {"action": "accepted", "match_type": "FN", "class_id": 1,
+             "gt_bbox_norm": [0.4, 0.4, 0.3, 0.3], "pred_bbox_norm": None},
+        ]},
+    }}
+
+
+def test_partition_positives_rejections_and_hard_negatives():
+    p = partition_review_verdicts(_review_state())
+    assert p["imgA.png"]["status"] == "positive"
+    assert len(p["imgA.png"]["positives"]) == 1
+    assert p["imgA.png"]["rejected_count"] == 1
+    assert p["imgB.png"]["status"] == "hard_negative"
+
+
+def test_partition_fp_accept_uses_pred_box():
+    state = {"image": {"x.png": {"img_status": "completed", "detections": [
+        {"action": "accepted", "match_type": "FP", "class_id": 2,
+         "gt_bbox_norm": None, "pred_bbox_norm": [0.6, 0.6, 0.2, 0.2]},
+    ]}}}
+    pos = partition_review_verdicts(state)["x.png"]["positives"]
+    assert len(pos) == 1
+    assert pos[0][0] == 2 and pos[0][1] == pytest.approx(0.6)
+
+
+def test_materialize_writes_labels_manifest_and_empty_negatives(tmp_path):
+    from PIL import Image
+    src = tmp_path / "src"
+    src.mkdir()
+    for name in ("imgA.png", "imgB.png"):
+        Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
+    out = tmp_path / "out"
+    state = {"image": {
+        "imgA.png": {"img_status": "completed", "detections": [
+            {"action": "accepted", "class_id": 0, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+        "imgB.png": {"img_status": "completed", "detections": [
+            {"action": "rejected", "class_id": 0, "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
+    }}
+    r = materialize_dataset(state, str(src), str(out))
+    assert (r["positive"], r["hard_negative"], r["total_boxes"]) == (1, 1, 1)
+
+    label_a = out / "labels" / "detect" / "imgA.txt"
+    parts = label_a.read_text().split()
+    assert parts[0] == "0" and len(parts) == 5
+
+    label_b = out / "labels" / "detect" / "imgB.txt"
+    assert label_b.is_file() and label_b.stat().st_size == 0  # empty hard-negative label
+
+    assert (out / "images" / "imgA.png").is_file()
+    man = json.loads((out / "curated_manifest.json").read_text())
+    assert man["counts"]["positive"] == 1 and man["counts"]["hard_negative"] == 1
+
+
+def test_materialize_skips_missing_source_images(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()  # empty
+    state = {"image": {"ghost.png": {"img_status": "completed", "detections": [
+        {"action": "accepted", "class_id": 0, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]}}}
+    r = materialize_dataset(state, str(src), str(tmp_path / "out"))
+    assert r["missing_images"] == 1 and r["positive"] == 0
+    assert not (tmp_path / "out" / "images" / "ghost.png").exists()
+
+
+def test_only_completed_and_select_unreviewed():
+    state = _review_state()
+    assert "imgC.png" in partition_review_verdicts(state)
+    assert "imgC.png" not in partition_review_verdicts(state, only_completed=True)
+    assert reviewed_image_names(state) == {"imgA.png", "imgB.png"}
+    assert select_unreviewed(["/a/imgA.png", "/a/imgZ.png"], {"imgA.png"}) == ["/a/imgZ.png"]
+
+
+def test_unit_scale_label_round_trips(tmp_path):
+    from tcip_annotation.label_io import write_detect_labels, parse_detect_labels
+    from tcip_annotation.state import BBox
+    cx, cy, w, h = 0.512345, 0.6, 0.2, 0.3
+    path = tmp_path / "lbl.txt"
+    write_detect_labels(str(path), [BBox(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, 3)], img_w=1, img_h=1)
+    boxes, _ = parse_detect_labels(str(path), 1, 1)
+    b = boxes[0]
+    assert b.class_id == 3
+    assert (b.x1 + b.x2) / 2 == pytest.approx(cx, abs=1e-6)
+    assert (b.x2 - b.x1) == pytest.approx(w, abs=1e-6)
