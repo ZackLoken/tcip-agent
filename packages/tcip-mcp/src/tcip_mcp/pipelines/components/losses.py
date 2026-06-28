@@ -42,16 +42,27 @@ class FocalLoss(BaseLoss):
     name = "focal"
     valid_tasks = ["detection", "classification"]
 
-    def __init__(self, alpha: float = 0.25, gamma: float = 2.0, reduction: str = "mean"):
+    def __init__(self, alpha: float = 0.25, gamma: float = 2.0,
+                 weight: torch.Tensor | list | None = None, reduction: str = "mean"):
         super().__init__()
         self.alpha = alpha
         self.gamma = gamma
         self.reduction = reduction
+        if weight is not None and not torch.is_tensor(weight):
+            weight = torch.tensor(weight, dtype=torch.float32)
+        # Registered as a buffer so it moves with the model via .to(device).
+        self.register_buffer("weight", weight)
 
     def forward(self, predictions, targets):
-        ce = F.cross_entropy(predictions, targets, reduction="none")
-        p_t = torch.exp(-ce)
-        loss = self.alpha * (1 - p_t) ** self.gamma * ce
+        if self.weight is not None:
+            # Per-class weight subsumes the scalar alpha (RetinaNet-style) — no double balance.
+            ce = F.cross_entropy(predictions, targets, weight=self.weight, reduction="none")
+            p_t = torch.exp(-ce)
+            loss = (1 - p_t) ** self.gamma * ce
+        else:
+            ce = F.cross_entropy(predictions, targets, reduction="none")
+            p_t = torch.exp(-ce)
+            loss = self.alpha * (1 - p_t) ** self.gamma * ce
         if self.reduction == "mean":
             return loss.mean()
         elif self.reduction == "sum":
@@ -215,12 +226,63 @@ def _generalized_box_iou_loss(pred_boxes: torch.Tensor, gt_boxes: torch.Tensor) 
     return (1.0 - giou).mean()
 
 
-def build_loss(name: str, **kwargs) -> BaseLoss:
-    """Build a loss by registry name, or parse combined like 'bce+dice'."""
+def compute_class_weights(
+    class_distribution: dict[int, int],
+    num_classes: int | None = None,
+    scheme: str = "balanced",
+    beta: float = 0.999,
+    normalize: bool = True,
+) -> torch.Tensor:
+    """Per-class loss weights from a class-count distribution.
+
+    Schemes: ``balanced`` (sklearn-style ``total/(n_present*count)`` — the same
+    inverse-frequency formula ``ClassBalancedSampler`` uses), ``inverse``
+    (``1/count``), or ``effective`` (Cui et al. 2019, ``(1-beta)/(1-beta**count)``).
+    Zero-count classes get weight 1.0. When ``normalize``, weights are rescaled so
+    the mean over present classes is 1.0.
+    """
+    if num_classes is None:
+        num_classes = (max(class_distribution) + 1) if class_distribution else 1
+    counts = [int(class_distribution.get(c, 0)) for c in range(num_classes)]
+    total = sum(counts)
+    n_present = sum(1 for c in counts if c > 0)
+    weights = []
+    for cnt in counts:
+        if cnt <= 0:
+            weights.append(1.0)
+        elif scheme == "inverse":
+            weights.append(1.0 / cnt)
+        elif scheme == "effective":
+            eff = 1.0 - beta ** cnt
+            weights.append((1.0 - beta) / eff if eff > 0 else 1.0)
+        else:  # balanced
+            weights.append(total / (n_present * cnt) if n_present > 0 else 1.0)
+    w = torch.tensor(weights, dtype=torch.float32)
+    if normalize and n_present > 0:
+        present_mean = torch.tensor([weights[c] for c in range(num_classes) if counts[c] > 0]).mean()
+        if present_mean > 0:
+            w = w / present_mean
+    return w
+
+
+_WEIGHTABLE_LOSSES = {"cross_entropy", "weighted_ce", "focal"}
+
+
+def build_loss(
+    name: str, *, class_distribution: dict[int, int] | None = None,
+    num_classes: int | None = None, weight_scheme: str = "balanced", **kwargs,
+) -> BaseLoss:
+    """Build a loss by registry name, or parse combined like 'bce+dice'.
+
+    When ``class_distribution`` is supplied and the loss is weightable
+    (``cross_entropy``/``weighted_ce``/``focal``), an inverse-frequency ``weight``
+    tensor is injected unless ``weight`` was passed explicitly.
+    """
     if "+" in name:
-        parts = name.split("+")
-        sub_losses = [build_loss(p.strip(), **kwargs) for p in parts]
+        sub_losses = [build_loss(p.strip(), **kwargs) for p in name.split("+")]
         return CombinedLoss(sub_losses)
+    if class_distribution is not None and "weight" not in kwargs and name in _WEIGHTABLE_LOSSES:
+        kwargs["weight"] = compute_class_weights(class_distribution, num_classes=num_classes, scheme=weight_scheme)
     return LOSSES.build(name, **kwargs)
 
 
@@ -230,6 +292,7 @@ def build_loss(name: str, **kwargs) -> BaseLoss:
 
 _LOSS_MAP: list[tuple[str, type, dict]] = [
     ("cross_entropy", CrossEntropyLoss, {"description": "Standard cross-entropy", "valid_tasks": ["classification", "semantic_seg"]}),
+    ("weighted_ce", CrossEntropyLoss, {"description": "Class-weighted cross-entropy for imbalance", "valid_tasks": ["classification", "semantic_seg"], "when_to_use": "Pair with class-balanced sampler / auto class weights"}),
     ("focal", FocalLoss, {"description": "Focal loss for class imbalance", "valid_tasks": ["detection", "classification"]}),
     ("smooth_l1", SmoothL1Loss, {"description": "Smooth L1 (box regression / regression)", "valid_tasks": ["detection", "regression"]}),
     ("huber", HuberLoss, {"description": "Huber loss (outlier-robust regression)", "valid_tasks": ["regression"]}),
