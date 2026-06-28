@@ -5,13 +5,21 @@ All functions are pure (no GUI dependencies).
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import Point as ShapelyPoint
 from shapely.validation import make_valid
 
+try:
+    from shapely.errors import ShapelyError
+except ImportError:  # pragma: no cover - older shapely
+    ShapelyError = Exception
+
 from tcip_annotation.state import BBox, Polygon, PredBBox, PredPolygon
+
+logger = logging.getLogger(__name__)
 
 
 def box_iou(b1: BBox, b2: BBox) -> float:
@@ -33,7 +41,9 @@ def polygon_iou(geom1: ShapelyPolygon, area1: float, geom2: ShapelyPolygon, area
         inter = geom1.intersection(geom2).area
         union = area1 + area2 - inter
         return inter / union if union > 0 else 0.0
-    except Exception:
+    except (ShapelyError, ValueError, ZeroDivisionError) as exc:
+        # Degenerate/invalid geometry: log and treat as no overlap (don't mask other bugs).
+        logger.debug("polygon_iou failed (%s); returning 0.0", exc)
         return 0.0
 
 
