@@ -8,6 +8,7 @@ format is task-specific but always dict-based. A factory function
 from __future__ import annotations
 
 import csv
+import json
 import logging
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -48,6 +49,36 @@ def _read_det_boxes_px(label_path, w: int, h: int) -> tuple[list[list[float]], l
             cx, cy, bw, bh = (float(v) for v in parts[1:5])
             boxes.append([(cx - bw / 2) * w, (cy - bh / 2) * h, (cx + bw / 2) * w, (cy + bh / 2) * h])
             labels.append(cid + 1)  # 0-indexed -> 1-indexed (background = 0)
+    return boxes, labels
+
+
+def _read_det_boxes_format(stem, labels_dir, fmt, coco, w, h, file_name):
+    """Pixel-xyxy boxes + 1-indexed labels for ``stem`` in any supported detection format.
+
+    YOLO needs the image (w, h) to denormalize; COCO/VOC/LabelMe are already pixel-space
+    (parsed via tcip_annotation.format_io into pixel-xyxy BBox objects).
+    """
+    fmt = (fmt or "yolo").lower()
+    if fmt == "yolo":
+        return _read_det_boxes_px(labels_dir / f"{stem}.txt", w, h)
+
+    from tcip_annotation import format_io
+    bboxes = []
+    if fmt == "voc":
+        p = labels_dir / f"{stem}.xml"
+        if p.is_file():
+            bboxes = format_io.parse_voc_detect(str(p))[0]
+    elif fmt == "labelme":
+        p = labels_dir / f"{stem}.json"
+        if p.is_file():
+            bboxes = format_io.parse_labelme_detect(str(p))[0]
+    elif fmt == "coco":
+        if coco is not None:
+            bboxes = format_io.parse_coco_detect(coco, file_name=file_name)[0]
+    else:
+        raise ValueError(f"Unknown detection label_format {fmt!r} (use yolo/coco/voc/labelme)")
+    boxes = [[b.x1, b.y1, b.x2, b.y2] for b in bboxes]
+    labels = [b.class_id + 1 for b in bboxes]  # 0-indexed cid -> 1-indexed (background 0)
     return boxes, labels
 
 
@@ -117,7 +148,13 @@ class BaseImageDataset(BaseDataset):
 # ====================================================================
 
 class DetectionDataset(BaseImageDataset):
-    """YOLO-format detection: ``cls cx cy w h`` per line."""
+    """Object detection. ``label_format`` selects the on-disk label format:
+
+    - ``yolo`` (default): ``cls cx cy w h`` (normalized) in ``<labels_dir>/<stem>.txt``
+    - ``voc``: one PASCAL VOC ``<stem>.xml`` per image in ``labels_dir``
+    - ``labelme``: one LabelMe ``<stem>.json`` per image in ``labels_dir``
+    - ``coco``: a single COCO JSON at ``coco_json`` (annotations matched by file name)
+    """
 
     task_type = "detection"
 
@@ -128,11 +165,19 @@ class DetectionDataset(BaseImageDataset):
         stems: list[str] | None = None,
         transforms: Any = None,
         num_classes: int = 1,
+        label_format: str = "yolo",
+        coco_json: str | None = None,
     ) -> None:
         self.images_dir = Path(images_dir)
         self.labels_dir = Path(labels_dir)
         self.transforms = transforms
         self._num_classes = num_classes
+        self.label_format = (label_format or "yolo").lower()
+        self._coco = None
+        if self.label_format == "coco":
+            if not coco_json:
+                raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
+            self._coco = json.loads(Path(coco_json).read_text(encoding="utf-8"))
         if stems is not None:
             self.stems = stems
         else:
@@ -152,20 +197,31 @@ class DetectionDataset(BaseImageDataset):
     @property
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
-        for stem in self.stems:
-            lp = self.labels_dir / f"{stem}.txt"
-            if lp.is_file():
-                for line in lp.read_text().splitlines():
-                    parts = line.strip().split()
-                    if len(parts) >= 5:
-                        counts[int(parts[0])] += 1
+        if self.label_format == "yolo":
+            for stem in self.stems:
+                lp = self.labels_dir / f"{stem}.txt"
+                if lp.is_file():
+                    for line in lp.read_text().splitlines():
+                        parts = line.strip().split()
+                        if len(parts) >= 5:
+                            counts[int(parts[0])] += 1
+        elif self.label_format == "coco" and self._coco:
+            for ann in self._coco.get("annotations", []):
+                counts[ann.get("category_id", 0)] += 1
+        else:  # voc / labelme: parse each image's annotation
+            for stem in self.stems:
+                _, labels = _read_det_boxes_format(stem, self.labels_dir, self.label_format, None, 0, 0, "")
+                for lab in labels:
+                    counts[lab - 1] += 1  # back to 0-indexed cid
         return dict(counts)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
         img = self._open_image(stem)
         w, h = self._image_size(img)
-        boxes, labels = _read_det_boxes_px(self.labels_dir / f"{stem}.txt", w, h)
+        file_name = _find_image(self.images_dir, stem).name if self.label_format == "coco" else ""
+        boxes, labels = _read_det_boxes_format(
+            stem, self.labels_dir, self.label_format, self._coco, w, h, file_name)
         target = {
             "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
             "labels": torch.tensor(labels, dtype=torch.int64),
