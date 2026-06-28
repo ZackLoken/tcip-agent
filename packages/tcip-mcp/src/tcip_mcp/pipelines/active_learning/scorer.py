@@ -8,11 +8,14 @@ Scorers:
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 
 class BaseScorer(ABC):
@@ -93,6 +96,12 @@ class DiversityScorer(BaseScorer):
         from tcip_mcp.pipelines.image_utils import pil_to_tensor
         from PIL import Image
 
+        if not hasattr(model, "backbone"):
+            # No silent random-noise embeddings: diversity needs real backbone features.
+            raise RuntimeError(
+                f"DiversityScorer requires a backbone-bearing model (ComposedModel/"
+                f"DetectionModel) to extract embeddings; got {type(model).__name__}."
+            )
         model.eval()
 
         # Extract backbone features
@@ -100,24 +109,20 @@ class DiversityScorer(BaseScorer):
         for path in image_paths:
             img = Image.open(path).convert("RGB")
             tensor = pil_to_tensor(img).unsqueeze(0).to(device)
-
-            # Get backbone features if model is ComposedModel
-            if hasattr(model, "backbone"):
-                backbone: torch.nn.Module = model.backbone  # type: ignore[assignment]
-                feats = backbone(tensor)
-                if isinstance(feats, dict):
-                    feat = list(feats.values())[-1]  # last scale
-                else:
-                    feat = feats
-                emb = F.adaptive_avg_pool2d(feat, 1).flatten(1).cpu().numpy()
-            else:
-                emb = np.random.randn(1, 128)  # fallback
+            feats = model.backbone(tensor)
+            feat = list(feats.values())[-1] if isinstance(feats, dict) else feats
+            emb = F.adaptive_avg_pool2d(feat, 1).flatten(1).cpu().numpy()
             embeddings.append(emb[0])
 
         embeddings_arr = np.stack(embeddings)
 
         if self._labeled is None or len(self._labeled) == 0:
-            # No labeled set — all images equally diverse
+            # No labeled reference set -> diversity is uninformative. Make it visible
+            # (uniform scores let CombinedScorer fall back to uncertainty cleanly).
+            logger.warning(
+                "DiversityScorer: no labeled embeddings set; returning uniform diversity "
+                "scores. Call set_labeled_embeddings() for meaningful diversity ranking."
+            )
             return [(p, 1.0) for p in image_paths]
 
         # Cosine distance to nearest labeled sample
