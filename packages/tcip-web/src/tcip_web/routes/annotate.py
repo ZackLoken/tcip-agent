@@ -8,7 +8,6 @@ backend doesn't have to guess a dataset layout.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -24,6 +23,7 @@ from tcip_annotation import (
     write_segment_labels,
 )
 from tcip_annotation.utils import auto_orient_image
+from tcip_web.paths import assert_path_allowed
 from tcip_web.state import PredictionReference, store
 
 router = APIRouter(prefix="/api/annotate", tags=["annotate"])
@@ -57,7 +57,10 @@ class SavePayload(BaseModel):
 
 
 def _image_dims(path: str) -> tuple[int, int]:
-    p = Path(path)
+    try:
+        p = assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
     if not p.is_file():
         raise HTTPException(404, f"image not found: {path}")
     with Image.open(p) as raw:
