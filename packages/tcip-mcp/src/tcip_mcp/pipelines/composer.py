@@ -393,13 +393,15 @@ def recommend_model_spec(
     tiny/small objects get the anchor-free FCOS detector with smaller anchors (and
     an extra ``add_p2`` pyramid level for tiny); medium/large keep Faster R-CNN.
     """
-    # Backbone selection by dataset size
+    # Backbone selection by dataset size. Without timm, fall back to the
+    # torchvision-only backbones (resnet18/50/101 and efficientnet_* are all
+    # timm-only — recommending them with no timm yields an unbuildable spec).
     if dataset_size < 500:
-        bb = "efficientnet_b0" if HAS_TIMM else "resnet18"
+        bb = "efficientnet_b0" if HAS_TIMM else "tv_resnet50"
     elif dataset_size < 2000:
-        bb = "resnet50"
+        bb = "resnet50" if HAS_TIMM else "tv_resnet50"
     else:
-        bb = "resnet101"
+        bb = "resnet101" if HAS_TIMM else "tv_resnet101"
 
     # Neck and head by task
     if task in ("detection", "instance_seg"):
