@@ -1,0 +1,13 @@
+# Repo-wide ruff config (CI-enforced via .github/workflows/ci.yml).
+# Default rule set = E4/E7/E9 + F (imports, syntax, pyflakes). Line length is NOT
+# enforced (E501 is not in the default select) to match the existing code style.
+
+[lint]
+ignore = [
+    "E741",  # ambiguous one-letter names (l/I/O): low value, mostly in tests
+]
+
+[lint.per-file-ignores]
+# `name = pytest.importorskip("dep")` legitimately precedes imports in dependency-gated
+# test files, which would otherwise trip E402 (module import not at top of file).
+"tests/**" = ["E402"]
