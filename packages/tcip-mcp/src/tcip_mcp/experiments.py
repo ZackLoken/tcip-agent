@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, file_transaction
+from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, file_transaction, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +148,49 @@ def update_lineage(
         atomic_write_json(lineage_path, lineage)
 
     return {"experiment_id": experiment_id, "lineage": lineage}
+
+
+def register_model_from_experiment(
+    experiment_id: str,
+    checkpoint_path: str,
+    *,
+    project_path: str = ".",
+    name: str | None = None,
+) -> dict[str, Any]:
+    """Register a completed experiment's model in the project registry.
+
+    Pulls the experiment's config + final (last-epoch) metrics, registers the checkpoint
+    with an ``experiment:<id>`` back-reference tag, and records it in the experiment's
+    lineage (``model_weights``). Metrics are read from the experiment, never fabricated.
+    """
+    d = _exp_dir(experiment_id)
+    if not d.exists():
+        return {"error": f"Experiment not found: {experiment_id}"}
+
+    config = read_json(d / "config.json", default={})
+    final_metrics: dict[str, Any] = {}
+    mpath = d / "metrics.jsonl"
+    if mpath.is_file():
+        lines = mpath.read_text(encoding="utf-8").strip().splitlines()
+        if lines:
+            try:
+                final_metrics = json.loads(lines[-1])
+            except json.JSONDecodeError:
+                final_metrics = {}
+
+    from tcip_mcp.model_registry import ModelRegistry
+
+    entry = ModelRegistry(project_path).register_model(
+        name or experiment_id, checkpoint_path, config,
+        metrics=final_metrics, tags=[f"experiment:{experiment_id}"],
+    )
+    update_lineage(experiment_id, model_weights=checkpoint_path)
+    return {
+        "experiment_id": experiment_id,
+        "registered": entry["name"],
+        "checkpoint": checkpoint_path,
+        "metrics": final_metrics,
+    }
 
 
 def get_experiment(experiment_id: str) -> dict[str, Any]:
