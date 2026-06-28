@@ -9,7 +9,7 @@ The agent can visually inspect images using `view_image` after rendering annotat
 
 ## Pattern
 
-1. Call a `visualize_*` MCP tool → returns `image_path` in the result dict
+1. Call a visualization MCP tool → returns `image_path` in the result dict
 2. Use `view_image` on that path → model sees the rendered image
 3. Describe findings and recommend actions
 
@@ -17,16 +17,19 @@ The agent can visually inspect images using `view_image` after rendering annotat
 
 | Tool | Purpose |
 |------|---------|
-| `visualize_annotations` | Render GT labels on a single image |
-| `visualize_predictions` | Render model predictions on a single image |
+| `visualize(source="annotations", path=<image>)` | Render GT labels on a single image |
+| `visualize(source="predictions", path=<image>)` | Render model predictions on a single image |
+| `visualize(source="dataset", path=<folder>, n=16)` | Random grid of annotated dataset samples |
 | `visualize_comparison` | Overlay GT (green) vs predictions (red) with match stats |
 | `visualize_worst_predictions` | Grid of top-K failure cases |
-| `visualize_dataset_sample` | Random grid of annotated dataset samples |
 | `sam_auto_label` | SAM candidate masks rendered with numbered overlay |
 | `accept_candidates` | Save classified candidates, render final result |
 | `visualize_grid_overlay` | Labeled grid overlay for spatial referencing |
 
-All tools save renders to `.tcip/artifacts/viz/` and return the file path.
+`visualize` is one tool with a `source` of `annotations` / `predictions` / `dataset`
+(it replaced the former `visualize_annotations` / `visualize_predictions` /
+`visualize_dataset_sample`). All tools save renders to `.tcip/artifacts/viz/` and
+return the file path.
 
 ## Workflows
 
@@ -35,9 +38,9 @@ All tools save renders to `.tcip/artifacts/viz/` and return the file path.
 Goal: Verify annotation quality before training.
 
 1. `load_dataset` → understand image inventory and format
-2. `visualize_dataset_sample(folder_path, n=16)` → grid overview
+2. `visualize(source="dataset", path=folder_path, n=16)` → grid overview
 3. `view_image` on the grid → assess overall annotation consistency
-4. For flagged images: `visualize_annotations(image_path)` → `view_image`
+4. For flagged images: `visualize(source="annotations", path=image_path)` → `view_image`
 5. Report: missed objects, wrong classes, sloppy box placement, inconsistent labeling
 
 ### Prediction Review
