@@ -67,6 +67,33 @@ def test_write_and_read_detect_roundtrip(label_dir: Path):
         assert abs(orig.y2 - read.y2) < 1.0
 
 
+def test_write_empty_deletes_by_default(label_dir: Path):
+    # Default behaviour (used by pipeline writers) removes an emptied label file.
+    p = Path(label_dir / "empty_default.txt")
+    write_detect_labels(str(p), [BBox(100, 50, 200, 150, 0)], IMG_W, IMG_H)
+    assert p.exists()
+    write_detect_labels(str(p), [], IMG_W, IMG_H)
+    assert not p.exists()
+
+
+def test_write_empty_keep_empty_preserves_negative(label_dir: Path):
+    # keep_empty=True (used by the interactive annotator) writes a 0-byte file so a
+    # confirmed negative is preserved on disk instead of deleted — empty label files
+    # are valid negatives (CLAUDE.md invariant), not noise to prune.
+    p = Path(label_dir / "neg.txt")
+    write_detect_labels(str(p), [], IMG_W, IMG_H, keep_empty=True)
+    assert p.exists()
+    assert p.read_text() == ""
+    read_back, class_ids = parse_detect_labels(str(p), IMG_W, IMG_H)
+    assert read_back == []
+    assert class_ids == set()
+
+    ps = Path(label_dir / "neg_seg.txt")
+    write_segment_labels(str(ps), [], IMG_W, IMG_H, keep_empty=True)
+    assert ps.exists()
+    assert ps.read_text() == ""
+
+
 # ── Segment labels ───────────────────────────────────────────────────────
 
 
