@@ -25,7 +25,7 @@ venv/
 
 # ── Node ─────────────────────────────────────────────────────────────────
 node_modules/
-package-lock.json
+# package-lock.json IS committed (reproducible installs + `npm ci` in CI).
 *.tsbuildinfo
 
 # ── Frontend build output (keep static assets, ignore generated bundles) ──
