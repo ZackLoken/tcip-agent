@@ -183,6 +183,39 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
     assert body["polygons"][0]["class_id"] == 1
 
 
+def test_annotate_save_empty_preserves_negative(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    # Clearing all boxes and saving must keep a 0-byte label file (a confirmed
+    # negative), not delete it — empty label files are valid negatives.
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.txt"
+
+    client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(img_path),
+            "detect_path": str(det_path),
+            "boxes": [{"x1": 10, "y1": 20, "x2": 50, "y2": 60, "class_id": 0}],
+            "polygons": [],
+        },
+    )
+    assert det_path.exists()
+
+    resp = client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(img_path),
+            "detect_path": str(det_path),
+            "boxes": [],
+            "polygons": [],
+        },
+    )
+    assert resp.status_code == 200
+    assert det_path.exists()
+    assert det_path.read_text() == ""
+
+
 # ── /api/review ─────────────────────────────────────────────────────────
 
 
