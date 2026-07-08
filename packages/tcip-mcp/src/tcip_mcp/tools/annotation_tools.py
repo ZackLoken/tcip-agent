@@ -201,6 +201,20 @@ def save_annotations(
         format_save(str(out_path), typed_polys, w, h, task="segment", fmt=fmt, file_name=img.name)
         written.append(str(out_path))
 
+    # Best-effort: notify a running GUI that the agent touched this image's labels,
+    # so it can surface the activity and refresh if it is viewing the same file.
+    if written:
+        try:
+            from tcip_mcp.web_client import post_panel_event
+
+            post_panel_event(
+                "annotate",
+                "labels_written",
+                {"image_path": image_path, "stem": stem, "written": written, "count": len(written)},
+            )
+        except Exception:
+            pass
+
     return {"written": written, "format": fmt, "count": len(written)}
 
 
