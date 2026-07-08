@@ -68,6 +68,21 @@ def _image_dims(path: str) -> tuple[int, int]:
         return im.size  # (w, h)
 
 
+def _guard_label_path(path: Optional[str]) -> None:
+    """Reject a client-supplied label path that escapes the configured image roots.
+
+    Label read/write paths are attacker-controlled, so an exposed deployment
+    (``TCIP_IMAGE_ROOTS`` set) must confine them exactly like image serving —
+    otherwise ``write_detect_labels`` is an arbitrary file write/delete primitive.
+    """
+    if not path:
+        return
+    try:
+        assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
 @router.get("/labels")
 def load_labels(
     image_path: str,
@@ -76,6 +91,8 @@ def load_labels(
 ) -> dict:
     """Read existing YOLO labels for an image and return them in pixel coords."""
     w, h = _image_dims(image_path)
+    _guard_label_path(detect_path)
+    _guard_label_path(segment_path)
     boxes: list[dict] = []
     polygons: list[dict] = []
 
@@ -106,8 +123,15 @@ def load_labels(
 
 @router.post("/labels")
 def save_labels(payload: SavePayload) -> dict:
-    """Write YOLO labels for an image. Either detect_path or segment_path may be omitted."""
+    """Write YOLO labels for an image. Either detect_path or segment_path may be omitted.
+
+    Empty box/polygon lists are written as 0-byte files (``keep_empty=True``) rather than
+    deleted: an annotator who clears all annotations is recording a *confirmed negative*,
+    and empty label files are valid negatives (CLAUDE.md invariant), not noise to prune.
+    """
     w, h = _image_dims(payload.image_path)
+    _guard_label_path(payload.detect_path)
+    _guard_label_path(payload.segment_path)
 
     boxes = [
         BBox(b.x1, b.y1, b.x2, b.y2, class_id=b.class_id)
@@ -122,14 +146,14 @@ def save_labels(payload: SavePayload) -> dict:
     if payload.detect_path:
         try:
             os.makedirs(os.path.dirname(payload.detect_path) or ".", exist_ok=True)
-            write_detect_labels(payload.detect_path, boxes, w, h)
+            write_detect_labels(payload.detect_path, boxes, w, h, keep_empty=True)
         except OSError as exc:
             raise HTTPException(500, f"could not write detect labels: {exc}") from exc
 
     if payload.segment_path:
         try:
             os.makedirs(os.path.dirname(payload.segment_path) or ".", exist_ok=True)
-            write_segment_labels(payload.segment_path, polygons, w, h)
+            write_segment_labels(payload.segment_path, polygons, w, h, keep_empty=True)
         except OSError as exc:
             raise HTTPException(500, f"could not write segment labels: {exc}") from exc
 
