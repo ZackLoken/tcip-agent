@@ -88,6 +88,10 @@ async def select_dataset(req: SelectionRequest) -> dict:
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {req.dataset_root}")
 
+    # Rehydrate any persisted GUI state for this project first (so backend state
+    # survives a restart), then apply the fresh selection on top via mutate().
+    store.load_from_disk(Path(req.project_root))
+
     image_list: list[str] = []
     if req.date:
         date_dir = root / "images" / req.date
