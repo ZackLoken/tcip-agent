@@ -67,35 +67,23 @@ class ReviewFilters(BaseModel):
     detection_idx: int = 0
 
 
-class TrainingRun(BaseModel):
-    run_id: str
-    status: str = "pending"       # pending|running|completed|failed
-    epoch: int = 0
-    best_fitness: Optional[float] = None
-
-
-class InferenceJob(BaseModel):
-    job_id: str
-    status: str = "pending"
-    done: int = 0
-    total: int = 0
-
-
 class GuiState(BaseModel):
-    """Complete GUI state — persisted to gui.json and broadcast to browsers."""
+    """Complete GUI state — persisted to gui.json and broadcast to browsers.
+
+    Only the *backend-authoritative* slice (``dataset``) meaningfully round-trips:
+    the browser owns navigation / view / mode / class / review-filter state and
+    keeps its own copy (the FE merges snapshots rather than replacing), so those
+    fields here are advisory. Training-run / inference-job / class-registry state
+    that used to live here was removed — the corresponding tabs own it directly.
+    """
 
     active_tab: str = "annotate"  # annotate|review|training|tuning|inference|results|meta
     dataset: DatasetSelection = Field(default_factory=DatasetSelection)
     view: ViewState = Field(default_factory=ViewState)
-    class_names: dict[int, str] = Field(default_factory=dict)
-    class_colors: dict[int, str] = Field(default_factory=dict)
     mode: str = "box"  # box|polygon
     active_class: int = 0
     review: ReviewFilters = Field(default_factory=ReviewFilters)
     pred_reference: Optional[PredictionReference] = None
-    training_runs: list[TrainingRun] = Field(default_factory=list)
-    active_run_id: Optional[str] = None
-    inference_jobs: list[InferenceJob] = Field(default_factory=list)
 
     def state_dir(self) -> Optional[Path]:
         if not self.dataset.project_root:
@@ -116,12 +104,13 @@ class StateStore:
 
     def __init__(self) -> None:
         self._state = GuiState()
+        self._version = 0
         self._save_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
         self._subscribers: list = []  # list[Callable[[dict], Awaitable[None]]]
 
     def subscribe(self, callback) -> None:
-        """Register a coroutine that will be called with each mutation payload."""
+        """Register a coroutine called with each mutation payload ``{state, version}``."""
         self._subscribers.append(callback)
 
     def unsubscribe(self, callback) -> None:
@@ -134,6 +123,16 @@ class StateStore:
     def state(self) -> GuiState:
         return self._state
 
+    @property
+    def version(self) -> int:
+        """Monotonic version, bumped on every state change.
+
+        Broadcast alongside each snapshot so a browser can drop a stale replay
+        (e.g. a reconnecting socket resending an older snapshot after newer local
+        state has been applied).
+        """
+        return self._version
+
     def snapshot(self) -> dict[str, Any]:
         """Return a JSON-safe snapshot of the current state."""
         return self._state.model_dump(mode="json")
@@ -142,6 +141,7 @@ class StateStore:
         """Replace the entire state (used on project-load)."""
         async with self._lock:
             self._state = new_state
+            self._version += 1
             self._schedule_save()
 
     async def mutate(self, mutation: dict[str, Any]) -> None:
@@ -153,8 +153,9 @@ class StateStore:
         """
         async with self._lock:
             self._state = self._state.model_copy(update=mutation)
+            self._version += 1
+            payload = {"state": self.snapshot(), "version": self._version}
             self._schedule_save()
-            payload = self.snapshot()
         # Notify subscribers outside the lock so they can do I/O.
         for cb in list(self._subscribers):
             try:
@@ -163,8 +164,7 @@ class StateStore:
                 logger.exception("state subscriber failed")
 
     def _schedule_save(self) -> None:
-        state_dir = self._state.state_dir()
-        if state_dir is None:
+        if self._state.state_dir() is None:
             return  # No project root → nothing to persist
         if self._save_task and not self._save_task.done():
             return  # Debounce: coalesce into the pending save
@@ -172,18 +172,24 @@ class StateStore:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             # Not in an event loop (e.g. called from a sync test) — flush now
-            self._flush_sync(state_dir)
+            self._flush_sync()
             return
-        self._save_task = loop.create_task(self._save_after_debounce(state_dir))
+        self._save_task = loop.create_task(self._save_after_debounce())
 
-    async def _save_after_debounce(self, state_dir: Path) -> None:
+    async def _save_after_debounce(self) -> None:
         try:
             await asyncio.sleep(PERSIST_DEBOUNCE_SECONDS)
-            await asyncio.to_thread(self._flush_sync, state_dir)
+            await asyncio.to_thread(self._flush_sync)
         except Exception:
             logger.exception("Failed to persist GUI state")
 
-    def _flush_sync(self, state_dir: Path) -> None:
+    def _flush_sync(self) -> None:
+        # Resolve the destination at flush time, NOT schedule time: if project_root
+        # changed during the debounce window, the new project's snapshot must not be
+        # written into the previous project's gui.json.
+        state_dir = self._state.state_dir()
+        if state_dir is None:
+            return
         try:
             from tcip_mcp.utils.atomic_io import atomic_write_json
 
@@ -195,7 +201,8 @@ class StateStore:
     def load_from_disk(self, project_root: Path) -> bool:
         """Load a previous snapshot from ``<project_root>/.tcip/state/gui.json``.
 
-        Returns ``True`` if a snapshot was loaded, ``False`` otherwise.
+        Returns ``True`` if a snapshot was loaded, ``False`` otherwise. Called when
+        a project becomes known (dataset select) so backend state survives a restart.
         """
         path = Path(project_root) / ".tcip" / "state" / STATE_FILENAME
         if not path.exists():
@@ -203,6 +210,7 @@ class StateStore:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             self._state = GuiState.model_validate(data)
+            self._version += 1
             return True
         except Exception:
             logger.exception("Could not load GUI state from %s", path)
