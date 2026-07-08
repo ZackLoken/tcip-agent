@@ -128,6 +128,14 @@ interface PerImageStatusState {
   activeFilter: "all" | ImageStatus;
 }
 
+export interface AgentActivity {
+  /** Increments per event so effects can react to the latest one. */
+  seq: number;
+  panel: string;
+  eventType: string;
+  data: Record<string, unknown>;
+}
+
 export interface AppState {
   /** Server-synchronized state (mirrors backend GuiState). */
   gui: GuiState;
@@ -146,6 +154,10 @@ export interface AppState {
   imageStatus: PerImageStatusState;
   annotateUi: AnnotateUiState;
   sessionTracking: SessionTrackingState;
+
+  /** Last panel event pushed by the MCP agent (via /ws/panel subscription). */
+  agentActivity: AgentActivity | null;
+  pushAgentActivity: (panel: string, eventType: string, data: Record<string, unknown>) => void;
 
   /** Setters. */
   setGui: (next: GuiState) => void;
@@ -245,6 +257,12 @@ export const useStore = create<AppState>()((set, get) => ({
     draggingVertex: null,
   },
   sessionTracking: EMPTY_SESSION_TRACKING,
+  agentActivity: null,
+
+  pushAgentActivity: (panel, eventType, data) =>
+    set((s) => ({
+      agentActivity: { seq: (s.agentActivity?.seq ?? 0) + 1, panel, eventType, data },
+    })),
 
   setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
