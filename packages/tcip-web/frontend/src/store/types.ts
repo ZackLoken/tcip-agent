@@ -43,33 +43,14 @@ export interface ReviewFilters {
   detection_idx: number;
 }
 
-export interface TrainingRun {
-  run_id: string;
-  status: "pending" | "running" | "completed" | "failed";
-  epoch: number;
-  best_fitness: number | null;
-}
-
-export interface InferenceJob {
-  job_id: string;
-  status: string;
-  done: number;
-  total: number;
-}
-
 export interface GuiState {
   active_tab: TabName;
   dataset: DatasetSelection;
   view: ViewState;
-  class_names: Record<number, string>;
-  class_colors: Record<number, string>;
   mode: Mode;
   active_class: number;
   review: ReviewFilters;
   pred_reference: PredictionReference | null;
-  training_runs: TrainingRun[];
-  active_run_id: string | null;
-  inference_jobs: InferenceJob[];
 }
 
 /* ── Canvas-local types (not synced to server) ──────────────────────── */
