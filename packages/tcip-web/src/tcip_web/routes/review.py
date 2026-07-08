@@ -60,6 +60,20 @@ def _image_dims(path: str) -> tuple[int, int]:
         return auto_orient_image(raw).size
 
 
+def _guard_path(path: Optional[str]) -> None:
+    """403 if a client-supplied label/dir path escapes the configured image roots.
+
+    ``save_gt`` / ``backup_labels`` write to caller-provided paths, so an exposed
+    deployment (``TCIP_IMAGE_ROOTS`` set) must confine them like image serving.
+    """
+    if not path:
+        return
+    try:
+        assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
 def _load_ctx(
     image_name: str,
     image_path: str,
@@ -268,6 +282,8 @@ class BackupPayload(BaseModel):
 @router.post("/backup_labels")
 def backup_labels(payload: BackupPayload) -> dict:
     """Backup label directories to ``<dir>/.original/`` (once per project)."""
+    for d in payload.label_dirs:
+        _guard_path(d)
     engine = _get_engine(payload.project_root)
     engine.backup_original_labels(*payload.label_dirs)
     return {"status": "ok", "labels_backed_up": engine.raw_state.get("labels_backed_up", False)}
@@ -287,6 +303,8 @@ class SaveGtPayload(BaseModel):
 def save_gt(payload: SaveGtPayload) -> dict:
     """Persist edited GT (post-review modification) for a single image."""
     w, h = _image_dims(payload.image_path)
+    _guard_path(payload.detect_path)
+    _guard_path(payload.segment_path)
     engine = _get_engine(payload.project_root)
 
     ctx = ReviewContext(
