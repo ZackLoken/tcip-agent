@@ -66,8 +66,7 @@ export const api = {
   },
 
   images: {
-    url: (path: string, max_width?: number) =>
-      `/api/images?${q({ path, max_width })}`,
+    url: (path: string, max_width?: number) => `/api/images?${q({ path, max_width })}`,
 
     dimensions: (path: string) =>
       call<{ path: string; width: number; height: number }>(
@@ -77,9 +76,7 @@ export const api = {
 
   annotate: {
     load: (image_path: string, detect_path?: string | null, segment_path?: string | null) =>
-      call<ImageLabels>(
-        `/api/annotate/labels?${q({ image_path, detect_path, segment_path })}`,
-      ),
+      call<ImageLabels>(`/api/annotate/labels?${q({ image_path, detect_path, segment_path })}`),
 
     save: (body: {
       image_path: string;
@@ -173,9 +170,7 @@ export const api = {
       }),
 
     imageStatus: (project_root: string, image_name: string) =>
-      call<{ status: string }>(
-        `/api/review/image_status?${q({ project_root, image_name })}`,
-      ),
+      call<{ status: string }>(`/api/review/image_status?${q({ project_root, image_name })}`),
   },
 };
 

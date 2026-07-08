@@ -39,12 +39,8 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas p-6">
           <div className="max-w-lg rounded-lg border border-tcip-fp/40 bg-tcip-panel px-5 py-4">
-            <p className="text-sm font-semibold text-tcip-fp">
-              Something went wrong in this view
-            </p>
-            <p className="mt-1 text-xs text-tcip-muted break-words">
-              {this.state.error.message}
-            </p>
+            <p className="text-sm font-semibold text-tcip-fp">Something went wrong in this view</p>
+            <p className="mt-1 text-xs text-tcip-muted break-words">{this.state.error.message}</p>
             <button
               className="tcip-btn mt-3 text-[11px]"
               onClick={() => this.setState({ error: null })}

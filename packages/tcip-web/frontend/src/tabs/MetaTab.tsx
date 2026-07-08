@@ -55,9 +55,14 @@ export function MetaTab() {
         {reports.length > 0 ? (
           <div className="flex flex-col gap-2">
             {reports.map((r) => (
-              <div key={r.file} className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0">
+              <div
+                key={r.file}
+                className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
+              >
                 <div className="flex items-center gap-2 text-[11px] text-tcip-muted">
-                  <span className="px-1.5 rounded bg-tcip-border text-tcip-fg">{r.category || "—"}</span>
+                  <span className="px-1.5 rounded bg-tcip-border text-tcip-fg">
+                    {r.category || "—"}
+                  </span>
                   <span className="font-mono">{r.timestamp ?? r.file}</span>
                 </div>
                 <div className="text-[12px] mt-1 whitespace-pre-wrap">{r.detail}</div>
@@ -81,7 +86,10 @@ export function MetaTab() {
         {retros.length > 0 ? (
           <div className="flex flex-col gap-3">
             {retros.map((rt) => (
-              <div key={rt.project_id} className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0">
+              <div
+                key={rt.project_id}
+                className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
+              >
                 <div className="flex items-center gap-2 text-[11px] text-tcip-muted">
                   <span className="font-semibold text-tcip-fg">{rt.project_id}</span>
                   <span className="font-mono">{rt.modified}</span>

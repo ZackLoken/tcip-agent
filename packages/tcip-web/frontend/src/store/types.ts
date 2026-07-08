@@ -4,13 +4,7 @@
  */
 
 export type TabName =
-  | "annotate"
-  | "review"
-  | "training"
-  | "tuning"
-  | "inference"
-  | "results"
-  | "meta";
+  "annotate" | "review" | "training" | "tuning" | "inference" | "results" | "meta";
 
 export type Mode = "box" | "polygon";
 

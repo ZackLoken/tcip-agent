@@ -91,8 +91,8 @@ export function HelpOverlay({ activeTab }: HelpOverlayProps) {
             Close
           </button>
         </div>
-        {(activeTab === "annotate") && <Section title="Annotate" items={ANNOTATE} />}
-        {(activeTab === "review") && <Section title="Review" items={REVIEW} />}
+        {activeTab === "annotate" && <Section title="Annotate" items={ANNOTATE} />}
+        {activeTab === "review" && <Section title="Review" items={REVIEW} />}
         <Section title="Mouse" items={MOUSE} />
         <Section title="Global" items={GLOBAL} />
       </div>

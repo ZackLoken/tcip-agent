@@ -113,8 +113,8 @@ export function TopBar() {
     const newStatus: ImageStatus = next
       ? "complete"
       : canvasBoxes.length + canvasPolygons.length > 0
-      ? "partial"
-      : "negative";
+        ? "partial"
+        : "negative";
     setImageStatus(currentImage, newStatus);
     await classesApi.setImageStatus(dataset.project_root, currentImage, newStatus);
   }
@@ -321,8 +321,8 @@ export function TopBar() {
             wsStatus === "connected"
               ? "bg-tcip-tp"
               : wsStatus === "connecting"
-              ? "bg-tcip-fn"
-              : "bg-tcip-fp"
+                ? "bg-tcip-fn"
+                : "bg-tcip-fp"
           }`}
         />
         <span className="text-tcip-muted">{wsStatus}</span>
