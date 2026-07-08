@@ -1,0 +1,61 @@
+import { beforeEach, describe, expect, it } from "vitest";
+
+import { useStore } from "@/store";
+import type { ImageLabels } from "@/store/types";
+
+const s = () => useStore.getState();
+
+function loadOnePolygon(): void {
+  const points: [number, number][] = [
+    [0, 0],
+    [10, 0],
+    [10, 10],
+  ];
+  const labels: ImageLabels = {
+    image_path: "x",
+    img_width: 100,
+    img_height: 100,
+    boxes: [],
+    polygons: [{ points, class_id: 0 }],
+  };
+  s().loadLabelsIntoCanvas(labels);
+}
+
+describe("canvas store", () => {
+  beforeEach(() => {
+    s().clearCanvas();
+  });
+
+  it("loadLabelsIntoCanvas resets dirty and undo/redo stacks", () => {
+    loadOnePolygon();
+    expect(s().canvas.polygons).toHaveLength(1);
+    expect(s().canvas.dirty).toBe(false);
+    expect(s().canvas.undoStack).toHaveLength(0);
+    expect(s().canvas.redoStack).toHaveLength(0);
+  });
+
+  it("dragVertex moves a vertex WITHOUT pushing an undo snapshot", () => {
+    loadOnePolygon();
+    const before = s().canvas.undoStack.length;
+    s().dragVertex(0, 1, [42, 7]);
+    expect(s().canvas.polygons[0].points[1]).toEqual([42, 7]);
+    // The whole point of dragVertex: a live drag must not flood the undo stack.
+    expect(s().canvas.undoStack.length).toBe(before);
+    expect(s().canvas.dirty).toBe(true);
+  });
+
+  it("addBox pushes an undo snapshot that undo restores", () => {
+    expect(s().canvas.boxes).toHaveLength(0);
+    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, class_id: 0 });
+    expect(s().canvas.boxes).toHaveLength(1);
+    expect(s().canvas.undoStack).toHaveLength(1);
+    s().undo();
+    expect(s().canvas.boxes).toHaveLength(0);
+    expect(s().canvas.redoStack).toHaveLength(1);
+  });
+
+  it("pushUndo caps the undo stack at 30 entries", () => {
+    for (let i = 0; i < 40; i++) s().pushUndo();
+    expect(s().canvas.undoStack).toHaveLength(30);
+  });
+});
