@@ -107,6 +107,12 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     )
 
     run = create_run(config, output_dir)
+    # Nest each run's artifacts under its run_id. The GUI (and typical callers) pass a
+    # shared base such as ``<project>/.tcip/experiments``; without nesting, sequential
+    # runs write ``metrics.jsonl`` / ``model_best.pt`` to the *same* flat directory and
+    # clobber each other — violating experiment immutability. Nesting also makes the
+    # trainer write exactly where the web metrics stream reads (``<base>/<run_id>/``).
+    run.output_dir = str(Path(output_dir) / run.run_id)
 
     # Determine task from model spec heads
     heads = model_spec.get("heads", [{}])
@@ -213,7 +219,7 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     tb_info = {}
     try:
         from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
-        tb_dir = str(Path(output_dir) / "tensorboard")
+        tb_dir = str(Path(run.output_dir) / "tensorboard")
         tb_info = launch_tensorboard(tb_dir, run_id=run.run_id)
     except Exception:
         pass  # TensorBoard launch is best-effort
@@ -222,7 +228,7 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
         "run_id": run.run_id,
         "experiment_id": experiment_id,
         "status": "launched",
-        "output_dir": output_dir,
+        "output_dir": run.output_dir,
         "tensorboard": tb_info,
     }
 
@@ -529,8 +535,16 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
 
     def _source_kwargs() -> dict:
         if task in ("detection", "instance_seg"):
-            return {"images_dir": data_cfg.get("images_dir", ""),
-                    "labels_dir": data_cfg.get("labels_dir", "")}
+            kw = {"images_dir": data_cfg.get("images_dir", ""),
+                  "labels_dir": data_cfg.get("labels_dir", "")}
+            # Thread the on-disk label format through to the dataset. Dropping it here
+            # silently defaults to YOLO parsing, so a VOC/LabelMe/COCO dataset reads as
+            # all-empty negatives — the undetected-format mismatch CLAUDE.md warns about.
+            if data_cfg.get("label_format"):
+                kw["label_format"] = data_cfg["label_format"]
+            if data_cfg.get("coco_json"):
+                kw["coco_json"] = data_cfg["coco_json"]
+            return kw
         if task == "semantic_seg":
             return {"images_dir": data_cfg.get("images_dir", ""),
                     "masks_dir": data_cfg.get("masks_dir", data_cfg.get("labels_dir", ""))}
