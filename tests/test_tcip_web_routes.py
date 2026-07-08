@@ -237,6 +237,74 @@ def test_annotate_save_label_path_outside_allowed_root_403(
     assert not outside.exists()
 
 
+def _save_box(client: TestClient, img_path, det_path, **extra) -> dict:
+    resp = client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(img_path),
+            "detect_path": str(det_path),
+            "boxes": [{"x1": 10, "y1": 20, "x2": 50, "y2": 60, "class_id": 0}],
+            "polygons": [],
+            **extra,
+        },
+    )
+    return resp
+
+
+def test_annotate_save_stale_mtime_conflicts(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    import os
+
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.txt"
+    base = _save_box(client, img_path, det_path).json()["base_mtimes"]
+
+    # A concurrent writer changes the file after our client loaded it.
+    det_path.write_text("0 0.5 0.5 0.2 0.2\n")
+    os.utime(det_path, ns=(base["detect"] + 1_000_000, base["detect"] + 1_000_000))
+
+    resp = client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(img_path),
+            "detect_path": str(det_path),
+            "boxes": [],
+            "polygons": [],
+            "base_mtimes": base,
+        },
+    )
+    assert resp.status_code == 409
+
+
+def test_annotate_save_matching_mtime_ok(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.txt"
+    base = _save_box(client, img_path, det_path).json()["base_mtimes"]
+
+    # No external change → the current mtime still matches → the save is accepted
+    # and returns fresh version tokens.
+    resp = _save_box(client, img_path, det_path, base_mtimes=base)
+    assert resp.status_code == 200
+    assert resp.json()["base_mtimes"]["detect"] is not None
+
+
+def test_annotate_save_writes_audit_entry(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    proj = tmp_path / "proj"
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.txt"
+    resp = _save_box(client, img_path, det_path, project_root=str(proj))
+    assert resp.status_code == 200
+
+    audit = proj / ".tcip" / "audit.jsonl"
+    assert audit.exists()
+    assert "gui_save_labels" in audit.read_text()
+
+
 # ── /api/review ─────────────────────────────────────────────────────────
 
 
