@@ -19,6 +19,7 @@ const STATUS_FILTERS: { value: "all" | ImageStatus; label: string }[] = [
   { value: "all", label: "All" },
   { value: "complete", label: "Complete" },
   { value: "partial", label: "Partial" },
+  { value: "negative", label: "Negative" },
   { value: "unannotated", label: "Unannotated" },
 ];
 
@@ -107,11 +108,13 @@ export function TopBar() {
 
   async function toggleComplete(next: boolean) {
     if (!currentImage || !dataset.project_root) return;
+    // Unchecking Complete falls back to a content-derived status: some annotations
+    // -> partial; none on a reviewed image -> negative (empty = valid negative).
     const newStatus: ImageStatus = next
       ? "complete"
       : canvasBoxes.length + canvasPolygons.length > 0
       ? "partial"
-      : "unannotated";
+      : "negative";
     setImageStatus(currentImage, newStatus);
     await classesApi.setImageStatus(dataset.project_root, currentImage, newStatus);
   }
