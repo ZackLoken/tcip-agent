@@ -1,5 +1,27 @@
 /** Inference + Results API helpers for the Inference and Results tabs. */
 
+/** Parse a JSON response, throwing on a non-2xx status so callers can surface the
+ *  error instead of reading fields off a FastAPI ``{detail}`` error body (which
+ *  silently yields ``undefined`` and crashes the tab on the next render). */
+async function asJson<T>(r: Response): Promise<T> {
+  if (!r.ok) {
+    let detail = "";
+    try {
+      detail = ((await r.json()) as { detail?: string })?.detail ?? "";
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail || `request failed: ${r.status}`);
+  }
+  return (await r.json()) as T;
+}
+
+export interface RegisteredModel {
+  name: string;
+  checkpoint_path: string;
+  tags?: string[];
+}
+
 export interface InferenceJob {
   job_id: string;
   status: "pending" | "running" | "completed" | "failed";
@@ -81,7 +103,7 @@ export interface OnsetRow {
 export const resultsApi = {
   registeredModels: (project_path: string) =>
     fetch(`/api/results/models/registered?project_path=${encodeURIComponent(project_path)}`).then(
-      (r) => r.json() as Promise<{ models: { name: string; path: string; tag?: string }[] }>,
+      (r) => asJson<{ models: RegisteredModel[] }>(r),
     ),
 
   buildPlantMapping: (body: {
@@ -114,14 +136,14 @@ export const resultsApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }).then((r) => r.json() as Promise<{ rows: PerPlantRow[]; n_plants: number }>),
+    }).then((r) => asJson<{ rows: PerPlantRow[]; n_plants: number }>(r)),
 
   onsetDates: (curves: PerPlantRow[]) =>
     fetch("/api/results/onset_dates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ curves }),
-    }).then((r) => r.json() as Promise<{ rows: OnsetRow[] }>),
+    }).then((r) => asJson<{ rows: OnsetRow[] }>(r)),
 
   exportCsv: async (rows: unknown[], filename: string): Promise<Blob> => {
     const resp = await fetch("/api/results/export_csv", {
