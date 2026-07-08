@@ -200,6 +200,10 @@ export interface AppState {
   deleteBox: (idx: number) => void;
   addPolygon: (polygon: PolygonShape) => void;
   updatePolygon: (idx: number, polygon: PolygonShape) => void;
+  /** Move a single polygon vertex WITHOUT pushing an undo snapshot. Used during a
+   *  live vertex drag (undo is captured once at drag start) so a 50px drag doesn't
+   *  push dozens of snapshots and evict the whole 30-entry undo history. */
+  dragVertex: (polygonIdx: number, vertexIdx: number, point: [number, number]) => void;
   deletePolygon: (idx: number) => void;
   selectPolygon: (idx: number | null) => void;
   setCurrentPolygon: (pts: [number, number][]) => void;
@@ -447,6 +451,17 @@ export const useStore = create<AppState>()((set, get) => ({
       return { canvas: { ...s.canvas, polygons: next, dirty: true } };
     });
   },
+
+  dragVertex: (polygonIdx, vertexIdx, point) =>
+    set((s) => {
+      const poly = s.canvas.polygons[polygonIdx];
+      if (!poly) return s;
+      const pts = poly.points.slice();
+      pts[vertexIdx] = point;
+      const next = s.canvas.polygons.slice();
+      next[polygonIdx] = { ...poly, points: pts };
+      return { canvas: { ...s.canvas, polygons: next, dirty: true } };
+    }),
 
   deletePolygon: (idx) => {
     get().pushUndo();
