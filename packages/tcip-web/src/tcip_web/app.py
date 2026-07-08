@@ -35,9 +35,9 @@ from tcip_web.state import store as _gui_store  # noqa: E402  (needs `app`)
 _state_watchers: set[WebSocket] = set()
 
 
-async def _broadcast_state_snapshot(snapshot: dict[str, Any]) -> None:
-    """Push the new state to every connected browser."""
-    msg = {"type": "state_snapshot", "state": snapshot}
+async def _broadcast_state_snapshot(payload: dict[str, Any]) -> None:
+    """Push the new state (with its version) to every connected browser."""
+    msg = {"type": "state_snapshot", "state": payload["state"], "version": payload["version"]}
     dead: list[WebSocket] = []
     for ws in list(_state_watchers):
         try:
@@ -62,7 +62,9 @@ async def state_ws(websocket: WebSocket) -> None:
     await websocket.accept()
     _state_watchers.add(websocket)
     try:
-        await websocket.send_json({"type": "state_snapshot", "state": _gui_store.snapshot()})
+        await websocket.send_json(
+            {"type": "state_snapshot", "state": _gui_store.snapshot(), "version": _gui_store.version}
+        )
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
