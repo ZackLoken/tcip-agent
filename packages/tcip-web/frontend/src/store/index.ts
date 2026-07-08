@@ -318,8 +318,7 @@ export const useStore = create<AppState>()((set, get) => ({
       return {
         sessionTracking: {
           ...s.sessionTracking,
-          annotationsAddedDelta:
-            s.sessionTracking.annotationsAddedDelta + Math.max(0, delta),
+          annotationsAddedDelta: s.sessionTracking.annotationsAddedDelta + Math.max(0, delta),
         },
       };
     }),
@@ -477,8 +476,7 @@ export const useStore = create<AppState>()((set, get) => ({
   selectPolygon: (selectedPolygonIdx) =>
     set((s) => ({ canvas: { ...s.canvas, selectedPolygonIdx } })),
 
-  setCurrentPolygon: (pts) =>
-    set((s) => ({ canvas: { ...s.canvas, currentPolygon: pts } })),
+  setCurrentPolygon: (pts) => set((s) => ({ canvas: { ...s.canvas, currentPolygon: pts } })),
 
   commitCurrentPolygon: () => {
     const cur = get().canvas.currentPolygon;

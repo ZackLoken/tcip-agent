@@ -26,9 +26,7 @@ export const metaApi = {
     ),
 
   retrospectives: (project_root: string) =>
-    fetch(
-      `/api/meta/retrospectives?project_root=${encodeURIComponent(project_root)}`,
-    ).then(
+    fetch(`/api/meta/retrospectives?project_root=${encodeURIComponent(project_root)}`).then(
       (r) =>
         r.json() as Promise<{
           retrospectives: Retrospective[];

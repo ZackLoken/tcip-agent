@@ -55,8 +55,7 @@ export const inferenceApi = {
   listJobs: () =>
     fetch("/api/inference/jobs").then((r) => r.json() as Promise<{ jobs: InferenceJob[] }>),
 
-  getJob: (jobId: string) =>
-    fetch(`/api/inference/jobs/${jobId}`).then((r) => r.json()),
+  getJob: (jobId: string) => fetch(`/api/inference/jobs/${jobId}`).then((r) => r.json()),
 
   getPreview: (jobId: string, limit = 12) =>
     fetch(`/api/inference/jobs/${jobId}/preview?limit=${limit}`).then((r) => r.json()),

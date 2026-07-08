@@ -33,8 +33,7 @@ export const trainingApi = {
   listRuns: () =>
     fetch("/api/training/runs").then((r) => r.json()) as Promise<{ runs: TrainingRunSummary[] }>,
 
-  getRun: (run_id: string) =>
-    fetch(`/api/training/runs/${run_id}`).then((r) => r.json()),
+  getRun: (run_id: string) => fetch(`/api/training/runs/${run_id}`).then((r) => r.json()),
 
   getMetrics: (project_root: string, run_id: string) =>
     fetch(

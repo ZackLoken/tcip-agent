@@ -22,9 +22,7 @@ const TAG_COLORS: Record<"tp" | "fp" | "fn", string> = {
   fn: "#FFA726",
 };
 
-function currentImagePath(
-  dataset: DatasetSelection,
-): { path: string | null; name: string | null } {
+function currentImagePath(dataset: DatasetSelection): { path: string | null; name: string | null } {
   if (!dataset.dataset_root || !dataset.date) return { path: null, name: null };
   const name = dataset.image_list[dataset.current_image_index];
   if (!name) return { path: null, name: null };
@@ -32,8 +30,7 @@ function currentImagePath(
 }
 
 function labelPaths(dataset: DatasetSelection, name: string | null) {
-  if (!name)
-    return { gt_detect: null, gt_segment: null, pred_detect: null, pred_segment: null };
+  if (!name) return { gt_detect: null, gt_segment: null, pred_detect: null, pred_segment: null };
   const stem = name.replace(/\.[^.]+$/, "");
   return {
     gt_detect: dataset.annotations_detect_dir
@@ -289,14 +286,14 @@ export function ReviewTab() {
     current?.det_type === "tp"
       ? "Confirm (A)"
       : current?.det_type === "fp"
-      ? "Add to GT (A)"
-      : "Keep GT (A)";
+        ? "Add to GT (A)"
+        : "Keep GT (A)";
   const rejectLabel =
     current?.det_type === "tp"
       ? "Delete GT (R)"
       : current?.det_type === "fp"
-      ? "Dismiss (R)"
-      : "Delete GT (R)";
+        ? "Dismiss (R)"
+        : "Delete GT (R)";
 
   return (
     <div className="flex-1 flex flex-col">
@@ -361,17 +358,25 @@ export function ReviewTab() {
           GT
         </label>
         <label className="flex items-center gap-1">
-          <input type="checkbox" checked={showPred} onChange={(e) => setShowPred(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={showPred}
+            onChange={(e) => setShowPred(e.target.checked)}
+          />
           Pred
         </label>
 
         <span className="flex-1" />
 
-        <button className="tcip-btn" onClick={() => stepImage(-1)}>◀ Prev img</button>
+        <button className="tcip-btn" onClick={() => stepImage(-1)}>
+          ◀ Prev img
+        </button>
         <span className="tabular-nums">
           {matches ? `${detectionIdx + 1} / ${matches.detections.length}` : "0 / 0"}
         </span>
-        <button className="tcip-btn" onClick={() => stepImage(1)}>Next img ▶</button>
+        <button className="tcip-btn" onClick={() => stepImage(1)}>
+          Next img ▶
+        </button>
       </div>
 
       <CanvasStage imageUrl={imageUrl} imgWidth={imgW} imgHeight={imgH}>
@@ -387,8 +392,12 @@ export function ReviewTab() {
       </CanvasStage>
 
       <div className="flex items-center gap-2 px-3 py-1.5 border-t border-tcip-border bg-tcip-panel text-[11px]">
-        <button className="tcip-btn" onClick={() => stepDetection(-1)}>◀ Prev</button>
-        <button className="tcip-btn" onClick={() => stepDetection(1)}>Next ▶</button>
+        <button className="tcip-btn" onClick={() => stepDetection(-1)}>
+          ◀ Prev
+        </button>
+        <button className="tcip-btn" onClick={() => stepDetection(1)}>
+          Next ▶
+        </button>
         {current && (
           <>
             <span
@@ -396,8 +405,8 @@ export function ReviewTab() {
                 current.det_type === "tp"
                   ? "border-tcip-tp text-tcip-tp"
                   : current.det_type === "fp"
-                  ? "border-tcip-fp text-tcip-fp"
-                  : "border-tcip-fn text-tcip-fn"
+                    ? "border-tcip-fp text-tcip-fp"
+                    : "border-tcip-fn text-tcip-fn"
               }`}
             >
               {current.det_type.toUpperCase()}
@@ -527,7 +536,11 @@ function ReviewOverlays({ matches, focusedIdx, showGT, showPred, classNameLookup
         })}
 
       {/* Focused prediction (only the active detection) */}
-      {showPred && focused && tagColor && focused.pred_type === "box" && focused.pred_idx !== null &&
+      {showPred &&
+        focused &&
+        tagColor &&
+        focused.pred_type === "box" &&
+        focused.pred_idx !== null &&
         matches.pred_boxes[focused.pred_idx] && (
           <FocusedPredBox
             b={matches.pred_boxes[focused.pred_idx]}
@@ -539,7 +552,11 @@ function ReviewOverlays({ matches, focusedIdx, showGT, showPred, classNameLookup
             isFp={focused.det_type === "fp"}
           />
         )}
-      {showPred && focused && tagColor && focused.pred_type === "polygon" && focused.pred_idx !== null &&
+      {showPred &&
+        focused &&
+        tagColor &&
+        focused.pred_type === "polygon" &&
+        focused.pred_idx !== null &&
         matches.pred_polygons[focused.pred_idx] && (
           <FocusedPredPoly
             p={matches.pred_polygons[focused.pred_idx]}
@@ -686,14 +703,31 @@ function FocusedPredPoly({
   );
 }
 
-function DetTypeBadge({ color, label, imgWidth }: { color: string; label: string; imgWidth: number }) {
+function DetTypeBadge({
+  color,
+  label,
+  imgWidth,
+}: {
+  color: string;
+  label: string;
+  imgWidth: number;
+}) {
   // Anchor the badge to image-coords near top-right (like yolo-annotator's
   // canvas overlay; sticks with the image as you pan/zoom).
   const x = Math.max(0, imgWidth - 80);
   const y = 4;
   return (
     <>
-      <Rect x={x} y={y} width={70} height={28} fill="#1A1A1A" stroke="#444444" strokeWidth={1} cornerRadius={4} />
+      <Rect
+        x={x}
+        y={y}
+        width={70}
+        height={28}
+        fill="#1A1A1A"
+        stroke="#444444"
+        strokeWidth={1}
+        cornerRadius={4}
+      />
       <Text
         x={x}
         y={y + 6}

@@ -37,7 +37,8 @@ export const sessionsApi = {
 
   load: (project_root: string) =>
     fetch(`/api/sessions/load?project_root=${encodeURIComponent(project_root)}`).then(
-      (r) => r.json() as Promise<{ sessions: SessionEntry[]; image_status: Record<string, string> }>,
+      (r) =>
+        r.json() as Promise<{ sessions: SessionEntry[]; image_status: Record<string, string> }>,
     ),
 
   imageEvent: (body: {

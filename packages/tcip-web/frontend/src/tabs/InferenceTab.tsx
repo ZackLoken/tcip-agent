@@ -38,7 +38,10 @@ export function InferenceTab() {
 
   useEffect(() => {
     const refresh = () =>
-      inferenceApi.listJobs().then((r) => setJobs(r.jobs)).catch(() => {});
+      inferenceApi
+        .listJobs()
+        .then((r) => setJobs(r.jobs))
+        .catch(() => {});
     void refresh();
     const t = setInterval(refresh, 3000);
     return () => clearInterval(t);
@@ -144,7 +147,9 @@ export function InferenceTab() {
           Prefill from current dataset
         </button>
 
-        <label className="block text-[11px] text-tcip-muted mb-1">Output directory (YOLO txt)</label>
+        <label className="block text-[11px] text-tcip-muted mb-1">
+          Output directory (YOLO txt)
+        </label>
         <input
           className="tcip-input w-full mb-3"
           value={outputDir}
@@ -250,8 +255,8 @@ export function InferenceTab() {
                         j.status === "completed"
                           ? "bg-tcip-tp/20 text-tcip-tp"
                           : j.status === "failed"
-                          ? "bg-tcip-fp/20 text-tcip-fp"
-                          : "bg-tcip-fn/20 text-tcip-fn"
+                            ? "bg-tcip-fp/20 text-tcip-fp"
+                            : "bg-tcip-fn/20 text-tcip-fn"
                       }`}
                     >
                       {j.status}
@@ -282,9 +287,7 @@ export function InferenceTab() {
         {activeJob && (
           <div className="mt-4 tcip-panel p-3">
             <div className="font-semibold text-[12px] mb-1">Active: {activeJob.job_id}</div>
-            <div className="text-[11px] text-tcip-muted">
-              Output: {activeJob.output_dir}
-            </div>
+            <div className="text-[11px] text-tcip-muted">Output: {activeJob.output_dir}</div>
             <div className="text-[11px] mt-1">
               Status: {activeJob.status} · {activeJob.done} / {activeJob.total}
             </div>

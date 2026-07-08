@@ -33,7 +33,11 @@ export function TuningTab() {
   const [outputDir, setOutputDir] = useState("");
 
   const [sweeps, setSweeps] = useState<Sweep[]>([]);
-  const [active, setActive] = useState<{ sweep_id: string; status: string; result: unknown } | null>(null);
+  const [active, setActive] = useState<{
+    sweep_id: string;
+    status: string;
+    result: unknown;
+  } | null>(null);
   const [launchMsg, setLaunchMsg] = useState<string | null>(null);
 
   async function refresh() {
@@ -98,7 +102,9 @@ export function TuningTab() {
       <div className="border-r border-tcip-border p-4 overflow-auto">
         <div className="font-semibold text-[13px] mb-3">HPO config</div>
 
-        <label className="block text-[11px] text-tcip-muted mb-1">Base training config (JSON)</label>
+        <label className="block text-[11px] text-tcip-muted mb-1">
+          Base training config (JSON)
+        </label>
         <textarea
           className="tcip-input w-full h-40 font-mono text-[11px] leading-4 resize-none mb-3"
           value={base}
@@ -138,7 +144,11 @@ export function TuningTab() {
             </select>
           </label>
           <label className="col-span-2 flex items-center gap-2">
-            <input type="checkbox" checked={useOptuna} onChange={(e) => setUseOptuna(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={useOptuna}
+              onChange={(e) => setUseOptuna(e.target.checked)}
+            />
             Use Optuna (TPE + ASHA)
           </label>
         </div>
@@ -170,10 +180,15 @@ export function TuningTab() {
                       ? "border-tcip-accent bg-tcip-accent/10"
                       : "border-tcip-border hover:border-tcip-muted"
                   }`}
-                  onClick={() => setActive({ sweep_id: s.sweep_id, status: s.status, result: null })}
+                  onClick={() =>
+                    setActive({ sweep_id: s.sweep_id, status: s.status, result: null })
+                  }
                 >
                   <div className="font-mono text-[11px]">{s.sweep_id}</div>
-                  <div className="text-[10px] text-tcip-muted">{s.status}{s.error ? ` — ${s.error}` : ""}</div>
+                  <div className="text-[10px] text-tcip-muted">
+                    {s.status}
+                    {s.error ? ` — ${s.error}` : ""}
+                  </div>
                 </li>
               ))}
             </ul>

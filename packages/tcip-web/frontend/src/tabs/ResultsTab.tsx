@@ -22,9 +22,7 @@ export function ResultsTab() {
   const dataset = useStore((s) => s.gui.dataset);
 
   const [mappingPath, setMappingPath] = useState(
-    dataset.project_root
-      ? `${dataset.project_root}/.tcip/state/plant_mapping.json`
-      : "",
+    dataset.project_root ? `${dataset.project_root}/.tcip/state/plant_mapping.json` : "",
   );
   const [predsByDate, setPredsByDate] = useState<string>(() =>
     JSON.stringify(
@@ -148,7 +146,11 @@ export function ResultsTab() {
               {loading ? "Computing…" : "Compute curves + onset dates"}
             </button>
             <div className="flex gap-1">
-              <button className="tcip-btn flex-1 text-[11px]" onClick={downloadCurvesCsv} disabled={curves.length === 0}>
+              <button
+                className="tcip-btn flex-1 text-[11px]"
+                onClick={downloadCurvesCsv}
+                disabled={curves.length === 0}
+              >
                 Curves CSV
               </button>
               <button

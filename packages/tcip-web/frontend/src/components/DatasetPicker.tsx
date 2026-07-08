@@ -9,15 +9,15 @@ import { api } from "@/api/client";
 import { useStore } from "@/store";
 
 export function DatasetPicker() {
-  const [projectRoot, setProjectRoot] = useState(() =>
-    localStorage.getItem("tcip.project_root") ?? "",
+  const [projectRoot, setProjectRoot] = useState(
+    () => localStorage.getItem("tcip.project_root") ?? "",
   );
-  const [datasetRoot, setDatasetRoot] = useState(() =>
-    localStorage.getItem("tcip.dataset_root") ?? "",
+  const [datasetRoot, setDatasetRoot] = useState(
+    () => localStorage.getItem("tcip.dataset_root") ?? "",
   );
   const [date, setDate] = useState(() => localStorage.getItem("tcip.date") ?? "");
-  const [annotationType, setAnnotationType] = useState(() =>
-    localStorage.getItem("tcip.annotation_type") ?? "",
+  const [annotationType, setAnnotationType] = useState(
+    () => localStorage.getItem("tcip.annotation_type") ?? "",
   );
   const [modelName, setModelName] = useState(() => localStorage.getItem("tcip.model_name") ?? "");
 
@@ -88,7 +88,8 @@ export function DatasetPicker() {
         <div className="text-[11px] text-tcip-muted">
           Enter absolute paths. Project root is where <code className="font-mono">.tcip/</code>
           lives; dataset root is the folder containing <code className="font-mono">images/</code>,
-          <code className="font-mono"> annotations/</code>, <code className="font-mono">models/</code>.
+          <code className="font-mono"> annotations/</code>,{" "}
+          <code className="font-mono">models/</code>.
         </div>
 
         <label className="text-[11px] text-tcip-muted">Project root</label>
@@ -126,11 +127,7 @@ export function DatasetPicker() {
 
           <div className="flex flex-col gap-1">
             <label className="text-[11px] text-tcip-muted">Date</label>
-            <select
-              className="tcip-select"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            >
+            <select className="tcip-select" value={date} onChange={(e) => setDate(e.target.value)}>
               <option value="">—</option>
               {tree?.dates_with_images.map((d) => (
                 <option key={d} value={d}>

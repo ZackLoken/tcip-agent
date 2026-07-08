@@ -250,7 +250,12 @@ export function TrainingTab() {
                   dataKey="step"
                   stroke="#8A8A8A"
                   style={{ fontSize: 11 }}
-                  label={{ value: "epoch/step", position: "insideBottom", offset: -5, fill: "#8A8A8A" }}
+                  label={{
+                    value: "epoch/step",
+                    position: "insideBottom",
+                    offset: -5,
+                    fill: "#8A8A8A",
+                  }}
                 />
                 <YAxis stroke="#8A8A8A" style={{ fontSize: 11 }} />
                 <Tooltip

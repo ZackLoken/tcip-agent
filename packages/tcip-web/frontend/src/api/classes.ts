@@ -30,9 +30,9 @@ export const classesApi = {
     ),
 
   loadImageStatus: (project_root: string) =>
-    fetch(
-      `/api/classes/image_status?project_root=${encodeURIComponent(project_root)}`,
-    ).then((r) => r.json() as Promise<{ statuses: Record<string, ImageStatus> }>),
+    fetch(`/api/classes/image_status?project_root=${encodeURIComponent(project_root)}`).then(
+      (r) => r.json() as Promise<{ statuses: Record<string, ImageStatus> }>,
+    ),
 
   setImageStatus: (project_root: string, image_name: string, status: ImageStatus) =>
     fetch("/api/classes/image_status", {
@@ -78,5 +78,8 @@ export const DEFAULT_CLASS_COLORS = [
 ];
 
 export function autoColor(classId: number): string {
-  return DEFAULT_CLASS_COLORS[((classId % DEFAULT_CLASS_COLORS.length) + DEFAULT_CLASS_COLORS.length) % DEFAULT_CLASS_COLORS.length];
+  return DEFAULT_CLASS_COLORS[
+    ((classId % DEFAULT_CLASS_COLORS.length) + DEFAULT_CLASS_COLORS.length) %
+      DEFAULT_CLASS_COLORS.length
+  ];
 }

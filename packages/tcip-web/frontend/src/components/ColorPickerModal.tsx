@@ -73,10 +73,7 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel }: Pr
       className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center"
       onClick={onCancel}
     >
-      <div
-        className="tcip-panel p-5 w-[400px]"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="tcip-panel p-5 w-[400px]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <div className="text-[13px] font-semibold">{title}</div>
           <button className="tcip-btn text-[11px]" onClick={onCancel}>
@@ -109,16 +106,8 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel }: Pr
               const el = document.createElement("input");
               el.type = "color";
               el.value = HEX_RE.test(color) ? color : "#ffffff";
-              el.addEventListener(
-                "input",
-                () => pick(el.value.toUpperCase()),
-                { once: false },
-              );
-              el.addEventListener(
-                "change",
-                () => pick(el.value.toUpperCase()),
-                { once: true },
-              );
+              el.addEventListener("input", () => pick(el.value.toUpperCase()), { once: false });
+              el.addEventListener("change", () => pick(el.value.toUpperCase()), { once: true });
               el.click();
             }}
           >
@@ -127,12 +116,7 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel }: Pr
         </div>
 
         <Section title="SI Palette" palette={SI_PALETTE} onPick={pick} selected={color} />
-        <Section
-          title="Basic Colors"
-          palette={BASIC_PALETTE}
-          onPick={pick}
-          selected={color}
-        />
+        <Section title="Basic Colors" palette={BASIC_PALETTE} onPick={pick} selected={color} />
 
         <div className="flex gap-2 mt-4">
           <button className="tcip-btn-primary flex-1" onClick={() => onSubmit(color)}>
@@ -160,9 +144,7 @@ function Section({
 }) {
   return (
     <div className="mb-3">
-      <div className="text-[11px] uppercase tracking-wide text-tcip-muted mb-1">
-        {title}
-      </div>
+      <div className="text-[11px] uppercase tracking-wide text-tcip-muted mb-1">{title}</div>
       <div className="grid grid-cols-5 gap-2">
         {palette.map(([name, hex]) => (
           <button
@@ -170,9 +152,7 @@ function Section({
             title={`${name}  ${hex}`}
             onClick={() => onPick(hex)}
             className={`h-8 rounded border-2 transition-transform hover:scale-105 ${
-              selected.toUpperCase() === hex.toUpperCase()
-                ? "border-white"
-                : "border-tcip-border"
+              selected.toUpperCase() === hex.toUpperCase() ? "border-white" : "border-tcip-border"
             }`}
             style={{ background: hex }}
           />

@@ -40,9 +40,7 @@ export function StatusBar() {
           Image: {canvasDims.w}×{canvasDims.h}
         </span>
       ) : null}
-      {activeTab === "annotate" && dirty && (
-        <span className="text-tcip-warn">Unsaved changes</span>
-      )}
+      {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}
       {activeTab === "review" && matches && (
         <span>
           <span className="text-tcip-tp">TP {matches.n_tp}</span>
