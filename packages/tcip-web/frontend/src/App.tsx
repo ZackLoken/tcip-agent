@@ -37,6 +37,16 @@ function App() {
     return () => stateSocket.close();
   }, []);
 
+  // Subscribe to agent panel pushes (e.g. the agent writing labels) and route
+  // them into the store so the StatusBar can surface them and the Annotate tab
+  // can offer to refresh. Previously push_panel_data had no consumer at all.
+  useEffect(() => {
+    const unsubscribe = stateSocket.subscribePanel("annotate", (ev) => {
+      useStore.getState().pushAgentActivity(ev.panel, ev.event_type, ev.data);
+    });
+    return unsubscribe;
+  }, []);
+
   // Session start / end.  Browser identifier is "web" since we don't have
   // OS user; the backend can rewrite this from a header later if needed.
   useEffect(() => {
