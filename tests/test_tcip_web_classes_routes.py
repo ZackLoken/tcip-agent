@@ -72,8 +72,8 @@ def test_derive_statuses_from_label_files(client: TestClient, tmp_path: Path) ->
     det = tmp_path / "detect"
     det.mkdir()
     (det / "IMG_A.txt").write_text("0 0.5 0.5 0.1 0.1\n")  # partial
-    (det / "IMG_B.txt").write_text("")  # empty = unannotated
-    # IMG_C.txt missing = unannotated
+    (det / "IMG_B.txt").write_text("")  # empty file exists = confirmed negative
+    # IMG_C.txt missing = unannotated (never looked at)
 
     resp = client.post(
         "/api/classes/image_status/derive",
@@ -88,7 +88,7 @@ def test_derive_statuses_from_label_files(client: TestClient, tmp_path: Path) ->
     body = resp.json()
     assert body["statuses"] == {
         "IMG_A.JPG": "partial",
-        "IMG_B.JPG": "unannotated",
+        "IMG_B.JPG": "negative",
         "IMG_C.JPG": "unannotated",
         "IMG_D.JPG": "complete",
     }
