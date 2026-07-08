@@ -113,10 +113,13 @@ def get_auto_color(class_id: int) -> dict:
 # ── Per-image status (used by Complete checkbox + status filter) ─────────
 
 
+VALID_STATUSES = ("complete", "partial", "negative", "unannotated")
+
+
 class ImageStatusPayload(BaseModel):
     project_root: str
     image_name: str
-    status: str  # "complete" | "partial" | "unannotated"
+    status: str  # "complete" | "partial" | "negative" | "unannotated"
 
 
 def _image_status_path(project_root: str) -> Path:
@@ -137,7 +140,7 @@ def get_image_status(project_root: str) -> dict:
 
 @router.post("/image_status")
 def set_image_status(payload: ImageStatusPayload) -> dict:
-    if payload.status not in ("complete", "partial", "unannotated"):
+    if payload.status not in VALID_STATUSES:
         raise HTTPException(400, f"invalid status: {payload.status}")
     path = _image_status_path(payload.project_root)
     with file_transaction(path):
@@ -162,7 +165,7 @@ def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
         if not isinstance(raw, dict):
             raw = {}
         for name, st in payload.statuses.items():
-            if st in ("complete", "partial", "unannotated"):
+            if st in VALID_STATUSES:
                 raw[name] = st
         atomic_write_json(path, {k: raw[k] for k in sorted(raw)})
     return {"status": "ok", "n": len(payload.statuses)}
@@ -181,6 +184,14 @@ def derive_image_status(payload: DerivePayload) -> dict:
     """Compute initial per-image status based on whether label files exist
     and contain any annotations. Images in ``complete_override`` are forced
     to ``complete``.
+
+    A label file that exists but is empty is a **confirmed negative** (the
+    annotator reviewed the image and recorded no objects) — distinct from an
+    image with no label file at all (never looked at):
+
+      - any non-empty label line -> ``partial``
+      - label file exists but empty -> ``negative``
+      - no label file -> ``unannotated``
     """
     det = Path(payload.annotations_detect_dir) if payload.annotations_detect_dir else None
     seg = Path(payload.annotations_segment_dir) if payload.annotations_segment_dir else None
@@ -193,12 +204,14 @@ def derive_image_status(payload: DerivePayload) -> dict:
             continue
         stem = name.rsplit(".", 1)[0]
         has_any = False
+        file_exists = False
         for label_dir in (det, seg):
             if not label_dir:
                 continue
             txt = label_dir / f"{stem}.txt"
             if not txt.exists():
                 continue
+            file_exists = True
             try:
                 with txt.open("r", encoding="utf-8") as f:
                     for line in f:
@@ -209,6 +222,11 @@ def derive_image_status(payload: DerivePayload) -> dict:
                 pass
             if has_any:
                 break
-        statuses[name] = "partial" if has_any else "unannotated"
+        if has_any:
+            statuses[name] = "partial"
+        elif file_exists:
+            statuses[name] = "negative"
+        else:
+            statuses[name] = "unannotated"
 
     return {"statuses": statuses}
