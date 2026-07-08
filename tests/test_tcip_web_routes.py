@@ -216,6 +216,27 @@ def test_annotate_save_empty_preserves_negative(
     assert det_path.read_text() == ""
 
 
+def test_annotate_save_label_path_outside_allowed_root_403(
+    client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch
+) -> None:
+    # With an allow-list configured, a label path outside it must be rejected —
+    # write_detect_labels is otherwise an arbitrary file write/delete primitive.
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(dataset_root.resolve()))
+    outside = tmp_path / "evil" / "IMG_0000.txt"
+    resp = client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(img_path),
+            "detect_path": str(outside),
+            "boxes": [],
+            "polygons": [],
+        },
+    )
+    assert resp.status_code == 403
+    assert not outside.exists()
+
+
 # ── /api/review ─────────────────────────────────────────────────────────
 
 
