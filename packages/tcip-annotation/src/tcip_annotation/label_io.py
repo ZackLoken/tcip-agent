@@ -132,50 +132,65 @@ def parse_segment_predictions(
 # ── Writing ─────────────────────────────────────────────────────────────────
 
 
-def write_detect_labels(path: str, boxes: list[BBox], img_w: int, img_h: int) -> None:
-    """Write detect boxes to a YOLO label file (atomic write)."""
-    if boxes:
-        dir_name = os.path.dirname(path) or "."
-        os.makedirs(dir_name, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+def _atomic_write_lines(path: str, lines: list[str]) -> None:
+    """Atomically write ``lines`` (already newline-terminated) to ``path``."""
+    dir_name = os.path.dirname(path) or "."
+    os.makedirs(dir_name, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        os.replace(tmp_path, path)
+    except BaseException:
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                for b in boxes:
-                    cx = ((b.x1 + b.x2) / 2) / img_w
-                    cy = ((b.y1 + b.y2) / 2) / img_h
-                    w = (b.x2 - b.x1) / img_w
-                    h = (b.y2 - b.y1) / img_h
-                    f.write(f"{b.class_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")
-            os.replace(tmp_path, path)
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def write_detect_labels(
+    path: str, boxes: list[BBox], img_w: int, img_h: int, *, keep_empty: bool = False
+) -> None:
+    """Write detect boxes to a YOLO label file (atomic write).
+
+    When ``boxes`` is empty: by default the file is removed. Pass ``keep_empty=True``
+    to instead write a 0-byte file — used by the interactive annotator so that clearing
+    all boxes records a *confirmed negative* (empty label file = valid negative) rather
+    than deleting the record (see CLAUDE.md invariant).
+    """
+    if boxes:
+        lines = []
+        for b in boxes:
+            cx = ((b.x1 + b.x2) / 2) / img_w
+            cy = ((b.y1 + b.y2) / 2) / img_h
+            w = (b.x2 - b.x1) / img_w
+            h = (b.y2 - b.y1) / img_h
+            lines.append(f"{b.class_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")
+        _atomic_write_lines(path, lines)
+    elif keep_empty:
+        _atomic_write_lines(path, [])
     elif os.path.exists(path):
         os.remove(path)
 
 
-def write_segment_labels(path: str, polygons: list[Polygon], img_w: int, img_h: int) -> None:
-    """Write segment polygons to a YOLO label file (atomic write)."""
+def write_segment_labels(
+    path: str, polygons: list[Polygon], img_w: int, img_h: int, *, keep_empty: bool = False
+) -> None:
+    """Write segment polygons to a YOLO label file (atomic write).
+
+    ``keep_empty=True`` writes a 0-byte file for an empty polygon list (confirmed
+    negative) instead of removing it; see :func:`write_detect_labels`.
+    """
     if polygons:
-        dir_name = os.path.dirname(path) or "."
-        os.makedirs(dir_name, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                for poly in polygons:
-                    coords = " ".join(
-                        f"{x / img_w:.6f} {y / img_h:.6f}" for x, y in poly.points
-                    )
-                    f.write(f"{poly.class_id} {coords}\n")
-            os.replace(tmp_path, path)
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        lines = []
+        for poly in polygons:
+            coords = " ".join(
+                f"{x / img_w:.6f} {y / img_h:.6f}" for x, y in poly.points
+            )
+            lines.append(f"{poly.class_id} {coords}\n")
+        _atomic_write_lines(path, lines)
+    elif keep_empty:
+        _atomic_write_lines(path, [])
     elif os.path.exists(path):
         os.remove(path)
