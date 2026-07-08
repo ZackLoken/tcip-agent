@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -129,13 +130,33 @@ class ReviewEngine:
         self._invalidate_reviewed_lookup()
 
     def save_review_state(self) -> None:
+        """Persist review state atomically (temp file + ``os.replace``).
+
+        A plain ``write_text`` can leave a half-written / truncated file if the
+        process dies mid-write, and ``load_review_state`` silently resets to ``{}``
+        on a parse error — which would discard the *entire* review history. The
+        atomic swap (same pattern as :mod:`tcip_annotation.label_io`) means a reader
+        always sees either the old or the new complete file, never a torn one.
+        """
+        path = self.review_state_path
         try:
-            self.review_state_path.write_text(
-                json.dumps(self._review_state, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = json.dumps(self._review_state, indent=2, ensure_ascii=False)
+            fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(data)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+            finally:
+                if os.path.exists(tmp):
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
         except Exception:
-            logger.exception("Could not save review state to %s", self.review_state_path)
+            logger.exception("Could not save review state to %s", path)
 
     @property
     def raw_state(self) -> dict:
