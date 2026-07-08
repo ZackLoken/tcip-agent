@@ -5,6 +5,7 @@ import {
   openInferenceStream,
   resultsApi,
   type InferenceJob,
+  type RegisteredModel,
 } from "@/api/inference";
 import { useStore } from "@/store";
 
@@ -13,7 +14,7 @@ export function InferenceTab() {
   const projectRoot = dataset.project_root;
   const datasetRoot = dataset.dataset_root;
 
-  const [models, setModels] = useState<{ name: string; path: string; tag?: string }[]>([]);
+  const [models, setModels] = useState<RegisteredModel[]>([]);
   const [modelPath, setModelPath] = useState<string>("");
   const [imagesDir, setImagesDir] = useState<string>("");
   const [outputDir, setOutputDir] = useState<string>("");
@@ -106,8 +107,9 @@ export function InferenceTab() {
           >
             <option value="">Select a registered model…</option>
             {models.map((m) => (
-              <option key={m.path} value={m.path}>
-                {m.name} {m.tag ? `(${m.tag})` : ""} — {m.path.split(/[/\\]/).slice(-3).join("/")}
+              <option key={m.checkpoint_path} value={m.checkpoint_path}>
+                {m.name} {m.tags?.length ? `(${m.tags.join(", ")})` : ""} —{" "}
+                {m.checkpoint_path.split(/[/\\]/).slice(-3).join("/")}
               </option>
             ))}
           </select>
