@@ -58,7 +58,11 @@ describe("mergeSnapshot ownership model", () => {
   it("preserves client-owned fields on a same-dataset snapshot", () => {
     // Backend re-broadcasts with its stale active_tab / mode / index.
     s().mergeSnapshot(
-      snapshot({ active_tab: "annotate", mode: "box", dataset: dataset({ current_image_index: 0 }) }),
+      snapshot({
+        active_tab: "annotate",
+        mode: "box",
+        dataset: dataset({ current_image_index: 0 }),
+      }),
       6,
     );
     expect(s().gui.active_tab).toBe("review");
@@ -80,9 +84,15 @@ describe("mergeSnapshot ownership model", () => {
 
   it("adopts a new dataset identity and resets index + pred_reference", () => {
     useStore.setState((st) => ({
-      gui: { ...st.gui, pred_reference: { type: "box", coords: [0, 0, 1, 1], class_id: 0, confidence: null } },
+      gui: {
+        ...st.gui,
+        pred_reference: { type: "box", coords: [0, 0, 1, 1], class_id: 0, confidence: null },
+      },
     }));
-    s().mergeSnapshot(snapshot({ dataset: dataset({ date: "3-2-26", current_image_index: 0 }) }), 8);
+    s().mergeSnapshot(
+      snapshot({ dataset: dataset({ date: "3-2-26", current_image_index: 0 }) }),
+      8,
+    );
     expect(s().gui.dataset.date).toBe("3-2-26");
     expect(s().gui.dataset.current_image_index).toBe(0);
     expect(s().gui.pred_reference).toBeNull();
