@@ -62,9 +62,9 @@ export function ResultsTab() {
         predictions_by_date: predsMap,
         elongation_height: elongationHeight,
       });
-      setCurves(curveRes.rows);
-      const onsetRes = await resultsApi.onsetDates(curveRes.rows);
-      setOnset(onsetRes.rows);
+      setCurves(curveRes.rows ?? []);
+      const onsetRes = await resultsApi.onsetDates(curveRes.rows ?? []);
+      setOnset(onsetRes.rows ?? []);
     } catch (e) {
       setError(String(e));
     } finally {
