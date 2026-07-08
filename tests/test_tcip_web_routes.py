@@ -318,4 +318,4 @@ def test_state_snapshot_available(client: TestClient) -> None:
     # Minimal shape sanity
     assert "active_tab" in body
     assert "view" in body
-    assert "class_names" in body
+    assert "dataset" in body
