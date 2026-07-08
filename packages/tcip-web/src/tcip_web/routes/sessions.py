@@ -36,7 +36,6 @@ yolo-annotator file format. The class-route file is canonical.
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +43,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+
+from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +58,14 @@ def _stats_path(project_root: str) -> Path:
 
 
 def _read(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    data = read_json(path, default=None)
+    if not isinstance(data, dict):
         return {"sessions": [], "image_status": {}}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"sessions": [], "image_status": {}}
+    return data
 
 
 def _write(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    atomic_write_json(path, data)
 
 
 # ── Per-image session telemetry ─────────────────────────────────────────
@@ -89,52 +87,53 @@ def image_event(payload: ImageEventPayload) -> dict:
     Called by the GUI on image-leave (Prev/Next/tab-switch/save).
     """
     path = _stats_path(payload.project_root)
-    data = _read(path)
-    sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
-    if not sessions:
-        sessions.insert(0, _new_session_entry())
-    s = sessions[0]
-    images: dict[str, Any] = s.setdefault("images", {})
-    img = images.setdefault(
-        payload.image_name,
-        {
-            "session_seconds": 0.0,
-            "loaded_annotation_count": payload.loaded_annotation_count or 0,
-            "annotations_added": 0,
-            "final_annotation_count": 0,
-            "avg_seconds_per_annotation": 0.0,
-        },
-    )
-
-    if payload.loaded_annotation_count is not None and "loaded_annotation_count" not in img:
-        img["loaded_annotation_count"] = int(payload.loaded_annotation_count)
-
-    img["session_seconds"] = round(
-        float(img.get("session_seconds", 0.0)) + max(0.0, payload.session_seconds_delta),
-        2,
-    )
-    img["annotations_added"] = int(img.get("annotations_added", 0)) + max(
-        0, payload.annotations_added_delta
-    )
-    img["final_annotation_count"] = int(payload.final_annotation_count)
-
-    if img["annotations_added"] > 0:
-        img["avg_seconds_per_annotation"] = round(
-            img["session_seconds"] / img["annotations_added"], 2
+    with file_transaction(path):
+        data = _read(path)
+        sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
+        if not sessions:
+            sessions.insert(0, _new_session_entry())
+        s = sessions[0]
+        images: dict[str, Any] = s.setdefault("images", {})
+        img = images.setdefault(
+            payload.image_name,
+            {
+                "session_seconds": 0.0,
+                "loaded_annotation_count": payload.loaded_annotation_count or 0,
+                "annotations_added": 0,
+                "final_annotation_count": 0,
+                "avg_seconds_per_annotation": 0.0,
+            },
         )
-    else:
-        img["avg_seconds_per_annotation"] = 0.0
 
-    # Drop entries that ended up empty (no time + no adds + no final count)
-    if (
-        img["session_seconds"] == 0.0
-        and img["annotations_added"] == 0
-        and img["final_annotation_count"] == 0
-    ):
-        images.pop(payload.image_name, None)
+        if payload.loaded_annotation_count is not None and "loaded_annotation_count" not in img:
+            img["loaded_annotation_count"] = int(payload.loaded_annotation_count)
 
-    _refresh_session_aggregate(s)
-    _write(path, data)
+        img["session_seconds"] = round(
+            float(img.get("session_seconds", 0.0)) + max(0.0, payload.session_seconds_delta),
+            2,
+        )
+        img["annotations_added"] = int(img.get("annotations_added", 0)) + max(
+            0, payload.annotations_added_delta
+        )
+        img["final_annotation_count"] = int(payload.final_annotation_count)
+
+        if img["annotations_added"] > 0:
+            img["avg_seconds_per_annotation"] = round(
+                img["session_seconds"] / img["annotations_added"], 2
+            )
+        else:
+            img["avg_seconds_per_annotation"] = 0.0
+
+        # Drop entries that ended up empty (no time + no adds + no final count)
+        if (
+            img["session_seconds"] == 0.0
+            and img["annotations_added"] == 0
+            and img["final_annotation_count"] == 0
+        ):
+            images.pop(payload.image_name, None)
+
+        _refresh_session_aggregate(s)
+        _write(path, data)
     return {"status": "ok"}
 
 
@@ -151,14 +150,15 @@ def start_session(payload: StartSessionPayload) -> dict:
     """Insert a new session row. The GUI calls this when the user opens a
     project (or on load if no session is currently open)."""
     path = _stats_path(payload.project_root)
-    data = _read(path)
-    sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
-    if sessions and not sessions[0].get("ended"):
-        # Already an open session — keep it.
-        return {"status": "ok", "session": sessions[0]}
-    entry = _new_session_entry(user=payload.user)
-    sessions.insert(0, entry)
-    _write(path, data)
+    with file_transaction(path):
+        data = _read(path)
+        sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
+        if sessions and not sessions[0].get("ended"):
+            # Already an open session — keep it.
+            return {"status": "ok", "session": sessions[0]}
+        entry = _new_session_entry(user=payload.user)
+        sessions.insert(0, entry)
+        _write(path, data)
     return {"status": "ok", "session": entry}
 
 
@@ -170,14 +170,15 @@ class EndSessionPayload(BaseModel):
 def end_session(payload: EndSessionPayload) -> dict:
     """Mark the latest session as ended and roll up totals."""
     path = _stats_path(payload.project_root)
-    data = _read(path)
-    sessions = data.setdefault("sessions", [])
-    if not sessions:
-        return {"status": "noop"}
-    s = sessions[0]
-    s["ended"] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-    _refresh_session_aggregate(s)
-    _write(path, data)
+    with file_transaction(path):
+        data = _read(path)
+        sessions = data.setdefault("sessions", [])
+        if not sessions:
+            return {"status": "noop"}
+        s = sessions[0]
+        s["ended"] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        _refresh_session_aggregate(s)
+        _write(path, data)
     return {"status": "ok", "session": s}
 
 
