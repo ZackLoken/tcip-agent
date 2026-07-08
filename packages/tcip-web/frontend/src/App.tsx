@@ -122,19 +122,19 @@ function App() {
   return (
     <div className="h-full flex flex-col bg-tcip-bg text-tcip-fg">
       <TopBar />
-      {datasetReady ? (
-        <ErrorBoundary resetKey={activeTab}>
-          {activeTab === "annotate" && <AnnotateTab />}
-          {activeTab === "review" && <ReviewTab />}
-          {activeTab === "training" && <TrainingTab />}
-          {activeTab === "tuning" && <TuningTab />}
-          {activeTab === "inference" && <InferenceTab />}
-          {activeTab === "results" && <ResultsTab />}
-          {activeTab === "meta" && <MetaTab />}
-        </ErrorBoundary>
-      ) : (
-        <DatasetPicker />
-      )}
+      {/* Only Annotate / Review / Results need an imagery dataset+date; the rest
+          (Training / Tuning / Inference / Meta) are reachable without one — being
+          forced to pick a dataset just to read agent reports or watch a run was a
+          usability trap. Dataset-dependent tabs show the picker until one is set. */}
+      <ErrorBoundary resetKey={activeTab}>
+        {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <DatasetPicker />)}
+        {activeTab === "review" && (datasetReady ? <ReviewTab /> : <DatasetPicker />)}
+        {activeTab === "results" && (datasetReady ? <ResultsTab /> : <DatasetPicker />)}
+        {activeTab === "training" && <TrainingTab />}
+        {activeTab === "tuning" && <TuningTab />}
+        {activeTab === "inference" && <InferenceTab />}
+        {activeTab === "meta" && <MetaTab />}
+      </ErrorBoundary>
       <StatusBar />
       <HelpOverlay activeTab={activeTab} />
     </div>
