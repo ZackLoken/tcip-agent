@@ -47,11 +47,19 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: packages/tcip-web/frontend
-        run: npm install --no-fund --no-audit
+        run: npm ci --no-fund --no-audit
+
+      - name: Lint
+        working-directory: packages/tcip-web/frontend
+        run: npm run lint
 
       - name: Type check
         working-directory: packages/tcip-web/frontend
         run: npm run typecheck
+
+      - name: Test
+        working-directory: packages/tcip-web/frontend
+        run: npm test
 
       - name: Build
         working-directory: packages/tcip-web/frontend
