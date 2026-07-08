@@ -71,6 +71,7 @@ export function AnnotateTab() {
   const deleteBox = useStore((s) => s.deleteBox);
   const deletePolygon = useStore((s) => s.deletePolygon);
   const updatePolygon = useStore((s) => s.updatePolygon);
+  const dragVertex = useStore((s) => s.dragVertex);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const setCurrentPolygon = useStore((s) => s.setCurrentPolygon);
@@ -94,6 +95,22 @@ export function AnnotateTab() {
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
 
+  // I/O safety. The canvas belongs to exactly the image last loaded from disk:
+  //  - loadedPathsRef: the (image, det, seg) the current boxes/polygons came from.
+  //    save() writes THERE — never to paths recomputed from a since-changed dataset,
+  //    which is how the old code could write one image's boxes onto another's file.
+  //  - loadedKeyRef: gates reloads to a genuine image-identity change, so unrelated
+  //    store updates (a WS snapshot, a mode/class toggle) don't re-read disk and
+  //    clobber unsaved edits.
+  //  - saveBlocked: set when a load failed, so a blank canvas can't overwrite the
+  //    labels still on disk.
+  const loadedKeyRef = useRef<string | null>(null);
+  const loadedPathsRef = useRef<{ image: string; det: string | null; seg: string | null } | null>(
+    null,
+  );
+  const [ioError, setIoError] = useState<string | null>(null);
+  const [saveBlocked, setSaveBlocked] = useState(false);
+
   const imgPath = currentImagePath(dataset);
   const currentImageName =
     dataset.image_list[dataset.current_image_index] ?? null;
@@ -111,74 +128,107 @@ export function AnnotateTab() {
 
   // ── Label load + save ───────────────────────────────────────────────
 
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      if (!imgPath) return;
-      const name = dataset.image_list[dataset.current_image_index];
-      const stem = name.replace(/\.[^.]+$/, "");
-      const det = dataset.annotations_detect_dir
-        ? `${dataset.annotations_detect_dir}/${stem}.txt`
-        : null;
-      const seg = dataset.annotations_segment_dir
-        ? `${dataset.annotations_segment_dir}/${stem}.txt`
-        : null;
-      try {
-        const labels = await api.annotate.load(imgPath, det, seg);
-        if (!cancelled) {
-          loadLabels(labels);
-          startImageSessionTracking(name, labels.boxes.length + labels.polygons.length);
-        }
-      } catch {
-        if (!cancelled) {
-          loadLabels({
-            image_path: imgPath,
-            img_width: 0,
-            img_height: 0,
-            boxes: [],
-            polygons: [],
-          });
-          startImageSessionTracking(name, 0);
+  // Save the current canvas to the paths it was actually loaded from. Reads the
+  // live store + refs (not render closures), so it stays correct even when called
+  // from an effect while the app is mid-transition to another image.
+  async function save() {
+    const paths = loadedPathsRef.current;
+    if (!paths) return; // no confirmed load → refuse to overwrite on-disk labels
+    const c = useStore.getState().canvas;
+    if (!c.dirty) return;
+    try {
+      await api.annotate.save({
+        image_path: paths.image,
+        detect_path: paths.det,
+        segment_path: paths.seg,
+        boxes: c.boxes,
+        polygons: c.polygons,
+      });
+    } catch {
+      setIoError("Could not save annotations — your edits are kept in the editor; press Save to retry.");
+      return;
+    }
+    markClean();
+    setIoError(null);
+
+    // Update per-image status unless it is pinned Complete. An empty save is a
+    // confirmed negative (the 0-byte label file is preserved on disk), distinct
+    // from an image that was never annotated.
+    const name = paths.image.split(/[/\\]/).pop() ?? "";
+    const projectRoot = useStore.getState().gui.dataset.project_root;
+    if (projectRoot && name) {
+      const current = useStore.getState().imageStatus.byImage[name];
+      if (current !== "complete") {
+        const newStatus = c.boxes.length + c.polygons.length > 0 ? "partial" : "negative";
+        if (current !== newStatus) {
+          setImageStatus(name, newStatus);
+          void classesApi.setImageStatus(projectRoot, name, newStatus);
         }
       }
     }
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [imgPath, dataset, loadLabels, startImageSessionTracking]);
+  }
 
-  async function save() {
-    if (!imgPath || !canvas.dirty) return;
-    const name = dataset.image_list[dataset.current_image_index];
-    const stem = name.replace(/\.[^.]+$/, "");
+  // Flush telemetry + any unsaved edits for the image being left, using the paths
+  // that canvas belongs to. Called before loading a different image and on unmount.
+  function flushLeaving() {
+    const leaving = useStore.getState().sessionTracking.currentImageName;
+    if (leaving) emitImageSessionEvent(leaving);
+    void save();
+  }
+
+  useEffect(() => {
+    if (!imgPath || !currentImageName) return;
+    const stem = currentImageName.replace(/\.[^.]+$/, "");
     const det = dataset.annotations_detect_dir
       ? `${dataset.annotations_detect_dir}/${stem}.txt`
       : null;
     const seg = dataset.annotations_segment_dir
       ? `${dataset.annotations_segment_dir}/${stem}.txt`
       : null;
-    await api.annotate.save({
-      image_path: imgPath,
-      detect_path: det,
-      segment_path: seg,
-      boxes: canvas.boxes,
-      polygons: canvas.polygons,
-    });
-    markClean();
+    const key = `${imgPath} ${det ?? ""} ${seg ?? ""}`;
 
-    // Update image status to "partial" or "unannotated" unless marked complete.
-    if (dataset.project_root && name) {
-      const current = imageStatus.byImage[name];
-      if (current !== "complete") {
-        const newStatus = canvas.boxes.length + canvas.polygons.length > 0 ? "partial" : "unannotated";
-        if (current !== newStatus) {
-          setImageStatus(name, newStatus);
-          void classesApi.setImageStatus(dataset.project_root, name, newStatus);
-        }
+    // Already displaying this exact image + label target. Ignore — this is what
+    // stops an unrelated store change (a WS state snapshot, a mode/class toggle,
+    // any patchGui that swaps the dataset object) from re-reading disk and
+    // discarding unsaved canvas edits.
+    if (loadedKeyRef.current === key) return;
+
+    // Switching images: flush the previous image's work first (to the paths it
+    // belongs to), then load the new one.
+    flushLeaving();
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const labels = await api.annotate.load(imgPath, det, seg);
+        if (cancelled) return;
+        loadLabels(labels);
+        loadedKeyRef.current = key;
+        loadedPathsRef.current = { image: imgPath, det, seg };
+        setSaveBlocked(false);
+        setIoError(null);
+        startImageSessionTracking(currentImageName, labels.boxes.length + labels.polygons.length);
+      } catch {
+        if (cancelled) return;
+        // Show a blank canvas but BLOCK saving so a transient load failure can't
+        // let an empty canvas overwrite the labels still on disk.
+        loadLabels({ image_path: imgPath, img_width: 0, img_height: 0, boxes: [], polygons: [] });
+        loadedKeyRef.current = key;
+        loadedPathsRef.current = null;
+        setSaveBlocked(true);
+        setIoError(
+          "Could not load this image's labels — saving is disabled to avoid overwriting the labels on disk.",
+        );
+        startImageSessionTracking(currentImageName, 0);
       }
-    }
-  }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Keyed on image identity + label dirs only (see loadedKeyRef guard); save /
+    // loadLabels / tracking actions are stable or ref-based.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imgPath, currentImageName, dataset.annotations_detect_dir, dataset.annotations_segment_dir]);
 
   function emitImageSessionEvent(imageName: string) {
     const state = useStore.getState();
@@ -213,19 +263,14 @@ export function AnnotateTab() {
     if (commitCurrentPolygon()) incrementAnnotationsAdded(1);
   }
 
-  // Auto-save + telemetry flush on image change and tab leave.
-  const dirtyRef = useRef(canvas.dirty);
-  dirtyRef.current = canvas.dirty;
+  // Flush telemetry + any unsaved edits when the tab unmounts (e.g. switching to
+  // another tab). Image-to-image flushing is handled by the load effect above.
   useEffect(() => {
     return () => {
-      if (!currentImageName) return;
-      emitImageSessionEvent(currentImageName);
-      if (dirtyRef.current) {
-        void save();
-      }
+      flushLeaving();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentImageName]);
+  }, []);
 
   function stepImage(delta: number) {
     if (!dataset.image_list.length) return;
@@ -235,7 +280,8 @@ export function AnnotateTab() {
     nextPos = Math.max(0, Math.min(indices.length - 1, nextPos));
     const next = indices[nextPos];
     if (next === dataset.current_image_index) return;
-    if (canvas.dirty) void save();
+    // The label-load effect flushes the current image (save + telemetry) when the
+    // index changes, so no explicit save is needed here.
     patchGui({ dataset: { ...dataset, current_image_index: next } });
     setPredReference(null);
     selectPolygon(null);
@@ -323,6 +369,9 @@ export function AnnotateTab() {
       for (let vi = 0; vi < poly.points.length; vi++) {
         const [px, py] = poly.points[vi];
         if (Math.hypot(px - ix, py - iy) < vertThr) {
+          // Capture undo once at drag start; the drag itself uses dragVertex (no
+          // per-mousemove undo push, which would otherwise flood the 30-entry stack).
+          pushUndo();
           useStore.getState().setDraggingVertex([pi, vi]);
           return;
         }
@@ -371,9 +420,7 @@ export function AnnotateTab() {
           Math.max(0, Math.min(canvas.imgWidth || sx, sx)),
           Math.max(0, Math.min(canvas.imgHeight || sy, sy)),
         ];
-        const newPts = poly.points.slice();
-        newPts[vi] = clamped;
-        updatePolygon(pi, { ...poly, points: newPts });
+        dragVertex(pi, vi, clamped); // no per-move undo push (see onDown drag start)
       }
       return;
     }
@@ -636,6 +683,12 @@ export function AnnotateTab() {
           {predRef && <PredReferenceOverlay pred={predRef} lineW={scaleLineW} />}
         </CanvasStage>
 
+        {ioError && (
+          <div className="absolute top-3 left-3 right-3 rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-3 py-1.5 text-[11px] text-tcip-fp">
+            {ioError}
+          </div>
+        )}
+
         {isLocked && (
           <div className="absolute top-3 right-3 rounded-md border border-tcip-border bg-tcip-panel/95 px-2 py-1 text-[11px] text-tcip-muted pointer-events-none">
             Locked (Complete). Uncheck Complete to edit.
@@ -667,7 +720,7 @@ export function AnnotateTab() {
         <button
           className={canvas.dirty ? "tcip-btn-primary" : "tcip-btn"}
           onClick={() => void save()}
-          disabled={!imgPath || isLocked}
+          disabled={!imgPath || isLocked || saveBlocked}
           title="Ctrl+S (auto-save on image change)"
         >
           {canvas.dirty ? "💾 Save" : "Saved"}
