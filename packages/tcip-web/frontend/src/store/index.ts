@@ -41,15 +41,10 @@ const DEFAULT_STATE: GuiState = {
   active_tab: "annotate",
   dataset: DEFAULT_DATASET,
   view: { scale: 1, offset_x: 0, offset_y: 0 },
-  class_names: { 0: "catkin" },
-  class_colors: { 0: "#4CAF50" },
   mode: "box",
   active_class: 0,
   review: DEFAULT_REVIEW,
   pred_reference: null,
-  training_runs: [],
-  active_run_id: null,
-  inference_jobs: [],
 };
 
 /**
@@ -137,6 +132,8 @@ export interface AppState {
   /** Server-synchronized state (mirrors backend GuiState). */
   gui: GuiState;
   wsStatus: "disconnected" | "connecting" | "connected" | "error";
+  /** Highest backend state version applied — used to drop stale snapshot replays. */
+  wsVersion: number;
 
   /** Canvas-local draft state (not persisted until save). */
   canvas: CanvasState;
@@ -153,6 +150,13 @@ export interface AppState {
   /** Setters. */
   setGui: (next: GuiState) => void;
   patchGui: (partial: Partial<GuiState>) => void;
+  /**
+   * Apply a backend state snapshot with ownership-aware merge (NOT a wholesale
+   * replace, which used to clobber unsaved edits, the active tab, and the scroll
+   * position). Backend owns the dataset selection; the browser owns
+   * navigation/view/mode/class/review-filter state and keeps its own copy.
+   */
+  mergeSnapshot: (state: GuiState, version: number | null) => void;
   setWsStatus: (s: AppState["wsStatus"]) => void;
   setActiveTab: (tab: TabName) => void;
   setView: (view: ViewState) => void;
@@ -228,6 +232,7 @@ function snapshot(c: CanvasState) {
 export const useStore = create<AppState>()((set, get) => ({
   gui: DEFAULT_STATE,
   wsStatus: "disconnected",
+  wsVersion: 0,
   canvas: EMPTY_CANVAS,
   review: { matches: null, loading: false },
   classes: { list: [], loaded: false },
@@ -243,6 +248,52 @@ export const useStore = create<AppState>()((set, get) => ({
 
   setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
+
+  mergeSnapshot: (incoming, version) =>
+    set((s) => {
+      // Drop a stale replay (older backend version than one already applied) —
+      // e.g. a reconnecting socket resending an old snapshot.
+      if (version != null && version < s.wsVersion) return s;
+      const nextVersion = version != null ? Math.max(s.wsVersion, version) : s.wsVersion;
+      const local = s.gui;
+      const inDs = incoming.dataset;
+
+      // A null/empty backend dataset must never clobber a populated client one:
+      // this is what lets the browser survive a backend restart (the restarted
+      // backend broadcasts an empty state before it knows the project).
+      if (!inDs || !inDs.dataset_root) {
+        return { wsVersion: nextVersion };
+      }
+
+      const identityChanged =
+        inDs.dataset_root !== local.dataset.dataset_root ||
+        inDs.date !== local.dataset.date ||
+        inDs.annotation_type !== local.dataset.annotation_type;
+
+      if (identityChanged) {
+        // New dataset selection: adopt it wholesale (including its index) and drop
+        // any stale prediction-reference overlay. The active tab stays put.
+        return { gui: { ...local, dataset: inDs, pred_reference: null }, wsVersion: nextVersion };
+      }
+      // Same dataset: accept backend-owned dataset fields (e.g. a changed model's
+      // prediction dirs) but keep the user's navigation position AND the local
+      // image_list reference (same identity => same list; reusing the ref avoids
+      // spuriously re-firing effects keyed on it, like class/status hydration).
+      // Everything else (active_tab / mode / active_class / view / review /
+      // pred_reference) is client-owned — keep local.
+      return {
+        gui: {
+          ...local,
+          dataset: {
+            ...inDs,
+            image_list: local.dataset.image_list,
+            current_image_index: local.dataset.current_image_index,
+          },
+        },
+        wsVersion: nextVersion,
+      };
+    }),
+
   setWsStatus: (wsStatus) => set({ wsStatus }),
   setActiveTab: (active_tab) => set((s) => ({ gui: { ...s.gui, active_tab } })),
   setView: (view) => set((s) => ({ gui: { ...s.gui, view } })),
