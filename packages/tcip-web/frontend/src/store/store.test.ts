@@ -59,3 +59,17 @@ describe("canvas store", () => {
     expect(s().canvas.undoStack).toHaveLength(30);
   });
 });
+
+describe("agent activity", () => {
+  it("pushAgentActivity records the event and increments seq", () => {
+    s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" });
+    const first = s().agentActivity;
+    expect(first?.panel).toBe("annotate");
+    expect(first?.eventType).toBe("labels_written");
+    expect(first?.data.stem).toBe("IMG_1");
+
+    s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_2" });
+    expect(s().agentActivity?.seq).toBe((first?.seq ?? 0) + 1);
+    expect(s().agentActivity?.data.stem).toBe("IMG_2");
+  });
+});
