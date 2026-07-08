@@ -8,6 +8,7 @@ backend doesn't have to guess a dataset layout.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -54,6 +55,13 @@ class SavePayload(BaseModel):
     segment_path: Optional[str] = None
     boxes: list[BoxPayload] = []
     polygons: list[PolygonPayload] = []
+    # Project root for the audit trail (optional; skipped if absent).
+    project_root: Optional[str] = None
+    # The label-file mtimes (ns) the client loaded, keyed "detect"/"segment". When
+    # present, a write is rejected (409) if the file changed underneath the client —
+    # a concurrent agent or second browser tab — so its edits aren't clobbered.
+    # Omit to skip the check (backward compatible for non-GUI callers).
+    base_mtimes: Optional[dict[str, Optional[int]]] = None
 
 
 def _image_dims(path: str) -> tuple[int, int]:
@@ -81,6 +89,50 @@ def _guard_label_path(path: Optional[str]) -> None:
         assert_path_allowed(path)
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
+
+
+def _file_mtime_ns(path: Optional[str]) -> Optional[int]:
+    """Modification time (nanoseconds) of a label file, or None if it doesn't exist.
+
+    Integer ns is used (not float seconds) so an unchanged file compares exactly.
+    """
+    if not path:
+        return None
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return None
+
+
+def _audit_gui_write(payload: "SavePayload") -> None:
+    """Append a GUI label-write to the project's audit log, mirroring @audited MCP tools.
+
+    Best-effort and project-scoped (``<project_root>/.tcip/audit.jsonl``); a missing
+    project_root or any I/O error just skips the entry — never fails the save.
+    """
+    if not payload.project_root:
+        return
+    try:
+        from tcip_mcp.utils.atomic_io import append_jsonl
+
+        append_jsonl(
+            os.path.join(payload.project_root, ".tcip", "audit.jsonl"),
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "tool": "gui_save_labels",
+                "source": "gui",
+                "arguments": {
+                    "image_path": payload.image_path,
+                    "detect_path": payload.detect_path,
+                    "segment_path": payload.segment_path,
+                    "n_boxes": len(payload.boxes),
+                    "n_polygons": len(payload.polygons),
+                },
+                "status": "ok",
+            },
+        )
+    except Exception:
+        pass
 
 
 @router.get("/labels")
@@ -118,6 +170,11 @@ def load_labels(
         "img_height": h,
         "boxes": boxes,
         "polygons": polygons,
+        # Version tokens the client echoes back on save for the lost-update guard.
+        "base_mtimes": {
+            "detect": _file_mtime_ns(detect_path),
+            "segment": _file_mtime_ns(segment_path),
+        },
     }
 
 
@@ -132,6 +189,20 @@ def save_labels(payload: SavePayload) -> dict:
     w, h = _image_dims(payload.image_path)
     _guard_label_path(payload.detect_path)
     _guard_label_path(payload.segment_path)
+
+    # Lost-update guard: reject if a label file changed since the client loaded it
+    # (a concurrent agent write or a second browser tab). The client resolves the
+    # 409 by reloading. Omitting base_mtimes skips the check.
+    if payload.base_mtimes is not None:
+        conflicts = [
+            key
+            for key, path in (("detect", payload.detect_path), ("segment", payload.segment_path))
+            if path and _file_mtime_ns(path) != payload.base_mtimes.get(key)
+        ]
+        if conflicts:
+            raise HTTPException(
+                409, {"error": "label file changed since it was loaded", "conflicts": conflicts}
+            )
 
     boxes = [
         BBox(b.x1, b.y1, b.x2, b.y2, class_id=b.class_id)
@@ -157,6 +228,8 @@ def save_labels(payload: SavePayload) -> dict:
         except OSError as exc:
             raise HTTPException(500, f"could not write segment labels: {exc}") from exc
 
+    _audit_gui_write(payload)
+
     return {
         "status": "ok" if ok else "partial",
         "image_path": payload.image_path,
@@ -164,6 +237,11 @@ def save_labels(payload: SavePayload) -> dict:
         "segment_written": payload.segment_path is not None,
         "n_boxes": len(boxes),
         "n_polygons": len(polygons),
+        # New version tokens so the client can save again without a reload.
+        "base_mtimes": {
+            "detect": _file_mtime_ns(payload.detect_path),
+            "segment": _file_mtime_ns(payload.segment_path),
+        },
     }
 
 
