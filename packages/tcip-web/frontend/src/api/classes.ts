@@ -6,7 +6,10 @@ export interface ClassEntry {
   color: string;
 }
 
-export type ImageStatus = "complete" | "partial" | "unannotated";
+// "negative" = the annotator reviewed the image and recorded no objects (an empty
+// label file exists on disk = a valid negative), distinct from "unannotated" (no
+// label file — never looked at).
+export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
 export const classesApi = {
   load: (project_root: string) =>
