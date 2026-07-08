@@ -29,7 +29,16 @@ export function useKeyboardShortcuts(shortcuts: Shortcut[]): void {
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       const tgt = e.target as HTMLElement | null;
-      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) {
+      // Ignore keystrokes aimed at a focused form control. SELECT is included so
+      // arrow keys / Delete / digit keys on an open dropdown change the dropdown
+      // value instead of stepping images or mutating annotations.
+      if (
+        tgt &&
+        (tgt.tagName === "INPUT" ||
+          tgt.tagName === "TEXTAREA" ||
+          tgt.tagName === "SELECT" ||
+          tgt.isContentEditable)
+      ) {
         return;
       }
       for (const s of shortcuts) {
