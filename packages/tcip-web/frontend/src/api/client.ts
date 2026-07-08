@@ -35,6 +35,27 @@ function q(params: Record<string, string | number | boolean | null | undefined>)
   return u.toString();
 }
 
+/** Per-file label mtimes (ns) used as optimistic-concurrency version tokens. */
+export interface Mtimes {
+  detect: number | null;
+  segment: number | null;
+}
+
+export type LoadedLabels = ImageLabels & { base_mtimes: Mtimes };
+
+export interface SaveLabelsBody {
+  image_path: string;
+  detect_path?: string | null;
+  segment_path?: string | null;
+  boxes: Box[];
+  polygons: PolygonShape[];
+  project_root?: string | null;
+  /** Echo the loaded mtimes so the backend can 409 a stale (lost-update) write. */
+  base_mtimes?: Mtimes | null;
+}
+
+export type SaveResult = { status: "ok"; base_mtimes: Mtimes } | { status: "conflict" };
+
 export const api = {
   state: (): Promise<GuiState> => call("/api/state"),
 
@@ -76,19 +97,24 @@ export const api = {
 
   annotate: {
     load: (image_path: string, detect_path?: string | null, segment_path?: string | null) =>
-      call<ImageLabels>(`/api/annotate/labels?${q({ image_path, detect_path, segment_path })}`),
+      call<LoadedLabels>(`/api/annotate/labels?${q({ image_path, detect_path, segment_path })}`),
 
-    save: (body: {
-      image_path: string;
-      detect_path?: string | null;
-      segment_path?: string | null;
-      boxes: Box[];
-      polygons: PolygonShape[];
-    }) =>
-      call<{ status: string; n_boxes: number; n_polygons: number }>("/api/annotate/labels", {
+    // Not routed through call(): a 409 (the label file changed underneath the
+    // client) is an expected outcome the caller resolves by reloading, not an error.
+    save: async (body: SaveLabelsBody): Promise<SaveResult> => {
+      const resp = await fetch("/api/annotate/labels", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      }),
+      });
+      if (resp.status === 409) return { status: "conflict" };
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => "");
+        throw new Error(`${resp.status} ${resp.statusText}: ${text}`);
+      }
+      const data = (await resp.json()) as { base_mtimes: Mtimes };
+      return { status: "ok", base_mtimes: data.base_mtimes };
+    },
 
     openImage: (body: {
       image_path: string;
