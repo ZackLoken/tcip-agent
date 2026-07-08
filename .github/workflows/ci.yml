@@ -49,6 +49,10 @@ jobs:
         working-directory: packages/tcip-web/frontend
         run: npm ci --no-fund --no-audit
 
+      - name: Format check
+        working-directory: packages/tcip-web/frontend
+        run: npm run format:check
+
       - name: Lint
         working-directory: packages/tcip-web/frontend
         run: npm run lint
