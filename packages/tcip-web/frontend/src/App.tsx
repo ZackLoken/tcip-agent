@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { classesApi } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { DatasetPicker } from "@/components/DatasetPicker";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { StatusBar } from "@/components/StatusBar";
 import { TopBar } from "@/components/TopBar";
@@ -122,7 +123,7 @@ function App() {
     <div className="h-full flex flex-col bg-tcip-bg text-tcip-fg">
       <TopBar />
       {datasetReady ? (
-        <>
+        <ErrorBoundary resetKey={activeTab}>
           {activeTab === "annotate" && <AnnotateTab />}
           {activeTab === "review" && <ReviewTab />}
           {activeTab === "training" && <TrainingTab />}
@@ -130,7 +131,7 @@ function App() {
           {activeTab === "inference" && <InferenceTab />}
           {activeTab === "results" && <ResultsTab />}
           {activeTab === "meta" && <MetaTab />}
-        </>
+        </ErrorBoundary>
       ) : (
         <DatasetPicker />
       )}
