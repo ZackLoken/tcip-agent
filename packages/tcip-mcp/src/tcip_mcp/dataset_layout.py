@@ -57,6 +57,28 @@ def _date_seg(date: Optional[str]) -> tuple[str, ...]:
     return (date,) if date else ()
 
 
+def image_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
+    """``<dataset_root>/images/[<date>/]`` — where an image's bytes live.
+
+    ``date`` of ``None`` yields the flat ``images/`` form; a date value nests it
+    under that bucket (canonical ISO ``YYYY-MM-DD`` capture-date buckets).
+    """
+    return Path(dataset_root, "images", *_date_seg(date))
+
+
+def image_path(dataset_root: str | Path, date: Optional[str], stem: str, ext: str) -> Path:
+    """Canonical write path for an image (``ext`` includes the leading dot)."""
+    return image_dir(dataset_root, date) / f"{stem}{ext}"
+
+
+def list_dates(dataset_root: str | Path) -> list[str]:
+    """Sorted capture-date bucket names under ``images/`` (ISO ``YYYY-MM-DD``)."""
+    imgs = Path(dataset_root) / "images"
+    if not imgs.is_dir():
+        return []
+    return sorted(p.name for p in imgs.iterdir() if p.is_dir())
+
+
 def annotation_dir(dataset_root: str | Path, trait: Optional[str], date: Optional[str], task: str) -> Path:
     """``<dataset_root>/annotations/<trait>/[<date>/]<task>`` (ground truth)."""
     return Path(dataset_root, "annotations", trait or DEFAULT_TRAIT, *_date_seg(date), task)
