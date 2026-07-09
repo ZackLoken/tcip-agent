@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,6 +17,41 @@ from tcip_web.paths import safe_join
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/training", tags=["training"])
+
+# Runs live in-memory in the trainer (`_RUNS`); they vanish on a backend restart. We
+# mirror the inference/HPO jobstore pattern: persist slim run summaries on every list
+# call and rehydrate them as historical stubs on startup, so the GUI still shows past
+# runs. Live runs (from the trainer) always win over a historical stub by run_id.
+_historical_runs: list[dict] = []
+
+
+def _run_summary(run: dict) -> dict:
+    """Slim a trainer run dict to the fields the GUI shows (drops metrics_history).
+
+    ``best_metric`` defaults to +inf for a not-yet-scored run; JSON can't round-trip a
+    non-finite float portably, so it is stored as null.
+    """
+    bm = run.get("best_metric")
+    if isinstance(bm, float) and not math.isfinite(bm):
+        bm = None
+    return {
+        "run_id": run.get("run_id"),
+        "status": run.get("status"),
+        "current_epoch": run.get("current_epoch"),
+        "best_metric": bm,
+    }
+
+
+def rehydrate() -> None:
+    """Load persisted run summaries after a restart; mark dead non-terminal runs interrupted."""
+    from tcip_web import jobstore
+
+    global _historical_runs
+    hist = jobstore.load("training_runs")
+    for s in hist:
+        if s.get("status") not in jobstore.TERMINAL_STATUSES:
+            s["status"] = "interrupted"
+    _historical_runs = hist
 
 
 def _metrics_path(project_root: str, run_id: str) -> Path:
@@ -56,8 +92,14 @@ def launch_training_route(payload: LaunchPayload) -> dict:
 @router.get("/runs")
 def list_runs_route() -> dict:
     from tcip_mcp.tools.training_tools import list_training_runs
+    from tcip_web import jobstore
 
-    return list_training_runs()
+    live = list_training_runs().get("runs", [])
+    live_ids = {r.get("run_id") for r in live}
+    merged = list(live) + [h for h in _historical_runs if h.get("run_id") not in live_ids]
+    # Persist the merged view (live wins) so history survives the next restart.
+    jobstore.persist("training_runs", [_run_summary(r) for r in merged])
+    return {"runs": merged}
 
 
 @router.get("/runs/{run_id}")
@@ -65,6 +107,21 @@ def get_run(run_id: str) -> dict:
     from tcip_mcp.tools.training_tools import check_training_status
 
     return check_training_status(run_id)
+
+
+@router.post("/runs/{run_id}/cancel")
+def cancel_run_route(run_id: str) -> dict:
+    """Request graceful cancellation of a running run (stops at the next batch boundary).
+
+    Wraps the ``cancel_training`` MCP tool — the trainer still writes ``model_final.pt``
+    so partial progress is recoverable. Status flips to 'cancelled' asynchronously.
+    """
+    from tcip_mcp.tools.training_tools import cancel_training
+
+    result = cancel_training(run_id)
+    if result.get("error"):
+        raise HTTPException(404, result["error"])
+    return result
 
 
 @router.get("/runs/{run_id}/metrics")
@@ -161,12 +218,16 @@ async def _stream_metrics(
         for row in rows:
             await ws.send_json({"type": "metric", "run_id": run_id, "row": row})
 
-        # Has the run finished?
+        # Has the run finished (or gone away)?
         try:
             from tcip_mcp.tools.training_tools import check_training_status
+            from tcip_web import jobstore
 
             status = check_training_status(run_id)
-            if status.get("status") in ("completed", "failed", "not_found"):
+            # ``error`` => unknown run (e.g. streamed after a restart); a cancelled run
+            # never reaches completed/failed. Either way, terminate — the prior check
+            # keyed only on completed/failed/"not_found" and spun forever on both.
+            if status.get("error") or status.get("status") in jobstore.TERMINAL_STATUSES:
                 await ws.send_json({"type": "status", "run_id": run_id, "status": status})
                 break
         except Exception:
