@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,26 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="TCIP Pipeline", version="0.1.0")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Rehydrate persisted job/sweep/run registries so GUI history survives a restart.
+
+    Their worker threads don't survive, so rehydrated non-terminal entries surface as
+    'interrupted' — a record, not a resumable job (see ``jobstore``).
+    """
+    try:
+        from tcip_web.routes import inference, training, tuning
+
+        inference.rehydrate()
+        tuning.rehydrate()
+        training.rehydrate()
+    except Exception:  # pragma: no cover - rehydrate is best-effort
+        logger.exception("job registry rehydrate failed")
+    yield
+
+
+app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 
 # CORS is not enabled by default — browser is expected to hit the same origin
 # via the Vite dev proxy. If we ever serve the frontend elsewhere, add
