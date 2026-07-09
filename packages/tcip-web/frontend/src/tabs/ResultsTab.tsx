@@ -31,8 +31,10 @@ interface DateRow {
 function dateKey(date: string): number {
   const parts = date.split("-");
   if (parts.length !== 3) return 0;
+  // Match the backend _date_key (Python int()): reject junk-suffixed parts like "15b"
+  // so the chart's date order agrees with the server-computed onset ordering.
+  if (!parts.every((p) => /^\d+$/.test(p))) return 0;
   const [y, m, d] = parts.map((x) => parseInt(x, 10));
-  if ([y, m, d].some((n) => Number.isNaN(n))) return 0;
   return y * 10000 + m * 100 + d;
 }
 
