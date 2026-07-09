@@ -20,34 +20,14 @@ from tcip_annotation.format_io import (
 )
 from tcip_annotation.utils import get_image_dimensions
 
+from tcip_mcp.dataset_layout import (
+    DEFAULT_TRAIT,
+    annotation_path_for_image,
+    find_gt_label,
+    find_prediction,
+)
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-
-
-def _find_label_path(root: Path, stem: str, task: str = "detect", fmt: str | None = None) -> Path | None:
-    """Find a label file for the given image stem in any supported format."""
-    subdir = "detect" if task == "detect" else "segment"
-    search_dirs = [root / "labels" / subdir, root / "labels"]
-
-    # If format is specified, search for matching extension first
-    fmt_ext_map = {"yolo": ".txt", "voc": ".xml", "coco": ".json", "labelme": ".json"}
-    if fmt and fmt in fmt_ext_map:
-        preferred_ext = fmt_ext_map[fmt]
-        for d in search_dirs:
-            if not d.is_dir():
-                continue
-            candidate = d / f"{stem}{preferred_ext}"
-            if candidate.is_file():
-                return candidate
-
-    for d in search_dirs:
-        if not d.is_dir():
-            continue
-        for ext in (".txt", ".xml", ".json"):
-            candidate = d / f"{stem}{ext}"
-            if candidate.is_file():
-                return candidate
-    return None
 
 
 @mcp.tool()
@@ -67,13 +47,11 @@ def load_annotations(image_path: str, fmt: str | None = None) -> dict:
         return {"error": f"Image not found: {image_path}"}
 
     w, h = get_image_dimensions(image_path)
-    stem = img.stem
-    root = img.parent.parent  # e.g. data/ if images are in data/images/
 
     result: dict = {"image": image_path, "width": w, "height": h}
 
     # Find and load detection labels
-    det_path = _find_label_path(root, stem, "detect", fmt=fmt)
+    det_path = find_gt_label(image_path, "detect", fmt=fmt)
     if det_path is not None:
         if fmt:
             file_fmt, confident = fmt, True
@@ -98,7 +76,7 @@ def load_annotations(image_path: str, fmt: str | None = None) -> dict:
             )
 
     # Find and load segment labels
-    seg_path = _find_label_path(root, stem, "segment", fmt=fmt)
+    seg_path = find_gt_label(image_path, "segment", fmt=fmt)
     if seg_path is not None:
         if fmt:
             file_fmt, confident = fmt, True
@@ -119,34 +97,30 @@ def load_annotations(image_path: str, fmt: str | None = None) -> dict:
             )
 
     # Look for predictions (YOLO format — predictions are always YOLO)
-    for pred_dir in (root / "predictions" / "detect",):
-        txt = pred_dir / f"{stem}.txt"
-        if txt.is_file():
-            pred_boxes, class_ids = parse_detect_predictions(str(txt), w, h)
-            result["detect_predictions"] = {
-                "path": str(txt),
-                "count": len(pred_boxes),
-                "class_ids": sorted(class_ids),
-                "boxes": [
-                    {
-                        "x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
-                        "class_id": b.class_id, "confidence": b.confidence,
-                    }
-                    for b in pred_boxes
-                ],
-            }
-            break
+    pred_det = find_prediction(image_path, "detect", fmt="yolo")
+    if pred_det is not None:
+        pred_boxes, class_ids = parse_detect_predictions(str(pred_det), w, h)
+        result["detect_predictions"] = {
+            "path": str(pred_det),
+            "count": len(pred_boxes),
+            "class_ids": sorted(class_ids),
+            "boxes": [
+                {
+                    "x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
+                    "class_id": b.class_id, "confidence": b.confidence,
+                }
+                for b in pred_boxes
+            ],
+        }
 
-    for pred_dir in (root / "predictions" / "segment",):
-        txt = pred_dir / f"{stem}.txt"
-        if txt.is_file():
-            pred_polys, class_ids = parse_segment_predictions(str(txt), w, h)
-            result["segment_predictions"] = {
-                "path": str(txt),
-                "count": len(pred_polys),
-                "class_ids": sorted(class_ids),
-            }
-            break
+    pred_seg = find_prediction(image_path, "segment", fmt="yolo")
+    if pred_seg is not None:
+        pred_polys, class_ids = parse_segment_predictions(str(pred_seg), w, h)
+        result["segment_predictions"] = {
+            "path": str(pred_seg),
+            "count": len(pred_polys),
+            "class_ids": sorted(class_ids),
+        }
 
     return result
 
@@ -158,16 +132,28 @@ def save_annotations(
     boxes: list[dict] | None = None,
     polygons: list[dict] | None = None,
     fmt: str = "yolo",
+    trait: str = DEFAULT_TRAIT,
+    date: str | None = None,
+    detect_path: str | None = None,
+    segment_path: str | None = None,
 ) -> dict:
-    """Write annotation label files for an image.
+    """Write annotation label files for an image into the canonical dataset layout.
 
-    Supports YOLO (.txt), PASCAL VOC (.xml), and LabelMe (.json).
+    Labels go to ``<dataset_root>/annotations/<trait>/<date>/<task>/<stem>.<ext>``
+    (see :mod:`tcip_mcp.dataset_layout`); ``date`` is derived from the image path
+    (``images/<date>/<stem>``) when not given. Pass ``detect_path`` / ``segment_path``
+    to write to an explicit location instead. Supports YOLO (.txt), PASCAL VOC (.xml),
+    and LabelMe (.json).
 
     Args:
         image_path: Absolute path to the image file.
         boxes: List of dicts with x1, y1, x2, y2, class_id (pixel coords).
         polygons: List of dicts with points and class_id (pixel coords).
         fmt: Output format — 'yolo' (default), 'voc', 'labelme', 'coco'.
+        trait: Annotation campaign (e.g. 'catkin') — the layout's ``<trait>`` segment.
+        date: Capture date; derived from the image path when omitted.
+        detect_path: Explicit detect label path (overrides the canonical location).
+        segment_path: Explicit segment label path (overrides the canonical location).
     """
     img = Path(image_path)
     if not img.is_file():
@@ -175,18 +161,17 @@ def save_annotations(
 
     w, h = get_image_dimensions(image_path)
     stem = img.stem
-    root = img.parent.parent
-
-    ext_map = {"yolo": ".txt", "voc": ".xml", "labelme": ".json", "coco": ".json"}
-    ext = ext_map.get(fmt, ".txt")
 
     written: list[str] = []
 
     if boxes is not None:
         typed_boxes = [BBox(x1=b["x1"], y1=b["y1"], x2=b["x2"], y2=b["y2"], class_id=b["class_id"]) for b in boxes]
-        out_dir = root / "labels" / "detect"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{stem}{ext}"
+        out_path = (
+            Path(detect_path)
+            if detect_path
+            else annotation_path_for_image(image_path, "detect", fmt, trait=trait, date=date)
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         format_save(str(out_path), typed_boxes, w, h, task="detect", fmt=fmt, file_name=img.name)
         written.append(str(out_path))
 
@@ -195,9 +180,12 @@ def save_annotations(
             Polygon(points=[(pt[0], pt[1]) for pt in p["points"]], class_id=p["class_id"])
             for p in polygons
         ]
-        out_dir = root / "labels" / "segment"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{stem}{ext}"
+        out_path = (
+            Path(segment_path)
+            if segment_path
+            else annotation_path_for_image(image_path, "segment", fmt, trait=trait, date=date)
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         format_save(str(out_path), typed_polys, w, h, task="segment", fmt=fmt, file_name=img.name)
         written.append(str(out_path))
 
@@ -210,7 +198,13 @@ def save_annotations(
             post_panel_event(
                 "annotate",
                 "labels_written",
-                {"image_path": image_path, "stem": stem, "written": written, "count": len(written)},
+                {
+                    "image_path": image_path,
+                    "stem": stem,
+                    "trait": trait,
+                    "written": written,
+                    "count": len(written),
+                },
             )
         except Exception:
             pass
@@ -230,25 +224,22 @@ def _load_image_annotations(image_path: str):
     if not img.is_file():
         return None
     w, h = get_image_dimensions(image_path)
-    stem = img.stem
-    root = img.parent.parent
-
     gt_boxes: list[BBox] = []
     gt_polys: list[Polygon] = []
     pred_boxes: list = []
     pred_polys: list = []
 
-    detect_label = root / "labels" / "detect" / f"{stem}.txt"
-    if detect_label.is_file():
+    detect_label = find_gt_label(image_path, "detect", fmt="yolo")
+    if detect_label:
         gt_boxes, _ = parse_detect_labels(str(detect_label), w, h)
-    segment_label = root / "labels" / "segment" / f"{stem}.txt"
-    if segment_label.is_file():
+    segment_label = find_gt_label(image_path, "segment", fmt="yolo")
+    if segment_label:
         gt_polys, _ = parse_segment_labels(str(segment_label), w, h)
-    detect_pred = root / "predictions" / "detect" / f"{stem}.txt"
-    if detect_pred.is_file():
+    detect_pred = find_prediction(image_path, "detect", fmt="yolo")
+    if detect_pred:
         pred_boxes, _ = parse_detect_predictions(str(detect_pred), w, h)
-    segment_pred = root / "predictions" / "segment" / f"{stem}.txt"
-    if segment_pred.is_file():
+    segment_pred = find_prediction(image_path, "segment", fmt="yolo")
+    if segment_pred:
         pred_polys, _ = parse_segment_predictions(str(segment_pred), w, h)
 
     iou_type, record = records_from_annotation(gt_boxes, gt_polys, pred_boxes, pred_polys, width=w, height=h)
@@ -320,7 +311,10 @@ def evaluate_dataset(
         images_dir = root
 
     image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-    images = sorted(f for f in images_dir.iterdir() if f.suffix.lower() in image_exts)
+    # Recurse to catch the canonical images/<date>/ layout.
+    images = sorted(
+        f for f in images_dir.rglob("*") if f.is_file() and f.suffix.lower() in image_exts
+    )
 
     from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics, records_from_annotation
 
@@ -486,21 +480,22 @@ def run_matching(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    root = img.parent.parent
-
     # Get image dimensions
     img_w, img_h = get_image_dimensions(image_path)
 
-    stem = img.stem
-    gt_det = str(root / "labels" / "detect" / f"{stem}.txt")
-    gt_seg = str(root / "labels" / "segment" / f"{stem}.txt")
-    pred_det = str(root / "predictions" / "detect" / f"{stem}.txt")
-    pred_seg = str(root / "predictions" / "segment" / f"{stem}.txt")
+    gt_det = find_gt_label(image_path, "detect", fmt="yolo")
+    gt_seg = find_gt_label(image_path, "segment", fmt="yolo")
+    pred_det = find_prediction(image_path, "detect", fmt="yolo")
+    pred_seg = find_prediction(image_path, "segment", fmt="yolo")
 
-    gt_boxes, _ = parse_detect_labels(gt_det, img_w, img_h)
-    gt_polys, _ = parse_segment_labels(gt_seg, img_w, img_h)
-    pred_boxes, _ = parse_detect_predictions(pred_det, img_w, img_h)
-    pred_polys, _ = parse_segment_predictions(pred_seg, img_w, img_h)
+    gt_boxes, _ = parse_detect_labels(str(gt_det), img_w, img_h) if gt_det else ([], set())
+    gt_polys, _ = parse_segment_labels(str(gt_seg), img_w, img_h) if gt_seg else ([], set())
+    pred_boxes, _ = (
+        parse_detect_predictions(str(pred_det), img_w, img_h) if pred_det else ([], set())
+    )
+    pred_polys, _ = (
+        parse_segment_predictions(str(pred_seg), img_w, img_h) if pred_seg else ([], set())
+    )
 
     matches = compute_matches(gt_boxes, gt_polys, pred_boxes, pred_polys,
                               iou_threshold, conf_threshold)
