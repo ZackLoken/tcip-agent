@@ -106,6 +106,10 @@ export function openInferenceStream(
   };
 }
 
+export interface PlantMappingSummary {
+  [date: string]: { n_images: number; n_mapped: number; avg_distance_m: number };
+}
+
 export interface PerPlantRow {
   plant_id: string;
   accession: string | null;
@@ -137,10 +141,14 @@ export const resultsApi = {
     dates?: string[];
     nn_tolerance_m?: number;
     persist_path?: string;
-  }) => postJson<unknown>("/api/results/plant_mapping/build", body),
+  }) =>
+    postJson<{ summary: PlantMappingSummary; mapping: unknown }>(
+      "/api/results/plant_mapping/build",
+      body,
+    ),
 
   loadPlantMapping: (persist_path: string) =>
-    postJson<unknown>("/api/results/plant_mapping/load", { persist_path }),
+    postJson<{ mapping: unknown }>("/api/results/plant_mapping/load", { persist_path }),
 
   perPlantCurves: (body: {
     project_root: string;
