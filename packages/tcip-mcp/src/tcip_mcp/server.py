@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 # Non-torch tools always load; torch-dependent tools load when torch is available.
 import tcip_mcp.tools.data_tools  # noqa: F401, E402
 import tcip_mcp.tools.project_tools  # noqa: F401, E402
+import tcip_mcp.tools.ingest_tools  # noqa: F401, E402
 import tcip_mcp.tools.experiment_tools  # noqa: F401, E402
 import tcip_mcp.tools.meta_tools  # noqa: F401, E402
 
