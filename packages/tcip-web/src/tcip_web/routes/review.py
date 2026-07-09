@@ -7,6 +7,9 @@ persisted via the engine to ``<project_root>/.tcip/state/review_stats.json``.
 
 from __future__ import annotations
 
+import logging
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -29,7 +32,10 @@ from tcip_annotation import (
     parse_segment_predictions,
 )
 from tcip_annotation.utils import auto_orient_image
+from tcip_mcp.utils.atomic_io import append_jsonl, read_json
 from tcip_web.paths import assert_path_allowed
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/review", tags=["review"])
 
@@ -39,14 +45,74 @@ router = APIRouter(prefix="/api/review", tags=["review"])
 _engines: dict[str, ReviewEngine] = {}
 
 
-def _get_engine(project_root: str, class_names: Optional[dict[int, str]] = None) -> ReviewEngine:
+def _load_class_names(project_root: str) -> dict[int, str]:
+    """Read id→name from ``<project_root>/.tcip/state/classes.json``.
+
+    Without this the engine records ``class_{id}`` placeholders; loading the real
+    names makes review_stats human-auditable (and refreshes when classes are added).
+    """
+    data = read_json(Path(project_root) / ".tcip" / "state" / "classes.json", default={})
+    names: dict[int, str] = {}
+    if isinstance(data, dict):
+        for k, v in data.items():
+            try:
+                cid = int(k)
+            except (TypeError, ValueError):
+                continue
+            name = v.get("name") if isinstance(v, dict) else None
+            if name:
+                names[cid] = name
+    return names
+
+
+def _current_user() -> str:
+    """Reviewer recorded on every verdict — ``TCIP_REVIEW_USER`` override else the OS user."""
+    user = os.environ.get("TCIP_REVIEW_USER", "").strip()
+    if user:
+        return user
+    try:
+        import getpass
+
+        return getpass.getuser() or "gui"
+    except Exception:
+        return "gui"
+
+
+def _get_engine(project_root: str) -> ReviewEngine:
     key = str(Path(project_root).resolve())
+    class_names = _load_class_names(project_root)
     if key not in _engines:
         state_dir = Path(project_root) / ".tcip" / "state"
-        _engines[key] = ReviewEngine(state_dir=state_dir, class_names=class_names or {})
-    elif class_names:
+        _engines[key] = ReviewEngine(
+            state_dir=state_dir, class_names=class_names, current_user=_current_user()
+        )
+    else:
+        # Refresh names so classes added mid-session appear in newly recorded entries.
         _engines[key].class_names = class_names
     return _engines[key]
+
+
+def _audit(project_root: str, tool: str, arguments: dict) -> None:
+    """Append a GUI review mutation to ``<project_root>/.tcip/audit.jsonl`` (best-effort).
+
+    Review verdicts + GT writes change tracked state, so — like @audited MCP tools and
+    the annotate save path — they belong in the tamper-evident log. Never fails the request.
+    """
+    if not project_root:
+        return
+    try:
+        append_jsonl(
+            os.path.join(project_root, ".tcip", "audit.jsonl"),
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "tool": tool,
+                "source": "gui",
+                "arguments": arguments,
+                "status": "ok",
+            },
+        )
+    except Exception:
+        pass
 
 
 def _image_dims(path: str) -> tuple[int, int]:
@@ -245,11 +311,15 @@ class ActionPayload(BaseModel):
     pred_idx: Optional[int] = None
     bbox: tuple[float, float, float, float]
     action: str  # "accepted" | "rejected" | "edited"
+    # Review thresholds so the route can decide (at the same op point as the GUI) whether
+    # this verdict was the last one and the image should flip to 'completed'.
+    iou_threshold: float = 0.5
+    conf_threshold: float = 0.25
 
 
 @router.post("/action")
 def record_action(payload: ActionPayload) -> dict:
-    """Record a user's accept/reject/edit decision for one detection."""
+    """Record a user's accept/reject/edit decision; auto-complete the image when done."""
     ctx = _load_ctx(
         image_name=payload.image_name,
         image_path=payload.image_path,
@@ -271,7 +341,38 @@ def record_action(payload: ActionPayload) -> dict:
         bbox=payload.bbox,
     )
     engine.record_detection_action(det, ctx, action=payload.action)
-    return {"status": "ok"}
+    # Promote to 'completed' once every detection at these thresholds is reviewed — the
+    # only path by which a GUI review reaches 'completed'.
+    matches = compute_matches(
+        gt_boxes=ctx.gt_boxes,
+        gt_polygons=ctx.gt_polygons,
+        pred_boxes=ctx.pred_boxes,
+        pred_polygons=ctx.pred_polygons,
+        iou_threshold=payload.iou_threshold,
+        conf_threshold=payload.conf_threshold,
+    )
+    engine.check_image_review_complete(payload.image_name, matches)
+    _audit(payload.project_root, "gui_review_action", {
+        "image_name": payload.image_name,
+        "det_type": payload.det_type,
+        "class_id": payload.class_id,
+        "action": payload.action,
+    })
+    return {"status": "ok", "image_status": engine.get_image_review_status(payload.image_name)}
+
+
+class MarkCompletePayload(BaseModel):
+    project_root: str
+    image_name: str
+
+
+@router.post("/mark_complete")
+def mark_complete(payload: MarkCompletePayload) -> dict:
+    """Manually mark an image fully reviewed (covers negatives / bulk-accept cases)."""
+    engine = _get_engine(payload.project_root)
+    engine.mark_image_reviewed(payload.image_name)
+    _audit(payload.project_root, "gui_review_mark_complete", {"image_name": payload.image_name})
+    return {"status": "ok", "image_status": engine.get_image_review_status(payload.image_name)}
 
 
 class BackupPayload(BaseModel):
@@ -331,6 +432,13 @@ def save_gt(payload: SaveGtPayload) -> dict:
         detect_path=payload.detect_path,
         segment_path=payload.segment_path,
     )
+    _audit(payload.project_root, "gui_review_save_gt", {
+        "image_name": payload.image_name,
+        "detect_path": payload.detect_path,
+        "segment_path": payload.segment_path,
+        "n_boxes": len(payload.boxes),
+        "n_polygons": len(payload.polygons),
+    })
     return {"status": "ok" if ok else "partial"}
 
 
