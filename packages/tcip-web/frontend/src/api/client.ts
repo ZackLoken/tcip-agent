@@ -35,6 +35,20 @@ function q(params: Record<string, string | number | boolean | null | undefined>)
   return u.toString();
 }
 
+export interface FsEntry {
+  name: string;
+  path: string;
+  is_dataset_root: boolean;
+}
+
+export interface FsListing {
+  path: string;
+  parent: string | null;
+  is_dataset_root?: boolean;
+  has_tcip?: boolean;
+  entries: FsEntry[];
+}
+
 /** Per-file label mtimes (ns) used as optimistic-concurrency version tokens. */
 export interface Mtimes {
   detect: number | null;
@@ -55,6 +69,14 @@ export interface SaveLabelsBody {
 }
 
 export type SaveResult = { status: "ok"; base_mtimes: Mtimes } | { status: "conflict" };
+
+/**
+ * Cap the width of the image served to the canvas. A 20MP drone frame is ~5500px wide;
+ * capping bounds GPU texture memory + decode time while staying oversampled at fit-zoom
+ * (narrower images are served untouched). It IS a quality/perf tradeoff — at extreme
+ * zoom the image softens. Raise it, or set it undefined (full-res), to tune.
+ */
+export const IMAGE_MAX_WIDTH = 4096;
 
 export const api = {
   state: (): Promise<GuiState> => call("/api/state"),
@@ -84,6 +106,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
+  },
+
+  fs: {
+    // List sub-directories of `path` (omit for the top-level drives/roots view).
+    list: (path?: string) => call<FsListing>(`/api/fs/list?${q({ path })}`),
   },
 
   images: {
