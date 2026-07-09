@@ -188,16 +188,18 @@ def per_plant_curves(payload: PerPlantCurvesPayload) -> dict:
 
 
 def _date_key(date_str: str) -> tuple[int, int, int]:
-    """Parse dates of the form M-D-YY → (year, month, day).
+    """Parse an ISO date (``YYYY-MM-DD``) → ``(year, month, day)`` for chronological sort.
 
-    Valley_Farm folder names use ``M-D-YY`` (e.g. ``3-24-26`` → 2026-03-24).
+    Dates are ISO platform-wide — ingestion buckets images by EXIF capture date into
+    ``images/<YYYY-MM-DD>/``. A malformed value sorts first as ``(0, 0, 0)``.
     """
-    parts = date_str.replace(".", "-").split("-")
+    parts = date_str.split("-")
     if len(parts) != 3:
         return (0, 0, 0)
-    m, d, y = (int(x) for x in parts)
-    if y < 100:
-        y += 2000
+    try:
+        y, m, d = (int(x) for x in parts)
+    except ValueError:
+        return (0, 0, 0)
     return (y, m, d)
 
 
