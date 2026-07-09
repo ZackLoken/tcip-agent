@@ -53,17 +53,15 @@ export function MetaTab() {
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <div className="font-semibold text-[13px]">Agent meta-loop</div>
+        <div className="tcip-heading">Agent meta-loop</div>
         <button className="tcip-btn text-[11px]" onClick={() => void refresh()} disabled={loading}>
-          {loading ? "Loading…" : "Refresh"}
+          {loading ? "Loading…" : <>↻&nbsp;&nbsp;Refresh</>}
         </button>
         {error && <div className="text-[11px] text-tcip-fp">{error}</div>}
       </div>
 
-      <div className="tcip-panel p-3">
-        <div className="text-[12px] text-tcip-muted mb-2">
-          Friction reports — {reports.length} shown
-        </div>
+      <div className="tcip-panel p-4">
+        <div className="tcip-heading mb-3">Friction reports — {reports.length} shown</div>
         {reports.length > 0 ? (
           <div className="flex flex-col gap-2">
             {reports.map((r) => (
@@ -72,7 +70,7 @@ export function MetaTab() {
                 className="border-t border-tcip-border pt-2 first:border-t-0 first:pt-0"
               >
                 <div className="flex items-center gap-2 text-[11px] text-tcip-muted">
-                  <span className="px-1.5 rounded bg-tcip-border text-tcip-fg">
+                  <span className="tcip-badge bg-tcip-border/60 text-tcip-fg">
                     {r.category || "—"}
                   </span>
                   <span className="font-mono">{r.timestamp ?? r.file}</span>
@@ -91,10 +89,8 @@ export function MetaTab() {
         )}
       </div>
 
-      <div className="tcip-panel p-3">
-        <div className="text-[12px] text-tcip-muted mb-2">
-          Retrospectives — {retros.length} shown
-        </div>
+      <div className="tcip-panel p-4">
+        <div className="tcip-heading mb-3">Retrospectives — {retros.length} shown</div>
         {retros.length > 0 ? (
           <div className="flex flex-col gap-3">
             {retros.map((rt) => (
@@ -115,31 +111,32 @@ export function MetaTab() {
         )}
       </div>
 
-      <div className="tcip-panel p-3">
-        <div className="text-[12px] text-tcip-muted mb-2">
-          Annotation sessions — {sessions.length} recorded
-        </div>
+      <div className="tcip-panel p-4">
+        <div className="tcip-heading mb-3">Annotation sessions — {sessions.length} recorded</div>
         {sessions.length > 0 ? (
           <table className="w-full text-[11px]">
-            <thead className="text-tcip-muted text-left">
-              <tr>
-                <th className="py-1 pr-3">Started</th>
-                <th className="pr-3">User</th>
-                <th className="pr-3">Images</th>
-                <th className="pr-3">Annotations</th>
-                <th className="pr-3">Time</th>
-                <th className="pr-3">Avg / annotation</th>
+            <thead>
+              <tr className="border-b border-tcip-border">
+                <th className="tcip-th">Started</th>
+                <th className="tcip-th">User</th>
+                <th className="tcip-th">Images</th>
+                <th className="tcip-th">Annotations</th>
+                <th className="tcip-th">Time</th>
+                <th className="tcip-th">Avg / annotation</th>
               </tr>
             </thead>
             <tbody>
               {sessions.map((s, i) => (
-                <tr key={`${s.started}-${i}`} className="border-t border-tcip-border">
-                  <td className="py-1 font-mono">{s.started}</td>
+                <tr
+                  key={`${s.started}-${i}`}
+                  className="border-t border-tcip-border first:border-t-0"
+                >
+                  <td className="py-1.5 pr-3 font-mono">{s.started}</td>
                   <td className="pr-3">{s.user || "—"}</td>
-                  <td className="pr-3">{s.images_annotated}</td>
-                  <td className="pr-3">{s.total_annotations}</td>
-                  <td className="pr-3">{fmtDuration(s.total_time_seconds)}</td>
-                  <td className="pr-3">
+                  <td className="pr-3 tabular-nums">{s.images_annotated}</td>
+                  <td className="pr-3 tabular-nums">{s.total_annotations}</td>
+                  <td className="pr-3 tabular-nums">{fmtDuration(s.total_time_seconds)}</td>
+                  <td className="pr-3 tabular-nums">
                     {s.avg_seconds_per_annotation ? `${s.avg_seconds_per_annotation}s` : "—"}
                   </td>
                 </tr>
