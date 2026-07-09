@@ -45,9 +45,10 @@ from tcip_mcp.tools.annotation_tools import (
 def project_dir(tmp_path: Path) -> Path:
     """Fully populated TCIP project with images, labels, and predictions."""
     root = tmp_path / "my_project"
-    images = root / "images"
-    labels_det = root / "labels" / "detect"
-    preds_det = root / "predictions" / "detect"
+    date = "2-11-26"
+    images = root / "images" / date
+    labels_det = root / "annotations" / "default" / date / "detect"
+    preds_det = root / "predictions" / "live" / date / "detect"
     for d in (images, labels_det, preds_det):
         d.mkdir(parents=True)
 
@@ -123,7 +124,7 @@ class TestE2EPipeline:
         })
 
         # ── Step 5: Load annotations for one image ───────────────────
-        img_path = str(project_dir / "images" / "img_000.jpg")
+        img_path = str(project_dir / "images" / "2-11-26" / "img_000.jpg")
         ann = load_annotations(img_path)
         assert "error" not in ann
         assert ann["detect_labels"]["count"] >= 2
@@ -140,7 +141,7 @@ class TestE2EPipeline:
         assert len(save_result["written"]) == 1
 
         # Verify file was updated
-        label_path = project_dir / "labels" / "detect" / "img_000.txt"
+        label_path = project_dir / "annotations" / "default" / "2-11-26" / "detect" / "img_000.txt"
         lines = label_path.read_text().strip().splitlines()
         assert len(lines) == 3  # we wrote 3 boxes
 
@@ -229,7 +230,7 @@ class TestE2EPipelineEdgeCases:
         """load_dataset reports unlabelled images correctly."""
         images = tmp_path / "images"
         images.mkdir()
-        labels = tmp_path / "labels" / "detect"
+        labels = tmp_path / "annotations" / "default" / "detect"
         labels.mkdir(parents=True)
 
         # 3 images, only 1 label
@@ -246,7 +247,7 @@ class TestE2EPipelineEdgeCases:
     def test_evaluate_no_predictions(self, tmp_path: Path):
         """evaluate_detections handles images with no predictions."""
         images = tmp_path / "images"
-        labels = tmp_path / "labels" / "detect"
+        labels = tmp_path / "annotations" / "default" / "detect"
         for d in (images, labels):
             d.mkdir(parents=True)
 
@@ -273,4 +274,4 @@ class TestE2EPipelineEdgeCases:
             {"x1": 10, "y1": 10, "x2": 50, "y2": 50, "class_id": 0},
         ])
         assert result["count"] == 1
-        assert (tmp_path / "labels" / "detect" / "new_img.txt").is_file()
+        assert (tmp_path / "annotations" / "default" / "detect" / "new_img.txt").is_file()
