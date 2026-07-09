@@ -73,7 +73,7 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel }: Pr
       className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center"
       onClick={onCancel}
     >
-      <div className="tcip-panel p-5 w-[400px]" onClick={(e) => e.stopPropagation()}>
+      <div className="tcip-panel rounded-lg p-5 w-[400px]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <div className="text-[13px] font-semibold">{title}</div>
           <button className="tcip-btn text-[11px]" onClick={onCancel}>
