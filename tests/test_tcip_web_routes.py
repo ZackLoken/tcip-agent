@@ -465,6 +465,118 @@ def test_review_action_records_real_class_name_and_reviewer(
     assert entry["reviewed_by"]  # non-empty reviewer
 
 
+def test_review_materialize_route(client: TestClient, tmp_path: Path) -> None:
+    from PIL import Image
+
+    project_root = tmp_path / "proj"
+    state_dir = project_root / ".tcip" / "state"
+    state_dir.mkdir(parents=True)
+    src = tmp_path / "src"
+    src.mkdir()
+    for name in ("imgA.png", "imgB.png"):
+        Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
+    (state_dir / "review_stats.json").write_text(
+        json.dumps({"image": {
+            "imgA.png": {"img_status": "completed", "detections": [
+                {"action": "accepted", "class_id": 0,
+                 "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+            "imgB.png": {"img_status": "completed", "detections": [
+                {"action": "rejected", "class_id": 0,
+                 "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
+        }})
+    )
+    out = tmp_path / "out"
+
+    resp = client.post(
+        "/api/review/materialize",
+        json={
+            "project_root": str(project_root),
+            "source_images_dir": str(src),
+            "output_dir": str(out),
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["positive"] == 1 and body["hard_negative"] == 1
+    assert (out / "images" / "imgA.png").is_file()
+    assert "gui_materialize_review_dataset" in (project_root / ".tcip" / "audit.jsonl").read_text()
+
+
+def test_review_materialize_missing_state_returns_400(client: TestClient, tmp_path: Path) -> None:
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+    src = tmp_path / "src"
+    src.mkdir()
+    resp = client.post(
+        "/api/review/materialize",
+        json={
+            "project_root": str(project_root),
+            "source_images_dir": str(src),
+            "output_dir": str(tmp_path / "out"),
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_review_queue_launch_validates_inputs(client: TestClient, tmp_path: Path) -> None:
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    # A missing checkpoint is a 404 before any work is scheduled.
+    resp = client.post(
+        "/api/review/queue/launch",
+        json={
+            "project_root": str(project_root),
+            "checkpoint_path": str(tmp_path / "nope.pt"),
+            "images_dir": str(tmp_path),
+        },
+    )
+    assert resp.status_code == 404
+    # An unknown queue job id is a 404.
+    assert client.get("/api/review/queue/does-not-exist").status_code == 404
+
+
+def test_review_queue_async_flow(client: TestClient, tmp_path: Path, monkeypatch) -> None:
+    import time
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    images = tmp_path / "imgs"
+    images.mkdir()
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+
+    fake = {
+        "method": "combined", "task": "detection", "total_candidates": 2,
+        "reviewed_skipped": 0, "selected_count": 1,
+        "queue": [{"image": str(images / "a.jpg"), "score": 0.9}],
+    }
+    # Avoid loading torch/a real model — exercise only the async job plumbing.
+    monkeypatch.setattr(
+        "tcip_mcp.tools.feedback_tools.prioritize_review_queue", lambda **kw: fake
+    )
+
+    resp = client.post(
+        "/api/review/queue/launch",
+        json={
+            "project_root": str(project_root),
+            "checkpoint_path": str(ckpt),
+            "images_dir": str(images),
+            "budget": 5,
+        },
+    )
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    body = {"status": "pending"}
+    for _ in range(50):  # worker runs on a thread; fake returns immediately
+        body = client.get(f"/api/review/queue/{job_id}").json()
+        if body["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.05)
+    assert body["status"] == "completed"
+    assert body["result"]["selected_count"] == 1
+
+
 # ── /api/state ───────────────────────────────────────────────────────────
 
 
