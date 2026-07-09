@@ -25,16 +25,14 @@ interface DateRow {
 }
 
 /**
- * Parse Valley_Farm folder dates (`M-D-YY`, e.g. `3-24-26`) into a sortable integer.
- * Mirrors the backend `_date_key` in results.py so the chart's date order matches the
- * server-computed onset table — a plain string sort puts `3-18-26` before `3-2-26`.
+ * Parse an ISO date (`YYYY-MM-DD`) into a sortable integer. Mirrors the backend `_date_key`
+ * in results.py so the chart's date order matches the server-computed onset table.
  */
 function dateKey(date: string): number {
-  const parts = date.replace(/\./g, "-").split("-");
+  const parts = date.split("-");
   if (parts.length !== 3) return 0;
-  const [m, d, yRaw] = parts.map((x) => parseInt(x, 10));
-  if ([m, d, yRaw].some((n) => Number.isNaN(n))) return 0;
-  const y = yRaw < 100 ? yRaw + 2000 : yRaw;
+  const [y, m, d] = parts.map((x) => parseInt(x, 10));
+  if ([y, m, d].some((n) => Number.isNaN(n))) return 0;
   return y * 10000 + m * 100 + d;
 }
 
