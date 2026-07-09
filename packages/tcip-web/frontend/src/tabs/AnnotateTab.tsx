@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Circle, Line, Rect, Text } from "react-konva";
 import Konva from "konva";
 
@@ -7,6 +7,7 @@ import type { Mtimes } from "@/api/client";
 import { classesApi } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
+import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@/store/types";
@@ -58,7 +59,6 @@ function pointInPolygon(pt: [number, number], poly: [number, number][]): boolean
 
 export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
-  const patchGui = useStore((s) => s.patchGui);
   const view = useStore((s) => s.gui.view);
   const mode = useStore((s) => s.gui.mode);
   const activeClass = useStore((s) => s.gui.active_class);
@@ -123,13 +123,8 @@ export function AnnotateTab() {
   const currentImageName = dataset.image_list[dataset.current_image_index] ?? null;
   const isLocked = currentImageName ? imageStatus.byImage[currentImageName] === "complete" : false;
 
-  // Filtered image list (Status filter)
-  const filteredIndices = useMemo(() => {
-    if (imageStatus.activeFilter === "all") return dataset.image_list.map((_, i) => i);
-    return dataset.image_list
-      .map((name, i) => (imageStatus.byImage[name] === imageStatus.activeFilter ? i : -1))
-      .filter((i) => i >= 0);
-  }, [dataset.image_list, imageStatus]);
+  // Image navigation (shared with TopBar + Review; honors the status filter).
+  const nav = useImageNav();
 
   // ── Label load + save ───────────────────────────────────────────────
 
@@ -353,17 +348,9 @@ export function AnnotateTab() {
   }, []);
 
   function stepImage(delta: number) {
-    if (!dataset.image_list.length) return;
-    const indices =
-      filteredIndices.length > 0 ? filteredIndices : dataset.image_list.map((_, i) => i);
-    const pos = indices.indexOf(dataset.current_image_index);
-    let nextPos = pos >= 0 ? pos + delta : 0;
-    nextPos = Math.max(0, Math.min(indices.length - 1, nextPos));
-    const next = indices[nextPos];
-    if (next === dataset.current_image_index) return;
-    // The label-load effect flushes the current image (save + telemetry) when the
-    // index changes, so no explicit save is needed here.
-    patchGui({ dataset: { ...dataset, current_image_index: next } });
+    // Shared filtered traversal; the label-load effect flushes the outgoing image
+    // (save + telemetry) when the index changes, so no explicit save is needed here.
+    nav.stepImage(delta);
     setPredReference(null);
     selectPolygon(null);
   }
