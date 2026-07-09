@@ -3,21 +3,29 @@
 This backend is the single source of truth for live GUI state across the
 TCIP tabs (Annotate / Review / Training / Tuning / Inference / Results).
 Claude agent and browser clients both connect through here.
+
+Domain endpoints live in ``tcip_web.routes`` (mounted via ``register_all``). This module
+keeps only the app-level surface: GUI state snapshot + WS, the agent panel-event hub,
+static-file serving, and health/index.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import os
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from tcip_web.paths import is_loopback_host
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +54,32 @@ app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 # CORS is not enabled by default — browser is expected to hit the same origin
 # via the Vite dev proxy. If we ever serve the frontend elsewhere, add
 # fastapi.middleware.cors.CORSMiddleware here.
+
+# ── Trust boundary ──
+# Keep local single-user use frictionless (loopback bind → no auth) while closing the two
+# browser-facing holes: cross-site WebSocket reads of GUI state (Origin check below) and
+# DNS-rebinding (Host allow-list). A deliberately network-exposed bind is gated further in
+# __main__ (refuses to bind non-loopback without an explicit opt-in).
+_BIND_HOST = os.environ.get("TCIP_WEB_HOST", "127.0.0.1")
+_EXPOSED = not is_loopback_host(_BIND_HOST)
+
+# Local origins on any port cover both the served app and the Vite dev server.
+_ALLOWED_ORIGIN_HOSTS = {"localhost", "127.0.0.1", "::1"}
+if _EXPOSED:
+    _ALLOWED_ORIGIN_HOSTS.add(_BIND_HOST)
+
+
+def _origin_allowed(origin: str | None) -> bool:
+    """Allow same-machine browser origins; a missing Origin means a non-browser client."""
+    if not origin:
+        return True
+    host = urlparse(origin).hostname or ""
+    return is_loopback_host(host) or host in _ALLOWED_ORIGIN_HOSTS
+
+
+# ``testserver`` is Starlette's TestClient default Host; a real deployment never sees it.
+_TRUSTED_HOSTS = ["*"] if _EXPOSED else ["localhost", "127.0.0.1", "testserver"]
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=_TRUSTED_HOSTS)
 
 # ── Tab routes ──
 from tcip_web.routes import register_all as _register_routes  # noqa: E402  (needs `app`)
@@ -80,6 +114,9 @@ def get_state() -> dict:
 @app.websocket("/ws/state")
 async def state_ws(websocket: WebSocket) -> None:
     """Receive live GuiState deltas. Replays the current snapshot on connect."""
+    if not _origin_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=1008, reason="origin not allowed")
+        return
     await websocket.accept()
     _state_watchers.add(websocket)
     try:
@@ -141,158 +178,6 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-# ── Dataset tools ──
-
-
-@app.get("/api/dataset")
-def load_dataset(folder_path: str = ".") -> dict:
-    from tcip_mcp.tools.data_tools import load_dataset as _load
-    return _load(folder_path)
-
-
-@app.get("/api/dataset/validate")
-def validate_data(folder_path: str = ".") -> dict:
-    from tcip_mcp.tools.data_tools import validate_data_quality as _validate
-    return _validate(folder_path)
-
-
-# ── Project tools ──
-
-
-@app.post("/api/project/init")
-def init_project(project_path: str = ".") -> dict:
-    from tcip_mcp.tools.project_tools import init_project as _init
-    return _init(project_path)
-
-
-@app.get("/api/project/status")
-def project_status(project_path: str = ".") -> dict:
-    from tcip_mcp.tools.project_tools import get_project_status as _status
-    return _status(project_path)
-
-
-# ── Experiment tools ──
-
-
-@app.get("/api/experiments")
-def list_experiments() -> list:
-    from tcip_mcp.experiments import list_experiments as _list
-    return _list()
-
-
-@app.get("/api/experiments/{experiment_id}")
-def get_experiment(experiment_id: str) -> dict:
-    from tcip_mcp.experiments import get_experiment as _get
-    return _get(experiment_id)
-
-
-@app.post("/api/experiments")
-def create_experiment(experiment_id: str, config: dict) -> dict:
-    from tcip_mcp.experiments import create_experiment as _create
-    return _create(experiment_id, config)
-
-
-@app.get("/api/experiments/compare")
-def compare_experiments(ids: str) -> dict:
-    """Compare experiments. Pass comma-separated IDs."""
-    from tcip_mcp.experiments import compare_experiments as _compare
-    return _compare(ids.split(","))
-
-
-# ── Training tools ──
-
-
-@app.post("/api/training/validate")
-def validate_config(config: dict) -> dict:
-    from tcip_mcp.tools.training_tools import validate_config as _validate
-    return _validate(config)
-
-
-@app.post("/api/training/launch")
-def launch_training(config: dict, output_dir: str = "./runs") -> dict:
-    from tcip_mcp.tools.training_tools import launch_training as _launch
-    return _launch(config, output_dir)
-
-
-@app.get("/api/training/{run_id}")
-def training_status(run_id: str) -> dict:
-    from tcip_mcp.tools.training_tools import check_training_status as _status
-    return _status(run_id)
-
-
-@app.get("/api/training")
-def list_runs() -> dict:
-    from tcip_mcp.tools.training_tools import list_training_runs as _list
-    return _list()
-
-
-# ── Model tools ──
-
-
-@app.get("/api/models/available")
-def available_models() -> dict:
-    from tcip_mcp.tools.model_tools import list_available_models as _list
-    return _list()
-
-
-@app.get("/api/models/registered")
-def registered_models(project_path: str = ".") -> dict:
-    from tcip_mcp.tools.model_tools import list_registered_models as _list
-    return _list(project_path)
-
-
-# ── Pipeline tools ──
-
-
-@app.get("/api/components")
-def list_components() -> dict:
-    from tcip_mcp.tools.pipeline_tools import list_components as _list
-    return _list()
-
-
-@app.post("/api/pipeline/run")
-def run_pipeline(spec: dict, work_dir: str = "./pipeline_runs") -> dict:
-    from tcip_mcp.tools.pipeline_tools import run_pipeline as _run
-    return _run(spec, work_dir)
-
-
-# ── WebSocket for training progress ──
-
-_training_watchers: list[WebSocket] = []
-
-
-@app.websocket("/ws/training/{run_id}")
-async def training_ws(websocket: WebSocket, run_id: str):
-    """WebSocket endpoint for streaming training metrics updates."""
-    await websocket.accept()
-    _training_watchers.append(websocket)
-
-    try:
-        from tcip_mcp.tools.training_tools import check_training_status
-
-        # Poll training status every 2 seconds and push updates
-        last_epoch = -1
-        while True:
-            status = check_training_status(run_id)
-            current_epoch = status.get("epoch", -1)
-
-            if current_epoch > last_epoch:
-                await websocket.send_json(status)
-                last_epoch = current_epoch
-
-            if status.get("status") in ("completed", "failed", "not_found"):
-                await websocket.send_json(status)
-                break
-
-            await asyncio.sleep(2)
-
-    except WebSocketDisconnect:
-        pass
-    finally:
-        if websocket in _training_watchers:
-            _training_watchers.remove(websocket)
-
-
 # ── Frontend ──
 
 
@@ -338,6 +223,9 @@ def get_recent_panel_events(panel: str, limit: int = 16):
 @app.websocket("/ws/panel/{panel}")
 async def panel_ws(websocket: WebSocket, panel: str):
     """Stream panel events to a browser client."""
+    if not _origin_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=1008, reason="origin not allowed")
+        return
     if panel not in VALID_PANELS:
         await websocket.close(code=1008, reason=f"unknown panel: {panel}")
         return
