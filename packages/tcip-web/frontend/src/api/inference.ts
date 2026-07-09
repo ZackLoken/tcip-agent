@@ -1,20 +1,6 @@
 /** Inference + Results API helpers for the Inference and Results tabs. */
 
-/** Parse a JSON response, throwing on a non-2xx status so callers can surface the
- *  error instead of reading fields off a FastAPI ``{detail}`` error body (which
- *  silently yields ``undefined`` and crashes the tab on the next render). */
-async function asJson<T>(r: Response): Promise<T> {
-  if (!r.ok) {
-    let detail = "";
-    try {
-      detail = ((await r.json()) as { detail?: string })?.detail ?? "";
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new Error(detail || `request failed: ${r.status}`);
-  }
-  return (await r.json()) as T;
-}
+import { getJson, postJson } from "@/api/http";
 
 export interface RegisteredModel {
   name: string;
@@ -46,19 +32,14 @@ export interface LaunchInferenceBody {
 
 export const inferenceApi = {
   launch: (body: LaunchInferenceBody) =>
-    fetch("/api/inference/launch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json() as Promise<{ status: string; job_id: string }>),
+    postJson<{ status: string; job_id: string }>("/api/inference/launch", body),
 
-  listJobs: () =>
-    fetch("/api/inference/jobs").then((r) => r.json() as Promise<{ jobs: InferenceJob[] }>),
+  listJobs: () => getJson<{ jobs: InferenceJob[] }>("/api/inference/jobs"),
 
-  getJob: (jobId: string) => fetch(`/api/inference/jobs/${jobId}`).then((r) => r.json()),
+  getJob: (jobId: string) => getJson<InferenceJob>(`/api/inference/jobs/${jobId}`),
 
   getPreview: (jobId: string, limit = 12) =>
-    fetch(`/api/inference/jobs/${jobId}/preview?limit=${limit}`).then((r) => r.json()),
+    getJson<unknown>(`/api/inference/jobs/${jobId}/preview?limit=${limit}`),
 };
 
 export function openInferenceStream(
@@ -101,8 +82,8 @@ export interface OnsetRow {
 
 export const resultsApi = {
   registeredModels: (project_path: string) =>
-    fetch(`/api/results/models/registered?project_path=${encodeURIComponent(project_path)}`).then(
-      (r) => asJson<{ models: RegisteredModel[] }>(r),
+    getJson<{ models: RegisteredModel[] }>(
+      `/api/results/models/registered?project_path=${encodeURIComponent(project_path)}`,
     ),
 
   buildPlantMapping: (body: {
@@ -111,38 +92,20 @@ export const resultsApi = {
     dates?: string[];
     nn_tolerance_m?: number;
     persist_path?: string;
-  }) =>
-    fetch("/api/results/plant_mapping/build", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json()),
+  }) => postJson<unknown>("/api/results/plant_mapping/build", body),
 
   loadPlantMapping: (persist_path: string) =>
-    fetch("/api/results/plant_mapping/load", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ persist_path }),
-    }).then((r) => r.json()),
+    postJson<unknown>("/api/results/plant_mapping/load", { persist_path }),
 
   perPlantCurves: (body: {
     project_root: string;
     mapping_path: string;
     predictions_by_date: Record<string, string>;
     elongation_height?: number;
-  }) =>
-    fetch("/api/results/per_plant_curves", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => asJson<{ rows: PerPlantRow[]; n_plants: number }>(r)),
+  }) => postJson<{ rows: PerPlantRow[]; n_plants: number }>("/api/results/per_plant_curves", body),
 
   onsetDates: (curves: PerPlantRow[]) =>
-    fetch("/api/results/onset_dates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ curves }),
-    }).then((r) => asJson<{ rows: OnsetRow[] }>(r)),
+    postJson<{ rows: OnsetRow[] }>("/api/results/onset_dates", { curves }),
 
   exportCsv: async (rows: unknown[], filename: string): Promise<Blob> => {
     const resp = await fetch("/api/results/export_csv", {
