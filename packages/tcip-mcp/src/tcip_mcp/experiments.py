@@ -84,6 +84,7 @@ def update_status(experiment_id: str, state: str) -> dict[str, Any]:
         status["state"] = state
 
         now = datetime.now(timezone.utc).isoformat()
+        status["heartbeat"] = now  # liveness stamp: a fresh heartbeat means a live process
         if state == "running" and not status.get("started"):
             status["started"] = now
         if state in ("completed", "failed"):
@@ -93,12 +94,31 @@ def update_status(experiment_id: str, state: str) -> dict[str, Any]:
     return {"experiment_id": experiment_id, "state": state}
 
 
+def _touch_heartbeat(exp_dir: Path) -> None:
+    """Best-effort: stamp the current time into ``status.json['heartbeat']``.
+
+    Called each epoch so a run still training in another process (e.g. the MCP agent) reads
+    as live to a web client reconstructing run state, instead of being flagged interrupted.
+    Never raises — a heartbeat failure must not break metric logging.
+    """
+    status_path = exp_dir / "status.json"
+    if not status_path.is_file():
+        return
+    try:
+        with file_transaction(status_path):
+            status = json.loads(status_path.read_text())
+            status["heartbeat"] = datetime.now(timezone.utc).isoformat()
+            atomic_write_json(status_path, status)
+    except Exception:
+        pass
+
+
 def log_metrics(
     experiment_id: str,
     epoch: int,
     metrics: dict[str, Any],
 ) -> dict[str, Any]:
-    """Append epoch metrics to metrics.jsonl."""
+    """Append epoch metrics to metrics.jsonl and refresh the run's liveness heartbeat."""
     d = _exp_dir(experiment_id)
     if not d.exists():
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -109,6 +129,7 @@ def log_metrics(
         **metrics,
     }
     append_jsonl(d / "metrics.jsonl", entry)
+    _touch_heartbeat(d)
 
     return {"experiment_id": experiment_id, "epoch": epoch, "logged": True}
 
@@ -159,24 +180,43 @@ def register_model_from_experiment(
 ) -> dict[str, Any]:
     """Register a completed experiment's model in the project registry.
 
-    Pulls the experiment's config + final (last-epoch) metrics, registers the checkpoint
-    with an ``experiment:<id>`` back-reference tag, and records it in the experiment's
-    lineage (``model_weights``). Metrics are read from the experiment, never fabricated.
+    Pulls the experiment's config and the checkpoint's own metrics — the epoch that produced
+    this checkpoint (e.g. ``model_best.pt``'s best epoch), not necessarily the last training
+    epoch — falling back to the experiment's final ``metrics.jsonl`` row if the checkpoint
+    carries none. Registers with an ``experiment:<id>`` back-reference tag and records it in
+    the experiment's lineage (``model_weights``). Metrics are read, never fabricated.
     """
     d = _exp_dir(experiment_id)
     if not d.exists():
         return {"error": f"Experiment not found: {experiment_id}"}
 
     config = read_json(d / "config.json", default={})
+
+    # Prefer metrics stored IN the checkpoint (they describe the epoch it was saved at, so a
+    # best-checkpoint isn't mislabelled with a later, worse epoch's numbers). Fall back to the
+    # experiment's last metrics.jsonl row only if the checkpoint carries none.
     final_metrics: dict[str, Any] = {}
-    mpath = d / "metrics.jsonl"
-    if mpath.is_file():
-        lines = mpath.read_text(encoding="utf-8").strip().splitlines()
-        if lines:
-            try:
-                final_metrics = json.loads(lines[-1])
-            except json.JSONDecodeError:
-                final_metrics = {}
+    ckpt = Path(checkpoint_path)
+    if ckpt.is_file():
+        try:
+            import torch  # local checkpoint the caller is registering deliberately
+
+            payload = torch.load(ckpt, map_location="cpu", weights_only=False)
+            if isinstance(payload, dict) and isinstance(payload.get("metrics"), dict):
+                final_metrics = dict(payload["metrics"])
+                if payload.get("epoch") is not None:
+                    final_metrics.setdefault("epoch", payload["epoch"])
+        except Exception:
+            final_metrics = {}
+    if not final_metrics:
+        mpath = d / "metrics.jsonl"
+        if mpath.is_file():
+            lines = mpath.read_text(encoding="utf-8").strip().splitlines()
+            if lines:
+                try:
+                    final_metrics = json.loads(lines[-1])
+                except json.JSONDecodeError:
+                    final_metrics = {}
 
     from tcip_mcp.model_registry import ModelRegistry
 
