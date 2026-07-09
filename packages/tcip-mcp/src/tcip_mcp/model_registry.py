@@ -116,13 +116,26 @@ class ModelRegistry:
                 return m
         return None
 
-    def best_model(self, metric_key: str = "mAP") -> dict | None:
-        """Get the model with the best metric value."""
+    def best_model(
+        self, metric_key: str = "val_map50", *, higher_is_better: bool | None = None
+    ) -> dict | None:
+        """Get the registered model with the best value for ``metric_key``.
+
+        Only models that actually carry the metric are considered — a missing metric is
+        skipped, not scored as a sentinel, so ``None`` cleanly means "no model has it".
+        ``higher_is_better`` defaults to a name heuristic: loss/error keys rank ascending,
+        everything else (map/f1/accuracy/…) descending.
+        """
+        if higher_is_better is None:
+            lk = metric_key.lower()
+            higher_is_better = not ("loss" in lk or "error" in lk)
         best = None
-        best_val = -1.0
+        best_val: float | None = None
         for m in self._index:
-            val = m.get("metrics", {}).get(metric_key, -1.0)
-            if val > best_val:
-                best_val = val
+            val = m.get("metrics", {}).get(metric_key)
+            if not isinstance(val, (int, float)) or isinstance(val, bool):
+                continue
+            if best_val is None or (val > best_val if higher_is_better else val < best_val):
+                best_val = float(val)
                 best = m
         return best
