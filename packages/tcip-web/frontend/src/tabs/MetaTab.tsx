@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { metaApi, type FrictionReport, type Retrospective } from "@/api/meta";
+import { sessionsApi, type SessionEntry } from "@/api/sessions";
 import { useStore } from "@/store";
+
+function fmtDuration(seconds: number): string {
+  const s = Math.round(seconds);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return m < 60 ? `${m}m ${rem}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
 
 /**
  * Surfaces the agent's meta-loop output so a human can read it: friction
@@ -13,6 +22,7 @@ export function MetaTab() {
 
   const [reports, setReports] = useState<FrictionReport[]>([]);
   const [retros, setRetros] = useState<Retrospective[]>([]);
+  const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -21,12 +31,14 @@ export function MetaTab() {
     setLoading(true);
     setError(null);
     try {
-      const [r, rt] = await Promise.all([
+      const [r, rt, sess] = await Promise.all([
         metaApi.reports(projectRoot),
         metaApi.retrospectives(projectRoot),
+        sessionsApi.load(projectRoot).catch(() => ({ sessions: [] as SessionEntry[] })),
       ]);
       setReports(r.reports);
       setRetros(rt.retrospectives);
+      setSessions(sess.sessions ?? []);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -100,6 +112,44 @@ export function MetaTab() {
           </div>
         ) : (
           <div className="text-[11px] text-tcip-muted">No retrospectives yet.</div>
+        )}
+      </div>
+
+      <div className="tcip-panel p-3">
+        <div className="text-[12px] text-tcip-muted mb-2">
+          Annotation sessions — {sessions.length} recorded
+        </div>
+        {sessions.length > 0 ? (
+          <table className="w-full text-[11px]">
+            <thead className="text-tcip-muted text-left">
+              <tr>
+                <th className="py-1 pr-3">Started</th>
+                <th className="pr-3">User</th>
+                <th className="pr-3">Images</th>
+                <th className="pr-3">Annotations</th>
+                <th className="pr-3">Time</th>
+                <th className="pr-3">Avg / annotation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((s, i) => (
+                <tr key={`${s.started}-${i}`} className="border-t border-tcip-border">
+                  <td className="py-1 font-mono">{s.started}</td>
+                  <td className="pr-3">{s.user || "—"}</td>
+                  <td className="pr-3">{s.images_annotated}</td>
+                  <td className="pr-3">{s.total_annotations}</td>
+                  <td className="pr-3">{fmtDuration(s.total_time_seconds)}</td>
+                  <td className="pr-3">
+                    {s.avg_seconds_per_annotation ? `${s.avg_seconds_per_annotation}s` : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="text-[11px] text-tcip-muted">
+            No annotation sessions yet — they're recorded automatically while you annotate.
+          </div>
         )}
       </div>
     </div>
