@@ -300,7 +300,7 @@ def run_hpo(
     param_space: dict | None = None,
     n_trials: int = 5,
     output_dir: str = "",
-    use_optuna: bool = False,
+    use_optuna: bool = True,
     direction: str = "maximize",
     pruner: str = "asha",
     grace_period: int = 5,
@@ -311,8 +311,10 @@ def run_hpo(
     """Run hyperparameter optimization with optional TensorBoard logging.
 
     Two modes:
-      - Random search (default): generates trial configs for separate training runs.
-      - Optuna (use_optuna=True): runs TPE/ASHA search with per-trial TensorBoard logging.
+      - Optuna (default, use_optuna=True): runs TPE/ASHA search with per-trial TensorBoard
+        logging. This is the standard path — it actually trains each trial.
+      - Random search (use_optuna=False): only *generates* trial configs; it does not train,
+        so it is a config-enumeration helper, not a real sweep. Prefer Optuna.
 
     TensorBoard logs are written to output_dir/hpo_tensorboard/trial_{n}/ for
     each trial, enabling side-by-side comparison in the TensorBoard HParams plugin.
@@ -359,7 +361,8 @@ def run_hpo(
             task = heads[0].get("task", "detection") if heads else "detection"
 
             trial_dir = str(Path(output_dir) / f"trial_{trial.number}")
-            run = create_run(merged, trial_dir)
+            # Tag as an HPO trial so it stays out of the Training-tab run list.
+            run = create_run(merged, trial_dir, origin="hpo_trial")
 
             try:
                 # W4 auto-val gives the val_loader that W1's composite / ASHA need.
