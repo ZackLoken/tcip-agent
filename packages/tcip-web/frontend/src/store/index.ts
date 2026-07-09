@@ -170,6 +170,10 @@ export interface AppState {
   pushToast: (message: string, level?: Toast["level"]) => void;
   dismissToast: (id: number) => void;
 
+  /** Agent terminal rail visibility (persisted; the server session survives closing). */
+  terminalOpen: boolean;
+  setTerminalOpen: (open: boolean) => void;
+
   /** Setters. */
   setGui: (next: GuiState) => void;
   patchGui: (partial: Partial<GuiState>) => void;
@@ -285,6 +289,24 @@ export const useStore = create<AppState>()((set, get) => ({
       return { toasts: [...s.toasts, { id, message, level }].slice(-4) };
     }),
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
+  // Default open — the rail is the breeder's front door to the agent. Guarded:
+  // this runs at module init, and blocked-storage browsers throw on access.
+  terminalOpen: (() => {
+    try {
+      return localStorage.getItem("tcip.terminal_open") !== "0";
+    } catch {
+      return true;
+    }
+  })(),
+  setTerminalOpen: (terminalOpen) => {
+    try {
+      localStorage.setItem("tcip.terminal_open", terminalOpen ? "1" : "0");
+    } catch {
+      /* preference just won't persist */
+    }
+    set({ terminalOpen });
+  },
 
   setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
