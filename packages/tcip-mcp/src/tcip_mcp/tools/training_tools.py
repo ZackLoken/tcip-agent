@@ -86,6 +86,13 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
 
+    # Canonicalize the shape: the GUI/validated schema nests stages/mixed_precision/batch_size
+    # under ``training``, but the trainer reads them from the top level of run.config — without
+    # this hoist a GUI-launched run silently trains the default single stage. (run_hpo already
+    # normalizes inside _apply_hpo_params.)
+    from tcip_mcp.pipelines.schemas import normalize_train_config
+    config = normalize_train_config(config)
+
     from tcip_mcp.pipelines.training.generic_trainer import TrainConfig, train, create_run
 
     model_spec = config.get("model_spec") or config["model"]
