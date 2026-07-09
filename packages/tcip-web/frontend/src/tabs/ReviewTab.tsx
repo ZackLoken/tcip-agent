@@ -447,24 +447,24 @@ export function ReviewTab() {
           disabled={imageStatus === "completed" || !imgName}
           title="Mark this image fully reviewed"
         >
-          ✓ Reviewed
+          ✓&nbsp;&nbsp;Reviewed
         </button>
 
         <button className="tcip-btn" onClick={() => stepImage(-1)}>
-          ◀ Prev img
+          ◀&nbsp;&nbsp;Prev img
         </button>
         <span className="tabular-nums">
           {matches ? `${detectionIdx + 1} / ${matches.detections.length}` : "0 / 0"}
         </span>
         <button className="tcip-btn" onClick={() => stepImage(1)}>
-          Next img ▶
+          Next img&nbsp;&nbsp;▶
         </button>
         <button
           className="tcip-btn ml-2"
           onClick={() => setToolsOpen(true)}
           title="Build training set / prioritize review queue"
         >
-          ⚙ Tools
+          ⚙&nbsp;&nbsp;Tools
         </button>
       </div>
 
@@ -482,10 +482,10 @@ export function ReviewTab() {
 
       <div className="flex items-center gap-2 px-3 py-1.5 border-t border-tcip-border bg-tcip-panel text-[11px]">
         <button className="tcip-btn" onClick={() => stepDetection(-1)}>
-          ◀ Prev
+          ◀&nbsp;&nbsp;Prev
         </button>
         <button className="tcip-btn" onClick={() => stepDetection(1)}>
-          Next ▶
+          Next&nbsp;&nbsp;▶
         </button>
         {current && (
           <>
@@ -526,17 +526,17 @@ export function ReviewTab() {
               onClick={() => void recordAction("accepted")}
               title={acceptTitle}
             >
-              ✓ {acceptLabel}
+              ✓&nbsp;&nbsp;{acceptLabel}
             </button>
             <button className="tcip-btn" onClick={editInAnnotate} title="Edit GT for this image">
-              ✎ Edit (E)
+              ✎&nbsp;&nbsp;Edit (E)
             </button>
             <button
               className="tcip-btn-danger"
               onClick={() => void recordAction("rejected")}
               title={rejectTitle}
             >
-              ✕ {rejectLabel}
+              ✕&nbsp;&nbsp;{rejectLabel}
             </button>
           </>
         )}
