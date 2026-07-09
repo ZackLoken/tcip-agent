@@ -139,9 +139,9 @@ export function InferenceTab() {
   return (
     <div className="flex-1 grid grid-cols-[440px_1fr] overflow-hidden">
       <div className="border-r border-tcip-border p-4 overflow-auto">
-        <div className="font-semibold text-[13px] mb-3">Inference config</div>
+        <div className="tcip-heading mb-3">Inference config</div>
 
-        <label className="block text-[11px] text-tcip-muted mb-1">Model checkpoint</label>
+        <label className="tcip-label mb-1">Model checkpoint</label>
         {models.length > 0 ? (
           <select
             className="tcip-select w-full mb-2"
@@ -165,7 +165,7 @@ export function InferenceTab() {
           />
         )}
 
-        <label className="block text-[11px] text-tcip-muted mb-1">Images directory</label>
+        <label className="tcip-label mb-1">Images directory</label>
         <input
           className="tcip-input w-full mb-1"
           value={imagesDir}
@@ -176,9 +176,7 @@ export function InferenceTab() {
           Prefill from current dataset
         </button>
 
-        <label className="block text-[11px] text-tcip-muted mb-1">
-          Output directory (YOLO txt)
-        </label>
+        <label className="tcip-label mb-1">Output directory (YOLO txt)</label>
         <input
           className="tcip-input w-full mb-3"
           value={outputDir}
@@ -193,8 +191,8 @@ export function InferenceTab() {
           </label>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px]">
-          <label>
+        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px] text-tcip-muted">
+          <label className="flex flex-col gap-1">
             Conf
             <input
               className="tcip-input w-full"
@@ -206,7 +204,7 @@ export function InferenceTab() {
               onChange={(e) => setConf(parseFloat(e.target.value))}
             />
           </label>
-          <label>
+          <label className="flex flex-col gap-1">
             IoU
             <input
               className="tcip-input w-full"
@@ -218,7 +216,7 @@ export function InferenceTab() {
               onChange={(e) => setIou(parseFloat(e.target.value))}
             />
           </label>
-          <label>
+          <label className="flex flex-col gap-1">
             Slice H
             <input
               className="tcip-input w-full"
@@ -227,7 +225,7 @@ export function InferenceTab() {
               onChange={(e) => setSliceH(parseInt(e.target.value, 10) || 640)}
             />
           </label>
-          <label>
+          <label className="flex flex-col gap-1">
             Slice W
             <input
               className="tcip-input w-full"
@@ -236,7 +234,7 @@ export function InferenceTab() {
               onChange={(e) => setSliceW(parseInt(e.target.value, 10) || 640)}
             />
           </label>
-          <label className="col-span-2">
+          <label className="col-span-2 flex flex-col gap-1">
             Overlap
             <input
               className="tcip-input w-full"
@@ -260,28 +258,28 @@ export function InferenceTab() {
       </div>
 
       <div className="p-4 overflow-auto">
-        <div className="font-semibold text-[13px] mb-2">Jobs</div>
+        <div className="tcip-heading mb-3">Jobs</div>
         {jobs.length === 0 ? (
           <div className="text-[11px] text-tcip-muted">No jobs yet.</div>
         ) : (
           <table className="w-full text-[11px]">
-            <thead className="text-tcip-muted text-left">
-              <tr>
-                <th className="py-1">Job</th>
-                <th>Status</th>
-                <th>Progress</th>
-                <th>Images dir</th>
-                <th></th>
+            <thead>
+              <tr className="border-b border-tcip-border">
+                <th className="tcip-th">Job</th>
+                <th className="tcip-th">Status</th>
+                <th className="tcip-th">Progress</th>
+                <th className="tcip-th">Images dir</th>
+                <th className="tcip-th"></th>
               </tr>
             </thead>
             <tbody>
               {jobs.map((j) => (
                 <tr key={j.job_id} className="border-t border-tcip-border">
-                  <td className="font-mono">{j.job_id}</td>
-                  <td>
+                  <td className="py-1.5 pr-3 font-mono">{j.job_id}</td>
+                  <td className="pr-3">
                     <span className={`tcip-badge ${statusBadgeClass(j.status)}`}>{j.status}</span>
                   </td>
-                  <td>
+                  <td className="pr-3 tabular-nums">
                     {j.total > 0 ? `${j.done} / ${j.total}` : j.done}
                     {j.total > 0 && (
                       <div className="h-1 mt-1 bg-tcip-border rounded overflow-hidden">
@@ -292,7 +290,9 @@ export function InferenceTab() {
                       </div>
                     )}
                   </td>
-                  <td className="truncate max-w-xs text-tcip-muted">{j.images_dir}</td>
+                  <td className="pr-3 truncate max-w-xs font-mono text-tcip-muted">
+                    {j.images_dir}
+                  </td>
                   <td>
                     <div className="flex gap-1">
                       <button className="tcip-btn text-[11px]" onClick={() => setActiveJob(j)}>
@@ -311,10 +311,15 @@ export function InferenceTab() {
           </table>
         )}
         {activeJob && (
-          <div className="mt-4 tcip-panel p-3">
-            <div className="font-semibold text-[12px] mb-1">Active: {activeJob.job_id}</div>
-            <div className="text-[11px] text-tcip-muted">Output: {activeJob.output_dir}</div>
-            <div className="text-[11px] mt-1">
+          <div className="mt-4 tcip-panel p-4">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="tcip-heading">Active</span>
+              <span className="font-mono text-[12px]">{activeJob.job_id}</span>
+            </div>
+            <div className="text-[11px] text-tcip-muted">
+              Output: <span className="font-mono">{activeJob.output_dir}</span>
+            </div>
+            <div className="text-[11px] mt-1 tabular-nums">
               Status: {activeJob.status} · {activeJob.done} / {activeJob.total}
             </div>
             {activeJob.error && (
