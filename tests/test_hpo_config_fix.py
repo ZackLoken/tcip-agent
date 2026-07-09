@@ -12,9 +12,11 @@ def test_normalize_train_config_resolves_model_alias():
 
 def test_stage_spec_accepts_freeze_to_without_lr():
     from tcip_mcp.pipelines.schemas import StageSpec
-    # The trainer's canonical stage shape (freeze_to + epochs, lr optional) must validate.
+    # The trainer's canonical stage shape is freeze_to + epochs. Per-stage lr was removed
+    # (L1: the optimizer block sets LR), but extra="allow" keeps an old lr-carrying stage valid.
     s = StageSpec.model_validate({"freeze_to": -1, "epochs": 5})
-    assert s.epochs == 5 and s.freeze_to == -1 and s.lr is None
+    assert s.epochs == 5 and s.freeze_to == -1
+    assert "lr" not in StageSpec.model_fields
 
 
 def test_apply_hpo_params_varies_architecture_in_model_spec():
