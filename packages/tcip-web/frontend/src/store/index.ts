@@ -136,6 +136,12 @@ export interface AgentActivity {
   data: Record<string, unknown>;
 }
 
+export interface Toast {
+  id: number;
+  message: string;
+  level: "error" | "info" | "success";
+}
+
 export interface AppState {
   /** Server-synchronized state (mirrors backend GuiState). */
   gui: GuiState;
@@ -158,6 +164,11 @@ export interface AppState {
   /** Last panel event pushed by the MCP agent (via /ws/panel subscription). */
   agentActivity: AgentActivity | null;
   pushAgentActivity: (panel: string, eventType: string, data: Record<string, unknown>) => void;
+
+  /** Transient user-facing notifications (API failures, etc.). */
+  toasts: Toast[];
+  pushToast: (message: string, level?: Toast["level"]) => void;
+  dismissToast: (id: number) => void;
 
   /** Setters. */
   setGui: (next: GuiState) => void;
@@ -258,11 +269,20 @@ export const useStore = create<AppState>()((set, get) => ({
   },
   sessionTracking: EMPTY_SESSION_TRACKING,
   agentActivity: null,
+  toasts: [],
 
   pushAgentActivity: (panel, eventType, data) =>
     set((s) => ({
       agentActivity: { seq: (s.agentActivity?.seq ?? 0) + 1, panel, eventType, data },
     })),
+
+  pushToast: (message, level = "error") =>
+    set((s) => {
+      const id = (s.toasts[s.toasts.length - 1]?.id ?? 0) + 1;
+      // Cap the stack so a failing poll can't flood the screen.
+      return { toasts: [...s.toasts, { id, message, level }].slice(-4) };
+    }),
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
