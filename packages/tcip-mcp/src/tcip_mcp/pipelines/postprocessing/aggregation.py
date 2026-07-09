@@ -25,13 +25,27 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_plant_id(image_name: str) -> str:
-    """Extract plant_id from image filename.
+    """Best-effort guess of plant_id from an image filename.
 
-    Convention: plant_id is everything before the last underscore + date/number.
-    E.g., 'PLANT_001_2024_05_15' → 'PLANT_001'
-          'bush_42_flight_3' → 'bush_42'
+    Heuristic: strip the last **two** underscore-separated tokens, treated as a
+    trailing capture/flight suffix, and return the remainder. E.g.:
 
-    Falls back to the full stem if no pattern is detected.
+        'bush_42_flight_3'      → 'bush_42'         (strips 'flight_3')
+        'PLANT_001_2024_05_15'  → 'PLANT_001_2024'  (strips '05_15' only)
+
+    Note the second case: a full ``YYYY_MM_DD`` date is *three* tokens, so one
+    date token (the year) is retained and one physical plant's temporal series
+    fragments per plant-year. There is no filename-only rule that recovers the
+    intended plant_id for every naming scheme (``001`` is part of the id but
+    ``2024_05_15`` is a date — both look numeric), so this stays a deliberate,
+    minimal heuristic rather than a fragile guesser.
+
+    This is a *fallback* used only when neither an explicit ``plant_id`` key nor
+    a ``plant_id_fn`` is supplied to ``aggregate_per_plant``; that caller emits a
+    warning when it fires so silent mis-grouping does not reach the delivery CSV.
+    Pass ``plant_id_fn`` or a ``plant_id`` key to control grouping precisely.
+
+    Falls back to the full stem if there is nothing to strip (single token).
     """
     stem = Path(image_name).stem
     parts = stem.rsplit("_", 2)
@@ -63,6 +77,7 @@ def aggregate_per_plant(
     """
     # Group by plant_id
     groups: dict[str, list[dict]] = defaultdict(list)
+    used_fallback = False
     for r in image_results:
         if plant_id_key in r:
             pid = r[plant_id_key]
@@ -70,7 +85,19 @@ def aggregate_per_plant(
             pid = plant_id_fn(r.get("image", ""))
         else:
             pid = _extract_plant_id(r.get("image", "unknown"))
+            used_fallback = True
         groups[pid].append(r)
+
+    if used_fallback:
+        logger.warning(
+            "aggregate_per_plant grouped image(s) by a plant_id *guessed* from "
+            "filenames (no %r key and no plant_id_fn). A trailing YYYY_MM_DD date "
+            "is three tokens but only two are stripped, so multi-date series can "
+            "fragment per plant-year in the delivery CSV. Supply plant_id_fn or a "
+            "%r key to control grouping.",
+            plant_id_key,
+            plant_id_key,
+        )
 
     aggregator = _STRATEGIES.get(strategy)
     if aggregator is None:
@@ -138,10 +165,17 @@ def _agg_sigmoid(items: list[dict], value_key: str) -> dict:
 
     Returns milestones: 5%, 50%, 95% thresholds of the fitted sigmoid.
     """
-    # Extract (time, value) pairs
+    # Extract (time, value) pairs. Use explicit ``is not None`` precedence so a
+    # legitimate 0 time axis (e.g. time_index=0, day_of_year=0) is not treated
+    # as missing by an ``or``-chain.
     pairs = []
     for r in items:
-        t = r.get("day_of_year") or r.get("date_ordinal") or r.get("time_index")
+        t = None
+        for time_key in ("day_of_year", "date_ordinal", "time_index"):
+            candidate = r.get(time_key)
+            if candidate is not None:
+                t = candidate
+                break
         v = r.get(value_key, 0.0)
         if t is not None:
             pairs.append((float(t), float(v)))
