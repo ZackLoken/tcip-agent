@@ -138,20 +138,20 @@ export function DatasetPicker() {
 
   return (
     <div className="h-full w-full flex items-center justify-center bg-tcip-bg p-4">
-      <div className="tcip-panel rounded-lg w-full max-w-xl p-6 flex flex-col gap-4">
+      <div className="tcip-panel rounded-lg w-full max-w-xl p-6 flex flex-col gap-4 shadow-lg">
         <div className="text-lg font-semibold">Open a dataset</div>
 
         {/* Paths */}
         <div className="flex flex-col gap-1">
           <label
-            className="text-[11px] font-medium"
+            className="tcip-label"
             title="Folder that holds .tcip\ — often the same as the dataset root"
           >
             Project root <span className="text-tcip-fp">*</span>
           </label>
           <div className="flex gap-2">
             <input
-              className="tcip-input flex-1"
+              className="tcip-input flex-1 font-mono"
               value={projectRoot}
               onChange={(e) => setProjectRoot(cleanPath(e.target.value))}
               placeholder="e.g. C:\path\to\project"
@@ -167,15 +167,12 @@ export function DatasetPicker() {
         </div>
 
         <div className="flex flex-col gap-1">
-          <label
-            className="text-[11px] font-medium"
-            title="Folder containing images/, annotations/, models/"
-          >
+          <label className="tcip-label" title="Folder containing images/, annotations/, models/">
             Dataset root <span className="text-tcip-fp">*</span>
           </label>
           <div className="flex gap-2">
             <input
-              className="tcip-input flex-1"
+              className="tcip-input flex-1 font-mono"
               value={datasetRoot}
               onChange={(e) => setDatasetRoot(cleanPath(e.target.value))}
               placeholder="e.g. C:\path\to\Valley_Farm"
@@ -210,7 +207,7 @@ export function DatasetPicker() {
         {/* Selection */}
         <div className="grid grid-cols-3 gap-2">
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-medium">
+            <label className="tcip-label">
               Date <span className="text-tcip-fp">*</span>
             </label>
             <select
@@ -229,7 +226,7 @@ export function DatasetPicker() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-medium" title="Needed to view/edit labels">
+            <label className="tcip-label" title="Needed to view/edit labels">
               Annotation type
             </label>
             <select
@@ -248,7 +245,7 @@ export function DatasetPicker() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-medium" title="Needed to review predictions">
+            <label className="tcip-label" title="Needed to review predictions">
               Model
             </label>
             <select
