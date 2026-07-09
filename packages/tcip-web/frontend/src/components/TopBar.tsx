@@ -37,10 +37,10 @@ export function TopBar() {
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id)}
-            className={`px-3 h-7 rounded text-[12px] ${
+            className={`px-3 h-7 rounded text-[12px] font-medium transition-colors ${
               activeTab === t.id
                 ? "bg-tcip-accent text-white"
-                : "bg-transparent text-tcip-fg hover:bg-tcip-border"
+                : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
             }`}
           >
             {t.label}
@@ -54,7 +54,11 @@ export function TopBar() {
       <div className="text-[11px] text-tcip-muted truncate max-w-md">
         {dataset.dataset_root && dataset.date ? (
           <>
-            {dataset.dataset_root.split(/[/\\]/).slice(-2).join("/")} · {dataset.date}
+            <span className="font-mono">
+              {dataset.dataset_root.split(/[/\\]/).slice(-2).join("/")}
+            </span>
+            <span className="mx-1.5 text-tcip-border">·</span>
+            <span className="font-mono">{dataset.date}</span>
           </>
         ) : (
           "no dataset selected"
@@ -62,7 +66,7 @@ export function TopBar() {
       </div>
 
       {/* WS pill */}
-      <div className="flex items-center gap-1 text-[11px] ml-2">
+      <div className="flex items-center gap-1.5 h-6 px-2 ml-2 rounded-full border border-tcip-border bg-tcip-bg text-[11px]">
         <span
           className={`w-2 h-2 rounded-full ${
             wsStatus === "connected"
