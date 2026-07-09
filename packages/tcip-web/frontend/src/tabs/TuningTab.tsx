@@ -106,11 +106,9 @@ export function TuningTab() {
   return (
     <div className="flex-1 grid grid-cols-[440px_1fr] overflow-hidden">
       <div className="border-r border-tcip-border p-4 overflow-auto">
-        <div className="font-semibold text-[13px] mb-3">HPO config</div>
+        <div className="tcip-heading mb-3">HPO config</div>
 
-        <label className="block text-[11px] text-tcip-muted mb-1">
-          Base training config (JSON)
-        </label>
+        <label className="tcip-label mb-1">Base training config (JSON)</label>
         <textarea
           className="tcip-input w-full h-40 font-mono text-[11px] leading-4 resize-none mb-3"
           value={base}
@@ -119,7 +117,7 @@ export function TuningTab() {
         />
 
         {/* Structured Optuna search space */}
-        <label className="block text-[11px] text-tcip-muted mb-1">
+        <label className="tcip-label mb-1">
           Search space — Optuna (TPE + ASHA) trains each trial
         </label>
         <div className="tcip-panel p-2 mb-3">
@@ -199,8 +197,8 @@ export function TuningTab() {
           ))}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px]">
-          <label>
+        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px] text-tcip-muted">
+          <label className="flex flex-col gap-1">
             Trials
             <input
               className="tcip-input w-full"
@@ -211,7 +209,7 @@ export function TuningTab() {
               onChange={(e) => setNTrials(parseInt(e.target.value, 10) || 1)}
             />
           </label>
-          <label>
+          <label className="flex flex-col gap-1">
             Direction
             <select
               className="tcip-select w-full"
@@ -224,7 +222,7 @@ export function TuningTab() {
           </label>
         </div>
 
-        <label className="block text-[11px] text-tcip-muted mb-1">Output directory</label>
+        <label className="tcip-label mb-1">Output directory</label>
         <input
           className="tcip-input w-full mb-3"
           value={outputDir}
@@ -241,8 +239,8 @@ export function TuningTab() {
           modest.
         </div>
 
-        <div className="mt-4">
-          <div className="font-semibold text-[13px] mb-2">Sweeps</div>
+        <div className="mt-5">
+          <div className="tcip-heading mb-2">Sweeps</div>
           {sweeps.length === 0 ? (
             <div className="text-[11px] text-tcip-muted">No sweeps yet.</div>
           ) : (
@@ -250,10 +248,10 @@ export function TuningTab() {
               {sweeps.map((s) => (
                 <li
                   key={s.sweep_id}
-                  className={`p-2 rounded border cursor-pointer ${
+                  className={`p-2 rounded border cursor-pointer transition-colors ${
                     selectedId === s.sweep_id
                       ? "border-tcip-accent bg-tcip-accent/10"
-                      : "border-tcip-border hover:border-tcip-muted"
+                      : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
                   }`}
                   onClick={() => setSelectedId(s.sweep_id)}
                 >
@@ -270,8 +268,16 @@ export function TuningTab() {
       </div>
 
       <div className="p-4 overflow-auto">
-        <div className="font-semibold text-[13px] mb-2">
-          {detail ? `Sweep ${detail.sweep_id} (${detail.status})` : "Select a sweep"}
+        <div className="mb-3 flex items-center gap-2">
+          {detail ? (
+            <>
+              <span className="tcip-heading">Sweep</span>
+              <span className="font-mono text-[12px] text-tcip-fg">{detail.sweep_id}</span>
+              <span className="text-[11px] text-tcip-muted">({detail.status})</span>
+            </>
+          ) : (
+            <span className="tcip-heading">Select a sweep</span>
+          )}
         </div>
         {detail?.result ? (
           <pre className="text-[11px] font-mono p-3 tcip-panel overflow-auto max-h-[80vh]">
