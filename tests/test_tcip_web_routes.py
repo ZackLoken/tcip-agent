@@ -377,6 +377,94 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
     assert data["image"]["IMG_0000.JPG"]["detections"][0]["action"] == "accepted"
 
 
+def test_review_action_auto_completes_and_audits(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    # A single detection on the image: reviewing it flips the image to 'completed'
+    # (the only GUI path to that status) and leaves an audit-trail entry.
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_gt = tmp_path / "gt.txt"
+    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
+    pred = tmp_path / "pred.txt"
+    pred.write_text("0 0.9 0.5 0.5 0.2 0.2\n")  # one matching prediction -> one TP
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = client.post(
+        "/api/review/action",
+        json={
+            "project_root": str(project_root),
+            "image_name": "IMG_0000.JPG",
+            "image_path": str(img_path),
+            "gt_detect_path": str(det_gt),
+            "pred_detect_path": str(pred),
+            "det_type": "tp", "class_id": 0, "conf": 0.9, "iou": 0.95,
+            "gt_type": "box", "gt_idx": 0, "pred_type": "box", "pred_idx": 0,
+            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
+            "iou_threshold": 0.3, "conf_threshold": 0.1,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["image_status"] == "completed"
+    assert "gui_review_action" in (project_root / ".tcip" / "audit.jsonl").read_text()
+
+
+def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = client.post(
+        "/api/review/mark_complete",
+        json={"project_root": str(project_root), "image_name": "IMG_9.JPG"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["image_status"] == "completed"
+
+    status = client.get(
+        "/api/review/image_status",
+        params={"project_root": str(project_root), "image_name": "IMG_9.JPG"},
+    )
+    assert status.json()["status"] == "completed"
+    assert "gui_review_mark_complete" in (project_root / ".tcip" / "audit.jsonl").read_text()
+
+
+def test_review_action_records_real_class_name_and_reviewer(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    # With classes.json present the engine records the real class name + a reviewer,
+    # instead of the "class_{id}" placeholder / empty reviewer the audit flagged.
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_gt = tmp_path / "gt.txt"
+    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
+    pred = tmp_path / "pred.txt"
+    pred.write_text("0 0.9 0.5 0.5 0.2 0.2\n")
+    project_root = tmp_path / "proj"
+    state = project_root / ".tcip" / "state"
+    state.mkdir(parents=True)
+    (state / "classes.json").write_text(json.dumps({"0": {"name": "catkin", "color": "#FF0000"}}))
+
+    resp = client.post(
+        "/api/review/action",
+        json={
+            "project_root": str(project_root),
+            "image_name": "IMG_0000.JPG",
+            "image_path": str(img_path),
+            "gt_detect_path": str(det_gt),
+            "pred_detect_path": str(pred),
+            "det_type": "tp", "class_id": 0, "conf": 0.9, "iou": 0.95,
+            "gt_type": "box", "gt_idx": 0, "pred_type": "box", "pred_idx": 0,
+            "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
+            "iou_threshold": 0.3, "conf_threshold": 0.1,
+        },
+    )
+    assert resp.status_code == 200
+    entry = json.loads((state / "review_stats.json").read_text())["image"]["IMG_0000.JPG"][
+        "detections"
+    ][0]
+    assert entry["class_name"] == "catkin"  # real name, not "class_0"
+    assert entry["reviewed_by"]  # non-empty reviewer
+
+
 # ── /api/state ───────────────────────────────────────────────────────────
 
 
