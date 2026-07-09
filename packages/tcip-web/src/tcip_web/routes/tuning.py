@@ -71,7 +71,9 @@ class LaunchHPOPayload(BaseModel):
     param_space: Optional[dict[str, Any]] = None
     n_trials: int = 5
     output_dir: str = ""
-    use_optuna: bool = False
+    # Optuna (TPE + ASHA) is the standard sweep — it actually trains each trial. The
+    # random-search path only enumerates configs, so it isn't offered as a default.
+    use_optuna: bool = True
     direction: str = "maximize"
 
 
