@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 
 import { classesApi, type ImageStatus } from "@/api/classes";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
+import { useImageNav } from "@/hooks/useImageNav";
 import { useStore } from "@/store";
 import type { TabName } from "@/store/types";
 
@@ -27,7 +28,6 @@ export function TopBar() {
   const activeTab = useStore((s) => s.gui.active_tab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const dataset = useStore((s) => s.gui.dataset);
-  const patchGui = useStore((s) => s.patchGui);
   const mode = useStore((s) => s.gui.mode);
   const setMode = useStore((s) => s.setMode);
   const activeClass = useStore((s) => s.gui.active_class);
@@ -62,16 +62,11 @@ export function TopBar() {
   }, [mode, canvasBoxes, canvasPolygons]);
 
   const currentImage = dataset.image_list[dataset.current_image_index] ?? "—";
-  const totalVisible = dataset.image_list.length;
   const currentStatus: ImageStatus | undefined = currentImage
     ? imageStatus.byImage[currentImage]
     : undefined;
-
-  function jumpToIndex(oneBased: number) {
-    if (!dataset.image_list.length) return;
-    const idx = Math.max(1, Math.min(dataset.image_list.length, oneBased)) - 1;
-    patchGui({ dataset: { ...dataset, current_image_index: idx } });
-  }
+  // Shared navigation — same filtered traversal as the arrow keys and the Review tab.
+  const nav = useImageNav();
 
   async function addNewClass() {
     const name = window.prompt("New class name:");
@@ -229,7 +224,7 @@ export function TopBar() {
               onClick={() => setMode("polygon")}
               className={`px-2 h-7 text-[11px] ${mode === "polygon" ? "bg-tcip-accent text-white" : "bg-tcip-panel text-tcip-fg"}`}
             >
-              Polygon ⬡
+              Polygon&nbsp;&nbsp;⬡
             </button>
           </div>
 
@@ -289,26 +284,26 @@ export function TopBar() {
         )}
       </div>
 
-      {/* Prev / counter / next */}
+      {/* Prev / counter / next — filtered position within the status filter */}
       <button
         className="tcip-btn text-[11px]"
-        onClick={() => jumpToIndex(dataset.current_image_index)}
-        disabled={!dataset.image_list.length || dataset.current_image_index <= 0}
+        onClick={() => nav.stepImage(-1)}
+        disabled={!nav.canPrev}
       >
-        ◀ Prev
+        ◀&nbsp;&nbsp;Prev
       </button>
 
       <input
         ref={counterRef}
         className="tcip-input w-12 text-center font-mono text-[11px]"
-        value={counterDraft ?? String(dataset.current_image_index + 1)}
+        value={counterDraft ?? (nav.position > 0 ? String(nav.position) : "")}
         onChange={(e) => setCounterDraft(e.target.value.replace(/[^0-9]/g, ""))}
-        onFocus={() => setCounterDraft(String(dataset.current_image_index + 1))}
+        onFocus={() => setCounterDraft(String(nav.position || 1))}
         onBlur={() => setCounterDraft(null)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             const num = parseInt(counterDraft ?? "", 10);
-            if (!Number.isNaN(num)) jumpToIndex(num);
+            if (!Number.isNaN(num)) nav.jumpToPosition(num);
             setCounterDraft(null);
             counterRef.current?.blur();
           } else if (e.key === "Escape") {
@@ -317,14 +312,14 @@ export function TopBar() {
           }
         }}
       />
-      <span className="text-[11px] text-tcip-muted tabular-nums">/ {totalVisible}</span>
+      <span className="text-[11px] text-tcip-muted tabular-nums">/ {nav.total}</span>
 
       <button
         className="tcip-btn text-[11px]"
-        onClick={() => jumpToIndex(dataset.current_image_index + 2)}
-        disabled={!dataset.image_list.length || dataset.current_image_index >= totalVisible - 1}
+        onClick={() => nav.stepImage(1)}
+        disabled={!nav.canNext}
       >
-        Next ▶
+        Next&nbsp;&nbsp;▶
       </button>
 
       {/* Image name */}
