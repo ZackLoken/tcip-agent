@@ -22,6 +22,8 @@ export function TopBar() {
   const dataset = useStore((s) => s.gui.dataset);
   const wsStatus = useStore((s) => s.wsStatus);
   const clearDataset = useStore((s) => s.clearDataset);
+  const terminalOpen = useStore((s) => s.terminalOpen);
+  const setTerminalOpen = useStore((s) => s.setTerminalOpen);
 
   function switchProject() {
     clearDataset();
@@ -72,6 +74,20 @@ export function TopBar() {
       ) : (
         <span className="text-[11px] text-tcip-muted">no project open</span>
       )}
+
+      {/* Agent rail toggle */}
+      <button
+        onClick={() => setTerminalOpen(!terminalOpen)}
+        aria-pressed={terminalOpen}
+        aria-label="Toggle agent terminal"
+        className={`ml-2 px-2.5 h-7 rounded text-[12px] font-medium transition-colors ${
+          terminalOpen
+            ? "bg-tcip-accent text-white"
+            : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
+        }`}
+      >
+        ✦ Agent
+      </button>
 
       {/* WS pill */}
       <div className="flex items-center gap-1.5 h-6 px-2 ml-2 rounded-full border border-tcip-border bg-tcip-bg text-[11px]">
