@@ -61,17 +61,25 @@ def list_registered_models(project_path: str, tag: str | None = None) -> dict:
 
 @mcp.tool()
 @audited
-def get_best_model(project_path: str, metric: str = "mAP") -> dict:
-    """Get the best model by a specific metric.
+def get_best_model(project_path: str, metric: str = "val_map50") -> dict:
+    """Get the best registered model by a metric.
 
     Args:
         project_path: Project root directory.
-        metric: Metric key to sort by.
+        metric: Metric key to rank by (default ``val_map50``; loss/error keys rank ascending).
     """
     registry = ModelRegistry(project_path)
     best = registry.best_model(metric)
     if best is None:
-        return {"error": "No models registered"}
+        models = registry.list_models()
+        if not models:
+            return {"error": "No models registered"}
+        available = sorted({k for m in models for k in m.get("metrics", {})})
+        return {
+            "error": f"No registered model has metric '{metric}'.",
+            "available_metrics": available,
+            "n_models": len(models),
+        }
     return best
 
 
