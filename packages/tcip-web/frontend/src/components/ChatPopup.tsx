@@ -41,8 +41,8 @@ export function ChatPopup({ enabled = CHAT_POPUP_ENABLED }: ChatPopupProps) {
           </div>
           <div className="p-3 text-[12px] text-tcip-muted">
             The agent chat backend is not implemented yet. See{" "}
-            <span className="font-mono">docs/chat-popup-design.md</span> for the design and
-            phased plan.
+            <span className="font-mono">docs/chat-popup-design.md</span> for the design and phased
+            plan.
           </div>
           <div className="p-2 border-t border-tcip-border">
             <input
