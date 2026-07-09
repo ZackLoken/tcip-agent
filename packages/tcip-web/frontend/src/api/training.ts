@@ -1,5 +1,7 @@
 /** Training-tab specific REST + WebSocket helpers. */
 
+import { getJson, postJson } from "@/api/http";
+
 export interface TrainingRunSummary {
   run_id: string;
   status: string;
@@ -17,35 +19,25 @@ export interface MetricRow {
 
 export const trainingApi = {
   validate: (config: unknown) =>
-    fetch("/api/training/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ config }),
-    }).then((r) => r.json()),
+    postJson<{ valid: boolean; issues: string[] }>("/api/training/validate", { config }),
 
   launch: (config: unknown, output_dir: string) =>
-    fetch("/api/training/launch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ config, output_dir }),
-    }).then((r) => r.json()),
+    postJson<{ run_id?: string; [k: string]: unknown }>("/api/training/launch", {
+      config,
+      output_dir,
+    }),
 
-  listRuns: () =>
-    fetch("/api/training/runs").then((r) => r.json()) as Promise<{ runs: TrainingRunSummary[] }>,
+  listRuns: () => getJson<{ runs: TrainingRunSummary[] }>("/api/training/runs"),
 
-  getRun: (run_id: string) => fetch(`/api/training/runs/${run_id}`).then((r) => r.json()),
+  getRun: (run_id: string) => getJson<TrainingRunSummary>(`/api/training/runs/${run_id}`),
 
   getMetrics: (project_root: string, run_id: string) =>
-    fetch(
+    getJson<{ metrics: MetricRow[]; exists: boolean }>(
       `/api/training/runs/${run_id}/metrics?project_root=${encodeURIComponent(project_root)}`,
-    ).then((r) => r.json()) as Promise<{ metrics: MetricRow[]; exists: boolean }>,
+    ),
 
   compare: (experiment_ids: string[]) =>
-    fetch("/api/training/compare", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ experiment_ids }),
-    }).then((r) => r.json()),
+    postJson<unknown>("/api/training/compare", { experiment_ids }),
 
   registerModel: (body: {
     project_path: string;
@@ -53,12 +45,7 @@ export const trainingApi = {
     checkpoint_path: string;
     tag?: string | null;
     metadata?: Record<string, unknown> | null;
-  }) =>
-    fetch("/api/training/register_model", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json()),
+  }) => postJson<unknown>("/api/training/register_model", body),
 };
 
 export function openTrainingStream(
