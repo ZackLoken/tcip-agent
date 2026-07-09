@@ -2,8 +2,8 @@ import { useEffect, useRef } from "react";
 
 import { classesApi } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
-import { ChatPopup } from "@/components/ChatPopup";
 import { ProjectPicker } from "@/components/ProjectPicker";
+import { TerminalRail } from "@/components/TerminalRail";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { StatusBar } from "@/components/StatusBar";
@@ -167,21 +167,25 @@ function App() {
       {/* Only Annotate / Review / Results need an imagery dataset+date; the rest
           (Training / Tuning / Inference / Meta) are reachable without one — being
           forced to pick a dataset just to read agent reports or watch a run was a
-          usability trap. Dataset-dependent tabs show the picker until one is set. */}
-      <ErrorBoundary resetKey={activeTab}>
-        {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <ProjectPicker />)}
-        {activeTab === "review" && (datasetReady ? <ReviewTab /> : <ProjectPicker />)}
-        {activeTab === "results" && (datasetReady ? <ResultsTab /> : <ProjectPicker />)}
-        {activeTab === "training" && <TrainingTab />}
-        {activeTab === "tuning" && <TuningTab />}
-        {activeTab === "inference" && <InferenceTab />}
-        {activeTab === "meta" && <MetaTab />}
-      </ErrorBoundary>
+          usability trap. Dataset-dependent tabs show the picker until one is set.
+          The agent rail (the real Claude Code in a PTY) docks to the right; the tabs
+          are its canvas — it drives them through the MCP panel channel. */}
+      <div className="flex-1 flex min-h-0">
+        <div className="flex-1 flex flex-col min-w-0">
+          <ErrorBoundary resetKey={activeTab}>
+            {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <ProjectPicker />)}
+            {activeTab === "review" && (datasetReady ? <ReviewTab /> : <ProjectPicker />)}
+            {activeTab === "results" && (datasetReady ? <ResultsTab /> : <ProjectPicker />)}
+            {activeTab === "training" && <TrainingTab />}
+            {activeTab === "tuning" && <TuningTab />}
+            {activeTab === "inference" && <InferenceTab />}
+            {activeTab === "meta" && <MetaTab />}
+          </ErrorBoundary>
+        </div>
+        <TerminalRail />
+      </div>
       <StatusBar />
       <HelpOverlay activeTab={activeTab} />
-      {/* Floating agent chat. Shows an unconfigured state when no sidecar is available.
-          See packages/tcip-web/docs/chat-popup-design.md. */}
-      <ChatPopup />
       <Toasts />
     </div>
   );
