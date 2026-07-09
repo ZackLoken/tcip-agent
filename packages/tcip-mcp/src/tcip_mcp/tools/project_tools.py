@@ -26,15 +26,12 @@ def _sessions_dir(project_path: str) -> Path:
     return d
 
 
-@mcp.tool()
-@audited
-def init_project(project_path: str) -> dict:
-    """Initialise a TCIP project directory.
+def _scaffold_project(project_path: str) -> dict:
+    """Create ``.tcip/`` (sessions/artifacts/models) + a default config.toml.
 
-    Creates ``.tcip/`` with default config, sessions dir, and artifacts dir.
-
-    Args:
-        project_path: Root directory of the project.
+    The internals of :func:`init_project`, factored out so other tools that
+    stand up a project (e.g. ``ingest_images``) reuse the exact same scaffolding
+    instead of re-implementing it. Idempotent — re-running only re-mkdirs.
     """
     tcip = _project_dir(project_path)
     (tcip / "sessions").mkdir(exist_ok=True)
@@ -62,6 +59,52 @@ def init_project(project_path: str) -> dict:
         "project_path": project_path,
         "tcip_dir": str(tcip),
         "created": [".tcip/", ".tcip/sessions/", ".tcip/artifacts/", ".tcip/models/"],
+    }
+
+
+@mcp.tool()
+@audited
+def init_project(project_path: str) -> dict:
+    """Initialise a TCIP project directory.
+
+    Creates ``.tcip/`` with default config, sessions dir, and artifacts dir.
+
+    Args:
+        project_path: Root directory of the project.
+    """
+    return _scaffold_project(project_path)
+
+
+@mcp.tool()
+@audited
+def set_active_project(name: str) -> dict:
+    """Set the workspace's active project so the GUI opens it.
+
+    Writes the workspace active-project marker (``<workspace>/.active``) and notifies a
+    running GUI to open the project — the loop-closer for the breeder flow ("I structured
+    your images into ``hazelnut_catkin_valley-farm`` — opening it now"). ``name`` is a
+    workspace project slug (``{crop}_{trait}_{site}``).
+
+    Args:
+        name: The workspace project to make active.
+    """
+    from tcip_mcp import workspace
+    from tcip_mcp.web_client import post_panel_event
+
+    try:
+        marker = workspace.set_active_project(name)
+        proj = workspace.project_path(name)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    delivery = post_panel_event(
+        "app", "active_project_changed", {"name": name, "project_path": str(proj)}
+    )
+    return {
+        "name": name,
+        "project_path": str(proj),
+        "marker": str(marker),
+        "gui_notified": bool(delivery.get("delivered")),
     }
 
 
@@ -195,15 +238,18 @@ def get_project_status(project_path: str) -> dict:
     if artifacts_dir.is_dir():
         status["artifact_count"] = len(list(artifacts_dir.iterdir()))
 
-    # Data
-    data_dir = root / "data"
-    if data_dir.is_dir():
-        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
-        images_dir = data_dir / "images"
-        if images_dir.is_dir():
-            status["image_count"] = len([f for f in images_dir.iterdir() if f.suffix.lower() in image_exts])
-        else:
-            status["image_count"] = len([f for f in data_dir.iterdir() if f.suffix.lower() in image_exts])
+    # Data — the canonical layout puts images under <root>/images/<date>/ (see
+    # tcip_mcp.dataset_layout); ingest_images writes there. Count that tree
+    # recursively so date buckets aren't missed, and report the capture dates.
+    image_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
+    images_dir = root / "images"
+    if images_dir.is_dir():
+        from tcip_mcp import dataset_layout
+
+        status["image_count"] = sum(
+            1 for f in images_dir.rglob("*") if f.is_file() and f.suffix.lower() in image_exts
+        )
+        status["dates"] = dataset_layout.list_dates(root)
 
     return status
 
