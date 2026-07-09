@@ -254,7 +254,7 @@ export function InferenceTab() {
           onClick={onLaunch}
           disabled={!modelPath || !imagesDir || !outputDir}
         >
-          ▶ Launch inference
+          ▶&nbsp;&nbsp;Launch inference
         </button>
       </div>
 
