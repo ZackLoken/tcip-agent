@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resultsApi } from "@/api/inference";
+import { inferenceApi, resultsApi } from "@/api/inference";
 
 function stubFetch(status: number, body: unknown) {
   vi.stubGlobal(
@@ -32,5 +32,27 @@ describe("results api error handling (asJson)", () => {
     // read `.models`/`.rows` off undefined and crashed on the next render.
     stubFetch(404, { detail: "no plant mapping" });
     await expect(resultsApi.registeredModels("/proj")).rejects.toThrow("no plant mapping");
+  });
+});
+
+describe("inferenceApi.cancel", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("POSTs to the job's cancel endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ job_id: "j1", status: "running", cancel_requested: true }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await inferenceApi.cancel("j1");
+    expect(res.cancel_requested).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/inference/jobs/j1/cancel",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });
