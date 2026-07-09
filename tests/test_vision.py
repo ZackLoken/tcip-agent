@@ -331,6 +331,68 @@ class TestGridToPixel:
             grid_to_pixel("A9", 640, 480, cols=8, rows=6)
 
 
+class TestSamPredictorCache:
+    """Predictor/image caching in sam_wrapper (fake SAM2, no checkpoint)."""
+
+    def test_model_swap_invalidates_image_cache(self, monkeypatch, tmp_path: Path):
+        import sys
+        import types
+
+        import numpy as np
+
+        from tcip_annotation import sam_wrapper
+
+        set_image_calls: list[object] = []
+
+        class FakePredictor:
+            def __init__(self, model):
+                self.model = model
+
+            def set_image(self, img):
+                set_image_calls.append(self)
+
+            def predict(self, **kwargs):
+                masks = np.zeros((1, 16, 16), dtype=bool)
+                masks[0, 4:12, 4:12] = True
+                return masks, np.array([0.9]), None
+
+        build_sam_mod = types.ModuleType("sam2.build_sam")
+        build_sam_mod.build_sam2 = lambda config, ckpt, device: object()
+        predictor_mod = types.ModuleType("sam2.sam2_image_predictor")
+        predictor_mod.SAM2ImagePredictor = FakePredictor
+        monkeypatch.setitem(sys.modules, "sam2", types.ModuleType("sam2"))
+        monkeypatch.setitem(sys.modules, "sam2.build_sam", build_sam_mod)
+        monkeypatch.setitem(sys.modules, "sam2.sam2_image_predictor", predictor_mod)
+
+        # Fake home with the expected checkpoint files present.
+        ckpt_dir = tmp_path / ".cache" / "tcip" / "sam2"
+        ckpt_dir.mkdir(parents=True)
+        (ckpt_dir / "sam2.1_hiera_tiny.pt").write_bytes(b"fake")
+        (ckpt_dir / "sam2.1_hiera_large.pt").write_bytes(b"fake")
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        # Start from a clean singleton state (monkeypatch restores afterwards).
+        monkeypatch.setattr(sam_wrapper, "_predictor", None)
+        monkeypatch.setattr(sam_wrapper, "_current_model_type", None)
+        monkeypatch.setattr(sam_wrapper, "_current_image_path", None)
+
+        img_path = str(tmp_path / "cache_test.jpg")
+        Image.new("RGB", (16, 16), color=(120, 120, 120)).save(img_path)
+
+        polygon = sam_wrapper.predict_from_point(img_path, 8, 8, model_type="hiera_t")
+        assert len(polygon) >= 3
+        assert len(set_image_calls) == 1
+
+        # Same image + same model: embedding cache hit, no new set_image.
+        sam_wrapper.predict_from_point(img_path, 8, 8, model_type="hiera_t")
+        assert len(set_image_calls) == 1
+
+        # Same image + different model: new predictor must recompute the embedding.
+        sam_wrapper.predict_from_point(img_path, 8, 8, model_type="hiera_l")
+        assert len(set_image_calls) == 2
+        assert set_image_calls[1] is not set_image_calls[0]
+
+
 class TestVisualizeGridOverlayTool:
     def test_basic(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import visualize_grid_overlay
