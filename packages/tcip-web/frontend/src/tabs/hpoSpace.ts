@@ -68,7 +68,11 @@ export function buildOptunaSpace(params: HpoParam[]): Record<string, unknown> {
   for (const p of params) {
     if (!p.enabled) continue;
     if (p.kind === "loguniform") {
-      space[p.key] = { type: "loguniform", low: p.low, high: p.high };
+      // Skip a param whose bounds were cleared to NaN — an unbounded log-uniform makes
+      // the sweep launch and then crash at runtime inside Optuna.
+      if (Number.isFinite(p.low) && Number.isFinite(p.high)) {
+        space[p.key] = { type: "loguniform", low: p.low, high: p.high };
+      }
     } else if (p.kind === "choices") {
       if (p.selected.length > 0) space[p.key] = { type: "categorical", choices: p.selected };
     } else if (p.values.length > 0) {
