@@ -13,10 +13,14 @@ const DEFAULT_BASE = `{
   "training": {"batch_size": 4, "num_workers": 0, "stages": [{"lr": 1e-3, "epochs": 3}]}
 }`;
 
+// Optuna-typed search space (matches get_default_optuna_space + _apply_hpo_params keys:
+// lr / batch_size / head / weight_decay / backbone / min_size).
 const DEFAULT_SPACE = `{
-  "optimizer.backbone_lr": [1e-5, 5e-5, 1e-4, 5e-4],
-  "optimizer.head_lr": [1e-4, 5e-4, 1e-3],
-  "training.batch_size": [2, 4, 8]
+  "lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
+  "batch_size": {"type": "categorical", "choices": [2, 4]},
+  "head": {"type": "categorical", "choices": ["faster_rcnn", "fcos", "retinanet"]},
+  "weight_decay": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
+  "backbone": {"type": "categorical", "choices": ["resnet50", "resnet101"]}
 }`;
 
 export function TuningTab() {
@@ -24,7 +28,6 @@ export function TuningTab() {
   const [space, setSpace] = useState(DEFAULT_SPACE);
   const [nTrials, setNTrials] = useState(5);
   const [direction, setDirection] = useState<"maximize" | "minimize">("maximize");
-  const [useOptuna, setUseOptuna] = useState(false);
   const [outputDir, setOutputDir] = useState("");
 
   const [sweeps, setSweeps] = useState<Sweep[]>([]);
@@ -72,7 +75,8 @@ export function TuningTab() {
         param_space: JSON.parse(space),
         n_trials: nTrials,
         output_dir: outputDir,
-        use_optuna: useOptuna,
+        // Optuna (TPE + ASHA) is the only sweep mode offered — it actually trains trials.
+        use_optuna: true,
         direction,
       });
       if (resp.sweep_id) {
@@ -102,13 +106,18 @@ export function TuningTab() {
           spellCheck={false}
         />
 
-        <label className="block text-[11px] text-tcip-muted mb-1">Param space (JSON)</label>
+        <label className="block text-[11px] text-tcip-muted mb-1">Optuna search space (JSON)</label>
         <textarea
-          className="tcip-input w-full h-32 font-mono text-[11px] leading-4 resize-none mb-3"
+          className="tcip-input w-full h-32 font-mono text-[11px] leading-4 resize-none mb-1"
           value={space}
           onChange={(e) => setSpace(e.target.value)}
           spellCheck={false}
         />
+        <p className="text-[10px] text-tcip-muted mb-3">
+          Sweeps run with Optuna (TPE + ASHA), training each trial. Per key:{" "}
+          {`{"type":"loguniform"|"uniform"|"int","low":…,"high":…}`} or{" "}
+          {`{"type":"categorical","choices":[…]}`}.
+        </p>
 
         <div className="grid grid-cols-2 gap-2 mb-3 text-[11px]">
           <label>
@@ -133,14 +142,6 @@ export function TuningTab() {
               <option value="minimize">Minimize</option>
             </select>
           </label>
-          <label className="col-span-2 flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={useOptuna}
-              onChange={(e) => setUseOptuna(e.target.checked)}
-            />
-            Use Optuna (TPE + ASHA)
-          </label>
         </div>
 
         <label className="block text-[11px] text-tcip-muted mb-1">Output directory</label>
@@ -152,7 +153,7 @@ export function TuningTab() {
         />
 
         <button className="tcip-btn-primary w-full" onClick={launch}>
-          ▶ Launch HPO
+          ▶&nbsp;&nbsp;Launch HPO
         </button>
         {launchMsg && <div className="mt-2 text-[11px] text-tcip-muted">{launchMsg}</div>}
         <div className="mt-1 text-[10px] text-tcip-muted">
