@@ -1,0 +1,74 @@
+{"timestamp": "2026-07-09T06:06:57.111610+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:06:57.118318+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:06:58.126251+00:00", "tool": "init_project", "arguments": {}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:06:58.145035+00:00", "tool": "get_project_status", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:06:58.155905+00:00", "tool": "create_session", "arguments": {"description": "E2E test run"}, "status": "ok", "duration_ms": 15.0}
+{"timestamp": "2026-07-09T06:06:58.170064+00:00", "tool": "load_dataset", "arguments": {}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:06:58.187011+00:00", "tool": "append_session_event", "arguments": {}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:06:58.204588+00:00", "tool": "validate_data_quality", "arguments": {}, "status": "ok", "duration_ms": 31.0}
+{"timestamp": "2026-07-09T06:06:58.244037+00:00", "tool": "append_session_event", "arguments": {}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:06:58.262413+00:00", "tool": "load_annotations", "arguments": {}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:06:58.286731+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 200, "y1": 200, "x2": 264, "y2": 248, "class_id": 0}, {"x1": 128, "y1": 112, "x2": 160, "y2": 136, "class_id": 0}, {"x1": 400, "y1": 300, "x2": 440, "y2": 340, "class_id": 1}]}, "status": "ok", "duration_ms": 110.0}
+{"timestamp": "2026-07-09T06:06:58.411894+00:00", "tool": "append_session_event", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:06:58.427130+00:00", "tool": "evaluate_detections", "arguments": {"iou_threshold": 0.5, "conf_threshold": 0.25}, "status": "ok", "duration_ms": 47.0}
+{"timestamp": "2026-07-09T06:06:58.494086+00:00", "tool": "run_matching", "arguments": {"iou_threshold": 0.5, "conf_threshold": 0.25}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:06:58.508251+00:00", "tool": "evaluate_dataset", "arguments": {"iou_threshold": 0.5, "conf_threshold": 0.25}, "status": "ok", "duration_ms": 94.0}
+{"timestamp": "2026-07-09T06:06:58.610643+00:00", "tool": "append_session_event", "arguments": {}, "status": "ok", "duration_ms": 15.0}
+{"timestamp": "2026-07-09T06:06:58.619046+00:00", "tool": "split_dataset", "arguments": {"output_path": "C:\\Users\\zack\\AppData\\Local\\Temp\\pytest-of-zack\\pytest-47\\test_full_pipeline0\\splits"}, "status": "ok", "duration_ms": 47.0}
+{"timestamp": "2026-07-09T06:06:58.682843+00:00", "tool": "append_session_event", "arguments": {}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:06:58.704354+00:00", "tool": "export_project", "arguments": {}, "status": "ok", "duration_ms": 62.0}
+{"timestamp": "2026-07-09T06:06:58.769096+00:00", "tool": "append_session_event", "arguments": {}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:06:58.833756+00:00", "tool": "get_project_status", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:06:58.864521+00:00", "tool": "load_dataset", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:06:58.880232+00:00", "tool": "evaluate_detections", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:06:58.895253+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 10, "y1": 10, "x2": 50, "y2": 50, "class_id": 0}]}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:07:47.208050+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 6656.0}
+{"timestamp": "2026-07-09T06:07:53.868268+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:07:53.870424+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:14:00.995610+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:14:01.001129+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:24:24.121690+00:00", "tool": "run_hpo", "arguments": {"n_trials": 2, "use_optuna": false}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:24:45.353251+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 2672.0}
+{"timestamp": "2026-07-09T06:24:48.039078+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:24:48.042843+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.701567+00:00", "tool": "load_dataset", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.716066+00:00", "tool": "load_dataset", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.726775+00:00", "tool": "load_dataset", "arguments": {}, "status": "ok", "duration_ms": 15.0}
+{"timestamp": "2026-07-09T06:25:00.781298+00:00", "tool": "validate_data_quality", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.807165+00:00", "tool": "validate_data_quality", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.824957+00:00", "tool": "validate_data_quality", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.842389+00:00", "tool": "load_annotations", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.858345+00:00", "tool": "load_annotations", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.875697+00:00", "tool": "load_annotations", "arguments": {}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:25:00.888981+00:00", "tool": "load_annotations", "arguments": {}, "status": "error", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.907894+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}], "fmt": "yolo"}, "status": "ok", "duration_ms": 47.0}
+{"timestamp": "2026-07-09T06:25:00.960452+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}], "fmt": "voc"}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:25:00.984493+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}], "fmt": "labelme"}, "status": "ok", "duration_ms": 31.0}
+{"timestamp": "2026-07-09T06:25:01.038930+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}, {"x1": 300, "y1": 300, "x2": 400, "y2": 400, "class_id": 1}], "fmt": "voc"}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:25:01.060467+00:00", "tool": "load_annotations", "arguments": {"fmt": "voc"}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T06:25:01.086522+00:00", "tool": "evaluate_detections", "arguments": {"iou_threshold": 0.5, "conf_threshold": 0.25}, "status": "ok", "duration_ms": 2094.0}
+{"timestamp": "2026-07-09T06:25:03.201388+00:00", "tool": "evaluate_dataset", "arguments": {"iou_threshold": 0.5}, "status": "ok", "duration_ms": 15.0}
+{"timestamp": "2026-07-09T06:25:03.230613+00:00", "tool": "run_matching", "arguments": {"iou_threshold": 0.5}, "status": "ok", "duration_ms": 15.0}
+{"timestamp": "2026-07-09T06:58:05.122643+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 2735.0}
+{"timestamp": "2026-07-09T06:58:07.880785+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T06:58:07.917358+00:00", "tool": "validate_config", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:27.938790+00:00", "tool": "load_dataset", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:27.956668+00:00", "tool": "load_dataset", "arguments": {}, "status": "ok", "duration_ms": 15.0}
+{"timestamp": "2026-07-09T07:23:27.969277+00:00", "tool": "load_dataset", "arguments": {}, "status": "ok", "duration_ms": 31.0}
+{"timestamp": "2026-07-09T07:23:28.018462+00:00", "tool": "validate_data_quality", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:28.036227+00:00", "tool": "validate_data_quality", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:28.046622+00:00", "tool": "validate_data_quality", "arguments": {}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T07:23:28.090596+00:00", "tool": "load_annotations", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:28.111826+00:00", "tool": "load_annotations", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:28.121957+00:00", "tool": "load_annotations", "arguments": {}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:28.133125+00:00", "tool": "load_annotations", "arguments": {}, "status": "error", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:28.144676+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}], "fmt": "yolo"}, "status": "ok", "duration_ms": 47.0}
+{"timestamp": "2026-07-09T07:23:28.210916+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}], "fmt": "voc"}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T07:23:28.278842+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}], "fmt": "labelme"}, "status": "ok", "duration_ms": 15.0}
+{"timestamp": "2026-07-09T07:23:28.322564+00:00", "tool": "save_annotations", "arguments": {"boxes": [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}, {"x1": 300, "y1": 300, "x2": 400, "y2": 400, "class_id": 1}], "fmt": "voc"}, "status": "ok", "duration_ms": 15.0}
+{"timestamp": "2026-07-09T07:23:28.347326+00:00", "tool": "load_annotations", "arguments": {"fmt": "voc"}, "status": "ok", "duration_ms": 16.0}
+{"timestamp": "2026-07-09T07:23:28.379344+00:00", "tool": "evaluate_detections", "arguments": {"iou_threshold": 0.5, "conf_threshold": 0.25}, "status": "ok", "duration_ms": 31.0}
+{"timestamp": "2026-07-09T07:23:28.444725+00:00", "tool": "evaluate_dataset", "arguments": {"iou_threshold": 0.5}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:28.479197+00:00", "tool": "run_matching", "arguments": {"iou_threshold": 0.5}, "status": "ok", "duration_ms": 0.0}
+{"timestamp": "2026-07-09T07:23:31.045530+00:00", "tool": "push_panel_data", "arguments": {}, "status": "ok", "duration_ms": 32.0}
+{"timestamp": "2026-07-09T07:26:37.461925+00:00", "tool": "evaluate_dataset", "arguments": {}, "status": "ok", "duration_ms": 16.0}
