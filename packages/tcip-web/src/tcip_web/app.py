@@ -46,6 +46,13 @@ async def _lifespan(_app: FastAPI):
     except Exception:  # pragma: no cover - rehydrate is best-effort
         logger.exception("job registry rehydrate failed")
     yield
+    # Kill any live chat sidecars so no agent process orphans the backend.
+    try:
+        from tcip_web.routes import chat
+
+        chat.shutdown_all()
+    except Exception:  # pragma: no cover - shutdown cleanup is best-effort
+        logger.exception("chat sidecar shutdown failed")
 
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
@@ -118,7 +125,9 @@ async def state_ws(websocket: WebSocket) -> None:
 
 # ── Panel event hub (replaces .tcip/events/ file bridge) ──
 
-VALID_PANELS = {"annotate", "review", "training", "tuning", "inference", "results"}
+# "app" is the app-level channel the agent uses to steer the GUI ("look here"): set the
+# active project, navigate a tab, select an image. The tab panels stay data-scoped.
+VALID_PANELS = {"app", "annotate", "review", "training", "tuning", "inference", "results"}
 
 # Recent events per panel, kept in memory for replay on reconnect.
 _recent_events: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=64))
