@@ -4,6 +4,7 @@ import { Line, Rect, Text } from "react-konva";
 import { api } from "@/api/client";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { ReviewToolsDrawer } from "@/components/ReviewToolsDrawer";
+import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useStore } from "@/store";
 import type {
@@ -76,6 +77,8 @@ export function ReviewTab() {
   const setMode = useStore((s) => s.setMode);
   const setPredReference = useStore((s) => s.setPredReference);
   const className = useStore((s) => s.className);
+  // Shared filtered navigation (same order as the arrow keys + TopBar Prev/Next).
+  const nav = useImageNav();
 
   const detectionIdx = gui.review.detection_idx;
   const filters = gui.review;
@@ -168,13 +171,7 @@ export function ReviewTab() {
   ]);
 
   function stepImage(delta: number) {
-    if (!dataset.image_list.length) return;
-    const next = Math.max(
-      0,
-      Math.min(dataset.image_list.length - 1, dataset.current_image_index + delta),
-    );
-    if (next === dataset.current_image_index) return;
-    patchGui({ dataset: { ...dataset, current_image_index: next } });
+    nav.stepImage(delta);
     setPredReference(null);
   }
 
