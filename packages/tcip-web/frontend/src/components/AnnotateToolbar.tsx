@@ -182,13 +182,13 @@ export function AnnotateToolbar() {
       <div className="flex rounded overflow-hidden border border-tcip-border ml-3">
         <button
           onClick={() => setMode("box")}
-          className={`px-2 h-7 text-[11px] ${mode === "box" ? "bg-tcip-accent text-white" : "bg-tcip-panel text-tcip-fg"}`}
+          className={`px-2 h-7 text-[11px] transition-colors ${mode === "box" ? "bg-tcip-accent text-white" : "bg-tcip-panel text-tcip-fg hover:bg-tcip-hover"}`}
         >
           Box
         </button>
         <button
           onClick={() => setMode("polygon")}
-          className={`px-2 h-7 text-[11px] ${mode === "polygon" ? "bg-tcip-accent text-white" : "bg-tcip-panel text-tcip-fg"}`}
+          className={`px-2 h-7 text-[11px] transition-colors ${mode === "polygon" ? "bg-tcip-accent text-white" : "bg-tcip-panel text-tcip-fg hover:bg-tcip-hover"}`}
         >
           Polygon&nbsp;&nbsp;⬡
         </button>
