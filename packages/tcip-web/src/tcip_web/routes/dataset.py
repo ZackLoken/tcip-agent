@@ -5,12 +5,12 @@ The frontend hits these to:
   * list images for a given (dataset_root, annotation_type, date),
   * read and persist the ``GuiState.dataset`` selection.
 
-Convention (from the Valley_Farm catkin layout):
+Convention — the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
 
     <dataset_root>/
         images/<date>/*.JPG
         annotations/<type>/<date>/{detect,segment}/*.txt
-        models/<name>/predictions/{detect,segment}/*.txt
+        predictions/<model>/<date>/{detect,segment}/*.txt
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from tcip_mcp.dataset_layout import annotation_dir, prediction_dir
 from tcip_web.paths import safe_join
 from tcip_web.state import DatasetSelection, store
 
@@ -52,7 +53,10 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
         dataset_root=str(root),
         dates_with_images=_list_children(root / "images"),
         annotation_types=_list_children(root / "annotations"),
-        model_names=_list_children(root / "models"),
+        # A model is selectable if it has a checkpoint dir and/or a predictions dir.
+        model_names=sorted(
+            set(_list_children(root / "models")) | set(_list_children(root / "predictions"))
+        ),
     )
 
 
@@ -102,25 +106,23 @@ async def select_dataset(req: SelectionRequest) -> dict:
                 if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
             )
 
+    # Canonical layout (see tcip_mcp.dataset_layout) — the single source of truth
+    # shared with the agent tools, so agent writes land where the GUI reads.
     ann_detect = (
-        str(root / "annotations" / req.annotation_type / req.date / "detect")
+        str(annotation_dir(root, req.annotation_type, req.date, "detect"))
         if req.annotation_type and req.date
         else None
     )
     ann_segment = (
-        str(root / "annotations" / req.annotation_type / req.date / "segment")
+        str(annotation_dir(root, req.annotation_type, req.date, "segment"))
         if req.annotation_type and req.date
         else None
     )
     pred_detect = (
-        str(root / "models" / req.model_name / "predictions" / "detect")
-        if req.model_name
-        else None
+        str(prediction_dir(root, req.model_name, req.date, "detect")) if req.model_name else None
     )
     pred_segment = (
-        str(root / "models" / req.model_name / "predictions" / "segment")
-        if req.model_name
-        else None
+        str(prediction_dir(root, req.model_name, req.date, "segment")) if req.model_name else None
     )
 
     selection = DatasetSelection(
