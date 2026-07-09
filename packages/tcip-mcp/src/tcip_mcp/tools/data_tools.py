@@ -28,41 +28,32 @@ def _scan_dataset(root: str) -> dict:
     preds_segment: list[str] = []
     detected_format: str = "yolo"
 
-    # Find images
+    # Find images (recurse to catch the canonical images/<date>/ layout).
     images_dir = root_path / "images"
-    if images_dir.is_dir():
-        for f in sorted(images_dir.iterdir()):
-            if f.suffix.lower() in image_exts:
-                images.append(str(f))
-    else:
-        for f in sorted(root_path.iterdir()):
-            if f.suffix.lower() in image_exts:
-                images.append(str(f))
+    scan_root = images_dir if images_dir.is_dir() else root_path
+    for f in sorted(scan_root.rglob("*")):
+        if f.is_file() and f.suffix.lower() in image_exts:
+            images.append(str(f))
 
-    # Find labels — check all supported format extensions
-    for sub in ("labels/detect", "labels"):
-        d = root_path / sub
-        if d.is_dir():
-            for f in sorted(d.iterdir()):
-                if f.suffix in label_exts:
-                    labels_detect.append(str(f))
-            if labels_detect:
-                # Auto-detect format from first label file
-                try:
-                    from tcip_annotation.format_io import detect_format
-                    detected_format = detect_format(labels_detect[0])
-                except Exception:
-                    pass
-            break
+    # Ground-truth labels: annotations/<trait>/[<date>/]<task>/*.{txt,xml,json}
+    ann_dir = root_path / "annotations"
+    if ann_dir.is_dir():
+        for f in sorted(ann_dir.rglob("*")):
+            if not (f.is_file() and f.suffix in label_exts):
+                continue
+            if f.parent.name == "detect":
+                labels_detect.append(str(f))
+            elif f.parent.name == "segment":
+                labels_segment.append(str(f))
+        if labels_detect:
+            # Auto-detect format from the first label file
+            try:
+                from tcip_annotation.format_io import detect_format
+                detected_format = detect_format(labels_detect[0])
+            except Exception:
+                pass
 
-    for sub in ("labels/segment",):
-        d = root_path / sub
-        if d.is_dir():
-            for f in sorted(d.iterdir()):
-                if f.suffix in label_exts:
-                    labels_segment.append(str(f))
-
-    # Check for single COCO JSON at root level
+    # A single COCO JSON at the dataset root
     for candidate in ("annotations.json", "labels.json", "instances.json"):
         coco_path = root_path / candidate
         if coco_path.is_file():
@@ -75,20 +66,16 @@ def _scan_dataset(root: str) -> dict:
                 pass
             break
 
-    # Find predictions
-    for sub in ("predictions/detect",):
-        d = root_path / sub
-        if d.is_dir():
-            for f in sorted(d.iterdir()):
-                if f.suffix in label_exts:
-                    preds_detect.append(str(f))
-
-    for sub in ("predictions/segment",):
-        d = root_path / sub
-        if d.is_dir():
-            for f in sorted(d.iterdir()):
-                if f.suffix in label_exts:
-                    preds_segment.append(str(f))
+    # Predictions: predictions/<model>/[<date>/]<task>/*.{txt,xml,json}
+    pred_dir = root_path / "predictions"
+    if pred_dir.is_dir():
+        for f in sorted(pred_dir.rglob("*")):
+            if not (f.is_file() and f.suffix in label_exts):
+                continue
+            if f.parent.name == "detect":
+                preds_detect.append(str(f))
+            elif f.parent.name == "segment":
+                preds_segment.append(str(f))
 
     return {
         "images": images,
@@ -108,8 +95,9 @@ def load_dataset(folder_path: str) -> dict:
     Supports YOLO (.txt), PASCAL VOC (.xml), COCO (.json), and LabelMe (.json).
     Format is auto-detected from file extensions and content.
 
-    Expects structure:
-        folder/images/  folder/labels/detect/  folder/predictions/detect/
+    Expects the canonical layout (see tcip_mcp.dataset_layout):
+        images/<date>/  annotations/<trait>/<date>/{detect,segment}/
+        predictions/<model>/<date>/{detect,segment}/
 
     Args:
         folder_path: Path to the dataset root directory.
