@@ -73,3 +73,24 @@ def test_pick_port_finds_free_when_taken() -> None:
         taken = s.getsockname()[1]
         got = m._pick_port("127.0.0.1", taken)  # requested port is occupied
         assert got != taken and got > 0
+
+
+def test_ws_inference_stream_rejects_cross_site_origin(client: TestClient) -> None:
+    # The inference progress stream must reject a cross-site opener (it echoes job state).
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            "/api/inference/jobs/does-not-exist/stream",
+            headers={"origin": "http://evil.example.com"},
+        ):
+            pass
+
+
+def test_ws_training_stream_rejects_cross_site_origin(client: TestClient) -> None:
+    # The training metrics stream takes a project_root and tails metrics.jsonl — a
+    # path-shaped cross-site file read if left ungated.
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            "/api/training/runs/does-not-exist/stream?project_root=/tmp",
+            headers={"origin": "http://evil.example.com"},
+        ):
+            pass
