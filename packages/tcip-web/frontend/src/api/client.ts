@@ -132,23 +132,29 @@ export const api = {
   },
 
   review: {
-    matches: (body: {
-      project_root: string;
-      image_name: string;
-      image_path: string;
-      gt_detect_path?: string | null;
-      gt_segment_path?: string | null;
-      pred_detect_path?: string | null;
-      pred_segment_path?: string | null;
-      iou_threshold?: number;
-      conf_threshold?: number;
-      filter_type?: string;
-      filter_class?: string | number;
-      status_filter?: string;
-    }) =>
+    // `signal` lets the caller cancel an in-flight recompute so a slower earlier
+    // response can't land after (and clobber) a newer one when sliders are dragged.
+    matches: (
+      body: {
+        project_root: string;
+        image_name: string;
+        image_path: string;
+        gt_detect_path?: string | null;
+        gt_segment_path?: string | null;
+        pred_detect_path?: string | null;
+        pred_segment_path?: string | null;
+        iou_threshold?: number;
+        conf_threshold?: number;
+        filter_type?: string;
+        filter_class?: string | number;
+        status_filter?: string;
+      },
+      signal?: AbortSignal,
+    ) =>
       call<MatchesResponse>("/api/review/matches", {
         method: "POST",
         body: JSON.stringify(body),
+        signal,
       }),
 
     action: (body: {
@@ -169,11 +175,25 @@ export const api = {
       pred_idx?: number | null;
       bbox: [number, number, number, number];
       action: "accepted" | "rejected" | "edited";
+      iou_threshold?: number;
+      conf_threshold?: number;
     }) =>
-      call<{ status: string }>("/api/review/action", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      call<{ status: string; image_status: MatchesResponse["image_status"] }>(
+        "/api/review/action",
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+      ),
+
+    markComplete: (project_root: string, image_name: string) =>
+      call<{ status: string; image_status: MatchesResponse["image_status"] }>(
+        "/api/review/mark_complete",
+        {
+          method: "POST",
+          body: JSON.stringify({ project_root, image_name }),
+        },
+      ),
 
     backupLabels: (project_root: string, label_dirs: string[]) =>
       call<{ status: string; labels_backed_up: boolean }>("/api/review/backup_labels", {
