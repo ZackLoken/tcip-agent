@@ -16,6 +16,8 @@ const config: Config = {
         "tcip-muted": "#8A8A8A",
         "tcip-border": "#3A3A3A",
         "tcip-panel": "#242424",
+        "tcip-hover": "#2E2E2E", // neutral raised hover surface (secondary controls)
+        "tcip-border-hover": "#4A4A4A",
         "tcip-accent": "#507754", // SI_GREEN
         "tcip-accent-hover": "#608864", // ACCENT_HOVER
         "tcip-warn": "#E6976B", // SI_PERSIMMON
