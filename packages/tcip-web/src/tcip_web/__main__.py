@@ -13,21 +13,28 @@ from pathlib import Path
 
 import uvicorn
 
+from tcip_web.paths import is_loopback_host
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 PORT_FILE = Path(".tcip") / "state" / "web_port.txt"
 
 
-def _pick_port(requested: int) -> int:
-    """Return the requested port, or find a free one if it is bound."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind((DEFAULT_HOST, requested))
-            return requested
-    except OSError:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind((DEFAULT_HOST, 0))
-            return s.getsockname()[1]
+def _pick_port(host: str, requested: int) -> int:
+    """Return ``requested`` if free on ``host``, else an OS-assigned free port.
+
+    Probes the *actual* bind host: a port free on 127.0.0.1 can be taken on the interface
+    we're about to bind (and vice-versa), so the old always-127.0.0.1 probe was wrong for
+    a non-loopback ``TCIP_WEB_HOST``.
+    """
+    for candidate in (requested, 0):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((host, candidate))
+                return s.getsockname()[1]
+        except OSError:
+            continue
+    return requested
 
 
 def _write_port_file(port: int) -> None:
@@ -39,10 +46,29 @@ def _write_port_file(port: int) -> None:
         pass
 
 
+def _refuse_insecure_bind(host: str) -> None:
+    """Refuse to expose the GUI network-wide with no auth unless explicitly allowed.
+
+    A non-loopback bind makes filesystem browsing + file writes reachable by anyone on the
+    network. Require ``TCIP_WEB_ALLOW_INSECURE=1`` as an explicit, trusted-network
+    acknowledgement (token auth for exposed deployments is a planned follow-on).
+    """
+    if is_loopback_host(host):
+        return
+    if os.environ.get("TCIP_WEB_ALLOW_INSECURE") == "1":
+        return
+    raise SystemExit(
+        f"Refusing to bind {host!r} (non-loopback): this exposes the GUI — including "
+        "filesystem browsing and file writes — to the whole network with no login.\n"
+        "Set TCIP_WEB_ALLOW_INSECURE=1 to override (only on a trusted network)."
+    )
+
+
 def main() -> None:
     host = os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)
+    _refuse_insecure_bind(host)
     requested = int(os.environ.get("TCIP_WEB_PORT", str(DEFAULT_PORT)))
-    port = _pick_port(requested)
+    port = _pick_port(host, requested)
     _write_port_file(port)
     reload = os.environ.get("TCIP_WEB_RELOAD", "0") == "1"
     uvicorn.run("tcip_web.app:app", host=host, port=port, reload=reload)
