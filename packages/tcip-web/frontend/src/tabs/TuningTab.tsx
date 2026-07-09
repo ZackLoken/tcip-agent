@@ -7,11 +7,10 @@ const DEFAULT_BASE = `{
   "model_spec": {
     "backbone": {"name": "resnet50", "pretrained": true},
     "neck": {"name": "fpn"},
-    "heads": [{"name": "detection_head", "task": "detection", "num_classes": 1}],
-    "loss": {"name": "focal_loss"}
+    "heads": [{"name": "anchor_detection", "num_classes": 1}]
   },
   "data": {"images_dir": "", "labels_dir": "", "task": "detection"},
-  "training": {"batch_size": 4, "num_workers": 0, "stages": [{"lr": 1e-3, "epochs": 3}]}
+  "training": {"batch_size": 4, "num_workers": 0, "stages": [{"epochs": 3}]}
 }`;
 
 const TERMINAL = new Set(["completed", "failed", "interrupted"]);
@@ -26,7 +25,7 @@ export function TuningTab() {
   const [sweeps, setSweeps] = useState<Sweep[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SweepDetail | null>(null);
-  const [launchMsg, setLaunchMsg] = useState<string | null>(null);
+  const [launchMsg, setLaunchMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   async function refresh() {
     try {
@@ -78,7 +77,7 @@ export function TuningTab() {
     setLaunchMsg(null);
     const space = buildOptunaSpace(params);
     if (Object.keys(space).length === 0) {
-      setLaunchMsg("Enable at least one parameter to sweep.");
+      setLaunchMsg({ text: "Enable at least one parameter to sweep.", ok: false });
       return;
     }
     try {
@@ -92,14 +91,14 @@ export function TuningTab() {
         direction,
       });
       if (resp.sweep_id) {
-        setLaunchMsg(`Launched ${resp.sweep_id}`);
+        setLaunchMsg({ text: `Launched ${resp.sweep_id}`, ok: true });
         setSelectedId(resp.sweep_id);
         void refresh();
       } else {
-        setLaunchMsg(`Error: ${JSON.stringify(resp)}`);
+        setLaunchMsg({ text: `Error: ${JSON.stringify(resp)}`, ok: false });
       }
     } catch (e) {
-      setLaunchMsg(String(e));
+      setLaunchMsg({ text: String(e), ok: false });
     }
   }
 
@@ -142,7 +141,7 @@ export function TuningTab() {
                           className="tcip-input w-24 text-[11px]"
                           type="number"
                           step="any"
-                          value={p.low}
+                          value={Number.isFinite(p.low) ? p.low : ""}
                           onChange={(e) => updateParam(p.key, { low: parseFloat(e.target.value) })}
                         />
                       </label>
@@ -152,7 +151,7 @@ export function TuningTab() {
                           className="tcip-input w-24 text-[11px]"
                           type="number"
                           step="any"
-                          value={p.high}
+                          value={Number.isFinite(p.high) ? p.high : ""}
                           onChange={(e) => updateParam(p.key, { high: parseFloat(e.target.value) })}
                         />
                       </label>
@@ -233,7 +232,11 @@ export function TuningTab() {
         <button className="tcip-btn-primary w-full" onClick={launch}>
           ▶&nbsp;&nbsp;Launch HPO
         </button>
-        {launchMsg && <div className="mt-2 text-[11px] text-tcip-muted">{launchMsg}</div>}
+        {launchMsg && (
+          <div className={`mt-2 text-[11px] ${launchMsg.ok ? "text-tcip-tp" : "text-tcip-fp"}`}>
+            {launchMsg.text}
+          </div>
+        )}
         <div className="mt-1 text-[10px] text-tcip-muted">
           Note: a running sweep can’t be cancelled — trials run to completion. Keep the trial count
           modest.
