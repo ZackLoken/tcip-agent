@@ -78,6 +78,27 @@ def test_snapshot_restore_roundtrip():
     assert model[0].weight not in new_opt.state
 
 
+def test_freeze_to_is_per_stage_for_tv_backbones():
+    """tv_* fallback backbones must freeze per stage, not all-or-nothing.
+
+    Regression: _freeze_sequential_fraction saw _MultiStageExtractor's sole
+    named child (the ``stages`` ModuleList) and froze the entire backbone for
+    any freeze_to >= 1, so intermediate schedule stages silently trained
+    heads-only.
+    """
+    from tcip_mcp.pipelines.registry import BACKBONES
+
+    bb = BACKBONES.build("tv_resnet50", pretrained=False)
+    counts = []
+    for stage in range(bb.num_stages + 1):  # 0 .. 4
+        bb.freeze_to(stage)
+        counts.append(sum(p.numel() for p in bb.model.parameters() if p.requires_grad))
+    assert counts[0] > 0  # freeze_to=0 leaves everything trainable
+    assert counts[-1] == 0  # freeze_to=num_stages freezes everything
+    # Strictly decreasing: each extra stage frozen removes trainable params.
+    assert all(b < a for a, b in zip(counts, counts[1:])), counts
+
+
 # --------------------------------------------------------------------------
 # Integration helpers
 # --------------------------------------------------------------------------
