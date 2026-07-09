@@ -144,7 +144,7 @@ function Section({
 }) {
   return (
     <div className="mb-3">
-      <div className="text-[11px] uppercase tracking-wide text-tcip-muted mb-1">{title}</div>
+      <div className="tcip-heading mb-1">{title}</div>
       <div className="grid grid-cols-5 gap-2">
         {palette.map(([name, hex]) => (
           <button
