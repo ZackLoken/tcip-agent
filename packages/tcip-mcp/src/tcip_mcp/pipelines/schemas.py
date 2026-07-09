@@ -43,13 +43,12 @@ class ModelSpecSchema(BaseModel):
 
 
 class StageSpec(BaseModel):
-    # A stage is a progressive-unfreeze step. The trainer reads ``freeze_to`` and
-    # ``epochs``; ``lr`` is an optional per-stage override. Kept consistent with
-    # ``generic_trainer.TrainConfig``'s stage defaults (the runtime canonical).
+    # A stage is a progressive-unfreeze step. The trainer reads ``freeze_to`` and ``epochs``;
+    # the optimizer LR comes from the top-level ``optimizer`` block, not per stage. extra is
+    # allowed, so an old config still carrying a per-stage ``lr`` validates (it's ignored).
     model_config = ConfigDict(extra="allow")
     epochs: int
     freeze_to: int | None = None
-    lr: float | None = None
 
 
 class TrainingSection(BaseModel):
@@ -67,16 +66,31 @@ class TrainConfigSchema(BaseModel):
 
 
 def normalize_train_config(config: dict) -> dict:
-    """Resolve the ``model`` / ``model_spec`` alias in one place.
+    """Canonicalize a training config for ``generic_trainer.train()``.
 
-    ``model_spec`` is the runtime-canonical key (``generic_trainer.train`` reads
-    ``config["model_spec"]``); ``model`` is accepted as an alias. Returns a shallow
-    copy with ``model_spec`` populated from whichever was provided.
+    Two jobs:
+
+    1. Resolve the ``model`` / ``model_spec`` alias (``model_spec`` is runtime-canonical —
+       ``train()`` reads ``config["model_spec"]``).
+    2. Hoist the ``training.*`` section onto the top level. The validated/GUI schema nests
+       ``stages`` / ``mixed_precision`` / ``batch_size`` / … under ``training``, but ``train()``
+       reads them from the top level of ``run.config`` — so without this a GUI-launched run
+       silently trains the default single stage instead of the configured schedule.
+
+    **Top-level wins**: a key already present at the top level is never overwritten by the
+    nested value — the orchestrator writes a flat config and the HPO objective writes tuned
+    params (lr, schedule) flat, and both must survive. The ``training`` section is left in
+    place for the validated schema and the experiment-record snapshot. Shallow copy: nested
+    dicts are shared, so callers must not mutate them in place after normalizing.
     """
     cfg = dict(config)
     spec = cfg.get("model_spec") or cfg.get("model")
     if spec is not None:
         cfg["model_spec"] = spec
+    training = cfg.get("training")
+    if isinstance(training, dict):
+        for key, value in training.items():
+            cfg.setdefault(key, value)  # top-level wins
     return cfg
 
 
