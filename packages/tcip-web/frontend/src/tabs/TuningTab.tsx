@@ -1,11 +1,6 @@
 import { useEffect, useState } from "react";
 
-interface Sweep {
-  sweep_id: string;
-  status: string;
-  error: string | null;
-  has_result: boolean;
-}
+import { tuningApi, type Sweep } from "@/api/tuning";
 
 const DEFAULT_BASE = `{
   "model_spec": {
@@ -42,7 +37,7 @@ export function TuningTab() {
 
   async function refresh() {
     try {
-      const r = await fetch("/api/tuning/sweeps").then((r) => r.json());
+      const r = await tuningApi.listSweeps();
       setSweeps(r.sweeps ?? []);
     } catch {
       /* ignore */
@@ -59,7 +54,7 @@ export function TuningTab() {
     if (!active?.sweep_id) return;
     const t = setInterval(async () => {
       try {
-        const r = await fetch(`/api/tuning/sweeps/${active.sweep_id}`).then((r) => r.json());
+        const r = await tuningApi.getSweep(active.sweep_id);
         setActive({ sweep_id: r.sweep_id, status: r.status, result: r.result });
         if (r.status === "completed" || r.status === "failed") return clearInterval(t);
       } catch {
@@ -72,19 +67,14 @@ export function TuningTab() {
   async function launch() {
     setLaunchMsg(null);
     try {
-      const body = {
+      const resp = await tuningApi.launch({
         base_config: JSON.parse(base),
         param_space: JSON.parse(space),
         n_trials: nTrials,
         output_dir: outputDir,
         use_optuna: useOptuna,
         direction,
-      };
-      const resp = await fetch("/api/tuning/launch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }).then((r) => r.json());
+      });
       if (resp.sweep_id) {
         setLaunchMsg(`Launched ${resp.sweep_id}`);
         setActive({ sweep_id: resp.sweep_id, status: "running", result: null });
