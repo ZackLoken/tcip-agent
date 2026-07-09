@@ -53,6 +53,7 @@ export function CanvasStage(props: CanvasStageProps) {
   const view = useStore((s) => s.gui.view);
   const setView = useStore((s) => s.setView);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
+  const [imgError, setImgError] = useState(false);
 
   // Track wrapper size
   useEffect(() => {
@@ -69,12 +70,22 @@ export function CanvasStage(props: CanvasStageProps) {
   useEffect(() => {
     if (!props.imageUrl) {
       setImg(null);
+      setImgError(false);
       return;
     }
+    setImgError(false);
     const el = new Image();
     el.crossOrigin = "anonymous";
-    el.onload = () => setImg(el);
-    el.onerror = () => setImg(null);
+    el.onload = () => {
+      setImg(el);
+      setImgError(false);
+    };
+    // Distinguish a failed load (missing / access-denied / server error) from an
+    // empty canvas — otherwise overlays float on a blank stage with no explanation.
+    el.onerror = () => {
+      setImg(null);
+      setImgError(true);
+    };
     el.src = props.imageUrl;
     return () => {
       el.onload = null;
@@ -238,6 +249,14 @@ export function CanvasStage(props: CanvasStageProps) {
           {props.children}
         </Layer>
       </Stage>
+      {imgError && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
+          <div className="max-w-sm rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-4 py-3 text-center text-[12px] text-tcip-fp">
+            Could not load this image — it may be missing, or access was denied (check the path and,
+            on a locked-down server, TCIP_IMAGE_ROOTS).
+          </div>
+        </div>
+      )}
     </div>
   );
 }
