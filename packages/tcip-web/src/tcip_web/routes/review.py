@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -446,3 +449,127 @@ def save_gt(payload: SaveGtPayload) -> dict:
 def get_image_status(project_root: str, image_name: str) -> dict:
     engine = _get_engine(project_root)
     return {"status": engine.get_image_review_status(image_name)}
+
+
+# ── Materialize a training set from review verdicts (synchronous file copy) ──
+
+
+class MaterializePayload(BaseModel):
+    project_root: str
+    source_images_dir: str
+    output_dir: str
+    experiment_id: str = ""
+    include_hard_negatives: bool = True
+    only_completed: bool = False
+    copy_files: bool = True
+
+
+@router.post("/materialize")
+def materialize_route(payload: MaterializePayload) -> dict:
+    """Turn recorded review verdicts into a curated YOLO training set (chains into split/train)."""
+    _guard_path(payload.source_images_dir)
+    _guard_path(payload.output_dir)
+    from tcip_mcp.tools.feedback_tools import materialize_review_dataset
+
+    review_state_dir = str(Path(payload.project_root) / ".tcip" / "state")
+    result = materialize_review_dataset(
+        review_state_dir=review_state_dir,
+        source_images_dir=payload.source_images_dir,
+        output_dir=payload.output_dir,
+        experiment_id=payload.experiment_id,
+        include_hard_negatives=payload.include_hard_negatives,
+        only_completed=payload.only_completed,
+        copy_files=payload.copy_files,
+    )
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    _audit(payload.project_root, "gui_materialize_review_dataset", {
+        "output_dir": payload.output_dir,
+        "only_completed": payload.only_completed,
+        "positive": result.get("positive"),
+        "hard_negative": result.get("hard_negative"),
+    })
+    return result
+
+
+# ── Review queue: rank unreviewed images (async — loads a model + scores a dir) ──
+
+
+@dataclass
+class QueueJob:
+    job_id: str
+    status: str = "pending"  # pending | running | completed | failed
+    error: Optional[str] = None
+    result: dict = field(default_factory=dict)
+    thread: Optional[threading.Thread] = field(default=None, repr=False)
+
+
+_queue_jobs: dict[str, QueueJob] = {}
+_queue_lock = threading.Lock()
+
+
+class QueuePayload(BaseModel):
+    project_root: str
+    checkpoint_path: str
+    images_dir: str
+    method: str = "combined"  # uncertainty | diversity | combined
+    task: str = "detection"
+    budget: int = 50
+    skip_reviewed: bool = True
+
+
+def _queue_worker(job: QueueJob, payload: QueuePayload) -> None:
+    try:
+        job.status = "running"
+        from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+
+        review_state_dir = str(Path(payload.project_root) / ".tcip" / "state")
+        res = prioritize_review_queue(
+            checkpoint_path=payload.checkpoint_path,
+            images_dir=payload.images_dir,
+            review_state_dir=review_state_dir,
+            method=payload.method,
+            task=payload.task,
+            budget=payload.budget,
+            skip_reviewed=payload.skip_reviewed,
+        )
+        if res.get("error"):
+            job.status = "failed"
+            job.error = res["error"]
+        else:
+            job.result = res
+            job.status = "completed"
+    except Exception as exc:
+        logger.exception("review queue job %s failed", job.job_id)
+        job.status = "failed"
+        job.error = str(exc)
+
+
+@router.post("/queue/launch")
+def launch_queue(payload: QueuePayload) -> dict:
+    """Kick off active-learning ranking of unreviewed images on a background thread."""
+    _guard_path(payload.images_dir)
+    if not Path(payload.checkpoint_path).is_file():
+        raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
+    if not Path(payload.images_dir).is_dir():
+        raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
+
+    job = QueueJob(job_id=f"rq-{uuid.uuid4().hex[:8]}")
+    with _queue_lock:
+        from tcip_web import jobstore
+
+        _queue_jobs[job.job_id] = job
+        jobstore.evict_terminal(_queue_jobs)  # bound the registry (results are recomputable)
+    t = threading.Thread(target=_queue_worker, args=(job, payload), daemon=True)
+    job.thread = t
+    t.start()
+    return {"status": "launched", "job_id": job.job_id}
+
+
+@router.get("/queue/{job_id}")
+def get_queue(job_id: str) -> dict:
+    with _queue_lock:
+        job = _queue_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, f"queue job not found: {job_id}")
+    return {"job_id": job.job_id, "status": job.status, "error": job.error, "result": job.result}
