@@ -1,10 +1,23 @@
 # In-app agent chat pop-up — design
 
-Status: **design only** (deferred follow-on from the G0–G5 GUI remediation roadmap).
-This document scopes the feature; **no agent-driving backend is built yet**. The only
-code shipped alongside it is a disabled-by-default UI shell
-(`frontend/src/components/ChatPopup.tsx`, flag `CHAT_POPUP_ENABLED = false`) that
-renders nothing and affects no existing behavior.
+Status: **SUPERSEDED (2026-07-09)** — replaced by the **embedded agent terminal**
+(decided with Zack after the translation-layer chat shipped and under-delivered).
+The in-app agent surface is now the *real* Claude Code CLI running in a server-side
+PTY (`tcip_web/terminal.py` + `routes/terminal.py`, ConPTY via `pywinpty` on Windows,
+stdlib `pty` on POSIX), streamed raw to an xterm.js terminal in a docked rail
+(`frontend/src/components/TerminalRail.tsx`) themed to the app palette via the ANSI
+slots. Rationale: the audience is tree-crop breeders using Claude as their ML/CV
+engineer — they need the full Claude Code experience (skills, CLAUDE.md, permission
+prompts, slash commands), and a translated chat envelope is a lossy re-implementation
+whose failure mode is silence. What survives from this design: the trust boundary
+(loopback + Origin-checked WS), one-session-attach semantics, replay-then-tail
+delivery, kill-on-shutdown, the two-MCP-instance concurrency invariant
+(`tests/test_concurrent_audit_appends.py`), and the agent→GUI channel (panel events +
+`set_active_project`), which is independent of how the conversation renders.
+End-to-end check: `scripts/smoke_terminal_e2e.py` (drives the real CLI).
+
+The remainder of this document is the original chat-popup design, kept for the
+option analysis (§2) and the invariants that carried over.
 
 ## 1. Problem
 
