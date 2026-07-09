@@ -107,6 +107,10 @@ class TrainRun:
     end_time: float = 0.0
     error: str = ""
     output_dir: str = ""
+    # "training" (standalone/GUI/agent run) vs "hpo_trial" (a run created by an HPO
+    # sweep's objective). The Training view lists only "training" so sweeps of dozens of
+    # trials don't flood it — HPO trials belong to the Tuning view.
+    origin: str = "training"
     # Set by cancel_run() to request a graceful stop; the train loop polls it.
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
@@ -118,6 +122,7 @@ class TrainRun:
             "current_stage": self.current_stage,
             "best_metric": self.best_metric,
             "metrics_history": self.metrics_history,
+            "origin": self.origin,
             "elapsed_seconds": (self.end_time or time.time()) - self.start_time if self.start_time else 0,
         }
 
@@ -125,9 +130,9 @@ class TrainRun:
 _RUNS: dict[str, TrainRun] = {}
 
 
-def create_run(config: dict, output_dir: str) -> TrainRun:
+def create_run(config: dict, output_dir: str, origin: str = "training") -> TrainRun:
     run_id = f"run_{int(time.time())}_{len(_RUNS)}"
-    run = TrainRun(run_id=run_id, config=config, output_dir=output_dir)
+    run = TrainRun(run_id=run_id, config=config, output_dir=output_dir, origin=origin)
     _RUNS[run_id] = run
     return run
 
@@ -136,8 +141,15 @@ def get_run(run_id: str) -> TrainRun | None:
     return _RUNS.get(run_id)
 
 
-def list_runs() -> list[dict]:
-    return [r.to_dict() for r in _RUNS.values()]
+def list_runs(include_hpo_trials: bool = False) -> list[dict]:
+    """Return runs as dicts. HPO trial runs (``origin='hpo_trial'``) are excluded by
+    default so a sweep's trials don't leak into the Training view; pass
+    ``include_hpo_trials=True`` for the full registry."""
+    return [
+        r.to_dict()
+        for r in _RUNS.values()
+        if include_hpo_trials or r.origin != "hpo_trial"
+    ]
 
 
 def cancel_run(run_id: str) -> bool:
