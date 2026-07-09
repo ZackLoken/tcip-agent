@@ -5,9 +5,20 @@ import {
   openInferenceStream,
   resultsApi,
   type InferenceJob,
+  type InferenceStatus,
   type RegisteredModel,
 } from "@/api/inference";
 import { useStore } from "@/store";
+
+// A job can still be stopped only while it is pending/running.
+const CANCELLABLE: ReadonlySet<InferenceStatus> = new Set(["pending", "running"]);
+
+function statusBadgeClass(status: InferenceStatus): string {
+  if (status === "completed") return "bg-tcip-tp/20 text-tcip-tp";
+  if (status === "failed" || status === "cancelled") return "bg-tcip-fp/20 text-tcip-fp";
+  if (status === "interrupted") return "bg-tcip-border text-tcip-muted";
+  return "bg-tcip-fn/20 text-tcip-fn"; // pending / running
+}
 
 export function InferenceTab() {
   const dataset = useStore((s) => s.gui.dataset);
@@ -110,6 +121,17 @@ export function InferenceTab() {
       useStore
         .getState()
         .pushToast(`Inference launch failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function onCancel(jobId: string) {
+    // Optimistically flip the row so the button disappears immediately; the poll +
+    // the worker's next-image-boundary stop will confirm the terminal state.
+    setJobs((prev) => prev.map((j) => (j.job_id === jobId ? { ...j, status: "cancelled" } : j)));
+    try {
+      await inferenceApi.cancel(jobId);
+    } catch (e) {
+      useStore.getState().pushToast(`Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -256,17 +278,7 @@ export function InferenceTab() {
                 <tr key={j.job_id} className="border-t border-tcip-border">
                   <td className="font-mono">{j.job_id}</td>
                   <td>
-                    <span
-                      className={`tcip-badge ${
-                        j.status === "completed"
-                          ? "bg-tcip-tp/20 text-tcip-tp"
-                          : j.status === "failed"
-                            ? "bg-tcip-fp/20 text-tcip-fp"
-                            : "bg-tcip-fn/20 text-tcip-fn"
-                      }`}
-                    >
-                      {j.status}
-                    </span>
+                    <span className={`tcip-badge ${statusBadgeClass(j.status)}`}>{j.status}</span>
                   </td>
                   <td>
                     {j.total > 0 ? `${j.done} / ${j.total}` : j.done}
@@ -281,9 +293,16 @@ export function InferenceTab() {
                   </td>
                   <td className="truncate max-w-xs text-tcip-muted">{j.images_dir}</td>
                   <td>
-                    <button className="tcip-btn text-[11px]" onClick={() => setActiveJob(j)}>
-                      Watch
-                    </button>
+                    <div className="flex gap-1">
+                      <button className="tcip-btn text-[11px]" onClick={() => setActiveJob(j)}>
+                        Watch
+                      </button>
+                      {CANCELLABLE.has(j.status) && (
+                        <button className="tcip-btn text-[11px]" onClick={() => onCancel(j.job_id)}>
+                          Cancel
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
