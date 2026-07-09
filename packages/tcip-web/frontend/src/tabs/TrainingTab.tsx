@@ -199,7 +199,7 @@ export function TrainingTab() {
               disabled={launching || !projectRoot}
               title={projectRoot ? "Launch training run" : "Select a dataset first"}
             >
-              {launching ? "Launching…" : "▶ Launch"}
+              {launching ? "Launching…" : <>▶&nbsp;&nbsp;Launch</>}
             </button>
           </div>
           <textarea
@@ -210,7 +210,11 @@ export function TrainingTab() {
           />
           {validate && (
             <div className={`mt-2 text-[11px] ${validate.valid ? "text-tcip-tp" : "text-tcip-fp"}`}>
-              {validate.valid ? "✓ Config is valid" : "✕ " + validate.issues.join("; ")}
+              {validate.valid ? (
+                <>✓&nbsp;&nbsp;Config is valid</>
+              ) : (
+                <>✕&nbsp;&nbsp;{validate.issues.join("; ")}</>
+              )}
             </div>
           )}
           {launchMsg && <div className="mt-1 text-[11px] text-tcip-muted">{launchMsg}</div>}
@@ -221,7 +225,7 @@ export function TrainingTab() {
             <span className="font-semibold text-[13px]">Runs</span>
             <span className="flex-1" />
             <button className="tcip-btn text-[11px]" onClick={refreshRuns}>
-              ↻ Refresh
+              ↻&nbsp;&nbsp;Refresh
             </button>
           </div>
           {runs.length === 0 ? (
