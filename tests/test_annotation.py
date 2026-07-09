@@ -23,7 +23,7 @@ def test_bbox_creation():
 
 
 def test_parse_detect_labels(data_dir: Path):
-    label_path = data_dir / "labels" / "detect" / "img_001.txt"
+    label_path = data_dir / "annotations" / "default" / "2-11-26" / "detect" / "img_001.txt"
     boxes, class_ids = parse_detect_labels(str(label_path), 640, 480)
     assert len(boxes) == 2
     assert all(isinstance(b, BBox) for b in boxes)
@@ -78,7 +78,7 @@ def test_evaluate_detections_tool(data_dir: Path):
     pytest.importorskip("tcip_mcp.tools.annotation_tools")
     from tcip_mcp.tools.annotation_tools import evaluate_detections
 
-    img = data_dir / "images" / "img_001.jpg"
+    img = data_dir / "images" / "2-11-26" / "img_001.jpg"
     result = evaluate_detections(str(img), iou_threshold=0.5, conf_threshold=0.25)
     assert "tp" in result
     assert "fp" in result
