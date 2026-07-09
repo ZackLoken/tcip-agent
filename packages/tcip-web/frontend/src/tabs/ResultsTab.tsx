@@ -283,7 +283,10 @@ export function ResultsTab() {
               min="0"
               max="1"
               value={elongationHeight}
-              onChange={(e) => setElongationHeight(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setElongationHeight(Number.isFinite(v) ? v : 0.02);
+              }}
             />
             <button className="tcip-btn-primary" onClick={compute} disabled={loading}>
               {loading ? "Computing…" : "Compute curves + onset dates"}
