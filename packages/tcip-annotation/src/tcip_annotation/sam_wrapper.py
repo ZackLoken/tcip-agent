@@ -60,7 +60,7 @@ _MODEL_MAP = {
 
 def _get_predictor(model_type: str = "hiera_b+") -> Any:
     """Load or reuse the SAM2 predictor singleton."""
-    global _predictor, _current_model_type
+    global _predictor, _current_model_type, _current_image_path
 
     if _predictor is not None and _current_model_type == model_type:
         return _predictor
@@ -91,6 +91,9 @@ def _get_predictor(model_type: str = "hiera_b+") -> Any:
     sam2_model = build_sam2(config_file, str(ckpt_path), device=device)
     _predictor = SAM2ImagePredictor(sam2_model)
     _current_model_type = model_type
+    # A fresh predictor has no image embedding: invalidate the image cache so
+    # _set_image recomputes it even when the same image path is requested again.
+    _current_image_path = None
     return _predictor
 
 
