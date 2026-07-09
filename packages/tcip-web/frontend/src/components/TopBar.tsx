@@ -21,6 +21,13 @@ export function TopBar() {
   const setActiveTab = useStore((s) => s.setActiveTab);
   const dataset = useStore((s) => s.gui.dataset);
   const wsStatus = useStore((s) => s.wsStatus);
+  const clearDataset = useStore((s) => s.clearDataset);
+
+  function switchProject() {
+    clearDataset();
+    // Land on a dataset-dependent tab so the project front door is shown.
+    if (!["annotate", "review", "results"].includes(activeTab)) setActiveTab("annotate");
+  }
 
   return (
     <div className="h-topbar flex items-center gap-2 px-3 border-b border-tcip-border bg-tcip-panel shrink-0">
@@ -50,20 +57,21 @@ export function TopBar() {
 
       <div className="flex-1" />
 
-      {/* Dataset breadcrumb */}
-      <div className="text-[11px] text-tcip-muted truncate max-w-md">
-        {dataset.dataset_root && dataset.date ? (
-          <>
-            <span className="font-mono">
-              {dataset.dataset_root.split(/[/\\]/).slice(-2).join("/")}
-            </span>
-            <span className="mx-1.5 text-tcip-border">·</span>
-            <span className="font-mono">{dataset.date}</span>
-          </>
-        ) : (
-          "no dataset selected"
-        )}
-      </div>
+      {/* Dataset breadcrumb — click to switch projects */}
+      {dataset.dataset_root && dataset.date ? (
+        <button
+          onClick={switchProject}
+          title="Switch project"
+          className="text-[11px] text-tcip-muted truncate max-w-md hover:text-tcip-fg transition-colors"
+        >
+          <span className="font-mono">{dataset.dataset_root.split(/[/\\]/).slice(-1)[0]}</span>
+          <span className="mx-1.5 text-tcip-border">·</span>
+          <span className="font-mono">{dataset.date}</span>
+          <span className="ml-1.5 text-tcip-muted/70">Switch</span>
+        </button>
+      ) : (
+        <span className="text-[11px] text-tcip-muted">no project open</span>
+      )}
 
       {/* WS pill */}
       <div className="flex items-center gap-1.5 h-6 px-2 ml-2 rounded-full border border-tcip-border bg-tcip-bg text-[11px]">
