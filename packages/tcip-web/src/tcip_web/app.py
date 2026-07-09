@@ -17,7 +17,6 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -25,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from tcip_web.paths import is_loopback_host
+from tcip_web.paths import is_loopback_host, origin_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -62,20 +61,6 @@ app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 # __main__ (refuses to bind non-loopback without an explicit opt-in).
 _BIND_HOST = os.environ.get("TCIP_WEB_HOST", "127.0.0.1")
 _EXPOSED = not is_loopback_host(_BIND_HOST)
-
-# Local origins on any port cover both the served app and the Vite dev server.
-_ALLOWED_ORIGIN_HOSTS = {"localhost", "127.0.0.1", "::1"}
-if _EXPOSED:
-    _ALLOWED_ORIGIN_HOSTS.add(_BIND_HOST)
-
-
-def _origin_allowed(origin: str | None) -> bool:
-    """Allow same-machine browser origins; a missing Origin means a non-browser client."""
-    if not origin:
-        return True
-    host = urlparse(origin).hostname or ""
-    return is_loopback_host(host) or host in _ALLOWED_ORIGIN_HOSTS
-
 
 # ``testserver`` is Starlette's TestClient default Host; a real deployment never sees it.
 _TRUSTED_HOSTS = ["*"] if _EXPOSED else ["localhost", "127.0.0.1", "testserver"]
@@ -114,7 +99,7 @@ def get_state() -> dict:
 @app.websocket("/ws/state")
 async def state_ws(websocket: WebSocket) -> None:
     """Receive live GuiState deltas. Replays the current snapshot on connect."""
-    if not _origin_allowed(websocket.headers.get("origin")):
+    if not origin_allowed(websocket.headers.get("origin")):
         await websocket.close(code=1008, reason="origin not allowed")
         return
     await websocket.accept()
@@ -253,7 +238,7 @@ def get_recent_panel_events(panel: str, limit: int = 16):
 @app.websocket("/ws/panel/{panel}")
 async def panel_ws(websocket: WebSocket, panel: str):
     """Stream panel events to a browser client."""
-    if not _origin_allowed(websocket.headers.get("origin")):
+    if not origin_allowed(websocket.headers.get("origin")):
         await websocket.close(code=1008, reason="origin not allowed")
         return
     if panel not in VALID_PANELS:
