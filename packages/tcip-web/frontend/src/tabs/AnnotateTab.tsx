@@ -4,7 +4,7 @@ import Konva from "konva";
 
 import { api, IMAGE_MAX_WIDTH } from "@/api/client";
 import type { Mtimes } from "@/api/client";
-import { classesApi } from "@/api/classes";
+import { classesApi, type ClassEntry } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
@@ -63,6 +63,12 @@ interface AnnotationShapesProps {
   hoveredIdx: number | null;
   draggingIdx: number | undefined;
   renderLabels: boolean;
+  /** Class registry entries. Not read directly — classColor/className are stable
+   *  store methods that read live state via get() — but the memo compares props,
+   *  so this is what invalidates it (and re-renders the tab, which subscribes to
+   *  the same list) when a class's color or name changes. Without it the canvas
+   *  keeps stale colors/names until an unrelated re-render. */
+  classes: ClassEntry[];
   classColor: (id: number) => string;
   className: (id: number) => string;
   boxStroke: number;
@@ -142,6 +148,10 @@ export function AnnotateTab() {
   const predRef = useStore((s) => s.gui.pred_reference);
   const classColor = useStore((s) => s.classColor);
   const className = useStore((s) => s.className);
+  // Subscribe to the class registry itself: classColor/className are stable
+  // function refs, so without this an upsertClass (color/name edit) would never
+  // re-render the tab or invalidate the AnnotationShapes memo.
+  const classList = useStore((s) => s.classes.list);
 
   const canvas = useStore((s) => s.canvas);
   const loadLabels = useStore((s) => s.loadLabelsIntoCanvas);
@@ -231,7 +241,9 @@ export function AnnotateTab() {
         base_mtimes: paths.mtimes,
       });
     } catch {
-      if (interactive)
+      // Identity check: a stale failure for a since-left image must not raise a
+      // banner over the image now on screen.
+      if (interactive && loadedPathsRef.current === paths)
         setIoError(
           "Could not save annotations — your edits are kept in the editor; press Save to retry.",
         );
@@ -240,8 +252,9 @@ export function AnnotateTab() {
 
     if (result.status === "conflict") {
       // Someone else (agent or another tab) wrote this file since we loaded it.
-      // Do NOT clobber their work; keep the canvas dirty.
-      if (interactive) {
+      // Do NOT clobber their work; keep the canvas dirty. Skip the banner if we
+      // have since navigated — the conflict belongs to the previous image.
+      if (interactive && loadedPathsRef.current === paths) {
         setConflict(true);
         setIoError(
           "These labels changed elsewhere (the agent or another tab). Reload to load the latest — this discards your unsaved edits — or keep editing.",
@@ -250,14 +263,11 @@ export function AnnotateTab() {
       return;
     }
 
-    loadedPathsRef.current = { ...paths, mtimes: result.base_mtimes };
-    markClean();
-    setIoError(null);
-    setConflict(false);
-
     // Update per-image status unless it is pinned Complete. An empty save is a
     // confirmed negative (the 0-byte label file is preserved on disk), distinct
-    // from an image that was never annotated.
+    // from an image that was never annotated. Runs before the staleness guard
+    // below: it uses the captured paths + canvas snapshot, so it stays correct
+    // for the image that was actually saved even after navigating away.
     const name = paths.image.split(/[/\\]/).pop() ?? "";
     if (projectRoot && name) {
       const current = useStore.getState().imageStatus.byImage[name];
@@ -270,6 +280,19 @@ export function AnnotateTab() {
         }
       }
     }
+
+    // Staleness guard: flushLeaving() fires this save without awaiting it, so by
+    // the time the POST resolves the load effect may already have loaded the NEXT
+    // image and repointed loadedPathsRef. Rewinding the ref here would make every
+    // later save write the new image's shapes onto the old image's label file
+    // (with echoed mtimes that match it, so the backend's 409 guard can't catch
+    // it), and markClean() would silently drop edits already made on the new image.
+    if (loadedPathsRef.current !== paths) return;
+
+    loadedPathsRef.current = { ...paths, mtimes: result.base_mtimes };
+    markClean();
+    setIoError(null);
+    setConflict(false);
   }
 
   // Re-fetch the current image's labels from disk, discarding local edits. Used to
@@ -839,6 +862,7 @@ export function AnnotateTab() {
             hoveredIdx={hoveredIdx}
             draggingIdx={draggingIdx}
             renderLabels={renderLabels}
+            classes={classList}
             classColor={classColor}
             className={className}
             boxStroke={boxStroke}
@@ -877,7 +901,7 @@ export function AnnotateTab() {
           title="Ctrl+Z"
           disabled={isLocked}
         >
-          ↶ Undo
+          ↶&nbsp;&nbsp;Undo
         </button>
         <button
           className="tcip-btn text-[11px]"
@@ -885,7 +909,7 @@ export function AnnotateTab() {
           title="Ctrl+Shift+Z"
           disabled={isLocked}
         >
-          ↷ Redo
+          ↷&nbsp;&nbsp;Redo
         </button>
         {mode === "polygon" && (
           <button
@@ -894,11 +918,11 @@ export function AnnotateTab() {
             disabled={isLocked || canvas.currentPolygon.length < 3}
             title="Double-click or Enter"
           >
-            ✓ Close polygon
+            ✓&nbsp;&nbsp;Close polygon
           </button>
         )}
         <span className="flex-1" />
-        <span className="text-tcip-muted">
+        <span className="text-tcip-muted tabular-nums">
           Boxes: {canvas.boxes.length} · Polys: {canvas.polygons.length}
         </span>
         <button
@@ -907,7 +931,7 @@ export function AnnotateTab() {
           disabled={!imgPath || isLocked || saveBlocked}
           title="Ctrl+S (auto-save on image change)"
         >
-          {canvas.dirty ? "💾 Save" : "Saved"}
+          {canvas.dirty ? <>💾&nbsp;&nbsp;Save</> : "Saved"}
         </button>
       </div>
     </div>
