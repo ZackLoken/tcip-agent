@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -158,8 +158,26 @@ async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
     for ws in dead:
         _panel_subscribers[panel].discard(ws)
 
+def _find_static_dir() -> Path:
+    """Locate the built frontend across install layouts.
+
+    Prefers a copy packaged inside the installed package (``tcip_web/static/`` — how a
+    wheel should ship it) and falls back to the src-layout checkout
+    (``packages/tcip-web/static/``). Returns the src-layout path if neither is built yet,
+    so ``/`` can render build instructions rather than 404.
+    """
+    candidates = [
+        Path(__file__).parent / "static",  # packaged in a wheel
+        Path(__file__).parent.parent.parent / "static",  # src-layout checkout
+    ]
+    for c in candidates:
+        if (c / "index.html").exists():
+            return c
+    return candidates[-1]
+
+
 # Serve static files (web frontend)
-STATIC_DIR = Path(__file__).parent.parent.parent / "static"
+STATIC_DIR = _find_static_dir()
 if STATIC_DIR.exists():
     # The built frontend references absolute /assets/... paths (Vite's default
     # base="/"), so mount that subdirectory at /assets. Keep /static available
@@ -186,7 +204,19 @@ def index():
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))
-    return {"message": "TCIP Pipeline API", "docs": "/docs"}
+    # Fail loudly instead of silently serving a stub: the API works, but the GUI bundle
+    # hasn't been built. Tell the operator exactly how to build it.
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "GUI not built",
+            "detail": (
+                "The frontend bundle is missing. Build it, then reload: "
+                "cd packages/tcip-web/frontend && npm install && npm run build"
+            ),
+            "api_docs": "/docs",
+        },
+    )
 
 
 # ── Panel events: POST endpoint (MCP tools) + WS subscription (browsers) ──
