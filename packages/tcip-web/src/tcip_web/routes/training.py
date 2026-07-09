@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import math
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,40 +17,41 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/training", tags=["training"])
 
-# Runs live in-memory in the trainer (`_RUNS`); they vanish on a backend restart. We
-# mirror the inference/HPO jobstore pattern: persist slim run summaries on every list
-# call and rehydrate them as historical stubs on startup, so the GUI still shows past
-# runs. Live runs (from the trainer) always win over a historical stub by run_id.
-_historical_runs: list[dict] = []
+_TERMINAL_STATES = {"completed", "failed", "cancelled", "interrupted"}
 
 
-def _run_summary(run: dict) -> dict:
-    """Slim a trainer run dict to the fields the GUI shows (drops metrics_history).
+def _historical_training_runs() -> list[dict]:
+    """Reconstruct past training runs from the immutable ``.tcip/experiments/`` records.
 
-    ``best_metric`` defaults to +inf for a not-yet-scored run; JSON can't round-trip a
-    non-finite float portably, so it is stored as null.
+    Every ``launch_training`` (standalone drift-retrain, GUI, or agent) writes an
+    experiment, so this recovers runs the in-memory registry lost on restart — with no
+    second persistence file. Only genuine *training* experiments are included (a
+    ``model_spec`` in the config); review-feedback / ad-hoc experiments are skipped, and
+    HPO trials never create experiments so they can't appear here. A non-terminal state
+    on a run that isn't live means the process died -> surfaced as ``interrupted``.
     """
-    bm = run.get("best_metric")
-    if isinstance(bm, float) and not math.isfinite(bm):
-        bm = None
-    return {
-        "run_id": run.get("run_id"),
-        "status": run.get("status"),
-        "current_epoch": run.get("current_epoch"),
-        "best_metric": bm,
-    }
+    from tcip_mcp.experiments import EXPERIMENTS_DIR
+    from tcip_mcp.utils.atomic_io import read_json
 
-
-def rehydrate() -> None:
-    """Load persisted run summaries after a restart; mark dead non-terminal runs interrupted."""
-    from tcip_web import jobstore
-
-    global _historical_runs
-    hist = jobstore.load("training_runs")
-    for s in hist:
-        if s.get("status") not in jobstore.TERMINAL_STATUSES:
-            s["status"] = "interrupted"
-    _historical_runs = hist
+    if not EXPERIMENTS_DIR.exists():
+        return []
+    runs: list[dict] = []
+    for d in sorted(EXPERIMENTS_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        config = read_json(d / "config.json", default={})
+        if not isinstance(config, dict) or not (config.get("model_spec") or config.get("model")):
+            continue  # not a training experiment (e.g. review-feedback lineage)
+        state = read_json(d / "status.json", default={}).get("state", "unknown")
+        if state not in _TERMINAL_STATES:
+            state = "interrupted"  # historical run, process gone
+        runs.append({
+            "run_id": d.name,
+            "status": state,
+            "current_epoch": None,
+            "best_metric": None,
+        })
+    return runs
 
 
 def _metrics_path(project_root: str, run_id: str) -> Path:
@@ -91,15 +91,18 @@ def launch_training_route(payload: LaunchPayload) -> dict:
 
 @router.get("/runs")
 def list_runs_route() -> dict:
+    """Live in-memory training runs, backfilled with past runs from experiment records.
+
+    ``list_training_runs`` already excludes HPO trials (they stay in the Tuning view);
+    historical runs come from ``.tcip/experiments/`` so they survive a restart without a
+    separate persistence file. Live runs win over a historical entry by run_id.
+    """
     from tcip_mcp.tools.training_tools import list_training_runs
-    from tcip_web import jobstore
 
     live = list_training_runs().get("runs", [])
     live_ids = {r.get("run_id") for r in live}
-    merged = list(live) + [h for h in _historical_runs if h.get("run_id") not in live_ids]
-    # Persist the merged view (live wins) so history survives the next restart.
-    jobstore.persist("training_runs", [_run_summary(r) for r in merged])
-    return {"runs": merged}
+    historical = [h for h in _historical_training_runs() if h.get("run_id") not in live_ids]
+    return {"runs": list(live) + historical}
 
 
 @router.get("/runs/{run_id}")
