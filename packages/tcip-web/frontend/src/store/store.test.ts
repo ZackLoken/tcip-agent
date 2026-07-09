@@ -60,6 +60,28 @@ describe("canvas store", () => {
   });
 });
 
+describe("toasts", () => {
+  beforeEach(() => {
+    useStore.setState({ toasts: [] });
+  });
+
+  it("pushToast adds a toast and dismissToast removes it", () => {
+    s().pushToast("hi", "info");
+    expect(s().toasts).toHaveLength(1);
+    expect(s().toasts[0].message).toBe("hi");
+    expect(s().toasts[0].level).toBe("info");
+    s().dismissToast(s().toasts[0].id);
+    expect(s().toasts).toHaveLength(0);
+  });
+
+  it("caps the toast stack at 4 (drops the oldest)", () => {
+    for (let i = 0; i < 6; i++) s().pushToast(`t${i}`);
+    expect(s().toasts).toHaveLength(4);
+    expect(s().toasts[0].message).toBe("t2");
+    expect(s().toasts[0].level).toBe("error"); // default level
+  });
+});
+
 describe("agent activity", () => {
   it("pushAgentActivity records the event and increments seq", () => {
     s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" });
