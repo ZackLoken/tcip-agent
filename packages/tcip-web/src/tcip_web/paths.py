@@ -10,6 +10,7 @@ from __future__ import annotations
 import ipaddress
 import os
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 
 def is_loopback_host(host: str) -> bool:
@@ -27,6 +28,25 @@ def is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(h).is_loopback
     except ValueError:
         return False
+
+
+# ── Browser trust boundary (shared by app.py + the WebSocket routes) ──
+# A loopback bind stays frictionless (no auth); the Origin check stops a cross-site page
+# from opening a WebSocket and reading GUI state (which includes filesystem paths). A
+# missing Origin means a non-browser client. Env-derived so a deliberately exposed bind
+# also trusts its own host.
+_BIND_HOST = os.environ.get("TCIP_WEB_HOST", "127.0.0.1")
+_ALLOWED_ORIGIN_HOSTS = {"localhost", "127.0.0.1", "::1"}
+if not is_loopback_host(_BIND_HOST):
+    _ALLOWED_ORIGIN_HOSTS.add(_BIND_HOST)
+
+
+def origin_allowed(origin: str | None) -> bool:
+    """Allow same-machine browser origins; a missing Origin means a non-browser client."""
+    if not origin:
+        return True
+    host = urlparse(origin).hostname or ""
+    return is_loopback_host(host) or host in _ALLOWED_ORIGIN_HOSTS
 
 
 def allowed_image_roots() -> list[Path]:
