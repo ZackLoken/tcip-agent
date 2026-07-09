@@ -39,6 +39,21 @@ def select_batch(
     return [path for path, _ in scored[:budget]]
 
 
+def _confidence_values(pred: dict) -> list[float]:
+    """Flat image-level confidences from a GenericPredictor prediction dict.
+
+    Classification/ordinal heads emit per-image confidences under
+    ``head{i}_confidences`` (via ComposedModel -> ``_format_other``); matching
+    the suffix covers multi-head specs. ``*_probabilities`` is deliberately
+    NOT matched — SemanticSegHead emits it as a 4-D nested list.
+    """
+    values: list[float] = []
+    for key, val in pred.items():
+        if key.endswith("_confidences") and isinstance(val, list):
+            values.extend(float(v) for v in val)
+    return values
+
+
 def auto_accept(
     predictions: list[dict],
     threshold: float = 0.8,
@@ -55,18 +70,15 @@ def auto_accept(
     accepted = []
     for pred in predictions:
         scores = pred.get("scores", [])
-        if scores and all(s >= threshold for s in scores):
-            accepted.append(pred)
-        elif "output" in pred:
-            # Classification: check max softmax prob
-            output = pred["output"]
-            if isinstance(output, list) and len(output) > 0:
-                if isinstance(output[0], list):
-                    max_prob = max(max(row) for row in output)
-                else:
-                    max_prob = max(output)
-                if max_prob >= threshold:
-                    accepted.append(pred)
+        if scores:
+            # Detection: every kept box must clear the threshold.
+            if all(s >= threshold for s in scores):
+                accepted.append(pred)
+        else:
+            # Classification/ordinal: every head's confidence must clear it.
+            confs = _confidence_values(pred)
+            if confs and all(c >= threshold for c in confs):
+                accepted.append(pred)
     return accepted
 
 
@@ -77,25 +89,18 @@ def review_queue(
 ) -> list[dict]:
     """Select predictions needing human review (medium confidence).
 
-    Returns predictions where at least one score is between low and high,
-    sorted by lowest confidence first (most uncertain = review first).
+    Returns predictions whose least-confident detection or head confidence
+    falls between low and high, sorted by lowest confidence first
+    (most uncertain = review first).
     """
     queue = []
     for pred in predictions:
         scores = pred.get("scores", [])
-        if scores:
-            min_score = min(scores)
-            if low <= min_score < high:
-                queue.append((min_score, pred))
-        elif "output" in pred:
-            output = pred["output"]
-            if isinstance(output, list) and len(output) > 0:
-                if isinstance(output[0], list):
-                    max_prob = max(max(row) for row in output)
-                else:
-                    max_prob = max(output)
-                if low <= max_prob < high:
-                    queue.append((max_prob, pred))
+        confs = scores if scores else _confidence_values(pred)
+        if confs:
+            min_conf = min(confs)
+            if low <= min_conf < high:
+                queue.append((min_conf, pred))
 
     queue.sort(key=lambda x: x[0])
     return [pred for _, pred in queue]
