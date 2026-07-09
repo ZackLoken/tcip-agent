@@ -24,6 +24,20 @@ interface DateRow {
   [plantId: string]: number | string;
 }
 
+/**
+ * Parse Valley_Farm folder dates (`M-D-YY`, e.g. `3-24-26`) into a sortable integer.
+ * Mirrors the backend `_date_key` in results.py so the chart's date order matches the
+ * server-computed onset table — a plain string sort puts `3-18-26` before `3-2-26`.
+ */
+function dateKey(date: string): number {
+  const parts = date.replace(/\./g, "-").split("-");
+  if (parts.length !== 3) return 0;
+  const [m, d, yRaw] = parts.map((x) => parseInt(x, 10));
+  if ([m, d, yRaw].some((n) => Number.isNaN(n))) return 0;
+  const y = yRaw < 100 ? yRaw + 2000 : yRaw;
+  return y * 10000 + m * 100 + d;
+}
+
 export function ResultsTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = dataset.project_root;
@@ -158,7 +172,7 @@ export function ResultsTab() {
       byDate[r.date] ??= { date: r.date };
       byDate[r.date][r.plant_id] = r.ratio;
     }
-    return Object.values(byDate).sort((a, b) => (a.date < b.date ? -1 : 1));
+    return Object.values(byDate).sort((a, b) => dateKey(a.date) - dateKey(b.date));
   }, [curves]);
 
   const plantKeys = useMemo(() => {
@@ -170,11 +184,11 @@ export function ResultsTab() {
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       {/* Plant mapping — build (from geolocated images + plant CSVs) or point at an existing file */}
-      <div className="tcip-panel p-3">
-        <div className="font-semibold text-[13px] mb-2">Plant mapping</div>
+      <div className="tcip-panel p-4">
+        <div className="tcip-heading mb-3">Plant mapping</div>
         <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-tcip-muted">
+            <label className="tcip-label">
               Mapping file (built here, or an existing one to load)
             </label>
             <input
@@ -183,9 +197,7 @@ export function ResultsTab() {
               onChange={(e) => setMappingPath(e.target.value)}
               placeholder="…/.tcip/state/plant_mapping.json"
             />
-            <label className="text-[11px] text-tcip-muted mt-1">
-              Plant CSV path(s) — one per line
-            </label>
+            <label className="tcip-label mt-1">Plant CSV path(s) — one per line</label>
             <textarea
               className="tcip-input h-16 font-mono text-[11px] leading-4"
               value={plantCsvText}
@@ -195,7 +207,7 @@ export function ResultsTab() {
             />
           </div>
           <div className="flex flex-col gap-2">
-            <label className="text-[11px] text-tcip-muted">NN tolerance (m)</label>
+            <label className="tcip-label">NN tolerance (m)</label>
             <input
               className="tcip-input"
               type="number"
@@ -215,7 +227,7 @@ export function ResultsTab() {
           </div>
         </div>
         {buildSummary && (
-          <div className="mt-2 text-[11px] text-tcip-muted">
+          <div className="mt-2 text-[11px] text-tcip-muted tabular-nums">
             {Object.entries(buildSummary).map(([d, s]) => (
               <div key={d}>
                 {d}: {s.n_mapped}/{s.n_images} mapped · avg {s.avg_distance_m.toFixed(1)} m
@@ -225,12 +237,12 @@ export function ResultsTab() {
         )}
       </div>
 
-      <div className="tcip-panel p-3">
-        <div className="font-semibold text-[13px] mb-2">Per-plant phenology curves</div>
+      <div className="tcip-panel p-4">
+        <div className="tcip-heading mb-3">Per-plant phenology curves</div>
         <div className="grid grid-cols-[1fr_180px] gap-3">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
-              <label className="text-[11px] text-tcip-muted flex-1">
+              <label className="tcip-label flex-1">
                 Predictions by date (JSON: date → detect/ dir)
               </label>
               <select
@@ -263,7 +275,7 @@ export function ResultsTab() {
             />
           </div>
           <div className="flex flex-col gap-2">
-            <label className="text-[11px] text-tcip-muted">Elongation bbox-height threshold</label>
+            <label className="tcip-label">Elongation bbox-height threshold</label>
             <input
               className="tcip-input"
               type="number"
@@ -297,8 +309,8 @@ export function ResultsTab() {
         {error && <div className="mt-2 text-[11px] text-tcip-fp">{error}</div>}
       </div>
 
-      <div className="tcip-panel p-3 h-80">
-        <div className="text-[12px] text-tcip-muted mb-2">
+      <div className="tcip-panel p-4 h-80">
+        <div className="tcip-heading mb-3">
           Elongated / total ratio over time, per plant ({plantKeys.length} plants)
         </div>
         {chartData.length > 0 ? (
@@ -311,6 +323,7 @@ export function ResultsTab() {
                 contentStyle={{
                   background: "#242424",
                   border: "1px solid #3A3A3A",
+                  borderRadius: 4,
                   fontSize: 11,
                 }}
               />
@@ -336,32 +349,32 @@ export function ResultsTab() {
         )}
       </div>
 
-      <div className="tcip-panel p-3">
-        <div className="text-[12px] text-tcip-muted mb-2">
+      <div className="tcip-panel p-4">
+        <div className="tcip-heading mb-3">
           Onset dates (catkin_05 / 50 / 95 per plant) — {onset.length} rows
         </div>
         {onset.length > 0 ? (
           <div className="overflow-auto max-h-96">
             <table className="w-full text-[11px]">
-              <thead className="text-tcip-muted text-left sticky top-0 bg-tcip-panel">
-                <tr>
-                  <th className="py-1 pr-3">Plant ID</th>
-                  <th className="pr-3">Accession</th>
-                  <th className="pr-3">N points</th>
-                  <th className="pr-3">05per date</th>
-                  <th className="pr-3">50per date</th>
-                  <th className="pr-3">95per date</th>
+              <thead className="sticky top-0 bg-tcip-panel">
+                <tr className="border-b border-tcip-border">
+                  <th className="tcip-th">Plant ID</th>
+                  <th className="tcip-th">Accession</th>
+                  <th className="tcip-th">N points</th>
+                  <th className="tcip-th">05per date</th>
+                  <th className="tcip-th">50per date</th>
+                  <th className="tcip-th">95per date</th>
                 </tr>
               </thead>
               <tbody>
                 {onset.map((r) => (
-                  <tr key={r.plant_id} className="border-t border-tcip-border">
-                    <td className="py-1 font-mono">{r.plant_id}</td>
+                  <tr key={r.plant_id} className="border-t border-tcip-border first:border-t-0">
+                    <td className="py-1.5 pr-3 font-mono">{r.plant_id}</td>
                     <td className="pr-3">{r.accession ?? "—"}</td>
-                    <td className="pr-3">{r.n_datapoints}</td>
-                    <td className="pr-3">{r.catkin_05per_date ?? "—"}</td>
-                    <td className="pr-3">{r.catkin_50per_date ?? "—"}</td>
-                    <td className="pr-3">{r.catkin_95per_date ?? "—"}</td>
+                    <td className="pr-3 tabular-nums">{r.n_datapoints}</td>
+                    <td className="pr-3 tabular-nums">{r.catkin_05per_date ?? "—"}</td>
+                    <td className="pr-3 tabular-nums">{r.catkin_50per_date ?? "—"}</td>
+                    <td className="pr-3 tabular-nums">{r.catkin_95per_date ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
