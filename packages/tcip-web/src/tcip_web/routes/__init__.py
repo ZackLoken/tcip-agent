@@ -10,7 +10,6 @@ from fastapi import FastAPI
 
 from tcip_web.routes import (
     annotate,
-    chat,
     classes,
     dataset,
     fs,
@@ -21,6 +20,7 @@ from tcip_web.routes import (
     results,
     review,
     sessions,
+    terminal,
     training,
     tuning,
 )
@@ -29,7 +29,7 @@ from tcip_web.routes import (
 def register_all(app: FastAPI) -> None:
     app.include_router(dataset.router)
     app.include_router(projects.router)
-    app.include_router(chat.router)
+    app.include_router(terminal.router)
     app.include_router(fs.router)
     app.include_router(images.router)
     app.include_router(annotate.router)
