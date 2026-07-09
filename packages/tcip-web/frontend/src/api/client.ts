@@ -217,7 +217,68 @@ export const api = {
 
     imageStatus: (project_root: string, image_name: string) =>
       call<{ status: string }>(`/api/review/image_status?${q({ project_root, image_name })}`),
+
+    materialize: (body: {
+      project_root: string;
+      source_images_dir: string;
+      output_dir: string;
+      experiment_id?: string;
+      include_hard_negatives?: boolean;
+      only_completed?: boolean;
+      copy_files?: boolean;
+    }) =>
+      call<MaterializeResult>("/api/review/materialize", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+
+    launchQueue: (body: {
+      project_root: string;
+      checkpoint_path: string;
+      images_dir: string;
+      method?: string;
+      task?: string;
+      budget?: number;
+      skip_reviewed?: boolean;
+    }) =>
+      call<{ status: string; job_id: string }>("/api/review/queue/launch", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+
+    getQueue: (job_id: string) => call<ReviewQueueJob>(`/api/review/queue/${job_id}`),
   },
 };
+
+export interface MaterializeResult {
+  positive: number;
+  hard_negative: number;
+  total_boxes: number;
+  output_dir: string;
+  manifest?: string;
+  experiment_id?: string;
+  [k: string]: unknown;
+}
+
+export interface ReviewQueueEntry {
+  image: string;
+  score: number;
+}
+
+export interface ReviewQueueResult {
+  method: string;
+  task: string;
+  total_candidates: number;
+  reviewed_skipped: number;
+  selected_count: number;
+  queue: ReviewQueueEntry[];
+}
+
+export interface ReviewQueueJob {
+  job_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  error: string | null;
+  result: ReviewQueueResult | Record<string, never>;
+}
 
 export type { Detection };
