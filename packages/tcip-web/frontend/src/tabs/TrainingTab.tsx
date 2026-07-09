@@ -186,9 +186,9 @@ export function TrainingTab() {
     <div className="flex-1 grid grid-cols-[400px_1fr] overflow-hidden">
       {/* Left sidebar: config + runs */}
       <div className="border-r border-tcip-border flex flex-col overflow-hidden">
-        <div className="p-3 border-b border-tcip-border">
+        <div className="p-4 border-b border-tcip-border">
           <div className="flex items-center gap-2 mb-2">
-            <span className="font-semibold text-[13px]">Training config</span>
+            <span className="tcip-heading">Training config</span>
             <span className="flex-1" />
             <button className="tcip-btn text-[11px]" onClick={onValidate}>
               Validate
@@ -220,9 +220,9 @@ export function TrainingTab() {
           {launchMsg && <div className="mt-1 text-[11px] text-tcip-muted">{launchMsg}</div>}
         </div>
 
-        <div className="flex-1 overflow-auto p-3">
+        <div className="flex-1 overflow-auto p-4">
           <div className="flex items-center gap-2 mb-2">
-            <span className="font-semibold text-[13px]">Runs</span>
+            <span className="tcip-heading">Runs</span>
             <span className="flex-1" />
             <button className="tcip-btn text-[11px]" onClick={refreshRuns}>
               ↻&nbsp;&nbsp;Refresh
@@ -235,10 +235,10 @@ export function TrainingTab() {
               {runs.map((r) => (
                 <li
                   key={r.run_id}
-                  className={`p-2 rounded border cursor-pointer ${
+                  className={`p-2 rounded border cursor-pointer transition-colors ${
                     selectedRun === r.run_id
                       ? "border-tcip-accent bg-tcip-accent/10"
-                      : "border-tcip-border hover:border-tcip-muted"
+                      : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
                   }`}
                   onClick={() => setSelectedRun(r.run_id)}
                 >
@@ -246,7 +246,7 @@ export function TrainingTab() {
                   <div className="text-[10px] text-tcip-muted flex justify-between">
                     <span>{r.status}</span>
                     {r.best_metric !== undefined && r.best_metric !== null && (
-                      <span>best: {Number(r.best_metric).toFixed(3)}</span>
+                      <span className="tabular-nums">best: {Number(r.best_metric).toFixed(3)}</span>
                     )}
                   </div>
                   {TRAINING_CANCELLABLE.has(r.status) && (
@@ -269,10 +269,15 @@ export function TrainingTab() {
 
       {/* Right pane: live curves */}
       <div className="flex flex-col overflow-hidden">
-        <div className="p-3 border-b border-tcip-border flex items-center gap-2">
-          <span className="font-semibold text-[13px]">
-            {selectedRun ? `Live metrics — ${selectedRun}` : "Select a run to view metrics"}
-          </span>
+        <div className="p-4 border-b border-tcip-border flex items-center gap-2">
+          {selectedRun ? (
+            <>
+              <span className="tcip-heading">Live metrics</span>
+              <span className="font-mono text-[12px] text-tcip-fg">{selectedRun}</span>
+            </>
+          ) : (
+            <span className="tcip-heading">Select a run to view metrics</span>
+          )}
         </div>
         <div className="flex-1 p-4 overflow-hidden">
           {selectedRun && chartData.length > 0 ? (
@@ -295,6 +300,7 @@ export function TrainingTab() {
                   contentStyle={{
                     background: "#242424",
                     border: "1px solid #3A3A3A",
+                    borderRadius: 4,
                     fontSize: 11,
                   }}
                 />
