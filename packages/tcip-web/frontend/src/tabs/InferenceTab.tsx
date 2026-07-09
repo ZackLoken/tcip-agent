@@ -76,7 +76,7 @@ export function InferenceTab() {
   function prefillFromDataset() {
     if (!datasetRoot || !dataset.date) return;
     setImagesDir(`${datasetRoot}/images/${dataset.date}`);
-    setOutputDir(`${datasetRoot}/models/live/predictions/detect`);
+    setOutputDir(`${datasetRoot}/predictions/live/${dataset.date}/detect`);
   }
 
   async function onLaunch() {
@@ -154,7 +154,7 @@ export function InferenceTab() {
           className="tcip-input w-full mb-3"
           value={outputDir}
           onChange={(e) => setOutputDir(e.target.value)}
-          placeholder="…/Valley_Farm/models/live/predictions/detect"
+          placeholder="…/Valley_Farm/predictions/live/2-11-26/detect"
         />
 
         <div className="flex items-center gap-2 mb-3">
