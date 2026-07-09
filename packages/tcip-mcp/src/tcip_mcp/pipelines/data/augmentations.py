@@ -46,8 +46,20 @@ class ToTensor:
         return pil_to_tensor(img), target
 
 
+def _resize_masks(masks: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
+    """Nearest-resize instance ``[N, H, W]`` or semantic ``[H, W]`` masks to ``(w, h)``."""
+    if masks.ndim == 2:
+        return _resize_masks(masks.unsqueeze(0), size).squeeze(0)
+    if len(masks) == 0:
+        return masks.new_zeros((0, size[1], size[0]))
+    resized = torch.nn.functional.interpolate(
+        masks.unsqueeze(1).float(), size=(size[1], size[0]), mode="nearest"
+    )
+    return resized.squeeze(1).to(masks.dtype)
+
+
 class RandomHorizontalFlip:
-    """Flip image and boxes horizontally with probability p."""
+    """Flip image, boxes, and masks horizontally with probability p."""
 
     def __init__(self, p: float = 0.5) -> None:
         self.p = p
@@ -64,11 +76,14 @@ class RandomHorizontalFlip:
                     new_boxes[:, 0] = w - boxes[:, 2]
                     new_boxes[:, 2] = w - boxes[:, 0]
                     target["boxes"] = new_boxes
+            if torch.is_tensor(target.get("masks")):
+                # Works for both [N, H, W] instance and [H, W] semantic masks
+                target["masks"] = torch.flip(target["masks"], dims=[-1])
         return img, target
 
 
 class RandomVerticalFlip:
-    """Flip image and boxes vertically with probability p."""
+    """Flip image, boxes, and masks vertically with probability p."""
 
     def __init__(self, p: float = 0.5) -> None:
         self.p = p
@@ -84,6 +99,8 @@ class RandomVerticalFlip:
                     new_boxes[:, 1] = h - boxes[:, 3]
                     new_boxes[:, 3] = h - boxes[:, 1]
                     target["boxes"] = new_boxes
+            if torch.is_tensor(target.get("masks")):
+                target["masks"] = torch.flip(target["masks"], dims=[-2])
         return img, target
 
 
@@ -120,7 +137,7 @@ class ColorJitter:
 
 
 class RandomResizedCrop:
-    """Crop a random region and resize to target size. Adjusts boxes accordingly."""
+    """Crop a random region and resize to target size. Adjusts boxes and masks accordingly."""
 
     def __init__(self, size: tuple[int, int] = (640, 640), min_scale: float = 0.5, max_scale: float = 1.0) -> None:
         self.size = size
@@ -138,6 +155,10 @@ class RandomResizedCrop:
         y2 = y1 + crop_h
 
         img = img.crop((x1, y1, x2, y2)).resize(self.size, Image.BILINEAR)
+
+        # Crop + nearest-resize masks in lockstep with the image
+        if torch.is_tensor(target.get("masks")):
+            target["masks"] = _resize_masks(target["masks"][..., y1:y2, x1:x2], self.size)
 
         # Adjust boxes
         if "boxes" in target and len(target["boxes"]) > 0:
@@ -159,8 +180,9 @@ class RandomResizedCrop:
                 target["boxes"] = boxes[valid]
                 if "labels" in target:
                     target["labels"] = target["labels"][valid]
-                if "masks" in target:
-                    target["masks"] = target["masks"][valid]
+                masks = target.get("masks")
+                if torch.is_tensor(masks) and masks.ndim == 3:
+                    target["masks"] = masks[valid]
 
         return img, target
 
@@ -179,7 +201,7 @@ class GaussianBlur:
 
 
 class Resize:
-    """Resize image to fixed size. Adjusts boxes accordingly."""
+    """Resize image to fixed size. Adjusts boxes and masks accordingly."""
 
     def __init__(self, size: tuple[int, int] = (640, 640)) -> None:
         self.size = size
@@ -196,6 +218,8 @@ class Resize:
                 boxes[:, [0, 2]] *= scale_x
                 boxes[:, [1, 3]] *= scale_y
                 target["boxes"] = boxes
+        if torch.is_tensor(target.get("masks")):
+            target["masks"] = _resize_masks(target["masks"], self.size)
         return img, target
 
 
@@ -206,8 +230,9 @@ class RandomRotation:
     Nadir/aerial imagery has no canonical "up", so free rotation is a valid
     augmentation. Boxes are rotated as 4 corners about the image center and taken
     as their axis-aligned envelope, then clamped + degenerate-filtered exactly like
-    ``RandomResizedCrop`` (filtering ``labels``/``masks`` in lockstep). Non-detection
-    targets (classification/ordinal/regression) pass through untouched.
+    ``RandomResizedCrop`` (filtering ``labels``/``masks`` in lockstep). Semantic
+    ``[H, W]`` masks are rotated with nearest resampling. Non-detection targets
+    (classification/ordinal/regression) pass through untouched.
     """
 
     def __init__(self, degrees: float = 180.0, p: float = 1.0) -> None:
@@ -255,6 +280,14 @@ class RandomRotation:
                     for m in masks
                 ]
                 target["masks"] = torch.stack(rotated)[valid] if rotated else masks[valid]
+        masks = target.get("masks")
+        if torch.is_tensor(masks) and masks.ndim == 2:
+            import numpy as np
+            target["masks"] = torch.tensor(
+                np.array(Image.fromarray(masks.cpu().numpy().astype("uint8")).rotate(
+                    angle, resample=Image.NEAREST, expand=False)),
+                dtype=masks.dtype,
+            )
         return out, target
 
 
