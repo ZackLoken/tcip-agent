@@ -1,5 +1,7 @@
 /** Class registry + per-image-status API helpers. */
 
+import { getJson, postJson } from "@/api/http";
+
 export interface ClassEntry {
   id: number;
   name: string;
@@ -13,40 +15,26 @@ export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
 export const classesApi = {
   load: (project_root: string) =>
-    fetch(`/api/classes/load?project_root=${encodeURIComponent(project_root)}`).then(
-      (r) => r.json() as Promise<{ classes: ClassEntry[] }>,
+    getJson<{ classes: ClassEntry[] }>(
+      `/api/classes/load?project_root=${encodeURIComponent(project_root)}`,
     ),
 
   save: (project_root: string, classes: ClassEntry[]) =>
-    fetch("/api/classes/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_root, classes }),
-    }).then((r) => r.json() as Promise<{ status: string; n_classes: number }>),
+    postJson<{ status: string; n_classes: number }>("/api/classes/save", { project_root, classes }),
 
   autoColor: (class_id: number) =>
-    fetch(`/api/classes/auto_color/${class_id}`).then(
-      (r) => r.json() as Promise<{ class_id: number; color: string }>,
-    ),
+    getJson<{ class_id: number; color: string }>(`/api/classes/auto_color/${class_id}`),
 
   loadImageStatus: (project_root: string) =>
-    fetch(`/api/classes/image_status?project_root=${encodeURIComponent(project_root)}`).then(
-      (r) => r.json() as Promise<{ statuses: Record<string, ImageStatus> }>,
+    getJson<{ statuses: Record<string, ImageStatus> }>(
+      `/api/classes/image_status?project_root=${encodeURIComponent(project_root)}`,
     ),
 
   setImageStatus: (project_root: string, image_name: string, status: ImageStatus) =>
-    fetch("/api/classes/image_status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_root, image_name, status }),
-    }).then((r) => r.json()),
+    postJson<unknown>("/api/classes/image_status", { project_root, image_name, status }),
 
   setImageStatusBulk: (project_root: string, statuses: Record<string, ImageStatus>) =>
-    fetch("/api/classes/image_status/bulk", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_root, statuses }),
-    }).then((r) => r.json()),
+    postJson<unknown>("/api/classes/image_status/bulk", { project_root, statuses }),
 
   deriveImageStatus: (body: {
     project_root: string;
@@ -55,11 +43,7 @@ export const classesApi = {
     image_list: string[];
     complete_override?: string[];
   }) =>
-    fetch("/api/classes/image_status/derive", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json() as Promise<{ statuses: Record<string, ImageStatus> }>),
+    postJson<{ statuses: Record<string, ImageStatus> }>("/api/classes/image_status/derive", body),
 };
 
 // High-contrast palette — matches backend DEFAULT_CLASS_COLORS so JS-side
