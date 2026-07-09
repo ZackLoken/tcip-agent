@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["httpx", "pytest", "pytest-asyncio"]
+dev = ["httpx", "pytest", "pytest-asyncio", "pytest-cov"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tcip_web"]
