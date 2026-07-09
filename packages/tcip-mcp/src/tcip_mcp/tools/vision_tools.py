@@ -76,21 +76,20 @@ def _viz_annotations(
         detect_format,
         load_annotations as format_load,
     )
-    from tcip_mcp.tools.annotation_tools import _find_label_path
+    from tcip_mcp.dataset_layout import find_gt_label
 
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
     w, h = get_image_dimensions(image_path)
-    root = img.parent.parent
     stem = img.stem
 
     name_map = {}
     if class_names:
         name_map = {i: n.strip() for i, n in enumerate(class_names.split(","))}
 
-    label_path = _find_label_path(root, stem, task)
+    label_path = find_gt_label(image_path, task)
     if label_path is None:
         return {"error": f"No {task} labels found for {stem}"}
 
@@ -139,16 +138,16 @@ def _viz_predictions(
         return {"error": f"Image not found: {image_path}"}
 
     w, h = get_image_dimensions(image_path)
-    root = img.parent.parent
     stem = img.stem
 
     name_map = {}
     if class_names:
         name_map = {i: n.strip() for i, n in enumerate(class_names.split(","))}
 
-    pred_dir = root / "predictions" / task
-    pred_file = pred_dir / f"{stem}.txt"
-    if not pred_file.is_file():
+    from tcip_mcp.dataset_layout import find_prediction
+
+    pred_file = find_prediction(image_path, task, fmt="yolo")
+    if pred_file is None:
         return {"error": f"No {task} predictions found for {stem}"}
 
     if task == "detect":
@@ -202,14 +201,13 @@ def visualize_comparison(
         load_annotations as format_load,
     )
     from tcip_annotation.matching import compute_matches
-    from tcip_mcp.tools.annotation_tools import _find_label_path
+    from tcip_mcp.dataset_layout import find_gt_label
 
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
     w, h = get_image_dimensions(image_path)
-    root = img.parent.parent
     stem = img.stem
 
     name_map = {}
@@ -217,7 +215,7 @@ def visualize_comparison(
         name_map = {i: n.strip() for i, n in enumerate(class_names.split(","))}
 
     # Load GT
-    label_path = _find_label_path(root, stem, task)
+    label_path = find_gt_label(image_path, task)
     if label_path is None:
         return {"error": f"No {task} labels found for {stem}"}
 
@@ -229,11 +227,12 @@ def visualize_comparison(
     ]
 
     # Load predictions
-    pred_dir = root / "predictions" / task
-    pred_file = pred_dir / f"{stem}.txt"
+    from tcip_mcp.dataset_layout import find_prediction
+
+    pred_file = find_prediction(image_path, task, fmt="yolo")
     pred_dicts: list[dict] = []
     matches_out: list[dict] = []
-    if pred_file.is_file():
+    if pred_file is not None:
         pred_boxes_raw, _ = parse_detect_predictions(str(pred_file), w, h)
         pred_dicts = [
             {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
@@ -383,7 +382,7 @@ def _viz_dataset_sample(
         detect_format,
         load_annotations as format_load,
     )
-    from tcip_mcp.tools.annotation_tools import _find_label_path
+    from tcip_mcp.dataset_layout import find_gt_label
 
     root = Path(folder_path)
     images_dir = root / "images"
@@ -394,10 +393,10 @@ def _viz_dataset_sample(
     if class_names:
         name_map = {i: n_name.strip() for i, n_name in enumerate(class_names.split(","))}
 
-    # Collect all image paths
+    # Collect all image paths (recurse for the canonical images/<date>/ layout).
     all_images = sorted(
-        p for p in images_dir.iterdir()
-        if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff")
+        p for p in images_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff")
     )
     if not all_images:
         return {"error": "No images found in dataset"}
@@ -410,7 +409,7 @@ def _viz_dataset_sample(
     titles = []
     for img_path in sample:
         w, h = get_image_dimensions(str(img_path))
-        label_path = _find_label_path(root, img_path.stem, task)
+        label_path = find_gt_label(str(img_path), task)
 
         if label_path is not None:
             fmt = detect_format(str(label_path))
@@ -590,23 +589,18 @@ def accept_candidates(
             class_id=class_id,
         ))
 
-    # Determine save path
-    root = img.parent.parent
+    # Determine save path (canonical layout, see tcip_mcp.dataset_layout)
+    from tcip_mcp.dataset_layout import annotation_path_for_image
+
     if boxes:
-        det_dir = root / "labels" / "detect"
-        det_dir.mkdir(parents=True, exist_ok=True)
-        format_save(
-            str(det_dir / f"{img.stem}.txt"), boxes, w, h,
-            task="detect", fmt=fmt,
-        )
+        det_path = annotation_path_for_image(str(img), "detect", fmt)
+        det_path.parent.mkdir(parents=True, exist_ok=True)
+        format_save(str(det_path), boxes, w, h, task="detect", fmt=fmt)
     if polygons and fmt != "voc":
         # VOC has no native polygon/segmentation support
-        seg_dir = root / "labels" / "segment"
-        seg_dir.mkdir(parents=True, exist_ok=True)
-        format_save(
-            str(seg_dir / f"{img.stem}.txt"), polygons, w, h,
-            task="segment", fmt=fmt,
-        )
+        seg_path = annotation_path_for_image(str(img), "segment", fmt)
+        seg_path.parent.mkdir(parents=True, exist_ok=True)
+        format_save(str(seg_path), polygons, w, h, task="segment", fmt=fmt)
 
     # Render final result for QA
     from tcip_annotation.viz import render_detections
