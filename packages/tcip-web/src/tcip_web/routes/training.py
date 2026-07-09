@@ -5,19 +5,40 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from tcip_web.paths import safe_join
+from tcip_web.paths import origin_allowed, safe_join
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/training", tags=["training"])
 
 _TERMINAL_STATES = {"completed", "failed", "cancelled", "interrupted"}
+
+# A reconstructed non-terminal run is only "interrupted" if its heartbeat is stale; a fresh
+# heartbeat means a training process (possibly the MCP agent) is still updating it. Generous
+# default so a slow epoch between per-epoch heartbeats doesn't flap the status.
+_HEARTBEAT_STALE_SECONDS = float(os.environ.get("TCIP_HEARTBEAT_STALE_SECONDS", "600"))
+
+
+def _heartbeat_fresh(hb_iso: str | None) -> bool:
+    """True if ``hb_iso`` (ISO-8601) is within the staleness window — i.e. a process is
+    still actively updating this run. Missing/unparseable → not fresh (treat as dead)."""
+    if not hb_iso:
+        return False
+    try:
+        hb = datetime.fromisoformat(hb_iso)
+    except (ValueError, TypeError):
+        return False
+    if hb.tzinfo is None:
+        hb = hb.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - hb).total_seconds() <= _HEARTBEAT_STALE_SECONDS
 
 
 def _historical_training_runs() -> list[dict]:
@@ -42,14 +63,18 @@ def _historical_training_runs() -> list[dict]:
         config = read_json(d / "config.json", default={})
         if not isinstance(config, dict) or not (config.get("model_spec") or config.get("model")):
             continue  # not a training experiment (e.g. review-feedback lineage)
-        state = read_json(d / "status.json", default={}).get("state", "unknown")
+        status = read_json(d / "status.json", default={})
+        state = status.get("state", "unknown")
         if state not in _TERMINAL_STATES:
-            state = "interrupted"  # historical run, process gone
+            # Not live in THIS process: either still training elsewhere (fresh heartbeat,
+            # e.g. an agent-launched run) or genuinely dead (stale/no heartbeat).
+            state = "running" if _heartbeat_fresh(status.get("heartbeat")) else "interrupted"
         runs.append({
             "run_id": d.name,
             "status": state,
             "current_epoch": None,
             "best_metric": None,
+            "external": True,  # reconstructed → not managed by this web process
         })
     return runs
 
@@ -160,27 +185,6 @@ def compare_runs_route(payload: ExperimentComparePayload) -> dict:
     return compare_experiments(payload.experiment_ids)
 
 
-class RegisterModelPayload(BaseModel):
-    project_path: str
-    model_name: str
-    checkpoint_path: str
-    tag: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
-
-
-@router.post("/register_model")
-def register_model_route(payload: RegisterModelPayload) -> dict:
-    from tcip_mcp.tools.model_tools import register_model
-
-    return register_model(
-        project_path=payload.project_path,
-        model_name=payload.model_name,
-        checkpoint_path=payload.checkpoint_path,
-        tag=payload.tag,
-        metadata=payload.metadata,
-    )
-
-
 # ── WebSocket live metrics ──────────────────────────────────────────────
 
 
@@ -242,6 +246,9 @@ async def _stream_metrics(
 @router.websocket("/runs/{run_id}/stream")
 async def training_stream_ws(websocket: WebSocket, run_id: str, project_root: str) -> None:
     """Tail metrics.jsonl for ``run_id`` and push new rows to the browser."""
+    if not origin_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=1008, reason="origin not allowed")
+        return
     await websocket.accept()
     try:
         await _stream_metrics(websocket, project_root, run_id)
