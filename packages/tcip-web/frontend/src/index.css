@@ -53,7 +53,7 @@ body,
   padding: 0;
 }
 
-/* Scrollbar polish matching yolo-annotator dark theme */
+/* Scrollbar polish — warm bark tones matching the field-station palette. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -62,11 +62,22 @@ body,
   background: #1e1e1e; /* tcip-bg — track sits flush with the page background */
 }
 ::-webkit-scrollbar-thumb {
-  background: #3a3a3a;
+  background: #33352c; /* tcip-border */
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4a4a4a;
+  background: #454a3b; /* tcip-border-hover */
+}
+
+/* Deliberate motion only — respect the OS reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 @layer components {
@@ -114,6 +125,20 @@ body,
      and sidebar section, so all tabs share one typographic hierarchy. */
   .tcip-heading {
     @apply text-[11px] font-semibold uppercase tracking-wider text-tcip-muted;
+  }
+
+  /* Hero "specimen tag" eyebrow — the identity motif: an uppercase instrument label
+     led by a small green→persimmon rule (canopy to fruit), echoing a botanical
+     specimen tag. Used sparingly, on the front door and section heroes. */
+  .tcip-eyebrow {
+    @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-tcip-muted;
+  }
+  .tcip-eyebrow::before {
+    content: "";
+    width: 16px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #507754, #e6976b);
   }
 
   /* Form-field label. */
