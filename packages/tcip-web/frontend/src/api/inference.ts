@@ -8,9 +8,18 @@ export interface RegisteredModel {
   tags?: string[];
 }
 
+export type InferenceStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  // Rehydrated after a restart: the job's worker thread is gone (not resumable).
+  | "interrupted";
+
 export interface InferenceJob {
   job_id: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: InferenceStatus;
   done: number;
   total: number;
   images_dir: string;
@@ -40,8 +49,19 @@ export const inferenceApi = {
 
   getPreview: (jobId: string, limit = 12) =>
     getJson<unknown>(`/api/inference/jobs/${jobId}/preview?limit=${limit}`),
+
+  cancel: (jobId: string) =>
+    postJson<{ job_id: string; status: string; cancel_requested: boolean }>(
+      `/api/inference/jobs/${encodeURIComponent(jobId)}/cancel`,
+      {},
+    ),
 };
 
+/**
+ * Open a live progress stream for an inference job, auto-reconnecting with capped
+ * backoff if the socket drops mid-run. The server sends a single ``final`` frame at a
+ * terminal state and closes; once seen we stop reconnecting (the job is done, not lost).
+ */
 export function openInferenceStream(
   jobId: string,
   onMessage: (msg: Record<string, unknown>) => void,
@@ -50,15 +70,40 @@ export function openInferenceStream(
   const url = `${proto}//${window.location.host}/api/inference/jobs/${encodeURIComponent(
     jobId,
   )}/stream`;
-  const ws = new WebSocket(url);
-  ws.onmessage = (ev) => {
-    try {
-      onMessage(JSON.parse(ev.data));
-    } catch {
-      /* ignore */
-    }
+  let ws: WebSocket | null = null;
+  let closedByClient = false;
+  let terminated = false;
+  let backoff = 500;
+
+  const connect = () => {
+    if (closedByClient) return;
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      backoff = 500;
+    };
+    ws.onmessage = (ev) => {
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      if (msg.type === "final") terminated = true;
+      onMessage(msg);
+    };
+    ws.onclose = () => {
+      if (closedByClient || terminated) return;
+      const delay = backoff;
+      backoff = Math.min(backoff * 2, 15_000);
+      setTimeout(connect, delay);
+    };
   };
-  return () => ws.close();
+
+  connect();
+  return () => {
+    closedByClient = true;
+    ws?.close();
+  };
 }
 
 export interface PerPlantRow {
