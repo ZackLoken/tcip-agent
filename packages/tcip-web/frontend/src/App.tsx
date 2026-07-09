@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { classesApi } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
+import { ChatPopup } from "@/components/ChatPopup";
 import { DatasetPicker } from "@/components/DatasetPicker";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { HelpOverlay } from "@/components/HelpOverlay";
@@ -150,6 +151,9 @@ function App() {
       </ErrorBoundary>
       <StatusBar />
       <HelpOverlay activeTab={activeTab} />
+      {/* Disabled Phase C0 stub — renders nothing until the agent chat backend
+          exists. See packages/tcip-web/docs/chat-popup-design.md. */}
+      <ChatPopup />
       <Toasts />
     </div>
   );
