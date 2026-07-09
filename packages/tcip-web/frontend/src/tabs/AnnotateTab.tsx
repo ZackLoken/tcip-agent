@@ -193,7 +193,8 @@ export function AnnotateTab() {
         const newStatus = c.boxes.length + c.polygons.length > 0 ? "partial" : "negative";
         if (current !== newStatus) {
           setImageStatus(name, newStatus);
-          void classesApi.setImageStatus(projectRoot, name, newStatus);
+          // Best-effort status write; the labels are already saved.
+          void classesApi.setImageStatus(projectRoot, name, newStatus).catch(() => {});
         }
       }
     }
