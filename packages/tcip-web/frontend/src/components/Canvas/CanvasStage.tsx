@@ -29,7 +29,7 @@ export interface CanvasStageProps {
 }
 
 // Discrete zoom levels mirror yolo-annotator (5% .. 1000%, 20 stops)
-export const ZOOM_LEVELS = [
+const ZOOM_LEVELS = [
   0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0,
   5.0, 7.0, 10.0,
 ];
@@ -115,10 +115,11 @@ export function CanvasStage(props: CanvasStageProps) {
   }, [img, props.imageUrl, props.imgWidth, props.imgHeight, dims, setView]);
 
   // Expose stage ref
+  const { onStageRef } = props;
   useEffect(() => {
-    props.onStageRef?.(stageRef.current);
-    return () => props.onStageRef?.(null);
-  }, [props.onStageRef]);
+    onStageRef?.(stageRef.current);
+    return () => onStageRef?.(null);
+  }, [onStageRef]);
 
   const toPixel = (sx: number, sy: number): [number, number] => {
     const s = view.scale || 1;
