@@ -348,6 +348,20 @@ def regression_metrics(pred_values: torch.Tensor, gt_values: torch.Tensor) -> di
 # Task-agnostic evaluate() — loss pass + prediction pass
 # ====================================================================
 
+def effective_iou_type(task: str, iou_type: str | None) -> str:
+    """Resolve the COCOeval ``iouType`` actually used to score ``task``.
+
+    An explicit ``iou_type`` wins; otherwise ``segm`` for instance_seg, ``bbox``
+    for detection, ``""`` for non-COCO tasks. Single source of truth so
+    ``run_test_evaluation`` records the same value ``evaluate`` scores with.
+    """
+    if iou_type:
+        return iou_type
+    if task == "instance_seg":
+        return "segm"
+    return "bbox" if task == "detection" else ""
+
+
 @torch.no_grad()
 def evaluate(
     model, loader, device, task: str, *,
@@ -357,7 +371,7 @@ def evaluate(
     """Compute per-task validation/test metrics. Returns BARE metric keys."""
     is_detection = task in ("detection", "instance_seg")
     is_instance_seg = task == "instance_seg"
-    eff_iou_type = iou_type or ("segm" if is_instance_seg else "bbox")
+    eff_iou_type = effective_iou_type(task, iou_type)
 
     model.eval()
     total_loss = 0.0
@@ -461,7 +475,7 @@ def run_test_evaluation(
     result = {
         **metrics,
         "model_path": str(ckpt_path), "task": task,
-        "iou_type": iou_type or ("bbox" if task in ("detection", "instance_seg") else ""),
+        "iou_type": effective_iou_type(task, iou_type),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
     }
     out = Path(output_dir) / "test_results.json"
