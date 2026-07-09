@@ -68,9 +68,10 @@ def test_make_splits_bad_ratios(data_dir: Path):
 def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=3) -> Path:
     from PIL import Image
 
-    images_dir = root / "images"
+    date = "2-11-26"
+    images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    labels_dir = root / "labels" / "detect"
+    labels_dir = root / "annotations" / "default" / date / "detect"
     labels_dir.mkdir(parents=True)
     for pref in prefixes:
         for t in range(tiles):
