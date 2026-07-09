@@ -20,6 +20,11 @@ def _target_class_id(target: dict, class_key: str | None = None) -> int | None:
     Replaces the previously-hardcoded ``label``/``ranks``/``labels`` detection: a dataset
     that names its class field differently can pass ``class_key`` instead of silently
     bucketing every sample as class 0. Returns None when no class is found.
+
+    Detection/instance-seg tensor ``labels`` are 1-indexed (cid + 1, background = 0)
+    while ``class_distribution`` keys are 0-indexed cids, so that fallback branch shifts
+    back by 1. An explicit ``class_key`` returns the raw value unshifted — don't pass
+    ``class_key="labels"`` for detection targets; rely on the fallback instead.
     """
     if class_key is not None:
         val = target.get(class_key)
@@ -28,7 +33,8 @@ def _target_class_id(target: dict, class_key: str | None = None) -> int | None:
     elif "ranks" in target:
         val = target["ranks"]
     elif torch.is_tensor(target.get("labels")) and len(target["labels"]) > 0:
-        val = target["labels"][0]
+        # 1-indexed detection label -> 0-indexed class_distribution key.
+        return int(target["labels"].reshape(-1)[0].item()) - 1
     else:
         return None
     if val is None:
@@ -110,8 +116,10 @@ class OverSampler(Sampler):
         self._indices.extend(extras)
 
     def __iter__(self):
-        g = torch.Generator()
-        perm = torch.randperm(len(self._indices), generator=g)
+        # Global RNG (like ClassBalancedSampler's multinomial): order varies per
+        # epoch and is controlled by set_seed(). A default-constructed Generator
+        # has a fixed seed, which froze the order identically every epoch.
+        perm = torch.randperm(len(self._indices))
         return iter([self._indices[i] for i in perm])
 
     def __len__(self) -> int:
