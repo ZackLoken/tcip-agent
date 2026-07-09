@@ -43,11 +43,11 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
     # Fabricate a mapping + predictions for two dates, two plants
     mapping_path = tmp_path / "mapping.json"
     mapping_data = {
-        "2-11-26": [
+        "2026-02-11": [
             {
                 "image_path": "/x/IMG_A.JPG",
                 "stem": "IMG_A",
-                "date_folder": "2-11-26",
+                "date_folder": "2026-02-11",
                 "plot_name": "PLANT_A",
                 "accession_name": "AccA",
                 "confidence": 0.9,
@@ -57,7 +57,7 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
             {
                 "image_path": "/x/IMG_B.JPG",
                 "stem": "IMG_B",
-                "date_folder": "2-11-26",
+                "date_folder": "2026-02-11",
                 "plot_name": "PLANT_B",
                 "accession_name": "AccB",
                 "confidence": 0.9,
@@ -65,11 +65,11 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
                 "distance_m": 1.0,
             },
         ],
-        "3-24-26": [
+        "2026-03-24": [
             {
                 "image_path": "/x/IMG_A2.JPG",
                 "stem": "IMG_A2",
-                "date_folder": "3-24-26",
+                "date_folder": "2026-03-24",
                 "plot_name": "PLANT_A",
                 "accession_name": "AccA",
                 "confidence": 0.9,
@@ -104,8 +104,8 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
             "project_root": str(tmp_path),
             "mapping_path": str(mapping_path),
             "predictions_by_date": {
-                "2-11-26": str(preds_211),
-                "3-24-26": str(preds_324),
+                "2026-02-11": str(preds_211),
+                "2026-03-24": str(preds_324),
             },
             "elongation_height": 0.02,
         },
@@ -115,12 +115,12 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
 
     by_key = {(r["plant_id"], r["date"]): r for r in body["rows"]}
     # PLANT_A on 2-11: 4 total, 0 elongated → ratio 0
-    assert by_key[("PLANT_A", "2-11-26")]["ratio"] == 0.0
-    assert by_key[("PLANT_A", "2-11-26")]["n_total"] == 4
+    assert by_key[("PLANT_A", "2026-02-11")]["ratio"] == 0.0
+    assert by_key[("PLANT_A", "2026-02-11")]["n_total"] == 4
     # PLANT_B on 2-11: 2 total, 2 elongated → ratio 1.0
-    assert by_key[("PLANT_B", "2-11-26")]["ratio"] == 1.0
+    assert by_key[("PLANT_B", "2026-02-11")]["ratio"] == 1.0
     # PLANT_A on 3-24: 3 total, 3 elongated → ratio 1.0
-    assert by_key[("PLANT_A", "3-24-26")]["ratio"] == 1.0
+    assert by_key[("PLANT_A", "2026-03-24")]["ratio"] == 1.0
 
 
 def test_onset_dates_finds_crossings(client: TestClient) -> None:
@@ -128,7 +128,7 @@ def test_onset_dates_finds_crossings(client: TestClient) -> None:
         {
             "plant_id": "PLANT_A",
             "accession": "A",
-            "date": "2-11-26",
+            "date": "2026-02-11",
             "n_images": 1,
             "n_total": 100,
             "n_elongated": 0,
@@ -137,7 +137,7 @@ def test_onset_dates_finds_crossings(client: TestClient) -> None:
         {
             "plant_id": "PLANT_A",
             "accession": "A",
-            "date": "3-2-26",
+            "date": "2026-03-02",
             "n_images": 1,
             "n_total": 100,
             "n_elongated": 10,
@@ -146,7 +146,7 @@ def test_onset_dates_finds_crossings(client: TestClient) -> None:
         {
             "plant_id": "PLANT_A",
             "accession": "A",
-            "date": "3-9-26",
+            "date": "2026-03-09",
             "n_images": 1,
             "n_total": 100,
             "n_elongated": 60,
@@ -155,7 +155,7 @@ def test_onset_dates_finds_crossings(client: TestClient) -> None:
         {
             "plant_id": "PLANT_A",
             "accession": "A",
-            "date": "3-18-26",
+            "date": "2026-03-18",
             "n_images": 1,
             "n_total": 100,
             "n_elongated": 100,
