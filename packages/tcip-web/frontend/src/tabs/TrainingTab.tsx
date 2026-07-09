@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -13,6 +13,10 @@ import {
 import { openTrainingStream, trainingApi } from "@/api/training";
 import type { MetricRow, TrainingRunSummary } from "@/api/training";
 import { useStore } from "@/store";
+import { mergeMetric } from "@/tabs/trainingMetrics";
+
+// Runs can only be stopped while still active; terminal/historical runs show no button.
+const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
 
 const DEFAULT_CONFIG = `{
   "model_spec": {
@@ -74,36 +78,50 @@ export function TrainingTab() {
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
   const streamRef = useRef<(() => void) | null>(null);
 
-  async function refreshRuns() {
+  const refreshRuns = useCallback(async () => {
     try {
       const r = await trainingApi.listRuns();
       setRuns(r.runs ?? []);
     } catch {
       /* ignore */
     }
-  }
+  }, []);
 
   useEffect(() => {
     void refreshRuns();
     const t = setInterval(refreshRuns, 4000);
     return () => clearInterval(t);
-  }, []);
+  }, [refreshRuns]);
 
   useEffect(() => {
     if (!selectedRun || !projectRoot) return;
-    // Seed with any already-written metrics
-    void trainingApi.getMetrics(projectRoot, selectedRun).then((r) => {
-      if (r.exists) setMetrics(r.metrics);
-    });
-    // Open WS for live stream
+    // Clear the previous run's curve; the stream replays THIS run from the start, so a
+    // seed GET would just double-load the same rows. The WS is the single source now.
+    setMetrics([]);
     streamRef.current?.();
     streamRef.current = openTrainingStream(projectRoot, selectedRun, (msg) => {
       if (msg.type === "metric" && msg.row) {
-        setMetrics((prev) => [...prev, msg.row as MetricRow]);
+        setMetrics((prev) => mergeMetric(prev, msg.row as MetricRow));
+      } else if (msg.type === "status") {
+        // Terminal frame — surface completion/failure/cancellation + refresh the list.
+        const st = msg.status?.status;
+        if (st) useStore.getState().pushToast(`Training ${selectedRun}: ${st}`, "info");
+        void refreshRuns();
+      } else if (msg.type === "error") {
+        useStore.getState().pushToast(`Training stream error: ${msg.error ?? "unknown run"}`);
       }
     });
     return () => streamRef.current?.();
-  }, [selectedRun, projectRoot]);
+  }, [selectedRun, projectRoot, refreshRuns]);
+
+  async function onCancel(runId: string) {
+    try {
+      await trainingApi.cancel(runId);
+      void refreshRuns();
+    } catch (e) {
+      useStore.getState().pushToast(`Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   async function onValidate() {
     try {
@@ -227,6 +245,17 @@ export function TrainingTab() {
                       <span>best: {Number(r.best_metric).toFixed(3)}</span>
                     )}
                   </div>
+                  {TRAINING_CANCELLABLE.has(r.status) && (
+                    <button
+                      className="tcip-btn text-[10px] mt-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onCancel(r.run_id);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
