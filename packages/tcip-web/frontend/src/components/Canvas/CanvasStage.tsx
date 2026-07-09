@@ -14,7 +14,11 @@ export interface CanvasStageProps {
   imageUrl: string | null;
   imgWidth: number;
   imgHeight: number;
+  /** Static shapes — rendered in the content layer (below the overlay). */
   children?: React.ReactNode;
+  /** Cursor-following / transient shapes — rendered in a separate top layer so they
+   *  can redraw on every mouse move without re-compositing the image or the shapes. */
+  overlay?: React.ReactNode;
   onStageRef?: (stage: Konva.Stage | null) => void;
   onPixelClick?: (x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) => void;
   onPixelMove?: (x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) => void;
@@ -242,12 +246,43 @@ export function CanvasStage(props: CanvasStageProps) {
         onDblClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
       >
-        <Layer x={view.offset_x} y={view.offset_y} scaleX={view.scale} scaleY={view.scale}>
+        {/* Three layers share the pan/zoom transform but redraw independently. All are
+            listening={false} — every interaction goes through the Stage-level pixel
+            handlers (getPointerPosition + toPixel), never per-shape Konva hit-testing —
+            so Konva skips building a hit graph for hundreds/thousands of shapes.
+            Isolating the image means a cursor move (overlay only) never re-composites
+            the 20MP bitmap. */}
+        <Layer
+          listening={false}
+          x={view.offset_x}
+          y={view.offset_y}
+          scaleX={view.scale}
+          scaleY={view.scale}
+        >
           {img ? (
             <KonvaImage image={img} x={0} y={0} width={props.imgWidth} height={props.imgHeight} />
           ) : null}
+        </Layer>
+        <Layer
+          listening={false}
+          x={view.offset_x}
+          y={view.offset_y}
+          scaleX={view.scale}
+          scaleY={view.scale}
+        >
           {props.children}
         </Layer>
+        {props.overlay != null && (
+          <Layer
+            listening={false}
+            x={view.offset_x}
+            y={view.offset_y}
+            scaleX={view.scale}
+            scaleY={view.scale}
+          >
+            {props.overlay}
+          </Layer>
+        )}
       </Stage>
       {imgError && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
