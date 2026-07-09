@@ -201,7 +201,10 @@ export function InferenceTab() {
               min="0"
               max="1"
               value={conf}
-              onChange={(e) => setConf(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setConf(Number.isFinite(v) ? v : 0.25);
+              }}
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -213,7 +216,10 @@ export function InferenceTab() {
               min="0"
               max="1"
               value={iou}
-              onChange={(e) => setIou(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setIou(Number.isFinite(v) ? v : 0.7);
+              }}
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -243,7 +249,10 @@ export function InferenceTab() {
               min="0"
               max="0.9"
               value={overlap}
-              onChange={(e) => setOverlap(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setOverlap(Number.isFinite(v) ? v : 0.2);
+              }}
             />
           </label>
         </div>
