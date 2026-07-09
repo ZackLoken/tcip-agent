@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tcip_mcp.utils.atomic_io import atomic_write_json
+from tcip_mcp.utils.atomic_io import atomic_write_json, read_json
 
 _STATE_DIR = Path(".tcip") / "state"
 MAX_JOBS = 100
-_TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
+TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})
 
 
 def persist(name: str, summaries: list[dict]) -> None:
@@ -26,6 +26,16 @@ def persist(name: str, summaries: list[dict]) -> None:
         pass
 
 
+def load(name: str) -> list[dict]:
+    """Read persisted job summaries from ``.tcip/state/<name>.json``.
+
+    Returns ``[]`` when the file is missing/unparseable or doesn't hold a list — a
+    restart with no prior state (or a corrupt file) starts clean rather than raising.
+    """
+    data = read_json(_STATE_DIR / f"{name}.json", default=[])
+    return data if isinstance(data, list) else []
+
+
 def evict_terminal(jobs: dict, max_jobs: int = MAX_JOBS) -> None:
     """Drop the oldest terminal jobs in place once the registry exceeds ``max_jobs``.
 
@@ -34,6 +44,8 @@ def evict_terminal(jobs: dict, max_jobs: int = MAX_JOBS) -> None:
     overflow = len(jobs) - max_jobs
     if overflow <= 0:
         return
-    evictable = [jid for jid, job in jobs.items() if getattr(job, "status", "") in _TERMINAL]
+    evictable = [
+        jid for jid, job in jobs.items() if getattr(job, "status", "") in TERMINAL_STATUSES
+    ]
     for jid in evictable[:overflow]:
         jobs.pop(jid, None)
