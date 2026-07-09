@@ -1,0 +1,193 @@
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+// Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+
+import { api } from "@/api/client";
+import { useStore } from "@/store";
+import type { Detection, MatchesResponse } from "@/store/types";
+import { ReviewTab } from "@/tabs/ReviewTab";
+
+// Konva needs a real 2D canvas; these tests exercise empty-state rendering, nav
+// bounds, and the matches-recompute effect, not drawing. Render Konva shapes as
+// divs and CanvasStage as a passthrough.
+vi.mock("konva", () => ({ default: {} }));
+vi.mock("react-konva", () => ({
+  Rect: () => <div data-testid="k-rect" />,
+  Line: () => <div data-testid="k-line" />,
+  Text: (props: { text?: string }) => <div data-testid="k-text" data-text={props.text} />,
+}));
+vi.mock("@/components/Canvas/CanvasStage", () => ({
+  CanvasStage: (props: { children?: React.ReactNode }) => (
+    <div data-testid="canvas-stage">{props.children}</div>
+  ),
+}));
+vi.mock("@/components/ReviewToolsDrawer", () => ({
+  ReviewToolsDrawer: () => <div data-testid="tools-drawer" />,
+}));
+
+const initialStoreState = useStore.getState();
+
+const PRED_DIR_A = "C:/data/predictions/model_a/detect/2026-01-01";
+const PRED_DIR_B = "C:/data/predictions/model_b/detect/2026-01-01";
+
+function setupDataset(opts: { predDetectDir?: string | null } = {}) {
+  const predDetectDir = opts.predDetectDir !== undefined ? opts.predDetectDir : PRED_DIR_A;
+  useStore.setState((s) => ({
+    gui: {
+      ...s.gui,
+      dataset: {
+        ...s.gui.dataset,
+        project_root: "C:/proj",
+        dataset_root: "C:/data",
+        annotation_type: "annotations",
+        date: "2026-01-01",
+        image_list: ["img1.jpg", "img2.jpg"],
+        current_image_index: 0,
+        annotations_detect_dir: "C:/data/annotations/detect/2026-01-01",
+        annotations_segment_dir: null,
+        predictions_detect_dir: predDetectDir,
+        predictions_segment_dir: null,
+      },
+    },
+  }));
+}
+
+function det(over: Partial<Detection> = {}): Detection {
+  return {
+    det_type: "tp",
+    class_id: 0,
+    conf: 0.9,
+    iou: 0.8,
+    gt_type: "box",
+    gt_idx: 0,
+    pred_type: "box",
+    pred_idx: null,
+    bbox: [10, 10, 50, 50],
+    reviewed: false,
+    reviewed_action: null,
+    ...over,
+  };
+}
+
+function matchesRes(detections: Detection[]): MatchesResponse {
+  return {
+    img_width: 1000,
+    img_height: 800,
+    n_tp: detections.filter((d) => d.det_type === "tp").length,
+    n_fp: detections.filter((d) => d.det_type === "fp").length,
+    n_fn: detections.filter((d) => d.det_type === "fn").length,
+    detections,
+    gt_boxes: [],
+    gt_polygons: [],
+    pred_boxes: [],
+    pred_polygons: [],
+    image_status: "not_started",
+  };
+}
+
+const prevBtn = () => screen.getByTitle("Previous detection (←)");
+const nextBtn = () => screen.getByTitle("Next detection (→)");
+
+let matchesSpy: MockInstance<typeof api.review.matches>;
+
+beforeEach(() => {
+  useStore.setState(initialStoreState, true);
+  setupDataset();
+  matchesSpy = vi.spyOn(api.review, "matches").mockResolvedValue(matchesRes([]));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe("ReviewTab empty states", () => {
+  it("shows 0 / 0, disables detection nav, and explains that filters exclude everything", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(useStore.getState().review.matches).not.toBeNull());
+
+    expect(screen.getByText("0 / 0")).toBeInTheDocument();
+    expect(prevBtn()).toBeDisabled();
+    expect(nextBtn()).toBeDisabled();
+
+    // Predictions dir IS configured -> the card blames the filters, echoing them.
+    expect(screen.getByText("No detections to review")).toBeInTheDocument();
+    expect(
+      screen.getByText(/under the current filters \(IoU ≥ 0\.50, Conf ≥ 0\.25, type all\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No predictions directory configured/)).not.toBeInTheDocument();
+  });
+
+  it("explains a missing predictions directory instead of blaming filters", async () => {
+    setupDataset({ predDetectDir: null });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(useStore.getState().review.matches).not.toBeNull());
+
+    expect(screen.getByText("No detections to review")).toBeInTheDocument();
+    expect(screen.getByText(/No predictions directory configured/)).toBeInTheDocument();
+    expect(screen.queryByText(/under the current filters/)).not.toBeInTheDocument();
+  });
+
+  it("does not show the card before matches load or when detections exist", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([det(), det({ det_type: "fp" })]));
+    render(<ReviewTab />);
+    // Pre-load (store.review.matches is null): no card, counter shows 0 / 0.
+    expect(screen.queryByText("No detections to review")).not.toBeInTheDocument();
+    expect(screen.getByText("0 / 0")).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByText("1 / 2")).toBeInTheDocument());
+    expect(screen.queryByText("No detections to review")).not.toBeInTheDocument();
+  });
+});
+
+describe("ReviewTab detection nav bounds", () => {
+  it("disables Prev at the first detection and Next at the last", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([det(), det({ det_type: "fp" })]));
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 2")).toBeInTheDocument());
+
+    expect(prevBtn()).toBeDisabled();
+    expect(nextBtn()).not.toBeDisabled();
+
+    fireEvent.click(nextBtn());
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(prevBtn()).not.toBeDisabled();
+    expect(nextBtn()).toBeDisabled();
+  });
+});
+
+describe("ReviewTab matches-recompute effect", () => {
+  it("re-fetches when the prediction dirs change under the same image (agent swaps model)", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+    expect(matchesSpy.mock.calls[0][0].pred_detect_path).toBe(`${PRED_DIR_A}/img1.txt`);
+
+    // mergeSnapshot's same-identity branch adopts backend-changed prediction dirs
+    // without changing imgPath — the tab must not keep showing the old model's matches.
+    act(() => {
+      const s = useStore.getState();
+      s.patchGui({ dataset: { ...s.gui.dataset, predictions_detect_dir: PRED_DIR_B } });
+    });
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(2));
+    expect(matchesSpy.mock.calls[1][0].pred_detect_path).toBe(`${PRED_DIR_B}/img1.txt`);
+  });
+
+  it("does NOT re-fetch when a WS snapshot rebuilds the dataset object with identical paths", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+
+    // Same strings, new object identity — the effect keys on the path strings, so a
+    // routine WS broadcast must not reset the detection index/zoom via a reload.
+    act(() => {
+      const s = useStore.getState();
+      s.patchGui({ dataset: { ...s.gui.dataset } });
+    });
+    // Outwait the 180ms debounce before asserting nothing fired.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    expect(matchesSpy).toHaveBeenCalledTimes(1);
+  });
+});
