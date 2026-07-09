@@ -29,6 +29,55 @@ def test_persist_writes_state_file(tmp_path, monkeypatch):
     assert data == [{"job_id": "a", "status": "completed"}]
 
 
+def test_load_roundtrips_persist_and_defaults_empty(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from tcip_web.jobstore import load, persist
+
+    assert load("inference_jobs") == []  # nothing persisted yet -> clean start
+    persist("inference_jobs", [{"job_id": "a", "status": "running"}])
+    assert load("inference_jobs") == [{"job_id": "a", "status": "running"}]
+
+
+def test_inference_rehydrate_marks_dead_jobs_interrupted(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from tcip_web.jobstore import persist
+    from tcip_web.routes import inference
+
+    persist("inference_jobs", [
+        {"job_id": "done", "status": "completed", "done": 3, "total": 3,
+         "images_dir": "i", "output_dir": "o", "error": None},
+        {"job_id": "dead", "status": "running", "done": 1, "total": 5,
+         "images_dir": "i", "output_dir": "o", "error": None},
+    ])
+    inference._jobs.clear()
+    try:
+        inference.rehydrate()
+        jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
+        assert jobs["done"]["status"] == "completed"      # terminal preserved
+        assert jobs["dead"]["status"] == "interrupted"    # thread gone -> not resumable
+    finally:
+        inference._jobs.clear()
+
+
+def test_tuning_rehydrate_marks_dead_sweeps_interrupted(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from tcip_web.jobstore import persist
+    from tcip_web.routes import tuning
+
+    persist("hpo_sweeps", [
+        {"sweep_id": "s_done", "status": "completed", "error": None, "has_result": True},
+        {"sweep_id": "s_dead", "status": "running", "error": None, "has_result": False},
+    ])
+    tuning._sweeps.clear()
+    try:
+        tuning.rehydrate()
+        got = {s["sweep_id"]: s for s in tuning.list_sweeps()["sweeps"]}
+        assert got["s_done"]["status"] == "completed"
+        assert got["s_dead"]["status"] == "interrupted"
+    finally:
+        tuning._sweeps.clear()
+
+
 def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     monkeypatch.chdir(tmp_path)
