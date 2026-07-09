@@ -78,8 +78,33 @@ export type SaveResult = { status: "ok"; base_mtimes: Mtimes } | { status: "conf
  */
 export const IMAGE_MAX_WIDTH = 4096;
 
+export interface ProjectSummary {
+  name: string;
+  path: string;
+  created: number;
+  modified: number;
+  dates: string[];
+  traits: string[];
+  models: string[];
+  image_count: number;
+  is_active: boolean;
+}
+
 export const api = {
   state: (): Promise<GuiState> => call("/api/state"),
+
+  projects: {
+    list: () =>
+      call<{ workspace: string; active: string | null; projects: ProjectSummary[] }>(
+        "/api/projects",
+      ),
+    getActive: () => call<{ name: string | null; path: string | null }>("/api/projects/active"),
+    setActive: (name: string) =>
+      call<{ name: string; path: string }>("/api/projects/active", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+  },
 
   dataset: {
     tree: (dataset_root: string) =>
