@@ -87,3 +87,35 @@ def test_compare_route_handles_empty_ids(client: TestClient) -> None:
     assert resp.status_code == 200
     # body schema is up to compare_experiments; we only assert the route returns JSON.
     assert isinstance(resp.json(), dict)
+
+
+def test_cancel_unknown_run_returns_404(client: TestClient) -> None:
+    resp = client.post("/api/training/runs/does-not-exist/cancel")
+    assert resp.status_code == 404
+
+
+def test_list_runs_merges_persisted_history(tmp_path, monkeypatch) -> None:
+    # A prior session persisted a run that was still 'running' when the backend died;
+    # after a restart it must resurface as an 'interrupted' historical stub, and stay
+    # on disk so it survives the *next* restart too (persist-on-list).
+    monkeypatch.chdir(tmp_path)
+    from tcip_web import jobstore
+    from tcip_web.routes import training
+
+    jobstore.persist("training_runs", [
+        {"run_id": "old-run", "status": "running", "current_epoch": 2, "best_metric": None},
+    ])
+    training._historical_runs = []
+    monkeypatch.setattr(
+        "tcip_mcp.tools.training_tools.list_training_runs", lambda: {"runs": []}
+    )
+    try:
+        training.rehydrate()
+        body = training.list_runs_route()
+        by_id = {r["run_id"]: r for r in body["runs"]}
+        assert by_id["old-run"]["status"] == "interrupted"
+
+        persisted = {r["run_id"]: r for r in jobstore.load("training_runs")}
+        assert "old-run" in persisted
+    finally:
+        training._historical_runs = []
