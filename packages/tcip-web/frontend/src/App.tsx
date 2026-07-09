@@ -3,13 +3,14 @@ import { useEffect, useRef } from "react";
 import { classesApi } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { ChatPopup } from "@/components/ChatPopup";
-import { DatasetPicker } from "@/components/DatasetPicker";
+import { ProjectPicker } from "@/components/ProjectPicker";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { StatusBar } from "@/components/StatusBar";
 import { Toasts } from "@/components/Toasts";
 import { TopBar } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
+import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import { InferenceTab } from "@/tabs/InferenceTab";
@@ -45,6 +46,33 @@ function App() {
   useEffect(() => {
     const unsubscribe = stateSocket.subscribePanel("annotate", (ev) => {
       useStore.getState().pushAgentActivity(ev.panel, ev.event_type, ev.data);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Agent → GUI "look here": when the agent sets the active project (e.g. after
+  // ingesting a breeder's images), open it here so the GUI lands on what it built.
+  useEffect(() => {
+    const unsubscribe = stateSocket.subscribePanel("app", (ev) => {
+      if (ev.event_type !== "active_project_changed") return;
+      const name = (ev.data as { name?: string }).name;
+      if (!name) return;
+      void openProjectByName(name)
+        .then((selection) => {
+          if (!selection) return;
+          useStore.getState().patchGui({ dataset: selection });
+          if (!selection.date) {
+            // No dated capture to land on — say so instead of appearing to do nothing.
+            useStore
+              .getState()
+              .pushToast(`Opened ${name}, but it has no dated images yet.`, "info");
+          }
+        })
+        .catch(() => {
+          useStore
+            .getState()
+            .pushToast(`Agent opened a project but it couldn't be loaded: ${name}`);
+        });
     });
     return unsubscribe;
   }, []);
@@ -141,9 +169,9 @@ function App() {
           forced to pick a dataset just to read agent reports or watch a run was a
           usability trap. Dataset-dependent tabs show the picker until one is set. */}
       <ErrorBoundary resetKey={activeTab}>
-        {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <DatasetPicker />)}
-        {activeTab === "review" && (datasetReady ? <ReviewTab /> : <DatasetPicker />)}
-        {activeTab === "results" && (datasetReady ? <ResultsTab /> : <DatasetPicker />)}
+        {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <ProjectPicker />)}
+        {activeTab === "review" && (datasetReady ? <ReviewTab /> : <ProjectPicker />)}
+        {activeTab === "results" && (datasetReady ? <ResultsTab /> : <ProjectPicker />)}
         {activeTab === "training" && <TrainingTab />}
         {activeTab === "tuning" && <TuningTab />}
         {activeTab === "inference" && <InferenceTab />}
@@ -151,8 +179,8 @@ function App() {
       </ErrorBoundary>
       <StatusBar />
       <HelpOverlay activeTab={activeTab} />
-      {/* Disabled Phase C0 stub — renders nothing until the agent chat backend
-          exists. See packages/tcip-web/docs/chat-popup-design.md. */}
+      {/* Floating agent chat. Shows an unconfigured state when no sidecar is available.
+          See packages/tcip-web/docs/chat-popup-design.md. */}
       <ChatPopup />
       <Toasts />
     </div>
