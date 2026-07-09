@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Line, Rect, Text } from "react-konva";
 
-import { api } from "@/api/client";
+import { api, IMAGE_MAX_WIDTH } from "@/api/client";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { ReviewToolsDrawer } from "@/components/ReviewToolsDrawer";
 import { useImageNav } from "@/hooks/useImageNav";
@@ -340,7 +340,7 @@ export function ReviewTab() {
     { keys: "arrowdown", action: () => stepImage(1) },
   ]);
 
-  const imageUrl = imgPath ? api.images.url(imgPath) : null;
+  const imageUrl = imgPath ? api.images.url(imgPath, IMAGE_MAX_WIDTH) : null;
   const imgW = matches?.img_width ?? 0;
   const imgH = matches?.img_height ?? 0;
 
