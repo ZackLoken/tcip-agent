@@ -26,12 +26,13 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    """Create a minimal YOLO-format dataset for testing."""
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    labels_dir = tmp_path / "labels" / "detect"
+    """Create a minimal YOLO-format dataset in the canonical layout for testing."""
+    date = "2-11-26"
+    images_dir = tmp_path / "images" / date
+    images_dir.mkdir(parents=True)
+    labels_dir = tmp_path / "annotations" / "default" / date / "detect"
     labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "detect"
+    preds_dir = tmp_path / "predictions" / "live" / date / "detect"
     preds_dir.mkdir(parents=True)
 
     # Create 3 tiny test images (1x1 white pixel PNG)
