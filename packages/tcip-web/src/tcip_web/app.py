@@ -30,11 +30,12 @@ async def _lifespan(_app: FastAPI):
     'interrupted' — a record, not a resumable job (see ``jobstore``).
     """
     try:
-        from tcip_web.routes import inference, training, tuning
+        from tcip_web.routes import inference, tuning
 
         inference.rehydrate()
         tuning.rehydrate()
-        training.rehydrate()
+        # Training runs aren't rehydrated from a state file — the training list route
+        # reconstructs past runs on demand from the immutable .tcip/experiments/ records.
     except Exception:  # pragma: no cover - rehydrate is best-effort
         logger.exception("job registry rehydrate failed")
     yield
