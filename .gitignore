@@ -1,5 +1,9 @@
-# ── Data (images & labels are large / user-specific) ──────────────────────
-/data
+# ── Project data & workspace ─────────────────────────────────────────────
+# Projects live in the TCIP workspace (default ~/tcip-projects/) OUTSIDE the repo, so
+# they're never tracked. Defensively ignore a workspace or stray data dir if one ever
+# lands in the repo tree.
+/tcip-projects/
+/data/
 
 # ── Design docs (working notes, not for version control) ────────────────────
 /docs
