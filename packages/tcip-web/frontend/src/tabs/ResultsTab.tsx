@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -10,7 +10,13 @@ import {
   YAxis,
 } from "recharts";
 
-import { resultsApi, type OnsetRow, type PerPlantRow } from "@/api/inference";
+import { api } from "@/api/client";
+import {
+  resultsApi,
+  type OnsetRow,
+  type PerPlantRow,
+  type PlantMappingSummary,
+} from "@/api/inference";
 import { useStore } from "@/store";
 
 interface DateRow {
@@ -20,32 +26,88 @@ interface DateRow {
 
 export function ResultsTab() {
   const dataset = useStore((s) => s.gui.dataset);
+  const projectRoot = dataset.project_root;
+  const datasetRoot = dataset.dataset_root;
 
   const [mappingPath, setMappingPath] = useState(
-    dataset.project_root ? `${dataset.project_root}/.tcip/state/plant_mapping.json` : "",
+    projectRoot ? `${projectRoot}/.tcip/state/plant_mapping.json` : "",
   );
-  const [predsByDate, setPredsByDate] = useState<string>(() =>
-    JSON.stringify(
-      {
-        "2-11-26": "",
-        "3-2-26": "",
-        "3-9-26": "",
-        "3-18-26": "",
-        "3-24-26": "",
-      },
-      null,
-      2,
-    ),
-  );
+  // No baked-in dates: derived from the dataset (Prefill), or edited by hand.
+  const [predsByDate, setPredsByDate] = useState<string>("{}");
   const [elongationHeight, setElongationHeight] = useState<number>(0.02);
+
+  // Dataset tree (dates + prediction-model dir names) used for prefill.
+  const [dates, setDates] = useState<string[]>([]);
+  const [models, setModels] = useState<string[]>([]);
+  const [predModel, setPredModel] = useState("");
+
+  // Plant-mapping build inputs.
+  const [plantCsvText, setPlantCsvText] = useState("");
+  const [nnTolerance, setNnTolerance] = useState(10);
+  const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
+  const [buildMsg, setBuildMsg] = useState<string | null>(null);
+  const [building, setBuilding] = useState(false);
 
   const [curves, setCurves] = useState<PerPlantRow[]>([]);
   const [onset, setOnset] = useState<OnsetRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
+  useEffect(() => {
+    if (!datasetRoot) return;
+    void api.dataset
+      .tree(datasetRoot)
+      .then((t) => {
+        setDates(t.dates_with_images);
+        setModels(t.model_names);
+        setPredModel((m) => m || t.model_names[0] || "");
+      })
+      .catch(() => {});
+  }, [datasetRoot]);
+
+  function prefillPreds() {
+    if (!datasetRoot || dates.length === 0) return;
+    const map: Record<string, string> = {};
+    for (const d of dates) {
+      map[d] = predModel ? `${datasetRoot}/predictions/${predModel}/${d}/detect` : "";
+    }
+    setPredsByDate(JSON.stringify(map, null, 2));
+  }
+
+  async function buildMapping() {
+    if (!datasetRoot) return;
+    const paths = plantCsvText
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (paths.length === 0) {
+      setBuildMsg("Add at least one plant CSV path.");
+      return;
+    }
+    setBuilding(true);
+    setBuildMsg(null);
+    setBuildSummary(null);
+    try {
+      const res = await resultsApi.buildPlantMapping({
+        images_root: `${datasetRoot}/images`,
+        plant_csv_paths: paths,
+        nn_tolerance_m: nnTolerance,
+        persist_path: mappingPath || undefined,
+      });
+      setBuildSummary(res.summary);
+      setBuildMsg(`Mapping built + saved to ${mappingPath}`);
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Build mapping failed: ${e instanceof Error ? e.message : String(e)}`);
+      setBuildMsg(null);
+    } finally {
+      setBuilding(false);
+    }
+  }
+
   async function compute() {
-    if (!dataset.project_root) return;
+    if (!projectRoot) return;
     setLoading(true);
     setError(null);
     try {
@@ -55,7 +117,7 @@ export function ResultsTab() {
         if (!predsMap[k]) delete predsMap[k];
       }
       const curveRes = await resultsApi.perPlantCurves({
-        project_root: dataset.project_root,
+        project_root: projectRoot,
         mapping_path: mappingPath,
         predictions_by_date: predsMap,
         elongation_height: elongationHeight,
@@ -107,21 +169,92 @@ export function ResultsTab() {
 
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
+      {/* Plant mapping — build (from geolocated images + plant CSVs) or point at an existing file */}
       <div className="tcip-panel p-3">
-        <div className="font-semibold text-[13px] mb-2">Per-plant phenology curves</div>
-        <div className="grid grid-cols-[1fr_1fr_180px] gap-3">
+        <div className="font-semibold text-[13px] mb-2">Plant mapping</div>
+        <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-tcip-muted">Plant mapping path</label>
+            <label className="text-[11px] text-tcip-muted">
+              Mapping file (built here, or an existing one to load)
+            </label>
             <input
               className="tcip-input"
               value={mappingPath}
               onChange={(e) => setMappingPath(e.target.value)}
+              placeholder="…/.tcip/state/plant_mapping.json"
+            />
+            <label className="text-[11px] text-tcip-muted mt-1">
+              Plant CSV path(s) — one per line
+            </label>
+            <textarea
+              className="tcip-input h-16 font-mono text-[11px] leading-4"
+              value={plantCsvText}
+              onChange={(e) => setPlantCsvText(e.target.value)}
+              placeholder="…/plants_block_A.csv"
+              spellCheck={false}
             />
           </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-[11px] text-tcip-muted">NN tolerance (m)</label>
+            <input
+              className="tcip-input"
+              type="number"
+              step="1"
+              min="0"
+              value={nnTolerance}
+              onChange={(e) => setNnTolerance(parseFloat(e.target.value) || 0)}
+            />
+            <button
+              className="tcip-btn-primary"
+              onClick={buildMapping}
+              disabled={building || !datasetRoot}
+            >
+              {building ? "Building…" : "Build + save mapping"}
+            </button>
+            {buildMsg && <div className="text-[11px] text-tcip-muted">{buildMsg}</div>}
+          </div>
+        </div>
+        {buildSummary && (
+          <div className="mt-2 text-[11px] text-tcip-muted">
+            {Object.entries(buildSummary).map(([d, s]) => (
+              <div key={d}>
+                {d}: {s.n_mapped}/{s.n_images} mapped · avg {s.avg_distance_m.toFixed(1)} m
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="tcip-panel p-3">
+        <div className="font-semibold text-[13px] mb-2">Per-plant phenology curves</div>
+        <div className="grid grid-cols-[1fr_180px] gap-3">
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-tcip-muted">
-              Predictions by date (JSON: date → detect/ dir)
-            </label>
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] text-tcip-muted flex-1">
+                Predictions by date (JSON: date → detect/ dir)
+              </label>
+              <select
+                className="tcip-select text-[11px]"
+                value={predModel}
+                onChange={(e) => setPredModel(e.target.value)}
+                title="Prediction model dir under predictions/"
+              >
+                {models.length === 0 && <option value="">no models</option>}
+                {models.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="tcip-btn text-[11px]"
+                onClick={prefillPreds}
+                disabled={dates.length === 0}
+                title="Fill from the dataset's dates + this model's prediction dirs"
+              >
+                Prefill from dataset
+              </button>
+            </div>
             <textarea
               className="tcip-input h-24 font-mono text-[11px] leading-4"
               value={predsByDate}
