@@ -1,5 +1,7 @@
 /** Session-tracking API helpers (annotation_stats.json on disk). */
 
+import { getJson, postJson } from "@/api/http";
+
 export interface SessionEntry {
   user: string;
   started: string;
@@ -22,23 +24,13 @@ export interface SessionEntry {
 
 export const sessionsApi = {
   start: (project_root: string, user: string) =>
-    fetch("/api/sessions/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_root, user }),
-    }).then((r) => r.json()),
+    postJson<unknown>("/api/sessions/start", { project_root, user }),
 
-  end: (project_root: string) =>
-    fetch("/api/sessions/end", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_root }),
-    }).then((r) => r.json()),
+  end: (project_root: string) => postJson<unknown>("/api/sessions/end", { project_root }),
 
   load: (project_root: string) =>
-    fetch(`/api/sessions/load?project_root=${encodeURIComponent(project_root)}`).then(
-      (r) =>
-        r.json() as Promise<{ sessions: SessionEntry[]; image_status: Record<string, string> }>,
+    getJson<{ sessions: SessionEntry[]; image_status: Record<string, string> }>(
+      `/api/sessions/load?project_root=${encodeURIComponent(project_root)}`,
     ),
 
   imageEvent: (body: {
@@ -48,10 +40,5 @@ export const sessionsApi = {
     annotations_added_delta: number;
     final_annotation_count: number;
     loaded_annotation_count?: number | null;
-  }) =>
-    fetch("/api/sessions/image_event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json()),
+  }) => postJson<unknown>("/api/sessions/image_event", body),
 };
