@@ -335,6 +335,9 @@ class TestSamPredictorCache:
     """Predictor/image caching in sam_wrapper (fake SAM2, no checkpoint)."""
 
     def test_model_swap_invalidates_image_cache(self, monkeypatch, tmp_path: Path):
+        # sam_wrapper loads images via cv2, which ships only with the optional ``sam`` extra
+        # (not installed in CI) — skip there, like the other SAM-stack tests.
+        pytest.importorskip("cv2")
         import sys
         import types
 
