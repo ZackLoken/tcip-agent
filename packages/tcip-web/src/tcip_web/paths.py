@@ -7,8 +7,26 @@ project root.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from pathlib import Path, PurePosixPath
+
+
+def is_loopback_host(host: str) -> bool:
+    """True if ``host`` binds only the local machine (127.0.0.0/8, ::1, localhost).
+
+    ``0.0.0.0`` / ``::`` mean "all interfaces" and are therefore NOT loopback — binding
+    them exposes the server to the network.
+    """
+    h = (host or "").strip().lower()
+    if h in ("localhost", "::1"):
+        return True
+    if h in ("", "0.0.0.0", "::"):
+        return False
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
 
 
 def allowed_image_roots() -> list[Path]:
