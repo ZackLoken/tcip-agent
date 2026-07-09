@@ -46,13 +46,17 @@ async def _lifespan(_app: FastAPI):
     except Exception:  # pragma: no cover - rehydrate is best-effort
         logger.exception("job registry rehydrate failed")
     yield
-    # Kill any live chat sidecars so no agent process orphans the backend.
+    # Kill any live agent terminals so no Claude Code process orphans the backend.
+    # Off-loop: terminate can block seconds (taskkill / SIGTERM grace), and stalling the
+    # event loop here would break the in-flight WebSocket close handshakes.
     try:
-        from tcip_web.routes import chat
+        import asyncio
 
-        chat.shutdown_all()
+        from tcip_web.routes import terminal
+
+        await asyncio.to_thread(terminal.shutdown_all)
     except Exception:  # pragma: no cover - shutdown cleanup is best-effort
-        logger.exception("chat sidecar shutdown failed")
+        logger.exception("agent terminal shutdown failed")
 
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
