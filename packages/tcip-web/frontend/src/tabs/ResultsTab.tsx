@@ -70,27 +70,25 @@ export function ResultsTab() {
     }
   }
 
-  async function downloadOnsetCsv() {
-    if (onset.length === 0) return;
-    const blob = await resultsApi.exportCsv(onset, "catkin_phenology.csv");
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "catkin_phenology.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+  async function downloadCsv(rows: unknown[], filename: string) {
+    if (rows.length === 0) return;
+    try {
+      const blob = await resultsApi.exportCsv(rows, filename);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`CSV export failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
-  async function downloadCurvesCsv() {
-    if (curves.length === 0) return;
-    const blob = await resultsApi.exportCsv(curves, "catkin_curves.csv");
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "catkin_curves.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  const downloadOnsetCsv = () => downloadCsv(onset, "catkin_phenology.csv");
+  const downloadCurvesCsv = () => downloadCsv(curves, "catkin_curves.csv");
 
   const chartData: DateRow[] = useMemo(() => {
     const byDate: Record<string, DateRow> = {};
