@@ -81,29 +81,35 @@ export function InferenceTab() {
 
   async function onLaunch() {
     if (!modelPath || !imagesDir || !outputDir) return;
-    const res = await inferenceApi.launch({
-      checkpoint_path: modelPath,
-      images_dir: imagesDir,
-      output_dir: outputDir,
-      sahi,
-      conf,
-      iou,
-      slice_h: sliceH,
-      slice_w: sliceW,
-      overlap,
-    });
-    if (res.job_id) {
-      const stub: InferenceJob = {
-        job_id: res.job_id,
-        status: "pending",
-        done: 0,
-        total: 0,
+    try {
+      const res = await inferenceApi.launch({
+        checkpoint_path: modelPath,
         images_dir: imagesDir,
         output_dir: outputDir,
-        error: null,
-      };
-      setJobs((prev) => [stub, ...prev]);
-      setActiveJob(stub);
+        sahi,
+        conf,
+        iou,
+        slice_h: sliceH,
+        slice_w: sliceW,
+        overlap,
+      });
+      if (res.job_id) {
+        const stub: InferenceJob = {
+          job_id: res.job_id,
+          status: "pending",
+          done: 0,
+          total: 0,
+          images_dir: imagesDir,
+          output_dir: outputDir,
+          error: null,
+        };
+        setJobs((prev) => [stub, ...prev]);
+        setActiveJob(stub);
+      }
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Inference launch failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
