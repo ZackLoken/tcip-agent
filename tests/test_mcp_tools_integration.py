@@ -22,9 +22,9 @@ def yolo_dataset(tmp_path: Path) -> Path:
     """Create a minimal YOLO-format dataset."""
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    labels_dir = tmp_path / "labels" / "detect"
+    labels_dir = tmp_path / "annotations" / "default" / "detect"
     labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "detect"
+    preds_dir = tmp_path / "predictions" / "live" / "detect"
     preds_dir.mkdir(parents=True)
 
     for name in ("img_001", "img_002", "img_003"):
@@ -41,7 +41,7 @@ def voc_dataset(tmp_path: Path) -> Path:
     """Create a minimal PASCAL VOC-format dataset."""
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    labels_dir = tmp_path / "labels" / "detect"
+    labels_dir = tmp_path / "annotations" / "default" / "detect"
     labels_dir.mkdir(parents=True)
 
     for name in ("img_001", "img_002"):
@@ -70,7 +70,7 @@ def labelme_dataset(tmp_path: Path) -> Path:
     """Create a minimal LabelMe-format dataset."""
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    labels_dir = tmp_path / "labels" / "detect"
+    labels_dir = tmp_path / "annotations" / "default" / "detect"
     labels_dir.mkdir(parents=True)
 
     for name in ("img_001", "img_002"):
