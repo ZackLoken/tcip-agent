@@ -8,6 +8,7 @@ tests that exercise the detection/classification ``_validate`` path end-to-end.
 from __future__ import annotations
 
 import csv
+import json
 import math
 from pathlib import Path
 
@@ -22,8 +23,10 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     classification_metrics,
     coco_detection_metrics,
     compute_composite_objective,
+    effective_iou_type,
     ordinal_metrics,
     regression_metrics,
+    run_test_evaluation,
 )
 from tcip_mcp.pipelines.training.generic_trainer import _selection_value  # noqa: E402
 
@@ -145,6 +148,49 @@ def test_selection_value_prefers_objective_for_detection():
     assert _selection_value("detection", {"val_loss": 0.1, "val_objective": 5.0}, 0.2) == 5.0
     assert _selection_value("classification", {"val_loss": 0.1}, 0.2) == 0.1
     assert _selection_value("detection", {"val_loss": 0.1}, 0.2) == 0.1  # no objective -> val_loss
+
+
+# --------------------------------------------------------------------------
+# Effective iou_type — evaluate() scoring and run_test_evaluation metadata
+# --------------------------------------------------------------------------
+
+def test_effective_iou_type_resolution():
+    assert effective_iou_type("detection", None) == "bbox"
+    assert effective_iou_type("instance_seg", None) == "segm"   # segm AP by default
+    assert effective_iou_type("instance_seg", "bbox") == "bbox"  # explicit override wins
+    assert effective_iou_type("detection", "segm") == "segm"
+    assert effective_iou_type("classification", None) == ""
+
+
+def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
+    """test_results.json must record the iou_type evaluate() actually scored with
+    (instance_seg defaults to segm AP — recording 'bbox' would misreport mask AP)."""
+    import tcip_mcp.pipelines.composer as composer
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+
+    class _DummyModel:
+        def load_state_dict(self, state_dict):
+            pass
+
+        def to(self, device):
+            pass
+
+    ckpt_path = tmp_path / "model_best.pt"
+    torch.save({"model_spec": {}, "model_state_dict": {}}, str(ckpt_path))
+    monkeypatch.setattr(composer, "compose_model", lambda spec: _DummyModel())
+    monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
+
+    r = run_test_evaluation(str(ckpt_path), None, "cpu", "instance_seg", str(tmp_path / "seg"))
+    assert r["iou_type"] == "segm"
+    on_disk = json.loads((tmp_path / "seg" / "test_results.json").read_text())
+    assert on_disk["iou_type"] == "segm"
+
+    r = run_test_evaluation(str(ckpt_path), None, "cpu", "detection", str(tmp_path / "det"))
+    assert r["iou_type"] == "bbox"
+
+    r = run_test_evaluation(str(ckpt_path), None, "cpu", "instance_seg", str(tmp_path / "ovr"),
+                            iou_type="bbox")
+    assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
 
 
 # --------------------------------------------------------------------------
