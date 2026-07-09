@@ -3,6 +3,7 @@ import { Line, Rect, Text } from "react-konva";
 
 import { api } from "@/api/client";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
+import { ReviewToolsDrawer } from "@/components/ReviewToolsDrawer";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useStore } from "@/store";
 import type {
@@ -83,6 +84,7 @@ export function ReviewTab() {
 
   const [showGT, setShowGT] = useState(true);
   const [showPred, setShowPred] = useState(true);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
 
   async function reloadMatches(indexHint?: number, signal?: AbortSignal) {
@@ -364,7 +366,7 @@ export function ReviewTab() {
         : "Record this ground-truth object as not a real object (recorded for retraining)";
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col relative">
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-tcip-border bg-tcip-panel text-[11px]">
         <span>IoU ≥</span>
         <input
@@ -457,6 +459,13 @@ export function ReviewTab() {
         <button className="tcip-btn" onClick={() => stepImage(1)}>
           Next img ▶
         </button>
+        <button
+          className="tcip-btn ml-2"
+          onClick={() => setToolsOpen(true)}
+          title="Build training set / prioritize review queue"
+        >
+          ⚙ Tools
+        </button>
       </div>
 
       <CanvasStage imageUrl={imageUrl} imgWidth={imgW} imgHeight={imgH}>
@@ -532,6 +541,8 @@ export function ReviewTab() {
           </>
         )}
       </div>
+
+      <ReviewToolsDrawer open={toolsOpen} onClose={() => setToolsOpen(false)} />
     </div>
   );
 }
