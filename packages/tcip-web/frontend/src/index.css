@@ -36,6 +36,15 @@
   color-scheme: dark;
 }
 
+/* Native form widgets (checkboxes, radios, range sliders) tint SI green instead
+   of the UA default blue, matching the accent used everywhere else. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: #507754;
+}
+
 html,
 body,
 #root {
@@ -50,7 +59,7 @@ body,
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #1a1a1a;
+  background: #1e1e1e; /* tcip-bg — track sits flush with the page background */
 }
 ::-webkit-scrollbar-thumb {
   background: #3a3a3a;
@@ -61,10 +70,13 @@ body,
 }
 
 @layer components {
+  /* Secondary buttons hover to a neutral raised surface; only .tcip-btn-primary
+     hovers SI green, so action hierarchy survives the hover state. */
   .tcip-btn {
     @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded border border-tcip-border bg-tcip-panel text-tcip-fg text-[12px]
-           hover:bg-tcip-accent-hover hover:border-tcip-accent-hover transition-colors disabled:opacity-40 disabled:hover:bg-tcip-panel
-           disabled:hover:border-tcip-border disabled:cursor-not-allowed;
+           hover:bg-tcip-hover hover:border-tcip-border-hover transition-colors disabled:opacity-40 disabled:hover:bg-tcip-panel
+           disabled:hover:border-tcip-border disabled:cursor-not-allowed
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg;
   }
 
   .tcip-btn-primary {
@@ -79,11 +91,15 @@ body,
 
   .tcip-input {
     @apply h-8 px-2 rounded bg-tcip-panel border border-tcip-border text-tcip-fg text-[12px]
-           focus:outline-none focus:border-tcip-accent;
+           placeholder:text-tcip-muted/60
+           focus:outline-none focus:border-tcip-accent
+           focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg;
   }
 
   .tcip-select {
-    @apply tcip-input pr-6 appearance-none cursor-pointer;
+    @apply tcip-input pr-7 appearance-none cursor-pointer bg-no-repeat;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238A8A8A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-position: right 0.5rem center;
   }
 
   .tcip-panel {
@@ -92,5 +108,21 @@ body,
 
   .tcip-badge {
     @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium;
+  }
+
+  /* Section header — the small uppercase "instrument label" used on every panel
+     and sidebar section, so all tabs share one typographic hierarchy. */
+  .tcip-heading {
+    @apply text-[11px] font-semibold uppercase tracking-wider text-tcip-muted;
+  }
+
+  /* Form-field label. */
+  .tcip-label {
+    @apply block text-[11px] font-medium text-tcip-muted;
+  }
+
+  /* Table column header — matches .tcip-heading at table scale. */
+  .tcip-th {
+    @apply py-1.5 pr-3 text-left text-[10px] font-semibold uppercase tracking-wider text-tcip-muted;
   }
 }
