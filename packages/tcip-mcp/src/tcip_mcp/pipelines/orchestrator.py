@@ -138,6 +138,9 @@ def validate_pipeline(spec: dict) -> list[str]:
 
 def _run_training_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> PhaseResult:
     """Train a model for this phase."""
+    from tcip_mcp.experiments import (
+        create_experiment, log_metrics, register_model_from_experiment, update_status,
+    )
     from tcip_mcp.pipelines.training.generic_trainer import (
         create_run, train, task_collate,
     )
@@ -165,28 +168,65 @@ def _run_training_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
             if "labels_dir" in prev:
                 ds_cfg.setdefault("labels_dir", prev["labels_dir"])
 
-        train_ds = build_dataset(task, **{**ds_cfg, "stems": ds_cfg.get("train_stems")})
+        # train_stems/val_stems are split directives for this phase, not dataset
+        # constructor kwargs — strip them before spreading (each build maps its
+        # split onto the dataset's 'stems' parameter).
+        src = {k: v for k, v in ds_cfg.items() if k not in ("train_stems", "val_stems")}
+        train_ds = build_dataset(task, **{**src, "stems": ds_cfg.get("train_stems")})
         collate = task_collate(task)
         train_loader = DataLoader(train_ds, batch_size=phase.get("batch_size", 4), collate_fn=collate, shuffle=True)
 
         val_loader = None
         if ds_cfg.get("val_stems"):
-            val_ds = build_dataset(task, **{**ds_cfg, "stems": ds_cfg.get("val_stems")})
+            val_ds = build_dataset(task, **{**src, "stems": ds_cfg["val_stems"]})
             val_loader = DataLoader(val_ds, batch_size=phase.get("batch_size", 4), collate_fn=collate)
 
         out = work_dir / phase["name"]
+        training_cfg = phase.get("training", {})
         run_config = {
             "model_spec": phase["model_spec"],
+            "data": ds_cfg,
             "stages": phase.get("stages", [{"freeze_to": -1, "epochs": 5}, {"freeze_to": 0, "epochs": 5}]),
             "optimizer": phase.get("optimizer", {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 1e-4}),
             "early_stopping": phase.get("early_stopping", {"enabled": True, "patience": 7}),
             "mixed_precision": phase.get("mixed_precision", True),
+            "batch_size": phase.get("batch_size", 4),
+            "seed": phase.get("seed", training_cfg.get("seed")),
+            "deterministic": phase.get("deterministic", training_cfg.get("deterministic", False)),
         }
         run = create_run(run_config, str(out))
-        train(run, train_loader, val_loader, task=task)
+
+        # Track the run like launch_training does (experiment + registry) so
+        # pipeline-trained models show up in .tcip/experiments, the GUI run
+        # list, and get_best_model. Best-effort: work_dir may not live inside
+        # a .tcip project, and tracking failure must not fail the phase.
+        try:
+            create_experiment(run.run_id, run_config, data_source=ds_cfg.get("images_dir"))
+            update_status(run.run_id, "running")
+        except Exception as exc:
+            logger.warning("Experiment tracking failed for %s: %s", run.run_id, exc)
+
+        def _epoch_cb(epoch: int, epoch_metrics: dict) -> None:
+            try:
+                log_metrics(run.run_id, epoch, epoch_metrics)
+            except Exception as exc:
+                logger.warning("Experiment metric log failed (%s epoch %s): %s", run.run_id, epoch, exc)
+
+        train(run, train_loader, val_loader, task=task, epoch_callback=_epoch_cb)
+
+        try:
+            if run.status == "completed":
+                best = out / "model_best.pt"
+                weights = str(best if best.is_file() else out / "model_final.pt")
+                update_status(run.run_id, "completed")
+                register_model_from_experiment(run.run_id, weights)
+            else:
+                update_status(run.run_id, run.status or "failed")
+        except Exception as exc:
+            logger.warning("Experiment completion wiring failed for %s: %s", run.run_id, exc)
 
         result.status = "completed" if run.status == "completed" else "failed"
-        result.artifacts = {"checkpoint": str(out / "model_best.pt"), "output_dir": str(out)}
+        result.artifacts = {"checkpoint": str(out / "model_best.pt"), "output_dir": str(out), "run_id": run.run_id}
         result.metrics = run.metrics_history[-1] if run.metrics_history else {}
         result.error = run.error
 
@@ -206,6 +246,7 @@ def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -
 
     try:
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+        from tcip_mcp.pipelines.postprocessing.export import result_to_yolo_lines
 
         ckpt = phase.get("checkpoint")
         input_ref = phase.get("input")
@@ -233,9 +274,10 @@ def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -
         for ip in img_paths:
             pred = predictor.predict(str(ip))
             results_list.append(pred)
-            # Save YOLO-format predictions
+            # Save predictions in the canonical "cls conf cx cy w h" format
+            # that parse_detect_predictions / the Review tab consume.
             txt_path = preds_dir / f"{ip.stem}.txt"
-            _save_yolo_predictions(pred, txt_path, ip)
+            txt_path.write_text("\n".join(result_to_yolo_lines(pred)))
 
         result.status = "completed"
         result.artifacts = {"predictions_dir": str(preds_dir), "images_dir": images_dir, "count": len(results_list)}
@@ -248,23 +290,6 @@ def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -
 
     result.elapsed_seconds = time.time() - t0
     return result
-
-
-def _save_yolo_predictions(pred: dict, txt_path: Path, img_path: Path) -> None:
-    """Write predictions to YOLO format txt file."""
-    w = pred.get("width", 1)
-    h = pred.get("height", 1)
-    lines = []
-    for box, label, score in zip(pred.get("boxes", []), pred.get("labels", []), pred.get("scores", [])):
-        if isinstance(box, (list, tuple)) and len(box) == 4:
-            x1, y1, x2, y2 = box
-            cx = ((x1 + x2) / 2) / w
-            cy = ((y1 + y2) / 2) / h
-            bw = (x2 - x1) / w
-            bh = (y2 - y1) / h
-            cid = label - 1  # torchvision 1-indexed → YOLO 0-indexed
-            lines.append(f"{cid} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f} {score:.4f}")
-    txt_path.write_text("\n".join(lines))
 
 
 def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> PhaseResult:
@@ -302,10 +327,11 @@ def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
             img = Image.open(img_path).convert("RGB")
             w, h = img.size
             for i, line in enumerate(txt_path.read_text().splitlines()):
+                # Canonical prediction format: "cls conf cx cy w h" (normalized).
                 parts = line.strip().split()
-                if len(parts) < 5:
+                if len(parts) < 6:
                     continue
-                cx, cy, bw, bh = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+                cx, cy, bw, bh = float(parts[2]), float(parts[3]), float(parts[4]), float(parts[5])
                 x1 = int((cx - bw / 2) * w)
                 y1 = int((cy - bh / 2) * h)
                 x2 = int((cx + bw / 2) * w)
@@ -393,6 +419,7 @@ def _run_aggregation_phase(phase: dict, context: dict[str, Any], work_dir: Path)
     except Exception as e:
         result.status = "failed"
         result.error = str(e)
+        logger.exception("Aggregation phase '%s' failed", phase["name"])
 
     result.elapsed_seconds = time.time() - t0
     return result
@@ -426,10 +453,11 @@ def _run_export_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> P
                 lines = txt_path.read_text().strip().splitlines()
                 scores = []
                 for line in lines:
+                    # Canonical prediction format: "cls conf cx cy w h".
                     parts = line.split()
                     if len(parts) >= 6:
                         try:
-                            scores.append(float(parts[5]))
+                            scores.append(float(parts[1]))
                         except ValueError:
                             pass
                 image_results.append({
@@ -448,6 +476,7 @@ def _run_export_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> P
     except Exception as e:
         result.status = "failed"
         result.error = str(e)
+        logger.exception("Export phase '%s' failed", phase["name"])
 
     result.elapsed_seconds = time.time() - t0
     return result
@@ -526,9 +555,6 @@ class PipelineOrchestrator:
             return pr
 
         name = spec["name"]
-        run_dir = self.work_dir / f"{name}_{int(time.time())}"
-        run_dir.mkdir(parents=True, exist_ok=True)
-
         pr = PipelineResult(pipeline_name=name, status="running", start_time=time.time())
         context: dict[str, Any] = {}
 
@@ -536,17 +562,37 @@ class PipelineOrchestrator:
         skip_until_after: str | None = None
         if resume_from:
             checkpoint = self._load_checkpoint(spec, resume_from)
-            if checkpoint:
-                context = checkpoint.get("context", {})
-                skip_until_after = resume_from
-                for phase_info in checkpoint.get("completed_phases", []):
-                    pr.phases.append(PhaseResult(
-                        phase_name=phase_info["name"],
-                        status="completed",
-                        artifacts=phase_info.get("artifacts", {}),
-                        metrics=phase_info.get("metrics", {}),
-                    ))
-                logger.info("Resuming pipeline '%s' after phase '%s'", name, resume_from)
+            if checkpoint is None:
+                # Fail loudly instead of silently re-running from scratch —
+                # expensive phases (training) must not re-execute unannounced.
+                logger.warning(
+                    "Resume point '%s' not found in any checkpoint for pipeline '%s' under %s",
+                    resume_from, name, self.work_dir,
+                )
+                pr.status = "failed"
+                pr.phases = [PhaseResult(
+                    phase_name="resume",
+                    status="failed",
+                    error=(
+                        f"Resume point '{resume_from}' not found in any checkpoint "
+                        f"under {self.work_dir}. Run without resume_from to start fresh."
+                    ),
+                )]
+                pr.end_time = time.time()
+                return pr
+            context = checkpoint.get("context", {})
+            skip_until_after = resume_from
+            for phase_info in checkpoint.get("completed_phases", []):
+                pr.phases.append(PhaseResult(
+                    phase_name=phase_info["name"],
+                    status="completed",
+                    artifacts=phase_info.get("artifacts", {}),
+                    metrics=phase_info.get("metrics", {}),
+                ))
+            logger.info("Resuming pipeline '%s' after phase '%s'", name, resume_from)
+
+        run_dir = self.work_dir / f"{name}_{int(time.time())}"
+        run_dir.mkdir(parents=True, exist_ok=True)
 
         for phase in spec["phases"]:
             # Skip already-completed phases on resume
