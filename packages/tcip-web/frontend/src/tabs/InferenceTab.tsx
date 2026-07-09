@@ -58,10 +58,11 @@ export function InferenceTab() {
     return () => clearInterval(t);
   }, []);
 
+  const activeJobId = activeJob?.job_id;
   useEffect(() => {
-    if (!activeJob) return;
+    if (!activeJobId) return;
     streamRef.current?.();
-    streamRef.current = openInferenceStream(activeJob.job_id, (msg) => {
+    streamRef.current = openInferenceStream(activeJobId, (msg) => {
       if (msg.type === "progress" || msg.type === "final") {
         // The "final" frame omits done/total; Number(undefined) is NaN and `?? `
         // does not catch NaN, so guard on Number.isFinite to keep the last value.
@@ -70,7 +71,7 @@ export function InferenceTab() {
           return Number.isFinite(n) ? n : fallback;
         };
         setActiveJob((prev) =>
-          prev && prev.job_id === activeJob.job_id
+          prev && prev.job_id === activeJobId
             ? ({
                 ...prev,
                 done: asNum(msg.done, prev.done),
@@ -82,7 +83,7 @@ export function InferenceTab() {
       }
     });
     return () => streamRef.current?.();
-  }, [activeJob?.job_id]);
+  }, [activeJobId]);
 
   function prefillFromDataset() {
     if (!datasetRoot || !dataset.date) return;
