@@ -43,10 +43,8 @@ const DEFAULT_CONFIG = `{
 }
 `;
 
-// Versioned after the default head was corrected (detection_head → anchor_detection):
-// a broken default persisted from an earlier session must not survive the fix, so we
-// read/write the config under a new key and let the stale one fall away.
-const CONFIG_STORAGE_KEY = "tcip.training.config.v2";
+// Persist the last-edited training config so it survives a reload.
+const CONFIG_STORAGE_KEY = "tcip.training.config";
 
 interface ValidateResult {
   valid: boolean;
