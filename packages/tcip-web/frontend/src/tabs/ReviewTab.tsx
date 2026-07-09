@@ -50,6 +50,17 @@ function labelPaths(dataset: DatasetSelection, name: string | null) {
 
 const TYPE_ORDER: ("tp" | "fp" | "fn")[] = ["tp", "fp", "fn"];
 
+const IMAGE_STATUS_LABEL: Record<MatchesResponse["image_status"], string> = {
+  not_started: "not started",
+  started: "in progress",
+  completed: "reviewed",
+};
+const IMAGE_STATUS_CLASS: Record<MatchesResponse["image_status"], string> = {
+  not_started: "bg-tcip-border text-tcip-muted",
+  started: "bg-tcip-fn/20 text-tcip-fn",
+  completed: "bg-tcip-tp/20 text-tcip-tp",
+};
+
 export function ReviewTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const patchGui = useStore((s) => s.patchGui);
@@ -72,26 +83,31 @@ export function ReviewTab() {
 
   const [showGT, setShowGT] = useState(true);
   const [showPred, setShowPred] = useState(true);
+  const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
 
-  async function reloadMatches(indexHint?: number) {
+  async function reloadMatches(indexHint?: number, signal?: AbortSignal) {
     if (!dataset.project_root || !imgPath || !imgName) return;
     setLoading(true);
     try {
-      const res = await api.review.matches({
-        project_root: dataset.project_root,
-        image_name: imgName,
-        image_path: imgPath,
-        gt_detect_path: paths.gt_detect,
-        gt_segment_path: paths.gt_segment,
-        pred_detect_path: paths.pred_detect,
-        pred_segment_path: paths.pred_segment,
-        iou_threshold: filters.iou_threshold,
-        conf_threshold: filters.conf_threshold,
-        filter_type: filters.filter_type,
-        filter_class: filters.filter_class,
-        status_filter: filters.status_filter,
-      });
+      const res = await api.review.matches(
+        {
+          project_root: dataset.project_root,
+          image_name: imgName,
+          image_path: imgPath,
+          gt_detect_path: paths.gt_detect,
+          gt_segment_path: paths.gt_segment,
+          pred_detect_path: paths.pred_detect,
+          pred_segment_path: paths.pred_segment,
+          iou_threshold: filters.iou_threshold,
+          conf_threshold: filters.conf_threshold,
+          filter_type: filters.filter_type,
+          filter_class: filters.filter_class,
+          status_filter: filters.status_filter,
+        },
+        signal,
+      );
       setMatches(res);
+      setImageStatus(res.image_status);
       // jump to first unreviewed if no hint
       if (indexHint === undefined) {
         const firstUnreviewed = res.detections.findIndex((d) => !d.reviewed);
@@ -102,6 +118,12 @@ export function ReviewTab() {
         setDetectionIdx(Math.max(0, Math.min(res.detections.length - 1, indexHint)));
         zoomToDetection(res.detections[indexHint]?.bbox);
       }
+    } catch (e) {
+      // A superseded (aborted) request is expected during slider drags — ignore it.
+      if (signal?.aborted || (e instanceof DOMException && e.name === "AbortError")) return;
+      useStore
+        .getState()
+        .pushToast(`Could not load review matches: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLoading(false);
     }
@@ -124,7 +146,15 @@ export function ReviewTab() {
   }
 
   useEffect(() => {
-    void reloadMatches();
+    // Debounce so dragging the IoU/Conf sliders doesn't fire a /matches recompute per
+    // tick, and abort the in-flight request so a slow earlier response can't clobber a
+    // newer one (out-of-order responses previously won).
+    const ac = new AbortController();
+    const t = setTimeout(() => void reloadMatches(undefined, ac.signal), 180);
+    return () => {
+      clearTimeout(t);
+      ac.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     imgPath,
@@ -197,31 +227,64 @@ export function ReviewTab() {
 
   async function recordAction(action: "accepted" | "rejected" | "edited") {
     if (!current || !dataset.project_root || !imgPath || !imgName) return;
-    await api.review.action({
-      project_root: dataset.project_root,
-      image_name: imgName,
-      image_path: imgPath,
-      gt_detect_path: paths.gt_detect,
-      gt_segment_path: paths.gt_segment,
-      pred_detect_path: paths.pred_detect,
-      pred_segment_path: paths.pred_segment,
-      det_type: current.det_type,
-      class_id: current.class_id,
-      conf: current.conf,
-      iou: current.iou,
-      gt_type: current.gt_type,
-      gt_idx: current.gt_idx,
-      pred_type: current.pred_type,
-      pred_idx: current.pred_idx,
-      bbox: current.bbox,
-      action,
-    });
-    markDetReviewed(detectionIdx, action);
-    advanceToNextUnreviewed();
+    try {
+      const res = await api.review.action({
+        project_root: dataset.project_root,
+        image_name: imgName,
+        image_path: imgPath,
+        gt_detect_path: paths.gt_detect,
+        gt_segment_path: paths.gt_segment,
+        pred_detect_path: paths.pred_detect,
+        pred_segment_path: paths.pred_segment,
+        det_type: current.det_type,
+        class_id: current.class_id,
+        conf: current.conf,
+        iou: current.iou,
+        gt_type: current.gt_type,
+        gt_idx: current.gt_idx,
+        pred_type: current.pred_type,
+        pred_idx: current.pred_idx,
+        bbox: current.bbox,
+        action,
+        iou_threshold: filters.iou_threshold,
+        conf_threshold: filters.conf_threshold,
+      });
+      setImageStatus(res.image_status);
+      markDetReviewed(detectionIdx, action);
+      advanceToNextUnreviewed();
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Could not record review action: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function markImageComplete() {
+    if (!dataset.project_root || !imgName) return;
+    try {
+      const res = await api.review.markComplete(dataset.project_root, imgName);
+      setImageStatus(res.image_status);
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Could not mark image reviewed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   function editInAnnotate() {
     if (!current || !imgPath) return;
+    // Back up the untouched GT once (idempotent per project) before the first edit, so a
+    // mistaken save can be recovered from <dir>/.original/.
+    if (dataset.project_root) {
+      const dirs = [dataset.annotations_detect_dir, dataset.annotations_segment_dir].filter(
+        Boolean,
+      ) as string[];
+      if (dirs.length) {
+        void api.review.backupLabels(dataset.project_root, dirs).catch(() => {
+          useStore.getState().pushToast("Could not back up original labels before editing.");
+        });
+      }
+    }
     const predRef = buildPredReference(current, matches);
     setPredReference(predRef);
     setActiveTab("annotate");
@@ -282,18 +345,23 @@ export function ReviewTab() {
   const imgW = matches?.img_width ?? 0;
   const imgH = matches?.img_height ?? 0;
 
-  const acceptLabel =
+  // Verdicts are recorded to the review log (for retraining/curation) — they do NOT
+  // rewrite the GT label files. Only Edit (E) changes GT. Labels/tooltips reflect that
+  // honestly; the old "Add to GT" / "Delete GT" wording implied a write that never happened.
+  const acceptLabel = "Accept (A)";
+  const rejectLabel = "Reject (R)";
+  const acceptTitle =
     current?.det_type === "tp"
-      ? "Confirm (A)"
+      ? "Record this match as correct (recorded for retraining, not written to GT)"
       : current?.det_type === "fp"
-        ? "Add to GT (A)"
-        : "Keep GT (A)";
-  const rejectLabel =
+        ? "Record this prediction as a real object the GT was missing (recorded for retraining)"
+        : "Record this ground-truth object as a real miss by the model (recorded for retraining)";
+  const rejectTitle =
     current?.det_type === "tp"
-      ? "Delete GT (R)"
+      ? "Record this match as wrong (recorded for retraining, not written to GT)"
       : current?.det_type === "fp"
-        ? "Dismiss (R)"
-        : "Delete GT (R)";
+        ? "Record this prediction as a genuine false positive (recorded for retraining)"
+        : "Record this ground-truth object as not a real object (recorded for retraining)";
 
   return (
     <div className="flex-1 flex flex-col">
@@ -368,6 +436,18 @@ export function ReviewTab() {
 
         <span className="flex-1" />
 
+        <span className={`tcip-badge ${IMAGE_STATUS_CLASS[imageStatus]}`}>
+          {IMAGE_STATUS_LABEL[imageStatus]}
+        </span>
+        <button
+          className="tcip-btn"
+          onClick={() => void markImageComplete()}
+          disabled={imageStatus === "completed" || !imgName}
+          title="Mark this image fully reviewed"
+        >
+          ✓ Reviewed
+        </button>
+
         <button className="tcip-btn" onClick={() => stepImage(-1)}>
           ◀ Prev img
         </button>
@@ -426,13 +506,27 @@ export function ReviewTab() {
 
         {current && (
           <>
-            <button className="tcip-btn-primary" onClick={() => void recordAction("accepted")}>
+            <span
+              className="text-tcip-muted mr-1"
+              title="Accept/Reject log a verdict for retraining. Edit changes the GT files."
+            >
+              logged for retraining ·
+            </span>
+            <button
+              className="tcip-btn-primary"
+              onClick={() => void recordAction("accepted")}
+              title={acceptTitle}
+            >
               ✓ {acceptLabel}
             </button>
-            <button className="tcip-btn" onClick={editInAnnotate}>
+            <button className="tcip-btn" onClick={editInAnnotate} title="Edit GT for this image">
               ✎ Edit (E)
             </button>
-            <button className="tcip-btn-danger" onClick={() => void recordAction("rejected")}>
+            <button
+              className="tcip-btn-danger"
+              onClick={() => void recordAction("rejected")}
+              title={rejectTitle}
+            >
               ✕ {rejectLabel}
             </button>
           </>
