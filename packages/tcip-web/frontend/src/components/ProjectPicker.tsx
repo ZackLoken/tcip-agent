@@ -1,0 +1,287 @@
+/**
+ * The front door. Lists the projects the agent built under the workspace and opens one —
+ * the human never browses the filesystem for two roots. Opening a project points the GUI
+ * at it (project root = dataset root); a date/trait/model can be picked per project. The
+ * active project (set by the agent after ingesting, or by the human here) auto-opens on
+ * first load. An "Open a folder outside the workspace" disclosure keeps the old two-root
+ * flow for edge cases.
+ */
+
+import { useEffect, useRef, useState } from "react";
+
+import { api, type ProjectSummary } from "@/api/client";
+import { AdvancedFolderOpen } from "@/components/AdvancedFolderOpen";
+import { SeasonRail } from "@/components/SeasonRail";
+import { defaultDate, openWorkspaceProject } from "@/lib/openProject";
+import { useStore } from "@/store";
+
+// Session-scoped: auto-open the active project only on the app's first load, so a later
+// "Switch project" (which returns here) doesn't immediately re-open the same project.
+let autoOpenAttempted = false;
+
+function relativeTime(epochSeconds: number): string {
+  const deltaMs = Date.now() - epochSeconds * 1000;
+  const mins = Math.round(deltaMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hr ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+export function ProjectPicker() {
+  const patchGui = useStore((s) => s.patchGui);
+  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
+  const [workspace, setWorkspace] = useState<string>("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [date, setDate] = useState("");
+  const [annType, setAnnType] = useState("");
+  const [model, setModel] = useState("");
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const openedRef = useRef(false);
+
+  function selectCard(p: ProjectSummary) {
+    setSelected(p.name);
+    setDate(defaultDate(p.dates));
+    setAnnType(p.traits[0] ?? "");
+    setModel(p.models[0] ?? "");
+    setOpenError(null);
+  }
+
+  async function openProject(
+    p: ProjectSummary,
+    chosenDate: string,
+    chosenType: string,
+    chosenModel: string,
+  ) {
+    if (openedRef.current) return;
+    if (!chosenDate) {
+      // Opening with no date can't satisfy datasetReady, so it would leave the picker on
+      // screen with a dead button. Tell the human instead of silently latching.
+      setOpenError("This project has no dated images yet — ingest images first.");
+      return;
+    }
+    openedRef.current = true;
+    setOpening(true);
+    setOpenError(null);
+    try {
+      const selection = await openWorkspaceProject(p, chosenDate, chosenType, chosenModel);
+      // Mark it active so it auto-opens next time and other clients agree.
+      void api.projects.setActive(p.name).catch(() => {});
+      patchGui({ dataset: selection });
+    } catch (e) {
+      openedRef.current = false;
+      setOpenError(String(e));
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    api.projects
+      .list()
+      .then((res) => {
+        if (cancelled) return;
+        setProjects(res.projects);
+        setWorkspace(res.workspace);
+        // Auto-open the active project on first app load.
+        if (!autoOpenAttempted) {
+          autoOpenAttempted = true;
+          const active = res.projects.find((p) => p.name === res.active);
+          // Only auto-open a project that actually has a dated capture to land on;
+          // otherwise just preselect it so the human sees where to go next.
+          if (active && defaultDate(active.dates)) {
+            selectCard(active);
+            void openProject(
+              active,
+              defaultDate(active.dates),
+              active.traits[0] ?? "",
+              active.models[0] ?? "",
+            );
+          } else if (active) {
+            selectCard(active);
+          }
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setLoadError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="h-full w-full overflow-auto bg-gradient-to-b from-tcip-bg to-[#181a12] p-6 flex justify-center">
+      <div className="w-full max-w-3xl flex flex-col gap-5">
+        <div className="animate-tcip-rise">
+          <span className="tcip-eyebrow">Field station</span>
+          <h1 className="text-xl font-semibold text-tcip-fg mt-2">Open a project</h1>
+          <p className="text-[12px] text-tcip-muted mt-1">
+            Each project is a season of captures the agent structured for you.
+            {workspace && (
+              <>
+                {" "}
+                Workspace <span className="font-mono">{workspace}</span>.
+              </>
+            )}
+          </p>
+        </div>
+
+        {loadError && (
+          <div className="tcip-panel p-4 text-[12px] text-tcip-fp">
+            Could not load projects. {loadError}
+          </div>
+        )}
+
+        {projects && projects.length === 0 && (
+          <div className="tcip-panel p-6 text-[12px] text-tcip-muted flex flex-col gap-2">
+            <span className="text-tcip-fg font-medium">No projects yet</span>
+            <span>
+              Ask the agent to structure your images into a project — it creates one with{" "}
+              <span className="font-mono">ingest_images</span>. Or open a folder below.
+            </span>
+          </div>
+        )}
+
+        {projects && projects.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {projects.map((p) => {
+              const isSelected = p.name === selected;
+              return (
+                <div
+                  key={p.name}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isSelected}
+                  className={`tcip-panel p-4 flex flex-col gap-2 cursor-pointer transition-colors animate-tcip-rise focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg ${
+                    isSelected ? "border-tcip-accent" : "hover:border-tcip-border-hover"
+                  }`}
+                  onClick={() => selectCard(p)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      selectCard(p);
+                    }
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-tcip-fg truncate" title={p.name}>
+                      {p.name}
+                    </span>
+                    {p.is_active && (
+                      <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent">active</span>
+                    )}
+                  </div>
+                  {/* Signature: the project's captures across the season. */}
+                  <SeasonRail dates={p.dates} className="my-0.5" />
+                  <div className="text-[11px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span>{p.image_count} image(s)</span>
+                    <span>
+                      {p.dates.length} date{p.dates.length === 1 ? "" : "s"}
+                    </span>
+                    <span>
+                      {p.traits.length} trait{p.traits.length === 1 ? "" : "s"}
+                    </span>
+                    <span>
+                      {p.models.length} model{p.models.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-tcip-muted/70">
+                    Updated {relativeTime(p.modified)}
+                  </span>
+
+                  {isSelected && (
+                    <div
+                      className="flex flex-col gap-2 pt-2 mt-1 border-t border-tcip-border"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="grid grid-cols-3 gap-2">
+                        <label className="flex flex-col gap-1">
+                          <span className="tcip-label">Date</span>
+                          <select
+                            className="tcip-select"
+                            value={date}
+                            onChange={(e) => setDate(e.target.value)}
+                          >
+                            {p.dates.length === 0 && <option value="">—</option>}
+                            {p.dates.map((d) => (
+                              <option key={d} value={d}>
+                                {d}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="tcip-label">Trait</span>
+                          <select
+                            className="tcip-select"
+                            value={annType}
+                            onChange={(e) => setAnnType(e.target.value)}
+                          >
+                            <option value="">—</option>
+                            {p.traits.map((t) => (
+                              <option key={t} value={t}>
+                                {t}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="tcip-label">Model</span>
+                          <select
+                            className="tcip-select"
+                            value={model}
+                            onChange={(e) => setModel(e.target.value)}
+                          >
+                            <option value="">—</option>
+                            {p.models.map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      {openError && <span className="text-[11px] text-tcip-fp">{openError}</span>}
+                      <button
+                        className="tcip-btn-primary"
+                        disabled={opening || !date}
+                        onClick={() => openProject(p, date, annType, model)}
+                      >
+                        {opening
+                          ? "Opening…"
+                          : !date
+                            ? "This project has no dated images"
+                            : "Open project"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!projects && !loadError && (
+          <div className="text-[12px] text-tcip-muted">Loading projects…</div>
+        )}
+
+        <details className="tcip-panel p-4 mt-2">
+          <summary className="text-[12px] text-tcip-muted cursor-pointer select-none">
+            Advanced: open a folder outside the workspace
+          </summary>
+          <div className="mt-4">
+            <AdvancedFolderOpen />
+          </div>
+        </details>
+      </div>
+    </div>
+  );
+}
