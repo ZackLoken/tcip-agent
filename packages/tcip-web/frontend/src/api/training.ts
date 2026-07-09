@@ -9,6 +9,7 @@ export interface TrainingRunSummary {
   best_metric?: number;
   output_dir?: string;
   config_summary?: Record<string, unknown>;
+  external?: boolean; // reconstructed from experiment records — running in another process
 }
 
 export interface MetricRow {
@@ -44,14 +45,6 @@ export const trainingApi = {
 
   compare: (experiment_ids: string[]) =>
     postJson<unknown>("/api/training/compare", { experiment_ids }),
-
-  registerModel: (body: {
-    project_path: string;
-    model_name: string;
-    checkpoint_path: string;
-    tag?: string | null;
-    metadata?: Record<string, unknown> | null;
-  }) => postJson<unknown>("/api/training/register_model", body),
 };
 
 export interface TrainingStreamMsg {
