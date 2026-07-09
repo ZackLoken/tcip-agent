@@ -98,10 +98,11 @@ def test_project_retrospective_appends_to_existing(tmp_path: Path):
     )
 
     retro_path = tmp_path / ".tcip" / "retrospectives" / "chestnut-bur-phase0.md"
-    content = retro_path.read_text()
+    content = retro_path.read_text(encoding="utf-8")
     # Only one top-level header, two dated sections
     assert content.count("# chestnut-bur-phase0") == 1
-    assert content.count("## Retrospective —") == 2
+    # Count section headers without the em-dash (dash byte can differ by encoding).
+    assert content.count("## Retrospective") == 2
     assert "First pass" in content
     assert "Second pass after three days" in content
 
