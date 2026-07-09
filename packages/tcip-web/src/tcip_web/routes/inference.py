@@ -89,6 +89,42 @@ def _list_jobs() -> list[InferenceJob]:
         return list(_jobs.values())
 
 
+def rehydrate() -> None:
+    """Seed the registry from the last persisted summaries after a backend restart.
+
+    The worker threads are gone, so a persisted non-terminal job is dead — it is
+    surfaced as ``interrupted``. Only the fields the API exposes are restored (the
+    per-image results list isn't persisted), so preview/results_tail come back empty.
+    """
+    from tcip_web import jobstore
+
+    with _job_lock:
+        if _jobs:
+            return
+        for s in jobstore.load("inference_jobs"):
+            jid = s.get("job_id")
+            if not jid:
+                continue
+            status = s.get("status", "interrupted")
+            if status not in jobstore.TERMINAL_STATUSES:
+                status = "interrupted"
+            _jobs[jid] = InferenceJob(
+                job_id=jid,
+                checkpoint_path="",
+                images_dir=s.get("images_dir", ""),
+                output_dir=s.get("output_dir", ""),
+                sahi=False,
+                conf=0.0,
+                iou=0.0,
+                slice_hw=(0, 0),
+                overlap=0.0,
+                total=s.get("total", 0),
+                done=s.get("done", 0),
+                status=status,
+                error=s.get("error"),
+            )
+
+
 # ── Worker ─────────────────────────────────────────────────────────────
 
 
@@ -254,6 +290,8 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
         await websocket.close()
         return
     try:
+        from tcip_web import jobstore
+
         last_done = -1
         while True:
             if job.done != last_done:
@@ -265,7 +303,9 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                     "total": job.total,
                     "status": job.status,
                 })
-            if job.status in ("completed", "failed"):
+            # Terminate on ANY terminal state — a cancelled/interrupted job never
+            # reaches completed/failed, so keying only on those spun this loop forever.
+            if job.status in jobstore.TERMINAL_STATUSES:
                 await websocket.send_json({
                     "type": "final",
                     "job_id": job.job_id,
