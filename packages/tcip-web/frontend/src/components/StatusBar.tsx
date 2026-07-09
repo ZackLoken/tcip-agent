@@ -48,18 +48,18 @@ export function StatusBar() {
 
   return (
     <div className="h-statusbar flex items-center gap-4 px-3 border-t border-tcip-border bg-tcip-panel text-[11px] text-tcip-muted shrink-0">
-      <span>Zoom: {(view.scale * 100).toFixed(0)}%</span>
+      <span className="tabular-nums">Zoom: {(view.scale * 100).toFixed(0)}%</span>
       {activeTab === "annotate" && sessionTracking.currentImageName ? (
-        <span>Image time: {fmtSeconds(imageSeconds)}</span>
+        <span className="tabular-nums">Image time: {fmtSeconds(imageSeconds)}</span>
       ) : null}
       {canvasDims.w ? (
-        <span>
+        <span className="tabular-nums">
           Image: {canvasDims.w}×{canvasDims.h}
         </span>
       ) : null}
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}
       {activeTab === "review" && matches && (
-        <span>
+        <span className="tabular-nums">
           <span className="text-tcip-tp">TP {matches.n_tp}</span>
           {" · "}
           <span className="text-tcip-fp">FP {matches.n_fp}</span>
