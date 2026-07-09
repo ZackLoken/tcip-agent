@@ -137,7 +137,7 @@ export function ReviewToolsDrawer({ open, onClose }: { open: boolean; onClose: (
   return (
     <div className="absolute inset-0 z-20 flex justify-end">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-[380px] h-full bg-tcip-panel border-l border-tcip-border overflow-auto p-4 flex flex-col gap-5 text-[12px]">
+      <div className="relative w-[380px] h-full bg-tcip-panel border-l border-tcip-border overflow-auto p-4 flex flex-col gap-5 text-[12px] shadow-xl">
         <div className="flex items-center">
           <span className="font-semibold text-[13px]">Review tools</span>
           <span className="flex-1" />
@@ -148,12 +148,12 @@ export function ReviewToolsDrawer({ open, onClose }: { open: boolean; onClose: (
 
         {/* ── Materialize ── */}
         <section className="flex flex-col gap-2">
-          <div className="font-semibold">Build training set from verdicts</div>
+          <div className="tcip-heading">Build training set from verdicts</div>
           <p className="text-[11px] text-tcip-muted">
             Accepted/edited GT → positives; rejected-only images → hard negatives. Chains into split
             + train.
           </p>
-          <label className="text-[11px] text-tcip-muted">Output directory</label>
+          <label className="tcip-label">Output directory</label>
           <input
             className="tcip-input"
             value={outputDir}
@@ -195,11 +195,11 @@ export function ReviewToolsDrawer({ open, onClose }: { open: boolean; onClose: (
 
         {/* ── Review queue ── */}
         <section className="flex flex-col gap-2">
-          <div className="font-semibold">Prioritize unreviewed images</div>
+          <div className="tcip-heading">Prioritize unreviewed images</div>
           <p className="text-[11px] text-tcip-muted">
             Ranks unreviewed images by model informativeness (needs a trained checkpoint).
           </p>
-          <label className="text-[11px] text-tcip-muted">Model checkpoint</label>
+          <label className="tcip-label">Model checkpoint</label>
           {models.length > 0 ? (
             <select
               className="tcip-select"
@@ -221,7 +221,7 @@ export function ReviewToolsDrawer({ open, onClose }: { open: boolean; onClose: (
               placeholder="Path to .pt checkpoint"
             />
           )}
-          <label className="text-[11px] text-tcip-muted">Images directory</label>
+          <label className="tcip-label">Images directory</label>
           <input
             className="tcip-input"
             value={imagesDir}
@@ -229,7 +229,7 @@ export function ReviewToolsDrawer({ open, onClose }: { open: boolean; onClose: (
           />
           <div className="grid grid-cols-2 gap-2">
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-tcip-muted">Method</span>
+              <span className="tcip-label">Method</span>
               <select
                 className="tcip-select"
                 value={method}
@@ -241,7 +241,7 @@ export function ReviewToolsDrawer({ open, onClose }: { open: boolean; onClose: (
               </select>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-tcip-muted">Budget</span>
+              <span className="tcip-label">Budget</span>
               <input
                 className="tcip-input"
                 type="number"
@@ -277,7 +277,7 @@ export function ReviewToolsDrawer({ open, onClose }: { open: boolean; onClose: (
                 {queueResult.queue.map((entry, i) => (
                   <li key={entry.image}>
                     <button
-                      className="w-full text-left px-2 py-1 rounded hover:bg-tcip-border font-mono text-[11px] flex justify-between"
+                      className="w-full text-left px-2 py-1 rounded hover:bg-tcip-hover transition-colors font-mono text-[11px] flex justify-between"
                       onClick={() => jumpTo(entry.image)}
                     >
                       <span className="truncate">
