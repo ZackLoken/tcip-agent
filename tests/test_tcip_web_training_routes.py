@@ -94,28 +94,45 @@ def test_cancel_unknown_run_returns_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
-def test_list_runs_merges_persisted_history(tmp_path, monkeypatch) -> None:
-    # A prior session persisted a run that was still 'running' when the backend died;
-    # after a restart it must resurface as an 'interrupted' historical stub, and stay
-    # on disk so it survives the *next* restart too (persist-on-list).
+def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
+    # No live runs (post-restart): the list is rebuilt from .tcip/experiments/. A genuine
+    # training experiment left 'running' by a crash resurfaces as 'interrupted'; a
+    # review-feedback experiment (no model_spec) is NOT a training run and is excluded.
     monkeypatch.chdir(tmp_path)
-    from tcip_web import jobstore
+    import json as _json
+
     from tcip_web.routes import training
 
-    jobstore.persist("training_runs", [
-        {"run_id": "old-run", "status": "running", "current_epoch": 2, "best_metric": None},
-    ])
-    training._historical_runs = []
+    exp = tmp_path / ".tcip" / "experiments" / "run_1"
+    exp.mkdir(parents=True)
+    (exp / "config.json").write_text(
+        _json.dumps({"model_spec": {"backbone": {"name": "resnet50"}}})
+    )
+    (exp / "status.json").write_text(_json.dumps({"state": "running"}))
+
+    fb = tmp_path / ".tcip" / "experiments" / "fb_1"
+    fb.mkdir(parents=True)
+    (fb / "config.json").write_text(_json.dumps({"source": "review_feedback"}))
+    (fb / "status.json").write_text(_json.dumps({"state": "completed"}))
+
     monkeypatch.setattr(
         "tcip_mcp.tools.training_tools.list_training_runs", lambda: {"runs": []}
     )
-    try:
-        training.rehydrate()
-        body = training.list_runs_route()
-        by_id = {r["run_id"]: r for r in body["runs"]}
-        assert by_id["old-run"]["status"] == "interrupted"
+    body = training.list_runs_route()
+    by_id = {r["run_id"]: r for r in body["runs"]}
+    assert by_id["run_1"]["status"] == "interrupted"  # dead process -> interrupted
+    assert "fb_1" not in by_id  # review-feedback experiment is not a training run
 
-        persisted = {r["run_id"]: r for r in jobstore.load("training_runs")}
-        assert "old-run" in persisted
-    finally:
-        training._historical_runs = []
+
+def test_list_runs_excludes_hpo_trials(monkeypatch) -> None:
+    # HPO trial runs (origin='hpo_trial') must not leak into the Training-tab list.
+    from tcip_mcp.pipelines.training import generic_trainer as gt
+
+    monkeypatch.setattr(gt, "_RUNS", {})
+    gt.create_run({"model_spec": {}}, "out_a", origin="training")
+    gt.create_run({"model_spec": {}}, "out_b", origin="hpo_trial")
+
+    default = {r["run_id"] for r in gt.list_runs()}
+    assert len(default) == 1  # only the standalone training run
+    assert all(gt._RUNS[rid].origin == "training" for rid in default)
+    assert len(gt.list_runs(include_hpo_trials=True)) == 2  # full set on request
