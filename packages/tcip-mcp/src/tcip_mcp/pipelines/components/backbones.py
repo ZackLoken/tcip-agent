@@ -161,9 +161,6 @@ class _MultiStageExtractor(nn.Module):
             out[f"s{i}"] = x
         return out
 
-    def named_children_list(self):
-        return list(self.stages.named_children())
-
 
 # ---------------------------------------------------------------------------
 # Stage freezing helpers
@@ -193,9 +190,14 @@ def _freeze_sequential_fraction(
     for p in model.parameters():
         p.requires_grad = True
     children = list(model.named_children())
+    # A wrapper whose sole child is a ModuleList (e.g. _MultiStageExtractor)
+    # keeps its real stages one level down — descend so freezing is per-stage
+    # rather than all-or-nothing.
+    if len(children) == 1 and isinstance(children[0][1], nn.ModuleList):
+        children = list(children[0][1].named_children())
     if not children:
         children = list(model.named_modules())
-    n_freeze = max(1, len(children) * freeze_to // total)
+    n_freeze = len(children) * freeze_to // total
     for i, (_, module) in enumerate(children):
         if i < n_freeze:
             for p in module.parameters():
