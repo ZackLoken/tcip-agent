@@ -217,12 +217,17 @@ def _crossing_date(
     still below the target, return ``None``. If the first point is already
     at/above, return that date's ISO string.
     """
-    if not sorted_points:
+    # Drop points whose date can't be parsed (the ``undated/`` bucket sorts to the
+    # (0,0,0) sentinel): an undated image has no capture date, so it can't sit on a
+    # phenology time-series. This also avoids date(0,0,0) raising during interpolation
+    # and "0000-00-00" leaking into the exported scientific CSV.
+    points = [p for p in sorted_points if _date_key(p[0]) != (0, 0, 0)]
+    if not points:
         return None
     # First point already meets target?
-    if sorted_points[0][1] >= target_ratio:
-        return _iso(sorted_points[0][0])
-    for (d1, r1), (d2, r2) in zip(sorted_points, sorted_points[1:]):
+    if points[0][1] >= target_ratio:
+        return _iso(points[0][0])
+    for (d1, r1), (d2, r2) in zip(points, points[1:]):
         if r2 >= target_ratio:
             # Interpolate between d1 and d2
             y1, m1, day1 = _date_key(d1)
