@@ -171,6 +171,23 @@ def test_onset_dates_finds_crossings(client: TestClient) -> None:
     assert onset["catkin_95per_date"] is not None  # reached between 3-9 and 3-18
 
 
+def test_onset_dates_ignores_undated_bucket(client: TestClient) -> None:
+    # The ingest 'undated/' bucket (and any non-ISO folder) sorts to the (0,0,0) sentinel.
+    # It must not crash interpolation (date(0,0,0)) or leak '0000-00-00' into the CSV.
+    curves = [
+        {"plant_id": "P", "accession": "A", "date": "undated", "ratio": 0.9},
+        {"plant_id": "P", "accession": "A", "date": "2026-02-11", "ratio": 0.0},
+        {"plant_id": "P", "accession": "A", "date": "2026-03-09", "ratio": 1.0},
+    ]
+    resp = client.post("/api/results/onset_dates", json={"curves": curves})
+    assert resp.status_code == 200
+    onset = resp.json()["rows"][0]
+    for key in ("catkin_05per_date", "catkin_50per_date", "catkin_95per_date"):
+        assert onset[key] != "0000-00-00"
+        if onset[key] is not None:
+            assert onset[key].startswith("2026-")
+
+
 def test_export_csv(client: TestClient) -> None:
     rows = [
         {"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15"},
