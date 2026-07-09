@@ -36,6 +36,12 @@ export const trainingApi = {
       `/api/training/runs/${run_id}/metrics?project_root=${encodeURIComponent(project_root)}`,
     ),
 
+  cancel: (run_id: string) =>
+    postJson<{ run_id: string; status: string; cancel_requested: boolean }>(
+      `/api/training/runs/${encodeURIComponent(run_id)}/cancel`,
+      {},
+    ),
+
   compare: (experiment_ids: string[]) =>
     postJson<unknown>("/api/training/compare", { experiment_ids }),
 
@@ -48,23 +54,61 @@ export const trainingApi = {
   }) => postJson<unknown>("/api/training/register_model", body),
 };
 
+export interface TrainingStreamMsg {
+  type: string;
+  run_id: string;
+  row?: MetricRow;
+  status?: { status?: string; [k: string]: unknown };
+  error?: string;
+}
+
+/**
+ * Open a live metrics stream for a training run, auto-reconnecting with capped backoff.
+ * The server replays all rows from the start on each (re)connect, so the consumer must
+ * dedupe by epoch/step. A ``status`` (terminal) or ``error`` (unknown run) frame ends
+ * the stream — once seen we stop reconnecting.
+ */
 export function openTrainingStream(
   project_root: string,
   run_id: string,
-  onMessage: (msg: { type: string; run_id: string; row?: MetricRow; status?: unknown }) => void,
+  onMessage: (msg: TrainingStreamMsg) => void,
 ): () => void {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const url = `${proto}//${window.location.host}/api/training/runs/${encodeURIComponent(
     run_id,
   )}/stream?project_root=${encodeURIComponent(project_root)}`;
-  const ws = new WebSocket(url);
-  ws.onmessage = (ev) => {
-    try {
-      const m = JSON.parse(ev.data);
+  let ws: WebSocket | null = null;
+  let closedByClient = false;
+  let terminated = false;
+  let backoff = 500;
+
+  const connect = () => {
+    if (closedByClient) return;
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      backoff = 500;
+    };
+    ws.onmessage = (ev) => {
+      let m: TrainingStreamMsg;
+      try {
+        m = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      if (m.type === "status" || m.type === "error") terminated = true;
       onMessage(m);
-    } catch {
-      /* ignore */
-    }
+    };
+    ws.onclose = () => {
+      if (closedByClient || terminated) return;
+      const delay = backoff;
+      backoff = Math.min(backoff * 2, 15_000);
+      setTimeout(connect, delay);
+    };
   };
-  return () => ws.close();
+
+  connect();
+  return () => {
+    closedByClient = true;
+    ws?.close();
+  };
 }
