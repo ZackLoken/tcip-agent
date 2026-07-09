@@ -15,9 +15,9 @@ def viz_dataset(tmp_path: Path) -> Path:
     """Create a dataset with images, labels, and predictions."""
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    labels_dir = tmp_path / "labels" / "detect"
+    labels_dir = tmp_path / "annotations" / "default" / "detect"
     labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "detect"
+    preds_dir = tmp_path / "predictions" / "live" / "detect"
     preds_dir.mkdir(parents=True)
 
     for name in ("img_001", "img_002", "img_003", "img_004"):
@@ -231,8 +231,8 @@ class TestVisualizeWorstPredictions:
         from tcip_mcp.tools.vision_tools import visualize_worst_predictions
 
         result = visualize_worst_predictions(
-            predictions_dir=str(viz_dataset / "predictions" / "detect"),
-            labels_dir=str(viz_dataset / "labels" / "detect"),
+            predictions_dir=str(viz_dataset / "predictions" / "live" / "detect"),
+            labels_dir=str(viz_dataset / "annotations" / "default" / "detect"),
             images_dir=str(viz_dataset / "images"),
             top_k=3,
         )
@@ -413,9 +413,9 @@ class TestAcceptCandidatesTool:
         assert Path(result["image_path"]).is_file()
 
         # Verify labels were written
-        det_file = viz_dataset / "labels" / "detect" / "img_001.txt"
+        det_file = viz_dataset / "annotations" / "default" / "detect" / "img_001.txt"
         assert det_file.is_file()
-        seg_file = viz_dataset / "labels" / "segment" / "img_001.txt"
+        seg_file = viz_dataset / "annotations" / "default" / "segment" / "img_001.txt"
         assert seg_file.is_file()
 
 
@@ -723,7 +723,7 @@ class TestFullPipelineIntegration:
         assert result["detection_count"] == 2
         assert result["format"] == "yolo"
 
-        det_file = pipeline_dataset / "labels" / "detect" / "sample.txt"
+        det_file = pipeline_dataset / "annotations" / "default" / "detect" / "sample.txt"
         assert det_file.is_file()
         lines = det_file.read_text().strip().splitlines()
         assert len(lines) == 2
@@ -754,7 +754,7 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["segmentation_count"] == 1
 
-        seg_file = pipeline_dataset / "labels" / "segment" / "sample.txt"
+        seg_file = pipeline_dataset / "annotations" / "default" / "segment" / "sample.txt"
         assert seg_file.is_file()
         lines = seg_file.read_text().strip().splitlines()
         assert len(lines) == 1
@@ -787,11 +787,11 @@ class TestFullPipelineIntegration:
         assert result["segmentation_count"] == 2
 
         # Parse back detection labels
-        det_file = pipeline_dataset / "labels" / "detect" / "sample.txt"
+        det_file = pipeline_dataset / "annotations" / "default" / "detect" / "sample.txt"
         det_lines = det_file.read_text().strip().splitlines()
         det_class_ids = sorted(int(l.split()[0]) for l in det_lines)
 
-        seg_file = pipeline_dataset / "labels" / "segment" / "sample.txt"
+        seg_file = pipeline_dataset / "annotations" / "default" / "segment" / "sample.txt"
         seg_lines = seg_file.read_text().strip().splitlines()
         seg_class_ids = sorted(int(l.split()[0]) for l in seg_lines)
 
@@ -973,7 +973,7 @@ class TestMultiFormatOutput:
         )
         assert "error" not in result
         assert result["format"] == "yolo"
-        det = format_dataset / "labels" / "detect" / "fmt_test.txt"
+        det = format_dataset / "annotations" / "default" / "detect" / "fmt_test.txt"
         assert det.is_file()
         # YOLO: 5 fields per line
         parts = det.read_text().strip().split()
@@ -1004,7 +1004,7 @@ class TestMultiFormatOutput:
         assert "error" not in result
         assert result["format"] == "voc"
         assert result["detection_count"] == 1
-        det = format_dataset / "labels" / "detect" / "fmt_test.txt"
+        det = format_dataset / "annotations" / "default" / "detect" / "fmt_test.xml"
         assert det.is_file()
         content = det.read_text()
         assert "<annotation>" in content
