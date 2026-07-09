@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Circle, Line, Rect, Text } from "react-konva";
 import Konva from "konva";
 
-import { api } from "@/api/client";
+import { api, IMAGE_MAX_WIDTH } from "@/api/client";
 import type { Mtimes } from "@/api/client";
 import { classesApi } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
+import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { computePolygonBboxes, findHoveredPolygon, pointInPolygon } from "@/lib/polygonGeometry";
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@/store/types";
 
@@ -45,17 +47,92 @@ function pointToSegmentDist(
   return { dist: d, t, proj };
 }
 
-function pointInPolygon(pt: [number, number], poly: [number, number][]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i];
-    const [xj, yj] = poly[j];
-    if (yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
+/**
+ * The committed boxes + polygons (content layer). Memoized and — crucially — the mouse
+ * cursor is NOT one of its props, so a mouse move (which only updates cursor-following
+ * overlays) does not re-render/reconcile these hundreds–thousands of Konva nodes. It
+ * re-renders only when the shapes, selection/hover, active class, or zoom-derived stroke
+ * sizes actually change.
+ */
+interface AnnotationShapesProps {
+  boxes: Box[];
+  polygons: PolygonShape[];
+  mode: "box" | "polygon";
+  activeClass: number;
+  selectedPolygonIdx: number | null;
+  hoveredIdx: number | null;
+  draggingIdx: number | undefined;
+  renderLabels: boolean;
+  classColor: (id: number) => string;
+  className: (id: number) => string;
+  boxStroke: number;
+  polyStroke: number;
+  vertR: number;
+  selVertR: number;
+  labelSize: number;
 }
+
+const AnnotationShapes = memo(function AnnotationShapes({
+  boxes,
+  polygons,
+  mode,
+  activeClass,
+  selectedPolygonIdx,
+  hoveredIdx,
+  draggingIdx,
+  renderLabels,
+  classColor,
+  className,
+  boxStroke,
+  polyStroke,
+  vertR,
+  selVertR,
+  labelSize,
+}: AnnotationShapesProps) {
+  if (!renderLabels) return null;
+  return (
+    <>
+      {/* Boxes (only active class in box mode, like yolo-annotator) */}
+      {mode === "box" &&
+        boxes.map((b, i) =>
+          b.class_id === activeClass ? (
+            <BoxOverlay
+              key={`box-${i}`}
+              box={b}
+              stroke={classColor(b.class_id)}
+              width={boxStroke}
+              labelSize={labelSize}
+              label={`${b.class_id}: ${className(b.class_id)}`}
+            />
+          ) : null,
+        )}
+
+      {/* Polygons */}
+      {polygons.map((p, i) => {
+        const selected = selectedPolygonIdx === i;
+        const hovered = hoveredIdx === i;
+        const dragging = draggingIdx === i;
+        // In box mode only show the selected polygon; in polygon mode show all
+        if (mode === "box" && !selected) return null;
+        // In polygon mode filter to active class unless selected
+        if (mode === "polygon" && !selected && p.class_id !== activeClass) return null;
+        const showVerts = selected || hovered || dragging;
+        return (
+          <PolygonOverlay
+            key={`poly-${i}`}
+            polygon={p}
+            stroke={selected ? "#00BFFF" : classColor(p.class_id)}
+            width={polyStroke}
+            vertexRadius={selected ? selVertR : vertR}
+            showVertices={showVerts}
+            labelSize={labelSize}
+            label={`${p.class_id}: ${className(p.class_id)}`}
+          />
+        );
+      })}
+    </>
+  );
+});
 
 export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
@@ -496,7 +573,17 @@ export function AnnotateTab() {
     }
   };
 
-  const onMove = (ix: number, iy: number) => {
+  // One bbox per polygon (recomputed only when the polygon list changes) lets the hover
+  // scan reject most polygons with four comparisons before the O(vertices) ray-cast.
+  const polygonBboxes = useMemo(() => computePolygonBboxes(canvas.polygons), [canvas.polygons]);
+
+  // rAF-throttle mouse moves: coalesce a burst of pointer events into one update per frame.
+  // The ref always holds the freshest closure, so a re-render between scheduling and the
+  // frame firing means the callback runs on current — never stale — state.
+  const pendingMoveRef = useRef<[number, number] | null>(null);
+  const moveRafRef = useRef<number | null>(null);
+  const processMoveRef = useRef<(ix: number, iy: number) => void>(() => {});
+  processMoveRef.current = (ix: number, iy: number) => {
     setCursor([ix, iy]);
     if (isLocked) return;
 
@@ -522,18 +609,28 @@ export function AnnotateTab() {
       return;
     }
 
-    // Polygon hover detection
+    // Polygon hover detection (bbox-prefiltered)
     if (mode === "polygon" && canvas.currentPolygon.length === 0) {
-      let hover: number | null = null;
-      for (let pi = 0; pi < canvas.polygons.length; pi++) {
-        if (pointInPolygon([ix, iy], canvas.polygons[pi].points)) {
-          hover = pi;
-          break;
-        }
-      }
+      const hover = findHoveredPolygon([ix, iy], canvas.polygons, polygonBboxes);
       if (hover !== annotateUi.hoveredPolygonIdx) setHoveredPolygon(hover);
     }
   };
+
+  const onMove = (ix: number, iy: number) => {
+    pendingMoveRef.current = [ix, iy];
+    if (moveRafRef.current != null) return;
+    moveRafRef.current = requestAnimationFrame(() => {
+      moveRafRef.current = null;
+      const p = pendingMoveRef.current;
+      if (p) processMoveRef.current(p[0], p[1]);
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (moveRafRef.current != null) cancelAnimationFrame(moveRafRef.current);
+    };
+  }, []);
 
   const onUp = (ix: number, iy: number) => {
     if (isLocked) return;
@@ -665,6 +762,7 @@ export function AnnotateTab() {
   if (!imgPath || !currentImageName) {
     return (
       <div className="flex-1 flex flex-col">
+        <AnnotateToolbar />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
           <div className="max-w-lg rounded-lg border border-tcip-border bg-tcip-panel px-5 py-4 text-center">
             <p className="text-sm font-semibold text-tcip-fg">No image loaded</p>
@@ -677,7 +775,7 @@ export function AnnotateTab() {
     );
   }
 
-  const imageUrl = imgPath ? api.images.url(imgPath) : null;
+  const imageUrl = imgPath ? api.images.url(imgPath, IMAGE_MAX_WIDTH) : null;
 
   const renderLabels = annotateUi.visible;
   const hoveredIdx = annotateUi.hoveredPolygonIdx;
@@ -685,6 +783,7 @@ export function AnnotateTab() {
 
   return (
     <div className="flex-1 flex flex-col">
+      <AnnotateToolbar />
       <div className="relative flex-1">
         <CanvasStage
           imageUrl={imageUrl}
@@ -697,78 +796,59 @@ export function AnnotateTab() {
           onPixelClick={onClick}
           onPixelDoubleClick={onDoubleClick}
           onPixelContextMenu={onContextMenu}
+          overlay={
+            <>
+              {/* In-progress polygon (rubber-bands to the cursor) */}
+              {mode === "polygon" && canvas.currentPolygon.length > 0 && (
+                <InProgressPolygon
+                  points={canvas.currentPolygon}
+                  cursor={cursor}
+                  stroke={classColor(activeClass)}
+                  strokeW={polyStroke}
+                  vertR={vertR}
+                />
+              )}
+
+              {/* Box draft */}
+              {drawing && (
+                <Rect
+                  x={Math.min(drawing.x1, drawing.x2)}
+                  y={Math.min(drawing.y1, drawing.y2)}
+                  width={Math.abs(drawing.x2 - drawing.x1)}
+                  height={Math.abs(drawing.y2 - drawing.y1)}
+                  stroke={classColor(activeClass)}
+                  strokeWidth={boxStroke}
+                  dash={[6 * scaleLineW, 4 * scaleLineW]}
+                />
+              )}
+
+              {/* Snap indicator */}
+              {annotateUi.snap && cursor && mode === "polygon" && (
+                <SnapIndicator cursor={cursor} polygons={canvas.polygons} scale={s} />
+              )}
+            </>
+          }
         >
-          {/* Boxes (only active class in box mode, like yolo-annotator) */}
-          {renderLabels &&
-            mode === "box" &&
-            canvas.boxes.map((b, i) =>
-              b.class_id === activeClass ? (
-                <BoxOverlay
-                  key={`box-${i}`}
-                  box={b}
-                  stroke={classColor(b.class_id)}
-                  width={boxStroke}
-                  labelSize={labelSize}
-                  label={`${b.class_id}: ${className(b.class_id)}`}
-                />
-              ) : null,
-            )}
+          {/* Committed shapes — memoized, cursor-independent (see AnnotationShapes) */}
+          <AnnotationShapes
+            boxes={canvas.boxes}
+            polygons={canvas.polygons}
+            mode={mode}
+            activeClass={activeClass}
+            selectedPolygonIdx={canvas.selectedPolygonIdx}
+            hoveredIdx={hoveredIdx}
+            draggingIdx={draggingIdx}
+            renderLabels={renderLabels}
+            classColor={classColor}
+            className={className}
+            boxStroke={boxStroke}
+            polyStroke={polyStroke}
+            vertR={vertR}
+            selVertR={selVertR}
+            labelSize={labelSize}
+          />
 
-          {/* Polygons */}
-          {renderLabels &&
-            canvas.polygons.map((p, i) => {
-              const selected = canvas.selectedPolygonIdx === i;
-              const hovered = hoveredIdx === i;
-              const dragging = draggingIdx === i;
-              // In box mode only show the selected polygon; in polygon mode show all
-              if (mode === "box" && !selected) return null;
-              // In polygon mode filter to active class unless selected
-              if (mode === "polygon" && !selected && p.class_id !== activeClass) return null;
-              const showVerts = selected || hovered || dragging;
-              return (
-                <PolygonOverlay
-                  key={`poly-${i}`}
-                  polygon={p}
-                  stroke={selected ? "#00BFFF" : classColor(p.class_id)}
-                  width={polyStroke}
-                  vertexRadius={selected ? selVertR : vertR}
-                  showVertices={showVerts}
-                  labelSize={labelSize}
-                  label={`${p.class_id}: ${className(p.class_id)}`}
-                />
-              );
-            })}
-
-          {/* In-progress polygon */}
-          {mode === "polygon" && canvas.currentPolygon.length > 0 && (
-            <InProgressPolygon
-              points={canvas.currentPolygon}
-              cursor={cursor}
-              stroke={classColor(activeClass)}
-              strokeW={polyStroke}
-              vertR={vertR}
-            />
-          )}
-
-          {/* Box draft */}
-          {drawing && (
-            <Rect
-              x={Math.min(drawing.x1, drawing.x2)}
-              y={Math.min(drawing.y1, drawing.y2)}
-              width={Math.abs(drawing.x2 - drawing.x1)}
-              height={Math.abs(drawing.y2 - drawing.y1)}
-              stroke={classColor(activeClass)}
-              strokeWidth={boxStroke}
-              dash={[6 * scaleLineW, 4 * scaleLineW]}
-            />
-          )}
-
-          {/* Snap indicator */}
-          {annotateUi.snap && cursor && mode === "polygon" && (
-            <SnapIndicator cursor={cursor} polygons={canvas.polygons} scale={s} />
-          )}
-
-          {/* Prediction reference */}
+          {/* Prediction reference (static per navigation) */}
           {predRef && <PredReferenceOverlay pred={predRef} lineW={scaleLineW} />}
         </CanvasStage>
 
