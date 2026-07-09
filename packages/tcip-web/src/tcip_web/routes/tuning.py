@@ -45,6 +45,27 @@ def _persist() -> None:
     jobstore.persist("hpo_sweeps", summaries)
 
 
+def rehydrate() -> None:
+    """Seed the sweep registry from the last persisted summaries after a restart.
+
+    Worker threads are gone, so a persisted non-terminal sweep is dead — surfaced as
+    ``interrupted``. Trial results aren't persisted, so a rehydrated sweep has no result.
+    """
+    from tcip_web import jobstore
+
+    with _lock:
+        if _sweeps:
+            return
+        for s in jobstore.load("hpo_sweeps"):
+            sid = s.get("sweep_id")
+            if not sid:
+                continue
+            status = s.get("status", "interrupted")
+            if status not in jobstore.TERMINAL_STATUSES:
+                status = "interrupted"
+            _sweeps[sid] = HPOJob(sweep_id=sid, status=status, error=s.get("error"))
+
+
 class LaunchHPOPayload(BaseModel):
     base_config: dict[str, Any]
     param_space: Optional[dict[str, Any]] = None
