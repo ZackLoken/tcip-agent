@@ -21,10 +21,6 @@ export class StateSocket {
   private ws: WebSocket | null = null;
   private closed = false;
   private backoffMs = 500;
-  private panelHandlers = new Map<
-    string,
-    (event: { panel: string; event_type: string; data: Record<string, unknown> }) => void
-  >();
 
   constructor(private path: string = "/ws/state") {}
 
@@ -93,23 +89,49 @@ export class StateSocket {
     }
   }
 
+  /**
+   * Subscribe to server-pushed events for one panel, reconnecting with capped
+   * exponential backoff if the socket drops (backend restart, transient
+   * network) — without it, panel events silently stop for the rest of the
+   * browser session. The returned unsubscribe closes the live socket and
+   * cancels any pending reconnect.
+   */
   subscribePanel(
     panel: string,
     handler: (event: { panel: string; event_type: string; data: Record<string, unknown> }) => void,
   ) {
-    this.panelHandlers.set(panel, handler);
-    const panelWs = new WebSocket(wsUrl(`/ws/panel/${panel}`));
-    panelWs.onmessage = (ev) => {
-      try {
-        const m = JSON.parse(ev.data);
-        handler(m);
-      } catch {
-        /* ignore */
-      }
+    let ws: WebSocket | null = null;
+    let closedByClient = false;
+    let backoff = 500;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      if (closedByClient) return;
+      ws = new WebSocket(wsUrl(`/ws/panel/${panel}`));
+      ws.onopen = () => {
+        backoff = 500;
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const m = JSON.parse(ev.data);
+          handler(m);
+        } catch {
+          /* ignore */
+        }
+      };
+      ws.onclose = () => {
+        if (closedByClient) return;
+        const delay = backoff;
+        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+        reconnectTimer = setTimeout(connect, delay);
+      };
     };
+
+    connect();
     return () => {
-      panelWs.close();
-      this.panelHandlers.delete(panel);
+      closedByClient = true;
+      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      ws?.close();
     };
   }
 }
