@@ -36,11 +36,16 @@ def test_apply_hpo_params_varies_architecture_in_model_spec():
     assert spec["heads"][0]["detector"] == "fcos"          # detector actually varied
     assert spec["heads"][0]["min_size"] == 800
     assert out["training"]["batch_size"] == 8
-    assert out["training"]["weight_decay"] == 1e-3
-    # lr builds a freeze_to schedule (the trainer reads freeze_to, not freeze_backbone)
-    stages = out["training"]["stages"]
+    # lr/weight_decay land in top-level optimizer — the only keys the trainer reads
+    assert out["optimizer"]["head_lr"] == 1e-3
+    assert out["optimizer"]["backbone_lr"] == 1e-4
+    assert out["optimizer"]["weight_decay"] == 1e-3
+    # lr builds a TOP-LEVEL freeze_to schedule (train() reads config["stages"], never
+    # training["stages"]) with no dead per-stage lr keys
+    stages = out["stages"]
     assert [s["freeze_to"] for s in stages] == [-1, 2, 0]
-    assert all("freeze_backbone" not in s for s in stages)
+    assert all("lr" not in s and "freeze_backbone" not in s for s in stages)
+    assert "stages" not in out["training"]
     # the base config must not be mutated
     assert base["model_spec"]["backbone"]["name"] == "tv_resnet50"
 
