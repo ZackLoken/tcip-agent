@@ -155,6 +155,10 @@ export function TuningTab() {
           ▶ Launch HPO
         </button>
         {launchMsg && <div className="mt-2 text-[11px] text-tcip-muted">{launchMsg}</div>}
+        <div className="mt-1 text-[10px] text-tcip-muted">
+          Note: a running sweep can’t be cancelled — trials run to completion. Keep the trial count
+          modest.
+        </div>
 
         <div className="mt-4">
           <div className="font-semibold text-[13px] mb-2">Sweeps</div>
