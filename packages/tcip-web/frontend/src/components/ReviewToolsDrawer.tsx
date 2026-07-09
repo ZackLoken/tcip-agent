@@ -185,8 +185,8 @@ export function ReviewToolsDrawer({ open, onClose }: { open: boolean; onClose: (
           </button>
           {materializeResult && (
             <div className="text-[11px] text-tcip-muted">
-              ✓ {materializeResult.positive} positive · {materializeResult.hard_negative} hard-neg ·{" "}
-              {materializeResult.total_boxes} boxes → {materializeResult.output_dir}
+              ✓&nbsp;&nbsp;{materializeResult.positive} positive · {materializeResult.hard_negative}{" "}
+              hard-neg · {materializeResult.total_boxes} boxes → {materializeResult.output_dir}
             </div>
           )}
         </section>
