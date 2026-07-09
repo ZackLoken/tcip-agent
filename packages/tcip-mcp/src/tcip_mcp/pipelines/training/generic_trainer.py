@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
+import tempfile
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -31,6 +34,7 @@ from tcip_mcp.pipelines.training.optimizer_factory import (
     restore_optimizer_state,
     snapshot_optimizer_state,
 )
+from tcip_mcp.utils.atomic_io import _replace_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -128,37 +132,76 @@ class TrainRun:
 
 
 _RUNS: dict[str, TrainRun] = {}
+_RUNS_LOCK = threading.Lock()
 
 
 def create_run(config: dict, output_dir: str, origin: str = "training") -> TrainRun:
-    run_id = f"run_{int(time.time())}_{len(_RUNS)}"
+    # uuid suffix (not len(_RUNS)): same-second launches — from this process, or from
+    # the web backend's separate registry sharing the same experiments dir — must never
+    # collide, or two runs would silently share one run_id and output directory.
+    run_id = f"run_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    # Reproducibility: never start an unseeded run. If the caller set no seed (same
+    # top-level/training.seed read as train()), draw one from OS entropy and write it
+    # into the config in place — launch_training snapshots this dict into the
+    # experiment record *after* create_run, and every checkpoint embeds it, so the
+    # effective seed is always on record and the run can be rerun exactly.
+    if config.get("seed", config.get("training", {}).get("seed")) is None:
+        config["seed"] = random.SystemRandom().randrange(2**31)
+        logger.info("Run %s: no seed configured; drew seed=%d.", run_id, config["seed"])
     run = TrainRun(run_id=run_id, config=config, output_dir=output_dir, origin=origin)
-    _RUNS[run_id] = run
+    with _RUNS_LOCK:
+        _RUNS[run_id] = run
     return run
 
 
 def get_run(run_id: str) -> TrainRun | None:
-    return _RUNS.get(run_id)
+    with _RUNS_LOCK:
+        return _RUNS.get(run_id)
 
 
 def list_runs(include_hpo_trials: bool = False) -> list[dict]:
     """Return runs as dicts. HPO trial runs (``origin='hpo_trial'``) are excluded by
     default so a sweep's trials don't leak into the Training view; pass
     ``include_hpo_trials=True`` for the full registry."""
+    with _RUNS_LOCK:
+        runs = list(_RUNS.values())
     return [
         r.to_dict()
-        for r in _RUNS.values()
+        for r in runs
         if include_hpo_trials or r.origin != "hpo_trial"
     ]
 
 
 def cancel_run(run_id: str) -> bool:
     """Request a graceful cancellation of a training run. Returns False if unknown."""
-    run = _RUNS.get(run_id)
+    with _RUNS_LOCK:
+        run = _RUNS.get(run_id)
     if run is None:
         return False
     run.cancel_event.set()
     return True
+
+
+def _atomic_torch_save(payload: dict, path: Path) -> None:
+    """``torch.save`` via temp file + ``os.replace`` (the ``atomic_io`` convention).
+
+    A crash/OOM mid-save can't destroy the previous checkpoint, and a concurrent
+    reader (GUI inference tab, ``evaluate_model`` on a live run) never observes a
+    half-written file.
+    """
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            torch.save(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        _replace_with_retry(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def _save_checkpoint(
@@ -171,7 +214,7 @@ def _save_checkpoint(
     Superset of the previous payload — ``GenericPredictor`` reads only
     ``model_spec``/``model_state_dict`` and stays compatible.
     """
-    torch.save({
+    _atomic_torch_save({
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
@@ -319,14 +362,7 @@ def train(
     run.status = "running"
     run.start_time = time.time()
 
-    out_dir = Path(run.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     tb_writer = None
-    if SummaryWriter is not None:
-        tb_writer = SummaryWriter(log_dir=str(out_dir / "tensorboard"))
-
-    metrics_path = out_dir / "metrics.jsonl"
 
     # Early stopping
     es = config.get("early_stopping", {})
@@ -340,6 +376,16 @@ def train(
     ckpt_every = config.get("checkpoint_every_n_epochs", 5)
 
     try:
+        # Failable setup lives inside the try so an invalid/unwritable output_dir
+        # marks the run "failed" instead of stranding it at "running" forever.
+        out_dir = Path(run.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        if SummaryWriter is not None:
+            tb_writer = SummaryWriter(log_dir=str(out_dir / "tensorboard"))
+
+        metrics_path = out_dir / "metrics.jsonl"
+
         device = torch.device(config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
 
         # W7: seed before model build so pretrained=False init + shuffle are reproducible.
@@ -596,13 +642,21 @@ def train(
                 # Best model checkpoint — selected by the W1 selection objective.
                 if sel < run.best_metric:
                     run.best_metric = sel
-                    torch.save({
-                        "model_state_dict": model.state_dict(),
-                        "model_spec": config["model_spec"],
-                        "config": config,
-                        "metrics": epoch_metrics,
-                        "stage": stage_idx, "epoch": run.current_epoch,
-                    }, out_dir / "model_best.pt")
+                    try:
+                        _atomic_torch_save({
+                            "model_state_dict": model.state_dict(),
+                            "model_spec": config["model_spec"],
+                            "config": config,
+                            "metrics": epoch_metrics,
+                            "stage": stage_idx, "epoch": run.current_epoch,
+                        }, out_dir / "model_best.pt")
+                    except PermissionError:
+                        # Windows: a concurrent reader (GUI inference / evaluate_model)
+                        # holding model_best.pt open can outlast the replace retries.
+                        # Keep the previous best on disk rather than failing the run.
+                        logger.warning(
+                            "model_best.pt held open by a reader; keeping previous best "
+                            "(epoch %d not persisted).", run.current_epoch)
 
                 # W2: remember this stage's best optimizer state for the handoff.
                 if sel < stage_best:
@@ -637,7 +691,7 @@ def train(
                 break  # stop before starting the next stage
 
         # Final checkpoint (saved even on cancellation so partial progress is recoverable).
-        torch.save({
+        _atomic_torch_save({
             "model_state_dict": model.state_dict(),
             "model_spec": config["model_spec"],
             "config": config,
