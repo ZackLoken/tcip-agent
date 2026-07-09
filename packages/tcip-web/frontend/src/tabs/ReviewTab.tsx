@@ -160,9 +160,18 @@ export function ReviewTab() {
       clearTimeout(t);
       ac.abort();
     };
+    // The four path STRINGS (not the `paths` object — mergeSnapshot rebuilds the
+    // dataset object on every WS snapshot, which would spuriously re-fire this and
+    // reset the detection index/zoom) so a backend-adopted change of prediction
+    // dirs (e.g. the agent re-selects the dataset with a different model) refreshes
+    // the matches instead of silently showing the previous model's TP/FP/FN.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     imgPath,
+    paths.gt_detect,
+    paths.gt_segment,
+    paths.pred_detect,
+    paths.pred_segment,
     filters.iou_threshold,
     filters.conf_threshold,
     filters.filter_type,
@@ -365,7 +374,7 @@ export function ReviewTab() {
   return (
     <div className="flex-1 flex flex-col relative">
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-tcip-border bg-tcip-panel text-[11px]">
-        <span>IoU ≥</span>
+        <span className="text-tcip-muted">IoU ≥</span>
         <input
           type="range"
           min={0}
@@ -380,7 +389,7 @@ export function ReviewTab() {
         />
         <span className="tabular-nums w-10">{filters.iou_threshold.toFixed(2)}</span>
 
-        <span className="ml-3">Conf ≥</span>
+        <span className="ml-3 text-tcip-muted">Conf ≥</span>
         <input
           type="range"
           min={0}
@@ -395,7 +404,7 @@ export function ReviewTab() {
         />
         <span className="tabular-nums w-10">{filters.conf_threshold.toFixed(2)}</span>
 
-        <span className="mx-2 text-tcip-muted">|</span>
+        <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
         <select
           className="tcip-select"
           value={filters.filter_type}
@@ -451,7 +460,9 @@ export function ReviewTab() {
           ◀&nbsp;&nbsp;Prev img
         </button>
         <span className="tabular-nums">
-          {matches ? `${detectionIdx + 1} / ${matches.detections.length}` : "0 / 0"}
+          {matches && matches.detections.length > 0
+            ? `${detectionIdx + 1} / ${matches.detections.length}`
+            : "0 / 0"}
         </span>
         <button className="tcip-btn" onClick={() => stepImage(1)}>
           Next img&nbsp;&nbsp;▶
@@ -477,11 +488,45 @@ export function ReviewTab() {
         )}
       </CanvasStage>
 
+      {/* Empty-state card: tells the reviewer WHY there is nothing to step through —
+          "no predictions configured" vs "filters exclude everything". Non-opaque and
+          pointer-transparent so still-rendered GT overlays stay visible behind it. */}
+      {matches && matches.detections.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="max-w-md rounded-lg border border-tcip-border bg-tcip-panel/90 px-5 py-4 text-center">
+            <p className="text-sm font-semibold text-tcip-fg">No detections to review</p>
+            <p className="mt-1 text-xs text-tcip-muted">
+              {!dataset.predictions_detect_dir && !dataset.predictions_segment_dir
+                ? "No predictions directory configured — run inference or select a model with predictions for this dataset."
+                : `No detections on this image under the current filters (IoU ≥ ${filters.iou_threshold.toFixed(
+                    2,
+                  )}, Conf ≥ ${filters.conf_threshold.toFixed(2)}, type ${
+                    filters.filter_type
+                  }) — relax filters to see more.`}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 px-3 py-1.5 border-t border-tcip-border bg-tcip-panel text-[11px]">
-        <button className="tcip-btn" onClick={() => stepDetection(-1)}>
+        <button
+          className="tcip-btn"
+          onClick={() => stepDetection(-1)}
+          disabled={!matches || matches.detections.length === 0 || detectionIdx <= 0}
+          title="Previous detection (←)"
+        >
           ◀&nbsp;&nbsp;Prev
         </button>
-        <button className="tcip-btn" onClick={() => stepDetection(1)}>
+        <button
+          className="tcip-btn"
+          onClick={() => stepDetection(1)}
+          disabled={
+            !matches ||
+            matches.detections.length === 0 ||
+            detectionIdx >= matches.detections.length - 1
+          }
+          title="Next detection (→)"
+        >
           Next&nbsp;&nbsp;▶
         </button>
         {current && (
