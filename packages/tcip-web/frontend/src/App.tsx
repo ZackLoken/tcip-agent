@@ -6,6 +6,7 @@ import { DatasetPicker } from "@/components/DatasetPicker";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { StatusBar } from "@/components/StatusBar";
+import { Toasts } from "@/components/Toasts";
 import { TopBar } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
 import { useStore } from "@/store";
@@ -52,7 +53,8 @@ function App() {
   useEffect(() => {
     if (!projectRoot) return;
     const user = localStorage.getItem("tcip.user") || "web";
-    void sessionsApi.start(projectRoot, user);
+    // Best-effort telemetry — never surface a failure to the user.
+    void sessionsApi.start(projectRoot, user).catch(() => {});
     endedSessionForRoot.current = null;
 
     function endSession() {
@@ -125,6 +127,7 @@ function App() {
         });
       } catch (err) {
         console.warn("class / image-status hydrate failed", err);
+        useStore.getState().pushToast("Could not load classes / image status for this project.");
       }
     })();
   }, [projectRoot, datasetKey, imageList, annDetectDir, annSegDir, setClasses, setImageStatuses]);
@@ -147,6 +150,7 @@ function App() {
       </ErrorBoundary>
       <StatusBar />
       <HelpOverlay activeTab={activeTab} />
+      <Toasts />
     </div>
   );
 }
