@@ -55,10 +55,10 @@ def validate_config(config: dict) -> dict:
     if not isinstance(batch_size, int) or batch_size < 1:
         issues.append("'training.batch_size' must be a positive integer")
 
-    stages = train_cfg.get("stages", [{"lr": 1e-3, "epochs": 10}])
-    for i, stage in enumerate(stages):
-        if "lr" not in stage:
-            issues.append(f"Stage {i} missing 'lr'")
+    # Per-stage 'epochs' is required; 'lr' is optional (StageSpec) and the trainer
+    # reads learning rates from config['optimizer'], never from a stage. Absent
+    # stages are fine — launch_training supplies its own default schedule.
+    for i, stage in enumerate(train_cfg.get("stages") or []):
         if "epochs" not in stage:
             issues.append(f"Stage {i} missing 'epochs'")
 
@@ -157,30 +157,18 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     # W8: inject imbalance loss + (auto) class weights into image-level head specs.
     # train() composes the model from run.config["model_spec"] (== config), so editing
     # the head specs here before the thread starts reaches the model.
-    loss_cfg = config.get("loss")
-    if isinstance(loss_cfg, dict):
-        cw = loss_cfg.get("class_weights")
-        for h in model_spec.get("heads", []):
-            if h.get("name") not in ("classification", "semantic_seg"):
-                continue
-            h["loss"] = loss_cfg.get("name", "weighted_ce")
-            if cw == "auto":
-                from tcip_mcp.pipelines.components.losses import compute_class_weights
-                weights = compute_class_weights(
-                    getattr(train_ds, "class_distribution", {}),
-                    num_classes=h.get("num_classes"),
-                    scheme=loss_cfg.get("weight_scheme", "balanced"),
-                )
-                h["class_weights"] = weights.tolist()
-            elif isinstance(cw, list):
-                h["class_weights"] = cw
+    _inject_imbalance_loss(config.get("loss"), model_spec, train_ds)
 
-    # Auto-create experiment if not already tracked
+    # Auto-create experiment if not already tracked. Experiments are immutable:
+    # reusing an id that already has a run would interleave metrics histories and
+    # overwrite lineage/registry entries, so such relaunches get a fresh id.
     experiment_id = config.get("experiment_id") or run.run_id
     try:
-        from tcip_mcp.experiments import create_experiment, update_status
+        from tcip_mcp.experiments import update_status
 
-        create_experiment(experiment_id, config, data_source=data_cfg.get("images_dir"))
+        experiment_id = _ensure_experiment(
+            experiment_id, config, data_cfg.get("images_dir"), resume_from, run.run_id,
+        )
         update_status(experiment_id, "running")
     except Exception as exc:  # Experiment tracking is best-effort, but failures must be visible.
         logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
@@ -353,7 +341,9 @@ def run_hpo(
 
             model_spec = merged.get("model_spec") or merged.get("model")
             if not model_spec:
-                return float("inf") if direction == "minimize" else 0.0
+                # Worst-possible value in either direction — a dead trial must never
+                # outrank a real one (0.0 beat every -composite under maximize).
+                return float("inf") if direction == "minimize" else float("-inf")
 
             data_cfg = merged.get("data", {})
             train_cfg = merged.get("training", {})
@@ -365,8 +355,18 @@ def run_hpo(
             run = create_run(merged, trial_dir, origin="hpo_trial")
 
             try:
+                # Trials must train under the same regime as the final launch_training
+                # run they tune for: same augmentation and same imbalance loss/class
+                # weights — otherwise the selected hyperparameters don't transfer.
+                transforms = None
+                aug_cfg = merged.get("augmentation", {})
+                if aug_cfg:
+                    from tcip_mcp.pipelines.data.augmentations import build_augmentation
+                    transforms = build_augmentation(aug_cfg)
+
                 # W4 auto-val gives the val_loader that W1's composite / ASHA need.
-                train_ds, val_ds = _auto_train_val(task, data_cfg, None)
+                train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
+                _inject_imbalance_loss(merged.get("loss"), model_spec, train_ds)
                 sampler = build_sampler(merged.get("sampler", "random"), train_ds)
                 batch_size = train_cfg.get("batch_size", trial_params.get("batch_size", 4))
                 num_workers = train_cfg.get("num_workers", 0)
@@ -385,20 +385,24 @@ def run_hpo(
                     value = metrics.get("val_objective", metrics.get("val_loss"))
                     if value is None:
                         return
-                    trial.report(value, epoch)
+                    # value is lower=better; report in the study's direction (matching
+                    # the -best_metric final return) so ASHA keeps the improving
+                    # trials — raw reports under maximize pruned the *best* trials.
+                    trial.report(-value if direction == "maximize" else value, epoch)
                     if trial.should_prune():
                         raise optuna.TrialPruned()
 
                 train(run, train_loader, val_loader, task=task, epoch_callback=epoch_cb)
 
-                if direction == "minimize":
-                    return run.best_metric if run.best_metric != float("inf") else 999.0
-                return -run.best_metric if run.best_metric != float("inf") else 0.0
+                # best_metric is lower=better; inf (train() caught a failure or never
+                # produced a metric) maps to the worst-possible value in either
+                # direction so a dead trial can never become the study's best.
+                return run.best_metric if direction == "minimize" else -run.best_metric
             except optuna.TrialPruned:
                 raise
             except Exception as e:
                 logger.warning("HPO trial failed: %s", e)
-                return float("inf") if direction == "minimize" else 0.0
+                return float("inf") if direction == "minimize" else float("-inf")
 
         result = optuna_search(
             objective_fn=objective_fn,
@@ -457,18 +461,22 @@ def run_hpo(
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     """Apply flat HPO params onto a deep copy of ``base_config``, in the right places.
 
-    Architecture params actually reach the model so an Optuna sweep varies the
-    architecture (the prior implementation dropped ``backbone`` entirely and wrote
-    ``head`` / ``min_size`` to an unread ``config["model"]`` key, so every trial
-    trained the same model):
+    A param only counts if it lands where ``generic_trainer.train()`` actually reads
+    it. Architecture params go into ``model_spec`` (the prior implementation dropped
+    ``backbone`` entirely and wrote ``head`` / ``min_size`` to an unread
+    ``config["model"]`` key, so every trial trained the same model). Optimizer params
+    go into TOP-LEVEL ``config["optimizer"]`` and the unfreeze schedule into
+    TOP-LEVEL ``config["stages"]`` — the trainer reads both from the top level and
+    never reads ``training["stages"]`` or a stage's ``lr`` (the prior implementation
+    wrote there, so every lr/weight_decay trial trained identically):
 
-      - ``backbone``  -> ``model_spec["backbone"]["name"]``
-      - ``head``      -> ``model_spec["heads"][0]["detector"]`` (faster_rcnn/fcos/retinanet)
-      - ``min_size``  -> ``model_spec["heads"][0]["min_size"]``
-      - ``lr``        -> a 3-stage ``freeze_to`` progressive-unfreeze schedule (the trainer
-                         reads ``freeze_to``; the old stages used ``freeze_backbone``, which
-                         the trainer ignores)
-      - anything else (``batch_size``, ``weight_decay``, ...) -> ``training``
+      - ``backbone``     -> ``model_spec["backbone"]["name"]``
+      - ``head``         -> ``model_spec["heads"][0]["detector"]`` (faster_rcnn/fcos/retinanet)
+      - ``min_size``     -> ``model_spec["heads"][0]["min_size"]``
+      - ``lr``           -> ``optimizer["head_lr"]`` (+ ``backbone_lr`` at lr*0.1) plus a
+                            3-stage ``freeze_to`` progressive-unfreeze schedule
+      - ``weight_decay`` -> ``optimizer["weight_decay"]``
+      - anything else (``batch_size``, ...) -> ``training``
     """
     import copy
 
@@ -488,15 +496,21 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     for key, value in params.items():
         if key == "lr":
             lr = float(value)
-            training["stages"] = [
-                {"freeze_to": -1, "lr": lr, "epochs": 5},        # heads only
-                {"freeze_to": 2, "lr": lr * 0.1, "epochs": 10},  # unfreeze top stages
-                {"freeze_to": 0, "lr": lr * 0.01, "epochs": 5},  # full fine-tune
+            optimizer = cfg.setdefault("optimizer", {})
+            optimizer["head_lr"] = lr
+            optimizer["backbone_lr"] = lr * 0.1
+            # 10 epochs total, matching the trainer's previous per-trial budget so a
+            # sweep's runtime doesn't double. No per-stage 'lr' keys: the trainer
+            # applies head_lr/backbone_lr per stage and ignores stage-level lr.
+            cfg["stages"] = [
+                {"freeze_to": -1, "epochs": 3},  # heads only
+                {"freeze_to": 2, "epochs": 4},   # unfreeze top stages
+                {"freeze_to": 0, "epochs": 3},   # full fine-tune
             ]
         elif key == "batch_size":
             training["batch_size"] = value
         elif key == "weight_decay":
-            training["weight_decay"] = value
+            cfg.setdefault("optimizer", {})["weight_decay"] = value
         elif spec is None:
             # No model spec to mutate — keep scalar params on training as a fallback.
             training[key] = value
@@ -513,6 +527,68 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
         else:
             training[key] = value
     return cfg
+
+
+def _ensure_experiment(
+    experiment_id: str, config: dict, data_source, resume_from: str, run_id: str,
+) -> str:
+    """Create or attach the experiment for a run, enforcing experiment immutability.
+
+    Returns the experiment id actually used. An existing id may be reused only when
+    the experiment is pristine (agent pre-created it: state 'created', no metrics)
+    or when ``resume_from`` continues that experiment's own checkpoint. Anything
+    else mints a fresh ``<id>_<run_id>`` (with the old id as parent lineage) so the
+    prior run's status, metrics, lineage, and registry entry stay intact.
+    """
+    from tcip_mcp.experiments import create_experiment, get_experiment
+
+    created = create_experiment(experiment_id, config, data_source=data_source)
+    if "error" not in created:
+        return experiment_id
+
+    existing = get_experiment(experiment_id, metrics_limit=1)
+    pristine = (
+        existing.get("status", {}).get("state") == "created"
+        and not existing.get("n_epochs")
+    )
+    if pristine or resume_from:
+        return experiment_id
+
+    fresh_id = f"{experiment_id}_{run_id}"
+    logger.warning(
+        "experiment_id %s already has a run; experiments are immutable — tracking "
+        "this run as %s instead.", experiment_id, fresh_id,
+    )
+    create_experiment(fresh_id, config, parent_experiment=experiment_id, data_source=data_source)
+    return fresh_id
+
+
+def _inject_imbalance_loss(loss_cfg, model_spec: dict, train_ds) -> None:
+    """W8: inject imbalance loss + (auto) class weights into image-level head specs.
+
+    Mutates ``model_spec["heads"]`` in place — the trainer composes the model from
+    the run config's ``model_spec``, so editing head specs before train() starts
+    reaches the model. The 'auto' scheme reads the built train dataset's
+    ``class_distribution``, so this must run after the dataset is built. No-op for
+    detection heads and non-dict ``loss_cfg``.
+    """
+    if not isinstance(loss_cfg, dict):
+        return
+    cw = loss_cfg.get("class_weights")
+    for h in model_spec.get("heads", []):
+        if h.get("name") not in ("classification", "semantic_seg"):
+            continue
+        h["loss"] = loss_cfg.get("name", "weighted_ce")
+        if cw == "auto":
+            from tcip_mcp.pipelines.components.losses import compute_class_weights
+            weights = compute_class_weights(
+                getattr(train_ds, "class_distribution", {}),
+                num_classes=h.get("num_classes"),
+                scheme=loss_cfg.get("weight_scheme", "balanced"),
+            )
+            h["class_weights"] = weights.tolist()
+        elif isinstance(cw, list):
+            h["class_weights"] = cw
 
 
 def _auto_train_val(task: str, data_cfg: dict, transforms):
@@ -661,7 +737,9 @@ def get_worst_predictions(
     descending error (missed detections + false positives + low confidence).
 
     Args:
-        predictions_dir: Directory with prediction label files (YOLO format).
+        predictions_dir: Directory with prediction files in the canonical
+            ``cls conf cx cy w h`` format written by run_inference /
+            export_predictions_yolo.
         labels_dir: Directory with ground-truth label files (YOLO format).
         n: Number of worst images to return.
     """
@@ -690,9 +768,11 @@ def get_worst_predictions(
             confs = []
             for line in pred_lines:
                 parts = line.split()
-                if len(parts) >= 6:  # detection format: cls x y w h conf
+                # Canonical prediction format (result_to_yolo_lines /
+                # parse_detect_predictions): cls conf cx cy w h
+                if len(parts) >= 6:
                     try:
-                        confs.append(float(parts[5]))
+                        confs.append(float(parts[1]))
                     except ValueError:
                         pass
             avg_conf = sum(confs) / len(confs) if confs else 0.5
