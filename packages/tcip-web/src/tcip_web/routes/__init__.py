@@ -12,6 +12,7 @@ from tcip_web.routes import (
     annotate,
     classes,
     dataset,
+    fs,
     images,
     inference,
     meta,
@@ -25,6 +26,7 @@ from tcip_web.routes import (
 
 def register_all(app: FastAPI) -> None:
     app.include_router(dataset.router)
+    app.include_router(fs.router)
     app.include_router(images.router)
     app.include_router(annotate.router)
     app.include_router(review.router)
