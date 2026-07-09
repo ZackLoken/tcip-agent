@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { tuningApi, type Sweep } from "@/api/tuning";
+import { tuningApi, type Sweep, type SweepDetail } from "@/api/tuning";
+import { buildOptunaSpace, DEFAULT_HPO_PARAMS, parseNumList, type HpoParam } from "@/tabs/hpoSpace";
 
 const DEFAULT_BASE = `{
   "model_spec": {
@@ -13,29 +14,18 @@ const DEFAULT_BASE = `{
   "training": {"batch_size": 4, "num_workers": 0, "stages": [{"lr": 1e-3, "epochs": 3}]}
 }`;
 
-// Optuna-typed search space (matches get_default_optuna_space + _apply_hpo_params keys:
-// lr / batch_size / head / weight_decay / backbone / min_size).
-const DEFAULT_SPACE = `{
-  "lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
-  "batch_size": {"type": "categorical", "choices": [2, 4]},
-  "head": {"type": "categorical", "choices": ["faster_rcnn", "fcos", "retinanet"]},
-  "weight_decay": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
-  "backbone": {"type": "categorical", "choices": ["resnet50", "resnet101"]}
-}`;
+const TERMINAL = new Set(["completed", "failed", "interrupted"]);
 
 export function TuningTab() {
   const [base, setBase] = useState(DEFAULT_BASE);
-  const [space, setSpace] = useState(DEFAULT_SPACE);
+  const [params, setParams] = useState<HpoParam[]>(DEFAULT_HPO_PARAMS);
   const [nTrials, setNTrials] = useState(5);
   const [direction, setDirection] = useState<"maximize" | "minimize">("maximize");
   const [outputDir, setOutputDir] = useState("");
 
   const [sweeps, setSweeps] = useState<Sweep[]>([]);
-  const [active, setActive] = useState<{
-    sweep_id: string;
-    status: string;
-    result: unknown;
-  } | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<SweepDetail | null>(null);
   const [launchMsg, setLaunchMsg] = useState<string | null>(null);
 
   async function refresh() {
@@ -53,26 +43,48 @@ export function TuningTab() {
     return () => clearInterval(t);
   }, []);
 
+  // Load the selected sweep's detail, then poll while it's still running. Keyed on the id
+  // so RE-selecting the same sweep keeps its already-loaded detail (the old code blanked
+  // the result on click and never re-fetched a same-id sweep).
   useEffect(() => {
-    if (!active?.sweep_id) return;
-    const t = setInterval(async () => {
+    if (!selectedId) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
       try {
-        const r = await tuningApi.getSweep(active.sweep_id);
-        setActive({ sweep_id: r.sweep_id, status: r.status, result: r.result });
-        if (r.status === "completed" || r.status === "failed") return clearInterval(t);
+        const r = await tuningApi.getSweep(selectedId);
+        if (cancelled) return;
+        setDetail(r);
+        if (!TERMINAL.has(r.status)) timer = setTimeout(poll, 3000);
       } catch {
         /* ignore */
       }
-    }, 3000);
-    return () => clearInterval(t);
-  }, [active?.sweep_id]);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [selectedId]);
+
+  function updateParam(key: string, patch: Record<string, unknown>) {
+    setParams((ps) => ps.map((p) => (p.key === key ? ({ ...p, ...patch } as HpoParam) : p)));
+  }
 
   async function launch() {
     setLaunchMsg(null);
+    const space = buildOptunaSpace(params);
+    if (Object.keys(space).length === 0) {
+      setLaunchMsg("Enable at least one parameter to sweep.");
+      return;
+    }
     try {
       const resp = await tuningApi.launch({
         base_config: JSON.parse(base),
-        param_space: JSON.parse(space),
+        param_space: space,
         n_trials: nTrials,
         output_dir: outputDir,
         // Optuna (TPE + ASHA) is the only sweep mode offered — it actually trains trials.
@@ -81,7 +93,7 @@ export function TuningTab() {
       });
       if (resp.sweep_id) {
         setLaunchMsg(`Launched ${resp.sweep_id}`);
-        setActive({ sweep_id: resp.sweep_id, status: "running", result: null });
+        setSelectedId(resp.sweep_id);
         void refresh();
       } else {
         setLaunchMsg(`Error: ${JSON.stringify(resp)}`);
@@ -106,18 +118,86 @@ export function TuningTab() {
           spellCheck={false}
         />
 
-        <label className="block text-[11px] text-tcip-muted mb-1">Optuna search space (JSON)</label>
-        <textarea
-          className="tcip-input w-full h-32 font-mono text-[11px] leading-4 resize-none mb-1"
-          value={space}
-          onChange={(e) => setSpace(e.target.value)}
-          spellCheck={false}
-        />
-        <p className="text-[10px] text-tcip-muted mb-3">
-          Sweeps run with Optuna (TPE + ASHA), training each trial. Per key:{" "}
-          {`{"type":"loguniform"|"uniform"|"int","low":…,"high":…}`} or{" "}
-          {`{"type":"categorical","choices":[…]}`}.
-        </p>
+        {/* Structured Optuna search space */}
+        <label className="block text-[11px] text-tcip-muted mb-1">
+          Search space — Optuna (TPE + ASHA) trains each trial
+        </label>
+        <div className="tcip-panel p-2 mb-3">
+          {params.map((p) => (
+            <div key={p.key} className="py-1 border-b border-tcip-border last:border-0">
+              <label className="flex items-center gap-2 text-[11px]">
+                <input
+                  type="checkbox"
+                  checked={p.enabled}
+                  onChange={(e) => updateParam(p.key, { enabled: e.target.checked })}
+                />
+                <span className="font-medium">{p.label}</span>
+                <span className="text-[10px] text-tcip-muted font-mono">{p.key}</span>
+              </label>
+              {p.enabled && (
+                <div className="mt-1 ml-5 text-[10px]">
+                  {p.kind === "loguniform" && (
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1">
+                        low
+                        <input
+                          className="tcip-input w-24 text-[11px]"
+                          type="number"
+                          step="any"
+                          value={p.low}
+                          onChange={(e) => updateParam(p.key, { low: parseFloat(e.target.value) })}
+                        />
+                      </label>
+                      <label className="flex items-center gap-1">
+                        high
+                        <input
+                          className="tcip-input w-24 text-[11px]"
+                          type="number"
+                          step="any"
+                          value={p.high}
+                          onChange={(e) => updateParam(p.key, { high: parseFloat(e.target.value) })}
+                        />
+                      </label>
+                      <span className="text-tcip-muted">log-uniform</span>
+                    </div>
+                  )}
+                  {p.kind === "numlist" && (
+                    <input
+                      className="tcip-input w-full text-[11px]"
+                      value={p.values.join(", ")}
+                      onChange={(e) => updateParam(p.key, { values: parseNumList(e.target.value) })}
+                      placeholder="comma-separated, e.g. 2, 4, 8"
+                      spellCheck={false}
+                    />
+                  )}
+                  {p.kind === "choices" && (
+                    <div className="flex flex-wrap gap-1">
+                      {p.options.map((opt) => {
+                        const on = p.selected.includes(opt);
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            className={`tcip-btn text-[10px] ${on ? "!bg-tcip-accent !text-white" : ""}`}
+                            onClick={() =>
+                              updateParam(p.key, {
+                                selected: on
+                                  ? p.selected.filter((o) => o !== opt)
+                                  : [...p.selected, opt],
+                              })
+                            }
+                          >
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
 
         <div className="grid grid-cols-2 gap-2 mb-3 text-[11px]">
           <label>
@@ -171,13 +251,11 @@ export function TuningTab() {
                 <li
                   key={s.sweep_id}
                   className={`p-2 rounded border cursor-pointer ${
-                    active?.sweep_id === s.sweep_id
+                    selectedId === s.sweep_id
                       ? "border-tcip-accent bg-tcip-accent/10"
                       : "border-tcip-border hover:border-tcip-muted"
                   }`}
-                  onClick={() =>
-                    setActive({ sweep_id: s.sweep_id, status: s.status, result: null })
-                  }
+                  onClick={() => setSelectedId(s.sweep_id)}
                 >
                   <div className="font-mono text-[11px]">{s.sweep_id}</div>
                   <div className="text-[10px] text-tcip-muted">
@@ -193,11 +271,11 @@ export function TuningTab() {
 
       <div className="p-4 overflow-auto">
         <div className="font-semibold text-[13px] mb-2">
-          {active ? `Sweep ${active.sweep_id} (${active.status})` : "Select a sweep"}
+          {detail ? `Sweep ${detail.sweep_id} (${detail.status})` : "Select a sweep"}
         </div>
-        {active?.result ? (
+        {detail?.result ? (
           <pre className="text-[11px] font-mono p-3 tcip-panel overflow-auto max-h-[80vh]">
-            {JSON.stringify(active.result, null, 2)}
+            {JSON.stringify(detail.result, null, 2)}
           </pre>
         ) : (
           <div className="text-[11px] text-tcip-muted">
