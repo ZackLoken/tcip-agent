@@ -93,7 +93,7 @@ export function FolderBrowser({
               {listing?.entries.map((e) => (
                 <li key={e.path}>
                   <button
-                    className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-tcip-border flex items-center gap-2"
+                    className="w-full text-left px-3 py-1.5 text-[12px] hover:bg-tcip-hover transition-colors flex items-center gap-2"
                     onClick={() => setPath(e.path)}
                   >
                     <span aria-hidden>📁</span>
