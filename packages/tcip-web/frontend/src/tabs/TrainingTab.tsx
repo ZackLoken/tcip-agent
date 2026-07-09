@@ -22,8 +22,7 @@ const DEFAULT_CONFIG = `{
   "model_spec": {
     "backbone": {"name": "resnet50", "pretrained": true},
     "neck": {"name": "fpn"},
-    "heads": [{"name": "detection_head", "task": "detection", "num_classes": 1}],
-    "loss": {"name": "focal_loss"}
+    "heads": [{"name": "anchor_detection", "num_classes": 1}]
   },
   "data": {
     "images_dir": "",
@@ -35,14 +34,19 @@ const DEFAULT_CONFIG = `{
     "num_workers": 0,
     "mixed_precision": true,
     "stages": [
-      {"freeze_to": -1, "lr": 1e-3, "epochs": 5, "batch_size": 8},
-      {"freeze_to": 2, "lr": 1e-4, "epochs": 10, "batch_size": 4}
+      {"freeze_to": -1, "epochs": 5},
+      {"freeze_to": 2, "epochs": 10}
     ]
   },
   "augmentation": {},
   "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 1e-4}
 }
 `;
+
+// Versioned after the default head was corrected (detection_head → anchor_detection):
+// a broken default persisted from an earlier session must not survive the fix, so we
+// read/write the config under a new key and let the stale one fall away.
+const CONFIG_STORAGE_KEY = "tcip.training.config.v2";
 
 interface ValidateResult {
   valid: boolean;
@@ -55,7 +59,7 @@ export function TrainingTab() {
   const annDetectDir = useStore((s) => s.gui.dataset.annotations_detect_dir);
 
   const [configText, setConfigText] = useState(() => {
-    const saved = localStorage.getItem("tcip.training.config");
+    const saved = localStorage.getItem(CONFIG_STORAGE_KEY);
     if (saved) return saved;
     if (!datasetRoot) return DEFAULT_CONFIG;
     // Pre-fill images_dir / labels_dir from current dataset selection
@@ -72,7 +76,7 @@ export function TrainingTab() {
 
   const [validate, setValidate] = useState<ValidateResult | null>(null);
   const [launching, setLaunching] = useState(false);
-  const [launchMsg, setLaunchMsg] = useState<string | null>(null);
+  const [launchMsg, setLaunchMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [runs, setRuns] = useState<TrainingRunSummary[]>([]);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
@@ -126,7 +130,7 @@ export function TrainingTab() {
   async function onValidate() {
     try {
       const cfg = JSON.parse(configText);
-      localStorage.setItem("tcip.training.config", configText);
+      localStorage.setItem(CONFIG_STORAGE_KEY, configText);
       const res = (await trainingApi.validate(cfg)) as ValidateResult;
       setValidate(res);
     } catch (e) {
@@ -140,18 +144,18 @@ export function TrainingTab() {
     setLaunchMsg(null);
     try {
       const cfg = JSON.parse(configText);
-      localStorage.setItem("tcip.training.config", configText);
+      localStorage.setItem(CONFIG_STORAGE_KEY, configText);
       const outputDir = `${projectRoot}/.tcip/experiments`;
       const res = await trainingApi.launch(cfg, outputDir);
       if (res.run_id) {
-        setLaunchMsg(`Launched ${res.run_id}`);
+        setLaunchMsg({ text: `Launched ${res.run_id}`, ok: true });
         setSelectedRun(res.run_id);
         void refreshRuns();
       } else {
-        setLaunchMsg(`Error: ${JSON.stringify(res)}`);
+        setLaunchMsg({ text: `Error: ${JSON.stringify(res)}`, ok: false });
       }
     } catch (e) {
-      setLaunchMsg(String(e));
+      setLaunchMsg({ text: String(e), ok: false });
     } finally {
       setLaunching(false);
     }
@@ -217,7 +221,11 @@ export function TrainingTab() {
               )}
             </div>
           )}
-          {launchMsg && <div className="mt-1 text-[11px] text-tcip-muted">{launchMsg}</div>}
+          {launchMsg && (
+            <div className={`mt-1 text-[11px] ${launchMsg.ok ? "text-tcip-tp" : "text-tcip-fp"}`}>
+              {launchMsg.text}
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-auto p-4">
@@ -244,12 +252,15 @@ export function TrainingTab() {
                 >
                   <div className="font-mono text-[11px]">{r.run_id}</div>
                   <div className="text-[10px] text-tcip-muted flex justify-between">
-                    <span>{r.status}</span>
+                    <span>
+                      {r.status}
+                      {r.external && r.status === "running" ? " · agent" : ""}
+                    </span>
                     {r.best_metric !== undefined && r.best_metric !== null && (
                       <span className="tabular-nums">best: {Number(r.best_metric).toFixed(3)}</span>
                     )}
                   </div>
-                  {TRAINING_CANCELLABLE.has(r.status) && (
+                  {TRAINING_CANCELLABLE.has(r.status) && !r.external && (
                     <button
                       className="tcip-btn text-[10px] mt-1"
                       onClick={(e) => {
