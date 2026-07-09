@@ -126,6 +126,30 @@ def test_images_downsample(client: TestClient, dataset_root: Path) -> None:
     assert im.size[0] == 50
 
 
+def test_images_etag_revalidation(client: TestClient, dataset_root: Path) -> None:
+    # First fetch carries an ETag + Cache-Control; re-requesting with If-None-Match gets a
+    # cheap 304 (no re-decode/re-encode), and the ETag varies with the render params.
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    first = client.get("/api/images", params={"path": str(img_path)})
+    etag = first.headers.get("etag")
+    assert etag and "cache-control" in first.headers
+
+    again = client.get(
+        "/api/images", params={"path": str(img_path)}, headers={"If-None-Match": etag}
+    )
+    assert again.status_code == 304
+    assert again.content == b""
+
+    # A different max_width is a different variant -> different ETag -> full 200.
+    variant = client.get(
+        "/api/images",
+        params={"path": str(img_path), "max_width": 50},
+        headers={"If-None-Match": etag},
+    )
+    assert variant.status_code == 200
+    assert variant.headers["etag"] != etag
+
+
 def test_images_dimensions(client: TestClient, dataset_root: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     resp = client.get("/api/images/dimensions", params={"path": str(img_path)})
@@ -587,3 +611,51 @@ def test_state_snapshot_available(client: TestClient) -> None:
     assert "active_tab" in body
     assert "view" in body
     assert "dataset" in body
+
+
+# ── /api/fs (folder browser) ───────────────────────────────────────────────
+
+
+def test_fs_list_directories(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "alpha").mkdir()
+    (tmp_path / "beta" / "images").mkdir(parents=True)  # looks like a dataset root
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / "afile.txt").write_text("x")
+    # Windows system/recovery folders that clutter a picker — filtered out by name.
+    (tmp_path / "$RECYCLE.BIN").mkdir()
+    (tmp_path / "System Volume Information").mkdir()
+    (tmp_path / "FOUND.000").mkdir()
+
+    resp = client.get("/api/fs/list", params={"path": str(tmp_path)})
+    assert resp.status_code == 200
+    body = resp.json()
+    names = {e["name"]: e for e in body["entries"]}
+    assert "alpha" in names and "beta" in names
+    assert ".hidden" not in names  # hidden dirs skipped
+    assert "afile.txt" not in names  # files skipped — directories only
+    assert "$RECYCLE.BIN" not in names
+    assert "System Volume Information" not in names
+    assert "FOUND.000" not in names
+    assert names["beta"]["is_dataset_root"] is True
+    assert names["alpha"]["is_dataset_root"] is False
+    assert body["path"] == str(tmp_path)
+
+
+def test_fs_list_404_for_non_dir(client: TestClient, tmp_path: Path) -> None:
+    f = tmp_path / "x.txt"
+    f.write_text("x")
+    assert client.get("/api/fs/list", params={"path": str(f)}).status_code == 404
+
+
+def test_fs_list_confined_by_image_roots(
+    client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    allowed = tmp_path / "allowed"
+    (allowed / "sub").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+
+    assert client.get("/api/fs/list", params={"path": str(allowed)}).status_code == 200
+    # Browsing outside the configured root is refused.
+    assert client.get("/api/fs/list", params={"path": str(outside)}).status_code == 403
