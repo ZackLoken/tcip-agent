@@ -173,6 +173,8 @@ export interface AppState {
   /** Setters. */
   setGui: (next: GuiState) => void;
   patchGui: (partial: Partial<GuiState>) => void;
+  /** Clear the dataset selection, returning the GUI to the project front door. */
+  clearDataset: () => void;
   /**
    * Apply a backend state snapshot with ownership-aware merge (NOT a wholesale
    * replace, which used to clobber unsaved edits, the active tab, and the scroll
@@ -286,6 +288,7 @@ export const useStore = create<AppState>()((set, get) => ({
 
   setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
+  clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: DEFAULT_DATASET } })),
 
   mergeSnapshot: (incoming, version) =>
     set((s) => {
