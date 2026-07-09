@@ -85,12 +85,18 @@ export function TopBar() {
       return;
     }
     const nextId = classes.length ? Math.max(...classes.map((c) => c.id)) + 1 : 0;
-    const { color } = await classesApi.autoColor(nextId);
-    const entry = { id: nextId, name: trimmed, color };
-    upsertClass(entry);
-    setActiveClass(nextId);
-    if (dataset.project_root) {
-      await classesApi.save(dataset.project_root, [...classes, entry]);
+    try {
+      const { color } = await classesApi.autoColor(nextId);
+      const entry = { id: nextId, name: trimmed, color };
+      upsertClass(entry);
+      setActiveClass(nextId);
+      if (dataset.project_root) {
+        await classesApi.save(dataset.project_root, [...classes, entry]);
+      }
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Could not add class: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -102,7 +108,13 @@ export function TopBar() {
     upsertClass(updated);
     if (dataset.project_root) {
       const next = classes.map((c) => (c.id === activeClass ? updated : c));
-      await classesApi.save(dataset.project_root, next);
+      try {
+        await classesApi.save(dataset.project_root, next);
+      } catch (e) {
+        useStore
+          .getState()
+          .pushToast(`Could not save class color: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   }
 
@@ -116,7 +128,13 @@ export function TopBar() {
         ? "partial"
         : "negative";
     setImageStatus(currentImage, newStatus);
-    await classesApi.setImageStatus(dataset.project_root, currentImage, newStatus);
+    try {
+      await classesApi.setImageStatus(dataset.project_root, currentImage, newStatus);
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Could not update status: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   // Class-dropdown options include the <New Class> sentinel
