@@ -152,8 +152,44 @@ export function TerminalRail() {
         e.stopPropagation();
       }
     };
+
+    // Copy: xterm paints its selection onto a canvas the OS clipboard can't see, and Ctrl+C
+    // is consumed by onData as SIGINT — so a "copy" grabbed nothing and left whatever was
+    // already on the clipboard (the *previous* selection) in place. Wire it explicitly:
+    //   • copy-on-select — when a drag ends with a selection, put it on the clipboard;
+    //   • the native copy event — right-click → Copy feeds xterm's selection in;
+    //   • Ctrl/Cmd+Shift+C — an explicit copy keystroke (plain Ctrl+C stays SIGINT).
+    const copySelection = () => {
+      const sel = term.getSelection();
+      if (sel) void navigator.clipboard?.writeText(sel).catch(() => {});
+    };
+    const onMouseUp = () => {
+      if (term.hasSelection()) copySelection();
+    };
+    const onCopy = (e: ClipboardEvent) => {
+      const sel = term.getSelection();
+      if (sel) {
+        e.clipboardData?.setData("text/plain", sel);
+        e.preventDefault();
+      }
+    };
+    term.attachCustomKeyEventHandler((e) => {
+      if (
+        e.type === "keydown" &&
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        (e.key === "C" || e.key === "c")
+      ) {
+        copySelection();
+        return false; // handled — don't forward Ctrl/Cmd+Shift+C to the PTY
+      }
+      return true;
+    });
+
     const focusTerm = () => term.focus();
     host.addEventListener("paste", onPaste, true);
+    host.addEventListener("copy", onCopy);
+    host.addEventListener("mouseup", onMouseUp);
     host.addEventListener("mousedown", focusTerm);
 
     let ws: WebSocket | null = null;
@@ -224,6 +260,8 @@ export function TerminalRail() {
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       observer.disconnect();
       host.removeEventListener("paste", onPaste, true);
+      host.removeEventListener("copy", onCopy);
+      host.removeEventListener("mouseup", onMouseUp);
       host.removeEventListener("mousedown", focusTerm);
       dataSub.dispose();
       resizeSub.dispose();
