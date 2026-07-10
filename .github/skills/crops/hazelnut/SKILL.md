@@ -17,6 +17,19 @@ description: "Hazelnut (Corylus spp.) — most sensor-diverse TCIP crop. 58 trai
 6. **Harvest** (Aug–Oct) — Nut drop, inshell weight/count
 7. **Senescence** (Oct–Nov) — Defoliation
 
+### Catkin bloom milestones — authoritative definition
+
+Bloom is the **fraction of a plant's detected catkins that are _elongated_** —
+"elongated" being an expert-scored, visible morphological stage from a validated 2-class
+classifier (class 1 = elongated), **never** a geometric proxy like bbox height. Per plant:
+
+- `catkin_elongation_date` — first date **any** elongation appears (fraction > 0)
+- `catkin_05/50/95per_date` — dates the elongated fraction crosses 5 / 50 / 95%
+
+`pistillate_05/50/95per_date` is the same pattern on the pistillate detector/classifier.
+This is **not** a catkin-count-of-peak or a sigmoid fit. Compose the `phenology` skill's
+pieces (`compute_phenology` tool → delivered `catkin_phenology.csv`); do not re-script it.
+
 ## Trait Inventory
 
 ### Phenology (14 traits)
