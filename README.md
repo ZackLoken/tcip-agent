@@ -44,13 +44,14 @@ packages/
   tcip-mcp/                    # MCP server (python -m tcip_mcp)
     src/tcip_mcp/
       tools/                   # domain tools (run scripts/list_tools.py for the current list)
-      pipelines/               # composable ML: registry, composer, trainer, predictor
+      pipelines/               # composable ML: registry, composer, trainer, predictor,
+                               #   postprocessing (plant mapping + catkin phenology)
   tcip-annotation/             # headless annotation library
   tcip-web/                    # FastAPI backend + React frontend
     src/tcip_web/
       routes/                  # annotate, review, training, tuning, inference, results, ...
     frontend/src/              # Vite + React 18 + TypeScript + Tailwind + Konva
-scripts/                       # one-off ingestion scripts (created by agent)
+scripts/                       # agent one-off scripts + end-to-end smokes (smoke_*_e2e.py)
 tests/                         # pytest suite
 data/                          # sample hazelnut dataset (gitignored)
 ```
@@ -84,6 +85,11 @@ npm run build      # rebuild production bundle → ../static/
 # Tests
 pytest tests/ -v --tb=short
 npm run typecheck  # from packages/tcip-web/frontend
+
+# End-to-end smokes (scripts/smoke_*_e2e.py)
+python scripts/smoke_phenology_e2e.py   # phenology pipeline: mapping -> milestones (offline)
+python scripts/smoke_terminal_e2e.py    # in-app agent terminal (costs one model turn)
+python scripts/smoke_fence_e2e.py       # agent permission fence (costs one model turn)
 ```
 
 The MCP server starts automatically when an MCP client connects (see `.mcp.json`).
@@ -107,7 +113,12 @@ backbone/neck/head spec (detectors built through a registry-driven `DETECTORS`
 factory; `instance_seg` via Mask R-CNN), on **RGB and N-channel imagery** (multi-band
 GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`), with
 training that loads YOLO / COCO / PASCAL VOC / LabelMe labels directly, experiment
-tracking, annotation/review, SAM-assisted labeling, and per-plant CSV export.
+tracking, annotation/review, SAM-assisted labeling, and per-plant CSV export — including the
+Phase 1 **catkin bloom phenology** deliverable (per-plant `catkin_05/50/95per_date` = the
+dates a plant's *elongated fraction* of detected catkins crosses 5/50/95%; elongation is a
+validated classifier class, never a geometric proxy). The agent composes it end to end via
+`build_plant_mapping` → tiled inference → `compute_phenology`, and the same milestone code
+backs the Results tab, so a bloom date means one thing on both surfaces.
 
 The detection training pipeline mirrors a production drone-phenotyping workflow:
 
@@ -136,8 +147,10 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   point-cloud dataset/loader or task type, so it is not trainable through the normal
   pipeline yet. (Multispectral / hyperspectral / depth as additional 2D channels *is*
   now supported via the N-channel path above.)
-- Temporal / phenology-sequence and relational pipeline patterns beyond the
-  per-image case.
+- Temporal / relational pipeline patterns in general. The one temporal trait built today is
+  **catkin bloom phenology** (per-plant elongated-fraction 05/50/95-per-date milestones — see
+  "Working now"); broader phenology-sequence and relational patterns beyond the per-image case
+  remain future work.
 - Fully automated active learning loop without human-in-the-loop. 
 
 ## License
