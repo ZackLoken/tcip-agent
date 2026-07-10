@@ -124,9 +124,12 @@ export interface OnsetRow {
   plant_id: string;
   accession: string | null;
   n_datapoints: number;
+  // Dates the elongated fraction crosses each level.
   catkin_05per_date: string | null;
   catkin_50per_date: string | null;
   catkin_95per_date: string | null;
+  // First date any elongation appears (fraction > 0).
+  catkin_elongation_date: string | null;
 }
 
 export const resultsApi = {
@@ -154,8 +157,16 @@ export const resultsApi = {
     project_root: string;
     mapping_path: string;
     predictions_by_date: Record<string, string>;
-    elongation_height?: number;
-  }) => postJson<{ rows: PerPlantRow[]; n_plants: number }>("/api/results/per_plant_curves", body),
+    elongated_class_id?: number;
+  }) =>
+    postJson<{
+      rows: PerPlantRow[];
+      n_plants: number;
+      classes_seen: number[];
+      // False when the predictions carry no elongation class — the ratios are then NOT a
+      // valid bloom measurement (run + validate the classifier first).
+      elongation_classified: boolean;
+    }>("/api/results/per_plant_curves", body),
 
   onsetDates: (curves: PerPlantRow[]) =>
     postJson<{ rows: OnsetRow[] }>("/api/results/onset_dates", { curves }),
