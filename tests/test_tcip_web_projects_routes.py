@@ -58,6 +58,49 @@ def test_list_projects_lists_workspace_projects(client, workspace_dir):
     assert hz["image_count"] == 1
 
 
+def test_projects_report_per_date_trait_model_availability(client, workspace_dir):
+    # catkin labelled on 02-11 (+ baseline predictions there); bush labelled on 03-02;
+    # 03-24 has images but nothing labelled.
+    from tcip_mcp.dataset_layout import annotation_dir, prediction_dir
+
+    proj = _make_project(
+        workspace_dir,
+        "hazelnut_catkin_valley-farm",
+        dates=["2026-02-11", "2026-03-02", "2026-03-24"],
+        traits=["catkin", "bush"],
+        models=["baseline"],
+    )
+    (annotation_dir(proj, "catkin", "2026-02-11", "detect") / "img.txt").parent.mkdir(
+        parents=True, exist_ok=True
+    )
+    (annotation_dir(proj, "catkin", "2026-02-11", "detect") / "img.txt").write_text(
+        "0 0.5 0.5 0.1 0.1\n", encoding="utf-8"
+    )
+    (annotation_dir(proj, "bush", "2026-03-02", "detect")).mkdir(parents=True, exist_ok=True)
+    (annotation_dir(proj, "bush", "2026-03-02", "detect") / "img.txt").write_text(
+        "0 0.4 0.4 0.2 0.2\n", encoding="utf-8"
+    )
+    (prediction_dir(proj, "baseline", "2026-02-11", "detect")).mkdir(parents=True, exist_ok=True)
+    (prediction_dir(proj, "baseline", "2026-02-11", "detect") / "img.txt").write_text(
+        "0 0.9 0.5 0.5 0.1 0.1\n", encoding="utf-8"
+    )
+
+    hz = next(
+        p
+        for p in client.get("/api/projects").json()["projects"]
+        if p["name"] == "hazelnut_catkin_valley-farm"
+    )
+    # Flat lists still list everything present anywhere.
+    assert hz["traits"] == ["bush", "catkin"]
+    # Per-date maps reflect where labels/predictions actually are.
+    assert hz["traits_by_date"]["2026-02-11"] == ["catkin"]
+    assert hz["traits_by_date"]["2026-03-02"] == ["bush"]
+    assert hz["traits_by_date"]["2026-03-24"] == []  # images but no labels
+    assert hz["models_by_date"]["2026-02-11"] == ["baseline"]
+    assert hz["models_by_date"]["2026-03-02"] == []
+    assert hz["models_by_date"]["2026-03-24"] == []
+
+
 def test_list_ignores_dirs_without_tcip(client, workspace_dir):
     _make_project(workspace_dir, "real_project_site", dates=["2026-02-11"])
     (workspace_dir / "not_a_project").mkdir()  # no .tcip/
