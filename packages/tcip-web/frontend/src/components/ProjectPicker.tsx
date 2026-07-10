@@ -19,6 +19,12 @@ import { useStore } from "@/store";
 // "Switch project" (which returns here) doesn't immediately re-open the same project.
 let autoOpenAttempted = false;
 
+// The traits/models that actually have data on a given date. Empty when nothing is
+// labelled/predicted there — the selectors show only these, so a date with no catkin
+// labels won't offer "catkin" (which would open a blank canvas).
+const traitsForDate = (p: ProjectSummary, d: string): string[] => p.traits_by_date[d] ?? [];
+const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
+
 function relativeTime(epochSeconds: number): string {
   const deltaMs = Date.now() - epochSeconds * 1000;
   const mins = Math.round(deltaMs / 60000);
@@ -45,10 +51,22 @@ export function ProjectPicker() {
 
   function selectCard(p: ProjectSummary) {
     setSelected(p.name);
-    setDate(defaultDate(p.dates));
-    setAnnType(p.traits[0] ?? "");
-    setModel(p.models[0] ?? "");
+    const d = defaultDate(p.dates);
+    setDate(d);
+    setAnnType(traitsForDate(p, d)[0] ?? "");
+    setModel(modelsForDate(p, d)[0] ?? "");
     setOpenError(null);
+  }
+
+  // Changing date re-scopes the trait/model choices to that date's available data:
+  // keep the current pick if it's still valid there, else fall to the first available
+  // (or none, which the "Open project" flow handles as no-annotations).
+  function chooseDate(p: ProjectSummary, newDate: string) {
+    setDate(newDate);
+    const traits = traitsForDate(p, newDate);
+    const models = modelsForDate(p, newDate);
+    setAnnType((prev) => (traits.includes(prev) ? prev : (traits[0] ?? "")));
+    setModel((prev) => (models.includes(prev) ? prev : (models[0] ?? "")));
   }
 
   async function openProject(
@@ -92,15 +110,18 @@ export function ProjectPicker() {
         if (!autoOpenAttempted) {
           autoOpenAttempted = true;
           const active = res.projects.find((p) => p.name === res.active);
-          // Only auto-open a project that actually has a dated capture to land on;
-          // otherwise just preselect it so the human sees where to go next.
-          if (active && defaultDate(active.dates)) {
+          const d = active ? defaultDate(active.dates) : "";
+          // Auto-open only when the default (newest) date actually has labelled traits —
+          // otherwise skipping straight into the app would land on a blank canvas with no
+          // way to change date. Instead preselect the card so the human lands on the picker
+          // (honest-empty dropdowns + the date selector) and picks a date with labels.
+          if (active && d && traitsForDate(active, d).length > 0) {
             selectCard(active);
             void openProject(
               active,
-              defaultDate(active.dates),
-              active.traits[0] ?? "",
-              active.models[0] ?? "",
+              d,
+              traitsForDate(active, d)[0] ?? "",
+              modelsForDate(active, d)[0] ?? "",
             );
           } else if (active) {
             selectCard(active);
@@ -208,7 +229,7 @@ export function ProjectPicker() {
                           <select
                             className="tcip-select"
                             value={date}
-                            onChange={(e) => setDate(e.target.value)}
+                            onChange={(e) => chooseDate(p, e.target.value)}
                           >
                             {p.dates.length === 0 && <option value="">—</option>}
                             {p.dates.map((d) => (
@@ -225,8 +246,10 @@ export function ProjectPicker() {
                             value={annType}
                             onChange={(e) => setAnnType(e.target.value)}
                           >
-                            <option value="">—</option>
-                            {p.traits.map((t) => (
+                            <option value="">
+                              {traitsForDate(p, date).length ? "—" : "no labels"}
+                            </option>
+                            {traitsForDate(p, date).map((t) => (
                               <option key={t} value={t}>
                                 {t}
                               </option>
@@ -240,8 +263,10 @@ export function ProjectPicker() {
                             value={model}
                             onChange={(e) => setModel(e.target.value)}
                           >
-                            <option value="">—</option>
-                            {p.models.map((m) => (
+                            <option value="">
+                              {modelsForDate(p, date).length ? "—" : "no preds"}
+                            </option>
+                            {modelsForDate(p, date).map((m) => (
                               <option key={m} value={m}>
                                 {m}
                               </option>
