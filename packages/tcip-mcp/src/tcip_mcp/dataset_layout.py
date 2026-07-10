@@ -138,6 +138,48 @@ def list_models(dataset_root: str | Path) -> list[str]:
     return sorted(p.name for p in preds.iterdir() if p.is_dir())
 
 
+def _dir_has_label_file(d: Path) -> bool:
+    """True if ``d`` holds at least one label file (any supported extension).
+
+    An *empty* label file counts: it is a confirmed negative (the trait was
+    annotated on that date, with no objects), not the absence of annotation.
+    """
+    if not d.is_dir():
+        return False
+    return any(p.is_file() and p.suffix in _ANY_EXTS for p in d.iterdir())
+
+
+def traits_with_labels(dataset_root: str | Path, date: Optional[str]) -> list[str]:
+    """Traits that actually have ≥1 label file (detect or segment) on ``date``.
+
+    This is what the GUI's trait selector should offer for a given date — a trait
+    campaign with no labels on the selected date is not a meaningful choice there,
+    so offering it (as the flat ``list_traits`` does) lands the user on an empty
+    canvas. Sorted, same order as ``list_traits``.
+    """
+    root = Path(dataset_root)
+    return [
+        trait
+        for trait in list_traits(root)
+        if any(_dir_has_label_file(annotation_dir(root, trait, date, task)) for task in TASKS)
+    ]
+
+
+def models_with_predictions(dataset_root: str | Path, date: Optional[str]) -> list[str]:
+    """Models that actually have ≥1 prediction file (detect or segment) on ``date``.
+
+    The model selector's job is to overlay a model's predictions; a model with no
+    predictions on the selected date has nothing to show there. Sorted, same order
+    as ``list_models``.
+    """
+    root = Path(dataset_root)
+    return [
+        model
+        for model in list_models(root)
+        if any(_dir_has_label_file(prediction_dir(root, model, date, task)) for task in TASKS)
+    ]
+
+
 def find_gt_label(
     image_path: str | Path,
     task: str,
