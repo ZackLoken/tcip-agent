@@ -84,17 +84,19 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
     preds_324 = tmp_path / "preds_3-24-26"
     preds_211.mkdir()
     preds_324.mkdir()
-    # PLANT_A on 2-11 → 4 detections, none elongated (h < 0.02)
+    # Predictions from the 2-class elongation classifier: class 0 = non-elongated,
+    # class 1 = elongated. Elongation is a CLASS, never a bbox-height proxy.
+    # PLANT_A on 2-11 → 4 detections, none elongated (class 0)
     (preds_211 / "IMG_A.txt").write_text(
         "\n".join("0 0.9 0.5 0.5 0.01 0.01" for _ in range(4)), encoding="utf-8"
     )
-    # PLANT_B on 2-11 → 2 detections, both elongated
+    # PLANT_B on 2-11 → 2 detections, both elongated (class 1)
     (preds_211 / "IMG_B.txt").write_text(
-        "0 0.9 0.5 0.5 0.01 0.05\n0 0.9 0.4 0.4 0.01 0.05\n", encoding="utf-8"
+        "1 0.9 0.5 0.5 0.01 0.05\n1 0.9 0.4 0.4 0.01 0.05\n", encoding="utf-8"
     )
-    # PLANT_A on 3-24 → 3 detections, all elongated
+    # PLANT_A on 3-24 → 3 detections, all elongated (class 1)
     (preds_324 / "IMG_A2.txt").write_text(
-        "0 0.9 0.5 0.5 0.01 0.05\n0 0.9 0.4 0.4 0.01 0.05\n0 0.9 0.3 0.3 0.01 0.05\n",
+        "1 0.9 0.5 0.5 0.01 0.05\n1 0.9 0.4 0.4 0.01 0.05\n1 0.9 0.3 0.3 0.01 0.05\n",
         encoding="utf-8",
     )
 
@@ -107,11 +109,11 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
                 "2026-02-11": str(preds_211),
                 "2026-03-24": str(preds_324),
             },
-            "elongation_height": 0.02,
         },
     )
     body = resp.json()
     assert body["n_plants"] == 2
+    assert body["elongation_classified"] is True  # class 1 present → real classification
 
     by_key = {(r["plant_id"], r["date"]): r for r in body["rows"]}
     # PLANT_A on 2-11: 4 total, 0 elongated → ratio 0
@@ -121,6 +123,46 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
     assert by_key[("PLANT_B", "2026-02-11")]["ratio"] == 1.0
     # PLANT_A on 3-24: 3 total, 3 elongated → ratio 1.0
     assert by_key[("PLANT_A", "2026-03-24")]["ratio"] == 1.0
+
+
+def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp_path: Path) -> None:
+    # Single-class detector output (no elongation classification) must NOT be passed off as
+    # a bloom measurement — the endpoint reports elongation_classified=False.
+    mapping_path = tmp_path / "m.json"
+    mapping_path.write_text(
+        json.dumps(
+            {
+                "2026-02-11": [
+                    {
+                        "image_path": "/x/IMG_A.JPG",
+                        "stem": "IMG_A",
+                        "date_folder": "2026-02-11",
+                        "plot_name": "PLANT_A",
+                        "accession_name": "AccA",
+                        "confidence": 0.9,
+                        "source": "sequence",
+                        "distance_m": 1.0,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    preds = tmp_path / "preds"
+    preds.mkdir()
+    # Raw single-class catkin detections: class 0 only, no elongation call.
+    (preds / "IMG_A.txt").write_text("0 0.9 0.5 0.5 0.01 0.05\n0 0.9 0.4 0.4 0.01 0.05\n", encoding="utf-8")
+
+    body = client.post(
+        "/api/results/per_plant_curves",
+        json={
+            "project_root": str(tmp_path),
+            "mapping_path": str(mapping_path),
+            "predictions_by_date": {"2026-02-11": str(preds)},
+        },
+    ).json()
+    assert body["elongation_classified"] is False
+    assert body["classes_seen"] == [0]
 
 
 def test_onset_dates_finds_crossings(client: TestClient) -> None:
@@ -169,6 +211,9 @@ def test_onset_dates_finds_crossings(client: TestClient) -> None:
     assert onset["catkin_05per_date"] is not None  # reached between 2-11 and 3-2
     assert onset["catkin_50per_date"] is not None  # reached between 3-2 and 3-9
     assert onset["catkin_95per_date"] is not None  # reached between 3-9 and 3-18
+    # First date any elongation appears (fraction > 0): the 03-02 point (0.10),
+    # since 02-11 is still 0.0.
+    assert onset["catkin_elongation_date"] == "2026-03-02"
 
 
 def test_onset_dates_ignores_undated_bucket(client: TestClient) -> None:
