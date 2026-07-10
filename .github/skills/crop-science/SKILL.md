@@ -23,7 +23,9 @@ Six tree crop species, each with unique traits and ML requirements:
 Phenology = timing of biological events (budbreak, bloom, fruit set, senescence). Key for breeding:
 - Measured as calendar dates or growing degree days (GDD)
 - Detected via temporal image series (change detection)
-- Modeled with sigmoid curves for precise date estimation
+- Bloom milestones (`*_05/50/95per_date`) are the dates a plant's **elongated/open
+  fraction** crosses 5/50/95% — not a peak-count or sigmoid-of-counts. See the
+  `phenology` skill for the authoritative definition and the pieces to compose.
 
 ## Sensor Types
 
