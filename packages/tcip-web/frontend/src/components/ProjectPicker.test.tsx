@@ -21,8 +21,9 @@ vi.mock("@/api/client", () => {
 });
 
 import { api } from "@/api/client";
+import type { ProjectSummary } from "@/api/client";
 
-const PROJECTS = [
+const PROJECTS: ProjectSummary[] = [
   {
     name: "hazelnut_catkin_valley-farm",
     path: "/ws/hazelnut_catkin_valley-farm",
@@ -31,6 +32,9 @@ const PROJECTS = [
     dates: ["2026-02-11", "2026-03-01"],
     traits: ["catkin", "bush"],
     models: ["baseline"],
+    // catkin labelled (+ baseline predicted) on 02-11; bush labelled on 03-01.
+    traits_by_date: { "2026-02-11": ["catkin"], "2026-03-01": ["bush"] },
+    models_by_date: { "2026-02-11": ["baseline"], "2026-03-01": [] },
     image_count: 42,
     is_active: false,
   },
@@ -42,6 +46,8 @@ const PROJECTS = [
     dates: ["2026-03-05"],
     traits: [],
     models: [],
+    traits_by_date: { "2026-03-05": [] },
+    models_by_date: { "2026-03-05": [] },
     image_count: 7,
     is_active: false,
   },
@@ -117,6 +123,28 @@ describe("ProjectPicker", () => {
     await waitFor(() =>
       expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/hazelnut_catkin_valley-farm"),
     );
+  });
+
+  it("filters the trait options to the selected date's labelled traits", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      projects: PROJECTS,
+    });
+    render(<ProjectPicker />);
+    fireEvent.click(await screen.findByText("hazelnut_catkin_valley-farm"));
+
+    // Default date is the most recent ISO date (2026-03-01), where only 'bush' is labelled.
+    const traitSelect = screen.getByLabelText("Trait") as HTMLSelectElement;
+    let opts = Array.from(traitSelect.options).map((o) => o.value);
+    expect(opts).toContain("bush");
+    expect(opts).not.toContain("catkin");
+
+    // Switch to 2026-02-11, where only 'catkin' is labelled.
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-02-11" } });
+    opts = Array.from(traitSelect.options).map((o) => o.value);
+    expect(opts).toContain("catkin");
+    expect(opts).not.toContain("bush");
   });
 
   it("renders the advanced folder-open disclosure", async () => {
