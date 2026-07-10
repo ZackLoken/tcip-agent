@@ -86,6 +86,11 @@ export interface ProjectSummary {
   dates: string[];
   traits: string[];
   models: string[];
+  // Per-date availability: traits with labels / models with predictions on each date.
+  // The trait/model pickers filter to these so a date with no catkin labels doesn't
+  // offer "catkin" (which would open an empty canvas).
+  traits_by_date: Record<string, string[]>;
+  models_by_date: Record<string, string[]>;
   image_count: number;
   is_active: boolean;
 }
@@ -113,6 +118,8 @@ export const api = {
         dates_with_images: string[];
         annotation_types: string[];
         model_names: string[];
+        traits_by_date: Record<string, string[]>;
+        models_by_date: Record<string, string[]>;
       }>(`/api/dataset/tree?${q({ dataset_root })}`),
 
     listImages: (dataset_root: string, date: string) =>
@@ -127,7 +134,14 @@ export const api = {
       date?: string | null;
       model_name?: string | null;
     }) =>
-      call<{ status: string; selection: DatasetSelection }>("/api/dataset/select", {
+      call<{
+        status: string;
+        selection: DatasetSelection;
+        // Advisory: whether the resolved (trait,date) has labels / (model,date) has
+        // predictions. False → the canvas will start empty (not an error).
+        annotations_present?: boolean;
+        predictions_present?: boolean;
+      }>("/api/dataset/select", {
         method: "POST",
         body: JSON.stringify(body),
       }),
