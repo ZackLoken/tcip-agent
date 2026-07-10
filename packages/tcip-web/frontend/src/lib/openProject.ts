@@ -33,10 +33,24 @@ export async function openWorkspaceProject(
   return res.selection;
 }
 
+/** The most-recent date that actually has a labelled trait, or null if none do. */
+function newestLabelledDate(p: ProjectSummary): string | null {
+  const labelled = p.dates.filter((d) => (p.traits_by_date[d] ?? []).length > 0);
+  return labelled.length ? defaultDate(labelled) : null;
+}
+
 /** Look a project up by name and open it on sensible defaults; null if it's gone. */
 export async function openProjectByName(name: string): Promise<DatasetSelection | null> {
   const { projects } = await api.projects.list();
   const p = projects.find((x) => x.name === name);
   if (!p) return null;
-  return openWorkspaceProject(p, defaultDate(p.dates), p.traits[0] ?? null, p.models[0] ?? null);
+  // Open on the most-recent date that actually HAS labels (not merely the newest date), and
+  // scope trait/model to that date's per-date availability — otherwise an agent that just
+  // ingested a still-unlabelled newer date would jump the human PAST their annotations onto a
+  // blank canvas (there's no date selector inside the Annotate tab to recover). Falls back to
+  // the newest date only when nothing is labelled yet (a genuinely empty project).
+  const date = newestLabelledDate(p) ?? defaultDate(p.dates);
+  const trait = (p.traits_by_date[date] ?? [])[0] ?? null;
+  const model = (p.models_by_date[date] ?? [])[0] ?? null;
+  return openWorkspaceProject(p, date, trait, model);
 }
