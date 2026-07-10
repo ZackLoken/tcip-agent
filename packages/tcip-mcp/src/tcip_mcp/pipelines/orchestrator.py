@@ -148,7 +148,7 @@ def _run_training_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
     from torch.utils.data import DataLoader
 
     result = PhaseResult(phase_name=phase["name"], status="running")
-    t0 = time.time()
+    t0 = time.perf_counter()
 
     if "model_spec" not in phase:
         result.status = "failed"
@@ -235,14 +235,14 @@ def _run_training_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
         result.error = str(e)
         logger.exception("Training phase '%s' failed", phase["name"])
 
-    result.elapsed_seconds = time.time() - t0
+    result.elapsed_seconds = time.perf_counter() - t0
     return result
 
 
 def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> PhaseResult:
     """Run inference using a trained checkpoint."""
     result = PhaseResult(phase_name=phase["name"], status="running")
-    t0 = time.time()
+    t0 = time.perf_counter()
 
     try:
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -288,14 +288,14 @@ def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -
         result.error = str(e)
         logger.exception("Inference phase '%s' failed", phase["name"])
 
-    result.elapsed_seconds = time.time() - t0
+    result.elapsed_seconds = time.perf_counter() - t0
     return result
 
 
 def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> PhaseResult:
     """Crop detected/segmented regions into sub-images for the next phase."""
     result = PhaseResult(phase_name=phase["name"], status="running")
-    t0 = time.time()
+    t0 = time.perf_counter()
 
     try:
         from PIL import Image
@@ -353,14 +353,14 @@ def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
         result.error = str(e)
         logger.exception("Cropping phase '%s' failed", phase["name"])
 
-    result.elapsed_seconds = time.time() - t0
+    result.elapsed_seconds = time.perf_counter() - t0
     return result
 
 
 def _run_aggregation_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> PhaseResult:
     """Temporal/spatial aggregation — per-image results to per-plant CSV."""
     result = PhaseResult(phase_name=phase["name"], status="running")
-    t0 = time.time()
+    t0 = time.perf_counter()
 
     try:
         from tcip_mcp.pipelines.postprocessing.aggregation import (
@@ -421,14 +421,14 @@ def _run_aggregation_phase(phase: dict, context: dict[str, Any], work_dir: Path)
         result.error = str(e)
         logger.exception("Aggregation phase '%s' failed", phase["name"])
 
-    result.elapsed_seconds = time.time() - t0
+    result.elapsed_seconds = time.perf_counter() - t0
     return result
 
 
 def _run_export_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> PhaseResult:
     """Export results to CSV or other delivery formats."""
     result = PhaseResult(phase_name=phase["name"], status="running")
-    t0 = time.time()
+    t0 = time.perf_counter()
 
     try:
         from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
@@ -478,7 +478,7 @@ def _run_export_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> P
         result.error = str(e)
         logger.exception("Export phase '%s' failed", phase["name"])
 
-    result.elapsed_seconds = time.time() - t0
+    result.elapsed_seconds = time.perf_counter() - t0
     return result
 
 
