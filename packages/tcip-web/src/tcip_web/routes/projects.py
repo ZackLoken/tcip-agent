@@ -34,6 +34,11 @@ class ProjectSummary(BaseModel):
     dates: list[str]
     traits: list[str]
     models: list[str]
+    # Per-date availability: which traits actually have labels / which models actually
+    # have predictions on each date. The trait/model pickers filter to these so a date
+    # with no catkin labels doesn't offer "catkin" (which would open an empty canvas).
+    traits_by_date: dict[str, list[str]]
+    models_by_date: dict[str, list[str]]
     image_count: int
     is_active: bool
 
@@ -51,14 +56,17 @@ def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
         image_count = sum(
             1 for f in images_dir.rglob("*") if f.is_file() and f.suffix.lower() in _IMAGE_EXTS
         )
+    dates = dataset_layout.list_dates(project_dir)
     return ProjectSummary(
         name=project_dir.name,
         path=str(project_dir),
         created=st.st_ctime,
         modified=st.st_mtime,
-        dates=dataset_layout.list_dates(project_dir),
+        dates=dates,
         traits=dataset_layout.list_traits(project_dir),
         models=dataset_layout.list_models(project_dir),
+        traits_by_date={d: dataset_layout.traits_with_labels(project_dir, d) for d in dates},
+        models_by_date={d: dataset_layout.models_with_predictions(project_dir, d) for d in dates},
         image_count=image_count,
         is_active=project_dir.name == active_name,
     )
