@@ -1,15 +1,17 @@
 """Per-plant aggregation — temporal/spatial aggregation of per-image results.
 
-Aggregation strategies:
+Aggregation strategies (per-plant summary of a per-image value):
   - count:    Median detection count across images per plant
-  - sigmoid:  Sigmoid curve fitting for phenology date estimation
   - mode:     Most frequent value (ordinal traits)
   - mean:     Arithmetic mean (continuous traits)
   - sum:      Sum of values (area traits)
 
+Bloom PHENOLOGY (05/50/95-per-date) is intentionally NOT here — it is the elongated-
+fraction crossing, implemented once in ``postprocessing/phenology.py``.
+
 Usage:
     results = aggregate_per_plant(image_results, strategy="count")
-    export_phenology_csv(results, "output.csv")
+    export_aggregated_csv(results, "output.csv", trait_name="count")
 """
 
 from __future__ import annotations
@@ -66,7 +68,7 @@ def aggregate_per_plant(
     Args:
         image_results: List of dicts, each with at least an 'image' key
                       and a value field (e.g., 'count', 'class', 'value').
-        strategy: Aggregation strategy — 'count', 'sigmoid', 'mode', 'mean', 'sum'.
+        strategy: Aggregation strategy — 'count', 'mode', 'mean', 'sum'.
         plant_id_key: Key in each result dict for plant identification.
                      If not present, extracts from image filename.
         value_key: Key in each result dict for the value to aggregate.
@@ -157,69 +159,12 @@ def _agg_sum(items: list[dict], value_key: str) -> dict:
     return {"value": sum(values)}
 
 
-def _agg_sigmoid(items: list[dict], value_key: str) -> dict:
-    """Sigmoid curve fitting for phenology date estimation.
-
-    Expects items sorted by date with a 'count' or 'value' field
-    and a 'date' or 'day_of_year' field for the time axis.
-
-    Returns milestones: 5%, 50%, 95% thresholds of the fitted sigmoid.
-    """
-    # Extract (time, value) pairs. Use explicit ``is not None`` precedence so a
-    # legitimate 0 time axis (e.g. time_index=0, day_of_year=0) is not treated
-    # as missing by an ``or``-chain.
-    pairs = []
-    for r in items:
-        t = None
-        for time_key in ("day_of_year", "date_ordinal", "time_index"):
-            candidate = r.get(time_key)
-            if candidate is not None:
-                t = candidate
-                break
-        v = r.get(value_key, 0.0)
-        if t is not None:
-            pairs.append((float(t), float(v)))
-
-    if len(pairs) < 3:
-        # Not enough data for sigmoid fitting — fall back to simple stats
-        values = [p[1] for p in pairs]
-        return {
-            "value": max(values) if values else 0,
-            "fit": {"error": "insufficient_data", "n_points": len(pairs)},
-        }
-
-    pairs.sort(key=lambda p: p[0])
-    times = [p[0] for p in pairs]
-    values = [p[1] for p in pairs]
-
-    # Normalize values to [0, 1]
-    v_max = max(values) if max(values) > 0 else 1.0
-    normed = [v / v_max for v in values]
-
-    # Simple sigmoid fit: find time points where normed crosses 0.05, 0.50, 0.95
-    milestones: dict[str, float | None] = {"05per": None, "50per": None, "95per": None}
-    thresholds = {"05per": 0.05, "50per": 0.50, "95per": 0.95}
-
-    for label, thresh in thresholds.items():
-        for i in range(len(normed) - 1):
-            if normed[i] <= thresh <= normed[i + 1]:
-                # Linear interpolation
-                if normed[i + 1] - normed[i] > 0:
-                    frac = (thresh - normed[i]) / (normed[i + 1] - normed[i])
-                    milestones[label] = round(times[i] + frac * (times[i + 1] - times[i]), 1)
-                else:
-                    milestones[label] = times[i]
-                break
-
-    return {
-        "value": max(values),
-        "max_count": max(values),
-        "fit": {
-            "milestones": milestones,
-            "n_points": len(pairs),
-            "method": "linear_interpolation",
-        },
-    }
+# NOTE: catkin bloom phenology (05/50/95-per-date milestones) is NOT an aggregation
+# strategy here. It is the elongated-FRACTION crossing, and its single canonical
+# implementation lives in ``postprocessing/phenology.py`` (used by the web Results route
+# and the ``compute_phenology`` MCP tool). A prior "sigmoid" strategy computed those
+# milestones from raw count normalized to the season peak — a different, wrong definition
+# of the same trait — and has been removed (see CLAUDE.md measurement integrity).
 
 
 _STRATEGIES = {
@@ -227,7 +172,6 @@ _STRATEGIES = {
     "mean": _agg_mean,
     "mode": _agg_mode,
     "sum": _agg_sum,
-    "sigmoid": _agg_sigmoid,
 }
 
 
