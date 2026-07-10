@@ -21,7 +21,12 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_mcp.dataset_layout import annotation_dir, prediction_dir
+from tcip_mcp.dataset_layout import (
+    annotation_dir,
+    models_with_predictions,
+    prediction_dir,
+    traits_with_labels,
+)
 from tcip_web.paths import safe_join
 from tcip_web.state import DatasetSelection, store
 
@@ -33,8 +38,13 @@ IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp")
 class DatasetTree(BaseModel):
     dataset_root: str
     dates_with_images: list[str]
-    annotation_types: list[str]  # e.g. ["catkin", "bush"]
-    model_names: list[str]       # e.g. ["baseline"]
+    annotation_types: list[str]  # every trait present anywhere, e.g. ["catkin", "bush"]
+    model_names: list[str]       # every model present anywhere, e.g. ["baseline"]
+    # Per-date availability: the traits that actually have labels / models that actually
+    # have predictions on each date. The GUI's trait/model pickers filter to these so a
+    # date with no catkin labels doesn't offer "catkin" (which would open an empty canvas).
+    traits_by_date: dict[str, list[str]]
+    models_by_date: dict[str, list[str]]
 
 
 def _list_children(p: Path) -> list[str]:
@@ -49,14 +59,17 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
     root = Path(dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
+    dates = _list_children(root / "images")
     return DatasetTree(
         dataset_root=str(root),
-        dates_with_images=_list_children(root / "images"),
+        dates_with_images=dates,
         annotation_types=_list_children(root / "annotations"),
         # A model is selectable if it has a checkpoint dir and/or a predictions dir.
         model_names=sorted(
             set(_list_children(root / "models")) | set(_list_children(root / "predictions"))
         ),
+        traits_by_date={d: traits_with_labels(root, d) for d in dates},
+        models_by_date={d: models_with_predictions(root, d) for d in dates},
     )
 
 
@@ -138,7 +151,26 @@ async def select_dataset(req: SelectionRequest) -> dict:
         predictions_segment_dir=pred_segment,
     )
     await store.mutate({"dataset": selection})
-    return {"status": "ok", "selection": selection.model_dump(mode="json")}
+
+    # Advisory only (never rejects): does the resolved (trait, date) actually have any labels /
+    # the (model, date) any predictions? Empty label files count as present (confirmed
+    # negatives), and starting a brand-new annotation on an unlabelled date is still allowed —
+    # so we don't block; we just tell the caller (agent or GUI) the canvas will start empty
+    # instead of leaving a silent blank canvas.
+    annotations_present = bool(
+        req.annotation_type
+        and req.date
+        and req.annotation_type in traits_with_labels(root, req.date)
+    )
+    predictions_present = bool(
+        req.model_name and req.date and req.model_name in models_with_predictions(root, req.date)
+    )
+    return {
+        "status": "ok",
+        "selection": selection.model_dump(mode="json"),
+        "annotations_present": annotations_present,
+        "predictions_present": predictions_present,
+    }
 
 
 @router.get("/state")
