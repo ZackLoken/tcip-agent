@@ -21,14 +21,27 @@ import json
 import re
 import sys
 
-# Repo-internal paths the fenced agent must never write to (mirrors the settings deny).
+# Repo-internal paths the fenced agent must never write to (mirrors the settings deny). The
+# fence's OWN files are included by basename so writing/deleting them is blocked even via a
+# relative path after a ``cd`` — the self-modification chain that would disable the guard.
+# Kept in sync with the PowerShell guard by ``test_agent_fence.py``.
 _PROTECTED = re.compile(
     r"(?:^|[\s/'\"])(?:packages|tests|scripts|\.github|\.claude)\b"
     r"|CLAUDE\.md|\.mcp\.json|pyproject\.toml|package\.json|tsconfig\.json|\.gitignore"
+    r"|agent_bash_guard\.py|agent_powershell_guard\.py"
+    r"|agent_terminal\.settings\.json|tcip_agent_fence\.settings\.json"
 )
 # Shell constructs that write to a file / run arbitrary code.
 _WRITE_OP = re.compile(r">>?|\btee\b|\bsed\b\s+-i|\bcp\b|\bmv\b|\bdd\b")
-_INLINE_INTERP = re.compile(r"\b(?:python3?|node|perl|ruby|deno|bun)\b\s+-\w*[ce]")
+# Inline / nested / arbitrary code execution — a spawned interpreter (``python -c``…) OR a
+# nested shell (``bash -c``, ``sh -c``, ``powershell -EncodedCommand``, ``cmd /c``) whose
+# payload the guard can't see through.
+_INLINE_INTERP = re.compile(
+    r"\b(?:python3?|node|perl|ruby|deno|bun)\b\s+-\w*[ce]"
+    r"|\b(?:bash|sh|zsh)\b\s+-\w*c\b"
+    r"|\b(?:powershell|pwsh)\b[\s\S]*?-(?:e|ec|enc|encodedcommand|command|c)\b"
+    r"|\bcmd\b[\s\S]*?/c\b"
+)
 
 
 def _deny(reason: str) -> None:
