@@ -220,3 +220,82 @@ phase rounded to exactly 0.0 and tripped `assert elapsed_seconds > 0.0`. Switche
 phase-duration measurements to monotonic `time.perf_counter()` (left the genuine wall-clock
 timestamps as `time.time()`). Now 5/5 green — a latent CI-flake that would have bitten a
 hands-off build.
+
+---
+
+## 2026-07-10 — Session 2 gaps: in-app agent handling "annotations not displaying" + "switch to bush polygons"
+
+Source: Zack's in-app TCIP Agent transcript (session `fa720006`), read off disk after the embedded
+terminal's copy-to-clipboard silently failed (see the terminal-copy fix below). The agent diagnosed the
+blank-canvas issue well but exposed three real platform gaps — all fixed this session.
+
+### G-A — GOVERNANCE HOLE: the fence was bypassable via PowerShell, and the Bash guard mis-fired after `cd`
+**Observation.** The agent hit the Bash guard, then wrote: "switch to PowerShell (no such hook)." Confirmed
+in config: `agent_terminal.settings.json` had a `PreToolUse` hook only for `matcher: "Bash"` and **no**
+PowerShell deny/hook — the whole fence ("never change internal code") was defeated by picking the other
+shell. Compounding it, the Bash hook command was **repo-relative** (`python packages/…/agent_bash_guard.py`);
+after the agent `cd`-ed, the interpreter couldn't find the script → exit 2 → Claude Code reads exit 2 as a
+BLOCK → every command denied ("guard blocks all listings after cd"), which is what pushed the agent to
+PowerShell.
+**Fix (Zack chose (c)+(b)).** (c) `terminal.py` now materializes an effective settings file at spawn with
+**absolute, quoted, forward-slash** hook commands (`"<sys.executable>" "<guard_dir>/agent_*_guard.py"`) —
+Python resolves the path, so no cwd dependency and no Windows `$VAR` hazard. (b) New `agent_powershell_guard.py`
+mirrors the Bash guard: blocks inline exec (`iex`/`Invoke-Expression`/`python -c`), dangerous git, all
+deletes, and writes into protected roots (Set-Content/Out-File/`>`/`[IO.File]::Write*`…). Added a PowerShell
+`PreToolUse` matcher + a drift-guard test asserting both shells fence the same roots. Honest scope unchanged
+(guardrail, not sandbox — a determined agent can still obfuscate; real isolation = a sandbox, still future).
+
+### G-B — the agent could switch the dataset but not finish the hand-off (mode + navigation)
+**Observation.** On "switch to bush polygons" the agent set `bush/2026-03-02` via `/api/dataset/select` but
+had to tell the human to press `M` (polygon mode) and navigate to image #48 — because `mode` and
+`current_image_index` are deliberately browser-local (`mergeSnapshot` keeps them, so a passive re-broadcast
+can't yank a user mid-edit), and `/select` always lands on index 0 in box mode. So the breeder landed on a
+blank frame in the wrong mode.
+**Fix.** New `focus_annotate` MCP tool resolves the FIRST annotated image + infers mode (segment→polygon,
+detect→box) and posts an explicit `app`/`annotate_focus` event. Frontend `applyAnnotateFocus` honors it with
+LOCAL setters (the same path the Review→Edit button uses) — so mergeSnapshot's local-mode invariant is
+preserved (mode changes only on a deliberate command, never a passive snapshot). No `mergeSnapshot` change.
+
+### G-C — dataset-select accepted any (trait, date); `openProjectByName` still used the flat trait list
+**Observation.** `/api/dataset/select` computes annotation dirs for any (trait, date) with no
+label-existence check → silent blank canvas for a direct API/agent caller. And `openProjectByName` (the
+agent→GUI "look here" path) still picked `traits[0]`/`models[0]` from the FLAT lists — the exact
+blank-canvas bug the ProjectPicker per-date fix closed, but never applied to the agent path.
+**Fix.** `/select` returns advisory `annotations_present`/`predictions_present` (never rejects; empty-negative
+files count as present; new-date annotation still allowed). `openProjectByName` now scopes trait/model to
+`traits_by_date[defaultDate]`/`models_by_date[defaultDate]` like the picker. Heal analysis confirmed a stale
+`gui.json` pair is fully overwritten on a normal open (load_from_disk → mutate, no yield between).
+
+### Terminal copy bug (what surfaced all this)
+The embedded xterm.js terminal wired PASTE but never COPY — selection lives on a canvas the OS clipboard
+can't see, and Ctrl+C is consumed as SIGINT. So "copy" grabbed nothing and left the *previous* clipboard
+value in place (Zack pasted a stale transcript, then couldn't copy the new one). Fixed: copy-on-select
+(mouseup), the native copy event (right-click), and Ctrl/Cmd+Shift+C, all wired to `term.getSelection()`.
+
+### Adversarial review round 2 — the first-pass fixes had real holes (all fixed)
+A 3-skeptic + completeness-critic workflow refuted the first-pass A/B/C fixes and found genuine defects —
+a strong reminder that a fresh guard/feature deserves an adversarial pass before trusting it:
+- **Fence (critical):** the PowerShell guard matched only full cmdlet NAMES, so every ALIAS bypassed it —
+  `sc`/`ac`/`ni`/`cp`/`mv`/`clc` (writes), `ri` (delete). And `Set-Content agent_powershell_guard.py`
+  could **overwrite the guard itself** → permanent total defeat. And `powershell -EncodedCommand <b64>`
+  smuggled an opaque payload past every token. **Fixed:** aliases (statement-anchored to avoid
+  false-positives like `Get-Content del.txt`), fence-file basenames added to `_PROTECTED` (self-modify
+  blocked even relative), nested-shell/encoded added to inline-exec, `[IO...]::OpenWrite`/`StreamWriter`
+  added. Verified all reviewer bypasses now DENY and legit reads ALLOW (60 fence tests).
+- **Fence (critical usability):** PowerShell had NO allow-list, so on Windows (PowerShell = primary shell)
+  EVERY read (`Get-ChildItem`/`Get-Content`/…) would prompt the breeder under `--permission-mode default`.
+  Added a PowerShell read allow-list mirroring the Bash one. (Live efficacy of `PowerShell(cmd:*)` prefix
+  matching still to confirm in a real fenced session.)
+- **GUI drive (real blank-canvas):** `focus_annotate` set index+mode but NOT `active_class`, and the
+  AnnotateTab canvas renders ONLY the active class — so a frame labelled class 1 showed blank even in the
+  right mode. Also mode was inferred from the first-annotated frame, not the explicitly requested one.
+  **Fixed:** resolve `active_class` + mode from the frame actually shown; `applyAnnotateFocus` calls
+  `setActiveClass`; added `is_file()` to match the frontend's image listing exactly.
+- **Heal (real blank-canvas):** `openProjectByName` opened on the newest date even when unlabelled, jumping
+  the human PAST their annotations (no in-app date selector to recover). **Fixed:** open on the newest date
+  that actually HAS labels; fall back to newest only when nothing's labelled.
+**Accepted residuals (documented, not fixed — the guardrail's limit):** a `cd` into a protected dir then a
+*relative* write, and paths assembled from string fragments, still evade the string-matching guard. These
+are why Zack's "a sandbox is the correct model moving forward" is the real fix; the guards close every
+*trivial/direct* bypass and can no longer be disabled by self-modification. Final: backend 843, frontend
+102, all green.
