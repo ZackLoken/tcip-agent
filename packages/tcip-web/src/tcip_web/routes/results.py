@@ -3,14 +3,19 @@
 The Phase 1 target is a per-plant CSV with catkin_05 / 50 / 95per_date columns.
 That pipeline looks like:
 
-    predictions(date) ─► foreground mask(bush model) ─► count catkins per plant
-                    ─► classify elongated vs dormant by bbox-height threshold
-                    ─► ratio elongated/total per (plant, date)
-                    ─► fit curve + find 5/50/95% crossings
+    predictions(date) ─► per-plant catkin detections (via plant mapping)
+                    ─► classify each catkin elongated vs not (validated classifier)
+                    ─► fraction elongated / total per (plant, date)
+                    ─► find the dates that fraction crosses 5/50/95%
+
+Bloom is the *elongated fraction* of a plant's catkins — "elongated" being an expert-
+defined morphological stage from a validated classifier, never a geometric proxy such
+as bbox height (see the ``phenology`` skill + the CLAUDE.md measurement-integrity
+invariant). The milestone math lives once in ``tcip_mcp...postprocessing.phenology``;
+this module is the HTTP surface the Results tab calls and delegates to it.
 
 For Phase 1 the backend owns everything except the model inference (which is
-driven by the Inference tab). This module provides the HTTP endpoints the
-Results tab calls.
+driven by the Inference tab).
 """
 
 from __future__ import annotations
@@ -24,8 +29,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
-
-from tcip_web import plant_mapping
+from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -91,43 +95,15 @@ def load_plant_mapping(payload: LoadMappingPayload) -> dict:
 # ── Per-plant curves ───────────────────────────────────────────────────
 
 
-def _count_predictions(txt_path: Path) -> tuple[int, int]:
-    """Return (total, n_elongated) based on bbox-height threshold.
-
-    The prediction file is YOLO format ``class conf cx cy w h`` with
-    normalised coordinates (0-1). Elongated catkins have substantially
-    larger bbox height (longer vertical pendant); we use a threshold on
-    normalised h that the caller can tune.
-    """
-    return _count_with_threshold(txt_path, elongation_height=0.020)
-
-
-def _count_with_threshold(txt_path: Path, elongation_height: float) -> tuple[int, int]:
-    if not txt_path.exists():
-        return (0, 0)
-    total = 0
-    elongated = 0
-    with txt_path.open("r", encoding="utf-8") as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) < 6:
-                continue
-            try:
-                h = float(parts[5])
-            except ValueError:
-                continue
-            total += 1
-            if h >= elongation_height:
-                elongated += 1
-    return total, elongated
-
-
 class PerPlantCurvesPayload(BaseModel):
     project_root: str
     mapping_path: str  # .tcip/state/plant_mapping.json or equivalent
-    # map date → predictions directory (YOLO detect txt files) for that date
+    # map date → predictions directory (YOLO detect txt files) for that date. Predictions
+    # MUST come from the validated 2-class elongation classifier (class
+    # ``elongated_class_id`` = elongated); raw single-class detections carry no elongation
+    # signal and cannot yield a bloom ratio.
     predictions_by_date: dict[str, str]
-    elongation_height: float = 0.02
+    elongated_class_id: int = 1
 
 
 class PerPlantCurveRow(BaseModel):
@@ -142,12 +118,21 @@ class PerPlantCurveRow(BaseModel):
 
 @router.post("/per_plant_curves")
 def per_plant_curves(payload: PerPlantCurvesPayload) -> dict:
+    """Per-(plant, date) elongated-catkin fraction from CLASSIFIED predictions.
+
+    Bloom, per the trait definition, is the fraction of a plant's detected catkins that are
+    elongated — "elongated" being an expert-defined morphological stage emitted by a
+    *validated* classifier, never a geometric proxy. If the predictions carry no elongation
+    class, ``elongation_classified`` is false and the ratios are NOT a valid bloom
+    measurement (run + validate the classifier first — see the ``phenology`` skill).
+    """
     mapping = plant_mapping.load_mapping(Path(payload.mapping_path))
     if not mapping:
         raise HTTPException(404, f"no mapping at {payload.mapping_path}")
 
     rows: list[dict] = []
     per_plant: dict[str, dict[str, dict]] = {}
+    all_classes: set[int] = set()
 
     for date, pred_dir in payload.predictions_by_date.items():
         pred_path = Path(pred_dir)
@@ -157,7 +142,10 @@ def per_plant_curves(payload: PerPlantCurvesPayload) -> dict:
             if not assignment.plot_name:
                 continue
             txt = pred_path / f"{assignment.stem}.txt"
-            total, elongated = _count_with_threshold(txt, payload.elongation_height)
+            total, elongated, classes_seen = phenology.count_by_class(
+                txt, payload.elongated_class_id
+            )
+            all_classes |= classes_seen
             plant_id = assignment.plot_name
             per_plant.setdefault(plant_id, {})
             entry = per_plant[plant_id].setdefault(
@@ -177,75 +165,20 @@ def per_plant_curves(payload: PerPlantCurvesPayload) -> dict:
 
     for plant_id, by_date in per_plant.items():
         for date, entry in by_date.items():
-            ratio = entry["n_elongated"] / entry["n_total"] if entry["n_total"] else 0.0
-            entry["ratio"] = ratio
+            entry["ratio"] = entry["n_elongated"] / entry["n_total"] if entry["n_total"] else 0.0
             rows.append(entry)
 
-    return {"rows": rows, "n_plants": len(per_plant)}
+    return {
+        "rows": rows,
+        "n_plants": len(per_plant),
+        "classes_seen": sorted(all_classes),
+        # Honest signal: were any predictions actually elongation-classified? If false, the
+        # ratios above are not a valid bloom measurement — do not deliver curves from them.
+        "elongation_classified": payload.elongated_class_id in all_classes,
+    }
 
 
 # ── Onset-date extraction + CSV export ─────────────────────────────────
-
-
-def _date_key(date_str: str) -> tuple[int, int, int]:
-    """Parse an ISO date (``YYYY-MM-DD``) → ``(year, month, day)`` for chronological sort.
-
-    Dates are ISO platform-wide — ingestion buckets images by EXIF capture date into
-    ``images/<YYYY-MM-DD>/``. A malformed value sorts first as ``(0, 0, 0)``.
-    """
-    parts = date_str.split("-")
-    if len(parts) != 3:
-        return (0, 0, 0)
-    try:
-        y, m, d = (int(x) for x in parts)
-    except ValueError:
-        return (0, 0, 0)
-    return (y, m, d)
-
-
-def _iso(date_str: str) -> str:
-    y, m, d = _date_key(date_str)
-    return f"{y:04d}-{m:02d}-{d:02d}"
-
-
-def _crossing_date(
-    sorted_points: list[tuple[str, float]], target_ratio: float
-) -> Optional[str]:
-    """Find the earliest date on which the ratio curve ≥ target_ratio.
-
-    Linear interpolation between neighbouring points. If the final point is
-    still below the target, return ``None``. If the first point is already
-    at/above, return that date's ISO string.
-    """
-    # Drop points whose date can't be parsed (the ``undated/`` bucket sorts to the
-    # (0,0,0) sentinel): an undated image has no capture date, so it can't sit on a
-    # phenology time-series. This also avoids date(0,0,0) raising during interpolation
-    # and "0000-00-00" leaking into the exported scientific CSV.
-    points = [p for p in sorted_points if _date_key(p[0]) != (0, 0, 0)]
-    if not points:
-        return None
-    # First point already meets target?
-    if points[0][1] >= target_ratio:
-        return _iso(points[0][0])
-    for (d1, r1), (d2, r2) in zip(points, points[1:]):
-        if r2 >= target_ratio:
-            # Interpolate between d1 and d2
-            y1, m1, day1 = _date_key(d1)
-            y2, m2, day2 = _date_key(d2)
-            # Straight interpolation using the ordinal delta as days is fine
-            # for our tight ~6-week window (no month boundaries to worry about)
-            if r2 == r1:
-                return _iso(d2)
-            t = (target_ratio - r1) / (r2 - r1)
-            t = max(0.0, min(1.0, t))
-            from datetime import date, timedelta
-
-            d1_obj = date(y1, m1, day1)
-            d2_obj = date(y2, m2, day2)
-            delta = (d2_obj - d1_obj).days
-            est = d1_obj + timedelta(days=round(t * delta))
-            return est.isoformat()
-    return None
 
 
 class OnsetDatesPayload(BaseModel):
@@ -254,23 +187,27 @@ class OnsetDatesPayload(BaseModel):
 
 @router.post("/onset_dates")
 def onset_dates(payload: OnsetDatesPayload) -> dict:
-    """Compute catkin_05/50/95per_date for each plant from its ratio curve."""
+    """Compute each plant's catkin phenology milestones from its elongated-fraction curve.
+
+    Delegates to the canonical ``phenology`` module so a milestone date means the same
+    thing here and in the ``compute_phenology`` MCP tool: ``catkin_05/50/95per_date`` are
+    the dates the elongated fraction crosses those levels; ``catkin_elongation_date`` is the
+    first date any elongation appears (fraction > 0).
+    """
     plants: dict[str, list[dict]] = {}
     for row in payload.curves:
         plants.setdefault(row["plant_id"], []).append(row)
 
     out: list[dict] = []
     for plant_id, rows in plants.items():
-        ordered = sorted(rows, key=lambda r: _date_key(r["date"]))
+        ordered = sorted(rows, key=lambda r: phenology.date_key(r["date"]))
         series = [(r["date"], float(r["ratio"])) for r in ordered]
         out.append(
             {
                 "plant_id": plant_id,
                 "accession": rows[0].get("accession"),
                 "n_datapoints": len(rows),
-                "catkin_05per_date": _crossing_date(series, 0.05),
-                "catkin_50per_date": _crossing_date(series, 0.50),
-                "catkin_95per_date": _crossing_date(series, 0.95),
+                **phenology.plant_milestones(series),
             }
         )
     return {"rows": out}
