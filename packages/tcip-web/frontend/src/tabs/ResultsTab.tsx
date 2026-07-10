@@ -48,7 +48,8 @@ export function ResultsTab() {
   );
   // No baked-in dates: derived from the dataset (Prefill), or edited by hand.
   const [predsByDate, setPredsByDate] = useState<string>("{}");
-  const [elongationHeight, setElongationHeight] = useState<number>(0.02);
+  // True unless a computed run reported that its predictions carried no elongation class.
+  const [elongationUnclassified, setElongationUnclassified] = useState(false);
 
   // Dataset tree (dates + prediction-model dir names) used for prefill.
   const [dates, setDates] = useState<string[]>([]);
@@ -134,11 +135,19 @@ export function ResultsTab() {
         project_root: projectRoot,
         mapping_path: mappingPath,
         predictions_by_date: predsMap,
-        elongation_height: elongationHeight,
       });
+      const unclassified = curveRes.elongation_classified === false;
+      setElongationUnclassified(unclassified);
       setCurves(curveRes.rows ?? []);
-      const onsetRes = await resultsApi.onsetDates(curveRes.rows ?? []);
-      setOnset(onsetRes.rows ?? []);
+      if (unclassified) {
+        // No elongation class → the fraction is not a bloom measurement. Don't derive
+        // milestones from it at all, so there is nothing to export (belt-and-braces with the
+        // disabled export buttons + the compute_phenology MCP tool's hard refusal).
+        setOnset([]);
+      } else {
+        const onsetRes = await resultsApi.onsetDates(curveRes.rows ?? []);
+        setOnset(onsetRes.rows ?? []);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -163,8 +172,17 @@ export function ResultsTab() {
     }
   }
 
-  const downloadOnsetCsv = () => downloadCsv(onset, "catkin_phenology.csv");
-  const downloadCurvesCsv = () => downloadCsv(curves, "catkin_curves.csv");
+  // Measurement-integrity guard: never export a bloom CSV built on predictions that carry
+  // no elongation class. Mirrors the compute_phenology MCP tool, which hard-refuses the same
+  // case, so the GUI and the agent surface behave identically (see CLAUDE.md invariant).
+  const downloadOnsetCsv = () => {
+    if (elongationUnclassified) return;
+    void downloadCsv(onset, "catkin_phenology.csv");
+  };
+  const downloadCurvesCsv = () => {
+    if (elongationUnclassified) return;
+    void downloadCsv(curves, "catkin_curves.csv");
+  };
 
   const chartData: DateRow[] = useMemo(() => {
     const byDate: Record<string, DateRow> = {};
@@ -275,19 +293,17 @@ export function ResultsTab() {
             />
           </div>
           <div className="flex flex-col gap-2">
-            <label className="tcip-label">Elongation bbox-height threshold</label>
-            <input
-              className="tcip-input"
-              type="number"
-              step="0.005"
-              min="0"
-              max="1"
-              value={elongationHeight}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                setElongationHeight(Number.isFinite(v) ? v : 0.02);
-              }}
-            />
+            <p className="text-[11px] text-tcip-muted">
+              Bloom = the fraction of a plant's detected catkins that are elongated. Elongation is a
+              class from the validated classifier, not a bbox measurement — predictions must be
+              elongation-classified.
+            </p>
+            {elongationUnclassified && (
+              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
+                These predictions carry no elongation class — the curves below are not a valid bloom
+                measurement, so CSV export is disabled. Run the elongation classifier first.
+              </div>
+            )}
             <button className="tcip-btn-primary" onClick={compute} disabled={loading}>
               {loading ? "Computing…" : "Compute curves + onset dates"}
             </button>
@@ -295,14 +311,14 @@ export function ResultsTab() {
               <button
                 className="tcip-btn flex-1 text-[11px]"
                 onClick={downloadCurvesCsv}
-                disabled={curves.length === 0}
+                disabled={curves.length === 0 || elongationUnclassified}
               >
                 Curves CSV
               </button>
               <button
                 className="tcip-btn-primary flex-1 text-[11px]"
                 onClick={downloadOnsetCsv}
-                disabled={onset.length === 0}
+                disabled={onset.length === 0 || elongationUnclassified}
               >
                 Onset CSV
               </button>
@@ -354,7 +370,7 @@ export function ResultsTab() {
 
       <div className="tcip-panel p-4">
         <div className="tcip-heading mb-3">
-          Onset dates (catkin_05 / 50 / 95 per plant) — {onset.length} rows
+          Onset dates (elongation + catkin_05 / 50 / 95 per plant) — {onset.length} rows
         </div>
         {onset.length > 0 ? (
           <div className="overflow-auto max-h-96">
@@ -364,6 +380,7 @@ export function ResultsTab() {
                   <th className="tcip-th">Plant ID</th>
                   <th className="tcip-th">Accession</th>
                   <th className="tcip-th">N points</th>
+                  <th className="tcip-th">Elongation date</th>
                   <th className="tcip-th">05per date</th>
                   <th className="tcip-th">50per date</th>
                   <th className="tcip-th">95per date</th>
@@ -375,6 +392,7 @@ export function ResultsTab() {
                     <td className="py-1.5 pr-3 font-mono">{r.plant_id}</td>
                     <td className="pr-3">{r.accession ?? "—"}</td>
                     <td className="pr-3 tabular-nums">{r.n_datapoints}</td>
+                    <td className="pr-3 tabular-nums">{r.catkin_elongation_date ?? "—"}</td>
                     <td className="pr-3 tabular-nums">{r.catkin_05per_date ?? "—"}</td>
                     <td className="pr-3 tabular-nums">{r.catkin_50per_date ?? "—"}</td>
                     <td className="pr-3 tabular-nums">{r.catkin_95per_date ?? "—"}</td>
