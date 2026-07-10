@@ -72,6 +72,31 @@ def test_dataset_tree(client: TestClient, dataset_root: Path) -> None:
     assert "3-2-26" in body["dates_with_images"]
     assert sorted(body["annotation_types"]) == ["bush", "catkin"]
     assert "baseline" in body["model_names"]
+    # Per-date maps present for every image date (empty here — the fixture makes trait
+    # dirs but no label files).
+    assert set(body["traits_by_date"]) == {"2-11-26", "3-2-26"}
+    assert body["traits_by_date"]["2-11-26"] == []
+
+
+def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_path: Path) -> None:
+    root = tmp_path / "ds"
+    (root / "images" / "2026-02-11").mkdir(parents=True)
+    (root / "images" / "2026-03-24").mkdir(parents=True)
+    Image.new("RGB", (8, 8)).save(root / "images" / "2026-02-11" / "IMG_1.JPG")
+    Image.new("RGB", (8, 8)).save(root / "images" / "2026-03-24" / "IMG_2.JPG")
+    # catkin labelled + baseline predicted on 02-11; nothing on 03-24.
+    det = root / "annotations" / "catkin" / "2026-02-11" / "detect"
+    det.mkdir(parents=True)
+    (det / "IMG_1.txt").write_text("0 0.5 0.5 0.1 0.1\n", encoding="utf-8")
+    pdet = root / "predictions" / "baseline" / "2026-02-11" / "detect"
+    pdet.mkdir(parents=True)
+    (pdet / "IMG_1.txt").write_text("0 0.9 0.5 0.5 0.1 0.1\n", encoding="utf-8")
+
+    body = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
+    assert body["traits_by_date"]["2026-02-11"] == ["catkin"]
+    assert body["traits_by_date"]["2026-03-24"] == []
+    assert body["models_by_date"]["2026-02-11"] == ["baseline"]
+    assert body["models_by_date"]["2026-03-24"] == []
 
 
 def test_dataset_list_images(client: TestClient, dataset_root: Path) -> None:
@@ -105,6 +130,35 @@ def test_dataset_select_populates_state(client: TestClient, dataset_root: Path, 
     assert sel["annotations_detect_dir"].endswith("catkin/2-11-26/detect") or sel[
         "annotations_detect_dir"
     ].endswith("catkin\\2-11-26\\detect")
+
+
+def test_dataset_select_advisory_reflects_actual_labels(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    body = {
+        "project_root": str(project),
+        "dataset_root": str(dataset_root),
+        "annotation_type": "catkin",
+        "date": "2-11-26",
+        "model_name": "baseline",
+    }
+    # The fixture makes the annotation dirs but no label files → advisory says "starts empty".
+    r1 = client.post("/api/dataset/select", json=body).json()
+    assert r1["annotations_present"] is False
+    assert r1["predictions_present"] is False
+
+    # Drop in a real label + prediction; the advisory flips to present (never rejects either way).
+    (dataset_root / "annotations" / "catkin" / "2-11-26" / "detect" / "IMG_0000.txt").write_text(
+        "0 0.5 0.5 0.1 0.1\n", encoding="utf-8"
+    )
+    pdet = dataset_root / "predictions" / "baseline" / "2-11-26" / "detect"
+    pdet.mkdir(parents=True, exist_ok=True)
+    (pdet / "IMG_0000.txt").write_text("0 0.9 0.5 0.5 0.1 0.1\n", encoding="utf-8")
+    r2 = client.post("/api/dataset/select", json=body).json()
+    assert r2["annotations_present"] is True
+    assert r2["predictions_present"] is True
 
 
 # ── /api/images ──────────────────────────────────────────────────────────
