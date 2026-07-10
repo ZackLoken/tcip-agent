@@ -17,6 +17,10 @@ interface Tree {
   dates_with_images: string[];
   annotation_types: string[];
   model_names: string[];
+  // Per-date availability — the selectors below filter to these so a date with no
+  // catkin labels doesn't offer "catkin" (which would open an empty canvas).
+  traits_by_date: Record<string, string[]>;
+  models_by_date: Record<string, string[]>;
 }
 
 function friendlyScanError(msg: string): string {
@@ -47,6 +51,21 @@ export function AdvancedFolderOpen() {
   const [submitting, setSubmitting] = useState(false);
   const [browsing, setBrowsing] = useState<"project" | "dataset" | null>(null);
   const patchGui = useStore((s) => s.patchGui);
+
+  // Traits/models that actually have data on the chosen date (empty until a tree is
+  // scanned or when nothing is labelled/predicted there).
+  const availTraits = tree ? (tree.traits_by_date[date] ?? []) : [];
+  const availModels = tree ? (tree.models_by_date[date] ?? []) : [];
+
+  // Changing date re-scopes the trait/model choices: keep the current pick if still valid
+  // on the new date, else fall to the first available (or none).
+  function chooseDate(newDate: string) {
+    setDate(newDate);
+    const traits = tree ? (tree.traits_by_date[newDate] ?? []) : [];
+    const models = tree ? (tree.models_by_date[newDate] ?? []) : [];
+    setAnnotationType((prev) => (traits.includes(prev) ? prev : (traits[0] ?? "")));
+    setModelName((prev) => (models.includes(prev) ? prev : (models[0] ?? "")));
+  }
 
   useEffect(() => {
     if (!datasetRoot) {
@@ -205,7 +224,7 @@ export function AdvancedFolderOpen() {
           <select
             className="tcip-select"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => chooseDate(e.target.value)}
             disabled={!tree}
           >
             <option value="">—</option>
@@ -227,8 +246,8 @@ export function AdvancedFolderOpen() {
             onChange={(e) => setAnnotationType(e.target.value)}
             disabled={!tree}
           >
-            <option value="">—</option>
-            {tree?.annotation_types.map((t) => (
+            <option value="">{availTraits.length ? "—" : "no labels this date"}</option>
+            {availTraits.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>
@@ -246,8 +265,8 @@ export function AdvancedFolderOpen() {
             onChange={(e) => setModelName(e.target.value)}
             disabled={!tree}
           >
-            <option value="">—</option>
-            {tree?.model_names.map((m) => (
+            <option value="">{availModels.length ? "—" : "no preds this date"}</option>
+            {availModels.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>
