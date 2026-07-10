@@ -22,11 +22,14 @@ loopback trust boundary without adding auth.
 from __future__ import annotations
 
 import codecs
+import json
 import logging
 import os
 import shlex
 import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Callable, Optional
@@ -66,14 +69,63 @@ def _repo_root() -> Path:
     return Path(os.getcwd())
 
 
+def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
+    """Rewrite ``python <rel>/agent_*_guard.py`` → ``"<python>" "<guard_dir>/<script>"``.
+
+    Only rewrites a command that invokes an ``agent_*_guard.py`` script; anything else is
+    returned unchanged. Quoted, forward-slashed paths parse under both cmd.exe and POSIX sh.
+    """
+    for tok in command.split():
+        name = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if name.startswith("agent_") and name.endswith("_guard.py"):
+            return f'"{python}" "{guard_dir}/{name}"'
+    return command
+
+
+def _materialize_fence_settings() -> Optional[Path]:
+    """Write a spawn-time copy of the fence settings with ABSOLUTE hook commands.
+
+    The committed template stores each PreToolUse guard command repo-relative
+    (``python packages/tcip-web/src/tcip_web/agent_bash_guard.py``) for readability, but a
+    PreToolUse hook runs from an unpredictable cwd — the Bash/PowerShell tool's persistent
+    ``cd`` moves it — so a relative path fails to even *locate* the script: the interpreter
+    exits 2, which Claude Code reads as a *block*, denying every command after a ``cd`` (the
+    reported "guard blocks all listings after cd"). We rewrite each guard command to an
+    absolute ``"<python>" "<guard_dir>/agent_*_guard.py"`` (this process's ``sys.executable``
+    + the guard directory) and hand that file to ``--settings``. Python — not the shell —
+    resolves the path, so there is no cwd dependency and no ``$VAR`` cross-platform hazard.
+
+    Returns the materialized file, or ``None`` if the template is missing/unreadable (the
+    caller then falls back to the committed file, so the fence is never silently dropped).
+    """
+    if not _FENCE_SETTINGS.is_file():
+        return None
+    try:
+        cfg = json.loads(_FENCE_SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    guard_dir = _FENCE_SETTINGS.parent.as_posix()
+    python = Path(sys.executable).as_posix()
+    for group in cfg.get("hooks", {}).get("PreToolUse", []):
+        for hook in group.get("hooks", []):
+            hook["command"] = _absolutize_guard_command(hook.get("command", ""), python, guard_dir)
+    dest = Path(tempfile.gettempdir()) / "tcip_agent_fence.settings.json"
+    try:
+        dest.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    except OSError:
+        return None
+    return dest
+
+
 def resolve_terminal_command() -> Optional[list[str]]:
     """Argv for the agent terminal, or ``None`` when unavailable.
 
     Order: an explicit ``TCIP_TERMINAL_CMD`` override (tests / power users), then the
     ``claude`` CLI on PATH. The real CLI is spawned **fenced**: ``--settings`` applies the
-    committed breeder-lane permission profile, ``--add-dir`` grants the out-of-repo
-    workspace, and ``--permission-mode default`` surfaces anything un-allowed to the human
-    for approval rather than auto-running or auto-denying it.
+    committed breeder-lane permission profile (materialized with absolute hook paths so the
+    Bash/PowerShell guards survive a ``cd``), ``--add-dir`` grants the out-of-repo workspace,
+    and ``--permission-mode default`` surfaces anything un-allowed to the human for approval
+    rather than auto-running or auto-denying it.
     """
     override = os.environ.get(TERMINAL_CMD_ENV, "").strip()
     if override:
@@ -88,9 +140,17 @@ def resolve_terminal_command() -> Optional[list[str]]:
     if _FENCE_SETTINGS.is_file():
         from tcip_mcp.workspace import workspace_root
 
+        materialized = _materialize_fence_settings()
+        if materialized is None:
+            logger.warning(
+                "Could not materialize absolute fence hook paths; falling back to the committed "
+                "template. Its relative hook paths OVER-deny after a shell cd (fail-safe, but "
+                "friction) — check temp-dir writability."
+            )
+        settings_path = materialized or _FENCE_SETTINGS
         argv += [
             "--settings",
-            str(_FENCE_SETTINGS),
+            str(settings_path),
             "--add-dir",
             str(workspace_root()),
             "--permission-mode",
