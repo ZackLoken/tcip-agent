@@ -1,8 +1,9 @@
 """Tests for per-plant aggregation postprocessing.
 
 Covers the plant_id extraction fallback (the source of a delivery-CSV
-fragmentation bug), the explicit plant_id_key / plant_id_fn override paths, the
-aggregation strategies, and the sigmoid time-axis extraction.
+fragmentation bug), the explicit plant_id_key / plant_id_fn override paths, and the
+aggregation strategies (count / mean / mode / sum). Bloom phenology milestones are
+NOT here — they are the elongated-fraction crossing, tested in test_phenology.py.
 """
 
 from __future__ import annotations
@@ -150,55 +151,6 @@ def test_mode_strategy():
 def test_unknown_strategy_raises():
     with pytest.raises(ValueError, match="Unknown aggregation strategy"):
         aggregate_per_plant([{"image": "a_b_c", "count": 1}], strategy="nope")
-
-
-# ── sigmoid time-axis extraction ────────────────────────────────────────────
-
-
-def test_sigmoid_milestones_basic():
-    # A monotonic rise across four time points; 50% crossing interpolated.
-    results = [
-        {"image": "p_1_1", "day_of_year": 100, "count": 0.0},
-        {"image": "p_1_2", "day_of_year": 110, "count": 2.0},
-        {"image": "p_1_3", "day_of_year": 120, "count": 8.0},
-        {"image": "p_1_4", "day_of_year": 130, "count": 10.0},
-    ]
-    out = aggregate_per_plant(results, strategy="sigmoid", value_key="count")
-    fit = out[0]["fit"]
-    assert fit["n_points"] == 4
-    assert fit["milestones"]["50per"] is not None
-
-
-def test_sigmoid_time_index_zero_is_not_dropped():
-    # time_index=0 is a valid first time point; the explicit is-not-None
-    # precedence must include it (an ``or``-chain would drop the falsy 0).
-    results = [
-        {"image": "p_1_1", "time_index": 0, "count": 0.0},
-        {"image": "p_1_2", "time_index": 1, "count": 5.0},
-        {"image": "p_1_3", "time_index": 2, "count": 10.0},
-    ]
-    out = aggregate_per_plant(results, strategy="sigmoid", value_key="count")
-    assert out[0]["fit"]["n_points"] == 3
-
-
-def test_sigmoid_day_of_year_zero_is_not_dropped():
-    # A falsy 0 in the first (highest-precedence) time key must survive.
-    results = [
-        {"image": "p_1_1", "day_of_year": 0, "count": 0.0},
-        {"image": "p_1_2", "day_of_year": 5, "count": 5.0},
-        {"image": "p_1_3", "day_of_year": 10, "count": 10.0},
-    ]
-    out = aggregate_per_plant(results, strategy="sigmoid", value_key="count")
-    assert out[0]["fit"]["n_points"] == 3
-
-
-def test_sigmoid_insufficient_data():
-    results = [
-        {"image": "p_1_1", "day_of_year": 100, "count": 1.0},
-        {"image": "p_1_2", "day_of_year": 110, "count": 2.0},
-    ]
-    out = aggregate_per_plant(results, strategy="sigmoid", value_key="count")
-    assert out[0]["fit"]["error"] == "insufficient_data"
 
 
 # ── CSV export ──────────────────────────────────────────────────────────────
