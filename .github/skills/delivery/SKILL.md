@@ -26,7 +26,7 @@ Different trait types require different aggregation from per-image to per-plant:
 | Trait Type | Aggregation | Example |
 |-----------|-------------|---------|
 | Count | Median across images | catkin_count → median of 5 flight images |
-| Date | Sigmoid curve fitting | bloom_date → inflection point of sigmoid fit |
+| Date (bloom) | Elongated-fraction crossing | catkin_50per_date → date the elongated fraction crosses 50% (see `phenology` skill) |
 | Ordinal | Mode | disease_severity → most common rating |
 | Continuous | Mean | fruit_diameter → average across images |
 | Area | Sum | canopy_area → sum of segmented pixels |
@@ -38,6 +38,7 @@ Different trait types require different aggregation from per-image to per-plant:
 | `export_results_csv` | Generate per-plant CSV from inference results |
 | `export_predictions_yolo` | Export predictions in YOLO format |
 | `run_inference` | Run batch inference on images |
+| `compute_phenology` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping — its own column schema; see `phenology` skill |
 
 ## Quality Control
 
