@@ -1,4 +1,4 @@
-"""Unit tests for tcip_web.plant_mapping."""
+"""Unit tests for the plant-mapping pipeline module."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tcip_web.plant_mapping import (
+from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     Assignment,
     ImageStamp,
     PlantRecord,
@@ -132,7 +132,6 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
                 date_folder="2-11-26",
                 plot_name="PLOT1",
                 accession_name="A",
-                confidence=0.8,
                 source="sequence",
                 distance_m=1.2,
             )
@@ -144,7 +143,7 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
     loaded = load_mapping(out)
     assert list(loaded.keys()) == ["2-11-26"]
     assert loaded["2-11-26"][0].plot_name == "PLOT1"
-    assert loaded["2-11-26"][0].confidence == pytest.approx(0.8)
+    assert loaded["2-11-26"][0].source == "sequence"
     assert loaded["2-11-26"][0].distance_m == pytest.approx(1.2)
 
 
