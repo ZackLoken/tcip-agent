@@ -28,6 +28,7 @@ import shlex
 import shutil
 import subprocess
 import threading
+from pathlib import Path
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -40,18 +41,39 @@ DEFAULT_CLI = "claude"
 DEFAULT_ROWS = 30
 DEFAULT_COLS = 100
 
+# The committed permission fence for the in-app (breeder-lane) agent. Passed via
+# --settings, which merges at CLI precedence — so the developer's own `claude`
+# sessions (no --settings) stay unrestricted. See AGENT_GOVERNANCE_PLAN.md.
+_FENCE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
+
 _UNAVAILABLE_REASON = (
     "Claude Code is not available. Install the `claude` CLI and sign in "
     "(subscription or ANTHROPIC_API_KEY) to enable the in-app agent terminal."
 )
 
 
+def _repo_root() -> Path:
+    """The repo root — the ancestor of this file that holds ``.mcp.json`` / ``CLAUDE.md``.
+
+    Resolved from ``__file__`` (not the launch cwd) so the fence's cwd-relative deny
+    paths and hook command bind to the repo reliably, however tcip-web was started.
+    Falls back to the process cwd if no marker is found (e.g. an unusual install).
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / ".mcp.json").is_file() or (parent / "CLAUDE.md").is_file():
+            return parent
+    return Path(os.getcwd())
+
+
 def resolve_terminal_command() -> Optional[list[str]]:
     """Argv for the agent terminal, or ``None`` when unavailable.
 
     Order: an explicit ``TCIP_TERMINAL_CMD`` override (tests / power users), then the
-    ``claude`` CLI on PATH — spawned with **no arguments**: the interactive TUI is the
-    product here.
+    ``claude`` CLI on PATH. The real CLI is spawned **fenced**: ``--settings`` applies the
+    committed breeder-lane permission profile, ``--add-dir`` grants the out-of-repo
+    workspace, and ``--permission-mode default`` surfaces anything un-allowed to the human
+    for approval rather than auto-running or auto-denying it.
     """
     override = os.environ.get(TERMINAL_CMD_ENV, "").strip()
     if override:
@@ -60,9 +82,21 @@ def resolve_terminal_command() -> Optional[list[str]]:
         return shlex.split(override)
     cli = os.environ.get(TERMINAL_CLI_ENV, DEFAULT_CLI)
     exe = shutil.which(cli)
-    if exe:
-        return [exe]
-    return None
+    if exe is None:
+        return None
+    argv = [exe]
+    if _FENCE_SETTINGS.is_file():
+        from tcip_mcp.workspace import workspace_root
+
+        argv += [
+            "--settings",
+            str(_FENCE_SETTINGS),
+            "--add-dir",
+            str(workspace_root()),
+            "--permission-mode",
+            "default",
+        ]
+    return argv
 
 
 def _pty_backend_available() -> tuple[bool, str]:
@@ -87,8 +121,9 @@ def terminal_status() -> dict:
 
 
 def terminal_cwd() -> str:
-    """Where the agent runs: the repo root tcip-web was launched from (overridable)."""
-    return os.environ.get(TERMINAL_CWD_ENV, os.getcwd())
+    """Where the agent runs: the repo root (so .mcp.json / CLAUDE.md / skills load and the
+    fence's cwd-relative deny paths bind correctly). Overridable via env."""
+    return os.environ.get(TERMINAL_CWD_ENV, str(_repo_root()))
 
 
 # ── PTY backends ────────────────────────────────────────────────────────
