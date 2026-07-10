@@ -10,6 +10,7 @@ import { StatusBar } from "@/components/StatusBar";
 import { Toasts } from "@/components/Toasts";
 import { TopBar } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
+import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
 import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -54,25 +55,39 @@ function App() {
   // ingesting a breeder's images), open it here so the GUI lands on what it built.
   useEffect(() => {
     const unsubscribe = stateSocket.subscribePanel("app", (ev) => {
-      if (ev.event_type !== "active_project_changed") return;
-      const name = (ev.data as { name?: string }).name;
-      if (!name) return;
-      void openProjectByName(name)
-        .then((selection) => {
-          if (!selection) return;
-          useStore.getState().patchGui({ dataset: selection });
-          if (!selection.date) {
-            // No dated capture to land on — say so instead of appearing to do nothing.
+      if (ev.event_type === "active_project_changed") {
+        const name = (ev.data as { name?: string }).name;
+        if (!name) return;
+        void openProjectByName(name)
+          .then((selection) => {
+            if (!selection) return;
+            useStore.getState().patchGui({ dataset: selection });
+            if (!selection.date) {
+              // No dated capture to land on — say so instead of appearing to do nothing.
+              useStore
+                .getState()
+                .pushToast(`Opened ${name}, but it has no dated images yet.`, "info");
+            }
+          })
+          .catch(() => {
             useStore
               .getState()
-              .pushToast(`Opened ${name}, but it has no dated images yet.`, "info");
-          }
-        })
-        .catch(() => {
+              .pushToast(`Agent opened a project but it couldn't be loaded: ${name}`);
+          });
+        return;
+      }
+
+      // Agent → GUI "focus the Annotate tab": land on a (trait, date) in the right mode on an
+      // annotated frame (see applyAnnotateFocus — uses local setters like Review→Edit so the
+      // deliberate "mode/index stay local" behavior of mergeSnapshot is preserved).
+      if (ev.event_type === "annotate_focus") {
+        void applyAnnotateFocus(ev.data as AnnotateFocusData).catch(() => {
           useStore
             .getState()
-            .pushToast(`Agent opened a project but it couldn't be loaded: ${name}`);
+            .pushToast("Agent tried to focus the Annotate tab, but it couldn't be applied.");
         });
+        return;
+      }
     });
     return unsubscribe;
   }, []);
