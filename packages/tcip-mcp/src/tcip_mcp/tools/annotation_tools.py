@@ -591,3 +591,118 @@ def push_panel_data(
     result.setdefault("panel", panel)
     result.setdefault("event_type", event_type)
     return result
+
+
+@mcp.tool()
+@audited
+def focus_annotate(
+    project_root: str,
+    dataset_root: str,
+    trait: str,
+    date: str,
+    mode: str | None = None,
+    image_index: int | None = None,
+) -> dict:
+    """Drive the live Annotate tab to a (trait, date), in the right mode, on an annotated frame.
+
+    Switching *only* the dataset selection lands the browser at image 0 in **box** mode — which
+    hides polygons and usually shows an unannotated frame, so the human sees a blank canvas
+    (the exact failure a real session hit on "switch to the bush polygons"). This posts an
+    explicit ``annotate_focus`` event the GUI honors with local view setters — the same path the
+    Review→Edit button uses — so the tab lands on the FIRST annotated image in the correct mode
+    with no manual steps. Requires the GUI to be running; returns ``delivered: false`` if not.
+
+    Args:
+        project_root: Project root (== dataset_root for workspace projects).
+        dataset_root: Dataset root holding ``images/`` and ``annotations/``.
+        trait: Annotation campaign (e.g. "catkin", "bush").
+        date: Capture-date bucket (e.g. "2026-03-02").
+        mode: "box" or "polygon". Default: inferred from the labels present on that frame
+            (segment → polygon, detect → box).
+        image_index: Index into the date's sorted image list. Default: the first image with a
+            non-empty label, so the canvas isn't blank.
+    """
+    from pathlib import Path
+
+    from tcip_mcp.dataset_layout import annotation_dir, image_dir
+    from tcip_mcp.web_client import post_panel_event
+
+    img_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
+    idir = Path(image_dir(dataset_root, date))
+    if not idir.is_dir():
+        return {"error": f"no images for date {date} under {dataset_root}"}
+    # Match the /api/dataset/select listing EXACTLY (p.is_file() + same ext set + sorted), so
+    # the resolved index lines up with the frontend's image_list, not one frame off.
+    images = sorted(p.name for p in idir.iterdir() if p.is_file() and p.suffix.lower() in img_exts)
+    if not images:
+        return {"error": f"no images on {date}"}
+
+    seg_dir = Path(annotation_dir(dataset_root, trait, date, "segment"))
+    det_dir = Path(annotation_dir(dataset_root, trait, date, "detect"))
+
+    def _label_task(stem: str) -> str | None:
+        # "segment"/"detect" if a NON-EMPTY label exists (something to show), else None.
+        for task, d in (("segment", seg_dir), ("detect", det_dir)):
+            f = d / f"{stem}.txt"
+            if f.is_file() and f.stat().st_size > 0:
+                return task
+        return None
+
+    def _first_class(stem: str, task: str) -> int | None:
+        d = seg_dir if task == "segment" else det_dir
+        try:
+            for line in (d / f"{stem}.txt").read_text(encoding="utf-8").splitlines():
+                parts = line.split()
+                if parts:
+                    return int(float(parts[0]))
+        except (OSError, ValueError):
+            pass
+        return None
+
+    n_annotated = 0
+    first_idx: int | None = None
+    for i, name in enumerate(images):
+        if _label_task(Path(name).stem) is not None:
+            n_annotated += 1
+            if first_idx is None:
+                first_idx = i
+
+    if image_index is None:
+        image_index = first_idx if first_idx is not None else 0
+    image_index = max(0, min(image_index, len(images) - 1))
+
+    # Mode + active class come from the frame ACTUALLY shown (images[image_index]) — not the
+    # first-annotated frame — so an explicit image_index gets a consistent mode/class. The
+    # canvas only renders shapes of the active class, so setting it is what keeps it non-blank.
+    resolved_stem = Path(images[image_index]).stem
+    resolved_task = _label_task(resolved_stem)
+    if mode is None:
+        mode = "polygon" if resolved_task == "segment" else "box"
+    if mode not in ("box", "polygon"):
+        return {"error": f"mode must be 'box' or 'polygon', got {mode!r}"}
+    active_class = _first_class(resolved_stem, resolved_task) if resolved_task else None
+
+    payload = {
+        "project_root": project_root,
+        "dataset_root": dataset_root,
+        "trait": trait,
+        "date": date,
+        "image_index": image_index,
+        "mode": mode,
+    }
+    if active_class is not None:
+        payload["active_class"] = active_class
+
+    result = post_panel_event("app", "annotate_focus", payload)
+    return {
+        "delivered": result.get("delivered", False),
+        "status": result.get("status"),
+        "trait": trait,
+        "date": date,
+        "image_index": image_index,
+        "mode": mode,
+        "active_class": active_class,
+        "n_images": len(images),
+        "n_annotated": n_annotated,
+        "image": images[image_index],
+    }
