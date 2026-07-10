@@ -45,7 +45,18 @@
       "Bash(grep:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
-      "Bash(git diff:*)"
+      "Bash(git diff:*)",
+      "PowerShell(Get-ChildItem:*)",
+      "PowerShell(Get-Content:*)",
+      "PowerShell(Get-Item:*)",
+      "PowerShell(Get-Location)",
+      "PowerShell(Test-Path:*)",
+      "PowerShell(Select-String:*)",
+      "PowerShell(Get-Process:*)",
+      "PowerShell(Get-NetTCPConnection:*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git log:*)",
+      "PowerShell(git diff:*)"
     ]
   },
   "hooks": {
@@ -56,6 +67,15 @@
           {
             "type": "command",
             "command": "python packages/tcip-web/src/tcip_web/agent_bash_guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python packages/tcip-web/src/tcip_web/agent_powershell_guard.py"
           }
         ]
       }
