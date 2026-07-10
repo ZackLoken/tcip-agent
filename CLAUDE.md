@@ -57,6 +57,24 @@ that silently corrupts results and compounds across sessions. So:
 
 ## Invariants that protect the science (hard rules)
 
+- **Measurement integrity — the highest rule.** This is a computer-vision *and* a
+  breeding platform: a confident, precise, wrong phenotype is the worst thing it can
+  produce. So:
+  - **The domain expert defines each trait's measurement**, grounded in the imagery. You
+    (Claude) are the CV engineer who operationalizes *their* definition; never substitute
+    your own. If the definition is unclear, stop and ask — do not infer it.
+  - **Never invent a proxy for a biological/phenotypic quantity.** A bounding-box height,
+    aspect ratio, or any geometric surrogate is *not* a measurement of a morphological
+    stage. If a trait can't yet be measured validly from pixels, say so — do not
+    manufacture a number so a result appears. (A prior session defined catkin "elongation"
+    from bbox height; it was invalid science, shipped fabricated phenology CSVs, and has
+    been removed — do not do this.)
+  - **Validate the measurement against expert-scored ground truth before producing any
+    downstream result** (curve, milestone, CSV, delivery). No validated measurement → no
+    result.
+  - **Never commit unvalidated domain logic as if it were a definition.** Provisional logic
+    is flagged provisional and validated or removed; it must not silently become
+    institutional truth that the next session reuses.
 - **Empty label files are valid negatives**, not noise. Never delete/skip without asking.
 - **Never train or evaluate on an unconfirmed format.** If `load_annotations`
   returns `"format_confident": false`, stop and confirm the format — an undetected
