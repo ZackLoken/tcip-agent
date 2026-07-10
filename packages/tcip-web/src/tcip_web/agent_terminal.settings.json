@@ -1,0 +1,64 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(packages/**)",
+      "Write(packages/**)",
+      "MultiEdit(packages/**)",
+      "NotebookEdit(packages/**)",
+      "Edit(tests/**)",
+      "Write(tests/**)",
+      "MultiEdit(tests/**)",
+      "Edit(.github/**)",
+      "Write(.github/**)",
+      "Edit(scripts/**)",
+      "Write(scripts/**)",
+      "Edit(.claude/**)",
+      "Write(.claude/**)",
+      "Edit(CLAUDE.md)",
+      "Write(CLAUDE.md)",
+      "Edit(.mcp.json)",
+      "Write(.mcp.json)",
+      "Edit(pyproject.toml)",
+      "Write(pyproject.toml)",
+      "Edit(package.json)",
+      "Write(package.json)",
+      "Edit(tsconfig.json)",
+      "Write(tsconfig.json)",
+      "Edit(.gitignore)",
+      "Write(.gitignore)",
+      "Edit(README.md)",
+      "Write(README.md)",
+      "Bash(rm:*)",
+      "Bash(rmdir:*)",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)",
+      "Bash(git clean:*)"
+    ],
+    "allow": [
+      "mcp__tcip__*",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(pwd)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python packages/tcip-web/src/tcip_web/agent_bash_guard.py"
+          }
+        ]
+      }
+    ]
+  }
+}
