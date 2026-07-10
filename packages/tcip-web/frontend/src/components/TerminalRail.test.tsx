@@ -18,6 +18,9 @@ const { termInstances, MockTerminal } = vi.hoisted(() => {
     dispose = vi.fn();
     focus = vi.fn();
     paste = vi.fn();
+    getSelection = vi.fn(() => "");
+    hasSelection = vi.fn(() => false);
+    attachCustomKeyEventHandler = vi.fn();
     onData = vi.fn(() => ({ dispose: vi.fn() }));
     onResize = vi.fn(() => ({ dispose: vi.fn() }));
     constructor() {
@@ -135,6 +138,19 @@ describe("TerminalRail", () => {
     Object.defineProperty(evt, "clipboardData", { value: { getData: () => "pasted text" } });
     host.dispatchEvent(evt);
     expect(termInstances[0].paste).toHaveBeenCalledWith("pasted text");
+  });
+
+  it("copies the terminal selection to the clipboard when a drag-select ends", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<TerminalRail />);
+    const host = await screen.findByTestId("terminal-host");
+    await waitFor(() => expect(termInstances[0].focus).toHaveBeenCalled());
+    const term = termInstances[0];
+    term.hasSelection.mockReturnValue(true);
+    term.getSelection.mockReturnValue("selected transcript text");
+    host.dispatchEvent(new Event("mouseup", { bubbles: true }));
+    expect(writeText).toHaveBeenCalledWith("selected transcript text");
   });
 
   it("exposes a resize separator", async () => {
