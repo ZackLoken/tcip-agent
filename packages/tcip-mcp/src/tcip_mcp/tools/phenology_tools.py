@@ -105,6 +105,10 @@ def compute_phenology(
     predictions_by_date: dict[str, str],
     output_csv_path: str,
     elongated_class_id: int = 1,
+    classifier_validated: str | None = None,
+    operating_point_conf: float | None = None,
+    operating_point_validated: str | None = None,
+    acknowledge_unvalidated: bool = False,
 ) -> dict:
     """Per-plant catkin bloom milestones from classified predictions + a plant mapping.
 
@@ -159,13 +163,45 @@ def compute_phenology(
             "n_plants": len(rows),
         }
 
-    csv_path = phenology.write_phenology_csv(rows, Path(output_csv_path))
+    # Measurement-integrity gate (the numerator's validity): the phenotype rests on the
+    # elongated/dormant call being right, so a delivery requires a classifier validated against
+    # held-out GT — presence of the class is not enough. Refuse unless explicitly acknowledged,
+    # and in that case stamp the CSV validated=false so the un-trustworthiness travels downstream.
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+
+    # A delivered phenotype needs both the classifier and the count operating point validated against
+    # held-out GT — gate both, or acknowledge. The stamp uses the checked value, not the caller's string.
+    classifier_ok = classifier_validated == VALIDATED_HELD_OUT
+    op_ok = operating_point_validated == VALIDATED_HELD_OUT
+    if not (classifier_ok and op_ok) and not acknowledge_unvalidated:
+        return {
+            "error": (
+                "a delivered bloom phenotype requires BOTH a held-out-validated elongation classifier "
+                f"(got classifier_validated={classifier_validated!r}) AND a held-out-validated count "
+                f"operating point (got operating_point_validated={operating_point_validated!r}). "
+                "Validate both (evaluate_model task='classification' for the classifier; "
+                "resolve_operating_point for the count), or pass acknowledge_unvalidated=True to write "
+                "a clearly-flagged provisional CSV."
+            ),
+            "elongation_classifier_validated": classifier_validated or "false",
+            "operating_point_validated": operating_point_validated or "false",
+            "n_plants": len(rows),
+        }
+
+    stamp = {
+        "operating_point_conf": operating_point_conf,
+        "operating_point_validated": VALIDATED_HELD_OUT if op_ok else "false",
+        "elongation_classifier_validated": VALIDATED_HELD_OUT if classifier_ok else "false",
+    }
+    csv_path = phenology.write_phenology_csv(rows, Path(output_csv_path), stamp=stamp)
     n_with_50 = sum(1 for r in rows if r.get("catkin_50per_date"))
     return {
         "csv_path": csv_path,
         "n_plants": len(rows),
         "n_plants_reached_50per": n_with_50,
         "elongation_classified": True,
+        "elongation_classifier_validated": stamp["elongation_classifier_validated"],
+        "operating_point_validated": stamp["operating_point_validated"],
         "classes_seen": result["classes_seen"],
         "columns": phenology.PHENOLOGY_CSV_COLUMNS,
     }
