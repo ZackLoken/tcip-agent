@@ -16,15 +16,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tcip_mcp.project_paths import resolve_state
 from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, file_transaction, read_json
 
 logger = logging.getLogger(__name__)
 
+# Relative default (tests rebind this constant). Consumers must go through
+# ``experiments_dir()`` so the store anchors to ``$TCIP_PROJECT_ROOT`` when pinned (no
+# subdir fragmentation) while a rebound absolute path / unpinned cwd still work.
 EXPERIMENTS_DIR = Path(".tcip/experiments")
 
 
+def experiments_dir() -> Path:
+    """The experiment store, resolved against the pinned platform root at use time."""
+    return resolve_state(EXPERIMENTS_DIR)
+
+
 def _exp_dir(experiment_id: str) -> Path:
-    return EXPERIMENTS_DIR / experiment_id
+    return experiments_dir() / experiment_id
 
 
 def create_experiment(
@@ -267,11 +276,12 @@ def get_experiment(
 
 def list_experiments() -> list[dict[str, Any]]:
     """List all experiments with summary info."""
-    if not EXPERIMENTS_DIR.exists():
+    root = experiments_dir()
+    if not root.exists():
         return []
 
     experiments = []
-    for d in sorted(EXPERIMENTS_DIR.iterdir()):
+    for d in sorted(root.iterdir()):
         if not d.is_dir():
             continue
         status_path = d / "status.json"
