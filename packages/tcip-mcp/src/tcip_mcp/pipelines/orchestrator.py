@@ -298,7 +298,7 @@ def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
     t0 = time.perf_counter()
 
     try:
-        from PIL import Image
+        from tcip_mcp.pipelines.image_utils import load_image
 
         input_ref = phase.get("input")
         if not input_ref or input_ref not in context:
@@ -324,7 +324,9 @@ def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
             if img_path is None:
                 continue
 
-            img = Image.open(img_path).convert("RGB")
+            # EXIF-oriented so crops align with predictions (which the predictor emits in the
+            # same upright frame via load_image), not the raw sensor frame.
+            img = load_image(img_path, 3)
             w, h = img.size
             for i, line in enumerate(txt_path.read_text().splitlines()):
                 # Canonical prediction format: "cls conf cx cy w h" (normalized).
