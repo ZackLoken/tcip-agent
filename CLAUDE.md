@@ -92,6 +92,12 @@ that silently corrupts results and compounds across sessions. So:
 - Models compose from a spec (`backbone → neck → heads → loss`); the component
   registry is a **library, not a constraint** — compose, or build a module in
   PyTorch from scratch. Use `recommend_model_spec` for a starting point.
+- **Parameters: derive, don't pin.** When a threshold or operating point varies by
+  dataset / model / trait (conf, IoU-for-a-hit, NMS, tile, anchors, `max_dets`), the deliverable
+  is never the *value* — not one you pick, not one you derive from the current dataset and freeze
+  "for future data" (a constant with extra steps, wrong on the next). Build the agent's capability
+  to derive it from the data in hand, at runtime. The human defines a trait's *semantics* (what a
+  catkin is; what a milestone means); the agent derives the *operating points* that realize it.
 
 ## Visual analysis loop
 
@@ -112,7 +118,11 @@ cd packages/tcip-web/frontend && npm run typecheck && npm run build   # build �
 python -m tcip_web                 # backend + built UI → http://127.0.0.1:8765
 ```
 
-The MCP server auto-launches when an MCP client connects (`.mcp.json`).
+The MCP server auto-launches when an MCP client connects (`.mcp.json`). If the
+`mcp__tcip__*` tools aren't available, the repo's `.mcp.json` didn't launch it — you're
+not at the repo root; relaunch from there. Durable platform state (`.tcip/audit.jsonl`,
+`.tcip/experiments/`) resolves via `$TCIP_PROJECT_ROOT` (the server/backend pin it to the
+repo root at startup), so a process started from a subdir no longer fragments `.tcip/`.
 
 ## Conventions
 
