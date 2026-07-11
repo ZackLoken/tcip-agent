@@ -706,3 +706,46 @@ def focus_annotate(
         "n_annotated": n_annotated,
         "image": images[image_index],
     }
+
+
+@mcp.tool()
+@audited
+def write_class_map(labels_dir: str, class_names: str = "", output_path: str = "") -> dict:
+    """Persist the class map (id -> name/color) derived from a label set to ``classes.json``.
+
+    Enumerates the class ids actually present in ``<labels_dir>/*.txt`` (YOLO ``cls ...`` per line)
+    and writes the canonical ``<project>/.tcip/state/classes.json`` the GUI and pipeline read — so
+    class identity and ``num_classes`` have one durable, audited source (derived from the labels in
+    hand) instead of a pinned integer. ``class_names`` is an optional comma-separated list indexed by
+    class id; unnamed ids fall back to ``class_<id>``.
+    """
+    import json as _json
+
+    from tcip_mcp.project_paths import resolve_state
+
+    ld = Path(labels_dir)
+    if not ld.is_dir():
+        return {"error": f"labels_dir not found: {labels_dir}"}
+    ids: set[int] = set()
+    for txt in ld.glob("*.txt"):
+        for line in txt.read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            if parts:
+                try:
+                    ids.add(int(float(parts[0])))
+                except ValueError:
+                    continue
+    if not ids:
+        return {"error": f"no class ids found in {labels_dir}"}
+    names = [n.strip() for n in class_names.split(",")] if class_names else []
+    palette = ["#FF0000", "#00FFFF", "#00FF00", "#FF00FF", "#FFFF00", "#0000FF", "#FF8000", "#8000FF"]
+    class_map = {
+        str(cid): {"name": names[cid] if cid < len(names) and names[cid] else f"class_{cid}",
+                   "color": palette[cid % len(palette)]}
+        for cid in sorted(ids)
+    }
+    out = Path(output_path) if output_path else resolve_state(Path(".tcip") / "state" / "classes.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_json.dumps(class_map, indent=2), encoding="utf-8")
+    return {"classes_path": str(out), "num_classes": max(ids) + 1,
+            "class_ids": sorted(ids), "class_map": class_map}
