@@ -31,7 +31,11 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
-MILESTONE_TARGETS = {"05per": 0.05, "50per": 0.50, "95per": 0.95}
+from tcip_mcp.traits import get_trait
+
+# Milestone crossing fractions, sourced from the trait's confirmed semantics (Tier C, read never
+# derived) — not a standalone literal. Keyed "NNper" to match the CSV column names.
+MILESTONE_TARGETS = {f"{int(round(f * 100)):02d}per": f for f in get_trait("catkin").milestone_fractions}
 
 # The delivered per-plant phenology CSV schema — one canonical column set/order so the
 # ``compute_phenology`` MCP tool and any other exporter emit the same file.
@@ -43,6 +47,11 @@ PHENOLOGY_CSV_COLUMNS = [
     "catkin_05per_date",
     "catkin_50per_date",
     "catkin_95per_date",
+    # Provenance stamp: how the counts behind these milestones were produced, and whether the
+    # measurement is trustworthy. A delivered phenotype must carry this so it can be traced.
+    "operating_point_conf",
+    "operating_point_validated",
+    "elongation_classifier_validated",
 ]
 
 
@@ -115,13 +124,14 @@ def elongation_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
 
 
 def plant_milestones(series: list[tuple[str, float]]) -> dict:
-    """The four catkin phenology dates for one plant's elongated-fraction series."""
-    return {
-        "catkin_05per_date": crossing_date(series, 0.05),
-        "catkin_50per_date": crossing_date(series, 0.50),
-        "catkin_95per_date": crossing_date(series, 0.95),
-        "catkin_elongation_date": elongation_onset_date(series),
-    }
+    """The catkin phenology dates for one plant's elongated-fraction series.
+
+    Crossing fractions come from ``MILESTONE_TARGETS`` (the trait's semantics), so the milestone
+    definition lives in one place instead of scattered literals.
+    """
+    out = {f"catkin_{key}_date": crossing_date(series, frac) for key, frac in MILESTONE_TARGETS.items()}
+    out["catkin_elongation_date"] = elongation_onset_date(series)
+    return out
 
 
 # ── elongated-fraction from classified predictions ───────────────────────
@@ -231,17 +241,19 @@ def per_plant_phenology(
     }
 
 
-def write_phenology_csv(rows: list[dict], out_path: Path) -> str:
+def write_phenology_csv(rows: list[dict], out_path: Path, stamp: dict | None = None) -> str:
     """Write per-plant milestone rows to the canonical delivery CSV.
 
     Emits exactly ``PHENOLOGY_CSV_COLUMNS`` (extra keys such as the raw ``series`` are
-    dropped) so every delivered ``catkin_phenology.csv`` has the same shape.
+    dropped) so every delivered ``catkin_phenology.csv`` has the same shape. ``stamp`` (the
+    operating point + validation status) is written into every row so the phenotype is traceable.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    stamp = stamp or {}
     with out_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=PHENOLOGY_CSV_COLUMNS, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow(row)
+            writer.writerow({**row, **stamp})
     return str(out_path)
