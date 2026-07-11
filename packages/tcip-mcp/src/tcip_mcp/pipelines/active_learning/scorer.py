@@ -45,14 +45,13 @@ class UncertaintyScorer(BaseScorer):
 
     @torch.no_grad()
     def score(self, image_paths: list[str], model: torch.nn.Module, device: torch.device) -> list[tuple[str, float]]:
-        from tcip_mcp.pipelines.image_utils import pil_to_tensor
-        from PIL import Image
+        from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
         model.eval()
         scored: list[tuple[str, float]] = []
 
         for path in image_paths:
-            img = Image.open(path).convert("RGB")
+            img = load_image(path, 3)  # EXIF-oriented: score/embed in the same frame the model trained on
             tensor = pil_to_tensor(img).unsqueeze(0).to(device)
 
             if self.task in ("detection", "instance_seg"):
@@ -101,8 +100,7 @@ class DiversityScorer(BaseScorer):
 
     @torch.no_grad()
     def score(self, image_paths: list[str], model: torch.nn.Module, device: torch.device) -> list[tuple[str, float]]:
-        from tcip_mcp.pipelines.image_utils import pil_to_tensor
-        from PIL import Image
+        from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
         if not hasattr(model, "backbone"):
             # No silent random-noise embeddings: diversity needs real backbone features.
@@ -115,7 +113,7 @@ class DiversityScorer(BaseScorer):
         # Extract backbone features
         embeddings = []
         for path in image_paths:
-            img = Image.open(path).convert("RGB")
+            img = load_image(path, 3)  # EXIF-oriented: score/embed in the same frame the model trained on
             tensor = pil_to_tensor(img).unsqueeze(0).to(device)
             feats = model.backbone(tensor)
             feat = list(feats.values())[-1] if isinstance(feats, dict) else feats
