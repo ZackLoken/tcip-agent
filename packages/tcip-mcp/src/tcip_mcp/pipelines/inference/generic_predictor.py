@@ -29,6 +29,8 @@ class GenericPredictor:
         checkpoint_path: str,
         device: str | None = None,
         score_threshold: float = 0.5,
+        nms_iou: float | None = None,
+        max_dets: int | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.score_threshold = score_threshold
@@ -41,6 +43,13 @@ class GenericPredictor:
         self.model.load_state_dict(ckpt["model_state_dict"])
         self.model.to(self.device)
         self.model.eval()
+
+        # Make the operating point GOVERN which boxes exist (in-model thresholds), not just a
+        # post-hoc filter that can never recover a box the model already discarded (the audit's
+        # finding). No-op for non-detection models. See pipelines/operating_point.py.
+        from tcip_mcp.pipelines.operating_point import set_detector_operating_point
+        set_detector_operating_point(self.model, score_thresh=score_threshold,
+                                     nms_thresh=nms_iou, detections_per_img=max_dets)
 
         # Infer task from first head
         heads = self.model_spec.get("heads", [])
