@@ -10,12 +10,12 @@ Safe to re-run. Prints a summary at the end.
 """
 from __future__ import annotations
 
-from pathlib import Path
+from _paths import BUSH_DATE, CATKIN_DATE, vf_root
 
-ROOT = Path(r"c:/Users/exx/Documents/GitHub/tcip-agent/data/hazelnut/catkin_05-50-95-per_date/Valley_Farm")
-IMAGES = ROOT / "images"
-BUSH_ANN = ROOT / "annotations" / "bush" / "3-2-26"
-CATKIN_ANN = ROOT / "annotations" / "catkin" / "2-11-26"
+VF = vf_root()
+IMAGES = VF / "images"
+BUSH_ANN = VF / "annotations" / "bush" / BUSH_DATE
+CATKIN_ANN = VF / "annotations" / "catkin" / CATKIN_DATE
 
 
 def flatten_iphone_suffix() -> list[str]:
