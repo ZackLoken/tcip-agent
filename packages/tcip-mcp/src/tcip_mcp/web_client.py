@@ -24,6 +24,8 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+from tcip_mcp.project_paths import project_root as _platform_root
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
@@ -41,8 +43,9 @@ def resolve_web_port(project_root: Optional[Path] = None) -> int:
     Parameters
     ----------
     project_root : Path, optional
-        Directory that contains ``.tcip/state/web_port.txt``. Defaults to
-        the current working directory.
+        Directory that contains ``.tcip/state/web_port.txt``. Defaults to the pinned platform
+        state root (``$TCIP_PROJECT_ROOT`` or cwd) — the same place the web backend writes it —
+        so the port is found regardless of the reader's cwd.
     """
     env = os.environ.get("TCIP_WEB_PORT")
     if env:
@@ -51,7 +54,7 @@ def resolve_web_port(project_root: Optional[Path] = None) -> int:
         except ValueError:
             logger.warning("TCIP_WEB_PORT=%r is not an integer; falling back", env)
 
-    root = Path(project_root) if project_root else Path.cwd()
+    root = Path(project_root) if project_root else _platform_root()
     port_file = root / PORT_FILE_RELATIVE
     if port_file.exists():
         try:
