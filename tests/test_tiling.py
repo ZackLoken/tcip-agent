@@ -26,18 +26,19 @@ def test_tile_positions_pad_and_stride():
 
 
 def test_clip_boxes_to_tile_sliver_drop_and_remap():
-    # Fully-inside box -> remapped to tile-local (minus origin 200,200).
-    tb, tl = tiling.clip_boxes_to_tile(np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 0.35)
+    # min_box_size=12: a clipped box counts unless its visible part is a sliver (< 12px char-size).
+    # Fully-inside box -> always kept, remapped to tile-local (minus origin 200,200).
+    tb, tl = tiling.clip_boxes_to_tile(np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 12.0)
     assert tb.shape == (1, 4)
     assert np.allclose(tb[0], [10, 10, 30, 30])
-    # Straddling box below keep-frac -> dropped (14*14/1600 ~ 0.12 < 0.35).
-    tb2, _ = tiling.clip_boxes_to_tile(np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 0.35)
-    assert len(tb2) == 0
-    # Straddling box above keep-frac -> kept and clipped.
-    tb3, _ = tiling.clip_boxes_to_tile(np.array([[255., 255., 265., 265.]]), np.array([1]), 200, 200, 64, 0.35)
-    assert len(tb3) == 1
+    # Straddling box whose visible part is substantial (clipped to 14x14, char 14 >= 12) -> KEPT.
+    tb2, _ = tiling.clip_boxes_to_tile(np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 12.0)
+    assert len(tb2) == 1
+    # Straddling box whose visible part is a sliver (clipped to 9x9, char 9 < 12) -> dropped.
+    tb3, _ = tiling.clip_boxes_to_tile(np.array([[255., 255., 265., 265.]]), np.array([1]), 200, 200, 64, 12.0)
+    assert len(tb3) == 0
     # Non-overlapping box -> no output.
-    tb4, _ = tiling.clip_boxes_to_tile(np.array([[0., 0., 10., 10.]]), np.array([1]), 200, 200, 64, 0.35)
+    tb4, _ = tiling.clip_boxes_to_tile(np.array([[0., 0., 10., 10.]]), np.array([1]), 200, 200, 64, 12.0)
     assert len(tb4) == 0
 
 
@@ -106,6 +107,27 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
     assert target["boxes"].shape[1] == 4
     assert (target["boxes"] >= 0).all() and (target["boxes"] <= 64).all()
     assert target["labels"].dtype == torch.int64
+
+
+def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
+    pytest.importorskip("torch")
+    from PIL import Image
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (256, 256), (120, 120, 120)).save(images_dir / "a.jpg")
+    (labels_dir / "a.txt").write_text("0 0.1 0.1 0.1 0.1\n")  # 25.6px box in the top-left corner
+    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
+                       num_classes=1, tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+    # Sliver cutoff is DERIVED from the class-average box size, not pinned.
+    assert ds.class_avg_size == pytest.approx(25.6, abs=1.0)
+    assert ds.min_box_size == pytest.approx(0.5 * ds.class_avg_size)
+    # skip_empty now defaults False -> tiles far from the object are kept as valid negatives.
+    empties = sum(1 for i in range(len(ds)) if ds[i][1]["boxes"].shape[0] == 0)
+    assert empties > 0
 
 
 def test_tiled_dataset_collate_roundtrip(tmp_path):
