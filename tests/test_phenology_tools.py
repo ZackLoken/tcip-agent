@@ -115,10 +115,14 @@ def test_compute_phenology_writes_canonical_csv(tmp_path: Path) -> None:
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         elongated_class_id=1,
+        classifier_validated="validated_held_out",  # a validated run may deliver
+        operating_point_conf=0.4,
+        operating_point_validated="validated_held_out",
     )
 
     assert "error" not in res
     assert res["elongation_classified"] is True
+    assert res["elongation_classifier_validated"] == "validated_held_out"
     assert res["n_plants"] == 1
     assert res["columns"] == phenology.PHENOLOGY_CSV_COLUMNS
     assert out_csv.is_file()
@@ -132,6 +136,55 @@ def test_compute_phenology_writes_canonical_csv(tmp_path: Path) -> None:
     # the internal 'series' column.
     assert rows[0]["catkin_elongation_date"] == "2026-03-09"
     assert "series" not in rows[0]
+    # the provenance stamp is written into every row
+    assert rows[0]["operating_point_conf"] == "0.4"
+    assert rows[0]["operating_point_validated"] == "validated_held_out"
+    assert rows[0]["elongation_classifier_validated"] == "validated_held_out"
+
+
+def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> None:
+    # Elongation class IS present, but the classifier is not validated -> no delivery.
+    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    _write_preds(d1, "P1_a", ["0 0.9 0.5 0.5 0.1 0.1"])
+    _write_preds(d2, "P1_b", ["1 0.9 0.5 0.5 0.1 0.1"])
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    res = compute_phenology(
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv),
+        elongated_class_id=1,  # classifier_validated defaults to None -> unvalidated
+    )
+    assert "error" in res and "requires BOTH" in res["error"]  # gate refuses on the unvalidated classifier
+    assert not out_csv.exists()  # nothing delivered
+
+
+def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) -> None:
+    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    _write_preds(d1, "P1_a", ["0 0.9 0.5 0.5 0.1 0.1"])
+    _write_preds(d2, "P1_b", ["1 0.9 0.5 0.5 0.1 0.1"])
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    res = compute_phenology(
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv),
+        elongated_class_id=1,
+        acknowledge_unvalidated=True,  # provisional delivery, clearly flagged
+    )
+    assert "error" not in res
+    assert res["elongation_classifier_validated"] == "false"
+    with out_csv.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["elongation_classifier_validated"] == "false"
 
 
 def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> None:
