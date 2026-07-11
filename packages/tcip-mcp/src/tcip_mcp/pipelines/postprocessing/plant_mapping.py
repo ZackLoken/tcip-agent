@@ -356,6 +356,23 @@ def assign_plants(
 # ── Whole-dataset driver ────────────────────────────────────────────────
 
 
+def grid_pitch_m(plants: list[PlantRecord]) -> float:
+    """Median nearest-neighbor spacing of the plant centroids = the planting grid pitch (m).
+
+    Derived from the layout in hand (not pinned): used to cap the GPS match tolerance so a
+    detection can't be attributed to a plant more than half a grid cell away — beyond that, the
+    nearest plant is as likely to be the wrong (adjacent) plot as the right one.
+    """
+    pts = [(p.lat, p.lon) for p in plants if p.lat is not None and p.lon is not None]
+    if len(pts) < 2:
+        return 0.0
+    nn = []
+    for i, (la, lo) in enumerate(pts):
+        nn.append(min(haversine_m(la, lo, la2, lo2) for j, (la2, lo2) in enumerate(pts) if j != i))
+    nn.sort()
+    return nn[len(nn) // 2]
+
+
 def build_mapping(
     images_root: Path,
     plant_csv_paths: list[Path],
@@ -365,6 +382,14 @@ def build_mapping(
 ) -> dict[str, list[Assignment]]:
     """Build per-date plant assignments for every image under ``images_root``."""
     plants = read_plant_csvs(plant_csv_paths)
+    # Cap the match tolerance so a detection can't reach an adjacent plot. assign_plants' loosest gate
+    # is 3x nn_tolerance, so cap at pitch/6 -> effective radius <= pitch/2.
+    pitch = grid_pitch_m(plants)
+    _cap = pitch / 6
+    if pitch > 0 and nn_tolerance_m > _cap:
+        logger.info("capping nn_tolerance_m %.1f -> %.2f (grid pitch %.1f: effective radius <= pitch/2)",
+                    nn_tolerance_m, _cap, pitch)
+        nn_tolerance_m = _cap
     result: dict[str, list[Assignment]] = {}
     images_root = Path(images_root)
     if not images_root.is_dir():
