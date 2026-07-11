@@ -225,6 +225,23 @@ class ExportCsvPayload(BaseModel):
 def export_csv(payload: ExportCsvPayload) -> Response:
     if not payload.rows:
         raise HTTPException(400, "no rows to export")
+
+    # Phenology-delivery guard: if these rows are a bloom-phenotype delivery (carry milestone dates),
+    # every row must carry a held-out-validated classifier AND operating point — the same gate
+    # compute_phenology enforces, applied here so this generic export can't become a second, un-gated
+    # door that ships an unvalidated phenotype CSV.
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+    _milestones = {"catkin_05per_date", "catkin_50per_date", "catkin_95per_date"}
+    if any(_milestones & set(r.keys()) for r in payload.rows):
+        for r in payload.rows:
+            if (r.get("elongation_classifier_validated") != VALIDATED_HELD_OUT
+                    or r.get("operating_point_validated") != VALIDATED_HELD_OUT):
+                raise HTTPException(
+                    400,
+                    "phenology delivery requires a held-out-validated classifier AND operating point in "
+                    "every row (elongation_classifier_validated / operating_point_validated = "
+                    "'validated_held_out'); produce it via compute_phenology, which gates and stamps it.",
+                )
     keys: list[str] = []
     seen: set[str] = set()
     for row in payload.rows:
