@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
+from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,27 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
             "Provide a val split (data.val_images_dir) or enable auto_val.",
             task, run.run_id,
         )
+
+    # Fill spec params the agent didn't pin (in_chans from the raster, num_classes from the labels;
+    # explicit wins) at the same pre-compose seam as _inject_imbalance_loss. A hiccup mustn't fail the launch.
+    try:
+        from tcip_mcp.pipelines.derivations import resolve_spec_derivations
+        _base_ds = getattr(train_ds, "base", train_ds)
+        _img_dir = getattr(_base_ds, "images_dir", None) or data_cfg.get("images_dir")
+        _sample = None
+        if _img_dir:
+            for _p in sorted(Path(str(_img_dir)).glob("*")):
+                if _p.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"):
+                    _sample = str(_p)
+                    break
+        # union of train+val so a class landing only in val isn't dropped from the head
+        _cd = dict(getattr(train_ds, "class_distribution", None) or {})
+        _val_cd = getattr(val_ds, "class_distribution", None) if val_ds is not None else None
+        for _k, _v in (_val_cd or {}).items():
+            _cd[_k] = _cd.get(_k, 0) + _v
+        resolve_spec_derivations(model_spec, sample_image=_sample, class_distribution=_cd or None)
+    except Exception:
+        logger.debug("spec derivation skipped", exc_info=True)
 
     # W8: inject imbalance loss + (auto) class weights into image-level head specs.
     # train() composes the model from run.config["model_spec"] (== config), so editing
@@ -813,9 +835,9 @@ def evaluate_model(
     images_dir: str,
     labels_dir: str = "",
     task: str = "detection",
-    conf_threshold: float = 0.25,
+    conf_threshold: float = DEFAULT_CONF,  # report/select at the ship point
     iou_threshold: float = 0.5,
-    iou_type: str = "bbox",
+    iou_type: str | None = None,
     max_dets: int = 100,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
@@ -831,7 +853,8 @@ def evaluate_model(
         task: Task type.
         conf_threshold: Operating confidence for P/R/F1.
         iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
-        iou_type: 'bbox' or 'segm'.
+        iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task — 'segm' for
+            instance_seg, 'bbox' otherwise — so a mask model isn't silently scored as boxes.
         max_dets: COCOeval max detections per image.
     """
     import torch
