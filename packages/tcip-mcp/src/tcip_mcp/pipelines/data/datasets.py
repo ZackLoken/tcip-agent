@@ -20,6 +20,8 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from tcip_annotation.utils import get_image_dimensions
+
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
 logger = logging.getLogger(__name__)
@@ -251,9 +253,9 @@ class TiledDetectionDataset(BaseDataset):
         base: "DetectionDataset",
         tile_size: int = 224,
         overlap: float = 0.2,
-        min_edge_keep_frac: float = 0.35,
+        sliver_frac: float = 0.5,
         dedup_iou: float = 0.8,
-        skip_empty: bool = True,
+        skip_empty: bool = False,
         transforms: Any = None,
     ) -> None:
         from tcip_mcp.pipelines.data.tiling import (
@@ -267,15 +269,33 @@ class TiledDetectionDataset(BaseDataset):
         self.stride = compute_stride(tile_size, overlap)
         self._index: list[dict] = []
 
+        # Pass 1: read every image's upright dims + full-image-px boxes, and accumulate GT box sizes
+        # so the seam-sliver cutoff is DERIVED from this dataset's class-average object size, not a
+        # fixed fraction (Q5 / derive-don't-pin). skip_empty defaults False: empty tiles are valid
+        # negatives (the invariant the old skip_empty=True default violated).
+        stems_data: list[tuple[str, np.ndarray, np.ndarray, int, int]] = []
+        char_sizes: list[float] = []
         for stem in base.stems:
             img_path = _find_image(base.images_dir, stem)
-            with Image.open(img_path) as im:
-                w, h = im.size  # header-only, no pixel decode
-            full_boxes, full_labels = _read_det_boxes_px(base.labels_dir / f"{stem}.txt", w, h)
+            w, h = get_image_dimensions(str(img_path))  # EXIF-oriented, shares the label frame
+            # Format-aware read: a COCO/VOC/LabelMe base has no <stem>.txt, so YOLO-only reading would
+            # yield zero boxes and (with skip_empty False) train on pure background.
+            file_name = img_path.name if base.label_format == "coco" else ""
+            full_boxes, full_labels = _read_det_boxes_format(
+                stem, base.labels_dir, base.label_format, base._coco, w, h, file_name)
             fb = np.asarray(full_boxes, dtype=np.float32).reshape(-1, 4)
             fl = np.asarray(full_labels, dtype=np.int64)
+            if len(fb):
+                char_sizes.extend((((fb[:, 2] - fb[:, 0]) * (fb[:, 3] - fb[:, 1])).clip(min=0) ** 0.5).tolist())
+            stems_data.append((stem, fb, fl, w, h))
+
+        self.class_avg_size = float(np.mean(char_sizes)) if char_sizes else 0.0
+        self.min_box_size = sliver_frac * self.class_avg_size
+
+        # Pass 2: tile using the derived sliver cutoff.
+        for stem, fb, fl, w, h in stems_data:
             for tile_x, tile_y in tile_positions(h, w, tile_size, self.stride):
-                tb, tl = clip_boxes_to_tile(fb, fl, tile_x, tile_y, tile_size, min_edge_keep_frac)
+                tb, tl = clip_boxes_to_tile(fb, fl, tile_x, tile_y, tile_size, self.min_box_size)
                 if len(tb) > 1:
                     tb, tl = dedup_boxes(tb, tl, dedup_iou)
                 if skip_empty and len(tb) == 0:
@@ -313,7 +333,9 @@ class TiledDetectionDataset(BaseDataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         e = self._index[idx]
-        img = Image.open(_find_image(self.base.images_dir, e["stem"])).convert("RGB")
+        # EXIF-oriented (via load_image) so cropped pixels align with the tile geometry and
+        # labels computed from get_image_dimensions() in __init__.
+        img = load_image(_find_image(self.base.images_dir, e["stem"]), 3)
         tile = self._crop_tile(img, e["tile_x"], e["tile_y"])
         target = {
             "boxes": torch.tensor(e["boxes"], dtype=torch.float32).reshape(-1, 4),
@@ -442,7 +464,9 @@ class SemanticSegDataset(BaseImageDataset):
         img = self._open_image(stem)
         w, h = self._image_size(img)
         mask_path = self.masks_dir / f"{stem}.png"
-        mask = np.array(Image.open(mask_path).convert("L")) if mask_path.exists() else np.zeros((h, w), dtype=np.int64)
+        # load_image EXIF-orients so the mask shares the image's upright frame (no-op for a
+        # plain PNG mask; matters only if a mask ever carries EXIF orientation).
+        mask = np.array(load_image(mask_path, 1)) if mask_path.exists() else np.zeros((h, w), dtype=np.int64)
         # Key matches the SemanticSegHead loss contract.
         target = {"masks": torch.tensor(mask, dtype=torch.int64)}
         return self._finalize(img, target)
@@ -627,7 +651,7 @@ _DATASET_MAP = {
 def build_dataset(task: str, **kwargs) -> BaseDataset:
     """Factory: build a dataset by task type.
 
-    An optional ``tiling`` dict (``{enabled, tile_size, overlap, min_edge_keep_frac,
+    An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac,
     dedup_iou, skip_empty}``) wraps the detection dataset in a
     :class:`TiledDetectionDataset` (W3). Ignored for non-detection tasks.
     """
@@ -641,7 +665,7 @@ def build_dataset(task: str, **kwargs) -> BaseDataset:
         transforms = kwargs.pop("transforms", None)
         base = cls(**kwargs)
         tile_kwargs = {k: tiling[k] for k in
-                       ("tile_size", "overlap", "min_edge_keep_frac", "dedup_iou", "skip_empty")
+                       ("tile_size", "overlap", "sliver_frac", "dedup_iou", "skip_empty")
                        if k in tiling}
         ds = TiledDetectionDataset(base, transforms=transforms, **tile_kwargs)
     else:
