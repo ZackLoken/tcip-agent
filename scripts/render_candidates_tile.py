@@ -15,12 +15,14 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps, ImageFont
 
-ROOT = Path(r"c:/Users/exx/Documents/GitHub/tcip-agent")
-VF = ROOT / "data" / "hazelnut" / "catkin_05-50-95-per_date" / "Valley_Farm"
-IMG_DIR = VF / "images" / "2-11-26"
-GT_DIR = VF / "annotations" / "catkin" / "2-11-26" / "detect"
-CANDS_PATH = ROOT / ".tcip" / "artifacts" / "review" / "fn_candidates.json"
-OUT_DIR = ROOT / ".tcip" / "artifacts" / "review"
+from _paths import CATKIN_DATE, repo_root, vf_root
+
+VF = vf_root()
+IMG_DIR = VF / "images" / CATKIN_DATE
+GT_DIR = VF / "annotations" / "catkin" / CATKIN_DATE / "detect"
+_REVIEW = repo_root() / ".tcip" / "artifacts" / "review"
+CANDS_PATH = _REVIEW / "fn_candidates.json"
+OUT_DIR = _REVIEW
 
 VIEW_WIDTH = 2400
 GT_COLOR = (0, 220, 0)
