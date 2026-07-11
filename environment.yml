@@ -8,8 +8,12 @@
 # repository root so the editable paths resolve.
 #
 # GPU note: this installs the default CPU/-or-platform torch wheel from PyPI,
-# which works everywhere. For a CUDA build, install torch/torchvision separately:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# which works everywhere. For a CUDA build, install torch/torchvision separately from a
+# CUDA index — the wheel bundles its own CUDA runtime, so only a recent NVIDIA driver is
+# needed (no system CUDA toolkit). Pick the index by desired torch version, not vice-versa:
+#   cu126 carries the newest torch (recommended):
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+#   (cu124 is an older index capped at torch 2.6.0; cu130 is the bleeding-edge CUDA 13 runtime.)
 # CI installs the explicit CPU wheel (see .github/workflows/ci.yml).
 #
 # The exact Windows lockfile that this replaced is kept as environment.win.lock.yml
