@@ -4,13 +4,11 @@ Tells us what we're dealing with before we decide how to use it.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import torch
 
-WEIGHTS = Path(
-    r"c:/Users/exx/Documents/GitHub/tcip-agent/data/hazelnut/catkin_05-50-95-per_date/Valley_Farm/models/baseline/weights.pt"
-)
+from _paths import vf_root
+
+WEIGHTS = vf_root() / "models" / "baseline" / "weights.pt"
 
 
 def main() -> None:
