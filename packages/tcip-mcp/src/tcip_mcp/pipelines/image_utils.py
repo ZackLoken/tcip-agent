@@ -38,7 +38,13 @@ def load_image(path: str | Path, num_channels: int = 3):
     ext = path.suffix.lower()
     if num_channels in (1, 3, 4) and ext not in (".npy", ".npz", ".tif", ".tiff"):
         mode = {1: "L", 3: "RGB", 4: "RGBA"}[num_channels]
-        return Image.open(path).convert(mode)
+        # EXIF-orient before convert so the returned frame matches get_image_dimensions()
+        # (both apply auto_orient_image). Labels are authored in this upright frame; without
+        # this the loader would denormalize upright coords against the raw sensor frame and
+        # scatter every box (Orientation-6 JPEGs differ 5712×4284 ↔ 4284×5712).
+        from tcip_annotation.utils import auto_orient_image
+
+        return auto_orient_image(Image.open(path)).convert(mode)
     # >4 channels, or a numpy/GeoTIFF container -> multi-band array.
     return load_multiband(path, num_channels)
 
