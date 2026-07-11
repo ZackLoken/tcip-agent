@@ -299,3 +299,28 @@ a strong reminder that a fresh guard/feature deserves an adversarial pass before
 are why Zack's "a sandbox is the correct model moving forward" is the real fix; the guards close every
 *trivial/direct* bypass and can no longer be disabled by self-modification. Final: backend 843, frontend
 102, all green.
+
+## 2026-07-10 — Backlog sweep (audit/journal leftovers) while Zack e2e-tested the fence
+
+Cleared the small deferred items surfaced in the debrief + AUDIT_REPORT + journal (sandbox and governance
+Part 2 stay deferred by Zack's call; GUI-audit G0–G5 confirmed COMPLETE — its only leftovers are token auth
+[defer with the sandbox/multi-user], a11y/visual polish, and config-portability = L7 below):
+- **Lo2 (fixed):** `evaluate_model` MCP tool hardcoded `iou_type="bbox"`, silently scoring instance_seg as
+  boxes. `run_test_evaluation` already auto-resolves via `effective_iou_type` when passed `None`; changed the
+  tool default to `None`.
+- **L6 (fixed the actionable half):** `environment.yml` already documents the CUDA-torch install; added the
+  missing **preflight** — `run_inference` now returns/logs a `warning` when a tiled/large workload runs on
+  CPU because CUDA is unavailable. (scipy is no longer needed — phenology uses linear interpolation.)
+- **L7 (moot, no change):** the stale absolute data path was *data* in one project's `config.toml`; the code
+  is fine — `init_project` scaffolds a relative `root="data"` and **nothing reads it** (the workspace model,
+  project root = dataset root, is the source of truth).
+- **Lo3 (fixed):** cwd-anchored platform state (`AUDIT_PATH`, `EXPERIMENTS_DIR`, the web port file) fragmented
+  `.tcip/` across processes launched from different dirs. New `tcip_mcp/project_paths.py`: `resolve_state()`
+  anchors a relative state path to `$TCIP_PROJECT_ROOT` when pinned (else cwd; absolute passes through), and
+  `pin_project_root()` (called in the web backend's `main()`) pins it to the repo root. Resolution is at USE
+  time, so per-test cwd isolation is preserved — an import-time snapshot first broke 8 experiment tests, which
+  is why the resolver is use-time not import-time. Consumers (`audit`, `experiments`, `web_client`, web
+  training route, `__main__`) route through it.
+- **L3 (fixed):** CLAUDE.md now notes "if `mcp__tcip__*` aren't available you're not at the repo root" + the
+  `$TCIP_PROJECT_ROOT` behavior. (L2 — `run_inference(tile=True)` is SAHI — was already in the phenology skill.)
+Gate: ruff clean, backend 851 passed / 6 skipped. No frontend changes this pass.
