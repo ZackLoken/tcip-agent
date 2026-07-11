@@ -26,6 +26,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+
 # Composite-objective weights. Note: in compute_composite_objective the F1 and
 # mAP50 terms are multiplied by 10 to lift them onto the same scale as val_loss,
 # so a weight here acts on that *scaled* term (a 0.35 f1 weight ~ 3.5 loss-units
@@ -65,9 +67,13 @@ def _xyxy_to_xywh(x1: float, y1: float, x2: float, y2: float) -> list[float]:
     return [float(x1), float(y1), float(x2 - x1), float(y2 - y1)]
 
 
-def build_coco_image_record(width: int, height: int, gt: list[dict], dt: list[dict]) -> dict:
-    """One per-image entry: ``{'width','height','gt':[ann...],'dt':[res...]}``."""
-    return {"width": int(width), "height": int(height), "gt": list(gt), "dt": list(dt)}
+def build_coco_image_record(width: int, height: int, gt: list[dict], dt: list[dict],
+                            image_id=None) -> dict:
+    """One per-image entry: ``{'width','height','gt':[ann...],'dt':[res...]}`` (+ optional image_id)."""
+    rec = {"width": int(width), "height": int(height), "gt": list(gt), "dt": list(dt)}
+    if image_id is not None:
+        rec["image_id"] = image_id
+    return rec
 
 
 def _counts_at_operating_point(coco_eval, iou_threshold: float, conf_threshold: float) -> dict:
@@ -91,7 +97,8 @@ def _counts_at_operating_point(coco_eval, iou_threshold: float, conf_threshold: 
         dt_ignore = np.asarray(e["dtIgnore"])
         e_tp = e_fp = 0
         for d in range(dt_scores.shape[0] if dt_scores.size else 0):
-            if dt_scores[d] < conf_threshold or dt_ignore[t, d]:
+            # strict > matches deployed torchvision's in-model score_thresh (keeps score > thresh)
+            if dt_scores[d] <= conf_threshold or dt_ignore[t, d]:
                 continue
             if dt_matches[t, d] > 0:
                 e_tp += 1
@@ -206,6 +213,127 @@ def coco_detection_metrics(
     }
 
 
+# ====================================================================
+# Center-match counting sweep (for count-unbiased operating-point calibration)
+# ====================================================================
+# For small objects (e.g. ~40px catkins) IoU is noise; a detection counts as finding an object when
+# its center lands within a derived tolerance of a GT center. The operating point (conf) is then
+# derived to minimize the signed per-image count bias E[FP-FN] — NOT F1 — because the phenotype is a
+# count (Sigma pred ~= Sigma gt). See traits.py (count_objective=count_unbiased, localization=center_match).
+
+def _centers_xywh(anns: list[dict]) -> list[tuple[float, float]]:
+    return [(a["bbox"][0] + a["bbox"][2] / 2.0, a["bbox"][1] + a["bbox"][3] / 2.0) for a in anns]
+
+
+def _char_size_xywh(a: dict) -> float:
+    """Characteristic size of a box = sqrt(w*h) — scale-robust for a tolerance basis."""
+    w, h = float(a["bbox"][2]), float(a["bbox"][3])
+    return (max(w, 0.0) * max(h, 0.0)) ** 0.5
+
+
+def gt_class_avg_size(per_image: list[dict], class_id: int | None = None) -> float:
+    """Average characteristic GT box size — the DERIVED basis for the center-match tolerance.
+
+    Derived from the data in hand (not pinned): the tolerance is ``half_class_avg_size`` (traits.py).
+    """
+    sizes = [
+        _char_size_xywh(a)
+        for rec in per_image for a in rec.get("gt", [])
+        if class_id is None or a["category_id"] == class_id
+    ]
+    return float(np.mean(sizes)) if sizes else 0.0
+
+
+def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tuple[int, int, int]:
+    """Greedy nearest-center 1:1 matching (dt pre-sorted by score desc). Returns (tp, fp, fn)."""
+    gt_centers = _centers_xywh(gt)
+    used = [False] * len(gt_centers)
+    tp = 0
+    for dx, dy in _centers_xywh(dt):
+        best_j, best_d = -1, tolerance
+        for j, (gx, gy) in enumerate(gt_centers):
+            if used[j]:
+                continue
+            d = ((dx - gx) ** 2 + (dy - gy) ** 2) ** 0.5
+            if d <= best_d:
+                best_d, best_j = d, j
+        if best_j >= 0:
+            used[best_j] = True
+            tp += 1
+    return tp, len(dt) - tp, len(gt_centers) - tp
+
+
+def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: int | None = None,
+                          conf_grid: list[float] | None = None, max_thresholds: int = 80) -> dict:
+    """Sweep the confidence threshold over ``per_image`` records via center-matching.
+
+    One model pass produces ``per_image`` (unfiltered dt with scores); this sweeps conf cheaply in
+    Python — no re-forwarding. For each conf: aggregate TP/FP/FN and per-image count bias (FP-FN).
+    Returns ``{tolerance, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
+    count_bias_mean, abs_count_error_mean}]}``.
+    """
+    scores = sorted({d["score"] for rec in per_image for d in rec.get("dt", [])})
+    if conf_grid is None:
+        if len(scores) > max_thresholds:
+            conf_grid = list(np.linspace(scores[0], scores[-1], max_thresholds))
+        else:
+            conf_grid = list(scores)
+        conf_grid = sorted(set([0.0, *conf_grid]))
+    curve: list[dict] = []
+    for conf in conf_grid:
+        tp = fp = fn = 0
+        biases: list[int] = []
+        for rec in per_image:
+            gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
+            dt = sorted(
+                (d for d in rec.get("dt", [])
+                 if d["score"] >= conf and (class_id is None or d["category_id"] == class_id)),
+                key=lambda d: -d["score"],
+            )
+            t, f, n = _center_match_image(gt, dt, tolerance)
+            tp += t
+            fp += f
+            fn += n
+            biases.append(f - n)
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        curve.append({
+            "conf": float(conf), "tp": tp, "fp": fp, "fn": fn,
+            "precision": precision, "recall": recall, "f1": f1,
+            "count_bias_mean": float(np.mean(biases)) if biases else 0.0,
+            "abs_count_error_mean": float(np.mean([abs(b) for b in biases])) if biases else 0.0,
+        })
+    return {"tolerance": float(tolerance), "class_id": class_id, "curve": curve}
+
+
+def pick_count_unbiased(sweep: dict) -> float | None:
+    """The conf that minimizes |mean per-image count bias| (tie-break: higher F1, lower |error|).
+
+    This is the count-trait operating point — where the model's totals match GT totals — which is
+    generally NOT the F1-max point (that optimizes matching, not count agreement).
+    """
+    curve = sweep.get("curve") or []
+    if not curve:
+        return None
+    best = min(curve, key=lambda c: (abs(c["count_bias_mean"]), -c["f1"], c["abs_count_error_mean"]))
+    return best["conf"]
+
+
+def pick_f1_max(sweep: dict) -> float | None:
+    """The F1-max conf — reported alongside the count-unbiased point to show the trade-off."""
+    curve = sweep.get("curve") or []
+    return max(curve, key=lambda c: c["f1"])["conf"] if curve else None
+
+
+def count_bias_at(sweep: dict, conf: float) -> dict | None:
+    """The curve entry at (nearest) ``conf`` — used to MEASURE bias on a held-out split."""
+    curve = sweep.get("curve") or []
+    if not curve:
+        return None
+    return min(curve, key=lambda c: abs(c["conf"] - conf))
+
+
 # ---- converters -----------------------------------------------------
 
 def _mask_to_rle(mask) -> dict:
@@ -249,7 +377,7 @@ def records_from_detector(target: dict, output: dict, *, width: int, height: int
             if pmasks is not None and i < len(pmasks):
                 res["segmentation"] = _mask_to_rle(pmasks[i])
             dt.append(res)
-    return build_coco_image_record(width, height, gt, dt)
+    return build_coco_image_record(width, height, gt, dt, image_id=target.get("image_id"))
 
 
 def _poly_flat(points) -> list[float]:
@@ -306,20 +434,37 @@ def records_from_annotation(gt_boxes, gt_polys, pred_boxes, pred_polys, *,
 # ====================================================================
 
 def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num_classes: int) -> dict:
+    """Accuracy + macro-F1 + per-class precision/recall/f1/support/count_bias.
+
+    ``count_bias[c] = (predicted count - true count) / true count`` matters for validating the
+    elongation classifier: the phenotype is the elongated *fraction*, so a class the classifier
+    over-predicts inflates the fraction even at high accuracy. This is what the phenology gate reads.
+    """
     pred = pred_labels.detach().cpu().long()
     gt = targets.detach().cpu().long()
     if gt.numel() == 0:
-        return {"accuracy": 0.0, "f1": 0.0}
+        return {"accuracy": 0.0, "f1": 0.0, "per_class": {}, "count_bias": {}}
     accuracy = (pred == gt).float().mean().item()
+    per_class: dict[int, dict] = {}
     f1s = []
     for c in range(num_classes):
         tp = int(((pred == c) & (gt == c)).sum())
         fp = int(((pred == c) & (gt != c)).sum())
         fn = int(((pred != c) & (gt == c)).sum())
+        support = int((gt == c).sum())
+        pred_count = int((pred == c).sum())
         p = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         r = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1s.append(2 * p * r / (p + r) if (p + r) > 0 else 0.0)
-    return {"accuracy": accuracy, "f1": sum(f1s) / len(f1s) if f1s else 0.0}
+        f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+        f1s.append(f1)
+        per_class[c] = {"precision": p, "recall": r, "f1": f1, "support": support,
+                        "count_bias": (pred_count - support) / support if support > 0 else 0.0}
+    return {
+        "accuracy": accuracy,
+        "f1": sum(f1s) / len(f1s) if f1s else 0.0,
+        "per_class": per_class,
+        "count_bias": {c: per_class[c]["count_bias"] for c in per_class},
+    }
 
 
 def ordinal_metrics(pred_ranks: torch.Tensor, gt_ranks: torch.Tensor) -> dict:
@@ -447,7 +592,9 @@ def evaluate(
         result["objective"] = round(compute_composite_objective(loss, m["f1"], m["map50"], score_weights), 6)
     elif task == "classification" and cls_p:
         num_classes = getattr(model.heads[0], "num_classes", int(torch.cat(cls_g).max()) + 1)
-        result.update({k: round(v, 6) for k, v in classification_metrics(torch.cat(cls_p), torch.cat(cls_g), num_classes).items()})
+        # classification_metrics now also returns per_class/count_bias DICTS — round only the scalars.
+        result.update({k: (round(v, 6) if isinstance(v, (int, float)) else v)
+                       for k, v in classification_metrics(torch.cat(cls_p), torch.cat(cls_g), num_classes).items()})
     elif task == "ordinal" and ord_p:
         result.update({k: round(v, 6) for k, v in ordinal_metrics(torch.cat(ord_p), torch.cat(ord_g)).items()})
     elif task == "regression" and reg_p:
@@ -458,7 +605,7 @@ def evaluate(
 
 def run_test_evaluation(
     ckpt_path: str, loader, device, task: str, output_dir: str, *,
-    conf_threshold: float = 0.25, iou_threshold: float = 0.5,
+    conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
 ) -> dict:
     """Load ``model_best.pt``, evaluate ``loader``, write ``test_results.json``."""
