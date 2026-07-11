@@ -13,8 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from tcip_mcp.project_paths import resolve_state
+
 logger = logging.getLogger(__name__)
 
+# Relative default (tests rebind this constant). At write time ``resolve_state`` anchors it to
+# ``$TCIP_PROJECT_ROOT`` when pinned, so processes from different dirs don't fragment the log.
 AUDIT_PATH = Path(".tcip/audit.jsonl")
 
 # Fields to redact from logged arguments
@@ -34,7 +38,7 @@ def _write_entry(entry: dict[str, Any]) -> None:
     try:
         from tcip_mcp.utils.atomic_io import append_jsonl
 
-        append_jsonl(AUDIT_PATH, entry)
+        append_jsonl(resolve_state(AUDIT_PATH), entry)
     except Exception:
         logger.debug("Failed to write audit entry", exc_info=True)
 
