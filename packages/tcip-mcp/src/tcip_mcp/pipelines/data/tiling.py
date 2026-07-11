@@ -49,12 +49,14 @@ def tile_positions(height: int, width: int, tile_size: int, stride: int) -> list
 
 def clip_boxes_to_tile(
     boxes: np.ndarray, labels: np.ndarray, tile_x: int, tile_y: int,
-    tile_size: int, min_edge_keep_frac: float,
+    tile_size: int, min_box_size: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Intersect full-image-px boxes with a tile; drop slivers; emit tile-local xyxy.
+    """Intersect full-image-px boxes with a tile; drop seam slivers; emit tile-local xyxy.
 
-    A box clipped by the tile edge is dropped when ``intersection / original_area <
-    min_edge_keep_frac``. Boxes fully inside the tile are always kept.
+    A box clipped by the tile edge is dropped only when the *visible* (clipped) part is a sliver —
+    its characteristic size ``sqrt(iw*ih) < min_box_size``. ``min_box_size`` is derived per dataset
+    from the class's average box size (a partial catkin counts unless it's a tiny sliver; see Q5 /
+    ``TiledDetectionDataset``), not a fixed fraction. Boxes fully inside the tile are always kept.
     """
     if len(boxes) == 0:
         return EMPTY_BOXES.copy(), EMPTY_LABELS.copy()
@@ -67,8 +69,7 @@ def clip_boxes_to_tile(
         if iw <= 0 or ih <= 0:
             continue
         clipped = bx1 < tile_x or by1 < tile_y or bx2 > tx2 or by2 > ty2
-        orig_area = max(1.0, (bx2 - bx1) * (by2 - by1))
-        if clipped and (iw * ih) / orig_area < min_edge_keep_frac:
+        if clipped and (iw * ih) ** 0.5 < min_box_size:
             continue
         out_boxes.append([ix1 - tile_x, iy1 - tile_y, ix2 - tile_x, iy2 - tile_y])
         out_labels.append(int(lab))
