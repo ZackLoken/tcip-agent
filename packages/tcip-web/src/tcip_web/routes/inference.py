@@ -23,6 +23,13 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from tcip_mcp.pipelines.resolution import (
+    DEFAULT_CONF,
+    DEFAULT_NMS_IOU,
+    DEFAULT_TILE_SIZE,
+    DEFAULT_TILED,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/inference", tags=["inference"])
@@ -187,11 +194,14 @@ class LaunchInferencePayload(BaseModel):
     checkpoint_path: str
     images_dir: str
     output_dir: str
-    sahi: bool = True
-    conf: float = 0.25
-    iou: float = 0.7
-    slice_h: int = 640
-    slice_w: int = 640
+    # tiling + conf/iou default to the ONE shared source so the GUI and the MCP agent produce the
+    # SAME count off the same checkpoint (they used to diverge: sahi/640 + 0.25/0.7 here vs
+    # tile=False/224 + 0.5/0.3 in run_inference — tiling drives the count most of all).
+    sahi: bool = DEFAULT_TILED
+    conf: float = DEFAULT_CONF
+    iou: float = DEFAULT_NMS_IOU
+    slice_h: int = DEFAULT_TILE_SIZE
+    slice_w: int = DEFAULT_TILE_SIZE
     overlap: float = 0.2
 
 
