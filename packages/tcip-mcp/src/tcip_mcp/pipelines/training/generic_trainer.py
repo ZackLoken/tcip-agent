@@ -27,6 +27,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.composer import compose_model, ComposedModel
+from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.pipelines.training.evaluation import evaluate
 from tcip_mcp.pipelines.training.optimizer_factory import (
     build_optimizer,
@@ -292,7 +293,7 @@ def _build_scheduler(optimizer, config: dict, epochs: int):
 @torch.no_grad()
 def _validate(
     model: ComposedModel, val_loader: DataLoader, device: torch.device, task: str, *,
-    conf_threshold: float = 0.25, iou_threshold: float = 0.5,
+    conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
 ) -> dict:
     """Task-aware validation — delegates to ``evaluation.evaluate`` and ``val_``-prefixes.
@@ -596,7 +597,7 @@ def train(
                 if val_loader is not None:
                     val_metrics = _validate(
                         model, val_loader, device, task,
-                        conf_threshold=eval_cfg.get("conf_threshold", 0.25),
+                        conf_threshold=eval_cfg.get("conf_threshold", DEFAULT_CONF),  # select at the ship point
                         iou_threshold=eval_cfg.get("iou_threshold", 0.5),
                         iou_type=eval_cfg.get("iou_type"),
                         max_dets=eval_cfg.get("max_dets", 100),
