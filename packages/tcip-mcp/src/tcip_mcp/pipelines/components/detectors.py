@@ -39,14 +39,18 @@ def _default_anchor_sizes(num_levels: int, base: int = 32) -> tuple[tuple[int, .
 
 def _build_faster_rcnn(
     adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
-    anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333, **_: Any,
+    anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333,
+    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0), **_: Any,
 ) -> Any:
     from torchvision.models.detection import FasterRCNN
     from torchvision.models.detection.rpn import AnchorGenerator
     from torchvision.ops import MultiScaleRoIAlign
 
     sizes = _default_anchor_sizes(num_levels, anchor_base_size)
-    anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=((0.5, 1.0, 2.0),) * num_levels)
+    # aspect_ratios is a spec kwarg (was hardcoded): set/derive it per trait — elongated catkins
+    # (~1:3-1:6) need a tall ratio the default (0.5,1,2) can't match.
+    ar = tuple(float(r) for r in aspect_ratios)
+    anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
     roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=7, sampling_ratio=2)
     return FasterRCNN(
         adapter, num_classes=num_classes + 1,  # +1 for background
@@ -73,16 +77,17 @@ def _build_fcos(
 
 def _build_retinanet(
     adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
-    anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333, **_: Any,
+    anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333,
+    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0), **_: Any,
 ) -> Any:
     from torchvision.models.detection import RetinaNet
     from torchvision.models.detection.rpn import AnchorGenerator
 
     sizes = _default_anchor_sizes(num_levels, anchor_base_size)
-    # RetinaNet: 3 octave scales x 3 ratios = 9 anchors/location.
+    # RetinaNet: 3 octave scales x len(ratios) anchors/location.
     octave_sizes = tuple(tuple(int(s[0] * 2 ** (k / 3)) for k in range(3)) for s in sizes)
-    anchor_generator = AnchorGenerator(
-        sizes=octave_sizes, aspect_ratios=((0.5, 1.0, 2.0),) * num_levels)
+    ar = tuple(float(r) for r in aspect_ratios)
+    anchor_generator = AnchorGenerator(sizes=octave_sizes, aspect_ratios=(ar,) * num_levels)
     return RetinaNet(
         adapter, num_classes=num_classes + 1,
         anchor_generator=anchor_generator, min_size=min_size, max_size=max_size,
@@ -105,14 +110,16 @@ DETECTORS.register_factory("retinanet", _build_retinanet, category="anchor_based
 
 def _build_mask_rcnn(
     adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
-    anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333, **_: Any,
+    anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333,
+    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0), **_: Any,
 ) -> Any:
     from torchvision.models.detection import MaskRCNN
     from torchvision.models.detection.rpn import AnchorGenerator
     from torchvision.ops import MultiScaleRoIAlign
 
     sizes = _default_anchor_sizes(num_levels, anchor_base_size)
-    anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=((0.5, 1.0, 2.0),) * num_levels)
+    ar = tuple(float(r) for r in aspect_ratios)
+    anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
     box_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=7, sampling_ratio=2)
     mask_roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=14, sampling_ratio=2)
     return MaskRCNN(
