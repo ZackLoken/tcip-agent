@@ -18,12 +18,13 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps
 
-ROOT = Path(r"c:/Users/exx/Documents/GitHub/tcip-agent")
-VF = ROOT / "data" / "hazelnut" / "catkin_05-50-95-per_date" / "Valley_Farm"
-IMG_DIR = VF / "images" / "2-11-26"
-GT_DIR = VF / "annotations" / "catkin" / "2-11-26" / "detect"
+from _paths import CATKIN_DATE, repo_root, vf_root
+
+VF = vf_root()
+IMG_DIR = VF / "images" / CATKIN_DATE
+GT_DIR = VF / "annotations" / "catkin" / CATKIN_DATE / "detect"
 PRED_DIR = VF / "models" / "baseline" / "predictions_unfiltered" / "detect"
-OUT_DIR = ROOT / ".tcip" / "artifacts" / "review"
+OUT_DIR = repo_root() / ".tcip" / "artifacts" / "review"
 
 CONF_THRESHOLD = 0.3
 VIEW_WIDTH = 2400
