@@ -1,34 +1,62 @@
-"""Re-run baseline YOLOv8x inference on the 18 Feb-11 labeled images via SAHI.
+"""Re-run baseline YOLO inference on the labeled catkin images via SAHI (tiled).
 
-The baseline was trained on tiles, so full-image inference at imgsz=640 destroys
-recall on small catkins. PD's original predictions came from tiled/SAHI inference.
-We match that here, at conf=0.001 (effectively unfiltered) so low-confidence
-"hesitant" detections are preserved for false-negative mining.
+Full-image inference destroys recall on small catkins, so we tile. The slice size is the
+model's own training ``imgsz`` (read from the checkpoint, not hardcoded) — slicing at that
+scale keeps catkins the size the network learned. Tiles overlap so boundary catkins aren't
+cut. ``conf`` defaults near zero (unfiltered) to preserve low-confidence "hesitant"
+detections for false-negative mining.
 
-Output format: YOLO detect `class conf cx cy w h` (normalized, full-image coords).
+SAHI reads images EXIF-upright (``exif_fix=True``) and we normalize by the upright
+dimensions, so predictions land in the same frame the GT labels are authored in.
+
+Output: YOLO detect ``class conf cx cy w h`` (normalized, full-image, upright frame).
+
+    python rerun_baseline_inference.py [--tile N] [--overlap R] [--conf C] [--device D]
 """
 from __future__ import annotations
 
-from pathlib import Path
+import argparse
 
+import numpy as np
+import torch
 from PIL import Image
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 
-ROOT = Path(r"c:/Users/exx/Documents/GitHub/tcip-agent/data/hazelnut/catkin_05-50-95-per_date/Valley_Farm")
-WEIGHTS = ROOT / "models" / "baseline" / "weights.pt"
-IMAGES_DIR = ROOT / "images" / "2-11-26"
-LABEL_STEMS = sorted(p.stem for p in (ROOT / "annotations" / "catkin" / "2-11-26" / "detect").glob("*.txt"))
-OUT_DIR = ROOT / "models" / "baseline" / "predictions_unfiltered" / "detect"
+from tcip_annotation.utils import auto_orient_image, get_image_dimensions
 
-TILE_H = 640
-TILE_W = 640
-OVERLAP_H = 0.2
-OVERLAP_W = 0.2
-CONF = 0.001
+from _paths import CATKIN_DATE, vf_root
+
+VF = vf_root()
+WEIGHTS = VF / "models" / "baseline" / "weights.pt"
+IMAGES_DIR = VF / "images" / CATKIN_DATE
+LABEL_STEMS = sorted(p.stem for p in (VF / "annotations" / "catkin" / CATKIN_DATE / "detect").glob("*.txt"))
+OUT_DIR = VF / "models" / "baseline" / "predictions_unfiltered" / "detect"
+
+
+def training_imgsz(weights, default: int = 640) -> int:
+    """The size the model was trained at — read from the checkpoint so the tile tracks the
+    actual model instead of a guessed constant. Falls back to ``default`` if unavailable."""
+    try:
+        ckpt = torch.load(weights, map_location="cpu", weights_only=False)
+        imgsz = (ckpt.get("train_args") or {}).get("imgsz", default) if isinstance(ckpt, dict) else default
+        return int(imgsz[0] if isinstance(imgsz, (list, tuple)) else imgsz)
+    except Exception:
+        return default
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description="Tiled SAHI inference for the baseline detector.")
+    ap.add_argument("--tile", type=int, default=None, help="slice size in px (default: model's training imgsz)")
+    ap.add_argument("--overlap", type=float, default=0.2, help="tile overlap ratio, both axes (default: 0.2)")
+    ap.add_argument("--conf", type=float, default=0.001, help="confidence threshold; ~0 keeps hesitant dets for FN mining")
+    ap.add_argument("--device", default=None, help="torch device (default: cuda:0 if available, else cpu)")
+    args = ap.parse_args()
+
+    tile = args.tile or training_imgsz(WEIGHTS)
+    device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"tile={tile}px overlap={args.overlap} conf={args.conf} device={device}")
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     image_paths = [IMAGES_DIR / f"{stem}.JPG" for stem in LABEL_STEMS]
     missing = [p for p in image_paths if not p.exists()]
@@ -38,21 +66,23 @@ def main() -> None:
     det_model = AutoDetectionModel.from_pretrained(
         model_type="ultralytics",
         model_path=str(WEIGHTS),
-        confidence_threshold=CONF,
-        device="cuda:0",
+        confidence_threshold=args.conf,
+        device=device,
     )
 
     total = 0
     for path in image_paths:
-        with Image.open(path) as im:
-            W, H = im.size
+        # SAHI reads EXIF-upright; we hand it the already-oriented array and normalize by the
+        # upright dims (get_image_dimensions), so predictions share the GT's upright frame.
+        W, H = get_image_dimensions(str(path))
+        image = np.asarray(auto_orient_image(Image.open(path)).convert("RGB"))
         result = get_sliced_prediction(
-            image=str(path),
+            image=image,
             detection_model=det_model,
-            slice_height=TILE_H,
-            slice_width=TILE_W,
-            overlap_height_ratio=OVERLAP_H,
-            overlap_width_ratio=OVERLAP_W,
+            slice_height=tile,
+            slice_width=tile,
+            overlap_height_ratio=args.overlap,
+            overlap_width_ratio=args.overlap,
             verbose=0,
             postprocess_type="NMS",
             postprocess_match_threshold=0.5,
