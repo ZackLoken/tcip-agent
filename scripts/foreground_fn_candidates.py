@@ -17,11 +17,12 @@ import numpy as np
 from scipy.spatial import ConvexHull
 from matplotlib.path import Path as MplPath
 
-ROOT = Path(r"c:/Users/exx/Documents/GitHub/tcip-agent")
-VF = ROOT / "data" / "hazelnut" / "catkin_05-50-95-per_date" / "Valley_Farm"
-GT_DIR = VF / "annotations" / "catkin" / "2-11-26" / "detect"
+from _paths import CATKIN_DATE, repo_root, vf_root
+
+VF = vf_root()
+GT_DIR = VF / "annotations" / "catkin" / CATKIN_DATE / "detect"
 PRED_DIR = VF / "models" / "baseline" / "predictions_unfiltered" / "detect"
-OUT_PATH = ROOT / ".tcip" / "artifacts" / "review" / "fn_candidates.json"
+OUT_PATH = repo_root() / ".tcip" / "artifacts" / "review" / "fn_candidates.json"
 
 CONF_MIN = 0.5
 HULL_DILATE = 0.02
