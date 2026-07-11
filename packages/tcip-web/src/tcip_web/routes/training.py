@@ -51,13 +51,14 @@ def _historical_training_runs() -> list[dict]:
     HPO trials never create experiments so they can't appear here. A non-terminal state
     on a run that isn't live means the process died -> surfaced as ``interrupted``.
     """
-    from tcip_mcp.experiments import EXPERIMENTS_DIR
+    from tcip_mcp.experiments import experiments_dir
     from tcip_mcp.utils.atomic_io import read_json
 
-    if not EXPERIMENTS_DIR.exists():
+    exp_root = experiments_dir()
+    if not exp_root.exists():
         return []
     runs: list[dict] = []
-    for d in sorted(EXPERIMENTS_DIR.iterdir()):
+    for d in sorted(exp_root.iterdir()):
         if not d.is_dir():
             continue
         config = read_json(d / "config.json", default={})
