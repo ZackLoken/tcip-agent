@@ -10,7 +10,9 @@ from pathlib import Path
 from PIL import Image
 from PIL.ExifTags import GPSTAGS, TAGS
 
-ROOT = Path(r"c:/Users/exx/Documents/GitHub/tcip-agent/data/hazelnut/catkin_05-50-95-per_date/Valley_Farm/images")
+from _paths import vf_root
+
+ROOT = vf_root() / "images"
 
 
 def read_gps(path: Path) -> dict:
