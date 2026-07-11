@@ -14,9 +14,11 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(r"c:/Users/exx/Documents/GitHub/tcip-agent/data/hazelnut/catkin_05-50-95-per_date/Valley_Farm")
-GT_DIR = ROOT / "annotations" / "catkin" / "2-11-26" / "detect"
-PRED_DIR = ROOT / "models" / "baseline" / "predictions_unfiltered" / "detect"
+from _paths import CATKIN_DATE, vf_root
+
+VF = vf_root()
+GT_DIR = VF / "annotations" / "catkin" / CATKIN_DATE / "detect"
+PRED_DIR = VF / "models" / "baseline" / "predictions_unfiltered" / "detect"
 
 CONF_THRESHOLDS = [0.3, 0.5, 0.7]
 FP_EXPAND = 1.5  # GT counts as covered if any pred center is within this * bbox_half_size
