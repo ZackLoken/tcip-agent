@@ -234,9 +234,12 @@ def test_onset_dates_ignores_undated_bucket(client: TestClient) -> None:
 
 
 def test_export_csv(client: TestClient) -> None:
+    # A phenology delivery (milestone columns) must carry the validation stamp to be exported.
+    stamp = {"elongation_classifier_validated": "validated_held_out",
+             "operating_point_validated": "validated_held_out"}
     rows = [
-        {"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15"},
-        {"plant_id": "PLANT_B", "catkin_05per_date": "2026-03-05"},
+        {"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15", **stamp},
+        {"plant_id": "PLANT_B", "catkin_05per_date": "2026-03-05", **stamp},
     ]
     resp = client.post(
         "/api/results/export_csv",
@@ -250,6 +253,20 @@ def test_export_csv(client: TestClient) -> None:
     assert "plant_id" in lines[0]
     assert "PLANT_A" in lines[1]
     assert "PLANT_B" in lines[2]
+
+
+def test_export_csv_refuses_unvalidated_phenology(client: TestClient) -> None:
+    # Milestone rows without the held-out-validated stamp must NOT ship (the second-door hole).
+    rows = [{"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15"}]
+    resp = client.post("/api/results/export_csv", json={"rows": rows, "filename": "x.csv"})
+    assert resp.status_code == 400
+
+
+def test_export_csv_non_phenology_unaffected(client: TestClient) -> None:
+    # A generic (non-phenology) export is not gated.
+    rows = [{"plant_id": "PLANT_A", "some_metric": 42}]
+    resp = client.post("/api/results/export_csv", json={"rows": rows, "filename": "x.csv"})
+    assert resp.status_code == 200
 
 
 def test_export_csv_empty_rejected(client: TestClient) -> None:
