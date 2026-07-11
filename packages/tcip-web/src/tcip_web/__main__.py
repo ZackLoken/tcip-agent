@@ -9,15 +9,14 @@ from __future__ import annotations
 
 import os
 import socket
-from pathlib import Path
 
 import uvicorn
 
+from tcip_mcp.project_paths import project_root
 from tcip_web.paths import is_loopback_host
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-PORT_FILE = Path(".tcip") / "state" / "web_port.txt"
 
 
 def _pick_port(host: str, requested: int) -> int:
@@ -38,9 +37,12 @@ def _pick_port(host: str, requested: int) -> int:
 
 
 def _write_port_file(port: int) -> None:
+    # Anchored to the platform state root (pinned below) so MCP tools in other processes read
+    # the SAME web_port.txt regardless of cwd, instead of a fragmented cwd-relative one.
+    port_file = project_root() / ".tcip" / "state" / "web_port.txt"
     try:
-        PORT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        PORT_FILE.write_text(str(port), encoding="utf-8")
+        port_file.parent.mkdir(parents=True, exist_ok=True)
+        port_file.write_text(str(port), encoding="utf-8")
     except OSError:
         # Non-fatal: MCP tools fall back to TCIP_WEB_PORT / default
         pass
@@ -65,6 +67,12 @@ def _refuse_insecure_bind(host: str) -> None:
 
 
 def main() -> None:
+    # Pin the platform state root before importing the app (which resolves EXPERIMENTS_DIR)
+    # and before writing the port file, so this backend agrees with the MCP server on one
+    # .tcip/ even when launched from a different directory. Inherited by uvicorn's reloader.
+    from tcip_mcp.project_paths import pin_project_root
+
+    pin_project_root()
     host = os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)
     _refuse_insecure_bind(host)
     requested = int(os.environ.get("TCIP_WEB_PORT", str(DEFAULT_PORT)))
