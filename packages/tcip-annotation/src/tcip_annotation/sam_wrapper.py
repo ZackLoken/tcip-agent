@@ -103,11 +103,15 @@ def _set_image(predictor: Any, image_path: str) -> None:
     if _current_image_path == image_path:
         return
 
-    import cv2
-    img = cv2.imread(image_path)
-    if img is None:
-        raise FileNotFoundError(f"Cannot read image: {image_path}")
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    import numpy as np
+    from PIL import Image
+
+    from tcip_annotation.utils import auto_orient_image
+
+    # EXIF-orient so SAM's embedding, box prompts, and returned polygons all live in the
+    # same upright frame the annotations are authored in (cv2.imread ignores EXIF).
+    with Image.open(image_path) as im:
+        img_rgb = np.asarray(auto_orient_image(im).convert("RGB"))
 
     predictor.set_image(img_rgb)
     _current_image_path = image_path
@@ -254,11 +258,14 @@ def auto_mask(
         min_mask_region_area=min_mask_region_area,
     )
 
-    import cv2
-    img = cv2.imread(image_path)
-    if img is None:
-        raise FileNotFoundError(f"Cannot read image: {image_path}")
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    import numpy as np
+    from PIL import Image
+
+    from tcip_annotation.utils import auto_orient_image
+
+    # EXIF-orient so returned mask bboxes/polygons land in the upright annotation frame.
+    with Image.open(image_path) as im:
+        img_rgb = np.asarray(auto_orient_image(im).convert("RGB"))
 
     logger.info("Running SAM2 auto-mask generation on %s", image_path)
     masks = generator.generate(img_rgb)
