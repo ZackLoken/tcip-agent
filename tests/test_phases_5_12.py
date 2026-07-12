@@ -266,10 +266,9 @@ class TestToolImports:
         src = inspect.getsource(mt)
         assert "pipelines.models.builder" not in src
 
-    def test_inference_tools_uses_generic_predictor(self):
-        """inference_tools should reference GenericPredictor, not old Predictor."""
+    def test_inference_tools_uses_build_predictor(self):
+        """inference_tools should build its predictor through the model-kind factory."""
         import inspect
         import tcip_mcp.tools.inference_tools as it
         src = inspect.getsource(it)
-        assert "generic_predictor" in src
-        assert "predictor import Predictor" not in src
+        assert "build_predictor" in src
