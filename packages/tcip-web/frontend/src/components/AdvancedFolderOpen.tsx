@@ -24,7 +24,9 @@ interface Tree {
 }
 
 function friendlyScanError(msg: string): string {
-  if (/40[34]/.test(msg)) {
+  // Errors now carry the backend's clean `detail` (e.g. "dataset_root not found: …") rather than
+  // a raw "404 …" blob, so match the detail text as well as the status code.
+  if (/not found|40[34]/i.test(msg)) {
     return "Folder not found. Check the path is exact — in File Explorer, click the address bar and copy the full path.";
   }
   return msg;
