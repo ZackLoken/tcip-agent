@@ -39,6 +39,9 @@ DEFAULT_CONF = 0.5
 DEFAULT_NMS_IOU = 0.3
 DEFAULT_TILED = True
 DEFAULT_TILE_SIZE = 640
+# A high full-frame detection cap so dense scenes (hundreds of catkins) aren't silently truncated
+# at a framework default (torchvision 100 / ultralytics 300). Enforced after any tiled merge.
+DEFAULT_MAX_DETS = 1000
 
 
 class UnvalidatedOperatingPointError(RuntimeError):
@@ -191,6 +194,28 @@ class ResolvedBundle:
             "classifier_validated_vs_gt": self.classifier_validated_vs_gt,
             "operating_point": {name: p.to_provenance() for name, p in self.params.items()},
         }
+
+
+def raw_operating_point(
+    *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
+    max_dets: int,
+) -> ResolvedBundle:
+    """The operating point for RAW (uncalibrated) inference — the one both doors resolve through.
+
+    ``conf`` is a documented default with no per-dataset GT behind it, so it is a calibration param
+    stamped ``validated_vs_gt=false``: reading it requires ``unvalidated_value(...)`` and the caller
+    must stamp its output ``validated=false``. This is what stops the MCP tool and the web job giving
+    a different count (the phenotype) for the same model + images by entry point.
+    """
+    return ResolvedBundle(trait="", dataset_hash=None, params={
+        "conf": ResolvedParam("conf", conf, source="default", derivation_class="calibration",
+                              validated_vs_gt=VALIDATED_FALSE),
+        "cross_tile_nms": default("cross_tile_nms", cross_tile_nms if tiled else None,
+                                  derivation_class="distribution"),
+        "tiled": default("tiled", tiled),
+        "tile_size": default("tile_size", tile_size if tiled else None),
+        "max_dets": default("max_dets", max_dets, derivation_class="distribution"),
+    })
 
 
 # --- dataset identity -----------------------------------------------------
