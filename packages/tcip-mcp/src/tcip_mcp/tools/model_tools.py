@@ -47,8 +47,17 @@ def register_model(
         metrics: Evaluation metrics.
         tags: Tags for filtering.
     """
+    # Record the model kind so the GUI + agent know how to run it (e.g. a pretrained YOLO
+    # baseline registers as ``ultralytics``); best-effort — a checkpoint that can't be sniffed
+    # still registers, and build_predictor re-sniffs at inference time.
+    kind = None
+    try:
+        from tcip_mcp.pipelines.inference.predictor import detect_kind
+        kind = detect_kind(checkpoint_path)
+    except Exception:
+        kind = None
     registry = ModelRegistry(_registry_root(project_path))
-    return registry.register_model(name, checkpoint_path, config, metrics, tags)
+    return registry.register_model(name, checkpoint_path, config, metrics, tags, kind=kind)
 
 
 @mcp.tool()
