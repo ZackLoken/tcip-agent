@@ -549,6 +549,7 @@ def _queue_worker(job: QueueJob, payload: QueuePayload) -> None:
 def launch_queue(payload: QueuePayload) -> dict:
     """Kick off active-learning ranking of unreviewed images on a background thread."""
     _guard_path(payload.images_dir)
+    _guard_path(payload.checkpoint_path)  # fed to build_predictor → torch.load; confine it too
     if not Path(payload.checkpoint_path).is_file():
         raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
     if not Path(payload.images_dir).is_dir():
