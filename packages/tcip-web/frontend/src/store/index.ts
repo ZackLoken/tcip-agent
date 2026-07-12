@@ -86,6 +86,10 @@ const EMPTY_SESSION_TRACKING: SessionTrackingState = {
 interface ReviewTabState {
   matches: MatchesResponse | null;
   loading: boolean;
+  // One-shot: the detection index a `review_focus` command asked to center on. The reload
+  // effect consumes it once (else it always jumps to first-unreviewed, dropping the agent's
+  // "look at detection N" request).
+  focusDetectionIdx: number | null;
 }
 
 interface ClassesState {
@@ -247,6 +251,7 @@ export interface AppState {
   setMatches: (matches: MatchesResponse | null) => void;
   setReviewLoading: (loading: boolean) => void;
   setReviewDetectionIdx: (idx: number) => void;
+  setReviewFocusIdx: (idx: number | null) => void;
   markDetectionReviewed: (idx: number, action: string) => void;
 }
 
@@ -263,7 +268,7 @@ export const useStore = create<AppState>()((set, get) => ({
   wsStatus: "disconnected",
   wsVersion: 0,
   canvas: EMPTY_CANVAS,
-  review: { matches: null, loading: false },
+  review: { matches: null, loading: false, focusDetectionIdx: null },
   classes: { list: [], loaded: false },
   imageStatus: { byImage: {}, activeFilter: "all" },
   annotateUi: {
@@ -624,6 +629,7 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({
       gui: { ...s.gui, review: { ...s.gui.review, detection_idx: idx } },
     })),
+  setReviewFocusIdx: (idx) => set((s) => ({ review: { ...s.review, focusDetectionIdx: idx } })),
 
   markDetectionReviewed: (idx, action) =>
     set((s) => {
