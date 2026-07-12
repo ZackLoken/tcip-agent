@@ -56,6 +56,7 @@ class InferenceJob:
     slice_hw: tuple[int, int]
     overlap: float
     max_dets: int = DEFAULT_MAX_DETS
+    postprocess: str = "nms"  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
     total: int = 0
     done: int = 0
     status: str = "pending"  # pending | running | completed | failed | cancelled
@@ -195,6 +196,7 @@ def _worker(job: InferenceJob) -> None:
                 tile_size=job.slice_hw[0],
                 overlap=job.overlap,
                 global_nms_iou=job.iou,
+                postprocess=job.postprocess,
             )
             lines = result_to_yolo_lines(results[0])
             out = output_dir / f"{img.stem}.txt"
@@ -228,6 +230,7 @@ class LaunchInferencePayload(BaseModel):
     slice_w: int = DEFAULT_TILE_SIZE
     overlap: float = 0.2
     max_dets: int = DEFAULT_MAX_DETS
+    postprocess: str = "nms"
 
 
 @router.post("/launch")
@@ -248,6 +251,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         slice_hw=(payload.slice_h, payload.slice_w),
         overlap=payload.overlap,
         max_dets=payload.max_dets,
+        postprocess=payload.postprocess,
     )
     _register(job)
 
