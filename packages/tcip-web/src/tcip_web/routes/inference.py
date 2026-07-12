@@ -33,6 +33,7 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_TILE_SIZE,
     DEFAULT_TILED,
 )
+from tcip_web.paths import assert_path_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +236,14 @@ class LaunchInferencePayload(BaseModel):
 
 @router.post("/launch")
 def launch_inference(payload: LaunchInferencePayload) -> dict:
+    # Confine client-supplied paths to the allowed roots when the server is locked down
+    # (TCIP_IMAGE_ROOTS) — the checkpoint is fed to torch.load(weights_only=False), an
+    # arbitrary-pickle sink, so an unconfined path is the sharpest edge here. No-op when unset.
+    try:
+        for p in (payload.checkpoint_path, payload.images_dir, payload.output_dir):
+            assert_path_allowed(p)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
     if not Path(payload.checkpoint_path).is_file():
         raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
     if not Path(payload.images_dir).is_dir():
