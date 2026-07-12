@@ -245,7 +245,7 @@ def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -
     t0 = time.perf_counter()
 
     try:
-        from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+        from tcip_mcp.pipelines.inference.predictor import build_predictor
         from tcip_mcp.pipelines.postprocessing.export import result_to_yolo_lines
 
         ckpt = phase.get("checkpoint")
@@ -256,7 +256,7 @@ def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -
         if not ckpt:
             raise ValueError("Inference phase needs a checkpoint (from prior training or explicit)")
 
-        predictor = GenericPredictor(ckpt)
+        predictor = build_predictor(ckpt)
         images_dir = phase.get("images_dir")
         if not images_dir and input_ref and input_ref in context:
             images_dir = context[input_ref].get("images_dir")
