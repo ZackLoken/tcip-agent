@@ -173,6 +173,27 @@ async def select_dataset(req: SelectionRequest) -> dict:
     }
 
 
+class NavRequest(BaseModel):
+    current_image_index: int
+
+
+@router.post("/nav")
+async def set_current_image(req: NavRequest) -> dict:
+    """Persist the browser's current image position into ``GuiState.dataset``.
+
+    The frontend debounces this so rapid arrow-key nav doesn't flood the store; the
+    agent reads the resulting index via ``get_active_context`` (last image the human
+    looked at). Merges into the live dataset so the other selection fields survive.
+    """
+    dataset = store.state.dataset
+    n = len(dataset.image_list)
+    index = req.current_image_index
+    if n and not (0 <= index < n):
+        raise HTTPException(400, f"index {index} out of range for {n} images")
+    await store.mutate({"dataset": dataset.model_copy(update={"current_image_index": index})})
+    return {"status": "ok", "current_image_index": index}
+
+
 @router.get("/state")
 def get_state_snapshot() -> dict:
     """Return a JSON snapshot of the full :class:`GuiState` (debugging / replay)."""
