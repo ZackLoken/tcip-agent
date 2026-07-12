@@ -28,7 +28,7 @@ def score_unlabeled(
         task: Task type for uncertainty scoring.
         budget: Number of images to select.
     """
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.inference.predictor import KIND_TORCHVISION_COMPOSED, build_predictor
     from tcip_mcp.pipelines.active_learning.scorer import (
         UncertaintyScorer, DiversityScorer, CombinedScorer,
     )
@@ -37,7 +37,11 @@ def score_unlabeled(
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
 
-    predictor = GenericPredictor(checkpoint_path)
+    predictor = build_predictor(checkpoint_path)
+    if getattr(predictor, "kind", None) != KIND_TORCHVISION_COMPOSED:
+        return {"error": (f"uncertainty scoring needs a composed torchvision detector, not a "
+                          f"'{getattr(predictor, 'kind', 'unknown')}' model (its .model is not an "
+                          f"nn.Module the scorer can read logits from)")}
     device = predictor.device
     model = predictor.model
 
@@ -82,13 +86,13 @@ def get_review_queue(
         high: Upper confidence bound for review queue.
         auto_threshold: Confidence threshold for auto-accepting labels.
     """
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue
 
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
 
-    predictor = GenericPredictor(checkpoint_path)
+    predictor = build_predictor(checkpoint_path)
 
     exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
     paths = sorted(str(f) for f in Path(images_dir).iterdir() if f.suffix.lower() in exts)
