@@ -433,6 +433,18 @@ def run_hpo(
                 logger.warning("HPO trial failed: %s", e)
                 return float("inf") if direction == "minimize" else float("-inf")
 
+        # Persist the study to sqlite + a result file so a restart doesn't lose the trials
+        # (the web sweep was ephemeral in-memory — Optuna defaulted to storage=None). One
+        # uniquely-named study per call, under output_dir or the platform state root.
+        import uuid
+
+        from tcip_mcp.project_paths import project_root
+
+        hpo_dir = Path(output_dir) if output_dir else project_root() / ".tcip" / "hpo"
+        hpo_dir.mkdir(parents=True, exist_ok=True)
+        study_name = f"hpo_{uuid.uuid4().hex[:8]}"
+        storage = f"sqlite:///{(hpo_dir / 'hpo.db').as_posix()}"  # as_posix so Windows paths are valid URLs
+
         result = optuna_search(
             objective_fn=objective_fn,
             param_space=param_space,
@@ -444,6 +456,8 @@ def run_hpo(
             warm_start=warm_start,
             baseline_params=baseline_params,
             tb_logdir=tb_logdir,
+            study_name=study_name,
+            storage=storage,
         )
 
         # Auto-launch TensorBoard for HPO results
@@ -456,6 +470,14 @@ def run_hpo(
                 pass
 
         result["tensorboard"] = tb_info
+        result["storage"] = storage
+        # Durable result file alongside the sqlite study (best-effort — a write hiccup must not
+        # sink a completed sweep).
+        try:
+            from tcip_mcp.utils.atomic_io import atomic_write_json
+            atomic_write_json(hpo_dir / f"{study_name}.json", result)
+        except Exception:
+            logger.warning("could not persist hpo result json for %s", study_name, exc_info=True)
         return result
 
     # Random search fallback
