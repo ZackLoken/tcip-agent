@@ -27,6 +27,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.composer import compose_model, ComposedModel
+from tcip_mcp.pipelines.inference.predictor import KIND_TORCHVISION_COMPOSED
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.pipelines.training.evaluation import evaluate
 from tcip_mcp.pipelines.training.optimizer_factory import (
@@ -216,6 +217,7 @@ def _save_checkpoint(
     ``model_spec``/``model_state_dict`` and stays compatible.
     """
     _atomic_torch_save({
+        "kind": KIND_TORCHVISION_COMPOSED,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
@@ -645,6 +647,7 @@ def train(
                     run.best_metric = sel
                     try:
                         _atomic_torch_save({
+                            "kind": KIND_TORCHVISION_COMPOSED,
                             "model_state_dict": model.state_dict(),
                             "model_spec": config["model_spec"],
                             "config": config,
@@ -693,6 +696,7 @@ def train(
 
         # Final checkpoint (saved even on cancellation so partial progress is recoverable).
         _atomic_torch_save({
+            "kind": KIND_TORCHVISION_COMPOSED,
             "model_state_dict": model.state_dict(),
             "model_spec": config["model_spec"],
             "config": config,
