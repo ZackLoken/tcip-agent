@@ -232,7 +232,7 @@ export function CanvasStage(props: CanvasStageProps) {
   };
 
   return (
-    <div ref={wrapper} className="relative flex-1 bg-tcip-canvas overflow-hidden">
+    <div ref={wrapper} data-canvas-host className="relative flex-1 bg-tcip-canvas overflow-hidden">
       <Stage
         ref={(s) => {
           stageRef.current = s;
