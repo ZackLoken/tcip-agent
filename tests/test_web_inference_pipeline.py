@@ -33,8 +33,9 @@ def test_web_worker_uses_generic_predictor_and_writes_yolo(tmp_path, monkeypatch
     captured = {}
 
     class FakePredictor:
-        def __init__(self, checkpoint_path=None, device=None, score_threshold=0.5):
+        def __init__(self, checkpoint_path=None, **kwargs):
             captured["checkpoint"] = checkpoint_path
+            captured["kwargs"] = kwargs
 
         def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
             captured["tile"] = tile
