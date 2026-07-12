@@ -95,6 +95,24 @@ and its multimodal vision for classification and QA.
 4. `evaluate_detections` computes TP/FP/FN per class
 5. Review in panel: accept correct predictions, correct errors, add missed objects
 
+### The review channel — propose on canvas, never write GT blind
+
+The agent must **never write ground truth the human hasn't seen**. Stage proposals to the
+*predictions* tree and drive the human to review them:
+
+- **`stage_proposals(dataset_root, model_name, date, stem, boxes)`** writes agent-proposed
+  detections to `predictions/<model>/<date>/detect/<stem>.txt` (normalized `cx cy w h`) — the
+  predictions tree, **not** `annotations/`. They render on the Review canvas as predictions for
+  the human to accept/reject/edit. Use a distinct model bucket like `agent_proposals`.
+- **`focus_review(project_root, dataset_root, trait, date, model_name, image_index, detection_idx,
+  filter_type, iou, conf)`** drives the live Review tab straight to a model's predictions on a
+  frame/detection, so the human sees exactly what you flagged (a false positive, a missed catkin)
+  without hunting. The Review analog of `focus_annotate`; a soft no-op if no GUI is running.
+
+Flow: run inference (or `stage_proposals`) → `focus_review` the human to the weakest/flagged
+frames → they accept on the canvas → only then does it become GT. See
+`.github/skills/delivery` for what ships after sign-off.
+
 ## Quality Metrics
 
 - **Per-class AP** at IoU 0.5 and 0.5:0.95
