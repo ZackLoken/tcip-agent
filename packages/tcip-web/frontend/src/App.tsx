@@ -11,6 +11,7 @@ import { Toasts } from "@/components/Toasts";
 import { TopBar } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
 import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
+import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
 import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -85,6 +86,17 @@ function App() {
           useStore
             .getState()
             .pushToast("Agent tried to focus the Annotate tab, but it couldn't be applied.");
+        });
+        return;
+      }
+
+      // Agent → GUI "focus the Review tab": load a model's predictions on a frame/detection so
+      // the human sees exactly what the agent flagged (a false positive, a missed catkin).
+      if (ev.event_type === "review_focus") {
+        void applyReviewFocus(ev.data as ReviewFocusData).catch(() => {
+          useStore
+            .getState()
+            .pushToast("Agent tried to focus the Review tab, but it couldn't be applied.");
         });
         return;
       }
