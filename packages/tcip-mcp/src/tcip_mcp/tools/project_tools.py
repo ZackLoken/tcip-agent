@@ -204,14 +204,64 @@ def get_session(project_path: str, session_id: str) -> dict:
     return {"session_id": session_id, "events": events, "count": len(events)}
 
 
+def _resolve_project_path(project_path: str) -> str:
+    from tcip_mcp import workspace
+    return workspace.resolve_project_path(project_path)
+
+
+@mcp.tool()
+def get_active_context() -> dict:
+    """The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the
+    exact current image. Lets the agent work through the app instead of globbing or asking which image
+    is open. Reads the active-project marker + that project's gui.json. active_project is None when
+    nothing is open.
+    """
+    from tcip_mcp import workspace
+
+    name = workspace.read_active_project()
+    if not name:
+        return {"active_project": None,
+                "note": "no active project; open one in the GUI or call set_active_project"}
+    project_root = workspace.project_path(name)
+    ctx: dict = {"active_project": name, "project_root": str(project_root)}
+    gui_path = project_root / ".tcip" / "state" / "gui.json"
+    if not gui_path.is_file():
+        ctx["note"] = "no gui.json yet (the GUI has not persisted a selection for this project)"
+        return ctx
+    try:
+        gui = json.loads(gui_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        ctx["error"] = f"could not read gui.json: {e}"
+        return ctx
+    ds = gui.get("dataset") or {}
+    image_list = ds.get("image_list") or []
+    idx = ds.get("current_image_index") or 0
+    dataset_root, date = ds.get("dataset_root"), ds.get("date")
+    current_image = None
+    if dataset_root and date and 0 <= idx < len(image_list):
+        current_image = str(Path(dataset_root) / "images" / date / image_list[idx])
+    ctx.update({
+        "dataset_root": dataset_root,
+        "annotation_type": ds.get("annotation_type"),
+        "date": date,
+        "active_tab": gui.get("active_tab"),
+        "mode": gui.get("mode"),
+        "n_images": len(image_list),
+        "current_image_index": idx,
+        "current_image": current_image,
+    })
+    return ctx
+
+
 @mcp.tool()
 @audited
-def get_project_status(project_path: str) -> dict:
+def get_project_status(project_path: str = "") -> dict:
     """Get an overview of a TCIP project.
 
     Args:
-        project_path: Root directory of the project.
+        project_path: Root directory of the project. Empty defaults to the active project.
     """
+    project_path = _resolve_project_path(project_path)
     root = Path(project_path)
     tcip = root / ".tcip"
 
