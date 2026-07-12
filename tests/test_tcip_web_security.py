@@ -22,6 +22,30 @@ def test_trusted_host_rejects_foreign_host(client: TestClient) -> None:
     assert client.get("/health", headers={"host": "evil.example.com"}).status_code == 400
 
 
+def test_inference_launch_confines_checkpoint_to_image_roots(client, tmp_path, monkeypatch) -> None:
+    # A locked-down server (TCIP_IMAGE_ROOTS set) must reject a checkpoint outside the allowed
+    # roots BEFORE it reaches torch.load(weights_only=False) — an arbitrary-pickle sink.
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "evil.pt"
+    outside.write_bytes(b"x")
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": str(outside), "images_dir": str(allowed), "output_dir": str(allowed),
+    })
+    assert resp.status_code == 403
+
+
+def test_inference_launch_unconfined_when_no_image_roots(client, tmp_path, monkeypatch) -> None:
+    # With no allow-list the guard is a no-op: a missing checkpoint is a 404, never a 403.
+    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": str(tmp_path / "nope.pt"),
+        "images_dir": str(tmp_path), "output_dir": str(tmp_path),
+    })
+    assert resp.status_code == 404
+
+
 def test_ws_state_allows_missing_origin(client: TestClient) -> None:
     # A non-browser client sends no Origin — allowed, and gets the initial snapshot.
     with client.websocket_connect("/ws/state") as ws:
