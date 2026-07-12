@@ -30,6 +30,7 @@ export function InferenceTab() {
   const [imagesDir, setImagesDir] = useState<string>("");
   const [outputDir, setOutputDir] = useState<string>("");
   const [sahi, setSahi] = useState<boolean>(true);
+  const [postprocess, setPostprocess] = useState<"nms" | "nmm">("nms");
   const [conf, setConf] = useState<number>(0.25);
   const [iou, setIou] = useState<number>(0.7);
   const [sliceH, setSliceH] = useState<number>(640);
@@ -104,6 +105,7 @@ export function InferenceTab() {
         slice_h: sliceH,
         slice_w: sliceW,
         overlap,
+        postprocess,
       });
       if (res.job_id) {
         const stub: InferenceJob = {
@@ -184,10 +186,23 @@ export function InferenceTab() {
           placeholder="…/Valley_Farm/predictions/live/2-11-26/detect"
         />
 
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-3 mb-3">
           <label className="flex items-center gap-2 text-[12px]">
             <input type="checkbox" checked={sahi} onChange={(e) => setSahi(e.target.checked)} />
             SAHI tiled inference
+          </label>
+          <label className="flex items-center gap-1 text-[12px] text-tcip-muted">
+            Tile merge
+            <select
+              className="tcip-input text-[12px]"
+              value={postprocess}
+              disabled={!sahi}
+              title="How boxes from adjacent tiles are combined. NMM unions a box split across a seam; NMS suppresses overlaps."
+              onChange={(e) => setPostprocess(e.target.value === "nmm" ? "nmm" : "nms")}
+            >
+              <option value="nms">NMS (suppress)</option>
+              <option value="nmm">NMM (merge seams)</option>
+            </select>
           </label>
         </div>
 
