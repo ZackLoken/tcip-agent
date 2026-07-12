@@ -104,6 +104,15 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload) -> None:
 @router.post("/launch")
 def launch_hpo(payload: LaunchHPOPayload) -> dict:
     from tcip_web import jobstore
+    from tcip_web.paths import assert_path_allowed
+
+    # Confine the client-supplied output dir when the server is locked down (no-op otherwise).
+    # Data paths nested inside base_config are a documented follow-up (not top-level here).
+    if payload.output_dir:
+        try:
+            assert_path_allowed(payload.output_dir)
+        except ValueError as exc:
+            raise HTTPException(403, str(exc)) from exc
 
     job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
     with _lock:
