@@ -13,8 +13,34 @@ from PIL import Image
 
 from tcip_mcp.pipelines.composer import compose_model
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
+from tcip_mcp.pipelines.inference.predictor import KIND_TORCHVISION_COMPOSED
 
 logger = logging.getLogger(__name__)
+
+
+def _crop_pad_tile(img, x: int, y: int, tile_size: int, w: int, h: int):
+    """Crop a ``tile_size`` window at (x, y) and zero-pad short (edge) tiles.
+
+    Channel-generic: PIL for 1/3/4-channel images, numpy ``[H, W, C]`` for multi-band rasters
+    (which have no ``.crop``) — so tiled inference works on the multispectral 2D inputs the
+    dataset layer already reads, not just RGB.
+    """
+    x2, y2 = min(x + tile_size, w), min(y + tile_size, h)
+    if isinstance(img, Image.Image):
+        crop = img.crop((x, y, x2, y2))
+        if crop.size != (tile_size, tile_size):
+            padded = Image.new(img.mode, (tile_size, tile_size))  # 0-fill for the image's mode
+            padded.paste(crop, (0, 0))
+            crop = padded
+        return crop
+    import numpy as np
+
+    crop = img[y:y2, x:x2]
+    ph, pw = tile_size - crop.shape[0], tile_size - crop.shape[1]
+    if ph or pw:
+        pad_width = [(0, ph), (0, pw)] + ([(0, 0)] if crop.ndim == 3 else [])
+        crop = np.pad(crop, pad_width, mode="constant")
+    return crop
 
 
 class GenericPredictor:
@@ -31,11 +57,18 @@ class GenericPredictor:
         score_threshold: float = 0.5,
         nms_iou: float | None = None,
         max_dets: int | None = None,
+        *,
+        checkpoint: dict | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.score_threshold = score_threshold
+        self.max_dets = max_dets
+        self.kind = KIND_TORCHVISION_COMPOSED
 
-        ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        # ``build_predictor`` may hand us the already-loaded checkpoint (it read it to sniff the
+        # kind) so the weights aren't read from disk twice; fall back to loading it ourselves.
+        ckpt = checkpoint if checkpoint is not None else torch.load(
+            checkpoint_path, map_location=self.device, weights_only=False)
         self.model_spec = ckpt["model_spec"]
         self.config = ckpt.get("config", {})
 
@@ -79,7 +112,7 @@ class GenericPredictor:
     def predict_batch(
         self, image_paths: list[str], tile: bool = False, tile_size: int = 224,
         overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = 0.3,
-        batch_size: int = 16,
+        batch_size: int = 16, postprocess: str = "nms",
     ) -> list[dict]:
         """Run inference on multiple images (optionally tiled for small objects).
 
@@ -91,7 +124,8 @@ class GenericPredictor:
         if tile:
             return [
                 self.predict_tiled(p, tile_size=tile_size, overlap=overlap,
-                                   tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou)
+                                   tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
+                                   postprocess=postprocess)
                 for p in image_paths
             ]
         if self.task in ("anchor_detection", "anchor_free_detection"):
@@ -117,19 +151,20 @@ class GenericPredictor:
     @torch.no_grad()
     def predict_tiled(
         self, image_path: str, tile_size: int = 224, overlap: float = 0.2,
-        tile_batch_size: int = 96, global_nms_iou: float = 0.3,
+        tile_batch_size: int = 96, global_nms_iou: float = 0.3, postprocess: str = "nms",
     ) -> dict:
         """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict ->
-        core-region reconstruction -> single global NMS -> full-image detections.
+        core-region reconstruction -> cross-tile merge -> full-image detections.
 
-        Falls back to :meth:`predict` for non-detection heads.
+        ``postprocess`` selects the cross-tile merge: ``"nms"`` suppresses overlaps, ``"nmm"``
+        unions boxes split across a seam. Falls back to :meth:`predict` for non-detection heads.
         """
         if self.task not in ("anchor_detection", "anchor_free_detection"):
             return self.predict(image_path)
 
         import numpy as np
         from tcip_mcp.pipelines.data.tiling import (
-            compute_stride, tile_positions, reconstruct_core, global_nms,
+            compute_stride, tile_positions, reconstruct_core, global_nms, global_merge,
         )
 
         img = load_image(image_path, self.in_chans)
@@ -160,11 +195,7 @@ class GenericPredictor:
             batch_meta.clear()
 
         for tile_x, tile_y in positions:
-            crop = img.crop((tile_x, tile_y, min(tile_x + tile_size, w), min(tile_y + tile_size, h)))
-            if crop.size != (tile_size, tile_size):
-                padded = Image.new("RGB", (tile_size, tile_size), (0, 0, 0))
-                padded.paste(crop, (0, 0))  # zero-pad bottom/right
-                crop = padded
+            crop = _crop_pad_tile(img, tile_x, tile_y, tile_size, w, h)
             batch_tiles.append(pil_to_tensor(crop).to(self.device))
             batch_meta.append({"tile_x": tile_x, "tile_y": tile_y, "original_width": w, "original_height": h})
             if len(batch_tiles) >= tile_batch_size:
@@ -173,8 +204,19 @@ class GenericPredictor:
 
         boxes, scores, labels = reconstruct_core(
             per_tile_boxes, per_tile_scores, per_tile_labels, tile_info, tile_size, stride)
-        keep = global_nms(boxes, scores, labels, global_nms_iou) if len(boxes) else np.zeros((0,), dtype=np.int64)
-        boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+        if len(boxes) == 0:
+            pass
+        elif postprocess == "nmm":
+            boxes, scores, labels = global_merge(boxes, scores, labels, global_nms_iou)
+        else:
+            keep = global_nms(boxes, scores, labels, global_nms_iou)
+            boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+
+        # Enforce the full-frame detection cap AFTER the cross-tile merge (highest score first);
+        # the in-model detections_per_img only caps per tile, so a dense image can exceed it.
+        if self.max_dets is not None and len(scores) > self.max_dets:
+            top = np.argsort(scores)[::-1][: self.max_dets]
+            boxes, scores, labels = boxes[top], scores[top], labels[top]
 
         return {
             "image": image_path,
