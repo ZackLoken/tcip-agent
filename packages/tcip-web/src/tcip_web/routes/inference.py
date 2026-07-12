@@ -4,10 +4,13 @@ Jobs run on a background thread. Each job writes YOLO-format predictions
 (one ``<stem>.txt`` per image, ``class conf cx cy w h``) to ``output_dir``
 so they plug straight into the Review tab and the per-plant curve pipeline.
 
-Inference goes through the tcip pipeline ``GenericPredictor`` — the same code path as
-the MCP ``run_inference`` tool — with native SAHI-style tiling when ``sahi=true``. There
-is no separate ultralytics/SAHI stack. Checkpoints are tcip composed-model checkpoints
-(``model_spec`` + ``model_state_dict``) produced by the training pipeline.
+Inference goes through ``build_predictor`` — the same entry point as the MCP ``run_inference``
+tool — which dispatches on the checkpoint's model kind: a tcip composed-model checkpoint runs
+through native SAHI-style tiling, a pretrained ultralytics YOLO checkpoint runs through SAHI.
+The operating point (conf / NMS IoU / tiling / max_dets) is resolved through the same
+``raw_operating_point`` bundle as the MCP door and its provenance is stamped alongside the
+predictions, so a GUI run and an agent run can't diverge on the count or hide an unvalidated
+operating point.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from pydantic import BaseModel
 
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
+    DEFAULT_MAX_DETS,
     DEFAULT_NMS_IOU,
     DEFAULT_TILE_SIZE,
     DEFAULT_TILED,
@@ -51,6 +55,7 @@ class InferenceJob:
     iou: float
     slice_hw: tuple[int, int]
     overlap: float
+    max_dets: int = DEFAULT_MAX_DETS
     total: int = 0
     done: int = 0
     status: str = "pending"  # pending | running | completed | failed | cancelled
@@ -151,16 +156,35 @@ def _worker(job: InferenceJob) -> None:
         images = _list_images(Path(job.images_dir))
         job.total = len(images)
 
-        # One inference code path: the tcip pipeline predictor (same as MCP run_inference),
-        # with native sliding-window tiling when sahi=true. No ultralytics/SAHI stack.
-        from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+        # One inference entry point (same as MCP run_inference): build_predictor dispatches on
+        # the checkpoint's model kind (torchvision-composed → native tiling; ultralytics → SAHI).
+        from tcip_mcp.pipelines.inference.predictor import build_predictor
         from tcip_mcp.pipelines.postprocessing.export import result_to_yolo_lines
+        from tcip_mcp.pipelines.resolution import raw_operating_point
+        from tcip_mcp.utils.atomic_io import atomic_write_json
 
-        predictor = GenericPredictor(
+        # Resolve the operating point through the SAME firewalled bundle as the MCP door: conf is a
+        # documented default with no per-dataset GT, so it is unvalidated and stamped validated=false.
+        op_bundle = raw_operating_point(
+            conf=job.conf, cross_tile_nms=job.iou, tiled=job.sahi,
+            tile_size=job.slice_hw[0], max_dets=job.max_dets,
+        )
+        conf = op_bundle.get("conf").unvalidated_value(acknowledge_unvalidated=True)
+
+        predictor = build_predictor(
             checkpoint_path=job.checkpoint_path,
             device=None,  # auto: cuda if available, else cpu
-            score_threshold=job.conf,
+            score_threshold=conf,
+            nms_iou=job.iou,
+            max_dets=job.max_dets,
         )
+
+        # Stamp the operating point next to the predictions so a GUI-produced set carries the same
+        # provenance (and validated=false) the MCP door records — a phenotype's numbers are only as
+        # trustworthy as the operating point that produced them.
+        provenance = op_bundle.to_provenance()
+        provenance["validated"] = op_bundle.is_shippable
+        atomic_write_json(output_dir / "operating_point.json", provenance)
 
         for img in images:
             if job.cancel_event.is_set():
@@ -203,6 +227,7 @@ class LaunchInferencePayload(BaseModel):
     slice_h: int = DEFAULT_TILE_SIZE
     slice_w: int = DEFAULT_TILE_SIZE
     overlap: float = 0.2
+    max_dets: int = DEFAULT_MAX_DETS
 
 
 @router.post("/launch")
@@ -222,6 +247,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         iou=payload.iou,
         slice_hw=(payload.slice_h, payload.slice_w),
         overlap=payload.overlap,
+        max_dets=payload.max_dets,
     )
     _register(job)
 
