@@ -50,9 +50,6 @@ export const inferenceApi = {
 
   getJob: (jobId: string) => getJson<InferenceJob>(`/api/inference/jobs/${jobId}`),
 
-  getPreview: (jobId: string, limit = 12) =>
-    getJson<unknown>(`/api/inference/jobs/${jobId}/preview?limit=${limit}`),
-
   cancel: (jobId: string) =>
     postJson<{ job_id: string; status: string; cancel_requested: boolean }>(
       `/api/inference/jobs/${encodeURIComponent(jobId)}/cancel`,
