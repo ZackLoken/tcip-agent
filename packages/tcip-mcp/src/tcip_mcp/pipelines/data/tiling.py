@@ -88,6 +88,19 @@ def _iou(a, b, area_a, area_b) -> float:
     return inter / union if union > 0 else 0.0
 
 
+def _ios(a, b, area_a, area_b) -> float:
+    """Intersection over the SMALLER box area — the NMM match metric. A partial fragment mostly
+    inside a fuller detection scores high here even when its IoU is low, which is exactly the
+    seam-split case merging is meant to catch (IoU would leave the two boxes separate)."""
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0:
+        return 0.0
+    smaller = min(area_a, area_b)
+    return inter / smaller if smaller > 0 else 0.0
+
+
 def dedup_boxes(
     boxes: np.ndarray, labels: np.ndarray, iou_thresh: float, class_aware: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -190,3 +203,50 @@ def global_nms(
         return keep.cpu().numpy()
     except Exception:  # noqa: BLE001 — torch/torchvision absent -> numpy fallback
         return _numpy_nms(np.asarray(boxes), np.asarray(scores), np.asarray(labels), iou_thresh, class_aware)
+
+
+def global_merge(
+    boxes: np.ndarray, scores: np.ndarray, labels: np.ndarray,
+    iou_thresh: float, class_aware: bool = True,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cross-tile Non-Max *Merging*: union overlapping same-class boxes (bbox hull, max score)
+    instead of suppressing the lower-score one — recovers an object split across a tile seam
+    into two partial boxes (SAHI's NMM). Returns merged ``(boxes, scores, labels)`` — new boxes,
+    not a subset of indices like :func:`global_nms`, so callers consume the arrays directly.
+    """
+    boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
+    scores = np.asarray(scores, dtype=np.float64)
+    labels = np.asarray(labels, dtype=np.int64)
+    if len(boxes) == 0:
+        return EMPTY_BOXES.copy(), EMPTY_SCORES.copy(), EMPTY_LABELS.copy()
+
+    order = sorted(range(len(boxes)), key=lambda i: -scores[i])  # highest score seeds each cluster
+    used = [False] * len(boxes)
+    m_boxes, m_scores, m_labels = [], [], []
+    for i in order:
+        if used[i]:
+            continue
+        used[i] = True
+        cur = boxes[i].copy()
+        cur_score = float(scores[i])
+        merged = True
+        while merged:  # keep absorbing boxes overlapping the GROWING hull (transitive seams)
+            merged = False
+            cur_area = (cur[2] - cur[0]) * (cur[3] - cur[1])
+            for j in order:
+                if used[j] or (class_aware and labels[j] != labels[i]):
+                    continue
+                aj = (boxes[j][2] - boxes[j][0]) * (boxes[j][3] - boxes[j][1])
+                if _ios(cur, boxes[j], cur_area, aj) >= iou_thresh:
+                    used[j] = True
+                    cur = np.array([min(cur[0], boxes[j][0]), min(cur[1], boxes[j][1]),
+                                    max(cur[2], boxes[j][2]), max(cur[3], boxes[j][3])])
+                    cur_score = max(cur_score, float(scores[j]))
+                    merged = True
+                    break
+        m_boxes.append(cur)
+        m_scores.append(cur_score)
+        m_labels.append(int(labels[i]))
+    return (np.asarray(m_boxes, dtype=np.float32),
+            np.asarray(m_scores, dtype=np.float32),
+            np.asarray(m_labels, dtype=np.int64))
