@@ -161,6 +161,29 @@ def test_dataset_select_advisory_reflects_actual_labels(
     assert r2["predictions_present"] is True
 
 
+def test_dataset_nav_persists_current_index(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    client.post(
+        "/api/dataset/select",
+        json={
+            "project_root": str(project),
+            "dataset_root": str(dataset_root),
+            "annotation_type": "catkin",
+            "date": "2-11-26",
+        },
+    )
+    # A valid position is accepted and shows up in the live GuiState the agent reads.
+    ok = client.post("/api/dataset/nav", json={"current_image_index": 2})
+    assert ok.status_code == 200
+    assert ok.json()["current_image_index"] == 2
+    assert client.get("/api/state").json()["dataset"]["current_image_index"] == 2
+    # Out of range (3 images → valid 0..2) is rejected, not silently clamped.
+    assert client.post("/api/dataset/nav", json={"current_image_index": 9}).status_code == 400
+
+
 # ── /api/images ──────────────────────────────────────────────────────────
 
 
