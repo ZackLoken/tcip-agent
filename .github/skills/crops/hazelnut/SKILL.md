@@ -30,6 +30,14 @@ classifier (class 1 = elongated), **never** a geometric proxy like bbox height. 
 This is **not** a catkin-count-of-peak or a sigmoid fit. Compose the `phenology` skill's
 pieces (`compute_phenology` tool → delivered `catkin_phenology.csv`); do not re-script it.
 
+Bloom is **per plant**, but ground-RGB frames are not one-frame-per-plant: walking a
+hedgerow, adjacent frames are often *different* plants, and one plant may span several
+frames (or none, if skipped). Frame order is **not** plant identity — never aggregate by
+"every Nth frame is plant N." Plant identity comes from the spatial plant mapping
+(`build_plant_mapping` over the plant CSV), which assigns each detection to a plant by
+position. If that mapping is absent, per-plant milestones can't be computed; say so rather
+than inventing a frame-to-plant rule.
+
 ## Trait Inventory
 
 ### Phenology (14 traits)
