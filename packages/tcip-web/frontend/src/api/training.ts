@@ -30,8 +30,6 @@ export const trainingApi = {
 
   listRuns: () => getJson<{ runs: TrainingRunSummary[] }>("/api/training/runs"),
 
-  getRun: (run_id: string) => getJson<TrainingRunSummary>(`/api/training/runs/${run_id}`),
-
   getMetrics: (project_root: string, run_id: string) =>
     getJson<{ metrics: MetricRow[]; exists: boolean }>(
       `/api/training/runs/${run_id}/metrics?project_root=${encodeURIComponent(project_root)}`,
@@ -42,9 +40,6 @@ export const trainingApi = {
       `/api/training/runs/${encodeURIComponent(run_id)}/cancel`,
       {},
     ),
-
-  compare: (experiment_ids: string[]) =>
-    postJson<unknown>("/api/training/compare", { experiment_ids }),
 };
 
 export interface TrainingStreamMsg {
