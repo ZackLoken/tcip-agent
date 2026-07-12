@@ -24,6 +24,23 @@ def pytest_collection_modifyitems(config, items):
         )
 
 
+@pytest.fixture(autouse=True)
+def _restore_platform_root_env():
+    """Keep the process-global platform-state root hermetic across tests.
+
+    ``set_active_project`` repins ``TCIP_PROJECT_ROOT`` in-process (so a project's audit /
+    experiments / registry co-locate under it). Since pytest runs in one process, a test
+    that adopts a tmp project would otherwise leak that now-deleted root into later tests.
+    Snapshot and restore the var around every test.
+    """
+    saved = os.environ.get("TCIP_PROJECT_ROOT")
+    yield
+    if saved is None:
+        os.environ.pop("TCIP_PROJECT_ROOT", None)
+    else:
+        os.environ["TCIP_PROJECT_ROOT"] = saved
+
+
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
     """Create a minimal YOLO-format dataset in the canonical layout for testing."""
