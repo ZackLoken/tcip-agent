@@ -17,6 +17,18 @@ description: "Annotation and review workflows for YOLO, COCO, PASCAL VOC, and La
 Use `detect_format()` from `tcip_annotation.format_io` to auto-detect.
 Use `load_annotations` / `save_annotations` from `format_io` for format-agnostic I/O.
 
+## Coordinate frame — upright, EXIF applied once
+
+Every coordinate (normalized or pixel) lives in the **EXIF-upright** frame. Images are
+decoded through one door — `load_image` (`image_utils.py`) / `get_image_dimensions`, both
+via `auto_orient_image` — which applies the EXIF orientation exactly once, so the GUI
+canvas, the model, tiling, and viz all share one pixel space. This matters most for
+Orientation-6 phone/camera JPEGs whose stored frame is transposed (e.g. 5712×4284 ↔
+4284×5712): denormalizing an upright-authored box against the raw sensor frame scatters
+every box. Do not re-open images with a bare `PIL.Image.open` for anything coordinate-
+bearing (denormalizing, cropping, drawing) — go through `load_image` so orientation isn't
+applied twice or skipped.
+
 ## Stages
 
 1. **Initial labeling** — Manual or SAM-assisted bounding box and polygon annotation
