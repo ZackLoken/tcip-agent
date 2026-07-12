@@ -39,6 +39,7 @@ def test_web_worker_uses_generic_predictor_and_writes_yolo(tmp_path, monkeypatch
 
         def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
             captured["tile"] = tile
+            captured["postprocess"] = kw.get("postprocess")
             return [{"image": p, "width": 100, "height": 100,
                      "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
                     for p in paths]
@@ -49,7 +50,7 @@ def test_web_worker_uses_generic_predictor_and_writes_yolo(tmp_path, monkeypatch
     job = InferenceJob(
         job_id="t", checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), sahi=True, conf=0.25, iou=0.7,
-        slice_hw=(640, 640), overlap=0.2,
+        slice_hw=(640, 640), overlap=0.2, postprocess="nmm",
     )
     _worker(job)
 
@@ -57,6 +58,7 @@ def test_web_worker_uses_generic_predictor_and_writes_yolo(tmp_path, monkeypatch
     assert job.done == 1 and job.total == 1
     assert captured["checkpoint"] == str(ckpt)
     assert captured["tile"] is True                 # sahi=True -> pipeline tiling
+    assert captured["postprocess"] == "nmm"         # the GUI's tile-merge choice reaches inference
     parts = (out_dir / "img.txt").read_text().strip().split()
     assert len(parts) == 6 and parts[0] == "0"      # YOLO "cls conf cx cy w h"
     assert float(parts[2]) == pytest.approx(0.2)
