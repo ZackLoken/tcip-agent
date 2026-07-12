@@ -116,7 +116,7 @@ export function ReviewTab() {
       // A pending `review_focus` index (the agent asked to center on detection N) wins for one
       // reload; otherwise honor an explicit hint, else jump to the first unreviewed detection.
       const focusIdx = useStore.getState().review.focusDetectionIdx;
-      const effectiveHint = indexHint ?? (focusIdx ?? undefined);
+      const effectiveHint = indexHint ?? focusIdx ?? undefined;
       if (focusIdx !== null && focusIdx !== undefined) useStore.getState().setReviewFocusIdx(null);
       if (effectiveHint === undefined) {
         const firstUnreviewed = res.detections.findIndex((d) => !d.reviewed);
