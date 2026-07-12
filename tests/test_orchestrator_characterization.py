@@ -102,8 +102,8 @@ def fake_predictor(monkeypatch) -> dict:
     captured: dict = {"predicted": []}
 
     class FakePredictor:
-        def __init__(self, ckpt):
-            captured["checkpoint"] = ckpt
+        def __init__(self, checkpoint_path=None, **kwargs):
+            captured["checkpoint"] = checkpoint_path
 
         def predict(self, image_path):
             captured["predicted"].append(image_path)
