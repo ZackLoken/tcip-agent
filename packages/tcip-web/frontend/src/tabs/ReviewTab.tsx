@@ -113,15 +113,20 @@ export function ReviewTab() {
       );
       setMatches(res);
       setImageStatus(res.image_status);
-      // jump to first unreviewed if no hint
-      if (indexHint === undefined) {
+      // A pending `review_focus` index (the agent asked to center on detection N) wins for one
+      // reload; otherwise honor an explicit hint, else jump to the first unreviewed detection.
+      const focusIdx = useStore.getState().review.focusDetectionIdx;
+      const effectiveHint = indexHint ?? (focusIdx ?? undefined);
+      if (focusIdx !== null && focusIdx !== undefined) useStore.getState().setReviewFocusIdx(null);
+      if (effectiveHint === undefined) {
         const firstUnreviewed = res.detections.findIndex((d) => !d.reviewed);
         const target = firstUnreviewed >= 0 ? firstUnreviewed : 0;
         setDetectionIdx(target);
         zoomToDetection(res.detections[target]?.bbox);
       } else {
-        setDetectionIdx(Math.max(0, Math.min(res.detections.length - 1, indexHint)));
-        zoomToDetection(res.detections[indexHint]?.bbox);
+        const clamped = Math.max(0, Math.min(res.detections.length - 1, effectiveHint));
+        setDetectionIdx(clamped);
+        zoomToDetection(res.detections[clamped]?.bbox);
       }
     } catch (e) {
       // A superseded (aborted) request is expected during slider drags — ignore it.
