@@ -205,16 +205,19 @@ def register_model_from_experiment(
     # best-checkpoint isn't mislabelled with a later, worse epoch's numbers). Fall back to the
     # experiment's last metrics.jsonl row only if the checkpoint carries none.
     final_metrics: dict[str, Any] = {}
+    kind: str | None = None
     ckpt = Path(checkpoint_path)
     if ckpt.is_file():
         try:
             import torch  # local checkpoint the caller is registering deliberately
 
             payload = torch.load(ckpt, map_location="cpu", weights_only=False)
-            if isinstance(payload, dict) and isinstance(payload.get("metrics"), dict):
-                final_metrics = dict(payload["metrics"])
-                if payload.get("epoch") is not None:
-                    final_metrics.setdefault("epoch", payload["epoch"])
+            if isinstance(payload, dict):
+                kind = payload.get("kind")  # stamped by the trainer; None on older checkpoints
+                if isinstance(payload.get("metrics"), dict):
+                    final_metrics = dict(payload["metrics"])
+                    if payload.get("epoch") is not None:
+                        final_metrics.setdefault("epoch", payload["epoch"])
         except Exception:
             final_metrics = {}
     if not final_metrics:
@@ -234,7 +237,7 @@ def register_model_from_experiment(
     registry_root = project_path or str(project_root())
     entry = ModelRegistry(registry_root).register_model(
         name or experiment_id, checkpoint_path, config,
-        metrics=final_metrics, tags=[f"experiment:{experiment_id}"],
+        metrics=final_metrics, tags=[f"experiment:{experiment_id}"], kind=kind,
     )
     update_lineage(experiment_id, model_weights=checkpoint_path)
     return {
