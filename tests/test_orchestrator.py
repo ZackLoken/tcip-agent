@@ -265,7 +265,7 @@ class TestInferencePredictionFormat:
         pred = dict(self.PRED)
 
         class FakePredictor:
-            def __init__(self, ckpt):
+            def __init__(self, checkpoint_path=None, **kwargs):
                 pass
 
             def predict(self, image_path):
