@@ -144,7 +144,7 @@ export function ReviewTab() {
     const [x1, y1, x2, y2] = bbox;
     const dw = Math.max(1, x2 - x1);
     const dh = Math.max(1, y2 - y1);
-    const wrapper = document.querySelector(".flex-1.bg-tcip-canvas") as HTMLElement | null;
+    const wrapper = document.querySelector("[data-canvas-host]") as HTMLElement | null;
     const cw = wrapper?.clientWidth ?? 1200;
     const ch = wrapper?.clientHeight ?? 800;
     const scale = Math.max(0.05, Math.min(20, Math.min(cw / (dw * 3), ch / (dh * 3))));
