@@ -10,6 +10,7 @@ from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.postprocessing.export import export_detection_csv, result_to_yolo_lines
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
+    DEFAULT_MAX_DETS,
     DEFAULT_NMS_IOU,
     DEFAULT_TILE_SIZE,
     DEFAULT_TILED,
@@ -31,6 +32,8 @@ def run_inference(
     overlap: float = 0.2,
     tile_batch_size: int = 96,
     global_nms_iou: float = DEFAULT_NMS_IOU,
+    max_dets: int = DEFAULT_MAX_DETS,
+    postprocess: str = "nms",
     dry_run: bool = False,
 ) -> dict:
     """Run a trained model on images.
@@ -50,6 +53,9 @@ def run_inference(
         overlap: Fractional tile overlap (stride = tile_size*(1-overlap)).
         tile_batch_size: Tiles per forward batch.
         global_nms_iou: Cross-tile global NMS IoU threshold.
+        max_dets: Full-frame detection cap (after any tiled merge).
+        postprocess: Cross-tile merge — "nms" suppresses overlaps, "nmm" unions boxes split
+            across a tile seam (better for an object straddling a boundary).
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -66,6 +72,8 @@ def run_inference(
                 "tiled": tile,
                 "tile_size": tile_size if tile else None,
                 "overlap": overlap,
+                "max_dets": max_dets,
+                "postprocess": postprocess,
             },
             "note": ("These operating-point values govern the object count (the phenotype for count "
                      "traits). For a trait with a labeled subset, resolve them per dataset "
@@ -73,31 +81,27 @@ def run_inference(
         }
 
     # Lazy import to avoid torch import at module level
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE,
-        ResolvedBundle,
-        ResolvedParam,
-        default,
-    )
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tcip_mcp.pipelines.resolution import raw_operating_point
 
     # Route the operating point through a ResolvedBundle so the count carries firewall provenance.
     # Raw inference has no per-dataset calibration, so conf is unvalidated and read with an explicit
     # acknowledgement; the delivery gate downstream enforces validation.
-    op_bundle = ResolvedBundle(trait="", dataset_hash=None, params={
-        "conf": ResolvedParam("conf", score_threshold, source="default",
-                              derivation_class="calibration", validated_vs_gt=VALIDATED_FALSE),
-        "cross_tile_nms": default("cross_tile_nms", global_nms_iou if tile else None,
-                                  derivation_class="distribution"),
-        "tiled": default("tiled", tile),
-        "tile_size": default("tile_size", tile_size if tile else None),
-    })
+    op_bundle = raw_operating_point(
+        conf=score_threshold, cross_tile_nms=global_nms_iou, tiled=tile,
+        tile_size=tile_size, max_dets=max_dets,
+    )
     conf = op_bundle.get("conf").unvalidated_value(acknowledge_unvalidated=True)
 
-    predictor = GenericPredictor(
+    # Thread NMS IoU + the full-frame detection cap into the model so they GOVERN which boxes exist
+    # (torchvision in-model thresholds / ultralytics overrides), not just cross-tile merge — else
+    # nms_iou has no effect on an untiled run and dense scenes truncate at the framework default.
+    predictor = build_predictor(
         checkpoint_path=checkpoint_path,
         device=device,
         score_threshold=conf,
+        nms_iou=global_nms_iou,
+        max_dets=max_dets,
     )
 
     if image_paths is None:
@@ -124,7 +128,7 @@ def run_inference(
 
     results = predictor.predict_batch(
         image_paths, tile=tile, tile_size=tile_size, overlap=overlap,
-        tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
+        tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
     )
     total_detections = sum(r["count"] for r in results)
 
@@ -147,10 +151,20 @@ def export_predictions_yolo(
     checkpoint_path: str,
     images_dir: str,
     output_dir: str,
-    score_threshold: float = 0.5,
+    score_threshold: float = DEFAULT_CONF,
     device: str | None = None,
+    tile: bool = DEFAULT_TILED,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    overlap: float = 0.2,
+    global_nms_iou: float = DEFAULT_NMS_IOU,
+    max_dets: int = DEFAULT_MAX_DETS,
 ) -> dict:
     """Run inference and save predictions as YOLO-format text files.
+
+    Routes through ``run_inference`` so this delivery door resolves the SAME firewalled
+    operating point (conf/NMS/tiling/max_dets) — earlier it built its own bare predictor and
+    so truncated the count at the framework default and shipped labels with no provenance.
+    Writes ``<stem>.txt`` per image plus an ``operating_point.json`` stamp beside them.
 
     Args:
         checkpoint_path: Path to model .pt checkpoint.
@@ -158,33 +172,37 @@ def export_predictions_yolo(
         output_dir: Directory for output .txt prediction files.
         score_threshold: Minimum confidence score.
         device: Device to use.
+        tile: Tiled (SAHI-style) inference for small dense objects.
+        tile_size: Sliding-window tile edge (px).
+        overlap: Fractional tile overlap.
+        global_nms_iou: Cross-tile NMS IoU.
+        max_dets: Full-frame detection cap.
     """
-    if not Path(checkpoint_path).is_file():
-        return {"error": f"Checkpoint not found: {checkpoint_path}"}
-
-    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-
-    predictor = GenericPredictor(
-        checkpoint_path=checkpoint_path,
-        device=device,
-        score_threshold=score_threshold,
+    result = run_inference(
+        checkpoint_path=checkpoint_path, images_dir=images_dir, score_threshold=score_threshold,
+        device=device, tile=tile, tile_size=tile_size, overlap=overlap,
+        global_nms_iou=global_nms_iou, max_dets=max_dets,
     )
+    if "error" in result:
+        return result
 
-    image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-    p = Path(images_dir)
-    image_paths = sorted(str(f) for f in p.iterdir() if f.suffix.lower() in image_exts)
+    from tcip_mcp.utils.atomic_io import atomic_write_json
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-
     written: list[str] = []
-    results = predictor.predict_batch(image_paths)
-    for img_path, result in zip(image_paths, results):
-        out_txt = out / f"{Path(img_path).stem}.txt"
-        out_txt.write_text("\n".join(result_to_yolo_lines(result)))
+    for r in result["results"]:
+        out_txt = out / f"{Path(r['image']).stem}.txt"
+        lines = result_to_yolo_lines(r)
+        out_txt.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         written.append(str(out_txt))
 
-    return {"image_count": len(written), "output_dir": output_dir, "files": written}
+    # Stamp the operating point beside the delivered labels (raw inference conf is unvalidated).
+    atomic_write_json(out / "operating_point.json",
+                      {"operating_point": result.get("operating_point"), "validated": False})
+
+    return {"image_count": len(written), "output_dir": output_dir, "files": written,
+            "operating_point": result.get("operating_point")}
 
 
 @mcp.tool()
@@ -219,4 +237,7 @@ def export_results_csv(
         "csv_path": csv_path,
         "image_count": result["image_count"],
         "total_detections": result["total_detections"],
+        # Carry the operating point that produced these counts — the CSV is a count-bearing
+        # deliverable and the numbers are only as trustworthy as the operating point behind them.
+        "operating_point": result.get("operating_point"),
     }
