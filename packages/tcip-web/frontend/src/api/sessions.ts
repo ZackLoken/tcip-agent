@@ -26,8 +26,6 @@ export const sessionsApi = {
   start: (project_root: string, user: string) =>
     postJson<unknown>("/api/sessions/start", { project_root, user }),
 
-  end: (project_root: string) => postJson<unknown>("/api/sessions/end", { project_root }),
-
   load: (project_root: string) =>
     getJson<{ sessions: SessionEntry[]; image_status: Record<string, string> }>(
       `/api/sessions/load?project_root=${encodeURIComponent(project_root)}`,
