@@ -60,7 +60,11 @@ class UncertaintyScorer(BaseScorer):
                     outputs = outputs[0]
                 scores = outputs.get("scores", torch.tensor([]))
                 if len(scores) == 0:
-                    uncertainty = 1.0  # no detections = high uncertainty
+                    # No detections = no ambiguous decision for uncertainty sampling to act on.
+                    # Scoring these 1.0 floods the queue with empty frames; a MISSED object is a
+                    # recall gap uncertainty sampling can't see from the model's own outputs (use
+                    # diversity/coverage sampling for that), so an empty frame ranks low, not top.
+                    uncertainty = 0.0
                 else:
                     # Low confidence spread → uncertain
                     uncertainty = 1.0 - scores.mean().item()
