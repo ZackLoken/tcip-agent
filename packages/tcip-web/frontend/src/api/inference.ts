@@ -37,6 +37,9 @@ export interface LaunchInferenceBody {
   slice_h?: number;
   slice_w?: number;
   overlap?: number;
+  // Cross-tile merge (tiled runs only): "nms" suppresses overlaps, "nmm" unions boxes split
+  // across a tile seam. Only meaningful when sahi=true.
+  postprocess?: "nms" | "nmm";
 }
 
 export const inferenceApi = {
