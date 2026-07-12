@@ -32,7 +32,7 @@ def test_export_predictions_yolo_writes_normalized_lines(tmp_path, monkeypatch):
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
 
     class FakePredictor:
-        def __init__(self, checkpoint_path=None, device=None, score_threshold=0.5):
+        def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
         def predict_batch(self, paths, **kw):
