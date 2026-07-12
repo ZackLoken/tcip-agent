@@ -8,8 +8,21 @@
 
 import { useCallback, useMemo } from "react";
 
+import { api } from "@/api/client";
 import type { ImageStatus } from "@/api/classes";
 import { useStore } from "@/store";
+
+// Debounce the backend nav sync: rapid arrow-key traversal patches local state on every
+// step but only persists the settled position (which get_active_context reads). Fire-and-
+// forget — a dropped sync just leaves gui.json one image stale until the next move.
+let navSyncTimer: ReturnType<typeof setTimeout> | null = null;
+function syncNavIndex(index: number): void {
+  if (navSyncTimer !== null) clearTimeout(navSyncTimer);
+  navSyncTimer = setTimeout(() => {
+    navSyncTimer = null;
+    api.dataset.nav(index).catch(() => {});
+  }, 400);
+}
 
 /** Indices of images that match the active status filter (all indices when "all"). */
 export function computeFilteredIndices(
@@ -71,6 +84,7 @@ export function useImageNav() {
       // other dataset fields with a stale render closure.
       const dataset = useStore.getState().gui.dataset;
       patchGui({ dataset: { ...dataset, current_image_index: index } });
+      syncNavIndex(index);
     },
     [currentIndex, patchGui],
   );
