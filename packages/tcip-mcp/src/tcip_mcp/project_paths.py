@@ -1,20 +1,22 @@
 """Stable resolution of the platform state root, independent of a process's cwd.
 
-Durable *platform* state — the ``@audited`` log and the experiment store — historically
-anchored to ``Path(".tcip/...")``, i.e. the process's *current working directory*. Two
-processes launched from different directories (an agent that ``cd``-ed, a backend started
-from a subdir) then silently write to different ``.tcip/`` trees and fragment the record
-(the audit found a stray ``frontend/.tcip/`` demonstrating exactly this).
+Durable *platform* state — the ``@audited`` log, the experiment store, and the model
+registry — anchors here so a whole project is self-contained under one ``<root>/.tcip/``.
 
-Resolution order:
-  1. ``$TCIP_PROJECT_ROOT`` if set — the MCP server and the web backend set it to the repo
-     root at startup (``pin_project_root``), so every process agrees regardless of cwd.
+Resolution order (``project_root`` / ``resolve_state``, evaluated at use time):
+  1. ``$TCIP_PROJECT_ROOT`` if set. Servers pin it to the repo root at startup
+     (``pin_project_root``) so processes launched from different dirs don't fragment the
+     record (the audit once found a stray ``frontend/.tcip/`` from exactly this). Adopting a
+     project (``set_active_project``) then *repins* it to ``<workspace>/<project>``, so the
+     audit log, experiments, and registry all land under that project.
   2. otherwise the current working directory — the historical default, so nothing changes
      for tests or an un-pinned run.
 
-Project-scoped state (``<project>/.tcip/...`` — model registry, reports, retrospectives,
-gui.json) already takes an explicit ``project_path`` and is unaffected; this only concerns
-the platform-level defaults.
+The repin is an explicit action, not a passive marker read, so an in-flight training run
+keeps writing to the project it started under until the agent deliberately adopts another.
+Data-side project state (images, ``gui.json``, reports, retrospectives) is addressed by an
+explicit ``project_path`` (the workspace project); after adoption the platform root equals
+that project, so the two coincide.
 """
 
 from __future__ import annotations
@@ -65,7 +67,9 @@ def pin_project_root() -> Path:
 
     Call at the top of a long-running entry point (MCP server, web backend) *before* the
     audit/experiment modules resolve their paths, so all of them — and any child process —
-    agree on one ``.tcip/`` even if the launch cwd differs.
+    agree on one ``.tcip/`` even if the launch cwd differs. This is the pre-adoption root;
+    ``set_active_project`` repins it to the adopted project. ``setdefault`` so it never
+    stomps a root a caller (or an earlier adoption) already chose.
     """
     root = os.environ.setdefault(ENV_VAR, str(repo_root_from_here()))
     logger.info("TCIP platform state root: %s", root)
