@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tcip_mcp.project_paths import resolve_state
+from tcip_mcp.project_paths import project_root, resolve_state
 from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, file_transaction, read_json
 
 logger = logging.getLogger(__name__)
@@ -184,7 +184,7 @@ def register_model_from_experiment(
     experiment_id: str,
     checkpoint_path: str,
     *,
-    project_path: str = ".",
+    project_path: str = "",
     name: str | None = None,
 ) -> dict[str, Any]:
     """Register a completed experiment's model in the project registry.
@@ -229,7 +229,10 @@ def register_model_from_experiment(
 
     from tcip_mcp.model_registry import ModelRegistry
 
-    entry = ModelRegistry(project_path).register_model(
+    # Registry co-locates with the experiment store under the platform root (the adopted
+    # project after set_active_project) unless an explicit path overrides.
+    registry_root = project_path or str(project_root())
+    entry = ModelRegistry(registry_root).register_model(
         name or experiment_id, checkpoint_path, config,
         metrics=final_metrics, tags=[f"experiment:{experiment_id}"],
     )
