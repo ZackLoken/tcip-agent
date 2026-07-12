@@ -62,4 +62,10 @@ def list_registered_tools() -> list[str]:
 
 def main() -> None:
     """Start the MCP server on stdio transport."""
+    # Pin the platform-state root before any tool resolves a ``.tcip`` path, so a server
+    # launched from a subdir still agrees with the web backend on one root. ``set_active_project``
+    # later repins this to the adopted project.
+    from tcip_mcp.project_paths import pin_project_root
+
+    pin_project_root()
     mcp.run(transport="stdio")
