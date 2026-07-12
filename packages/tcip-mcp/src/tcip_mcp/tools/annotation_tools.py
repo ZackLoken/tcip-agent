@@ -710,6 +710,166 @@ def focus_annotate(
 
 @mcp.tool()
 @audited
+def focus_review(
+    project_root: str,
+    dataset_root: str,
+    trait: str,
+    date: str,
+    model_name: str,
+    image_index: int | None = None,
+    detection_idx: int = 0,
+    filter_type: str = "all",
+    iou_threshold: float = 0.5,
+    conf_threshold: float = 0.25,
+) -> dict:
+    """Drive the live Review tab to a model's predictions on a frame, so the human sees exactly
+    what the agent flagged (a false positive, a missed catkin) without hunting for it.
+
+    Posts a ``review_focus`` event the GUI honors with local setters — the Review analog of
+    ``focus_annotate`` — landing on the (trait, date) with ``model_name``'s predictions loaded,
+    on ``image_index`` (default: the first frame that has predictions for this model, so the
+    canvas isn't empty), at ``detection_idx`` under the given filter. Requires the GUI to be
+    running; returns ``delivered: false`` if not.
+
+    Args:
+        project_root: Project root (== dataset_root for workspace projects).
+        dataset_root: Dataset root holding ``images/``, ``annotations/``, ``predictions/``.
+        trait: Annotation campaign (e.g. "catkin").
+        date: Capture-date bucket (e.g. "2026-02-11").
+        model_name: The model whose ``predictions/<model>/<date>/`` to review.
+        image_index: Index into the date's sorted image list. Default: the first image that has
+            a non-empty prediction file for this model.
+        detection_idx: Which detection to center in the Review navigator.
+        filter_type: "all" | "tp" | "fp" | "fn" — the Review match filter to apply.
+        iou_threshold: IoU cutoff for the TP/FP/FN match classification.
+        conf_threshold: Confidence cutoff for showing predictions.
+    """
+    from tcip_mcp.dataset_layout import image_dir, prediction_dir
+    from tcip_mcp.web_client import post_panel_event
+
+    if filter_type not in ("all", "tp", "fp", "fn"):
+        return {"error": f"filter_type must be all|tp|fp|fn, got {filter_type!r}"}
+
+    img_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
+    idir = Path(image_dir(dataset_root, date))
+    if not idir.is_dir():
+        return {"error": f"no images for date {date} under {dataset_root}"}
+    # Match /api/dataset/select's listing exactly so the resolved index lines up with the frontend.
+    images = sorted(p.name for p in idir.iterdir() if p.is_file() and p.suffix.lower() in img_exts)
+    if not images:
+        return {"error": f"no images on {date}"}
+
+    pred_dir = Path(prediction_dir(dataset_root, model_name, date, "detect"))
+
+    def _has_pred(stem: str) -> bool:
+        f = pred_dir / f"{stem}.txt"
+        return f.is_file() and f.stat().st_size > 0
+
+    n_with_preds = 0
+    first_idx: int | None = None
+    for i, name in enumerate(images):
+        if _has_pred(Path(name).stem):
+            n_with_preds += 1
+            if first_idx is None:
+                first_idx = i
+
+    if image_index is None:
+        image_index = first_idx if first_idx is not None else 0
+    image_index = max(0, min(image_index, len(images) - 1))
+
+    payload = {
+        "project_root": project_root,
+        "dataset_root": dataset_root,
+        "trait": trait,
+        "date": date,
+        "model_name": model_name,
+        "image_index": image_index,
+        "detection_idx": detection_idx,
+        "filter_type": filter_type,
+        "iou_threshold": iou_threshold,
+        "conf_threshold": conf_threshold,
+    }
+    result = post_panel_event("app", "review_focus", payload)
+    return {
+        "delivered": result.get("delivered", False),
+        "status": result.get("status"),
+        "trait": trait,
+        "date": date,
+        "model_name": model_name,
+        "image_index": image_index,
+        "detection_idx": detection_idx,
+        "filter_type": filter_type,
+        "n_images": len(images),
+        "n_with_predictions": n_with_preds,
+        "image": images[image_index],
+    }
+
+
+@mcp.tool()
+@audited
+def stage_proposals(
+    dataset_root: str,
+    model_name: str,
+    date: str,
+    stem: str,
+    boxes: list[dict],
+) -> dict:
+    """Stage agent-proposed detections to ``predictions/<model>/<date>/detect/<stem>.txt`` for
+    canvas review — the "show on canvas before writing ground truth" guardrail.
+
+    Proposals (a corrected detection, a SAM output, a model prediction the agent wants a human to
+    vet) go to the PREDICTIONS tree, never ``annotations/``, so the human reviews them on the
+    Review canvas and accepts/rejects/edits before they become GT. This never writes ground truth.
+    Pair with ``focus_review`` to send the human straight to them.
+
+    Args:
+        dataset_root: Dataset root holding ``predictions/``.
+        model_name: Predictions bucket to stage under (e.g. "agent_proposals").
+        date: Capture-date bucket (e.g. "2026-02-11").
+        stem: Image stem (filename without extension).
+        boxes: ``[{class_id, conf, cx, cy, w, h}]`` with cx/cy/w/h normalized to [0, 1].
+    """
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.utils.atomic_io import atomic_write_text
+    from tcip_mcp.workspace import is_valid_name
+
+    # Confine the path segments so a malformed model/date/stem (an absolute path, a stray ``..``)
+    # can't escape predictions/ into annotations/ — this tool's whole promise is "never GT".
+    for label, val in (("model_name", model_name), ("date", date), ("stem", stem)):
+        if not is_valid_name(val):
+            return {"error": f"{label} must be a single safe path segment (no separators/'..'), got {val!r}"}
+
+    lines: list[str] = []
+    for i, b in enumerate(boxes):
+        try:
+            cx, cy, w, h = float(b["cx"]), float(b["cy"]), float(b["w"]), float(b["h"])
+            cls = int(b.get("class_id", 0))
+            conf = float(b.get("conf", 1.0))
+        except (KeyError, TypeError, ValueError):
+            return {"error": f"box {i} needs numeric class_id, conf, cx, cy, w, h (normalized): {b!r}"}
+        # Guard against pixel coords slipping in — they'd render off-canvas and corrupt the review.
+        if any(v < -0.01 or v > 1.5 for v in (cx, cy, w, h)):
+            return {"error": (f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be "
+                              f"in [0,1] (divide pixel coords by image width/height)")}
+        lines.append(f"{cls} {conf:.4f} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+
+    pdir = Path(prediction_dir(dataset_root, model_name, date, "detect"))
+    pdir.mkdir(parents=True, exist_ok=True)
+    out = pdir / f"{stem}.txt"
+    atomic_write_text(out, "\n".join(lines) + ("\n" if lines else ""))
+    return {
+        "staged": len(lines),
+        "path": str(out),
+        "model_name": model_name,
+        "date": date,
+        "stem": stem,
+        "note": ("staged to predictions/ for canvas review — NOT committed as ground truth; the "
+                 "human accepts on the Review tab before it becomes GT (focus_review to send them)"),
+    }
+
+
+@mcp.tool()
+@audited
 def write_class_map(labels_dir: str, class_names: str = "", output_path: str = "") -> dict:
     """Persist the class map (id -> name/color) derived from a label set to ``classes.json``.
 
