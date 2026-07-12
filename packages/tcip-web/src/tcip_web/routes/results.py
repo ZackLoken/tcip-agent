@@ -31,9 +31,22 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 
+from tcip_web.paths import assert_path_allowed
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/results", tags=["results"])
+
+
+def _guard(*paths: str | None) -> None:
+    """Confine client-supplied file paths to the allowed roots (no-op unless TCIP_IMAGE_ROOTS)."""
+    for p in paths:
+        if not p:
+            continue
+        try:
+            assert_path_allowed(p)
+        except ValueError as exc:
+            raise HTTPException(403, str(exc)) from exc
 
 
 # ── Plant mapping ──────────────────────────────────────────────────────
@@ -49,6 +62,7 @@ class BuildMappingPayload(BaseModel):
 
 @router.post("/plant_mapping/build")
 def build_plant_mapping(payload: BuildMappingPayload) -> dict:
+    _guard(payload.images_root, payload.persist_path, *payload.plant_csv_paths)
     mapping = plant_mapping.build_mapping(
         Path(payload.images_root),
         [Path(p) for p in payload.plant_csv_paths],
@@ -84,6 +98,7 @@ class LoadMappingPayload(BaseModel):
 
 @router.post("/plant_mapping/load")
 def load_plant_mapping(payload: LoadMappingPayload) -> dict:
+    _guard(payload.persist_path)
     mapping = plant_mapping.load_mapping(Path(payload.persist_path))
     return {
         "mapping": {
@@ -126,6 +141,7 @@ def per_plant_curves(payload: PerPlantCurvesPayload) -> dict:
     class, ``elongation_classified`` is false and the ratios are NOT a valid bloom
     measurement (run + validate the classifier first — see the ``phenology`` skill).
     """
+    _guard(payload.mapping_path, *payload.predictions_by_date.values())
     mapping = plant_mapping.load_mapping(Path(payload.mapping_path))
     if not mapping:
         raise HTTPException(404, f"no mapping at {payload.mapping_path}")
