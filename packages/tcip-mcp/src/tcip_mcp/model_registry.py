@@ -44,6 +44,7 @@ class ModelRegistry:
         config: dict,
         metrics: dict | None = None,
         tags: list[str] | None = None,
+        kind: str | None = None,
     ) -> dict:
         """Register a trained model with SHA-256 integrity checksum.
 
@@ -53,6 +54,8 @@ class ModelRegistry:
             config: Training config dict.
             metrics: Evaluation metrics dict.
             tags: Optional tags for filtering.
+            kind: Model kind (``torchvision_composed`` / ``ultralytics``) so the GUI + agent
+                know how to run it; ``build_predictor`` can still sniff it at inference time.
         """
         ckpt = Path(checkpoint_path)
         sha256 = _compute_sha256(ckpt) if ckpt.is_file() else None
@@ -61,6 +64,7 @@ class ModelRegistry:
         entry = {
             "name": name,
             "checkpoint_path": checkpoint_path,
+            "kind": kind,
             "sha256": sha256,
             "file_size_bytes": file_size,
             "registered_at": datetime.now(timezone.utc).isoformat(),
