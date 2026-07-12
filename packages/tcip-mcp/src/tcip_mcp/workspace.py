@@ -81,16 +81,33 @@ def read_active_project() -> Optional[str]:
     return val or None
 
 
-def set_active_project(name: str) -> Path:
-    """Write the active-project marker atomically. Returns the marker path.
+def resolve_project_path(given: str) -> str:
+    """A given path wins; empty falls back to the active project's root (the live GUI session)."""
+    if given:
+        return given
+    name = read_active_project()
+    return str(project_path(name)) if name else given
 
-    ``name`` must be a valid workspace project slug. The write is atomic
-    (temp file + ``os.replace``) so two concurrent writers can't tear the file.
+
+def set_active_project(name: str) -> Path:
+    """Adopt a workspace project: write the marker atomically and repin platform state to it.
+
+    ``name`` must be a valid workspace project slug. The write is atomic (temp file +
+    ``os.replace``) so two concurrent writers can't tear the file.
+
+    Adopting also repins this process's ``TCIP_PROJECT_ROOT`` to the project, so the
+    ``@audited`` log, the experiment store, and the model registry all resolve under
+    ``<project>/.tcip/`` — one self-contained ``.tcip`` per project. The repin is an
+    explicit action (not a passive marker read), so an in-flight training run keeps writing
+    to the project it started under until the agent deliberately adopts a different one.
     """
     if not is_valid_name(name):
         raise ValueError(f"invalid project name: {name!r}")
+    from tcip_mcp.project_paths import ENV_VAR
     from tcip_mcp.utils.atomic_io import atomic_write_text
 
+    root = project_path(name)
     p = active_marker_path()
     atomic_write_text(p, name.strip() + "\n")
+    os.environ[ENV_VAR] = str(root)
     return p
