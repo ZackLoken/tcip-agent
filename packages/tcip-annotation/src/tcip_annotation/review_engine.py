@@ -173,6 +173,15 @@ class ReviewEngine:
         img_data["img_status"] = "completed"
         self.save_review_state()
 
+    def unmark_image_reviewed(self, img_name: str) -> None:
+        """Reverse a manual mark: back to started (verdicts kept) or not_started."""
+        per_image = self._review_state.setdefault("image", {})
+        img_data = per_image.get(img_name)
+        if not img_data:
+            return
+        img_data["img_status"] = "started" if img_data.get("detections") else "not_started"
+        self.save_review_state()
+
     def is_image_reviewed(self, img_name: str) -> bool:
         per_image = self._review_state.get("image", {})
         img_data = per_image.get(img_name)
