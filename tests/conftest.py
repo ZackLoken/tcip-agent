@@ -8,6 +8,22 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _pin_torch_single_thread():
+    """Pin torch to one intra-op thread for the test session.
+
+    The fixtures are tiny (1-2 epochs on ≤4 images), so a multi-thread pool is pure overhead;
+    single-thread is also a prerequisite for pytest-xdist (else N workers oversubscribe the
+    cores). Lazy-import so a torch-less collection still works.
+    """
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    try:
+        import torch
+    except ImportError:
+        return
+    torch.set_num_threads(1)
+
+
 def pytest_collection_modifyitems(config, items):
     """Guardrail: fail loudly when far fewer tests collect than expected.
 
