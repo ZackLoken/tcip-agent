@@ -363,7 +363,8 @@ def test_annotate_save_stale_mtime_conflicts(
 
     # A concurrent writer changes the file after our client loaded it.
     det_path.write_text("0 0.5 0.5 0.2 0.2\n")
-    os.utime(det_path, ns=(base["detect"] + 1_000_000, base["detect"] + 1_000_000))
+    bumped = int(base["detect"]) + 1_000_000
+    os.utime(det_path, ns=(bumped, bumped))
 
     resp = client.post(
         "/api/annotate/labels",
@@ -389,7 +390,11 @@ def test_annotate_save_matching_mtime_ok(
     # and returns fresh version tokens.
     resp = _save_box(client, img_path, det_path, base_mtimes=base)
     assert resp.status_code == 200
-    assert resp.json()["base_mtimes"]["detect"] is not None
+    token = resp.json()["base_mtimes"]["detect"]
+    assert token is not None
+    # Tokens must be strings: the ns value exceeds JavaScript's 2**53 exact-integer
+    # range, so a numeric token gets rounded by the browser and every save 409s.
+    assert isinstance(token, str)
 
 
 def test_annotate_save_writes_audit_entry(
