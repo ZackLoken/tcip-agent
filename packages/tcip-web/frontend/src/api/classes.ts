@@ -14,13 +14,27 @@ export interface ClassEntry {
 export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
 export const classesApi = {
-  load: (project_root: string) =>
-    getJson<{ classes: ClassEntry[] }>(
-      `/api/classes/load?project_root=${encodeURIComponent(project_root)}`,
-    ),
+  // Class ids are trait-scoped (catkin=0, bush=0 coexist). Pass the active trait; the label dirs
+  // let the server derive a provisional map from labels when a trait has no saved one yet.
+  load: (
+    project_root: string,
+    trait?: string | null,
+    annotations_detect_dir?: string | null,
+    annotations_segment_dir?: string | null,
+  ) => {
+    const params = new URLSearchParams({ project_root });
+    if (trait) params.set("trait", trait);
+    if (annotations_detect_dir) params.set("annotations_detect_dir", annotations_detect_dir);
+    if (annotations_segment_dir) params.set("annotations_segment_dir", annotations_segment_dir);
+    return getJson<{ classes: ClassEntry[] }>(`/api/classes/load?${params.toString()}`);
+  },
 
-  save: (project_root: string, classes: ClassEntry[]) =>
-    postJson<{ status: string; n_classes: number }>("/api/classes/save", { project_root, classes }),
+  save: (project_root: string, trait: string | null, classes: ClassEntry[]) =>
+    postJson<{ status: string; n_classes: number }>("/api/classes/save", {
+      project_root,
+      trait,
+      classes,
+    }),
 
   autoColor: (class_id: number) =>
     getJson<{ class_id: number; color: string }>(`/api/classes/auto_color/${class_id}`),
