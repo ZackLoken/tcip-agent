@@ -46,7 +46,7 @@ applied twice or skipped.
 | `run_matching` | Match predictions to ground truth by IoU |
 | `evaluate_detections` | Compute precision/recall/AP from matched pairs |
 | `push_panel_data` | Send images + annotations to the annotation or review panel |
-| `score_unlabeled` | Rank unlabeled images by model uncertainty |
+| `prioritize_review_queue` | Rank unlabeled images by model uncertainty/diversity |
 | `get_review_queue` | Get prioritized list of images needing review |
 
 ## SAM-Assisted Labeling
@@ -122,7 +122,7 @@ frames → they accept on the canvas → only then does it become GT. See
 
 ## Active Learning
 
-`score_unlabeled` ranks images by model uncertainty:
+`prioritize_review_queue` ranks images by model uncertainty/diversity:
 - High uncertainty = model unsure = most valuable to annotate
-- Supports entropy, margin, and committee disagreement scoring
+- Supports uncertainty, diversity, and combined scoring; can skip already-reviewed images
 - `get_review_queue` returns a prioritized list for the annotator
