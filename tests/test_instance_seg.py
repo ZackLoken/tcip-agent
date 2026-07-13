@@ -23,7 +23,9 @@ def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
     from tcip_mcp.pipelines.composer import DetectionModel, compose_model
 
     model = compose_model({
-        "backbone": {"name": "tv_resnet50"},
+        # resnet18 (not tv_resnet50): loss_mask / predicted-masks are mask-head assertions,
+        # independent of backbone depth — the FPN out_channels normalizes the channel difference.
+        "backbone": {"name": "resnet18"},
         "neck": {"name": "fpn", "out_channels": 64},
         "heads": [{"name": "anchor_detection", "num_classes": 1, "detector": "mask_rcnn"}],
     })
