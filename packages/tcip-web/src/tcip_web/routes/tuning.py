@@ -71,9 +71,6 @@ class LaunchHPOPayload(BaseModel):
     param_space: Optional[dict[str, Any]] = None
     n_trials: int = 5
     output_dir: str = ""
-    # Optuna (TPE + ASHA) is the standard sweep — it actually trains each trial. The
-    # random-search path only enumerates configs, so it isn't offered as a default.
-    use_optuna: bool = True
     direction: str = "maximize"
 
 
@@ -88,7 +85,6 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload) -> None:
             param_space=payload.param_space,
             n_trials=payload.n_trials,
             output_dir=payload.output_dir,
-            use_optuna=payload.use_optuna,
             direction=payload.direction,
         )
         job.result = res if isinstance(res, dict) else {"raw": res}
