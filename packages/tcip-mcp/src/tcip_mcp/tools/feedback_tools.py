@@ -133,23 +133,16 @@ def prioritize_review_queue(
                 "reviewed_skipped": reviewed_skipped, "selected_count": 0, "queue": []}
 
     try:
-        from tcip_mcp.pipelines.inference.predictor import KIND_TORCHVISION_COMPOSED, build_predictor
-        from tcip_mcp.pipelines.active_learning.scorer import (
-            UncertaintyScorer, DiversityScorer, CombinedScorer,
-        )
+        from tcip_mcp.pipelines.inference.predictor import build_predictor
+        from tcip_mcp.pipelines.active_learning.helpers import build_scorer, require_composed_detector
     except (ImportError, OSError) as e:
         return {"error": f"torch/torchvision unavailable: {e}"}
 
     predictor = build_predictor(checkpoint_path)
-    if getattr(predictor, "kind", None) != KIND_TORCHVISION_COMPOSED:
-        return {"error": (f"review-queue scoring needs a composed torchvision detector, not a "
-                          f"'{getattr(predictor, 'kind', 'unknown')}' model")}
-    if method == "uncertainty":
-        scorer = UncertaintyScorer(task=task)
-    elif method == "diversity":
-        scorer = DiversityScorer()
-    else:
-        scorer = CombinedScorer(task=task)
+    guard = require_composed_detector(predictor, purpose="review-queue scoring")
+    if guard:
+        return {"error": guard}
+    scorer = build_scorer(method, task)
 
     scored = scorer.score(paths, predictor.model, predictor.device)[:budget]
     return {
