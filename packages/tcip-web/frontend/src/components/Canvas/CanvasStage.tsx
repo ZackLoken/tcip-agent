@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Image as KonvaImage, Layer, Stage } from "react-konva";
 import Konva from "konva";
 
+import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { useStore } from "@/store";
 
 export interface CanvasStageProps {
@@ -27,28 +28,6 @@ export interface CanvasStageProps {
   onPixelDoubleClick?: (x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) => void;
   onPixelContextMenu?: (x: number, y: number, ev: Konva.KonvaEventObject<PointerEvent>) => void;
 }
-
-// Discrete zoom levels mirror yolo-annotator (5% .. 1000%, 20 stops)
-const ZOOM_LEVELS = [
-  0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 0.85, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0,
-  5.0, 7.0, 10.0,
-];
-
-function nearestZoomIndex(scale: number): number {
-  let bestIdx = 0;
-  let bestDiff = Math.abs(ZOOM_LEVELS[0] - scale);
-  for (let i = 1; i < ZOOM_LEVELS.length; i++) {
-    const diff = Math.abs(ZOOM_LEVELS[i] - scale);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestIdx = i;
-    }
-  }
-  return bestIdx;
-}
-
-const MIN_SCALE = ZOOM_LEVELS[0];
-const MAX_SCALE = ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
 
 export function CanvasStage(props: CanvasStageProps) {
   const wrapper = useRef<HTMLDivElement | null>(null);
@@ -77,6 +56,9 @@ export function CanvasStage(props: CanvasStageProps) {
       setImgError(false);
       return;
     }
+    // Drop the previous bitmap immediately — otherwise the new image's labels render
+    // over the old photo for the seconds the fetch takes (misregistered symbology).
+    setImg(null);
     setImgError(false);
     const el = new Image();
     el.crossOrigin = "anonymous";
@@ -94,14 +76,16 @@ export function CanvasStage(props: CanvasStageProps) {
     return () => {
       el.onload = null;
       el.onerror = null;
+      el.src = ""; // cancel the abandoned download; rapid flips otherwise queue every skip
     };
   }, [props.imageUrl]);
 
-  // Fit image to canvas the first time we know both dims + image size
+  // Fit image to canvas the first time we know both dims + image size. The key includes
+  // the image dims so a fit computed from the previous image's dimensions can't latch.
   const didFit = useRef<string | null>(null);
   useEffect(() => {
     if (!img || !props.imgWidth || !props.imgHeight) return;
-    const key = `${props.imageUrl}:${dims.w}x${dims.h}`;
+    const key = `${props.imageUrl}:${dims.w}x${dims.h}:${props.imgWidth}x${props.imgHeight}`;
     if (didFit.current === key) return;
     didFit.current = key;
     const sx = dims.w / props.imgWidth;
@@ -121,20 +105,31 @@ export function CanvasStage(props: CanvasStageProps) {
     return () => onStageRef?.(null);
   }, [onStageRef]);
 
+  // Handlers read the live store view (not the render-closure `view`): trackpads emit
+  // event bursts faster than the 20MP canvas re-renders, and stale reads drop deltas.
+  const liveView = () => useStore.getState().gui.view;
+
   const toPixel = (sx: number, sy: number): [number, number] => {
-    const s = view.scale || 1;
-    return [(sx - view.offset_x) / s, (sy - view.offset_y) / s];
+    const v = liveView();
+    const s = v.scale || 1;
+    return [(sx - v.offset_x) / s, (sy - v.offset_y) / s];
   };
+
+  // Line-mode wheel deltas (legacy mice / some drivers) arrive in lines, not pixels.
+  const normDelta = (d: number, mode: number) => (mode === 1 ? d * 16 : d);
 
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
+    const v = liveView();
+    const dx = normDelta(e.evt.deltaX, e.evt.deltaMode);
+    const dy = normDelta(e.evt.deltaY, e.evt.deltaMode);
     if (!e.evt.ctrlKey) {
-      // Plain scroll: pan vertically (Shift+scroll: pan horizontally)
-      const delta = -e.evt.deltaY;
       if (e.evt.shiftKey) {
-        setView({ ...view, offset_x: view.offset_x + delta });
+        // Shift+scroll: horizontal pan. Chromium pre-swaps the delta into deltaX.
+        setView({ ...v, offset_x: v.offset_x - (dx || dy) });
       } else {
-        setView({ ...view, offset_y: view.offset_y + delta });
+        // Plain scroll pans both axes — two-finger trackpad panning in any direction.
+        setView({ ...v, offset_x: v.offset_x - dx, offset_y: v.offset_y - dy });
       }
       return;
     }
@@ -142,26 +137,65 @@ export function CanvasStage(props: CanvasStageProps) {
     if (!stage) return;
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
-    const [ix, iy] = toPixel(pointer.x, pointer.y);
-    // Snap to discrete zoom levels (yolo-annotator parity)
-    const direction = e.evt.deltaY < 0 ? 1 : -1;
-    const currentIdx = nearestZoomIndex(view.scale);
-    const newIdx = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, currentIdx + direction));
-    if (newIdx === currentIdx) return;
-    const newScale = ZOOM_LEVELS[newIdx];
+    const s = v.scale || 1;
+    const ix = (pointer.x - v.offset_x) / s;
+    const iy = (pointer.y - v.offset_y) / s;
+    // Ctrl+wheel (and precision-touchpad pinch, which browsers deliver as ctrl+wheel):
+    // continuous magnitude-proportional zoom about the pointer. A 100-delta mouse notch
+    // is ~x1.22 — about one legacy ladder stop — while small pinch deltas stay smooth.
+    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * Math.exp(-dy * 0.002)));
+    if (newScale === v.scale) return;
     setView({
-      scale: Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale)),
+      scale: newScale,
       offset_x: pointer.x - ix * newScale,
       offset_y: pointer.y - iy * newScale,
     });
   };
 
-  // Middle-click + drag = pan
-  const panning = useRef<{ x: number; y: number } | null>(null);
+  // Middle-drag pans anywhere; space-hold turns left-drag into a pan (the touchpad answer).
+  const panning = useRef<{ x: number; y: number; buttonsBit: number } | null>(null);
+  const panMoved = useRef(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+
+  useEffect(() => {
+    const isTyping = () => {
+      const el = document.activeElement as HTMLElement | null;
+      return (
+        !!el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      );
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat || isTyping()) return;
+      e.preventDefault();
+      setSpaceHeld(true);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") setSpaceHeld(false);
+    };
+    const reset = () => setSpaceHeld(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", reset);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
 
   const handleMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (e.evt.button === 1) {
-      panning.current = { x: e.evt.clientX, y: e.evt.clientY };
+    if (e.evt.button === 1 || (spaceHeld && e.evt.button === 0)) {
+      // buttonsBit lets the move handler detect a release that happened off-canvas.
+      panning.current = {
+        x: e.evt.clientX,
+        y: e.evt.clientY,
+        buttonsBit: e.evt.button === 1 ? 4 : 1,
+      };
+      panMoved.current = false;
       e.evt.preventDefault();
       return;
     }
@@ -175,11 +209,17 @@ export function CanvasStage(props: CanvasStageProps) {
 
   const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (panning.current) {
-      const dx = e.evt.clientX - panning.current.x;
-      const dy = e.evt.clientY - panning.current.y;
-      panning.current = { x: e.evt.clientX, y: e.evt.clientY };
-      setView({ ...view, offset_x: view.offset_x + dx, offset_y: view.offset_y + dy });
-      return;
+      if ((e.evt.buttons & panning.current.buttonsBit) === 0) {
+        panning.current = null; // button released outside the canvas — end the pan
+      } else {
+        const dx = e.evt.clientX - panning.current.x;
+        const dy = e.evt.clientY - panning.current.y;
+        panning.current = { ...panning.current, x: e.evt.clientX, y: e.evt.clientY };
+        if (dx || dy) panMoved.current = true;
+        const v = liveView();
+        setView({ ...v, offset_x: v.offset_x + dx, offset_y: v.offset_y + dy });
+        return;
+      }
     }
     const stage = stageRef.current;
     if (!stage) return;
@@ -204,6 +244,11 @@ export function CanvasStage(props: CanvasStageProps) {
 
   const handleClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (e.evt.button !== 0) return;
+    // A space-pan release must not place a vertex / start a shape under the cursor.
+    if (spaceHeld || panMoved.current) {
+      panMoved.current = false;
+      return;
+    }
     const stage = stageRef.current;
     if (!stage) return;
     const p = stage.getPointerPosition();
@@ -232,7 +277,12 @@ export function CanvasStage(props: CanvasStageProps) {
   };
 
   return (
-    <div ref={wrapper} data-canvas-host className="relative flex-1 bg-tcip-canvas overflow-hidden">
+    <div
+      ref={wrapper}
+      data-canvas-host
+      className="relative flex-1 bg-tcip-canvas overflow-hidden"
+      style={spaceHeld ? { cursor: "grab" } : undefined}
+    >
       <Stage
         ref={(s) => {
           stageRef.current = s;
