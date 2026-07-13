@@ -1,15 +1,13 @@
 """HPO — hyperparameter optimization with Optuna integration + TensorBoard logging.
 
 Supports:
-  - Random search (always available, no dependencies)
-  - Optuna TPE/ASHA (optional, requires `pip install optuna`)
+  - Optuna TPE/ASHA search that trains each trial (requires `pip install optuna`)
   - Per-trial TensorBoard logging (each trial gets its own subdirectory)
 """
 
 from __future__ import annotations
 
 import logging
-import random
 from pathlib import Path
 from typing import Any, Callable
 
@@ -30,59 +28,6 @@ try:
 except ImportError:
     SummaryWriter = None  # type: ignore[misc,assignment]
     HAS_TB = False
-
-
-def random_search(
-    param_space: dict[str, list[Any]],
-    n_trials: int = 10,
-    seed: int = 42,
-) -> list[dict]:
-    """Generate n_trials random configurations from a parameter space.
-
-    Args:
-        param_space: Dict mapping parameter names to lists of possible values.
-        n_trials: Number of configurations to sample.
-        seed: Random seed.
-
-    Returns:
-        List of config dicts.
-
-    Example:
-        param_space = {
-            "lr": [1e-4, 3e-4, 1e-3, 3e-3],
-            "head": ["faster_rcnn", "fcos"],
-            "batch_size": [2, 4, 8],
-        }
-    """
-    rng = random.Random(seed)
-    configs = []
-    for _ in range(n_trials):
-        config = {k: rng.choice(v) for k, v in param_space.items()}
-        configs.append(config)
-    return configs
-
-
-def validate_param_space(param_space: dict) -> list[str]:
-    """Validate an HPO parameter space definition."""
-    issues: list[str] = []
-    if not isinstance(param_space, dict):
-        issues.append("param_space must be a dict")
-        return issues
-    for key, values in param_space.items():
-        if not isinstance(values, list) or len(values) == 0:
-            issues.append(f"'{key}' must be a non-empty list of candidate values")
-    return issues
-
-
-def get_default_param_space() -> dict:
-    """Return a reasonable default HPO search space for detection."""
-    return {
-        "lr": [1e-4, 3e-4, 5e-4, 1e-3],
-        "batch_size": [2, 4],
-        "head": ["faster_rcnn"],
-        "weight_decay": [1e-4, 1e-3],
-        "min_size": [640, 800],
-    }
 
 
 # ---------------------------------------------------------------------------
