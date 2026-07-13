@@ -15,20 +15,6 @@ def _registry_root(project_path: str) -> str:
 
 @mcp.tool()
 @audited
-def list_available_models() -> dict:
-    """List available model architectures (backbones / necks / heads / losses).
-
-    A focused view over the component registries. Delegates to ``list_components`` (the
-    full set — also optimizers/detectors with metadata) so there is one source of truth;
-    the previous standalone version crashed on ``sorted()`` over metadata dicts.
-    """
-    from tcip_mcp.tools.pipeline_tools import list_components
-    full = list_components()
-    return {key: full.get(key, []) for key in ("backbones", "necks", "heads", "losses")}
-
-
-@mcp.tool()
-@audited
 def register_model(
     name: str,
     checkpoint_path: str,
