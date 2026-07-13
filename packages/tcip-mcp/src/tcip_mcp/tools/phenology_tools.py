@@ -123,11 +123,20 @@ def compute_phenology(
     Args:
         mapping_path: Path to a persisted plant-mapping JSON (``{date: [assignment, ...]}``
             with ``stem`` / ``plot_name`` / ``accession_name`` per assignment) — produced by
-            the web plant-mapping step or ``run_matching``.
+            the web plant-mapping step or ``build_plant_mapping``.
         predictions_by_date: ``{date: predictions_dir}`` — each dir holds YOLO ``.txt``
             prediction files (one per image ``stem``) from the elongation classifier.
         output_csv_path: Where to write the delivered per-plant ``catkin_phenology.csv``.
         elongated_class_id: Class id the classifier assigns to "elongated" (default 1).
+        classifier_validated: The elongation classifier's ``validated_vs_gt`` state; a CSV
+            is only written unacknowledged when this is ``validated_held_out``.
+        operating_point_conf: The count operating point (conf) the predictions were produced
+            at — stamped into the CSV for provenance.
+        operating_point_validated: The count operating point's ``validated_vs_gt`` state; like
+            ``classifier_validated``, must be ``validated_held_out`` to deliver unacknowledged.
+        acknowledge_unvalidated: Override the gate — write the CSV even when the classifier or
+            operating point is unvalidated, stamping the un-validated dimension as ``false`` so
+            the un-trustworthiness travels with the delivery.
 
     Returns a summary. **Measurement-integrity guard:** if the predictions carry no
     elongation class anywhere, the elongated fraction is not a valid bloom measurement — the
