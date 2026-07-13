@@ -5,9 +5,11 @@ import type Konva from "konva";
 import { api, IMAGE_MAX_WIDTH } from "@/api/client";
 import { classesApi } from "@/api/classes";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
+import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { ReviewToolsDrawer } from "@/components/ReviewToolsDrawer";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import {
   applyEditDrag,
   clampShapeToImage,
@@ -116,6 +118,7 @@ export function ReviewTab() {
   const setStoreImageStatus = useStore((s) => s.setImageStatus);
   // Shared filtered navigation (same order as the arrow keys + TopBar Prev/Next).
   const nav = useImageNav();
+  usePrefetchAdjacentImages();
 
   const detectionIdx = gui.review.detection_idx;
   const filters = gui.review;
@@ -193,7 +196,8 @@ export function ReviewTab() {
     const wrapper = document.querySelector("[data-canvas-host]") as HTMLElement | null;
     const cw = wrapper?.clientWidth ?? 1200;
     const ch = wrapper?.clientHeight ?? 800;
-    const scale = Math.max(0.05, Math.min(20, Math.min(cw / (dw * 3), ch / (dh * 3))));
+    // Clamp to the wheel ladder's range — beyond MAX_SCALE the wheel goes dead/jumpy.
+    const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(cw / (dw * 3), ch / (dh * 3))));
     setView({
       scale,
       offset_x: cw / 2 - ((x1 + x2) / 2) * scale,
@@ -355,18 +359,23 @@ export function ReviewTab() {
     }
   }
 
-  async function markImageComplete() {
+  async function markImageComplete(completed: boolean) {
     if (!dataset.project_root || !imgName) return;
     try {
-      const res = await api.review.markComplete(dataset.project_root, imgName);
-      setImageStatus(res.image_status); // local review badge → reviewed
-      // Completing an image confirms it: with GT → complete; empty → a confirmed negative.
-      // Read matches from the live store — the render closure can predate a GT-changing verdict.
-      const m = useStore.getState().review.matches;
-      const hasGt = (m?.gt_boxes.length ?? 0) + (m?.gt_polygons.length ?? 0) > 0;
-      const annStatus: "complete" | "negative" = hasGt ? "complete" : "negative";
-      setStoreImageStatus(imgName, annStatus);
-      void classesApi.setImageStatus(dataset.project_root, imgName, annStatus).catch(() => {});
+      const res = await api.review.markComplete({
+        project_root: dataset.project_root,
+        image_name: imgName,
+        gt_detect_path: paths.gt_detect,
+        gt_segment_path: paths.gt_segment,
+        completed,
+      });
+      setImageStatus(res.image_status); // local review badge
+      // The annotation status comes from the server (GT files on disk), never from a
+      // matches snapshot that can belong to the previous image mid-navigation.
+      setStoreImageStatus(imgName, res.annotation_status);
+      void classesApi
+        .setImageStatus(dataset.project_root, imgName, res.annotation_status)
+        .catch(() => {});
     } catch (e) {
       useStore
         .getState()
@@ -467,8 +476,21 @@ export function ReviewTab() {
     { keys: "escape", action: () => cancelEdit(), when: () => !!edit },
     { keys: "arrowleft", action: () => stepDetection(-1), when: () => !edit },
     { keys: "arrowright", action: () => stepDetection(1), when: () => !edit },
-    { keys: "arrowup", action: () => stepImage(-1), when: () => !edit },
-    { keys: "arrowdown", action: () => stepImage(1), when: () => !edit },
+    // Image flips ignore held-key auto-repeat — each one costs a full image render.
+    {
+      keys: "arrowup",
+      action: (e) => {
+        if (!e.repeat) stepImage(-1);
+      },
+      when: () => !edit,
+    },
+    {
+      keys: "arrowdown",
+      action: (e) => {
+        if (!e.repeat) stepImage(1);
+      },
+      when: () => !edit,
+    },
   ]);
 
   const imageUrl = imgPath ? api.images.url(imgPath, IMAGE_MAX_WIDTH) : null;
@@ -574,14 +596,19 @@ export function ReviewTab() {
         <span className={`tcip-badge ${IMAGE_STATUS_CLASS[imageStatus]}`}>
           {IMAGE_STATUS_LABEL[imageStatus]}
         </span>
-        <button
-          className="tcip-btn"
-          onClick={() => void markImageComplete()}
-          disabled={imageStatus === "completed" || !imgName || !!edit}
-          title="Mark this image fully reviewed"
+        {/* Same affordance as Annotate's Complete: a reversible checkbox. */}
+        <label
+          className="flex items-center gap-1"
+          title="Mark this image fully reviewed — its annotation status is confirmed from the GT files; uncheck to reopen"
         >
-          ✓&nbsp;&nbsp;Reviewed
-        </button>
+          <input
+            type="checkbox"
+            checked={imageStatus === "completed"}
+            onChange={(e) => void markImageComplete(e.target.checked)}
+            disabled={!imgName || !!edit}
+          />
+          Reviewed
+        </label>
 
         <button className="tcip-btn" onClick={() => stepImage(-1)} disabled={!!edit}>
           ◀&nbsp;&nbsp;Prev img
@@ -604,27 +631,42 @@ export function ReviewTab() {
         </button>
       </div>
 
-      <CanvasStage
-        imageUrl={imageUrl}
-        imgWidth={imgW}
-        imgHeight={imgH}
-        onPixelDown={edit ? onEditDown : undefined}
-        onPixelMove={edit ? onEditMove : undefined}
-        onPixelUp={edit ? onEditUp : undefined}
-        overlay={edit ? <EditShapeOverlay edit={edit} /> : undefined}
-      >
-        {matches && (
-          <ReviewOverlays
-            matches={matches}
-            focusedIdx={detectionIdx}
-            showGT={showGT}
-            showPred={showPred}
-            classNameLookup={className}
-            suppressFocusedGt={!!edit && current?.det_type !== "fp"}
-            suppressFocusedPred={!!edit && current?.det_type === "fp"}
-          />
+      <div className="relative flex-1 flex flex-col">
+        <CanvasStage
+          imageUrl={imageUrl}
+          imgWidth={imgW}
+          imgHeight={imgH}
+          onPixelDown={edit ? onEditDown : undefined}
+          onPixelMove={edit ? onEditMove : undefined}
+          onPixelUp={edit ? onEditUp : undefined}
+          overlay={edit ? <EditShapeOverlay edit={edit} /> : undefined}
+        >
+          {matches && (
+            <ReviewOverlays
+              matches={matches}
+              focusedIdx={detectionIdx}
+              showGT={showGT}
+              showPred={showPred}
+              classNameLookup={className}
+              suppressFocusedGt={!!edit && current?.det_type !== "fp"}
+              suppressFocusedPred={!!edit && current?.det_type === "fp"}
+            />
+          )}
+        </CanvasStage>
+        {/* Screen-fixed detection-type badge — in image coords it was illegible at fit
+            zoom and canvas-blanketing when zoomed to a detection. */}
+        {current && (
+          <span
+            className="absolute top-2 right-3 tcip-badge border bg-tcip-panel/90 pointer-events-none font-bold"
+            style={{
+              color: TAG_COLORS[current.det_type],
+              borderColor: TAG_COLORS[current.det_type],
+            }}
+          >
+            {current.det_type.toUpperCase()}
+          </span>
         )}
-      </CanvasStage>
+      </div>
 
       {/* Empty-state card: tells the reviewer WHY there is nothing to step through —
           "no predictions configured" vs "filters exclude everything". Non-opaque and
@@ -848,7 +890,6 @@ function ReviewOverlays({
   const scale = useStore((s) => s.gui.view.scale);
   const lw = 1 / (scale || 1);
   const focused = matches.detections[focusedIdx];
-  const focusedColor = focused ? TAG_COLORS[focused.det_type] : "#E0E0E0";
 
   // Build a lookup for which (gt_type, gt_idx) and (pred_type, pred_idx)
   // belong to a reviewed detection — used to draw stippled / faded GT.
@@ -938,15 +979,6 @@ function ReviewOverlays({
             isFp={focused.det_type === "fp"}
           />
         )}
-
-      {/* Detection-type badge (top-right of screen, fixed canvas coords). */}
-      {focused && (
-        <DetTypeBadge
-          color={focusedColor}
-          label={focused.det_type.toUpperCase()}
-          imgWidth={matches.img_width}
-        />
-      )}
     </>
   );
 }
@@ -1069,45 +1101,6 @@ function FocusedPredPoly({
         fill={isFp ? `${color}33` : ""}
       />
       <HaloLabel x={x0} y={y0} text={label} fill={color} size={11 * lw} />
-    </>
-  );
-}
-
-function DetTypeBadge({
-  color,
-  label,
-  imgWidth,
-}: {
-  color: string;
-  label: string;
-  imgWidth: number;
-}) {
-  // Anchor the badge to image-coords near top-right (like yolo-annotator's
-  // canvas overlay; sticks with the image as you pan/zoom).
-  const x = Math.max(0, imgWidth - 80);
-  const y = 4;
-  return (
-    <>
-      <Rect
-        x={x}
-        y={y}
-        width={70}
-        height={28}
-        fill="#1A1A1A"
-        stroke="#444444"
-        strokeWidth={1}
-        cornerRadius={4}
-      />
-      <Text
-        x={x}
-        y={y + 6}
-        width={70}
-        align="center"
-        text={`[${label}]`}
-        fill={color}
-        fontSize={14}
-        fontStyle="bold"
-      />
     </>
   );
 }
