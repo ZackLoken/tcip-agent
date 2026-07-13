@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from tcip_annotation import (
     BBox,
     Polygon,
+    boxes_from_polygons,
     parse_detect_labels,
     parse_segment_labels,
     write_detect_labels,
@@ -212,11 +213,17 @@ def save_labels(payload: SavePayload) -> dict:
         for p in payload.polygons
     ]
 
+    # Detect is a derived view of segment: when polygons exist, the detect boxes are
+    # their bounding boxes, so editing a polygon can't leave a stale box twin behind
+    # (the two label files stay in lockstep). With no polygons, drawn boxes stand.
+    detect_derived = bool(polygons) and payload.detect_path is not None
+    detect_boxes = boxes_from_polygons(polygons) if polygons else boxes
+
     ok = True
     if payload.detect_path:
         try:
             os.makedirs(os.path.dirname(payload.detect_path) or ".", exist_ok=True)
-            write_detect_labels(payload.detect_path, boxes, w, h, keep_empty=True)
+            write_detect_labels(payload.detect_path, detect_boxes, w, h, keep_empty=True)
         except OSError as exc:
             raise HTTPException(500, f"could not write detect labels: {exc}") from exc
 
@@ -234,7 +241,8 @@ def save_labels(payload: SavePayload) -> dict:
         "image_path": payload.image_path,
         "detect_written": payload.detect_path is not None,
         "segment_written": payload.segment_path is not None,
-        "n_boxes": len(boxes),
+        "detect_derived": detect_derived,
+        "n_boxes": len(detect_boxes),
         "n_polygons": len(polygons),
         # New version tokens so the client can save again without a reload.
         "base_mtimes": {
