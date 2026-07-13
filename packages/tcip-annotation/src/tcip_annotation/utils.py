@@ -39,7 +39,18 @@ def auto_orient_image(img: Image.Image) -> Image.Image:
 
 
 def get_image_dimensions(path: str) -> tuple[int, int]:
-    """Return (width, height) of an image, applying EXIF orientation."""
+    """Return (width, height) of an image, applying EXIF orientation.
+
+    Header-only: reads size + orientation without decoding pixels. The transpose-based
+    path forced a full decode of a 24MP frame (~0.5 s) just to learn its dimensions,
+    and this runs on every label load / save / review-matches call.
+    """
     with Image.open(path) as img:
-        img = auto_orient_image(img)
-        return img.size
+        w, h = img.size
+        orientation = 1
+        try:
+            orientation = int(img.getexif().get(0x0112, 1) or 1)
+        except Exception:
+            pass
+    # Orientations 5-8 include a 90°/270° rotation, so the oriented axes swap.
+    return (h, w) if orientation in (5, 6, 7, 8) else (w, h)
