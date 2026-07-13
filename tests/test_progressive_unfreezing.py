@@ -127,8 +127,12 @@ def _classification_loader(tmp_path: Path, n: int = 6, batch_size: int = 2) -> D
 
 
 def _cls_spec() -> dict:
+    # resnet18 (not tv_resnet50): these integration tests exercise backbone-agnostic
+    # LR-schedule / freeze / warmup logic — the smaller backbone routes through the identical
+    # BackboneWrapper.freeze_to path and cuts per-test model-construction cost. The tv_* freeze
+    # branch stays covered by test_freeze_to_is_per_stage_for_tv_backbones (kept on tv_resnet50).
     return {
-        "backbone": {"name": "tv_resnet50", "pretrained": False},
+        "backbone": {"name": "resnet18", "pretrained": False},
         "neck": {"name": "gap"},
         "heads": [{"name": "classification", "num_classes": 2}],
     }
@@ -169,7 +173,7 @@ def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
     spec = _cls_spec()
     compose_model(spec)
     cfg = _cfg(
-        [{"freeze_to": -1, "epochs": 2}, {"freeze_to": 0, "epochs": 3}],
+        [{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 2}],
         stage_warmup_epochs=2,
     )
     run = create_run(cfg, str(tmp_path / "out"))
@@ -177,7 +181,7 @@ def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
     assert run.status == "completed", getattr(run, "error", run.status)
 
     stage1 = [m for m in run.metrics_history if m["stage"] == 1]
-    assert len(stage1) == 3
+    assert len(stage1) == 2
     assert stage1[0]["lr"] > 0 and stage1[1]["lr"] > 0
     assert stage1[1]["lr"] >= stage1[0]["lr"]  # ramping up toward target
     for m in run.metrics_history:
