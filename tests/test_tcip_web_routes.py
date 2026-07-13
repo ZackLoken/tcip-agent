@@ -287,8 +287,8 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
 def test_annotate_save_empty_preserves_negative(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    # Clearing all boxes and saving must keep a 0-byte label file (a confirmed
-    # negative), not delete it — empty label files are valid negatives.
+    # Clearing all boxes and saving must keep a 0-byte label file, not delete it — the empty file
+    # is a valid on-disk state (it becomes a confirmed negative once the image is explicitly completed).
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     det_path = tmp_path / "detect" / "IMG_0000.txt"
 
@@ -476,6 +476,146 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
     assert "image" in data
     assert "IMG_0000.JPG" in data["image"]
     assert data["image"]["IMG_0000.JPG"]["detections"][0]["action"] == "accepted"
+
+
+def _review_action(client, img_path, det_gt, project_root, **over):
+    body = {
+        "project_root": str(project_root),
+        "image_name": "IMG_0000.JPG",
+        "image_path": str(img_path),
+        "gt_detect_path": str(det_gt),
+        "det_type": "tp",
+        "class_id": 0,
+        "gt_type": "box",
+        "gt_idx": 0,
+        "pred_type": "box",
+        "pred_idx": 0,
+        "bbox": [40.0, 32.0, 60.0, 48.0],
+        "action": "accepted",
+    }
+    body.update(over)
+    return client.post("/api/review/action", json=body)
+
+
+def test_review_accept_fp_adds_prediction_to_gt(client, dataset_root, tmp_path) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_gt = tmp_path / "gt_detect.txt"
+    det_gt.write_text("")  # start with a confirmed negative (empty GT)
+    pred_det = tmp_path / "pred_detect.txt"
+    pred_det.write_text("0 0.9 0.5 0.5 0.2 0.2\n")
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(
+        client, img_path, det_gt, project_root,
+        pred_detect_path=str(pred_det), det_type="fp", action="accepted",
+    )
+    assert resp.status_code == 200
+    assert resp.json()["annotation_status"] == "partial"  # GT now has the promoted box
+    lines = [ln for ln in det_gt.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1 and lines[0].split()[0] == "0"
+
+
+def test_review_reject_deletes_reviewed_gt(client, dataset_root, tmp_path) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_gt = tmp_path / "gt_detect.txt"
+    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")  # one GT box (a missed FN)
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(client, img_path, det_gt, project_root, det_type="fn", action="rejected")
+    assert resp.status_code == 200
+    # Emptying GT does NOT auto-confirm a negative (that needs an explicit Complete) — it reads as
+    # needing review. The label file is kept as a 0-byte file, not deleted.
+    assert resp.json()["annotation_status"] == "unannotated"
+    assert det_gt.is_file()
+    assert [ln for ln in det_gt.read_text().splitlines() if ln.strip()] == []
+
+
+def test_review_accept_tp_keeps_gt_untouched(client, dataset_root, tmp_path) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_gt = tmp_path / "gt_detect.txt"
+    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
+    before = det_gt.read_text()
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(client, img_path, det_gt, project_root, det_type="tp", action="accepted")
+    assert resp.status_code == 200
+    assert resp.json()["annotation_status"] is None  # GT unchanged → no status update
+    assert det_gt.read_text() == before
+
+
+def test_review_edit_writes_edited_box_as_gt(client, dataset_root, tmp_path) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_gt = tmp_path / "gt_detect.txt"
+    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(
+        client, img_path, det_gt, project_root,
+        det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0],
+    )
+    assert resp.status_code == 200
+    assert resp.json()["annotation_status"] == "partial"
+    lines = [ln for ln in det_gt.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1  # replaced the matched GT, still one box
+    # image is 100x80: edited box [10,10,30,30] → cx=0.2, cy=0.25
+    assert float(lines[0].split()[1]) == pytest.approx(0.2)
+
+
+def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_root, tmp_path) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_gt = tmp_path / "gt_detect.txt"
+    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")  # one GT box, no predictions → an FN
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(
+        client, img_path, det_gt, project_root,
+        det_type="fn", pred_type=None, pred_idx=None,
+        action="edited", edited_box=[10.0, 10.0, 30.0, 30.0],
+    )
+    assert resp.status_code == 200
+
+    # The next reload rebuilds the FN from the edited GT file — the verdict must still be
+    # recognized, i.e. the entry is keyed to the post-edit geometry, not the pre-edit one.
+    m = client.post(
+        "/api/review/matches",
+        json={
+            "project_root": str(project_root),
+            "image_name": "IMG_0000.JPG",
+            "image_path": str(img_path),
+            "gt_detect_path": str(det_gt),
+        },
+    ).json()
+    assert len(m["detections"]) == 1
+    assert m["detections"][0]["det_type"] == "fn"
+    assert m["detections"][0]["reviewed"] is True
+    assert m["detections"][0]["reviewed_action"] == "edited"
+
+
+def test_review_gt_write_without_path_is_rejected(client, dataset_root, tmp_path) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    pred_det = tmp_path / "pred_detect.txt"
+    pred_det.write_text("0 0.9 0.5 0.5 0.2 0.2\n")
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    # Accepting an FP writes detect GT; with no detect path configured the route must
+    # refuse loudly rather than report ok while writing nothing.
+    resp = _review_action(
+        client, img_path, "unused", project_root,
+        gt_detect_path=None, pred_detect_path=str(pred_det), det_type="fp", action="accepted",
+    )
+    assert resp.status_code == 400
+    assert "no detect annotations path" in resp.json()["detail"]
+    # The refused verdict must not have been recorded as reviewed.
+    stats_path = project_root / ".tcip" / "state" / "review_stats.json"
+    if stats_path.exists():
+        data = json.loads(stats_path.read_text(encoding="utf-8"))
+        assert not data.get("image", {}).get("IMG_0000.JPG", {}).get("detections")
 
 
 def test_review_action_auto_completes_and_audits(
