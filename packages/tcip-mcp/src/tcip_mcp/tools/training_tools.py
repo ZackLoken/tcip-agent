@@ -317,7 +317,6 @@ def run_hpo(
     param_space: dict | None = None,
     n_trials: int = 5,
     output_dir: str = "",
-    use_optuna: bool = True,
     direction: str = "maximize",
     pruner: str = "asha",
     grace_period: int = 5,
@@ -325,188 +324,157 @@ def run_hpo(
     warm_start: bool = False,
     baseline_params: dict | None = None,
 ) -> dict:
-    """Run hyperparameter optimization with optional TensorBoard logging.
+    """Run Optuna hyperparameter optimization with per-trial TensorBoard logging.
 
-    Two modes:
-      - Optuna (default, use_optuna=True): runs TPE/ASHA search with per-trial TensorBoard
-        logging. This is the standard path — it actually trains each trial.
-      - Random search (use_optuna=False): only *generates* trial configs; it does not train,
-        so it is a config-enumeration helper, not a real sweep. Prefer Optuna.
+    Runs a TPE/ASHA search that actually trains each trial and reports per-epoch for pruning.
+    (The former ``use_optuna=False`` random-search branch was removed — it only *enumerated*
+    trial configs without training, so it could never select hyperparameters; the agent can
+    assemble and launch configs itself for a manual sweep.)
 
     TensorBoard logs are written to output_dir/hpo_tensorboard/trial_{n}/ for
     each trial, enabling side-by-side comparison in the TensorBoard HParams plugin.
 
     Args:
         base_config: Base training config to modify.
-        param_space: Dict mapping param names to candidate values (random) or
-                    Optuna space dicts (optuna).
-        n_trials: Number of trials to generate/run.
+        param_space: Dict mapping param names to Optuna space dicts. Defaults to the
+            built-in space when omitted.
+        n_trials: Number of trials to run.
         output_dir: Base output directory for trial results.
-        use_optuna: If True, use Optuna TPE search with TensorBoard logging.
-        direction: 'maximize' (for mAP) or 'minimize' (for loss). Only for Optuna.
+        direction: 'maximize' (for mAP) or 'minimize' (for loss).
     """
-    if use_optuna:
-        from tcip_mcp.pipelines.training.hpo import optuna_search, get_default_optuna_space
+    from tcip_mcp.pipelines.training.hpo import optuna_search, get_default_optuna_space
 
-        if param_space is None:
-            param_space = get_default_optuna_space()
-
-        tb_logdir = str(Path(output_dir) / "hpo_tensorboard") if output_dir else None
-
-        import optuna
-
-        def objective_fn(trial_params: dict, trial) -> float:
-            """Run a full training trial; report per-epoch for ASHA pruning.
-
-            ``run.best_metric`` is the composite selection objective (W1, lower=better)
-            for detection when a val_loader exists, else val/train loss; ``maximize``
-            inverts it (``-best_metric``), so the existing direction handling stays correct.
-            """
-            merged = _apply_hpo_params(base_config, trial_params)
-
-            from tcip_mcp.pipelines.training.generic_trainer import create_run, train, task_collate
-            from tcip_mcp.pipelines.data.samplers import build_sampler
-            from torch.utils.data import DataLoader
-
-            model_spec = merged.get("model_spec") or merged.get("model")
-            if not model_spec:
-                # Worst-possible value in either direction — a dead trial must never
-                # outrank a real one (0.0 beat every -composite under maximize).
-                return float("inf") if direction == "minimize" else float("-inf")
-
-            data_cfg = merged.get("data", {})
-            train_cfg = merged.get("training", {})
-            heads = (model_spec.get("heads") or [{}])
-            task = heads[0].get("task", "detection") if heads else "detection"
-
-            trial_dir = str(Path(output_dir) / f"trial_{trial.number}")
-            # Tag as an HPO trial so it stays out of the Training-tab run list.
-            run = create_run(merged, trial_dir, origin="hpo_trial")
-
-            try:
-                # Trials must train under the same regime as the final launch_training
-                # run they tune for: same augmentation and same imbalance loss/class
-                # weights — otherwise the selected hyperparameters don't transfer.
-                transforms = None
-                aug_cfg = merged.get("augmentation", {})
-                if aug_cfg:
-                    from tcip_mcp.pipelines.data.augmentations import build_augmentation
-                    transforms = build_augmentation(aug_cfg)
-
-                # W4 auto-val gives the val_loader that W1's composite / ASHA need.
-                train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
-                _inject_imbalance_loss(merged.get("loss"), model_spec, train_ds)
-                sampler = build_sampler(merged.get("sampler", "random"), train_ds)
-                batch_size = train_cfg.get("batch_size", trial_params.get("batch_size", 4))
-                num_workers = train_cfg.get("num_workers", 0)
-                train_loader = DataLoader(
-                    train_ds, batch_size=batch_size, shuffle=(sampler is None),
-                    sampler=sampler, collate_fn=task_collate(task), num_workers=num_workers,
-                )
-                val_loader = None
-                if val_ds is not None:
-                    val_loader = DataLoader(
-                        val_ds, batch_size=batch_size, shuffle=False,
-                        collate_fn=task_collate(task), num_workers=num_workers,
-                    )
-
-                def epoch_cb(epoch: int, metrics: dict) -> None:
-                    value = metrics.get("val_objective", metrics.get("val_loss"))
-                    if value is None:
-                        return
-                    # value is lower=better; report in the study's direction (matching
-                    # the -best_metric final return) so ASHA keeps the improving
-                    # trials — raw reports under maximize pruned the *best* trials.
-                    trial.report(-value if direction == "maximize" else value, epoch)
-                    if trial.should_prune():
-                        raise optuna.TrialPruned()
-
-                train(run, train_loader, val_loader, task=task, epoch_callback=epoch_cb)
-
-                # best_metric is lower=better; inf (train() caught a failure or never
-                # produced a metric) maps to the worst-possible value in either
-                # direction so a dead trial can never become the study's best.
-                return run.best_metric if direction == "minimize" else -run.best_metric
-            except optuna.TrialPruned:
-                raise
-            except Exception as e:
-                logger.warning("HPO trial failed: %s", e)
-                return float("inf") if direction == "minimize" else float("-inf")
-
-        # Persist the study to sqlite + a result file so a restart doesn't lose the trials
-        # (the web sweep was ephemeral in-memory — Optuna defaulted to storage=None). One
-        # uniquely-named study per call, under output_dir or the platform state root.
-        import uuid
-
-        from tcip_mcp.project_paths import project_root
-
-        hpo_dir = Path(output_dir) if output_dir else project_root() / ".tcip" / "hpo"
-        hpo_dir.mkdir(parents=True, exist_ok=True)
-        study_name = f"hpo_{uuid.uuid4().hex[:8]}"
-        storage = f"sqlite:///{(hpo_dir / 'hpo.db').as_posix()}"  # as_posix so Windows paths are valid URLs
-
-        result = optuna_search(
-            objective_fn=objective_fn,
-            param_space=param_space,
-            n_trials=n_trials,
-            direction=direction,
-            pruner=pruner,
-            grace_period=grace_period,
-            reduction_factor=reduction_factor,
-            warm_start=warm_start,
-            baseline_params=baseline_params,
-            tb_logdir=tb_logdir,
-            study_name=study_name,
-            storage=storage,
-        )
-
-        # Auto-launch TensorBoard for HPO results
-        tb_info = {}
-        if tb_logdir:
-            try:
-                from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
-                tb_info = launch_tensorboard(tb_logdir, run_id=f"hpo_{result.get('study_name', 'search')}")
-            except Exception:
-                pass
-
-        result["tensorboard"] = tb_info
-        result["storage"] = storage
-        # Durable result file alongside the sqlite study (best-effort — a write hiccup must not
-        # sink a completed sweep).
-        try:
-            from tcip_mcp.utils.atomic_io import atomic_write_json
-            atomic_write_json(hpo_dir / f"{study_name}.json", result)
-        except Exception:
-            logger.warning("could not persist hpo result json for %s", study_name, exc_info=True)
-        return result
-
-    # Random search fallback
-    from tcip_mcp.pipelines.training.hpo import (
-        random_search, validate_param_space, get_default_param_space,
-    )
     if param_space is None:
-        param_space = get_default_param_space()
+        param_space = get_default_optuna_space()
 
-    issues = validate_param_space(param_space)
-    if issues:
-        return {"error": "Invalid param_space", "issues": issues}
+    tb_logdir = str(Path(output_dir) / "hpo_tensorboard") if output_dir else None
 
-    trials = random_search(param_space, n_trials=n_trials)
+    import optuna
 
-    # Merge each trial's params into the base config
-    configs = []
-    for i, trial_params in enumerate(trials):
-        config = _apply_hpo_params(base_config, trial_params)
-        config["_trial_id"] = i
-        config["_trial_params"] = trial_params
-        configs.append(config)
+    def objective_fn(trial_params: dict, trial) -> float:
+        """Run a full training trial; report per-epoch for ASHA pruning.
 
-    return {
-        "n_trials": len(configs),
-        "param_space": param_space,
-        "trials": [{"trial_id": c["_trial_id"], "params": c["_trial_params"]} for c in configs],
-        "configs": configs,
-    }
+        ``run.best_metric`` is the composite selection objective (W1, lower=better)
+        for detection when a val_loader exists, else val/train loss; ``maximize``
+        inverts it (``-best_metric``), so the existing direction handling stays correct.
+        """
+        merged = _apply_hpo_params(base_config, trial_params)
+
+        from tcip_mcp.pipelines.training.generic_trainer import create_run, train, task_collate
+        from tcip_mcp.pipelines.data.samplers import build_sampler
+        from torch.utils.data import DataLoader
+
+        model_spec = merged.get("model_spec") or merged.get("model")
+        if not model_spec:
+            # Worst-possible value in either direction — a dead trial must never
+            # outrank a real one (0.0 beat every -composite under maximize).
+            return float("inf") if direction == "minimize" else float("-inf")
+
+        data_cfg = merged.get("data", {})
+        train_cfg = merged.get("training", {})
+        heads = (model_spec.get("heads") or [{}])
+        task = heads[0].get("task", "detection") if heads else "detection"
+
+        trial_dir = str(Path(output_dir) / f"trial_{trial.number}")
+        # Tag as an HPO trial so it stays out of the Training-tab run list.
+        run = create_run(merged, trial_dir, origin="hpo_trial")
+
+        try:
+            # Trials must train under the same regime as the final launch_training
+            # run they tune for: same augmentation and same imbalance loss/class
+            # weights — otherwise the selected hyperparameters don't transfer.
+            transforms = None
+            aug_cfg = merged.get("augmentation", {})
+            if aug_cfg:
+                from tcip_mcp.pipelines.data.augmentations import build_augmentation
+                transforms = build_augmentation(aug_cfg)
+
+            # W4 auto-val gives the val_loader that W1's composite / ASHA need.
+            train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
+            _inject_imbalance_loss(merged.get("loss"), model_spec, train_ds)
+            sampler = build_sampler(merged.get("sampler", "random"), train_ds)
+            batch_size = train_cfg.get("batch_size", trial_params.get("batch_size", 4))
+            num_workers = train_cfg.get("num_workers", 0)
+            train_loader = DataLoader(
+                train_ds, batch_size=batch_size, shuffle=(sampler is None),
+                sampler=sampler, collate_fn=task_collate(task), num_workers=num_workers,
+            )
+            val_loader = None
+            if val_ds is not None:
+                val_loader = DataLoader(
+                    val_ds, batch_size=batch_size, shuffle=False,
+                    collate_fn=task_collate(task), num_workers=num_workers,
+                )
+
+            def epoch_cb(epoch: int, metrics: dict) -> None:
+                value = metrics.get("val_objective", metrics.get("val_loss"))
+                if value is None:
+                    return
+                # value is lower=better; report in the study's direction (matching
+                # the -best_metric final return) so ASHA keeps the improving
+                # trials — raw reports under maximize pruned the *best* trials.
+                trial.report(-value if direction == "maximize" else value, epoch)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+
+            train(run, train_loader, val_loader, task=task, epoch_callback=epoch_cb)
+
+            # best_metric is lower=better; inf (train() caught a failure or never
+            # produced a metric) maps to the worst-possible value in either
+            # direction so a dead trial can never become the study's best.
+            return run.best_metric if direction == "minimize" else -run.best_metric
+        except optuna.TrialPruned:
+            raise
+        except Exception as e:
+            logger.warning("HPO trial failed: %s", e)
+            return float("inf") if direction == "minimize" else float("-inf")
+
+    # Persist the study to sqlite + a result file so a restart doesn't lose the trials
+    # (the web sweep was ephemeral in-memory — Optuna defaulted to storage=None). One
+    # uniquely-named study per call, under output_dir or the platform state root.
+    import uuid
+
+    from tcip_mcp.project_paths import project_root
+
+    hpo_dir = Path(output_dir) if output_dir else project_root() / ".tcip" / "hpo"
+    hpo_dir.mkdir(parents=True, exist_ok=True)
+    study_name = f"hpo_{uuid.uuid4().hex[:8]}"
+    storage = f"sqlite:///{(hpo_dir / 'hpo.db').as_posix()}"  # as_posix so Windows paths are valid URLs
+
+    result = optuna_search(
+        objective_fn=objective_fn,
+        param_space=param_space,
+        n_trials=n_trials,
+        direction=direction,
+        pruner=pruner,
+        grace_period=grace_period,
+        reduction_factor=reduction_factor,
+        warm_start=warm_start,
+        baseline_params=baseline_params,
+        tb_logdir=tb_logdir,
+        study_name=study_name,
+        storage=storage,
+    )
+
+    # Auto-launch TensorBoard for HPO results
+    tb_info = {}
+    if tb_logdir:
+        try:
+            from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
+            tb_info = launch_tensorboard(tb_logdir, run_id=f"hpo_{result.get('study_name', 'search')}")
+        except Exception:
+            pass
+
+    result["tensorboard"] = tb_info
+    result["storage"] = storage
+    # Durable result file alongside the sqlite study (best-effort — a write hiccup must not
+    # sink a completed sweep).
+    try:
+        from tcip_mcp.utils.atomic_io import atomic_write_json
+        atomic_write_json(hpo_dir / f"{study_name}.json", result)
+    except Exception:
+        logger.warning("could not persist hpo result json for %s", study_name, exc_info=True)
+    return result
 
 
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
@@ -782,10 +750,13 @@ def get_worst_predictions(
     labels_dir: str,
     n: int = 8,
 ) -> dict:
-    """Return the N images with the worst prediction quality (highest loss / lowest confidence).
+    """Return the N images ranked worst by a count-mismatch + low-confidence triage heuristic.
 
-    Compares prediction files to ground-truth labels and ranks images by
-    descending error (missed detections + false positives + low confidence).
+    This is a cheap triage signal, not a quality metric: it does no IoU matching and computes
+    no loss. The score is ``2·|n_gt−n_pred as a shortfall| + |surplus| + (1−avg_conf)`` — purely
+    the difference in box *counts* plus mean confidence, so an image with the right count but
+    every box mislocated scores as good. Use it to surface likely-bad frames for a human to look
+    at; for true TP/FP/FN ranking use ``run_matching`` / ``evaluate_detections`` (IoU-matched).
 
     Args:
         predictions_dir: Directory with prediction files in the canonical
