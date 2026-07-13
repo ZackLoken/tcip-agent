@@ -15,8 +15,17 @@ export function StatusBar() {
   const dirty = useStore((s) => s.canvas.dirty);
   const matches = useStore((s) => s.review.matches);
   const activeTab = useStore((s) => s.gui.active_tab);
+  const setActiveTab = useStore((s) => s.setActiveTab);
   const sessionTracking = useStore((s) => s.sessionTracking);
   const agentActivity = useStore((s) => s.agentActivity);
+  const dataset = useStore((s) => s.gui.dataset);
+  const clearDataset = useStore((s) => s.clearDataset);
+
+  function switchProject() {
+    clearDataset();
+    // Land on a dataset-dependent tab so the project front door is shown.
+    if (!["annotate", "review", "results"].includes(activeTab)) setActiveTab("annotate");
+  }
 
   // Per-image timer. Compute the elapsed seconds inside the interval (not in the
   // render body) so there's no Date.now()-during-render hack.
@@ -73,6 +82,21 @@ export function StatusBar() {
           ⚡ Agent: {agentActivity.eventType}
           {agentStem ? ` (${agentStem})` : ""}
         </span>
+      )}
+      {/* Project breadcrumb — lower-right corner; click to switch projects. */}
+      {dataset.dataset_root && dataset.date ? (
+        <button
+          onClick={switchProject}
+          title="Switch project"
+          className="truncate max-w-md hover:text-tcip-fg transition-colors"
+        >
+          <span className="font-mono">{dataset.dataset_root.split(/[/\\]/).slice(-1)[0]}</span>
+          <span className="mx-1.5 text-tcip-border">·</span>
+          <span className="font-mono">{dataset.date}</span>
+          <span className="ml-1.5">Switch</span>
+        </button>
+      ) : (
+        <span>no project open</span>
       )}
     </div>
   );
