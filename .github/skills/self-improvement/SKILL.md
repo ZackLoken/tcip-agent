@@ -51,6 +51,14 @@ the session and draft **concrete, reviewable artifacts**, not vague notes:
 Each proposal states: the observation (what happened), the artifact (exactly what to
 create/change), and why it helps the *next* session.
 
+**Gathering tool.** `python scripts/distill_learnings.py` collects the raw material into one
+Markdown worksheet — undistilled journal entries, recurring themes, and the machine-local
+friction reports / retrospectives / session captures that never reach the repo on their own — so
+review is cheap and nothing is dropped. It *gathers*; the drafting judgment above stays yours.
+Run it at the start of a learning review. (A soft `SessionEnd` hook,
+`agent_learning_capture.py`, files a session-boundary record to `.tcip/learning_capture.jsonl` as
+a backstop, so a session is never invisible even if you forgot to journal.)
+
 ## Approve — the human gate (the fence, in spirit)
 
 You **propose**; the owner **approves and applies** anything touching governance
