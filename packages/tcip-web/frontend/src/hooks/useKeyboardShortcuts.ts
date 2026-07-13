@@ -42,12 +42,16 @@ export function useKeyboardShortcuts(shortcuts: Shortcut[]): void {
         return;
       }
       for (const s of shortcuts) {
-        if (s.when && !s.when()) continue;
-        if (matches(e, s.keys)) {
-          e.preventDefault();
-          s.action(e);
-          return;
+        if (!matches(e, s.keys)) continue;
+        if (s.when && !s.when()) {
+          // A gated-off modifier combo still hits browser chrome (Ctrl+S on a locked
+          // image → Save-Page dialog); bare keys fall through (Enter on a button).
+          if (e.ctrlKey || e.metaKey) e.preventDefault();
+          continue;
         }
+        e.preventDefault();
+        s.action(e);
+        return;
       }
     }
     window.addEventListener("keydown", handler);
