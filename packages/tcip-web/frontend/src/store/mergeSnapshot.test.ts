@@ -102,4 +102,35 @@ describe("mergeSnapshot ownership model", () => {
     s().mergeSnapshot(snapshot({ dataset: dataset({ date: "9-9-99" }) }), 3); // 3 < wsVersion 5
     expect(s().gui.dataset.date).toBe("2-11-26"); // unchanged
   });
+
+  it("adopts the whole persisted state on boot (fresh page load resumes the session)", () => {
+    // Fresh browser: no dataset yet — there is no local state to protect, so the first
+    // snapshot restores tab/mode/filters instead of leaving the Annotate defaults.
+    useStore.setState({
+      gui: snapshot({
+        dataset: dataset({
+          project_root: null,
+          dataset_root: null,
+          annotation_type: null,
+          date: null,
+          image_list: [],
+          current_image_index: 0,
+        }),
+      }),
+      wsVersion: 0,
+    });
+    s().mergeSnapshot(
+      snapshot({
+        active_tab: "review",
+        mode: "polygon",
+        active_class: 2,
+        dataset: dataset({ current_image_index: 2 }),
+      }),
+      1,
+    );
+    expect(s().gui.active_tab).toBe("review");
+    expect(s().gui.mode).toBe("polygon");
+    expect(s().gui.active_class).toBe(2);
+    expect(s().gui.dataset.current_image_index).toBe(2);
+  });
 });
