@@ -166,19 +166,24 @@ def test_check_image_review_complete(engine: ReviewEngine, ctx: ReviewContext) -
     assert engine.is_image_reviewed(ctx.img_name)
 
 
-def test_backup_original_labels_copies_once(engine: ReviewEngine, tmp_path: Path) -> None:
+def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -> None:
     detect_dir = tmp_path / "detect"
     detect_dir.mkdir()
     (detect_dir / "IMG_0001.txt").write_text("0 0.5 0.5 0.1 0.1\n")
-    engine.backup_original_labels(detect_dir)
+    assert engine.backup_original_labels(detect_dir) == 1
     backup = detect_dir / ".original" / "IMG_0001.txt"
-    assert backup.exists()
     assert backup.read_text() == "0 0.5 0.5 0.1 0.1\n"
 
-    # Mutate label on disk; second backup should NOT overwrite
+    # Mutate the label on disk; a later backup must not overwrite its baseline
     (detect_dir / "IMG_0001.txt").write_text("1 0.5 0.5 0.1 0.1\n")
-    engine.backup_original_labels(detect_dir)
+    assert engine.backup_original_labels(detect_dir) == 0
     assert backup.read_text() == "0 0.5 0.5 0.1 0.1\n"  # still original
+
+    # A label added after the first backup still gets its own baseline captured
+    (detect_dir / "IMG_0002.txt").write_text("0 0.3 0.3 0.1 0.1\n")
+    assert engine.backup_original_labels(detect_dir) == 1
+    assert (detect_dir / ".original" / "IMG_0002.txt").read_text() == "0 0.3 0.3 0.1 0.1\n"
+    assert backup.read_text() == "0 0.5 0.5 0.1 0.1\n"
 
 
 def test_save_gt_writes_both_files(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
