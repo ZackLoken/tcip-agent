@@ -47,10 +47,12 @@ export interface FsListing {
   entries: FsEntry[];
 }
 
-/** Per-file label mtimes (ns) used as optimistic-concurrency version tokens. */
+/** Per-file label version tokens (stringified mtime ns), echoed back opaquely on save.
+ *  Strings because the ns value exceeds 2**53 — as a number, JSON.parse would round it
+ *  and every save would 409. */
 export interface Mtimes {
-  detect: number | null;
-  segment: number | null;
+  detect: string | null;
+  segment: string | null;
 }
 
 export type LoadedLabels = ImageLabels & { base_mtimes: Mtimes };
