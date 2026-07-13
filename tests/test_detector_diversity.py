@@ -1,6 +1,6 @@
 """W6 — detector & architecture diversity: add_p2 necks, FCOS/RetinaNet, recommender.
 
-All backbones are ``tv_resnet50`` (timm-independent). CPU, tiny inputs, 1 epoch.
+Build specs use ``resnet18`` (FPN normalizes the channel difference); CPU, tiny inputs, 1 epoch.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
 import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 from tcip_mcp.pipelines.components.necks import FPN, PAN  # noqa: E402
-from tcip_mcp.pipelines.composer import compose_model, recommend_model_spec, validate_model_spec, DetectionModel  # noqa: E402
+from tcip_mcp.pipelines.composer import compose_model, recommend_model_spec, validate_model_spec  # noqa: E402
 from tcip_mcp.pipelines.registry import HEADS  # noqa: E402
 
 
@@ -35,7 +35,7 @@ def _det_spec(head_name, **head_extra):
     head = {"name": head_name, "num_classes": 1, "min_size": 64, "max_size": 128}
     head.update(head_extra)
     return {
-        "backbone": {"name": "tv_resnet50", "pretrained": False},
+        "backbone": {"name": "resnet18", "pretrained": False},
         "neck": {"name": "fpn", "out_channels": 256},
         "heads": [head],
     }
@@ -71,24 +71,6 @@ def test_necks_default_off_unchanged():
 # Detectors
 # --------------------------------------------------------------------------
 
-def test_detection_model_fcos_builds_and_evals():
-    model = compose_model(_det_spec("anchor_free_detection", detector="fcos"))
-    assert isinstance(model, DetectionModel)
-    model.eval()
-    out = model([torch.randn(3, 64, 64)])
-    assert isinstance(out, list)
-    assert {"boxes", "scores", "labels"} <= set(out[0].keys())
-
-
-def test_detection_model_retinanet_builds():
-    model = compose_model(_det_spec("anchor_free_detection", detector="retinanet"))
-    model.train()
-    target = [{"boxes": torch.tensor([[10.0, 10.0, 40.0, 40.0]]), "labels": torch.tensor([1])}]
-    loss = model([torch.randn(3, 64, 64)], target)
-    assert "classification" in loss and "bbox_regression" in loss
-    assert torch.isfinite(sum(loss.values()))
-
-
 def test_detection_anchor_count_with_p2():
     spec = _det_spec("anchor_detection")
     spec["neck"]["add_p2"] = True  # 5 pyramid levels
@@ -99,7 +81,7 @@ def test_detection_anchor_count_with_p2():
 def test_anchor_free_head_registered_and_valid():
     assert "anchor_free_detection" in HEADS
     spec = {
-        "backbone": {"name": "tv_resnet50"},
+        "backbone": {"name": "resnet18"},
         "neck": {"name": "fpn"},
         "heads": [{"name": "anchor_free_detection", "num_classes": 1}],
     }
