@@ -142,7 +142,7 @@ def test_run_hpo_asha_maximize_never_prunes_best_trial(tmp_path, monkeypatch):
     result = run_hpo(
         _detection_base(),
         param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
-        n_trials=6, output_dir=str(tmp_path), use_optuna=True,
+        n_trials=6, output_dir=str(tmp_path),
         direction="maximize", pruner="asha", grace_period=1, reduction_factor=2,
     )
     states = {t["number"]: t["state"] for t in result["all_trials"]}
@@ -172,7 +172,7 @@ def test_run_hpo_failed_trial_never_wins(tmp_path, monkeypatch):
     result = run_hpo(
         _detection_base(),
         param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
-        n_trials=3, output_dir=str(tmp_path), use_optuna=True,
+        n_trials=3, output_dir=str(tmp_path),
         direction="maximize", pruner="none",
     )
     values = {t["number"]: t["value"] for t in result["all_trials"]}
@@ -209,7 +209,7 @@ def test_run_hpo_trials_use_base_augmentation_and_loss(tmp_path, monkeypatch):
     }
     run_hpo(
         base, param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
-        n_trials=1, output_dir=str(tmp_path), use_optuna=True,
+        n_trials=1, output_dir=str(tmp_path),
         direction="maximize", pruner="none",
     )
     assert captured["transforms"] is not None       # augmentation was built + passed
