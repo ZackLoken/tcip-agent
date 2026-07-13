@@ -118,10 +118,11 @@ def resolve_operating_point(
         conf = pick_count_unbiased(cal_sweep) if trait.count_objective == "count_unbiased" else pick_f1_max(cal_sweep)
         conf = _DEFAULT_CONF_PLACEHOLDER if conf is None else conf
         if holdout_records:
-            # A held-out claim is only meaningful if the holdout doesn't overlap the calibration set.
+            # Disjointness can only be proven from image_ids, so fail closed (not disjoint) when
+            # either set has none — else the same records passed as cal+holdout look validated.
             cal_ids = {r["image_id"] for r in calibration_records if "image_id" in r}
             hold_ids = {r["image_id"] for r in holdout_records if "image_id" in r}
-            disjoint = not (cal_ids and hold_ids and (cal_ids & hold_ids))
+            disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
             hold_tol = 0.5 * gt_class_avg_size(holdout_records)
             hold_sweep = sweep_operating_point(holdout_records, tolerance=hold_tol)
             hb = count_bias_at(hold_sweep, conf)  # bias on the holdout at the calibration-chosen conf
