@@ -211,10 +211,22 @@ def export_results_csv(
     checkpoint_path: str,
     images_dir: str,
     output_path: str,
-    score_threshold: float = 0.5,
+    score_threshold: float = DEFAULT_CONF,
     device: str | None = None,
+    tile: bool = DEFAULT_TILED,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    overlap: float = 0.2,
+    global_nms_iou: float = DEFAULT_NMS_IOU,
+    max_dets: int = DEFAULT_MAX_DETS,
 ) -> dict:
     """Run inference and export a CSV summary of detection counts per image.
+
+    Routes through ``run_inference`` so the per-image counts resolve the same firewalled
+    operating point (conf/NMS/tiling/max_dets) as ``run_inference``/``export_predictions_yolo`` —
+    the CSV is a count-bearing deliverable (the count is the phenotype for count traits), so it
+    must not be produced at a different, untiled, truncating operating point. Earlier this door
+    hardcoded ``score_threshold=0.5`` and passed no tiling/max_dets, under-reporting dense
+    small-object counts relative to the other two doors.
 
     Args:
         checkpoint_path: Path to model .pt checkpoint.
@@ -222,12 +234,22 @@ def export_results_csv(
         output_path: Path for the output CSV file.
         score_threshold: Minimum confidence score.
         device: Device to use.
+        tile: Tiled (SAHI-style) inference for small dense objects.
+        tile_size: Sliding-window tile edge (px).
+        overlap: Fractional tile overlap.
+        global_nms_iou: Cross-tile NMS IoU.
+        max_dets: Full-frame detection cap.
     """
     result = run_inference(
         checkpoint_path=checkpoint_path,
         images_dir=images_dir,
         score_threshold=score_threshold,
         device=device,
+        tile=tile,
+        tile_size=tile_size,
+        overlap=overlap,
+        global_nms_iou=global_nms_iou,
+        max_dets=max_dets,
     )
     if "error" in result:
         return result
