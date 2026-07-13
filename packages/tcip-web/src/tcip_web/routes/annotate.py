@@ -57,11 +57,11 @@ class SavePayload(BaseModel):
     polygons: list[PolygonPayload] = []
     # Project root for the audit trail (optional; skipped if absent).
     project_root: Optional[str] = None
-    # The label-file mtimes (ns) the client loaded, keyed "detect"/"segment". When
+    # The label-file mtime tokens the client loaded, keyed "detect"/"segment". When
     # present, a write is rejected (409) if the file changed underneath the client —
     # a concurrent agent or second browser tab — so its edits aren't clobbered.
     # Omit to skip the check (backward compatible for non-GUI callers).
-    base_mtimes: Optional[dict[str, Optional[int]]] = None
+    base_mtimes: Optional[dict[str, Optional[str]]] = None
 
 
 def _image_dims(path: str) -> tuple[int, int]:
@@ -91,15 +91,17 @@ def _guard_label_path(path: Optional[str]) -> None:
         raise HTTPException(403, str(exc)) from exc
 
 
-def _file_mtime_ns(path: Optional[str]) -> Optional[int]:
-    """Modification time (nanoseconds) of a label file, or None if it doesn't exist.
+def _mtime_token(path: Optional[str]) -> Optional[str]:
+    """Modification time (ns) of a label file as an opaque string token, or None if absent.
 
-    Integer ns is used (not float seconds) so an unchanged file compares exactly.
+    A string, not an int: the ns value exceeds JavaScript's 2**53 exact-integer range, so a
+    numeric token is silently rounded by the browser's JSON parse and every echo mismatches
+    (the 409-on-every-save bug). The client never inspects it — it only echoes it back.
     """
     if not path:
         return None
     try:
-        return os.stat(path).st_mtime_ns
+        return str(os.stat(path).st_mtime_ns)
     except OSError:
         return None
 
@@ -172,8 +174,8 @@ def load_labels(
         "polygons": polygons,
         # Version tokens the client echoes back on save for the lost-update guard.
         "base_mtimes": {
-            "detect": _file_mtime_ns(detect_path),
-            "segment": _file_mtime_ns(segment_path),
+            "detect": _mtime_token(detect_path),
+            "segment": _mtime_token(segment_path),
         },
     }
 
@@ -197,7 +199,7 @@ def save_labels(payload: SavePayload) -> dict:
         conflicts = [
             key
             for key, path in (("detect", payload.detect_path), ("segment", payload.segment_path))
-            if path and _file_mtime_ns(path) != payload.base_mtimes.get(key)
+            if path and _mtime_token(path) != payload.base_mtimes.get(key)
         ]
         if conflicts:
             raise HTTPException(
@@ -239,8 +241,8 @@ def save_labels(payload: SavePayload) -> dict:
         "n_polygons": len(polygons),
         # New version tokens so the client can save again without a reload.
         "base_mtimes": {
-            "detect": _file_mtime_ns(payload.detect_path),
-            "segment": _file_mtime_ns(payload.segment_path),
+            "detect": _mtime_token(payload.detect_path),
+            "segment": _mtime_token(payload.segment_path),
         },
     }
 
