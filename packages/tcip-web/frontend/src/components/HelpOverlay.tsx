@@ -26,28 +26,27 @@ const ANNOTATE: Shortcut[] = [
   { key: "←  →", desc: "Prev / Next image" },
 ];
 
-// Accept/Reject verdicts go to the review log for retraining — they never rewrite
-// GT label files. Only Edit (E) changes GT. Keep in sync with ReviewTab's labels.
+// Verdicts write ground truth — keep in sync with ReviewTab's button titles.
 const REVIEW: Shortcut[] = [
-  { key: "a", desc: "Accept: record verdict for retraining (does not change GT)" },
-  { key: "r", desc: "Reject: record verdict for retraining (does not change GT)" },
-  {
-    key: "e",
-    desc: "Edit in Annotate tab (carries zoom + pred-reference) — the only action that changes GT files",
-  },
+  { key: "a", desc: "Accept: keep this object in GT (accepting an FP adds the prediction to GT)" },
+  { key: "r", desc: "Reject: FP discards the prediction; TP/FN deletes the ground-truth object" },
+  { key: "e", desc: "Edit the shape in place on this canvas (drag corners / points)" },
+  { key: "Enter", desc: "Save the edited shape to ground truth" },
+  { key: "Esc", desc: "Cancel the edit — ground truth unchanged" },
   { key: "←  →", desc: "Prev / Next detection" },
   { key: "↑  ↓", desc: "Prev / Next image" },
 ];
 
 const MOUSE: Shortcut[] = [
-  { key: "Ctrl + Scroll", desc: "Zoom at cursor" },
-  { key: "Middle-click + drag", desc: "Pan" },
-  { key: "Scroll", desc: "Pan vertically" },
+  { key: "Scroll / two-finger", desc: "Pan (any direction)" },
+  { key: "Ctrl + Scroll / pinch", desc: "Zoom at cursor" },
   { key: "Shift + Scroll", desc: "Pan horizontally" },
+  { key: "Space + drag", desc: "Pan (hold space, drag with the left button)" },
+  { key: "Middle-click + drag", desc: "Pan" },
   { key: "Double-click", desc: "Close current polygon (polygon mode)" },
   {
     key: "Right-click",
-    desc: "Cancel in-progress polygon, or delete vertex / polygon / box under cursor",
+    desc: "Cancel in-progress polygon, or delete vertex / shape under cursor (current mode only)",
   },
 ];
 
