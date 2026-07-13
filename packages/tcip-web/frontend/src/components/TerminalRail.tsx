@@ -153,44 +153,90 @@ export function TerminalRail() {
       }
     };
 
-    // Copy: xterm paints its selection onto a canvas the OS clipboard can't see, and Ctrl+C
-    // is consumed by onData as SIGINT — so a "copy" grabbed nothing and left whatever was
-    // already on the clipboard (the *previous* selection) in place. Wire it explicitly:
-    //   • copy-on-select — when a drag ends with a selection, put it on the clipboard;
-    //   • the native copy event — right-click → Copy feeds xterm's selection in;
-    //   • Ctrl/Cmd+Shift+C — an explicit copy keystroke (plain Ctrl+C stays SIGINT).
+    // Copy. Claude Code keeps SGR mouse tracking on for the whole session, and xterm
+    // disables its selection service whenever an app owns the mouse — a plain drag never
+    // creates a selection, which is why every earlier copy fix "didn't work". xterm's
+    // only escape hatch is shift+drag (its force-selection modifier), so restore
+    // conhost/QuickEdit semantics: an unmodified left press is re-dispatched with
+    // shiftKey set, making drag-select (and double/triple-click word/line select) work
+    // while wheel scrolling still reaches the TUI. Then:
+    //   • copy-on-select — a drag ending with a selection lands on the clipboard;
+    //   • right-click — copy the selection if there is one, else paste (conhost style);
+    //   • Ctrl/Cmd+Shift+C / Ctrl+Insert copy; Ctrl+Shift+V / Shift+Insert paste;
+    //   • plain Ctrl+C stays SIGINT, matching a native terminal.
     const copySelection = () => {
       const sel = term.getSelection();
       if (sel) void navigator.clipboard?.writeText(sel).catch(() => {});
     };
-    const onMouseUp = () => {
+    const pasteClipboard = () => {
+      void navigator.clipboard
+        ?.readText()
+        .then((t) => {
+          if (t) term.paste(t);
+        })
+        .catch(() => {});
+    };
+    const forceSelection = (ev: MouseEvent) => {
+      if (ev.button !== 0 || ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      ev.stopImmediatePropagation();
+      ev.preventDefault();
+      // Clone explicitly — spreading a MouseEvent doesn't copy its prototype props.
+      ev.target?.dispatchEvent(
+        new MouseEvent(ev.type, {
+          bubbles: true,
+          cancelable: true,
+          shiftKey: true,
+          button: ev.button,
+          buttons: ev.buttons,
+          detail: ev.detail,
+          clientX: ev.clientX,
+          clientY: ev.clientY,
+          screenX: ev.screenX,
+          screenY: ev.screenY,
+        }),
+      );
+      term.focus();
+    };
+    // Window-level: xterm finalizes drags via window listeners, so a release outside
+    // the rail still completes the selection — a host listener would miss the copy.
+    const onWindowMouseUp = () => {
       if (term.hasSelection()) copySelection();
     };
-    const onCopy = (e: ClipboardEvent) => {
-      const sel = term.getSelection();
-      if (sel) {
-        e.clipboardData?.setData("text/plain", sel);
-        e.preventDefault();
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      if (term.hasSelection()) {
+        copySelection();
+        term.clearSelection();
+      } else {
+        pasteClipboard();
       }
     };
     term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      const mod = e.ctrlKey || e.metaKey;
       if (
-        e.type === "keydown" &&
-        (e.ctrlKey || e.metaKey) &&
-        e.shiftKey &&
-        (e.key === "C" || e.key === "c")
+        (mod && e.shiftKey && (e.key === "C" || e.key === "c")) ||
+        (e.ctrlKey && e.key === "Insert")
       ) {
+        e.preventDefault(); // otherwise Chrome also opens DevTools on Ctrl+Shift+C
         copySelection();
-        return false; // handled — don't forward Ctrl/Cmd+Shift+C to the PTY
+        return false;
+      }
+      if (
+        (mod && e.shiftKey && (e.key === "V" || e.key === "v")) ||
+        (e.shiftKey && !mod && e.key === "Insert")
+      ) {
+        e.preventDefault();
+        pasteClipboard();
+        return false;
       }
       return true;
     });
 
-    const focusTerm = () => term.focus();
     host.addEventListener("paste", onPaste, true);
-    host.addEventListener("copy", onCopy);
-    host.addEventListener("mouseup", onMouseUp);
-    host.addEventListener("mousedown", focusTerm);
+    host.addEventListener("mousedown", forceSelection, true);
+    host.addEventListener("contextmenu", onContextMenu);
+    window.addEventListener("mouseup", onWindowMouseUp);
 
     let ws: WebSocket | null = null;
     let closedByClient = false;
@@ -260,9 +306,9 @@ export function TerminalRail() {
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       observer.disconnect();
       host.removeEventListener("paste", onPaste, true);
-      host.removeEventListener("copy", onCopy);
-      host.removeEventListener("mouseup", onMouseUp);
-      host.removeEventListener("mousedown", focusTerm);
+      host.removeEventListener("mousedown", forceSelection, true);
+      host.removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("mouseup", onWindowMouseUp);
       dataSub.dispose();
       resizeSub.dispose();
       ws?.close();
@@ -301,7 +347,7 @@ export function TerminalRail() {
         className="absolute left-0 top-0 bottom-0 -ml-1 w-1.5 z-10 cursor-col-resize hover:bg-tcip-accent/40"
       />
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
-        <span className="tcip-eyebrow">Agent · Claude Code</span>
+        <span className="tcip-eyebrow">TCIP Agent</span>
         <div className="flex items-center gap-1">
           <button
             onClick={restart}
@@ -313,7 +359,7 @@ export function TerminalRail() {
           <button
             onClick={() => setOpen(false)}
             aria-label="Minimize agent terminal"
-            title="Minimize — the agent keeps running; reopen from the ✦ Agent button"
+            title="Minimize — the agent keeps running; reopen from the ✦ TCIP Agent button"
             className="text-tcip-muted hover:text-tcip-fg text-[15px] leading-none px-1.5 h-6 rounded hover:bg-tcip-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
           >
             –
