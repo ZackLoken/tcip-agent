@@ -133,6 +133,10 @@ repo root at startup), so a process started from a subdir no longer fragments `.
   infrastructure, or domain knowledge the agent lacks.
 - Crop traits are controlled vocabulary in `.github/skills/crops/` — verify there before asserting.
 - Match surrounding code style.
+- **Comments and emphasis (hard rule).** Match the file's existing comment density — most edits need
+  no new comment. Keep any comment to one line; never add a multi-line block to explain "why" on a
+  routine change. Never use all-caps for emphasis in code or prose (write "not"/"never", not
+  "NOT"/"NEVER"). Scan your own diff for both before presenting it.
 
 ## Pointers
 
