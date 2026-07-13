@@ -86,10 +86,12 @@ class TestFullClassificationPipeline:
         assert dataset.num_classes == 2
         assert dataset.num_samples == 12
 
-        loader = DataLoader(
-            dataset, batch_size=4, shuffle=True,
-            collate_fn=task_collate("classification"),
-        )
+        # Train/val split (folds in the former TestFullPipelineWithValidation): exercises the
+        # val_loader + early-stopping wiring on this run instead of a second full training.
+        collate = task_collate("classification")
+        train_ds, val_ds = torch.utils.data.random_split(dataset, [8, 4])
+        loader = DataLoader(train_ds, batch_size=4, shuffle=True, collate_fn=collate)
+        val_loader = DataLoader(val_ds, batch_size=4, shuffle=False, collate_fn=collate)
 
         # Verify one batch works
         batch_images, batch_targets = next(iter(loader))
@@ -106,17 +108,19 @@ class TestFullClassificationPipeline:
             "mixed_precision": False,
             "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
             "scheduler": {"type": "cosine"},
-            "early_stopping": {"enabled": False},
+            "early_stopping": {"enabled": True, "patience": 10, "min_delta": 1e-4},
             "gradient_accumulation_steps": 1,
             "checkpoint_every_n_epochs": 1,
         }
         run = create_run(config, output_dir)
 
-        completed_run = train(run, loader, val_loader=None, task="classification")
+        completed_run = train(run, loader, val_loader=val_loader, task="classification")
 
         assert completed_run.status == "completed"
         assert completed_run.current_epoch == 2
         assert len(completed_run.metrics_history) == 2
+        # val_loader + early-stopping wiring (folded from the former TestFullPipelineWithValidation)
+        assert "val_loss" in completed_run.metrics_history[-1]
 
         # Verify output files exist
         out = Path(output_dir)
@@ -174,47 +178,6 @@ class TestFullClassificationPipeline:
         assert "detection_count" in content
         lines = content.strip().splitlines()
         assert len(lines) == 5  # header + 4 images
-
-
-class TestFullPipelineWithValidation:
-    """Train with train/val split and verify early stopping wiring."""
-
-    def test_train_val_split(self, tiny_classification_data, output_dir):
-        from tcip_mcp.pipelines.composer import recommend_model_spec
-        from tcip_mcp.pipelines.data.datasets import build_dataset
-        from tcip_mcp.pipelines.training.generic_trainer import (
-            create_run, train, task_collate,
-        )
-
-        spec = recommend_model_spec(task="classification", dataset_size=12, num_classes=2)
-
-        dataset = build_dataset("classification", images_dir=tiny_classification_data)
-
-        # Split into train (8) / val (4)
-        train_ds, val_ds = torch.utils.data.random_split(dataset, [8, 4])
-
-        collate = task_collate("classification")
-        train_loader = DataLoader(train_ds, batch_size=4, shuffle=True, collate_fn=collate)
-        val_loader = DataLoader(val_ds, batch_size=4, shuffle=False, collate_fn=collate)
-
-        config = {
-            "model_spec": spec,
-            "device": "cpu",
-            "stages": [{"freeze_to": -1, "epochs": 2}],
-            "mixed_precision": False,
-            "optimizer": {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0},
-            "scheduler": {"type": "cosine"},
-            "early_stopping": {"enabled": True, "patience": 10, "min_delta": 1e-4},
-            "gradient_accumulation_steps": 1,
-            "checkpoint_every_n_epochs": 0,
-        }
-        run = create_run(config, output_dir)
-        completed = train(run, train_loader, val_loader=val_loader, task="classification")
-
-        assert completed.status == "completed"
-        assert completed.current_epoch == 2
-        # Metrics should have val_loss when val_loader provided
-        assert "val_loss" in completed.metrics_history[-1]
 
 
 class TestModelSpecValidation:
