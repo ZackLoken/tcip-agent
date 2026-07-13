@@ -24,7 +24,7 @@ const config: Config = {
         "tcip-hover": "#282922", // warm raised hover surface (secondary controls)
         "tcip-border-hover": "#454A3B",
         "tcip-accent": "#507754", // SI_GREEN — held fixed (focus-ring colour test)
-        "tcip-accent-hover": "#608864",
+        "tcip-accent-hover": "#46694A", // darker on hover: white 12px text stays AA (6.2:1)
         "tcip-warn": "#E6976B", // SI_PERSIMMON — the warm / autumn signal
         // Phenology season scale (dormant → bud → canopy → late-summer → fruit),
         // used by the SeasonRail signature. Anchored on the brand green + persimmon.
