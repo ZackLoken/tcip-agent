@@ -150,6 +150,16 @@ function App() {
     };
   }, [projectRoot]);
 
+  // A refresh/close with unsaved canvas edits gets the browser's leave-page prompt —
+  // React never unmounts on unload, so AnnotateTab's flush-on-unmount can't cover this.
+  useEffect(() => {
+    function guardUnload(e: BeforeUnloadEvent) {
+      if (useStore.getState().canvas.dirty) e.preventDefault();
+    }
+    window.addEventListener("beforeunload", guardUnload);
+    return () => window.removeEventListener("beforeunload", guardUnload);
+  }, []);
+
   // Hydrate classes + per-image status whenever the dataset selection changes.
   useEffect(() => {
     if (!projectRoot || imageList.length === 0) return;
@@ -160,28 +170,30 @@ function App() {
 
         const saved = await classesApi.loadImageStatus(projectRoot);
         const savedMap = saved.statuses ?? {};
-        // For any image not yet in savedMap, derive status from label files.
-        const missing = imageList.filter((name) => !(name in savedMap));
-        let derived: Record<string, string> = {};
-        if (missing.length) {
-          const derivedRes = await classesApi.deriveImageStatus({
-            project_root: projectRoot,
-            annotations_detect_dir: annDetectDir,
-            annotations_segment_dir: annSegDir,
-            image_list: missing,
-          });
-          derived = derivedRes.statuses ?? {};
-          if (Object.keys(derived).length) {
-            await classesApi.setImageStatusBulk(
-              projectRoot,
-              derived as Record<string, "complete" | "partial" | "unannotated">,
-            );
-          }
-        }
-        setImageStatuses({
-          ...savedMap,
-          ...(derived as Record<string, "complete" | "partial" | "unannotated">),
+        // Reconcile every image against the label files, honoring confirmed reviews via
+        // complete_override — so a wrongly-saved "negative" whose files have content heals
+        // to partial instead of silently locking the canvas forever.
+        const confirmed = imageList.filter(
+          (name) => savedMap[name] === "complete" || savedMap[name] === "negative",
+        );
+        const derivedRes = await classesApi.deriveImageStatus({
+          project_root: projectRoot,
+          annotations_detect_dir: annDetectDir,
+          annotations_segment_dir: annSegDir,
+          image_list: imageList,
+          complete_override: confirmed,
         });
+        const reconciled = (derivedRes.statuses ?? {}) as Record<
+          string,
+          "complete" | "partial" | "negative" | "unannotated"
+        >;
+        const changed = Object.fromEntries(
+          Object.entries(reconciled).filter(([name, st]) => savedMap[name] !== st),
+        ) as Record<string, "complete" | "partial" | "negative" | "unannotated">;
+        if (Object.keys(changed).length) {
+          await classesApi.setImageStatusBulk(projectRoot, changed);
+        }
+        setImageStatuses(reconciled);
       } catch (err) {
         console.warn("class / image-status hydrate failed", err);
         useStore.getState().pushToast("Could not load classes / image status for this project.");
