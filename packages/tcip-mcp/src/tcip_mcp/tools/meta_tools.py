@@ -112,7 +112,7 @@ def claude_reports(
 @mcp.tool()
 @audited
 def load_reports(
-    project_path: str,
+    project_path: str = "",
     limit: int = 5,
     category: str = "",
     filter_substring: str = "",
@@ -125,13 +125,18 @@ def load_reports(
     surfaced but did not resolve. Returns the most recently written reports first.
 
     Args:
-        project_path: Root directory of the project.
+        project_path: Root directory of the project. Empty defaults to the active
+            project (matching ``get_project_status``) so the CLAUDE.md session-start
+            flow — load_reports + load_retrospectives + get_project_status — needs no path.
         limit: Maximum number of reports to return (default 5).
         category: Optional exact category filter (e.g. 'missing_tool'). One of the
             ``claude_reports`` categories; empty means all categories.
         filter_substring: Optional case-insensitive substring matched against the
             report's filename or its detail/context text.
     """
+    from tcip_mcp import workspace
+
+    project_path = workspace.resolve_project_path(project_path)
     reports_dir = Path(project_path) / ".tcip" / "reports"
     if not reports_dir.exists():
         return {
@@ -277,7 +282,7 @@ def project_retrospective(
 @mcp.tool()
 @audited
 def load_retrospectives(
-    project_path: str,
+    project_path: str = "",
     limit: int = 5,
     filter_substring: str = "",
 ) -> dict:
@@ -288,12 +293,16 @@ def load_retrospectives(
     modified retrospectives first.
 
     Args:
-        project_path: Root directory of the project.
+        project_path: Root directory of the project. Empty defaults to the active
+            project (matching ``get_project_status``) so the session-start flow needs no path.
         limit: Maximum number of retrospectives to return (default 5).
         filter_substring: Optional case-insensitive substring. Only
             retrospectives whose filename OR content contains this string
             will be returned.
     """
+    from tcip_mcp import workspace
+
+    project_path = workspace.resolve_project_path(project_path)
     retros_dir = Path(project_path) / ".tcip" / "retrospectives"
     if not retros_dir.exists():
         return {
