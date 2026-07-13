@@ -117,33 +117,9 @@ class TestTrainConfig:
 # Phase 7: Pipeline Orchestrator Validation
 # ====================================================================
 
-class TestOrchestrator:
-    def test_validate_simple_pipeline(self):
-        from tcip_mcp.pipelines.orchestrator import validate_pipeline
-        spec = {
-            "phases": [
-                {
-                    "name": "train",
-                    "type": "training",
-                    "model_spec": {"backbone": "resnet50", "neck": "fpn", "heads": [{"name": "classification", "task": "classification", "num_classes": 5}]},
-                    "dataset": {"task": "classification"},
-                },
-                {
-                    "name": "infer",
-                    "type": "inference",
-                    "checkpoint": "$train.checkpoint",
-                    "images_dir": "/some/dir",
-                },
-            ]
-        }
-        issues = validate_pipeline(spec)
-        assert isinstance(issues, list)
-
-    def test_empty_pipeline_fails(self):
-        from tcip_mcp.pipelines.orchestrator import validate_pipeline
-        spec = {"phases": []}
-        issues = validate_pipeline(spec)
-        assert any("phase" in i.lower() or "empty" in i.lower() for i in issues)
+# (validate_pipeline is covered exactly by test_orchestrator_characterization.py::TestValidatePipeline,
+#  which pins the precise issue strings — including "Pipeline has no phases" — so the two weaker
+#  isinstance/any-substring checks that lived here were removed as strict duplicates.)
 
 
 # ====================================================================
