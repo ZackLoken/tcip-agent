@@ -250,7 +250,12 @@ def test_optuna_warm_start_trial0_is_baseline():
     assert result["all_trials"][0]["params"]["batch_size"] == 4
 
 
-def test_run_hpo_still_importable():
+def test_run_hpo_is_optuna_only():
+    # The use_optuna=False random-search branch (enumerate-only, never trained) was removed;
+    # run_hpo is Optuna-only now. Its training path is covered in test_training_tools.py.
+    import inspect
+
     from tcip_mcp.tools.training_tools import run_hpo
-    result = run_hpo({"model_spec": {"heads": [{"task": "detection"}]}}, n_trials=2, use_optuna=False)
-    assert "configs" in result  # random-search path unaffected
+    params = inspect.signature(run_hpo).parameters
+    assert "n_trials" in params  # signature is introspectable (not opaque *args/**kwargs)
+    assert "use_optuna" not in params
