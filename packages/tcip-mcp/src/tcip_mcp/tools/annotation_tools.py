@@ -26,6 +26,7 @@ from tcip_mcp.dataset_layout import (
     find_gt_label,
     find_prediction,
 )
+from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
 
@@ -159,6 +160,17 @@ def save_annotations(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
+    # trait/date become path segments under annotations/, so confine them (like stage_proposals)
+    # when the canonical layout is used — the explicit *_path args bypass it.
+    from tcip_mcp.workspace import is_valid_name
+
+    canonical_used = (boxes is not None and not detect_path) or (polygons is not None and not segment_path)
+    if canonical_used:
+        if not is_valid_name(trait):
+            return {"error": f"trait must be a single safe path segment (no separators/'..'), got {trait!r}"}
+        if date is not None and not is_valid_name(date):
+            return {"error": f"date must be a single safe path segment (no separators/'..'), got {date!r}"}
+
     w, h = get_image_dimensions(image_path)
     stem = img.stem
 
@@ -251,7 +263,7 @@ def _load_image_annotations(image_path: str):
 def evaluate_detections(
     image_path: str,
     iou_threshold: float = 0.5,
-    conf_threshold: float = 0.25,
+    conf_threshold: float = DEFAULT_CONF,
 ) -> dict:
     """Match predictions against ground truth for a single image (COCOeval).
 
@@ -261,7 +273,9 @@ def evaluate_detections(
     Args:
         image_path: Absolute path to the image file.
         iou_threshold: IoU threshold for a positive match.
-        conf_threshold: Minimum confidence to consider a prediction.
+        conf_threshold: Minimum confidence to consider a prediction. Defaults to the shared
+            ``DEFAULT_CONF`` so the reported P/R/F1 operating point matches evaluate_model /
+            inference (they used to diverge — 0.25 here vs 0.5 there).
     """
     loaded = _load_image_annotations(image_path)
     if loaded is None:
@@ -296,14 +310,15 @@ def evaluate_detections(
 def evaluate_dataset(
     folder_path: str,
     iou_threshold: float = 0.5,
-    conf_threshold: float = 0.25,
+    conf_threshold: float = DEFAULT_CONF,
 ) -> dict:
     """Aggregate detection metrics across all images in a dataset.
 
     Args:
         folder_path: Path to dataset root.
         iou_threshold: IoU threshold for a positive match.
-        conf_threshold: Minimum confidence.
+        conf_threshold: Minimum confidence. Defaults to the shared ``DEFAULT_CONF`` so the
+            reported operating point matches evaluate_model / inference.
     """
     root = Path(folder_path)
     images_dir = root / "images"
@@ -576,14 +591,16 @@ def push_panel_data(
 
     Args:
         panel: Target panel — 'annotate', 'review', 'training', 'tuning',
-            'inference', or 'results'.
+            'inference', 'results', or 'app' (app-level events like
+            annotate_focus / review_focus / project_changed).
         event_type: Event type the panel switches on (e.g. 'load_matches',
             'metrics_update').
         data: Arbitrary JSON data payload.
     """
     from tcip_mcp.web_client import post_panel_event
 
-    valid_panels = {"annotate", "review", "training", "tuning", "inference", "results"}
+    # 'app' is a real target: focus_annotate/focus_review/set_active_project all post to it.
+    valid_panels = {"app", "annotate", "review", "training", "tuning", "inference", "results"}
     if panel not in valid_panels:
         return {"error": f"Unknown panel: {panel}. Valid: {sorted(valid_panels)}"}
 
@@ -746,9 +763,16 @@ def focus_review(
     """
     from tcip_mcp.dataset_layout import image_dir, prediction_dir
     from tcip_mcp.web_client import post_panel_event
+    from tcip_mcp.workspace import is_valid_name
 
     if filter_type not in ("all", "tp", "fp", "fn"):
         return {"error": f"filter_type must be all|tp|fp|fn, got {filter_type!r}"}
+
+    # model_name/date become path segments, so confine them like stage_proposals (read-only here,
+    # but keeps a traversal segment from probing paths / a later refactor becoming a write path).
+    for label, val in (("model_name", model_name), ("date", date)):
+        if not is_valid_name(val):
+            return {"error": f"{label} must be a single safe path segment (no separators/'..'), got {val!r}"}
 
     img_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
     idir = Path(image_dir(dataset_root, date))
