@@ -69,6 +69,47 @@ class TestPostPanelEventRoute:
         assert len(events) == 2
         assert events[-1]["data"]["trial"] == 2
 
+    def test_review_focus_persists_advisory_state(self, client: TestClient) -> None:
+        # The agent reads gui state back via get_active_context — a focus event must
+        # land there even though the browser applies it with local setters only.
+        resp = client.post(
+            "/api/events/app",
+            json={
+                "event_type": "review_focus",
+                "data": {
+                    "trait": "catkin",
+                    "date": "2-11-26",
+                    "model_name": "m1",
+                    "image_index": 3,
+                    "detection_idx": 7,
+                    "filter_type": "fp",
+                    "iou_threshold": 0.4,
+                    "conf_threshold": 0.3,
+                },
+            },
+        )
+        assert resp.status_code == 200
+        state = client.get("/api/dataset/state").json()
+        assert state["active_tab"] == "review"
+        assert state["review"]["filter_type"] == "fp"
+        assert state["review"]["detection_idx"] == 7
+        assert state["review"]["iou_threshold"] == 0.4
+        assert state["review"]["conf_threshold"] == 0.3
+
+    def test_annotate_focus_persists_advisory_state(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/events/app",
+            json={
+                "event_type": "annotate_focus",
+                "data": {"trait": "bush", "date": "2-11-26", "mode": "polygon", "active_class": 2},
+            },
+        )
+        assert resp.status_code == 200
+        state = client.get("/api/dataset/state").json()
+        assert state["active_tab"] == "annotate"
+        assert state["mode"] == "polygon"
+        assert state["active_class"] == 2
+
 
 class TestPushPanelDataTool:
     """Verify the MCP tool posts via HTTP and aliases legacy panel names."""
