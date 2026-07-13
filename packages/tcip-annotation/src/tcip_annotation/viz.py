@@ -42,9 +42,21 @@ COLOR_PALETTE: list[tuple[int, int, int]] = [
 MAX_RENDER_EDGE = 1024
 
 
+def _viz_base() -> Path:
+    """The ``.tcip`` base for viz output. Honors ``TCIP_PROJECT_ROOT`` (the platform-state root the
+    MCP server / web backend pin to the active project) so renders land under the project, not the
+    process CWD — the agent's CWD is often the repo, which fragmented artifacts away from the
+    project and returned a CWD-relative path callers couldn't resolve. Falls back to CWD-relative
+    for standalone ``tcip_annotation`` use."""
+    import os
+
+    root = os.environ.get("TCIP_PROJECT_ROOT")
+    return (Path(root) if root else Path(".")) / ".tcip"
+
+
 def _default_output(func_name: str, suffix: str = ".png") -> str:
-    """Generate default output path in .tcip/artifacts/viz/."""
-    viz_dir = Path(".tcip") / "artifacts" / "viz"
+    """Generate an absolute default output path under ``<root>/.tcip/artifacts/viz/``."""
+    viz_dir = (_viz_base() / "artifacts" / "viz").resolve()
     viz_dir.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
     # Include microseconds to avoid collision when many images render in one second
@@ -340,7 +352,7 @@ def render_confusion_examples(
     Returns:
         List of output paths (one per failure case).
     """
-    output_dir = output_dir or str(Path(".tcip") / "artifacts" / "viz" / "failures")
+    output_dir = output_dir or str((_viz_base() / "artifacts" / "viz" / "failures").resolve())
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     paths: list[str] = []
