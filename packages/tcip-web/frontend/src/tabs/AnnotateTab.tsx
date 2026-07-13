@@ -10,6 +10,7 @@ import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { computePolygonBboxes, findHoveredPolygon, pointInPolygon } from "@/lib/polygonGeometry";
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@/store/types";
@@ -214,6 +215,7 @@ export function AnnotateTab() {
 
   // Image navigation (shared with TopBar + Review; honors the status filter).
   const nav = useImageNav();
+  usePrefetchAdjacentImages();
 
   // ── Label load + save ───────────────────────────────────────────────
 
@@ -403,9 +405,10 @@ export function AnnotateTab() {
         startImageSessionTracking(currentImageName, labels.boxes.length + labels.polygons.length);
       } catch {
         if (cancelled) return;
-        // Show a blank canvas but BLOCK saving so a transient load failure can't
-        // let an empty canvas overwrite the labels still on disk.
-        loadLabels({ image_path: imgPath, img_width: 0, img_height: 0, boxes: [], polygons: [] });
+        // Show a blank canvas but block saving so a transient load failure can't let an
+        // empty canvas overwrite the labels still on disk. image_path stays empty so the
+        // Complete checkbox won't derive a status from this blank canvas either.
+        loadLabels({ image_path: "", img_width: 0, img_height: 0, boxes: [], polygons: [] });
         loadedKeyRef.current = key;
         loadedPathsRef.current = null;
         setSaveBlocked(true);
@@ -512,8 +515,19 @@ export function AnnotateTab() {
         selectPolygon(null);
       },
     },
-    { keys: "arrowleft", action: () => stepImage(-1) },
-    { keys: "arrowright", action: () => stepImage(1) },
+    // Held-key auto-repeat (~30/s) would queue a full image render per tick — one flip per press.
+    {
+      keys: "arrowleft",
+      action: (e) => {
+        if (!e.repeat) stepImage(-1);
+      },
+    },
+    {
+      keys: "arrowright",
+      action: (e) => {
+        if (!e.repeat) stepImage(1);
+      },
+    },
     {
       keys: "enter",
       action: () => {
@@ -560,10 +574,17 @@ export function AnnotateTab() {
 
   // ── Mouse handlers ──────────────────────────────────────────────────
 
-  const onDown = (ix: number, iy: number) => {
+  // Set when a press starts a vertex drag / edge insert, so the trailing click of the
+  // drag release can't place a vertex or deselect (one gesture, one meaning).
+  const didDragRef = useRef(false);
+
+  const onDown = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     if (isLocked) return;
+    if (ev.evt.button !== 0) return; // right-button drags must not fabricate boxes
     if (mode === "box") {
-      setDrawing({ x1: ix, y1: iy, x2: ix, y2: iy, class_id: activeClass });
+      const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
+      const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
+      setDrawing({ x1: cx, y1: cy, x2: cx, y2: cy, class_id: activeClass });
       return;
     }
     // Polygon: button press starts either a vertex drag (if clicked within
@@ -583,6 +604,7 @@ export function AnnotateTab() {
           // per-mousemove undo push, which would otherwise flood the 30-entry stack).
           pushUndo();
           useStore.getState().setDraggingVertex([pi, vi]);
+          didDragRef.current = true;
           return;
         }
       }
@@ -606,12 +628,11 @@ export function AnnotateTab() {
         newPts.splice(bestEdge + 1, 0, bestProj);
         updatePolygon(pi, { ...poly, points: newPts });
         useStore.getState().setDraggingVertex([pi, bestEdge + 1]);
+        didDragRef.current = true;
         return;
       }
-      // Click missed vertex + edge while polygon selected — check if still inside to keep selected
-      if (!pointInPolygon([ix, iy], poly.points)) {
-        selectPolygon(null);
-      }
+      // A miss keeps the selection; the click event deselects (one click = one action,
+      // never deselect-and-start-a-polygon from the same press).
     }
   };
 
@@ -645,9 +666,11 @@ export function AnnotateTab() {
       return;
     }
 
-    // Box drag
+    // Box drag (rubber-band stops at the image edge; polygons already clamp)
     if (drawing) {
-      setDrawing({ ...drawing, x2: ix, y2: iy });
+      const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
+      const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
+      setDrawing({ ...drawing, x2: cx, y2: cy });
       return;
     }
 
@@ -681,11 +704,13 @@ export function AnnotateTab() {
       return;
     }
     if (mode === "box" && drawing) {
+      const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
+      const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
       const box: Box = {
-        x1: Math.min(drawing.x1, ix),
-        y1: Math.min(drawing.y1, iy),
-        x2: Math.max(drawing.x1, ix),
-        y2: Math.max(drawing.y1, iy),
+        x1: Math.min(drawing.x1, cx),
+        y1: Math.min(drawing.y1, cy),
+        x2: Math.max(drawing.x1, cx),
+        y2: Math.max(drawing.y1, cy),
         class_id: activeClass,
       };
       if (box.x2 - box.x1 > MIN_BOX_SIDE && box.y2 - box.y1 > MIN_BOX_SIDE) {
@@ -701,6 +726,10 @@ export function AnnotateTab() {
     if (ev.evt.button !== 0) return;
     if (mode !== "polygon") return;
     if (annotateUi.draggingVertex) return;
+    if (didDragRef.current) {
+      didDragRef.current = false; // the trailing click of a vertex-drag release
+      return;
+    }
 
     // Placing vertices into a new polygon
     if (canvas.currentPolygon.length > 0) {
@@ -771,12 +800,15 @@ export function AnnotateTab() {
       selectPolygon(null);
       return;
     }
-    // Box right-click delete
-    for (let i = 0; i < canvas.boxes.length; i++) {
-      const b = canvas.boxes[i];
-      if (ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
-        deleteBox(i);
-        return;
+    // Box right-click delete — box mode only: in polygon mode a coincident (invisible)
+    // detect box would swallow the click and silently fork the two GT layouts.
+    if (mode === "box") {
+      for (let i = 0; i < canvas.boxes.length; i++) {
+        const b = canvas.boxes[i];
+        if (ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
+          deleteBox(i);
+          return;
+        }
       }
     }
     // Non-selected polygon right-click delete (polygon mode)
@@ -796,9 +828,12 @@ export function AnnotateTab() {
   const scaleLineW = 1 / s;
   const boxStroke = Math.max(1, Math.min(2 + s * 0.5, 6)) * scaleLineW;
   const polyStroke = Math.max(1, Math.min(2.5 + s * 0.5, 7)) * scaleLineW;
-  const vertR = Math.max(3, Math.min(VERTEX_HANDLE_RADIUS * (1.6 - s * 0.2), 12)) * scaleLineW;
-  const selVertR =
-    Math.max(vertR, Math.min(VERTEX_HANDLE_RADIUS * (2.2 - s * 0.2), 16)) * scaleLineW;
+  // Both radii resolve in screen px, then compensate by 1/s exactly once — mixing the
+  // spaces here once made selected handles grow 1/s² and blanket the frame at fit zoom.
+  const vertScreen = Math.max(3, Math.min(VERTEX_HANDLE_RADIUS * (1.6 - s * 0.2), 12));
+  const selScreen = Math.max(vertScreen + 1, Math.min(VERTEX_HANDLE_RADIUS * (2.2 - s * 0.2), 16));
+  const vertR = vertScreen * scaleLineW;
+  const selVertR = selScreen * scaleLineW;
   const labelSize = Math.max(8, Math.min(Math.round(9 * (0.6 + s * 0.4)), 18)) * scaleLineW;
 
   if (!imgPath || !currentImageName) {
@@ -908,7 +943,9 @@ export function AnnotateTab() {
 
         {isLocked && (
           <div className="absolute top-3 right-3 rounded-md border border-tcip-border bg-tcip-panel/95 px-2 py-1 text-[11px] text-tcip-muted pointer-events-none">
-            Locked (Complete). Uncheck Complete to edit.
+            {currentStatus === "negative"
+              ? "Locked — confirmed negative. Uncheck Complete to edit; it becomes partial when you save annotations."
+              : "Locked — complete. Uncheck Complete to edit."}
           </div>
         )}
       </div>
