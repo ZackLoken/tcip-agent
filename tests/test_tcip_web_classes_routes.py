@@ -44,6 +44,53 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
     assert on_disk["0"]["name"] == "catkin"
 
 
+def test_per_trait_maps_are_scoped(client: TestClient, tmp_path: Path) -> None:
+    # catkin and bush each use class 0 for their own object — trait-scoped maps keep them apart.
+    for trait, name in (("catkin", "catkin"), ("bush", "bush")):
+        r = client.post(
+            "/api/classes/save",
+            json={
+                "project_root": str(tmp_path),
+                "trait": trait,
+                "classes": [{"id": 0, "name": name, "color": "#FF0000"}],
+            },
+        )
+        assert r.status_code == 200
+
+    cat = client.get(
+        "/api/classes/load", params={"project_root": str(tmp_path), "trait": "catkin"}
+    ).json()
+    bush = client.get(
+        "/api/classes/load", params={"project_root": str(tmp_path), "trait": "bush"}
+    ).json()
+    assert cat["classes"][0]["name"] == "catkin"
+    assert bush["classes"][0]["name"] == "bush"
+    # each map lands under its own per-trait path
+    assert (tmp_path / ".tcip" / "state" / "classes" / "catkin.json").is_file()
+    assert (tmp_path / ".tcip" / "state" / "classes" / "bush.json").is_file()
+
+
+def test_load_derives_from_labels_when_map_absent(client: TestClient, tmp_path: Path) -> None:
+    # No saved map for this trait, but its labels exist → derive a provisional registry so the
+    # canvas never loads empty (names default to class_<id>).
+    det = tmp_path / "annotations" / "catkin" / "d" / "detect"
+    det.mkdir(parents=True)
+    (det / "IMG_A.txt").write_text("0 0.5 0.5 0.1 0.1\n2 0.2 0.2 0.1 0.1\n")
+    load = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "trait": "catkin", "annotations_detect_dir": str(det)},
+    ).json()
+    assert [c["id"] for c in load["classes"]] == [0, 2]
+    assert load["classes"][0]["name"] == "class_0"
+
+
+def test_load_rejects_invalid_trait(client: TestClient, tmp_path: Path) -> None:
+    resp = client.get(
+        "/api/classes/load", params={"project_root": str(tmp_path), "trait": "../evil"}
+    )
+    assert resp.status_code == 400
+
+
 def test_auto_color_is_deterministic(client: TestClient) -> None:
     c0 = client.get("/api/classes/auto_color/0").json()
     c10 = client.get("/api/classes/auto_color/10").json()
@@ -68,12 +115,15 @@ def test_image_status_rejects_invalid(client: TestClient, tmp_path: Path) -> Non
     assert resp.status_code == 400
 
 
-def test_derive_statuses_from_label_files(client: TestClient, tmp_path: Path) -> None:
+def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path: Path) -> None:
+    # A negative is intentional (completed + empty), never inferred from an empty file alone —
+    # so an accidental empty file, or flipping through an image, doesn't become a training negative.
     det = tmp_path / "detect"
     det.mkdir()
-    (det / "IMG_A.txt").write_text("0 0.5 0.5 0.1 0.1\n")  # partial
-    (det / "IMG_B.txt").write_text("")  # empty file exists = confirmed negative
-    # IMG_C.txt missing = unannotated (never looked at)
+    (det / "IMG_A.txt").write_text("0 0.5 0.5 0.1 0.1\n")  # has objects, not completed
+    (det / "IMG_B.txt").write_text("")  # empty file, not completed
+    (det / "IMG_E.txt").write_text("0 0.5 0.5 0.1 0.1\n")  # has objects, completed
+    # IMG_C.txt missing; IMG_D completed but has no file (empty)
 
     resp = client.post(
         "/api/classes/image_status/derive",
@@ -81,16 +131,16 @@ def test_derive_statuses_from_label_files(client: TestClient, tmp_path: Path) ->
             "project_root": str(tmp_path),
             "annotations_detect_dir": str(det),
             "annotations_segment_dir": None,
-            "image_list": ["IMG_A.JPG", "IMG_B.JPG", "IMG_C.JPG", "IMG_D.JPG"],
-            "complete_override": ["IMG_D.JPG"],
+            "image_list": ["IMG_A.JPG", "IMG_B.JPG", "IMG_C.JPG", "IMG_D.JPG", "IMG_E.JPG"],
+            "complete_override": ["IMG_D.JPG", "IMG_E.JPG"],
         },
     )
-    body = resp.json()
-    assert body["statuses"] == {
-        "IMG_A.JPG": "partial",
-        "IMG_B.JPG": "negative",
-        "IMG_C.JPG": "unannotated",
-        "IMG_D.JPG": "complete",
+    assert resp.json()["statuses"] == {
+        "IMG_A.JPG": "partial",  # has objects, not completed
+        "IMG_B.JPG": "unannotated",  # empty file alone is NOT a negative — needs review
+        "IMG_C.JPG": "unannotated",  # no file
+        "IMG_D.JPG": "negative",  # completed + empty → confirmed negative (intentional)
+        "IMG_E.JPG": "complete",  # completed + has objects
     }
 
 
