@@ -35,16 +35,18 @@ describe("HelpOverlay", () => {
     expect(screen.getByText(/keyboard & mouse reference/i)).toBeInTheDocument();
   });
 
-  it("documents Review verdicts as retraining-only (no GT rewrite)", () => {
+  it("documents Review verdicts as writing ground truth (matches ReviewTab semantics)", () => {
     render(<HelpOverlay activeTab="review" />);
     fireEvent.keyDown(document.body, { key: "?" });
 
-    // Accept/Reject must state they don't change GT (matches ReviewTab semantics);
-    // the old "add-to-GT" / "delete GT" wording must not come back.
-    expect(screen.getAllByText(/does not change GT/)).toHaveLength(2);
-    expect(screen.getByText(/the only action that changes GT files/)).toBeInTheDocument();
-    expect(screen.queryByText(/add-to-GT/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/delete GT/)).not.toBeInTheDocument();
+    // Verdicts author GT: accepting an FP adds the prediction, rejecting a TP/FN
+    // deletes the object. The old "does not change GT" wording must not come back —
+    // it told reviewers a destructive key was safe.
+    expect(screen.getByText(/adds the prediction to GT/)).toBeInTheDocument();
+    expect(screen.getByText(/deletes the ground-truth object/)).toBeInTheDocument();
+    expect(screen.getByText(/Save the edited shape to ground truth/)).toBeInTheDocument();
+    expect(screen.queryByText(/does not change GT/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Edit in Annotate tab/)).not.toBeInTheDocument();
   });
 
   it("lists the Annotate shortcuts actually registered in AnnotateTab", () => {
