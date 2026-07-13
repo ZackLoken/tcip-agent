@@ -61,6 +61,9 @@ export interface CanvasState {
   undoStack: { boxes: Box[]; polygons: PolygonShape[]; selectedPolygonIdx: number | null }[];
   redoStack: { boxes: Box[]; polygons: PolygonShape[]; selectedPolygonIdx: number | null }[];
   dirty: boolean;
+  // Which image's labels the canvas holds — status writes must not read shapes that
+  // still belong to the previous image (or a failed load) mid-flip.
+  loadedImagePath: string | null;
 }
 
 const EMPTY_CANVAS: CanvasState = {
@@ -73,6 +76,7 @@ const EMPTY_CANVAS: CanvasState = {
   undoStack: [],
   redoStack: [],
   dirty: false,
+  loadedImagePath: null,
 };
 
 const EMPTY_SESSION_TRACKING: SessionTrackingState = {
@@ -338,6 +342,13 @@ export const useStore = create<AppState>()((set, get) => ({
         inDs.date !== local.dataset.date ||
         inDs.annotation_type !== local.dataset.annotation_type;
 
+      // Boot hydration: the browser has no dataset yet (fresh load / project open), so
+      // there is no local state to protect — adopt the persisted tab/mode/filters too,
+      // so a refresh resumes where the session left off instead of resetting to Annotate.
+      if (!local.dataset.dataset_root) {
+        return { gui: { ...incoming, pred_reference: null }, wsVersion: nextVersion };
+      }
+
       if (identityChanged) {
         // New dataset selection: adopt it wholesale (including its index) and drop
         // any stale prediction-reference overlay. The active tab stays put.
@@ -473,6 +484,7 @@ export const useStore = create<AppState>()((set, get) => ({
         undoStack: [],
         redoStack: [],
         dirty: false,
+        loadedImagePath: labels.image_path || null,
       },
     })),
 
