@@ -35,7 +35,7 @@ vi.mock("@/components/AnnotateToolbar", () => ({
 
 const initialStoreState = useStore.getState();
 
-const mt = (detect: number): Mtimes => ({ detect, segment: null });
+const mt = (detect: number): Mtimes => ({ detect: String(detect), segment: null });
 
 // Distinct mtimes per image so a save's echoed base_mtimes identify which
 // image's load they came from.
