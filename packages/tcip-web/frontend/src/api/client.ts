@@ -240,16 +240,21 @@ export const api = {
       pred_idx?: number | null;
       bbox: [number, number, number, number];
       action: "accepted" | "rejected" | "edited";
+      // Only for action "edited": the shape the user adjusted on the Review canvas.
+      edited_box?: [number, number, number, number] | null;
+      edited_polygon?: number[][] | null;
       iou_threshold?: number;
       conf_threshold?: number;
     }) =>
-      call<{ status: string; image_status: MatchesResponse["image_status"] }>(
-        "/api/review/action",
-        {
-          method: "POST",
-          body: JSON.stringify(body),
-        },
-      ),
+      call<{
+        status: string;
+        image_status: MatchesResponse["image_status"];
+        // Per-image annotation status after the GT write (null when unchanged), for the client to sync.
+        annotation_status: "complete" | "partial" | "negative" | "unannotated" | null;
+      }>("/api/review/action", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
 
     markComplete: (project_root: string, image_name: string) =>
       call<{ status: string; image_status: MatchesResponse["image_status"] }>(
@@ -261,7 +266,7 @@ export const api = {
       ),
 
     backupLabels: (project_root: string, label_dirs: string[]) =>
-      call<{ status: string; labels_backed_up: boolean }>("/api/review/backup_labels", {
+      call<{ status: string; files_backed_up: number }>("/api/review/backup_labels", {
         method: "POST",
         body: JSON.stringify({ project_root, label_dirs }),
       }),
