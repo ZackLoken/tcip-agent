@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from PIL import Image
 from pydantic import BaseModel
 
 from tcip_annotation import (
@@ -36,7 +35,7 @@ from tcip_annotation import (
     write_detect_labels,
     write_segment_labels,
 )
-from tcip_annotation.utils import auto_orient_image
+from tcip_annotation.utils import get_image_dimensions
 from tcip_mcp.utils.atomic_io import append_jsonl, read_json
 from tcip_web.paths import assert_path_allowed
 
@@ -127,8 +126,7 @@ def _image_dims(path: str) -> tuple[int, int]:
         raise HTTPException(403, str(exc)) from exc
     if not p.is_file():
         raise HTTPException(404, f"image not found: {path}")
-    with Image.open(p) as raw:
-        return auto_orient_image(raw).size
+    return get_image_dimensions(str(p))  # header-only (w, h); never decodes pixels
 
 
 def _guard_path(path: Optional[str]) -> None:
@@ -469,15 +467,47 @@ def record_action(payload: ActionPayload) -> dict:
 class MarkCompletePayload(BaseModel):
     project_root: str
     image_name: str
+    gt_detect_path: Optional[str] = None
+    gt_segment_path: Optional[str] = None
+    completed: bool = True  # False reverses a manual mark (verdicts are kept)
 
 
 @router.post("/mark_complete")
 def mark_complete(payload: MarkCompletePayload) -> dict:
-    """Manually mark an image fully reviewed (covers negatives / bulk-accept cases)."""
+    """Mark (or unmark) an image fully reviewed; covers negatives / bulk-accept cases."""
+    _guard_path(payload.gt_detect_path)
+    _guard_path(payload.gt_segment_path)
     engine = _get_engine(payload.project_root)
-    engine.mark_image_reviewed(payload.image_name)
-    _audit(payload.project_root, "gui_review_mark_complete", {"image_name": payload.image_name})
-    return {"status": "ok", "image_status": engine.get_image_review_status(payload.image_name)}
+    if payload.completed:
+        engine.mark_image_reviewed(payload.image_name)
+    else:
+        engine.unmark_image_reviewed(payload.image_name)
+    # Derive the annotation status from the GT files on disk — the client's matches
+    # snapshot can be stale or null mid-navigation and once wrote negatives for annotated frames.
+    has_content = False
+    for p in (payload.gt_detect_path, payload.gt_segment_path):
+        if p and os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    if any(line.strip() for line in f):
+                        has_content = True
+                        break
+            except OSError:
+                pass
+    if payload.completed:
+        annotation_status = "complete" if has_content else "negative"
+    else:
+        annotation_status = "partial" if has_content else "unannotated"
+    _audit(payload.project_root, "gui_review_mark_complete", {
+        "image_name": payload.image_name,
+        "completed": payload.completed,
+        "annotation_status": annotation_status,
+    })
+    return {
+        "status": "ok",
+        "image_status": engine.get_image_review_status(payload.image_name),
+        "annotation_status": annotation_status,
+    }
 
 
 class BackupPayload(BaseModel):
