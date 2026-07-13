@@ -96,13 +96,14 @@ body,
   }
 
   .tcip-btn-danger {
+    /* Hover signal rides the border only — a lighter fill under 12px warn text fails AA. */
     @apply tcip-btn bg-tcip-warn/20 border-tcip-warn/40 text-tcip-warn
-           hover:bg-tcip-warn/30 hover:border-tcip-warn;
+           hover:bg-tcip-warn/20 hover:border-tcip-warn;
   }
 
   .tcip-input {
     @apply h-8 px-2 rounded bg-tcip-panel border border-tcip-border text-tcip-fg text-[12px]
-           placeholder:text-tcip-muted/60
+           placeholder:text-tcip-muted placeholder:italic
            focus:outline-none focus:border-tcip-accent
            focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg;
   }
