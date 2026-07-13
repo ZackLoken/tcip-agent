@@ -330,7 +330,10 @@ export function ResultsTab() {
 
       <div className="tcip-panel p-4 h-80">
         <div className="tcip-heading mb-3">
-          Elongated / total ratio over time, per plant ({plantKeys.length} plants)
+          Elongated / total ratio over time, per plant
+          {plantKeys.length > 30
+            ? ` (showing 30 of ${plantKeys.length} plants — the onset table below has all)`
+            : ` (${plantKeys.length} plants)`}
         </div>
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="90%">
