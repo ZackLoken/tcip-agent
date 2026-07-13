@@ -235,6 +235,25 @@ async def post_panel_event(panel: str, event: PanelEvent):
         "data": event.data,
     }
     _recent_events[panel].append(payload)
+    # Agent focus events also update the advisory GuiState slice, so gui.json (what the
+    # agent reads back via get_active_context) reflects where it pointed the human — the
+    # browser applies the event locally and never syncs these fields back itself.
+    if event.event_type == "review_focus":
+        review = _gui_store.state.review.model_copy(
+            update={
+                k: event.data[k]
+                for k in ("filter_type", "iou_threshold", "conf_threshold", "detection_idx")
+                if k in event.data
+            }
+        )
+        await _gui_store.mutate({"active_tab": "review", "review": review})
+    elif event.event_type == "annotate_focus":
+        mutation: dict[str, Any] = {"active_tab": "annotate"}
+        if "mode" in event.data:
+            mutation["mode"] = event.data["mode"]
+        if "active_class" in event.data:
+            mutation["active_class"] = event.data["active_class"]
+        await _gui_store.mutate(mutation)
     await _broadcast_to_panel(panel, payload)
     return {"status": "ok", "panel": panel, "event_type": event.event_type}
 
