@@ -115,13 +115,28 @@ def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
 def test_stage_proposals_rejects_path_traversal_into_gt(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     good = [{"class_id": 0, "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
-    # A malformed model_name/date/stem must never escape predictions/ into the GT tree.
-    for bad_model in ("../annotations/catkin", "..", "a/b", "D:/evil"):
+    # A malformed model_name/date/stem must never escape predictions/ into the GT tree. Include a
+    # backslash segment (a Windows separator — "predictions\..\annotations" would escape) and a
+    # whitespace/empty segment, both of which is_valid_name rejects.
+    for bad_model in ("../annotations/catkin", "..", "a/b", "D:/evil", "a\\b", " ", ""):
         res = stage_proposals(str(root), bad_model, "2026-02-11", "IMG_0001", good)
         assert "error" in res
     res = stage_proposals(str(root), "agent_proposals", "2026-02-11", "../../annotations/x/IMG", good)
     assert "error" in res
     assert not (root / "annotations").exists()  # nothing leaked into ground truth
+
+
+def test_focus_review_rejects_path_traversal(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _images(root, date, ["IMG_0000.JPG"])
+    # focus_review is read-only, but a traversal model_name/date must still be rejected (it becomes
+    # a path segment in prediction_dir/image_dir) — the guard mirrors stage_proposals.
+    for bad_model in ("../../annotations", "a\\b", ".."):
+        res = focus_review(str(root), str(root), "catkin", date, bad_model)
+        assert "error" in res
+    res = focus_review(str(root), str(root), "catkin", "../evil", "baseline")
+    assert "error" in res
 
 
 def test_stage_proposals_rejects_non_numeric_class(tmp_path: Path) -> None:
