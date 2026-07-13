@@ -84,18 +84,10 @@ config = {
 
 ## HPO
 
-`run_hpo` supports two modes:
+`run_hpo` runs an Optuna TPE/ASHA search that trains each trial:
 
-### Random Search (default)
 ```python
-run_hpo(base_config=config, n_trials=10)
-```
-- Generates trial configs from discrete param space
-- Returns configs ready for `launch_training`
-
-### Optuna + TensorBoard (recommended)
-```python
-run_hpo(base_config=config, n_trials=20, use_optuna=True, output_dir="runs/hpo_1")
+run_hpo(base_config=config, n_trials=20, output_dir="runs/hpo_1")
 ```
 - TPE sampler with ASHA/MedianPruner for early trial termination
 - Per-trial TensorBoard logs in `output_dir/hpo_tensorboard/trial_{n}/`
