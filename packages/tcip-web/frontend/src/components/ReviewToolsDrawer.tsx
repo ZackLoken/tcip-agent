@@ -277,13 +277,15 @@ export function ReviewToolsDrawer({ open, onClose }: { open: boolean; onClose: (
                 {queueResult.queue.map((entry, i) => (
                   <li key={entry.image}>
                     <button
-                      className="w-full text-left px-2 py-1 rounded hover:bg-tcip-hover transition-colors font-mono text-[11px] flex justify-between"
+                      className="group w-full text-left px-2 py-1 rounded hover:bg-tcip-hover transition-colors font-mono text-[11px] flex justify-between"
                       onClick={() => jumpTo(entry.image)}
                     >
                       <span className="truncate">
                         {i + 1}. {basename(entry.image)}
                       </span>
-                      <span className="text-tcip-muted ml-2">{entry.score.toFixed(3)}</span>
+                      <span className="text-tcip-muted group-hover:text-tcip-fg ml-2">
+                        {entry.score.toFixed(3)}
+                      </span>
                     </button>
                   </li>
                 ))}
