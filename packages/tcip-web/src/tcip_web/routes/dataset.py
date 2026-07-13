@@ -138,13 +138,24 @@ async def select_dataset(req: SelectionRequest) -> dict:
         str(prediction_dir(root, req.model_name, req.date, "segment")) if req.model_name else None
     )
 
+    # Re-selecting the same (root, trait, date) — e.g. the auto-open on app load — resumes
+    # at the persisted position instead of clobbering it back to image 0.
+    prev = store.state.dataset
+    same_identity = (
+        prev.dataset_root == req.dataset_root
+        and prev.date == req.date
+        and prev.annotation_type == req.annotation_type
+    )
+    index = prev.current_image_index if same_identity else 0
+    index = max(0, min(index, len(image_list) - 1)) if image_list else 0
+
     selection = DatasetSelection(
         project_root=req.project_root,
         dataset_root=req.dataset_root,
         annotation_type=req.annotation_type,
         date=req.date,
         image_list=image_list,
-        current_image_index=0,
+        current_image_index=index,
         annotations_detect_dir=ann_detect,
         annotations_segment_dir=ann_segment,
         predictions_detect_dir=pred_detect,
