@@ -201,6 +201,32 @@ def test_per_plant_phenology_builds_fraction_series(tmp_path):
     assert row["catkin_95per_date"] == "2024-05-14"
 
 
+def test_per_plant_phenology_excludes_zero_detection_date_from_milestones(tmp_path):
+    # A date with total==0 (nothing detected) isn't an observation of the elongated fraction
+    # (pre-emergence or a detection gap), so it's excluded from the milestone series and kept in
+    # the raw series with ratio=None. A total>0/elongated==0 date is a real 0% and is kept.
+    # Excluding this date moves the 50% crossing to the first real observation (05-15).
+    d0 = tmp_path / "2024-05-01"
+    d1 = tmp_path / "2024-05-15"
+    d0.mkdir(parents=True, exist_ok=True)
+    (d0 / "P1_a.txt").write_text("", encoding="utf-8")  # zero detections on this date
+    _write_preds(d1, "P1_b", ["1 0.9 0.5 0.5 0.1 0.1", "1 0.8 0.4 0.4 0.1 0.1"])
+    mapping = {
+        "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
+        "2024-05-15": [_Assignment("P1_b", "P1", "acc-9")],
+    }
+    preds = {"2024-05-01": str(d0), "2024-05-15": str(d1)}
+
+    out = phenology.per_plant_phenology(mapping, preds, elongated_class_id=1)
+    row = out["rows"][0]
+    # the zero-detection date is kept in the raw series but flagged as no-observation (ratio None)
+    assert row["series"][0] == {"date": "2024-05-01", "n_total": 0, "n_elongated": 0, "ratio": None}
+    assert row["n_dates"] == 2 and row["n_observed_dates"] == 1
+    # ...and it does not feed the milestones: onset + 50% crossing are the first real observation.
+    assert row["catkin_elongation_date"] == "2024-05-15"
+    assert row["catkin_50per_date"] == "2024-05-15"
+
+
 def test_per_plant_phenology_flags_unclassified_predictions(tmp_path):
     # Predictions carry only class 0 — no elongation class anywhere. The fraction
     # is meaningless as bloom, and the guard must say so.
