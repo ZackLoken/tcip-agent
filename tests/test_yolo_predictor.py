@@ -65,6 +65,32 @@ def test_detect_kind_sniffs_ultralytics_shaped_checkpoint(tmp_path):
     assert detect_kind(str(p)) == KIND_ULTRALYTICS
 
 
+def test_kind_from_ckpt_raises_on_ambiguous_checkpoint():
+    # Integrity promise (predictor.py): an undeterminable kind raises rather than guessing a default
+    # and running a wrong forward. A dict with neither tcip nor ultralytics markers is ambiguous.
+    from tcip_mcp.pipelines.inference.predictor import _kind_from_ckpt
+
+    with pytest.raises(ValueError):
+        _kind_from_ckpt({"optimizer": {}, "epoch": 3}, "ambiguous.pt")
+
+
+def test_kind_from_ckpt_sniffs_composed_checkpoint():
+    from tcip_mcp.pipelines.inference.predictor import _kind_from_ckpt, KIND_TORCHVISION_COMPOSED
+
+    ckpt = {"model_spec": {"backbone": {}}, "model_state_dict": {}}
+    assert _kind_from_ckpt(ckpt, "composed.pt") == KIND_TORCHVISION_COMPOSED
+
+
+def test_kind_from_ckpt_bare_module_is_ultralytics():
+    # ultralytics can pickle a bare nn.Module (non-dict) in some export paths.
+    from tcip_mcp.pipelines.inference.predictor import _kind_from_ckpt, KIND_ULTRALYTICS
+
+    class _NotADict:
+        pass
+
+    assert _kind_from_ckpt(_NotADict(), "bare.pt") == KIND_ULTRALYTICS
+
+
 # ── real-model integration (runs on a machine with the baseline; skipped in CI) ──
 
 def _baseline_weights() -> Path | None:
@@ -74,21 +100,25 @@ def _baseline_weights() -> Path | None:
     return w if w.is_file() else None
 
 
-def test_score_unlabeled_rejects_non_composed_kind(tmp_path, monkeypatch):
+def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch):
     # Active-learning uncertainty scoring reads model logits, which a SAHI-wrapped YOLO doesn't
     # expose — so a non-composed kind must fail LOUD with a clear error, not crash on .model.
+    # (This guard lived in the removed score_unlabeled; prioritize_review_queue is its superset.)
     from types import SimpleNamespace
 
     import tcip_mcp.pipelines.inference.predictor as predmod
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")
-    (tmp_path / "unlabeled").mkdir()
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "a.jpg").write_bytes(b"x")
+    # prioritize_review_queue imports build_predictor from the predictor module at call time.
     monkeypatch.setattr(predmod, "build_predictor",
                         lambda *a, **k: SimpleNamespace(kind="ultralytics"))
-    from tcip_mcp.tools.active_learning_tools import score_unlabeled
+    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
-    r = score_unlabeled(checkpoint_path=str(ckpt), unlabeled_dir=str(tmp_path / "unlabeled"))
+    r = prioritize_review_queue(checkpoint_path=str(ckpt), images_dir=str(images))
     assert "error" in r and "ultralytics" in r["error"]
 
 
