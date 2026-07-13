@@ -116,11 +116,14 @@ def _viz_annotations(
         out = render_segmentations(image_path, poly_dicts, class_names=name_map)
         summary = f"Rendered {len(polys)} segmentation masks on {img.name}"
 
+    _count = len(boxes) if task == "detect" else len(polys)
     return {
         "image_path": out,
         "summary": summary,
         "format": fmt,
-        "annotation_count": len(boxes) if task == "detect" else len(polys),
+        # `count` is the stable key across all visualize sources; the source-specific alias stays.
+        "count": _count,
+        "annotation_count": _count,
     }
 
 
@@ -170,10 +173,13 @@ def _viz_predictions(
         out = render_segmentations(image_path, poly_dicts, class_names=name_map)
         summary = f"Rendered {len(pred_polys)} prediction masks on {img.name}"
 
+    _count = len(pred_boxes) if task == "detect" else len(pred_polys)
     return {
         "image_path": out,
         "summary": summary,
-        "prediction_count": len(pred_boxes) if task == "detect" else len(pred_polys),
+        # `count` is the stable key across all visualize sources; the source-specific alias stays.
+        "count": _count,
+        "prediction_count": _count,
     }
 
 
@@ -441,6 +447,8 @@ def _viz_dataset_sample(
     return {
         "image_path": grid_path,
         "summary": f"Grid of {len(sample)} annotated samples from {root.name}",
+        # `count` is the stable key across all visualize sources; the source-specific alias stays.
+        "count": len(sample),
         "sample_count": len(sample),
         "total_images": len(all_images),
     }
@@ -500,11 +508,13 @@ def sam_auto_label(
 
     out = render_candidates(image_path, candidates)
 
-    # Store candidates in project state for accept_candidates
-    state_dir = Path(".tcip") / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
+    # Resolve state via the platform root (like write_class_map), not a CWD-relative path, so the
+    # handoff to accept_candidates survives CWD != project root.
+    from tcip_mcp.project_paths import resolve_state
+
     import json
-    state_file = state_dir / f"candidates_{img.stem}.json"
+    state_file = resolve_state(Path(".tcip") / "state" / f"candidates_{img.stem}.json")
+    state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(json.dumps(candidates, default=str), encoding="utf-8")
 
     return {
@@ -553,8 +563,10 @@ def accept_candidates(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    # Load cached candidates
-    state_file = Path(".tcip") / "state" / f"candidates_{img.stem}.json"
+    # Load cached candidates from the same platform-root state location sam_auto_label wrote to.
+    from tcip_mcp.project_paths import resolve_state
+
+    state_file = resolve_state(Path(".tcip") / "state" / f"candidates_{img.stem}.json")
     if not state_file.is_file():
         return {"error": f"No candidates found for {img.stem}. Run sam_auto_label first."}
 
