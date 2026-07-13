@@ -1,4 +1,9 @@
-"""Active learning MCP tools — score unlabeled images, manage review queue."""
+"""Active learning MCP tools — partition predictions into review queues.
+
+(``score_unlabeled`` was removed — ``feedback_tools.prioritize_review_queue`` is a strict
+superset: same scorer + composed-detector guard, plus optional skip-already-reviewed and
+per-image scores in the result.)
+"""
 
 from __future__ import annotations
 
@@ -6,66 +11,6 @@ from pathlib import Path
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-
-
-@mcp.tool()
-@audited
-def score_unlabeled(
-    checkpoint_path: str,
-    unlabeled_dir: str,
-    method: str = "combined",
-    task: str = "classification",
-    budget: int = 50,
-) -> dict:
-    """Score unlabeled images and select the most informative ones to annotate.
-
-    Uses active learning to maximize labeling efficiency.
-
-    Args:
-        checkpoint_path: Path to trained model checkpoint.
-        unlabeled_dir: Directory of unlabeled images.
-        method: Scoring method ('uncertainty', 'diversity', 'combined').
-        task: Task type for uncertainty scoring.
-        budget: Number of images to select.
-    """
-    from tcip_mcp.pipelines.inference.predictor import KIND_TORCHVISION_COMPOSED, build_predictor
-    from tcip_mcp.pipelines.active_learning.scorer import (
-        UncertaintyScorer, DiversityScorer, CombinedScorer,
-    )
-    from tcip_mcp.pipelines.active_learning.selector import select_batch
-
-    if not Path(checkpoint_path).is_file():
-        return {"error": f"Checkpoint not found: {checkpoint_path}"}
-
-    predictor = build_predictor(checkpoint_path)
-    if getattr(predictor, "kind", None) != KIND_TORCHVISION_COMPOSED:
-        return {"error": (f"uncertainty scoring needs a composed torchvision detector, not a "
-                          f"'{getattr(predictor, 'kind', 'unknown')}' model (its .model is not an "
-                          f"nn.Module the scorer can read logits from)")}
-    device = predictor.device
-    model = predictor.model
-
-    exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
-    paths = sorted(str(f) for f in Path(unlabeled_dir).iterdir() if f.suffix.lower() in exts)
-
-    if not paths:
-        return {"error": "No images found in unlabeled_dir"}
-
-    if method == "uncertainty":
-        scorer = UncertaintyScorer(task=task)
-    elif method == "diversity":
-        scorer = DiversityScorer()
-    else:
-        scorer = CombinedScorer(task=task)
-
-    selected = select_batch(scorer, paths, model, device, budget=budget)
-
-    return {
-        "method": method,
-        "total_unlabeled": len(paths),
-        "selected_count": len(selected),
-        "selected": selected,
-    }
 
 
 @mcp.tool()
