@@ -10,7 +10,7 @@ pytest.importorskip("torchvision")
 
 def _det_spec(detector):
     return {
-        "backbone": {"name": "tv_resnet50"},
+        "backbone": {"name": "resnet18"},
         "neck": {"name": "fpn", "out_channels": 64},
         "heads": [{"name": "anchor_detection", "num_classes": 1, "detector": detector}],
     }
@@ -32,6 +32,14 @@ def test_compose_builds_each_builtin_detector(detector):
     model.eval()
     out = model([torch.rand(3, 64, 64)])
     assert isinstance(out, list) and "boxes" in out[0]
+    # train-forward: each detector returns a finite loss dict (folds in the former
+    # detector-diversity fcos-eval / retinanet-train duplicates — strictly more coverage,
+    # since all three detectors are now train-forwarded, not just retinanet).
+    model.train()
+    target = [{"boxes": torch.tensor([[10.0, 10.0, 40.0, 40.0]]), "labels": torch.tensor([1])}]
+    loss = model([torch.rand(3, 64, 64)], target)
+    assert isinstance(loss, dict) and loss
+    assert torch.isfinite(sum(loss.values()))
 
 
 def test_register_external_detector_and_compose():
@@ -79,7 +87,7 @@ def test_composed_and_detection_models_share_base_and_inherit_freeze():
     det.freeze_backbone(2)  # inherited from the shared base
 
     clf = compose_model({
-        "backbone": {"name": "tv_resnet50"},
+        "backbone": {"name": "resnet18"},
         "neck": {"name": "gap"},
         "heads": [{"name": "classification", "num_classes": 3}],
     })
