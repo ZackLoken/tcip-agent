@@ -278,8 +278,10 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
         },
     )
     body = resp.json()
+    # Detect is derived from the polygon, so the box takes the polygon's class (1),
+    # not the independently-sent box's class (0). The polygon round-trips as-is.
     assert len(body["boxes"]) == 1
-    assert body["boxes"][0]["class_id"] == 0
+    assert body["boxes"][0]["class_id"] == 1
     assert len(body["polygons"]) == 1
     assert body["polygons"][0]["class_id"] == 1
 
@@ -395,6 +397,54 @@ def test_annotate_save_matching_mtime_ok(
     # Tokens must be strings: the ns value exceeds JavaScript's 2**53 exact-integer
     # range, so a numeric token gets rounded by the browser and every save 409s.
     assert isinstance(token, str)
+
+
+def test_annotate_save_derives_detect_from_polygons(client, dataset_root, tmp_path) -> None:
+    # When polygons exist, detect is their bbox — a drawn box that disagrees is ignored,
+    # so editing a polygon can never leave a stale box twin behind. Image is 100x80.
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.txt"
+    seg_path = tmp_path / "segment" / "IMG_0000.txt"
+    resp = client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(img_path),
+            "detect_path": str(det_path),
+            "segment_path": str(seg_path),
+            # A box the client sent that disagrees with the polygon — must be discarded.
+            "boxes": [{"x1": 50, "y1": 50, "x2": 60, "y2": 60, "class_id": 0}],
+            "polygons": [{"points": [[10, 10], [30, 10], [30, 30], [10, 30]], "class_id": 0}],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["detect_derived"] is True
+    lines = [ln for ln in det_path.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    # Polygon bbox (10,10)-(30,30) → cx=0.2, not the drawn box's cx=0.55.
+    assert float(lines[0].split()[1]) == pytest.approx(0.2)
+    assert float(lines[0].split()[2]) == pytest.approx(0.25)  # cy=(10+30)/2/80
+
+
+def test_annotate_save_keeps_boxes_when_no_polygons(client, dataset_root, tmp_path) -> None:
+    # No polygons → detect is authoritative, boxes written as drawn (detect-primary project).
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.txt"
+    seg_path = tmp_path / "segment" / "IMG_0000.txt"
+    resp = client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(img_path),
+            "detect_path": str(det_path),
+            "segment_path": str(seg_path),
+            "boxes": [{"x1": 50, "y1": 40, "x2": 70, "y2": 60, "class_id": 0}],
+            "polygons": [],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["detect_derived"] is False
+    lines = [ln for ln in det_path.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    assert float(lines[0].split()[1]) == pytest.approx(0.6)  # drawn box cx=(50+70)/2/100
 
 
 def test_annotate_save_writes_audit_entry(
