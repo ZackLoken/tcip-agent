@@ -132,6 +132,19 @@ def test_resolve_operating_point_overlapping_holdout_not_validated():
     assert not b.is_shippable
 
 
+def test_resolve_operating_point_missing_image_ids_fails_closed():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    # Records with no image_id: identity is unverifiable, so a held-out claim can't be proven —
+    # the same records as cal+holdout must not be stamped validated (the firewall fails closed).
+    # Before, empty id-sets made `disjoint` True, so an in-sample "holdout" passed as validated.
+    recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
+             "dt": [_ann(100, 100, score=0.9)]}]  # no image_id key
+    b = resolve_operating_point("catkin", dataset_hash="h1",
+                                calibration_records=recs, holdout_records=recs)
+    assert b.get("conf").validated_vs_gt == "false"
+    assert not b.is_shippable
+
+
 def test_resolve_operating_point_biased_holdout_is_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     b = resolve_operating_point("catkin", dataset_hash="h1",
