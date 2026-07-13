@@ -1,11 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
-import { Line, Rect, Text } from "react-konva";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Circle, Line, Rect, Text } from "react-konva";
+import type Konva from "konva";
 
 import { api, IMAGE_MAX_WIDTH } from "@/api/client";
+import { classesApi } from "@/api/classes";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { ReviewToolsDrawer } from "@/components/ReviewToolsDrawer";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import {
+  applyEditDrag,
+  clampShapeToImage,
+  hitTestEdit,
+  type EditDrag,
+  type EditShape,
+} from "@/lib/reviewEditGeometry";
 import { useStore } from "@/store";
 import type {
   Box,
@@ -15,7 +24,6 @@ import type {
   PolygonShape,
   PredBox,
   PredPolygon,
-  PredictionReference,
 } from "@/store/types";
 
 const TAG_COLORS: Record<"tp" | "fp" | "fn", string> = {
@@ -23,6 +31,35 @@ const TAG_COLORS: Record<"tp" | "fp" | "fn", string> = {
   fp: "#EF5350",
   fn: "#FFA726",
 };
+
+const EDIT_COLOR = "#00BFFF"; // tcip-pred — the shape currently picked up for adjustment
+const MIN_BOX_SIDE = 3;
+const HANDLE_HIT_PX = 10; // screen-px hit radius for edit handles
+
+/** The shape Edit picks up: the matched GT for a TP/FN (what a save replaces), the
+ *  prediction for an FP (what a save adds). Deep-copied so dragging never mutates matches. */
+function seedEditShape(d: Detection, m: MatchesResponse): EditShape | null {
+  if (d.det_type === "fp") {
+    if (d.pred_type === "box" && d.pred_idx !== null && m.pred_boxes[d.pred_idx]) {
+      const b = m.pred_boxes[d.pred_idx];
+      return { kind: "box", box: [b.x1, b.y1, b.x2, b.y2] };
+    }
+    if (d.pred_type === "polygon" && d.pred_idx !== null && m.pred_polygons[d.pred_idx]) {
+      const pts = m.pred_polygons[d.pred_idx].points;
+      return { kind: "polygon", points: pts.map((p) => [p[0], p[1]]) };
+    }
+    return null;
+  }
+  if (d.gt_type === "box" && d.gt_idx !== null && m.gt_boxes[d.gt_idx]) {
+    const b = m.gt_boxes[d.gt_idx];
+    return { kind: "box", box: [b.x1, b.y1, b.x2, b.y2] };
+  }
+  if (d.gt_type === "polygon" && d.gt_idx !== null && m.gt_polygons[d.gt_idx]) {
+    const pts = m.gt_polygons[d.gt_idx].points;
+    return { kind: "polygon", points: pts.map((p) => [p[0], p[1]]) };
+  }
+  return null;
+}
 
 function currentImagePath(dataset: DatasetSelection): { path: string | null; name: string | null } {
   if (!dataset.dataset_root || !dataset.date) return { path: null, name: null };
@@ -73,10 +110,10 @@ export function ReviewTab() {
   const setLoading = useStore((s) => s.setReviewLoading);
   const setDetectionIdx = useStore((s) => s.setReviewDetectionIdx);
   const markDetReviewed = useStore((s) => s.markDetectionReviewed);
-  const setActiveTab = useStore((s) => s.setActiveTab);
-  const setMode = useStore((s) => s.setMode);
   const setPredReference = useStore((s) => s.setPredReference);
   const className = useStore((s) => s.className);
+  // Shared annotation status (nav filter, coloring, Complete lock) — synced when a verdict authors GT.
+  const setStoreImageStatus = useStore((s) => s.setImageStatus);
   // Shared filtered navigation (same order as the arrow keys + TopBar Prev/Next).
   const nav = useImageNav();
 
@@ -89,6 +126,11 @@ export function ReviewTab() {
   const [showPred, setShowPred] = useState(true);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
+  const [edit, setEdit] = useState<EditShape | null>(null);
+  const editDrag = useRef<EditDrag | null>(null);
+  // One GT-mutating request at a time: key auto-repeat / double-clicks must not append
+  // or delete twice, and no verdict may land while indices are stale mid-reload.
+  const actionPending = useRef(false);
 
   async function reloadMatches(indexHint?: number, signal?: AbortSignal) {
     if (!dataset.project_root || !imgPath || !imgName) return;
@@ -111,6 +153,10 @@ export function ReviewTab() {
         },
         signal,
       );
+      // Identity check: if the user navigated while this was in flight, installing the
+      // response would put another image's matches under the current image.
+      const now = useStore.getState().gui.dataset;
+      if ((now.image_list[now.current_image_index] ?? null) !== imgName) return;
       setMatches(res);
       setImageStatus(res.image_status);
       // A pending `review_focus` index (the agent asked to center on detection N) wins for one
@@ -238,9 +284,17 @@ export function ReviewTab() {
 
   const current = matches?.detections[detectionIdx] ?? null;
 
-  async function recordAction(action: "accepted" | "rejected" | "edited") {
-    if (!current || !dataset.project_root || !imgPath || !imgName) return;
+  async function recordAction(
+    action: "accepted" | "rejected" | "edited",
+    edited?: { box?: [number, number, number, number]; polygon?: number[][] },
+  ): Promise<boolean> {
+    if (actionPending.current) return false;
+    if (!current || !dataset.project_root || !imgPath || !imgName) return false;
+    actionPending.current = true;
     try {
+      // The .original snapshot must exist before the first GT write — awaited, and a
+      // failure aborts the verdict rather than mutating labels with no pristine baseline.
+      if (!(await ensureBackup())) return false;
       const res = await api.review.action({
         project_root: dataset.project_root,
         image_name: imgName,
@@ -259,16 +313,45 @@ export function ReviewTab() {
         pred_idx: current.pred_idx,
         bbox: current.bbox,
         action,
+        edited_box: edited?.box ?? null,
+        edited_polygon: edited?.polygon ?? null,
         iou_threshold: filters.iou_threshold,
         conf_threshold: filters.conf_threshold,
       });
       setImageStatus(res.image_status);
       markDetReviewed(detectionIdx, action);
       advanceToNextUnreviewed();
+      if (res.annotation_status) {
+        // GT changed: sync the status, then refresh so gt_idx/pred_idx are rebuilt from the
+        // written files — awaited, so no verdict can land against the stale indices.
+        setStoreImageStatus(imgName, res.annotation_status);
+        await reloadMatches(useStore.getState().gui.review.detection_idx);
+      }
+      return true;
     } catch (e) {
       useStore
         .getState()
         .pushToast(`Could not record review action: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    } finally {
+      actionPending.current = false;
+    }
+  }
+
+  async function ensureBackup(): Promise<boolean> {
+    if (!dataset.project_root) return false;
+    const dirs = [dataset.annotations_detect_dir, dataset.annotations_segment_dir].filter(
+      Boolean,
+    ) as string[];
+    if (!dirs.length) return true;
+    try {
+      await api.review.backupLabels(dataset.project_root, dirs);
+      return true;
+    } catch {
+      useStore
+        .getState()
+        .pushToast("Could not back up original labels — nothing was written. Retry the action.");
+      return false;
     }
   }
 
@@ -276,7 +359,14 @@ export function ReviewTab() {
     if (!dataset.project_root || !imgName) return;
     try {
       const res = await api.review.markComplete(dataset.project_root, imgName);
-      setImageStatus(res.image_status);
+      setImageStatus(res.image_status); // local review badge → reviewed
+      // Completing an image confirms it: with GT → complete; empty → a confirmed negative.
+      // Read matches from the live store — the render closure can predate a GT-changing verdict.
+      const m = useStore.getState().review.matches;
+      const hasGt = (m?.gt_boxes.length ?? 0) + (m?.gt_polygons.length ?? 0) > 0;
+      const annStatus: "complete" | "negative" = hasGt ? "complete" : "negative";
+      setStoreImageStatus(imgName, annStatus);
+      void classesApi.setImageStatus(dataset.project_root, imgName, annStatus).catch(() => {});
     } catch (e) {
       useStore
         .getState()
@@ -284,97 +374,120 @@ export function ReviewTab() {
     }
   }
 
-  function editInAnnotate() {
-    if (!current || !imgPath) return;
-    // Back up the untouched GT once (idempotent per project) before the first edit, so a
-    // mistaken save can be recovered from <dir>/.original/.
-    if (dataset.project_root) {
-      const dirs = [dataset.annotations_detect_dir, dataset.annotations_segment_dir].filter(
-        Boolean,
-      ) as string[];
-      if (dirs.length) {
-        void api.review.backupLabels(dataset.project_root, dirs).catch(() => {
-          useStore.getState().pushToast("Could not back up original labels before editing.");
-        });
-      }
+  // ── In-place edit: pick the shape up on this canvas, adjust, save to GT ──
+
+  function startEdit() {
+    if (!current || !matches) return;
+    const seed = seedEditShape(current, matches);
+    if (!seed) {
+      useStore.getState().pushToast("This detection has no shape to adjust.");
+      return;
     }
-    const predRef = buildPredReference(current, matches);
-    setPredReference(predRef);
-    setActiveTab("annotate");
-    if (current.gt_type === "polygon" || current.pred_type === "polygon") setMode("polygon");
-    else setMode("box");
-    void api.annotate.openImage({
-      image_path: imgPath,
-      image_index: dataset.current_image_index,
-      scale: gui.view.scale,
-      offset_x: gui.view.offset_x,
-      offset_y: gui.view.offset_y,
-      mode: current.gt_type === "polygon" || current.pred_type === "polygon" ? "polygon" : "box",
-      pred_reference: predRef,
-    });
-    // Mark editing pending so when the user returns to Review we offer a
-    // confirm dialog.
-    sessionStorage.setItem(
-      "tcip.review_edit_pending",
-      JSON.stringify({ image_name: imgName, detection_idx: detectionIdx }),
-    );
+    setEdit(clampShapeToImage(seed, matches.img_width, matches.img_height));
   }
 
-  // On Review-tab activation, if we just returned from an Edit flow, offer
-  // a confirm dialog to record the edit.
-  useEffect(() => {
-    if (gui.active_tab !== "review") return;
-    const raw = sessionStorage.getItem("tcip.review_edit_pending");
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as { image_name: string; detection_idx: number };
-      if (parsed.image_name !== imgName) return;
-      sessionStorage.removeItem("tcip.review_edit_pending");
-      const ok = window.confirm(
-        "Save this annotation edit to the GT dataset?\n\nOK to record as edited and advance.\nCancel to discard.",
-      );
-      if (ok && matches) {
-        markDetReviewed(parsed.detection_idx, "edited");
-        // Refresh matches so any GT changes are picked up
-        void reloadMatches(parsed.detection_idx);
+  function cancelEdit() {
+    setEdit(null);
+    editDrag.current = null;
+  }
+
+  async function commitEdit() {
+    if (!edit) return;
+    if (edit.kind === "box") {
+      const [x1, y1, x2, y2] = edit.box;
+      if (x2 - x1 < MIN_BOX_SIDE || y2 - y1 < MIN_BOX_SIDE) {
+        useStore.getState().pushToast("Box too small to save — drag a corner to enlarge it.");
+        return;
       }
-    } catch {
-      sessionStorage.removeItem("tcip.review_edit_pending");
+      if (await recordAction("edited", { box: edit.box })) cancelEdit();
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gui.active_tab, imgName]);
+    if (edit.points.length < 3) {
+      useStore.getState().pushToast("Polygon needs at least 3 points to save.");
+      return;
+    }
+    if (await recordAction("edited", { polygon: edit.points.map((p) => [p[0], p[1]]) }))
+      cancelEdit();
+  }
+
+  // An edit belongs to one detection on one matches snapshot — leaving either discards it.
+  useEffect(() => {
+    setEdit(null);
+    editDrag.current = null;
+  }, [detectionIdx, imgName, matches]);
+
+  function onEditDown(x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) {
+    editDrag.current = null; // a miss (or a stale drag from an off-canvas release) grabs nothing
+    if (!edit || ev.evt.button !== 0) return;
+    const tol = HANDLE_HIT_PX / (useStore.getState().gui.view.scale || 1);
+    editDrag.current = hitTestEdit(edit, x, y, tol);
+  }
+
+  function onEditMove(x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) {
+    const drag = editDrag.current;
+    if (!edit || !drag || !matches) return;
+    // The button was released outside the canvas — Konva never delivered the mouseup.
+    if (ev.evt.buttons === 0) {
+      editDrag.current = null;
+      return;
+    }
+    const r = applyEditDrag(edit, drag, x, y, matches.img_width, matches.img_height);
+    editDrag.current = r.drag;
+    if (r.shape !== edit) setEdit(r.shape);
+  }
+
+  function onEditUp() {
+    editDrag.current = null;
+  }
 
   useKeyboardShortcuts([
-    { keys: "a", action: () => void recordAction("accepted"), when: () => !!current },
-    { keys: "r", action: () => void recordAction("rejected"), when: () => !!current },
-    { keys: "e", action: () => editInAnnotate(), when: () => !!current },
-    { keys: "arrowleft", action: () => stepDetection(-1) },
-    { keys: "arrowright", action: () => stepDetection(1) },
-    { keys: "arrowup", action: () => stepImage(-1) },
-    { keys: "arrowdown", action: () => stepImage(1) },
+    {
+      keys: "a",
+      action: (e) => {
+        if (!e.repeat) void recordAction("accepted");
+      },
+      when: () => !!current && !edit,
+    },
+    {
+      keys: "r",
+      action: (e) => {
+        if (!e.repeat) void recordAction("rejected");
+      },
+      when: () => !!current && !edit,
+    },
+    { keys: "e", action: () => startEdit(), when: () => !!current && !edit },
+    {
+      keys: "enter",
+      action: (e) => {
+        // A focused button owns Enter (its native click already fired or will).
+        if (!e.repeat && !(document.activeElement instanceof HTMLButtonElement)) void commitEdit();
+      },
+      when: () => !!edit,
+    },
+    { keys: "escape", action: () => cancelEdit(), when: () => !!edit },
+    { keys: "arrowleft", action: () => stepDetection(-1), when: () => !edit },
+    { keys: "arrowright", action: () => stepDetection(1), when: () => !edit },
+    { keys: "arrowup", action: () => stepImage(-1), when: () => !edit },
+    { keys: "arrowdown", action: () => stepImage(1), when: () => !edit },
   ]);
 
   const imageUrl = imgPath ? api.images.url(imgPath, IMAGE_MAX_WIDTH) : null;
   const imgW = matches?.img_width ?? 0;
   const imgH = matches?.img_height ?? 0;
 
-  // Verdicts are recorded to the review log (for retraining/curation) — they do NOT
-  // rewrite the GT label files. Only Edit (E) changes GT. Labels/tooltips reflect that
-  // honestly; the old "Add to GT" / "Delete GT" wording implied a write that never happened.
+  // Verdicts author ground truth: accept an FP adds the prediction to GT; reject a detection that
+  // has GT (TP/FN) deletes that GT box; accept a TP/FN keeps the existing GT. Edit adjusts the shape
+  // first, then accept commits it.
   const acceptLabel = "Accept (A)";
   const rejectLabel = "Reject (R)";
   const acceptTitle =
-    current?.det_type === "tp"
-      ? "Record this match as correct (recorded for retraining, not written to GT)"
-      : current?.det_type === "fp"
-        ? "Record this prediction as a real object the GT was missing (recorded for retraining)"
-        : "Record this ground-truth object as a real miss by the model (recorded for retraining)";
+    current?.det_type === "fp"
+      ? "Add this prediction to ground truth (A)"
+      : "Keep this ground-truth object (A)";
   const rejectTitle =
-    current?.det_type === "tp"
-      ? "Record this match as wrong (recorded for retraining, not written to GT)"
-      : current?.det_type === "fp"
-        ? "Record this prediction as a genuine false positive (recorded for retraining)"
-        : "Record this ground-truth object as not a real object (recorded for retraining)";
+    current?.det_type === "fp"
+      ? "Discard this prediction — ground truth unchanged (R)"
+      : "Delete this ground-truth object (R)";
 
   return (
     <div className="flex-1 flex flex-col relative">
@@ -386,6 +499,7 @@ export function ReviewTab() {
           max={100}
           step={5}
           value={filters.iou_threshold * 100}
+          disabled={!!edit}
           onChange={(e) =>
             patchGui({
               review: { ...filters, iou_threshold: Number(e.target.value) / 100 },
@@ -401,6 +515,7 @@ export function ReviewTab() {
           max={100}
           step={5}
           value={filters.conf_threshold * 100}
+          disabled={!!edit}
           onChange={(e) =>
             patchGui({
               review: { ...filters, conf_threshold: Number(e.target.value) / 100 },
@@ -413,6 +528,7 @@ export function ReviewTab() {
         <select
           className="tcip-select"
           value={filters.filter_type}
+          disabled={!!edit}
           onChange={(e) =>
             patchGui({ review: { ...filters, filter_type: e.target.value as never } })
           }
@@ -425,6 +541,7 @@ export function ReviewTab() {
         <select
           className="tcip-select"
           value={filters.status_filter}
+          disabled={!!edit}
           onChange={(e) =>
             patchGui({ review: { ...filters, status_filter: e.target.value as never } })
           }
@@ -449,19 +566,24 @@ export function ReviewTab() {
 
         <span className="flex-1" />
 
+        {imgName && (
+          <span className="text-tcip-fg font-medium truncate max-w-[12rem]" title={imgName}>
+            {imgName}
+          </span>
+        )}
         <span className={`tcip-badge ${IMAGE_STATUS_CLASS[imageStatus]}`}>
           {IMAGE_STATUS_LABEL[imageStatus]}
         </span>
         <button
           className="tcip-btn"
           onClick={() => void markImageComplete()}
-          disabled={imageStatus === "completed" || !imgName}
+          disabled={imageStatus === "completed" || !imgName || !!edit}
           title="Mark this image fully reviewed"
         >
           ✓&nbsp;&nbsp;Reviewed
         </button>
 
-        <button className="tcip-btn" onClick={() => stepImage(-1)}>
+        <button className="tcip-btn" onClick={() => stepImage(-1)} disabled={!!edit}>
           ◀&nbsp;&nbsp;Prev img
         </button>
         <span className="tabular-nums">
@@ -469,19 +591,28 @@ export function ReviewTab() {
             ? `${detectionIdx + 1} / ${matches.detections.length}`
             : "0 / 0"}
         </span>
-        <button className="tcip-btn" onClick={() => stepImage(1)}>
+        <button className="tcip-btn" onClick={() => stepImage(1)} disabled={!!edit}>
           Next img&nbsp;&nbsp;▶
         </button>
         <button
           className="tcip-btn ml-2"
           onClick={() => setToolsOpen(true)}
+          disabled={!!edit}
           title="Build training set / prioritize review queue"
         >
           ⚙&nbsp;&nbsp;Tools
         </button>
       </div>
 
-      <CanvasStage imageUrl={imageUrl} imgWidth={imgW} imgHeight={imgH}>
+      <CanvasStage
+        imageUrl={imageUrl}
+        imgWidth={imgW}
+        imgHeight={imgH}
+        onPixelDown={edit ? onEditDown : undefined}
+        onPixelMove={edit ? onEditMove : undefined}
+        onPixelUp={edit ? onEditUp : undefined}
+        overlay={edit ? <EditShapeOverlay edit={edit} /> : undefined}
+      >
         {matches && (
           <ReviewOverlays
             matches={matches}
@@ -489,6 +620,8 @@ export function ReviewTab() {
             showGT={showGT}
             showPred={showPred}
             classNameLookup={className}
+            suppressFocusedGt={!!edit && current?.det_type !== "fp"}
+            suppressFocusedPred={!!edit && current?.det_type === "fp"}
           />
         )}
       </CanvasStage>
@@ -517,7 +650,7 @@ export function ReviewTab() {
         <button
           className="tcip-btn"
           onClick={() => stepDetection(-1)}
-          disabled={!matches || matches.detections.length === 0 || detectionIdx <= 0}
+          disabled={!matches || matches.detections.length === 0 || detectionIdx <= 0 || !!edit}
           title="Previous detection (←)"
         >
           ◀&nbsp;&nbsp;Prev
@@ -528,7 +661,8 @@ export function ReviewTab() {
           disabled={
             !matches ||
             matches.detections.length === 0 ||
-            detectionIdx >= matches.detections.length - 1
+            detectionIdx >= matches.detections.length - 1 ||
+            !!edit
           }
           title="Next detection (→)"
         >
@@ -560,13 +694,13 @@ export function ReviewTab() {
 
         <span className="flex-1" />
 
-        {current && (
+        {current && !edit && (
           <>
             <span
               className="text-tcip-muted mr-1"
-              title="Accept/Reject log a verdict for retraining. Edit changes the GT files."
+              title="Verdicts write ground truth — each button says what it does for this detection"
             >
-              logged for retraining ·
+              writes GT ·
             </span>
             <button
               className="tcip-btn-primary"
@@ -575,7 +709,11 @@ export function ReviewTab() {
             >
               ✓&nbsp;&nbsp;{acceptLabel}
             </button>
-            <button className="tcip-btn" onClick={editInAnnotate} title="Edit GT for this image">
+            <button
+              className="tcip-btn"
+              onClick={startEdit}
+              title="Adjust this shape on the canvas (E)"
+            >
               ✎&nbsp;&nbsp;Edit (E)
             </button>
             <button
@@ -587,6 +725,36 @@ export function ReviewTab() {
             </button>
           </>
         )}
+        {current && edit && (
+          <>
+            <span className="tcip-badge bg-transparent border border-tcip-pred text-tcip-pred">
+              Editing
+            </span>
+            <span className="text-tcip-muted">
+              {edit.kind === "box"
+                ? "Drag a corner to resize · drag inside to move"
+                : "Drag a point to reshape · drag inside to move"}
+            </span>
+            <button
+              className="tcip-btn-primary"
+              onClick={() => void commitEdit()}
+              title={
+                current.det_type === "fp"
+                  ? "Write this shape to ground truth (Enter)"
+                  : "Replace the ground-truth shape with this one (Enter)"
+              }
+            >
+              ✓&nbsp;&nbsp;Save edit (Enter)
+            </button>
+            <button
+              className="tcip-btn"
+              onClick={cancelEdit}
+              title="Discard this adjustment — ground truth unchanged (Esc)"
+            >
+              Cancel (Esc)
+            </button>
+          </>
+        )}
       </div>
 
       <ReviewToolsDrawer open={toolsOpen} onClose={() => setToolsOpen(false)} />
@@ -594,32 +762,67 @@ export function ReviewTab() {
   );
 }
 
-function buildPredReference(
-  det: Detection,
-  matches: MatchesResponse | null,
-): PredictionReference | null {
-  if (!matches) return null;
-  if (det.pred_type === "box" && det.pred_idx !== null) {
-    const b = matches.pred_boxes[det.pred_idx];
-    if (!b) return null;
-    return {
-      type: "box",
-      coords: [b.x1, b.y1, b.x2, b.y2],
-      class_id: b.class_id,
-      confidence: b.confidence,
-    };
+function EditShapeOverlay({ edit }: { edit: EditShape }) {
+  const scale = useStore((s) => s.gui.view.scale);
+  const lw = 1 / (scale || 1);
+  const hs = 5 * lw; // handle half-size
+  if (edit.kind === "box") {
+    const [x1, y1, x2, y2] = edit.box;
+    const corners: [number, number][] = [
+      [x1, y1],
+      [x2, y1],
+      [x2, y2],
+      [x1, y2],
+    ];
+    return (
+      <>
+        <Rect
+          x={x1}
+          y={y1}
+          width={x2 - x1}
+          height={y2 - y1}
+          stroke={EDIT_COLOR}
+          strokeWidth={2.5 * lw}
+          fill="rgba(0, 191, 255, 0.08)"
+        />
+        {corners.map(([cx, cy], i) => (
+          <Rect
+            key={i}
+            x={cx - hs}
+            y={cy - hs}
+            width={hs * 2}
+            height={hs * 2}
+            fill="#FFFFFF"
+            stroke={EDIT_COLOR}
+            strokeWidth={1.5 * lw}
+          />
+        ))}
+      </>
+    );
   }
-  if (det.pred_type === "polygon" && det.pred_idx !== null) {
-    const p = matches.pred_polygons[det.pred_idx];
-    if (!p) return null;
-    return {
-      type: "polygon",
-      coords: p.points as number[][],
-      class_id: p.class_id,
-      confidence: p.confidence,
-    };
-  }
-  return null;
+  if (edit.points.length < 2) return null;
+  return (
+    <>
+      <Line
+        points={edit.points.flat()}
+        closed
+        stroke={EDIT_COLOR}
+        strokeWidth={2.5 * lw}
+        fill="rgba(0, 191, 255, 0.08)"
+      />
+      {edit.points.map(([px, py], i) => (
+        <Circle
+          key={i}
+          x={px}
+          y={py}
+          radius={4.5 * lw}
+          fill="#FFFFFF"
+          stroke={EDIT_COLOR}
+          strokeWidth={1.5 * lw}
+        />
+      ))}
+    </>
+  );
 }
 
 interface OverlayProps {
@@ -628,9 +831,20 @@ interface OverlayProps {
   showGT: boolean;
   showPred: boolean;
   classNameLookup: (cid: number) => string;
+  /** While editing, the picked-up shape is hidden here — it renders live in the edit overlay. */
+  suppressFocusedGt?: boolean;
+  suppressFocusedPred?: boolean;
 }
 
-function ReviewOverlays({ matches, focusedIdx, showGT, showPred, classNameLookup }: OverlayProps) {
+function ReviewOverlays({
+  matches,
+  focusedIdx,
+  showGT,
+  showPred,
+  classNameLookup,
+  suppressFocusedGt,
+  suppressFocusedPred,
+}: OverlayProps) {
   const scale = useStore((s) => s.gui.view.scale);
   const lw = 1 / (scale || 1);
   const focused = matches.detections[focusedIdx];
@@ -658,6 +872,7 @@ function ReviewOverlays({ matches, focusedIdx, showGT, showPred, classNameLookup
         matches.gt_boxes.map((b: Box, i: number) => {
           const key = `box:${i}`;
           const isFocused = focusedGt === key;
+          if (isFocused && suppressFocusedGt) return null;
           const isReviewed = reviewedGtKeys.has(key);
           return (
             <GtBox
@@ -674,6 +889,7 @@ function ReviewOverlays({ matches, focusedIdx, showGT, showPred, classNameLookup
         matches.gt_polygons.map((p: PolygonShape, i: number) => {
           const key = `polygon:${i}`;
           const isFocused = focusedGt === key;
+          if (isFocused && suppressFocusedGt) return null;
           const isReviewed = reviewedGtKeys.has(key);
           return (
             <GtPolygon
@@ -689,6 +905,7 @@ function ReviewOverlays({ matches, focusedIdx, showGT, showPred, classNameLookup
 
       {/* Focused prediction (only the active detection) */}
       {showPred &&
+        !suppressFocusedPred &&
         focused &&
         tagColor &&
         focused.pred_type === "box" &&
@@ -705,6 +922,7 @@ function ReviewOverlays({ matches, focusedIdx, showGT, showPred, classNameLookup
           />
         )}
       {showPred &&
+        !suppressFocusedPred &&
         focused &&
         tagColor &&
         focused.pred_type === "polygon" &&
