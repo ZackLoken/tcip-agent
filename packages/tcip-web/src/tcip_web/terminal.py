@@ -70,14 +70,15 @@ def _repo_root() -> Path:
 
 
 def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
-    """Rewrite ``python <rel>/agent_*_guard.py`` → ``"<python>" "<guard_dir>/<script>"``.
+    """Rewrite ``python <rel>/agent_*.py`` → ``"<python>" "<guard_dir>/<script>"``.
 
-    Only rewrites a command that invokes an ``agent_*_guard.py`` script; anything else is
-    returned unchanged. Quoted, forward-slashed paths parse under both cmd.exe and POSIX sh.
+    Only rewrites a command that invokes an ``agent_*.py`` script under the fence directory (the
+    PreToolUse guards and the SessionEnd learning-capture hook); anything else is returned
+    unchanged. Quoted, forward-slashed paths parse under both cmd.exe and POSIX sh.
     """
     for tok in command.split():
         name = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-        if name.startswith("agent_") and name.endswith("_guard.py"):
+        if name.startswith("agent_") and name.endswith(".py"):
             return f'"{python}" "{guard_dir}/{name}"'
     return command
 
@@ -106,9 +107,12 @@ def _materialize_fence_settings() -> Optional[Path]:
         return None
     guard_dir = _FENCE_SETTINGS.parent.as_posix()
     python = Path(sys.executable).as_posix()
-    for group in cfg.get("hooks", {}).get("PreToolUse", []):
-        for hook in group.get("hooks", []):
-            hook["command"] = _absolutize_guard_command(hook.get("command", ""), python, guard_dir)
+    # Absolutize every agent_*.py hook across all events (PreToolUse guards + SessionEnd capture),
+    # so none depends on cwd — the same reason the guards must be absolute.
+    for event_groups in cfg.get("hooks", {}).values():
+        for group in event_groups:
+            for hook in group.get("hooks", []):
+                hook["command"] = _absolutize_guard_command(hook.get("command", ""), python, guard_dir)
     dest = Path(tempfile.gettempdir()) / "tcip_agent_fence.settings.json"
     try:
         dest.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
