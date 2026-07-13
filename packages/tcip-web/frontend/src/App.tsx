@@ -33,6 +33,7 @@ function App() {
   const imageList = useStore((s) => s.gui.dataset.image_list);
   const annDetectDir = useStore((s) => s.gui.dataset.annotations_detect_dir);
   const annSegDir = useStore((s) => s.gui.dataset.annotations_segment_dir);
+  const annotationType = useStore((s) => s.gui.dataset.annotation_type);
   const setClasses = useStore((s) => s.setClasses);
   const setImageStatuses = useStore((s) => s.setImageStatuses);
   const endedSessionForRoot = useRef<string | null>(null);
@@ -154,7 +155,7 @@ function App() {
     if (!projectRoot || imageList.length === 0) return;
     void (async () => {
       try {
-        const reg = await classesApi.load(projectRoot);
+        const reg = await classesApi.load(projectRoot, annotationType, annDetectDir, annSegDir);
         setClasses(reg.classes);
 
         const saved = await classesApi.loadImageStatus(projectRoot);
@@ -186,7 +187,16 @@ function App() {
         useStore.getState().pushToast("Could not load classes / image status for this project.");
       }
     })();
-  }, [projectRoot, datasetKey, imageList, annDetectDir, annSegDir, setClasses, setImageStatuses]);
+  }, [
+    projectRoot,
+    datasetKey,
+    imageList,
+    annotationType,
+    annDetectDir,
+    annSegDir,
+    setClasses,
+    setImageStatuses,
+  ]);
 
   return (
     <div className="h-full flex flex-col bg-tcip-bg text-tcip-fg">
