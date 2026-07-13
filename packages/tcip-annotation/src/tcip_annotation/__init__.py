@@ -1,6 +1,13 @@
 """Headless annotation library — YOLO, COCO, PASCAL VOC, and LabelMe format support."""
 
-from tcip_annotation.state import AnnotationState, BBox, Polygon, PredBBox, PredPolygon
+from tcip_annotation.state import (
+    AnnotationState,
+    BBox,
+    Polygon,
+    PredBBox,
+    PredPolygon,
+    boxes_from_polygons,
+)
 from tcip_annotation.label_io import (
     parse_detect_labels,
     parse_segment_labels,
@@ -39,6 +46,7 @@ __all__ = [
     "Polygon",
     "PredBBox",
     "PredPolygon",
+    "boxes_from_polygons",
     # YOLO-specific (preserved for backwards compat)
     "parse_detect_labels",
     "parse_segment_labels",
