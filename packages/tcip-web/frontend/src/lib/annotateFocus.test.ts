@@ -4,7 +4,7 @@ import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { useStore } from "@/store";
 
 vi.mock("@/api/client", () => ({
-  api: { dataset: { select: vi.fn() } },
+  api: { dataset: { select: vi.fn(), nav: vi.fn(async () => ({ status: "ok" })) } },
 }));
 
 import { api } from "@/api/client";
