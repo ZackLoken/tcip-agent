@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from PIL import Image
 from pydantic import BaseModel
 
 from tcip_annotation import (
@@ -23,7 +22,7 @@ from tcip_annotation import (
     write_detect_labels,
     write_segment_labels,
 )
-from tcip_annotation.utils import auto_orient_image
+from tcip_annotation.utils import get_image_dimensions
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import PredictionReference, store
 
@@ -71,9 +70,7 @@ def _image_dims(path: str) -> tuple[int, int]:
         raise HTTPException(403, str(exc)) from exc
     if not p.is_file():
         raise HTTPException(404, f"image not found: {path}")
-    with Image.open(p) as raw:
-        im = auto_orient_image(raw)
-        return im.size  # (w, h)
+    return get_image_dimensions(str(p))  # header-only (w, h); never decodes pixels
 
 
 def _guard_label_path(path: Optional[str]) -> None:
