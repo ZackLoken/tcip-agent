@@ -11,7 +11,7 @@ import logging
 import os
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -33,6 +33,8 @@ from tcip_annotation import (
     parse_detect_predictions,
     parse_segment_labels,
     parse_segment_predictions,
+    write_detect_labels,
+    write_segment_labels,
 )
 from tcip_annotation.utils import auto_orient_image
 from tcip_mcp.utils.atomic_io import append_jsonl, read_json
@@ -314,10 +316,64 @@ class ActionPayload(BaseModel):
     pred_idx: Optional[int] = None
     bbox: tuple[float, float, float, float]
     action: str  # "accepted" | "rejected" | "edited"
+    # Edited shape committed from the Review canvas (only for action="edited"): a box, or a
+    # polygon's points. Accept/Reject don't carry these — they act on the loaded pred/gt by index.
+    edited_box: Optional[tuple[float, float, float, float]] = None
+    edited_polygon: Optional[list[list[float]]] = None
     # Review thresholds so the route can decide (at the same op point as the GUI) whether
     # this verdict was the last one and the image should flip to 'completed'.
     iou_threshold: float = 0.5
     conf_threshold: float = 0.25
+
+
+def _apply_gt_mutation(
+    ctx: ReviewContext, payload: "ActionPayload"
+) -> tuple[Optional[str], Optional[int]]:
+    """Author GT from a verdict; return (task changed: "detect"/"segment"/None, index the
+    written shape landed at in ctx's GT list — edited/accepted writes only). Accept an FP adds
+    the prediction; accept a TP/FN keeps GT; reject a TP/FN deletes that GT; reject an FP is a
+    no-op; edit writes the edited shape (replacing the matched GT, or adding it)."""
+    dt, act = payload.det_type, payload.action
+
+    if act == "edited":
+        if payload.edited_box is not None:
+            x1, y1, x2, y2 = payload.edited_box
+            nb = BBox(x1=x1, y1=y1, x2=x2, y2=y2, class_id=payload.class_id)
+            if dt in ("tp", "fn") and payload.gt_type == "box" and payload.gt_idx is not None \
+                    and 0 <= payload.gt_idx < len(ctx.gt_boxes):
+                ctx.gt_boxes[payload.gt_idx] = nb
+                return "detect", payload.gt_idx
+            ctx.gt_boxes.append(nb)
+            return "detect", len(ctx.gt_boxes) - 1
+        if payload.edited_polygon is not None:
+            npg = Polygon(points=[tuple(pt) for pt in payload.edited_polygon], class_id=payload.class_id)
+            if dt in ("tp", "fn") and payload.gt_type == "polygon" and payload.gt_idx is not None \
+                    and 0 <= payload.gt_idx < len(ctx.gt_polygons):
+                ctx.gt_polygons[payload.gt_idx] = npg
+                return "segment", payload.gt_idx
+            ctx.gt_polygons.append(npg)
+            return "segment", len(ctx.gt_polygons) - 1
+        return None, None
+
+    if act == "rejected" and dt in ("tp", "fn") and payload.gt_idx is not None:
+        if payload.gt_type == "box" and 0 <= payload.gt_idx < len(ctx.gt_boxes):
+            ctx.gt_boxes.pop(payload.gt_idx)
+            return "detect", None
+        if payload.gt_type == "polygon" and 0 <= payload.gt_idx < len(ctx.gt_polygons):
+            ctx.gt_polygons.pop(payload.gt_idx)
+            return "segment", None
+        return None, None
+
+    if act == "accepted" and dt == "fp" and payload.pred_idx is not None:
+        if payload.pred_type == "box" and 0 <= payload.pred_idx < len(ctx.pred_boxes):
+            pb = ctx.pred_boxes[payload.pred_idx]
+            ctx.gt_boxes.append(BBox(x1=pb.x1, y1=pb.y1, x2=pb.x2, y2=pb.y2, class_id=pb.class_id))
+            return "detect", len(ctx.gt_boxes) - 1
+        if payload.pred_type == "polygon" and 0 <= payload.pred_idx < len(ctx.pred_polygons):
+            pp = ctx.pred_polygons[payload.pred_idx]
+            ctx.gt_polygons.append(Polygon(points=list(pp.points), class_id=pp.class_id))
+            return "segment", len(ctx.gt_polygons) - 1
+    return None, None  # accept TP/FN and reject FP leave GT untouched
 
 
 @router.post("/action")
@@ -343,12 +399,53 @@ def record_action(payload: ActionPayload) -> dict:
         pred_idx=payload.pred_idx,
         bbox=payload.bbox,
     )
-    engine.record_detection_action(det, ctx, action=payload.action)
+
+    # Author GT on a copy so the guard can 400 before anything is recorded, and so the
+    # verdict entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
+    work = replace(ctx, gt_boxes=list(ctx.gt_boxes), gt_polygons=list(ctx.gt_polygons))
+    changed, landed_idx = _apply_gt_mutation(work, payload)
+    if changed == "detect" and not payload.gt_detect_path:
+        raise HTTPException(400, "this verdict writes detect ground truth, but no detect annotations path was provided")
+    if changed == "segment" and not payload.gt_segment_path:
+        raise HTTPException(400, "this verdict writes segment ground truth, but no segment annotations path was provided")
+
+    # An edited verdict rewrites the GT bbox, so key the entry to the post-edit geometry —
+    # otherwise the next reload's spatial lookup misses it and the detection reads unreviewed.
+    norm_det = norm_ctx = None
+    if payload.action == "edited" and changed is not None and landed_idx is not None:
+        kind = "box" if changed == "detect" else "polygon"
+        norm_det = replace(det, gt_type=kind, gt_idx=landed_idx)
+        norm_ctx = work
+    engine.record_detection_action(
+        det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx
+    )
+
+    # Write only the changed label file (keep_empty: an emptied GT stays a 0-byte file,
+    # not deleted). accept-TP/FN and reject-FP are no-ops.
+    if changed == "detect" and payload.gt_detect_path:
+        _guard_path(payload.gt_detect_path)
+        os.makedirs(os.path.dirname(payload.gt_detect_path) or ".", exist_ok=True)
+        write_detect_labels(
+            payload.gt_detect_path, work.gt_boxes, ctx.img_width, ctx.img_height, keep_empty=True
+        )
+    elif changed == "segment" and payload.gt_segment_path:
+        _guard_path(payload.gt_segment_path)
+        os.makedirs(os.path.dirname(payload.gt_segment_path) or ".", exist_ok=True)
+        write_segment_labels(
+            payload.gt_segment_path, work.gt_polygons, ctx.img_width, ctx.img_height, keep_empty=True
+        )
+
+    # Annotation status to sync client-side (only when GT changed); an emptied GT reads as
+    # "unannotated" — a negative needs an explicit Complete, not just an empty file.
+    annotation_status: Optional[str] = None
+    if changed is not None:
+        annotation_status = "partial" if (work.gt_boxes or work.gt_polygons) else "unannotated"
+
     # Promote to 'completed' once every detection at these thresholds is reviewed — the
-    # only path by which a GUI review reaches 'completed'.
+    # only path by which a GUI review reaches 'completed'. Recompute against the (now-authored) GT.
     matches = compute_matches(
-        gt_boxes=ctx.gt_boxes,
-        gt_polygons=ctx.gt_polygons,
+        gt_boxes=work.gt_boxes,
+        gt_polygons=work.gt_polygons,
         pred_boxes=ctx.pred_boxes,
         pred_polygons=ctx.pred_polygons,
         iou_threshold=payload.iou_threshold,
@@ -360,8 +457,13 @@ def record_action(payload: ActionPayload) -> dict:
         "det_type": payload.det_type,
         "class_id": payload.class_id,
         "action": payload.action,
+        "gt_changed": changed,
     })
-    return {"status": "ok", "image_status": engine.get_image_review_status(payload.image_name)}
+    return {
+        "status": "ok",
+        "image_status": engine.get_image_review_status(payload.image_name),
+        "annotation_status": annotation_status,
+    }
 
 
 class MarkCompletePayload(BaseModel):
@@ -385,12 +487,12 @@ class BackupPayload(BaseModel):
 
 @router.post("/backup_labels")
 def backup_labels(payload: BackupPayload) -> dict:
-    """Backup label directories to ``<dir>/.original/`` (once per project)."""
+    """Top up ``<dir>/.original/`` — capture any label file that has no baseline yet."""
     for d in payload.label_dirs:
         _guard_path(d)
     engine = _get_engine(payload.project_root)
-    engine.backup_original_labels(*payload.label_dirs)
-    return {"status": "ok", "labels_backed_up": engine.raw_state.get("labels_backed_up", False)}
+    n = engine.backup_original_labels(*payload.label_dirs)
+    return {"status": "ok", "files_backed_up": n}
 
 
 class SaveGtPayload(BaseModel):
