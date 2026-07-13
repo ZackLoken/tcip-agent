@@ -58,6 +58,13 @@ export function AnnotateToolbar() {
   const currentStatus: ImageStatus | undefined = currentImage
     ? imageStatus.byImage[currentImage]
     : undefined;
+  // The canvas swaps asynchronously on flips — until it holds this image's labels,
+  // Complete would derive its status from the previous image's shapes.
+  const loadedImagePath = useStore((s) => s.canvas.loadedImagePath);
+  const canvasReady =
+    !!dataset.dataset_root &&
+    !!dataset.date &&
+    loadedImagePath === `${dataset.dataset_root}/images/${dataset.date}/${currentImage}`;
   // Shared navigation — same filtered traversal as the arrow keys and the Review tab.
   const nav = useImageNav();
 
@@ -215,13 +222,16 @@ export function AnnotateToolbar() {
       </button>
 
       {/* Complete + Status filter */}
-      <label className="flex items-center gap-1 text-[11px] ml-3">
+      <label
+        className="flex items-center gap-1 text-[11px] ml-3"
+        title={canvasReady ? undefined : "Loading this image's labels…"}
+      >
         <input
           type="checkbox"
           // Show a confirmed negative as checked too (completing an empty image sets "negative").
           checked={currentStatus === "complete" || currentStatus === "negative"}
           onChange={(e) => void toggleComplete(e.target.checked)}
-          disabled={!currentImage}
+          disabled={!currentImage || !canvasReady}
         />
         Complete
       </label>
