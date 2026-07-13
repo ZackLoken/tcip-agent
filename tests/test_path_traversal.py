@@ -1,17 +1,10 @@
-"""Phase 4.4 — path-traversal validation: safe_join for run_id, allowed-root image guard."""
+"""Phase 4.4 — path-traversal validation: allowed-root image guard + route-level run_id/path guards.
+
+(safe_join itself is covered by test_tcip_web_routes.py::TestSafeJoin — under-root, parent-traversal,
+absolute, forward-slashes — so it is not re-tested here.)
+"""
 
 import pytest
-
-
-def test_safe_join_rejects_traversal_and_absolute(tmp_path):
-    from tcip_web.paths import safe_join
-    root = tmp_path / "exp"
-    root.mkdir()
-    assert safe_join(root, "run1", "metrics.jsonl") == (root / "run1" / "metrics.jsonl").resolve()
-    with pytest.raises(ValueError):
-        safe_join(root, "../../etc", "passwd")
-    with pytest.raises(ValueError):
-        safe_join(root, "/etc/passwd")
 
 
 def test_assert_path_allowed_permissive_then_restricted(tmp_path, monkeypatch):
