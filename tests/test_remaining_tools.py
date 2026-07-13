@@ -1,13 +1,18 @@
-"""Phase 4.6 — list_available_models dedup/fix + experiment-tool coverage."""
+"""Phase 4.6 — component-registry listing + experiment-tool coverage.
+
+(``list_available_models`` was removed as a strict subset of ``list_components``; this pins the
+superset the agent now uses instead.)
+"""
 
 import pytest
 
 
-def test_list_available_models_returns_component_lists():
+def test_list_components_returns_registry_lists():
     pytest.importorskip("torch")  # populating the registries imports the component modules
-    from tcip_mcp.tools.model_tools import list_available_models
-    res = list_available_models()
-    assert set(res.keys()) == {"backbones", "necks", "heads", "losses"}
+    from tcip_mcp.tools.pipeline_tools import list_components
+    res = list_components()
+    # the superset that replaced list_available_models: same four keys plus detectors/optimizers
+    assert {"backbones", "necks", "heads", "losses"} <= set(res.keys())
     assert isinstance(res["backbones"], list) and res["backbones"]   # non-empty, no crash
 
 
