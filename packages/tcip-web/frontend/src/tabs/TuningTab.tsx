@@ -86,8 +86,6 @@ export function TuningTab() {
         param_space: space,
         n_trials: nTrials,
         output_dir: outputDir,
-        // Optuna (TPE + ASHA) is the only sweep mode offered — it actually trains trials.
-        use_optuna: true,
         direction,
       });
       if (resp.sweep_id) {
