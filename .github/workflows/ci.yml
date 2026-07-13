@@ -7,6 +7,29 @@ on:
     branches: [main]
 
 jobs:
+  # mypy runs as its own job so its ~2-3 min stays off the pytest critical path.
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU-only torch
+        run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install packages
+        run: |
+          pip install mypy
+          pip install -e packages/tcip-annotation
+          pip install -e "packages/tcip-mcp[dev,hpo]"
+          pip install -e "packages/tcip-web[dev]"
+
+      - name: Type check (mypy — permissive; see mypy.ini)
+        run: mypy packages/tcip-annotation/src packages/tcip-mcp/src packages/tcip-web/src
+
   python:
     runs-on: ubuntu-latest
     steps:
@@ -21,7 +44,7 @@ jobs:
 
       - name: Install packages
         run: |
-          pip install pytest-timeout ruff
+          pip install pytest-timeout pytest-xdist ruff
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev,hpo]"
           pip install -e "packages/tcip-web[dev]"
@@ -32,9 +55,13 @@ jobs:
       - name: Run tests
         # TCIP_MIN_TESTS guards against the "missing dep silently skips ~15 files,
         # CI still green" mode — see tests/conftest.py and tests/test_core_deps.py.
+        # -n auto: pytest-xdist parallelism (parallel-safe; scales to the runner's cores).
+        # OMP_NUM_THREADS=1 pairs with the torch single-thread fixture so workers don't
+        # oversubscribe. --timeout=300 caps thermal-throttle outliers without slowing the gate.
         env:
           TCIP_MIN_TESTS: "400"
-        run: pytest tests/ --timeout=120 -v
+          OMP_NUM_THREADS: "1"
+        run: pytest tests/ -n auto --timeout=300 -q
 
   typescript:
     runs-on: ubuntu-latest
