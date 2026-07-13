@@ -208,7 +208,9 @@ export function AnnotateTab() {
 
   const imgPath = currentImagePath(dataset);
   const currentImageName = dataset.image_list[dataset.current_image_index] ?? null;
-  const isLocked = currentImageName ? imageStatus.byImage[currentImageName] === "complete" : false;
+  // A confirmed negative is a completed review (empty) — lock it like "complete".
+  const currentStatus = currentImageName ? imageStatus.byImage[currentImageName] : undefined;
+  const isLocked = currentStatus === "complete" || currentStatus === "negative";
 
   // Image navigation (shared with TopBar + Review; honors the status filter).
   const nav = useImageNav();
@@ -219,15 +221,16 @@ export function AnnotateTab() {
   // live store + refs (not render closures), so it stays correct even when called
   // from an effect while the app is mid-transition to another image.
   async function save(opts?: { interactive?: boolean }) {
-    // interactive=false is the auto-flush on navigate/unmount: a conflict there is
-    // handled silently (don't clobber; the StatusBar agent indicator already told
-    // the user), whereas an explicit Save surfaces the Reload prompt.
+    // interactive=false is the auto-flush on navigate/unmount: it can't show the Reload
+    // banner (the user is on another image), but a dropped save must never be silent —
+    // it surfaces as a toast naming the image whose edits were lost.
     const interactive = opts?.interactive ?? true;
     const paths = loadedPathsRef.current;
     if (!paths) return; // no confirmed load → refuse to overwrite on-disk labels
     const c = useStore.getState().canvas;
     if (!c.dirty) return;
     const projectRoot = useStore.getState().gui.dataset.project_root;
+    const imgFileName = paths.image.split(/[/\\]/).pop() ?? "image";
 
     let result;
     try {
@@ -243,36 +246,52 @@ export function AnnotateTab() {
     } catch {
       // Identity check: a stale failure for a since-left image must not raise a
       // banner over the image now on screen.
-      if (interactive && loadedPathsRef.current === paths)
+      if (interactive && loadedPathsRef.current === paths) {
         setIoError(
           "Could not save annotations — your edits are kept in the editor; press Save to retry.",
         );
+      } else {
+        useStore
+          .getState()
+          .pushToast(`Could not save ${imgFileName} — edits made there were not written.`);
+      }
       return;
     }
 
     if (result.status === "conflict") {
       // Someone else (agent or another tab) wrote this file since we loaded it.
-      // Do NOT clobber their work; keep the canvas dirty. Skip the banner if we
-      // have since navigated — the conflict belongs to the previous image.
+      // Never clobber their work; keep the canvas dirty. The banner belongs to the
+      // image on screen — after navigating away, the loss is reported as a toast.
       if (interactive && loadedPathsRef.current === paths) {
         setConflict(true);
         setIoError(
           "These labels changed elsewhere (the agent or another tab). Reload to load the latest — this discards your unsaved edits — or keep editing.",
         );
+      } else {
+        useStore
+          .getState()
+          .pushToast(
+            `Edits to ${imgFileName} were not saved — its labels changed elsewhere (the agent or another tab) first.`,
+          );
       }
       return;
     }
 
-    // Update per-image status unless it is pinned Complete. An empty save is a
-    // confirmed negative (the 0-byte label file is preserved on disk), distinct
-    // from an image that was never annotated. Runs before the staleness guard
-    // below: it uses the captured paths + canvas snapshot, so it stays correct
-    // for the image that was actually saved even after navigating away.
+    // Update per-image status unless it is pinned Complete. Runs before the staleness guard
+    // below on the captured paths + canvas snapshot, so it stays correct for the image that
+    // was actually saved even after navigating away.
     const name = paths.image.split(/[/\\]/).pop() ?? "";
     if (projectRoot && name) {
       const current = useStore.getState().imageStatus.byImage[name];
       if (current !== "complete") {
-        const newStatus = c.boxes.length + c.polygons.length > 0 ? "partial" : "negative";
+        const hasContent = c.boxes.length + c.polygons.length > 0;
+        // boxes -> partial; an empty save keeps a prior confirmed negative, else unannotated
+        // (a negative needs an explicit Complete, not just an empty file).
+        const newStatus = hasContent
+          ? "partial"
+          : current === "negative"
+            ? "negative"
+            : "unannotated";
         if (current !== newStatus) {
           setImageStatus(name, newStatus);
           // Best-effort status write; the labels are already saved.
@@ -358,7 +377,7 @@ export function AnnotateTab() {
     const seg = dataset.annotations_segment_dir
       ? `${dataset.annotations_segment_dir}/${stem}.txt`
       : null;
-    const key = `${imgPath} ${det ?? ""} ${seg ?? ""}`;
+    const key = `${imgPath}\0${det ?? ""}\0${seg ?? ""}`;
 
     // Already displaying this exact image + label target. Ignore — this is what
     // stops an unrelated store change (a WS state snapshot, a mode/class toggle,
@@ -807,7 +826,7 @@ export function AnnotateTab() {
   return (
     <div className="flex-1 flex flex-col">
       <AnnotateToolbar />
-      <div className="relative flex-1">
+      <div className="relative flex-1 flex flex-col">
         <CanvasStage
           imageUrl={imageUrl}
           imgWidth={canvas.imgWidth}
