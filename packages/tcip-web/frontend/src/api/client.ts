@@ -258,14 +258,22 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    markComplete: (project_root: string, image_name: string) =>
-      call<{ status: string; image_status: MatchesResponse["image_status"] }>(
-        "/api/review/mark_complete",
-        {
-          method: "POST",
-          body: JSON.stringify({ project_root, image_name }),
-        },
-      ),
+    markComplete: (body: {
+      project_root: string;
+      image_name: string;
+      gt_detect_path?: string | null;
+      gt_segment_path?: string | null;
+      completed?: boolean;
+    }) =>
+      call<{
+        status: string;
+        image_status: MatchesResponse["image_status"];
+        // Derived server-side from the GT files — never from a stale client snapshot.
+        annotation_status: "complete" | "partial" | "negative" | "unannotated";
+      }>("/api/review/mark_complete", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
 
     backupLabels: (project_root: string, label_dirs: string[]) =>
       call<{ status: string; files_backed_up: number }>("/api/review/backup_labels", {
