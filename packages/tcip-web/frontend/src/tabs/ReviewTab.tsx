@@ -634,6 +634,7 @@ export function ReviewTab() {
       <div className="relative flex-1 flex flex-col">
         <CanvasStage
           imageUrl={imageUrl}
+          hiResImageUrl={imgPath ? api.images.hiResUrl(imgPath) : null}
           imgWidth={imgW}
           imgHeight={imgH}
           onPixelDown={edit ? onEditDown : undefined}
