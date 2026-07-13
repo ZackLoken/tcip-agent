@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import shutil
-from collections import Counter
 from pathlib import Path
 
 from tcip_mcp.server import mcp
@@ -259,8 +257,10 @@ def split_dataset(
     Creates output_path/{train,val,test}/{images,labels}/ with actual file
     copies (or symlinks if copy_files=False). Also writes split manifest JSONs.
 
-    When stratified=True, splits are balanced by the primary class in each label
-    file so rare classes are proportionally represented in every split.
+    Uses the same leakage-free, group-aware splitter as ``make_splits``: sibling tiles of one
+    source image are kept in the same split (no tree-/canopy-level leakage). When stratified=True,
+    splits are additionally balanced by each source's foreground annotation count so dense and
+    sparse sources are proportionally represented.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -269,7 +269,7 @@ def split_dataset(
         test_ratio: Fraction for test set.
         seed: Random seed for reproducibility.
         output_path: Directory for split output (defaults to folder_path/splits).
-        stratified: Use stratified sampling by primary class.
+        stratified: Balance splits by each source's foreground annotation count.
         copy_files: Copy files (True) or create symlinks (False).
     """
     if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
@@ -291,49 +291,23 @@ def split_dataset(
     if not paired_stems:
         return {"error": "No paired image+label files found"}
 
-    rng = random.Random(seed)
+    # Group-aware split (same core as make_splits): sibling tiles stay in one split, no leakage.
+    from tcip_mcp.pipelines.data.splits import group_balanced_split
 
+    annotation_counts: dict[str, int] | None = None
     if stratified:
-        # Determine primary class per stem (most frequent class in label file)
-        stem_classes: dict[str, int] = {}
+        # stratify by GT box count so dense and sparse sources are balanced per split
+        annotation_counts = {}
         for stem in paired_stems:
-            counter: Counter[int] = Counter()
             with open(label_map[stem], "r") as f:
-                for line in f:
-                    parts = line.strip().split()
-                    if parts:
-                        try:
-                            counter[int(parts[0])] += 1
-                        except ValueError:
-                            pass
-            stem_classes[stem] = counter.most_common(1)[0][0] if counter else -1
+                annotation_counts[stem] = sum(1 for line in f if line.strip())
 
-        # Group by class
-        class_groups: dict[int, list[str]] = {}
-        for stem, cid in stem_classes.items():
-            class_groups.setdefault(cid, []).append(stem)
-
-        # Stratified split per class
-        splits: dict[str, list[str]] = {"train": [], "val": [], "test": []}
-        for cid in sorted(class_groups):
-            group = class_groups[cid]
-            rng.shuffle(group)
-            n = len(group)
-            n_train = max(1, int(n * train_ratio)) if n >= 3 else n
-            n_val = int(n * val_ratio) if n >= 3 else 0
-            splits["train"].extend(group[:n_train])
-            splits["val"].extend(group[n_train : n_train + n_val])
-            splits["test"].extend(group[n_train + n_val :])
-    else:
-        rng.shuffle(paired_stems)
-        n = len(paired_stems)
-        n_train = int(n * train_ratio)
-        n_val = int(n * val_ratio)
-        splits = {
-            "train": paired_stems[:n_train],
-            "val": paired_stems[n_train : n_train + n_val],
-            "test": paired_stems[n_train + n_val :],
-        }
+    splits = group_balanced_split(
+        paired_stems,
+        annotation_counts=annotation_counts,
+        splits=(train_ratio, val_ratio, test_ratio),
+        seed=seed,
+    )
 
     out_dir = Path(output_path) if output_path else root / "splits"
     out_dir.mkdir(parents=True, exist_ok=True)
