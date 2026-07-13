@@ -577,11 +577,26 @@ export function AnnotateTab() {
   // Set when a press starts a vertex drag / edge insert, so the trailing click of the
   // drag release can't place a vertex or deselect (one gesture, one meaning).
   const didDragRef = useRef(false);
+  // Throttle the "detect is derived" notice to once per image, not once per click.
+  const derivedNoticeRef = useRef<string | null>(null);
 
   const onDown = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     if (isLocked) return;
     if (ev.evt.button !== 0) return; // right-button drags must not fabricate boxes
     if (mode === "box") {
+      // Detect boxes are derived from polygons when any exist, so a drawn box would be
+      // discarded on save — point the annotator at polygon mode instead of losing it.
+      if (canvas.polygons.length > 0) {
+        if (derivedNoticeRef.current !== currentImageName) {
+          derivedNoticeRef.current = currentImageName;
+          useStore
+            .getState()
+            .pushToast(
+              "Detect boxes are derived from polygons on this image — switch to Polygon mode (M) to add an object.",
+            );
+        }
+        return;
+      }
       const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
       const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
       setDrawing({ x1: cx, y1: cy, x2: cx, y2: cy, class_id: activeClass });
@@ -864,6 +879,7 @@ export function AnnotateTab() {
       <div className="relative flex-1 flex flex-col">
         <CanvasStage
           imageUrl={imageUrl}
+          hiResImageUrl={imgPath ? api.images.hiResUrl(imgPath) : null}
           imgWidth={canvas.imgWidth}
           imgHeight={canvas.imgHeight}
           onStageRef={(st) => (stageRef.current = st)}
