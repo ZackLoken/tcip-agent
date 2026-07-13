@@ -14,6 +14,7 @@ vi.mock("konva", () => ({ default: {} }));
 vi.mock("react-konva", () => ({
   Rect: () => <div data-testid="k-rect" />,
   Line: () => <div data-testid="k-line" />,
+  Circle: () => <div data-testid="k-circle" />,
   Text: (props: { text?: string }) => <div data-testid="k-text" data-text={props.text} />,
 }));
 vi.mock("@/components/Canvas/CanvasStage", () => ({
@@ -155,6 +156,105 @@ describe("ReviewTab detection nav bounds", () => {
     expect(screen.getByText("2 / 2")).toBeInTheDocument();
     expect(prevBtn()).not.toBeDisabled();
     expect(nextBtn()).toBeDisabled();
+  });
+});
+
+describe("ReviewTab in-place edit", () => {
+  const gtBox = { x1: 10, y1: 10, x2: 50, y2: 50, class_id: 0 };
+
+  function seedEditableMatches() {
+    matchesSpy.mockResolvedValue({
+      ...matchesRes([det()]),
+      gt_boxes: [gtBox],
+    });
+  }
+
+  const editBtn = () => screen.getByTitle("Adjust this shape on the canvas (E)");
+  const saveBtn = () => screen.getByTitle("Replace the ground-truth shape with this one (Enter)");
+
+  let actionSpy: MockInstance<typeof api.review.action>;
+  let backupSpy: MockInstance<typeof api.review.backupLabels>;
+
+  beforeEach(() => {
+    seedEditableMatches();
+    actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
+      status: "ok",
+      image_status: "started",
+      annotation_status: "partial",
+    });
+    backupSpy = vi.spyOn(api.review, "backupLabels").mockResolvedValue({
+      status: "ok",
+      files_backed_up: 0,
+    });
+  });
+
+  it("Edit swaps the verdict bar for Save/Cancel", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(editBtn());
+    expect(saveBtn()).toBeInTheDocument();
+    expect(screen.getByText("Cancel (Esc)")).toBeInTheDocument();
+    expect(screen.getByText("Editing")).toBeInTheDocument();
+    expect(screen.queryByText(/Accept \(A\)/)).not.toBeInTheDocument();
+  });
+
+  it("Enter commits the seeded GT box as an edited action, after the .original snapshot", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(editBtn());
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    expect(backupSpy).toHaveBeenCalledTimes(1);
+    expect(actionSpy.mock.calls[0][0]).toMatchObject({
+      action: "edited",
+      edited_box: [10, 10, 50, 50],
+      edited_polygon: null,
+      det_type: "tp",
+      gt_type: "box",
+      gt_idx: 0,
+    });
+    // The verdict bar returns once the edit is committed.
+    await waitFor(() =>
+      expect(
+        screen.queryByTitle("Replace the ground-truth shape with this one (Enter)"),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("an FP edit commits the prediction shape (added to GT, not replacing)", async () => {
+    matchesSpy.mockResolvedValue({
+      ...matchesRes([
+        det({ det_type: "fp", gt_type: null, gt_idx: null, pred_type: "box", pred_idx: 0 }),
+      ]),
+      pred_boxes: [{ x1: 100, y1: 100, x2: 140, y2: 150, class_id: 0, confidence: 0.7 }],
+    });
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(editBtn());
+    fireEvent.click(screen.getByTitle("Write this shape to ground truth (Enter)"));
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    expect(actionSpy.mock.calls[0][0]).toMatchObject({
+      action: "edited",
+      edited_box: [100, 100, 140, 150],
+      det_type: "fp",
+      pred_idx: 0,
+    });
+  });
+
+  it("Escape discards the edit without writing anything", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(editBtn());
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(
+      screen.queryByTitle("Replace the ground-truth shape with this one (Enter)"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Accept \(A\)/)).toBeInTheDocument();
+    expect(actionSpy).not.toHaveBeenCalled();
   });
 });
 
