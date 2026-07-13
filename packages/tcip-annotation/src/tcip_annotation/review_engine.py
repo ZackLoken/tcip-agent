@@ -424,13 +424,24 @@ class ReviewEngine:
         det: ReviewDetection,
         ctx: ReviewContext,
         action: str,
+        *,
+        norm_det: Optional[ReviewDetection] = None,
+        norm_ctx: Optional[ReviewContext] = None,
     ) -> None:
-        """Log an accept / reject / edit action for a detection."""
+        """Log an accept / reject / edit action for a detection.
+
+        ``norm_det``/``norm_ctx`` override the geometry the entry is stored under. An
+        edited verdict rewrites the GT bbox, so the entry must be keyed to the post-edit
+        geometry (what the next reload's lookup sees) while any prior entry for this
+        detection is still found via the pre-edit geometry of ``det``/``ctx``.
+        """
         per_image = self._review_state.setdefault("image", {})
         img_data = per_image.setdefault(
             ctx.img_name, {"img_status": "started", "detections": []}
         )
 
+        nd = norm_det if norm_det is not None else det
+        nc = norm_ctx if norm_ctx is not None else ctx
         class_name = self.class_names.get(det.class_id, f"class_{det.class_id}")
         entry = {
             "match_type": det.det_type.upper(),
@@ -439,8 +450,8 @@ class ReviewEngine:
             "reviewed_by": self.current_user,
             "class_id": det.class_id,
             "class_name": class_name,
-            "gt_bbox_norm": self._normalised_bbox(ctx, "gt", det),
-            "pred_bbox_norm": self._normalised_bbox(ctx, "pred", det),
+            "gt_bbox_norm": self._normalised_bbox(nc, "gt", nd),
+            "pred_bbox_norm": self._normalised_bbox(nc, "pred", nd),
             "iou": round(det.iou, 4) if det.iou is not None else None,
             "conf": round(det.conf, 4) if det.conf is not None else None,
         }
@@ -486,29 +497,30 @@ class ReviewEngine:
 
     # ── Label backup / save ───────────────────────────────────────────────
 
-    def backup_original_labels(self, *label_dirs: Path | str) -> None:
-        """Copy ``*.txt`` files from each label dir into ``<dir>/.original/``.
+    def backup_original_labels(self, *label_dirs: Path | str) -> int:
+        """Ensure every ``*.txt`` in each label dir has a pristine copy in ``<dir>/.original/``.
 
-        Runs at most once per project — tracked by
-        ``_review_state["labels_backed_up"]``.
+        Per-file and idempotent: a file is captured the first time it is seen and never
+        overwritten afterwards, so labels added after the first backup still get their
+        baseline before the platform first mutates them. Returns the number of files
+        newly captured by this call.
         """
-        if self._review_state.get("labels_backed_up"):
-            return
+        captured = 0
         for label_dir in label_dirs:
             d = Path(label_dir)
             if not d.is_dir():
                 continue
             backup_dir = d / ".original"
-            if backup_dir.is_dir():
-                continue
-            txt_files = [p for p in d.iterdir() if p.is_file() and p.suffix == ".txt"]
-            if not txt_files:
-                continue
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            for src in txt_files:
-                shutil.copy2(src, backup_dir / src.name)
-        self._review_state["labels_backed_up"] = True
-        self.save_review_state()
+            for src in d.iterdir():
+                if not (src.is_file() and src.suffix == ".txt"):
+                    continue
+                dst = backup_dir / src.name
+                if dst.exists():
+                    continue
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                captured += 1
+        return captured
 
     def save_gt(self, ctx: ReviewContext, *, detect_path: Optional[str] = None, segment_path: Optional[str] = None) -> bool:
         """Write the current GT from ``ctx`` back in its source format.
