@@ -4,7 +4,7 @@ import { applyReviewFocus } from "@/lib/reviewFocus";
 import { useStore } from "@/store";
 
 vi.mock("@/api/client", () => ({
-  api: { dataset: { select: vi.fn() } },
+  api: { dataset: { select: vi.fn(), nav: vi.fn(async () => ({ status: "ok" })) } },
 }));
 
 import { api } from "@/api/client";
@@ -92,6 +92,8 @@ describe("applyReviewFocus", () => {
     expect(g.dataset.current_image_index).toBe(7);
     expect(g.review.filter_type).toBe("fn");
     expect(g.active_tab).toBe("review");
+    // The focused frame is persisted like user navigation, so get_active_context sees it.
+    expect(api.dataset.nav).toHaveBeenCalledWith(7);
   });
 
   it("re-selects when the model differs even though the dataset identity matches", async () => {
