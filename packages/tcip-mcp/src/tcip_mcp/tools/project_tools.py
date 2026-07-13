@@ -210,6 +210,7 @@ def _resolve_project_path(project_path: str) -> str:
 
 
 @mcp.tool()
+@audited
 def get_active_context() -> dict:
     """The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the
     exact current image. Lets the agent work through the app instead of globbing or asking which image
@@ -309,8 +310,10 @@ def get_project_status(project_path: str = "") -> dict:
 def export_project(project_path: str, output_path: str = "", include_models: bool = False) -> dict:
     """Export an annotation project as a portable ZIP archive.
 
-    Includes images, labels, classes.txt, data.yaml, .tcip config, and session logs.
-    Optionally includes trained model checkpoints.
+    Scans the canonical dataset layout (see :mod:`tcip_mcp.dataset_layout`): images under
+    ``<root>/images/<date>/`` and ground truth under
+    ``<root>/annotations/<trait>/<date>/<task>/``, plus the ``.tcip`` config, session logs,
+    and the class map (``.tcip/state/classes.json``). Optionally includes trained checkpoints.
 
     Args:
         project_path: Root directory of the project.
@@ -327,34 +330,27 @@ def export_project(project_path: str, output_path: str = "", include_models: boo
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+    image_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
+    label_exts = {".txt", ".xml", ".json"}
     files_added = 0
 
     with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
-        for sub in (root / "data").rglob("*"):
-            if sub.is_file() and (
-                sub.suffix.lower() in image_exts
-                or sub.suffix == ".txt"
-                or sub.suffix == ".yaml"
-                or sub.suffix == ".yml"
-            ):
-                zf.write(sub, sub.relative_to(root))
-                files_added += 1
+        # Canonical trees (images/<date>/, annotations/<trait>/<date>/<task>/) — the old root/data
+        # scan silently dropped everything for an ingested project.
+        for tree, exts in ((root / "images", image_exts), (root / "annotations", label_exts)):
+            if tree.is_dir():
+                for sub in tree.rglob("*"):
+                    if sub.is_file() and sub.suffix.lower() in exts:
+                        zf.write(sub, sub.relative_to(root))
+                        files_added += 1
 
-        # .tcip config + sessions
+        # .tcip config + sessions + the class map at .tcip/state/classes.json
         tcip_dir = root / ".tcip"
         if tcip_dir.is_dir():
             for f in tcip_dir.rglob("*"):
                 if f.is_file() and f.suffix in (".toml", ".jsonl", ".txt", ".yaml", ".yml", ".json"):
                     zf.write(f, f.relative_to(root))
                     files_added += 1
-
-        # Top-level config files
-        for name in ("classes.txt", "data.yaml", "data.yml"):
-            cfg = root / name
-            if cfg.is_file():
-                zf.write(cfg, cfg.relative_to(root))
-                files_added += 1
 
         # Models (optional, can be large)
         if include_models:
