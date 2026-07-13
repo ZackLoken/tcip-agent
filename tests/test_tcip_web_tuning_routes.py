@@ -33,7 +33,6 @@ def test_launch_creates_sweep_then_listed(client: TestClient) -> None:
             "param_space": {"training.batch_size": [2, 4]},
             "n_trials": 1,
             "output_dir": "",
-            "use_optuna": False,
             "direction": "maximize",
         },
     )
