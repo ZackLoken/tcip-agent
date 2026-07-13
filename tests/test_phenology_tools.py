@@ -187,6 +187,60 @@ def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) 
     assert rows[0]["elongation_classifier_validated"] == "false"
 
 
+def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None:
+    # Classifier validated but the count operating point isn't. The gate requires both, so a
+    # partially-validated phenotype must still refuse — a half-validated bloom can't slip through.
+    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    _write_preds(d1, "P1_a", ["0 0.9 0.5 0.5 0.1 0.1"])
+    _write_preds(d2, "P1_b", ["1 0.9 0.5 0.5 0.1 0.1"])
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    res = compute_phenology(
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv),
+        elongated_class_id=1,
+        classifier_validated="validated_held_out",
+        operating_point_validated=None,  # op point not validated → still refuse
+    )
+    assert "error" in res and "requires BOTH" in res["error"]
+    assert not out_csv.exists()
+
+
+def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_path: Path) -> None:
+    # Acknowledged asymmetric delivery: the validated dimension keeps validated_held_out, the
+    # unvalidated one is stamped 'false' — the invalid half is never stamped valid.
+    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    _write_preds(d1, "P1_a", ["0 0.9 0.5 0.5 0.1 0.1"])
+    _write_preds(d2, "P1_b", ["1 0.9 0.5 0.5 0.1 0.1"])
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+    res = compute_phenology(
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv),
+        elongated_class_id=1,
+        classifier_validated=None,                       # classifier not validated
+        operating_point_validated="validated_held_out",  # op point validated
+        acknowledge_unvalidated=True,
+    )
+    assert "error" not in res
+    assert res["elongation_classifier_validated"] == "false"          # unvalidated half → false
+    assert res["operating_point_validated"] == "validated_held_out"   # validated half preserved
+    with out_csv.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["elongation_classifier_validated"] == "false"
+    assert rows[0]["operating_point_validated"] == "validated_held_out"
+
+
 def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> None:
     # Predictions carry only class 0 — no elongation class. The tool must NOT write a
     # CSV and must flag the measurement as invalid.
