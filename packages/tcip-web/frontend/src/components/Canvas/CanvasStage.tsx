@@ -11,10 +11,16 @@ import Konva from "konva";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { useStore } from "@/store";
 
+// Above this magnification the display-capped bitmap is visibly upscaled; fetch the
+// full-native-resolution variant so pixel-level inspection isn't softened by the cap.
+const HIRES_SCALE = 1.5;
+
 export interface CanvasStageProps {
   imageUrl: string | null;
   imgWidth: number;
   imgHeight: number;
+  /** Optional full-resolution variant, loaded lazily once zoomed past HIRES_SCALE. */
+  hiResImageUrl?: string | null;
   /** Static shapes — rendered in the content layer (below the overlay). */
   children?: React.ReactNode;
   /** Cursor-following / transient shapes — rendered in a separate top layer so they
@@ -37,6 +43,8 @@ export function CanvasStage(props: CanvasStageProps) {
   const setView = useStore((s) => s.setView);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [hiResImg, setHiResImg] = useState<HTMLImageElement | null>(null);
+  const hiResLoadedFor = useRef<string | null>(null);
 
   // Track wrapper size
   useEffect(() => {
@@ -79,6 +87,35 @@ export function CanvasStage(props: CanvasStageProps) {
       el.src = ""; // cancel the abandoned download; rapid flips otherwise queue every skip
     };
   }, [props.imageUrl]);
+
+  // A new source image invalidates any full-res variant held for the previous one.
+  useEffect(() => {
+    setHiResImg(null);
+    hiResLoadedFor.current = null;
+  }, [props.hiResImageUrl]);
+
+  // Fetch the full-res variant once zoomed in far enough to see the difference. It swaps
+  // in when ready (the capped bitmap covers the wait) and then stays — one big texture
+  // per image, dropped on image change; loaded at most once per image.
+  const wantHiRes = view.scale > HIRES_SCALE && !!props.hiResImageUrl;
+  useEffect(() => {
+    const url = props.hiResImageUrl;
+    if (!wantHiRes || !url || hiResLoadedFor.current === url) return;
+    let cancelled = false;
+    const el = new Image();
+    el.crossOrigin = "anonymous";
+    el.onload = () => {
+      if (cancelled) return;
+      hiResLoadedFor.current = url; // guard set only on success, so a cancel can retry
+      setHiResImg(el);
+    };
+    el.src = url;
+    return () => {
+      cancelled = true;
+      el.onload = null;
+      el.src = "";
+    };
+  }, [wantHiRes, props.hiResImageUrl]);
 
   // Fit image to canvas the first time we know both dims + image size. The key includes
   // the image dims so a fit computed from the previous image's dimensions can't latch.
@@ -310,8 +347,14 @@ export function CanvasStage(props: CanvasStageProps) {
           scaleX={view.scale}
           scaleY={view.scale}
         >
-          {img ? (
-            <KonvaImage image={img} x={0} y={0} width={props.imgWidth} height={props.imgHeight} />
+          {img || hiResImg ? (
+            <KonvaImage
+              image={hiResImg ?? img ?? undefined}
+              x={0}
+              y={0}
+              width={props.imgWidth}
+              height={props.imgHeight}
+            />
           ) : null}
         </Layer>
         <Layer
