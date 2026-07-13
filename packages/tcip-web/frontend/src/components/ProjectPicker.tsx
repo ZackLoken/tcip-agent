@@ -214,7 +214,7 @@ export function ProjectPicker() {
                       {p.models.length} model{p.models.length === 1 ? "" : "s"}
                     </span>
                   </div>
-                  <span className="text-[10px] text-tcip-muted/70">
+                  <span className="text-[10px] text-tcip-muted">
                     Updated {relativeTime(p.modified)}
                   </span>
 
