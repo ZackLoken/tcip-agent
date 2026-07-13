@@ -220,15 +220,18 @@ def per_plant_phenology(
     per_plant, all_classes = per_plant_series(mapping, predictions_by_date, elongated_class_id)
     rows = []
     for plant_id, info in sorted(per_plant.items()):
-        frac_series = [
-            (d, (elong / total if total else 0.0)) for (d, total, elong) in info["series"]
-        ]
+        # total==0 detected no catkins, so it's not an observation of the elongated fraction
+        # (pre-emergence or a detection gap) — excluded from the milestone series; total>0 with
+        # elongated==0 is a real 0% and kept. The raw series keeps it with ratio=None.
+        frac_series = [(d, elong / total) for (d, total, elong) in info["series"] if total]
         row = {
             "plant_id": plant_id,
             "accession": info["accession"],
             "n_dates": len(info["series"]),
+            "n_observed_dates": len(frac_series),
             "series": [
-                {"date": d, "n_total": total, "n_elongated": elong, "ratio": (elong / total if total else 0.0)}
+                {"date": d, "n_total": total, "n_elongated": elong,
+                 "ratio": (elong / total if total else None)}
                 for (d, total, elong) in info["series"]
             ],
             **plant_milestones(frac_series),
