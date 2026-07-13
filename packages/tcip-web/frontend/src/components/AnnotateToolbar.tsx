@@ -79,7 +79,7 @@ export function AnnotateToolbar() {
       upsertClass(entry);
       setActiveClass(nextId);
       if (dataset.project_root) {
-        await classesApi.save(dataset.project_root, [...classes, entry]);
+        await classesApi.save(dataset.project_root, dataset.annotation_type, [...classes, entry]);
       }
     } catch (e) {
       useStore
@@ -97,7 +97,7 @@ export function AnnotateToolbar() {
     if (dataset.project_root) {
       const next = classes.map((c) => (c.id === activeClass ? updated : c));
       try {
-        await classesApi.save(dataset.project_root, next);
+        await classesApi.save(dataset.project_root, dataset.annotation_type, next);
       } catch (e) {
         useStore
           .getState()
@@ -108,13 +108,15 @@ export function AnnotateToolbar() {
 
   async function toggleComplete(next: boolean) {
     if (!currentImage || !dataset.project_root) return;
-    // Unchecking Complete falls back to a content-derived status: some annotations
-    // -> partial; none on a reviewed image -> negative (empty = valid negative).
+    const hasContent = canvasBoxes.length + canvasPolygons.length > 0;
+    // Complete → content:complete, empty:negative (the intentional negative); uncheck → content:partial, empty:unannotated.
     const newStatus: ImageStatus = next
-      ? "complete"
-      : canvasBoxes.length + canvasPolygons.length > 0
+      ? hasContent
+        ? "complete"
+        : "negative"
+      : hasContent
         ? "partial"
-        : "negative";
+        : "unannotated";
     setImageStatus(currentImage, newStatus);
     try {
       await classesApi.setImageStatus(dataset.project_root, currentImage, newStatus);
@@ -216,7 +218,8 @@ export function AnnotateToolbar() {
       <label className="flex items-center gap-1 text-[11px] ml-3">
         <input
           type="checkbox"
-          checked={currentStatus === "complete"}
+          // Show a confirmed negative as checked too (completing an empty image sets "negative").
+          checked={currentStatus === "complete" || currentStatus === "negative"}
           onChange={(e) => void toggleComplete(e.target.checked)}
           disabled={!currentImage}
         />
