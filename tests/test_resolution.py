@@ -132,6 +132,22 @@ def test_validate_export_refuses_unvalidated():
     assert any("shippable" in s or "not validated" in s for s in issues)
 
 
+def test_validate_bundle_surfaces_all_firewall_issues_at_export():
+    # The realistic delivery-time call: a dataset-scoped calibration inherited across a different
+    # dataset while exporting, plus an in_chans mismatch. All three firewall checks must fire, so a
+    # regression dropping any one (e.g. the shippable_issues(target_dataset_hash=...) fold-in)
+    # can't slip past — each check is exercised in isolation elsewhere but never together.
+    b = ResolvedBundle("catkin", "AAAA", {
+        "in_chans": derived("in_chans", 3, derivation_class="deterministic", derived_from="raster"),
+        "conf": derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
+                        validated_vs_gt=VALIDATED_FALSE, dataset_scoped=True, dataset_hash="AAAA"),
+    })
+    issues = validate_resolved_bundle(b, probed_channels=4, target_dataset_hash="BBBB", for_export=True)
+    assert any("in_chans" in s for s in issues)       # channel mismatch
+    assert any("never inherit" in s for s in issues)  # dataset-scoped inherited across a hash
+    assert any("shippable" in s for s in issues)      # export refuses an unvalidated operating point
+
+
 # --- trait knowledge ---
 
 def test_catkin_trait_semantics():
