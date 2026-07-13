@@ -24,6 +24,23 @@ class Polygon:
     class_id: int
 
 
+def boxes_from_polygons(polygons: list["Polygon"]) -> list["BBox"]:
+    """Axis-aligned bounding box of each polygon, preserving class id.
+
+    Used where the detect layout is derived from the segment layout: when polygons
+    exist they are the source of truth and their boxes are a pure function of them,
+    so the two label files can never silently diverge.
+    """
+    out: list[BBox] = []
+    for p in polygons:
+        if not p.points:
+            continue
+        xs = [pt[0] for pt in p.points]
+        ys = [pt[1] for pt in p.points]
+        out.append(BBox(min(xs), min(ys), max(xs), max(ys), class_id=p.class_id))
+    return out
+
+
 @dataclass
 class PredBBox(BBox):
     """Predicted bounding box with confidence score."""
