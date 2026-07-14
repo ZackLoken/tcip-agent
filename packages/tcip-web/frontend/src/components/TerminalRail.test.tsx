@@ -163,7 +163,7 @@ describe("TerminalRail", () => {
     render(<TerminalRail />);
     await screen.findByTestId("terminal-host");
     await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalled());
-    fireEvent.click(screen.getByText("Restart"));
+    fireEvent.click(screen.getByLabelText("Restart the agent"));
     await waitFor(() => expect(terminalApi.restart).toHaveBeenCalledWith("t1", 30, 100));
     expect(termInstances[0].reset).toHaveBeenCalled();
   });
