@@ -13,6 +13,7 @@ import {
 import { openTrainingStream, trainingApi } from "@/api/training";
 import type { MetricRow, TrainingRunSummary } from "@/api/training";
 import { useStore } from "@/store";
+import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 import { mergeMetric } from "@/tabs/trainingMetrics";
 
 // Runs can only be stopped while still active; terminal/historical runs show no button.
@@ -173,17 +174,6 @@ export function TrainingTab() {
     return Array.from(keys);
   }, [metrics]);
 
-  const chartColors = [
-    "#4CAF50",
-    "#E6976B",
-    "#00BFFF",
-    "#FFD700",
-    "#EF5350",
-    "#81C784",
-    "#BA68C8",
-    "#FFB74D",
-  ];
-
   return (
     <div className="flex-1 grid grid-cols-[400px_1fr] overflow-hidden">
       {/* Left sidebar: config + runs */}
@@ -292,34 +282,34 @@ export function TrainingTab() {
           {selectedRun && chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData}>
-                <CartesianGrid stroke="#3A3A3A" strokeDasharray="3 3" />
+                <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
                 <XAxis
                   dataKey="step"
-                  stroke="#8A8A8A"
+                  stroke={CHART.axis}
                   style={{ fontSize: 11 }}
                   label={{
                     value: "epoch/step",
                     position: "insideBottom",
                     offset: -5,
-                    fill: "#8A8A8A",
+                    fill: CHART.axis,
                   }}
                 />
-                <YAxis stroke="#8A8A8A" style={{ fontSize: 11 }} />
+                <YAxis stroke={CHART.axis} style={{ fontSize: 11 }} />
                 <Tooltip
                   contentStyle={{
-                    background: "#242424",
-                    border: "1px solid #3A3A3A",
+                    background: CHART.tooltipBg,
+                    border: `1px solid ${CHART.tooltipBorder}`,
                     borderRadius: 4,
                     fontSize: 11,
                   }}
                 />
-                <Legend wrapperStyle={{ fontSize: 11, color: "#E0E0E0" }} />
+                <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
                 {metricKeys.map((key, i) => (
                   <Line
                     key={key}
                     type="monotone"
                     dataKey={key}
-                    stroke={chartColors[i % chartColors.length]}
+                    stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
                     dot={false}
                     strokeWidth={1.5}
                     isAnimationActive={false}
