@@ -379,6 +379,12 @@ export function AnnotateToolbar({
           <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">
             Image
           </span>
+          <span
+            className="max-w-[150px] truncate font-mono text-[11px] text-tcip-fg"
+            title={currentImage}
+          >
+            {currentImage}
+          </span>
           <button
             className="tcip-btn text-[11px]"
             onClick={() => nav.stepImage(-1)}
@@ -387,12 +393,6 @@ export function AnnotateToolbar({
           >
             ◀
           </button>
-          <span
-            className="max-w-[150px] truncate font-mono text-[11px] text-tcip-fg"
-            title={currentImage}
-          >
-            {currentImage}
-          </span>
           <input
             ref={counterRef}
             className="tcip-input w-10 text-center font-mono text-[11px]"
