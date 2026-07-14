@@ -173,7 +173,12 @@ export function TuningTab() {
                           <button
                             key={opt}
                             type="button"
-                            className={`tcip-btn text-[10px] ${on ? "!bg-tcip-accent !text-white" : ""}`}
+                            aria-pressed={on}
+                            className={`h-6 rounded border px-2 text-[10px] transition-colors ${
+                              on
+                                ? "border-tcip-accent bg-tcip-accent text-white"
+                                : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
+                            }`}
                             onClick={() =>
                               updateParam(p.key, {
                                 selected: on
