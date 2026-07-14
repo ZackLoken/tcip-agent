@@ -929,7 +929,7 @@ export function AnnotateTab() {
 
   if (!imgPath || !currentImageName) {
     return (
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-h-0">
         <AnnotateToolbar
           onSave={() => void save()}
           saveDisabled={saveDisabled}
@@ -965,13 +965,13 @@ export function AnnotateTab() {
     : canvas.boxes;
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col min-h-0">
       <AnnotateToolbar
         onSave={() => void save()}
         saveDisabled={saveDisabled}
         dirty={canvas.dirty}
       />
-      <div className="relative flex-1 flex flex-col">
+      <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
           imageUrl={imageUrl}
           hiResImageUrl={imgPath ? api.images.hiResUrl(imgPath) : null}
@@ -1073,7 +1073,7 @@ function AnnotateLegend() {
   const classes = useStore((s) => s.classes.list);
   return (
     <div className="group absolute bottom-3 left-3 z-20">
-      <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-52 translate-y-1 rounded-md border border-tcip-border-hover bg-tcip-panel p-3 opacity-0 shadow-lg transition-all group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
+      <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-max min-w-[8rem] translate-y-1 whitespace-nowrap rounded-md border border-tcip-border-hover bg-tcip-panel p-3 opacity-0 shadow-lg transition-all group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
         <h4 className="mb-2 text-[11px] font-semibold tracking-wide text-tcip-fg">
           Annotate Legend
         </h4>
