@@ -1,118 +1,199 @@
 ---
-name: Hazelnut
-description: "Hazelnut (Corylus spp.) — most sensor-diverse TCIP crop. 58 traits, 7 sensor types (RGB, LiDAR, SfM, hyperspectral, NIRS, radar). Catkin/pistillate phenology, EFB disease, kernel quality."
+name: hazelnut
+description: "Domain knowledge for hazelnut (Corylus americana × Corylus avellana hybrids and pure C. americana selections; family Betulaceae) — a multi-stemmed, clump-forming nut shrub grown in Upper-Midwest breeding plantings. Covers its monoecious, wind-pollinated, dichogamous reproductive biology; pendulous male catkins and tiny red-styled pistillate flowers; husk-enclosed nut clusters, in-shell nuts, and kernels; and Eastern Filbert Blight, big-bud mite, and hazelnut weevil signs. Load this when phenotyping hazelnut, working with hazelnut imagery, or measuring hazelnut traits."
 ---
 
-# Hazelnut — Corylus spp.
+# Hazelnut (Corylus americana × avellana)
 
-58 traits | 7 sensor types | 3 perspectives (aerial, ground, lab) | 10 pipeline groups
+## Identity
 
-## Phenology Calendar
+Interspecific hybrids of *Corylus americana* Walter (American hazelnut) × *Corylus avellana* L.
+(European hazelnut / filbert), plus pure *C. americana* selections; family Betulaceae. The
+Upper-Midwest program favors hybrids for cold-hardiness and Eastern Filbert Blight resistance.
 
-1. **Dormancy** (Nov–Feb) — Catkins visible but closed
-2. **Catkin elongation** (Feb–Mar) — Track catkin_05/50/95per_date, catkin_elongation_date
-3. **Budbreak** (Mar–Apr) — Leaf emergence
-4. **Flowering** (Mar–Apr) — Track pistillate_05/50/95per_date. Female flowers are tiny red tufts at branch tips
-5. **Nut development** (May–Aug) — Cluster nut count assessment
-6. **Harvest** (Aug–Oct) — Nut drop, inshell weight/count
-7. **Senescence** (Oct–Nov) — Defoliation
+Growth form is a **multi-stemmed, clump-forming shrub** (~1-5 m), arising from a root crown and
+spreading by basal suckers/rhizomes into a dense clump or hedgerow — not a single-trunk tree. This
+is why the vocabulary tracks multiple stems and a root crown (`stem_count`,
+`stem_branching_frequency`, `root_crown_inrow_width`, `root_crown_betweenrow_width`) and separate
+in-row vs between-row canopy widths rather than a single-trunk diameter (hazelnut carries no
+trunk-diameter trait).
 
-### Catkin bloom milestones — authoritative definition
+Reproduction is **monoecious, wind-pollinated, and dichogamous**: on a genotype, pollen shed and
+stigma receptivity are offset in time. That offset runs **both ways depending on cultivar and
+climate** — protandrous (pollen first) or protogynous (stigmas first), with protogyny often
+predominating in cold, long-winter regions like the Upper Midwest — so do not assume a fixed
+male-then-female order. A single-locus sporophytic self-incompatibility system (allele series at one
+*S* locus) means a genotype generally needs a bloom-overlapping, compatible pollinizer. Flowers open
+on leafless stems in early spring. **Consequence for imaging:** male (catkin) and female
+(pistillate) phenology are tracked as *separate* trait families because dichogamy separates them in
+time; derive their overlap per site-year from data rather than assuming an ordering.
 
-Bloom is the **fraction of a plant's detected catkins that are _elongated_** —
-"elongated" being an expert-scored, visible morphological stage from a validated 2-class
-classifier (class 1 = elongated), **never** a geometric proxy like bbox height. Per plant:
+## Trait authority
 
-- `catkin_elongation_date` — first date **any** elongation appears (fraction > 0)
-- `catkin_05/50/95per_date` — dates the elongated fraction crosses 5 / 50 / 95%
+`crops.yml` is the trait authority (58 hazelnut traits). Verify every trait there; never assert one
+it does not list. This skill does not reproduce the catalog — it grounds how the traits appear in
+imagery and which can come from pixels at all.
 
-`pistillate_05/50/95per_date` is the same pattern on the pistillate detector/classifier.
-This is **not** a catkin-count-of-peak or a sigmoid fit. Compose the `phenology` skill's
-pieces (`compute_phenology` tool → delivered `catkin_phenology.csv`); do not re-script it.
+## Field-imageable vs lab/destructive
 
-Bloom is **per plant**, but ground-RGB frames are not one-frame-per-plant: walking a
-hedgerow, adjacent frames are often *different* plants, and one plant may span several
-frames (or none, if skipped). Frame order is **not** plant identity — never aggregate by
-"every Nth frame is plant N." Plant identity comes from the spatial plant mapping
-(`build_plant_mapping` over the plant CSV), which assigns each detection to a plant by
-position. If that mapping is absent, per-plant milestones can't be computed; say so rather
-than inventing a frame-to-plant rule.
+Not every trait is a computer-vision target. "Field-imageable" here spans field/ground/drone/
+close-range imagery of the living plant **and** valid bench morphometry of *intact* harvested nuts;
+"lab/destructive" covers weighing, cracking, chemistry/NIRS, sensory panels, force gauges, and
+harvest processing that no image can substitute for.
 
-## Trait Inventory
+**Field-imageable (living plant or bench, with the caveats below):**
+- Phenology (leafless-season close-range): `catkin_elongation_date`, `catkin_05per_date`,
+  `catkin_50per_date`, `catkin_95per_date`, `catkin_05per_julian`, `catkin_50per_julian`,
+  `catkin_95per_julian`; `pistillate_flowering_date`, `pistillate_05per_date`,
+  `pistillate_50per_date`, `pistillate_95per_date`, `pistillate_05per_julian`,
+  `pistillate_50per_julian`, `pistillate_95per_julian`.
+- Architecture / canopy: `plant_height`, `plant_max_height`, `plant_max_width`, `plant_min_width`,
+  `plant_width_inrow`, `plant_width_betweenrow`, `root_crown_inrow_width`,
+  `root_crown_betweenrow_width`, `stem_count`, `stem_branching_frequency`, `stem_internode_length`,
+  `stem_vertical_angle`, `terminal_bearing`, `plant_surface_area`, `plant_volume`, `plant_biomass`.
+- Disease/pest signs on the plant: `efb_presence`, `efb_damage`, `efb_canker_length`,
+  `big_bud_mite_damage`.
+- Bench morphometry of intact nuts: `inshell_height`, `inshell_length`, `inshell_width`;
+  `weevil_damage` (from exit holes on harvested nuts).
 
-### Phenology (14 traits)
-| Trait | Sensor | ML Task | Format |
-|-------|--------|---------|--------|
-| `catkin_05per_date` | Ground RGB | Object detection → Change detection | date |
-| `catkin_50per_date` | Ground RGB | Object detection → Change detection | date |
-| `catkin_95per_date` | Ground RGB | Object detection → Change detection | date |
-| `catkin_elongation_date` | Ground RGB | Object detection → Change detection | date |
-| `pistillate_05per_date` | Ground RGB | Object detection → Change detection | date |
-| `pistillate_50per_date` | Ground RGB | Object detection → Change detection | date |
-| `pistillate_95per_date` | Ground RGB | Object detection → Change detection | date |
+**Lab / destructive (never a CV target):** `inshell_weight`, `kernel_height`, `kernel_length`,
+`kernel_width`, `kernel_weight`, `kernel_dry_matter_perc`, `kernel_fiber`,
+`kernel_oleic_acid_content`, `kernel_pellicle`, `kernel_perc_grav`, `kernel_perc_oil`,
+`kernel_perc_vol`, `nut_husk_rating`, `nut_perc_blanks`, `cluster_mass`, `cluster_nut_count`,
+`cluster_detachment_force`, `ttl_inshell_count`, `ttl_inshell_weight`, `flavor_rating`.
 
-### Disease (5 traits)
-| Trait | Sensor | ML Task | Format |
-|-------|--------|---------|--------|
-| `efb_damage` | Aerial RGB | Classification | ordinal |
-| `efb_presence` | Aerial RGB | Classification | binary |
-| `big_bud_mite_damage` | Ground RGB | Classification | ordinal |
-| `weevil_damage` | Ground RGB | Classification | ordinal |
-| `efb_canker_length` | Ground RGB | Regression | numeric (cm) |
+**Caveats that move the line (confirm before treating as imageable):**
+- `plant_surface_area`, `plant_volume`, and `plant_biomass` are defined from a 3D canopy model
+  (biomass via an allometric equation). The platform is currently 2D-only with no 3D point-cloud
+  pipeline — they may not be computable today.
+- `inshell_height/length/width` need a harvested subsample **and** in-image physical-scale
+  calibration; pixels are not mm without it.
+- `ttl_inshell_count` and `cluster_nut_count` are harvest/bench counts; on-plant nut counting is
+  heavily occluded (see below) and is not a substitute.
 
-### Morphology (15 traits)
-| Trait | Sensor | ML Task |
-|-------|--------|---------|
-| `plant_biomass` | Aerial LiDAR | Point cloud |
-| `plant_height` | Aerial LiDAR | Point cloud |
-| `plant_max_height` | Aerial LiDAR | Point cloud |
-| `plant_volume` | Aerial LiDAR | Point cloud |
-| `stem_branching_frequency` | Aerial LiDAR | Point cloud |
-| `stem_vertical_angle` | Aerial LiDAR | Point cloud |
-| `stem_count` | Aerial RGB | Object detection |
-| `plant_max_width` | Aerial SfM | Point cloud |
-| `plant_min_width` | Aerial SfM | Point cloud |
-| `plant_surface_area` | Aerial SfM | Point cloud |
-| `plant_width_betweenrow` | Aerial SfM | Point cloud |
-| `plant_width_inrow` | Aerial SfM | Point cloud |
-| `root_crown_betweenrow_width` | Ground Radar | Point cloud |
-| `root_crown_inrow_width` | Ground Radar | Point cloud |
-| `stem_internode_length` | Ground RGB | Regression |
+## Phenophase calendar
 
-### Quality (18 traits)
-| Trait | Sensor | ML Task |
-|-------|--------|---------|
-| `inshell_height` | Lab RGB | Instance segmentation |
-| `inshell_length` | Lab RGB | Instance segmentation |
-| `inshell_width` | Lab RGB | Instance segmentation |
-| `kernel_height` | Lab RGB | Instance segmentation |
-| `kernel_length` | Lab RGB | Instance segmentation |
-| `kernel_width` | Lab RGB | Instance segmentation |
-| `kernel_pellicle` | Lab RGB | Classification (ordinal) |
-| `inshell_weight` | Lab RGB | Regression |
-| `kernel_weight` | Lab RGB | Regression |
-| `kernel_perc_grav` | Lab RGB | Regression |
-| `kernel_perc_vol` | Lab RGB | Regression |
-| `cluster_mass` | Lab RGB | Regression |
-| `kernel_perc_oil` | Lab NIRS | Regression |
-| `kernel_dry_matter_perc` | Lab NIRS | Regression |
-| `kernel_fiber` | Lab NIRS | Regression (ordinal) |
-| `kernel_oleic_acid_content` | Lab Hyperspectral | Regression |
+Timing is **approximate, region/year/genotype-dependent, and must be derived from imagery each
+site-year — never fixed.** Upper-Midwest bloom is far later than the Dec-Feb reported for warmer
+regions. Defer the elongated-fraction / crossing math to the `phenology` skill.
 
-### Yield (6 traits)
-| Trait | Sensor | ML Task |
-|-------|--------|---------|
-| `ttl_inshell_weight` | Aerial RGB | Regression |
-| `cluster_nut_count` | Ground RGB | Object detection |
-| `ttl_inshell_count` | Lab RGB | Object detection |
+| Approx. window (Upper Midwest) | Stage | Date traits |
+|---|---|---|
+| ~April-May, leafless | Catkin elongation & pollen shed (male anthesis) | `catkin_elongation_date`, `catkin_05per_date`, `catkin_50per_date`, `catkin_95per_date` (+ julian counterparts) |
+| ~April-May, overlapping catkins (order varies by genotype) | Pistillate receptivity (female anthesis) | `pistillate_flowering_date`, `pistillate_05per_date`, `pistillate_50per_date`, `pistillate_95per_date` (+ julian counterparts) |
+| ~May | Leaf-out | none — canopy begins occluding stems/buds/clusters |
+| ~June-August | Nut development & sizing | none |
+| ~late Aug-Sept (into Oct) | Ripening, husk browning, harvest | none — triggers destructive nut/kernel/cluster measurements |
+| ~Oct-Nov | Senescence & dormancy | none — cankers/galls most detectable on bare stems |
 
-### Non-Automatable (10)
-catkin_05/50/95per_julian, pistillate_05/50/95per_julian, cluster_detachment_force, flavor_rating, nut_husk_rating, nut_perc_blanks
+The hazelnut vocabulary has **no** leaf-out, ripening/harvest, or senescence date trait (those
+belong to other crops). Do not populate a phenology trait that is not in the hazelnut set.
 
-## Annotation Guidance
+## Key structures in imagery
 
-- **Catkins**: Elongated pendulous structures. Tight bounding boxes aligned to catkin axis. At 5% emergence they're small and partially hidden — high miss rate expected.
-- **Pistillate flowers**: Extremely small (2–3mm). Require high-res ground images. Red stigmas emerging from buds — annotators frequently miss early-stage flowers.
-- **EFB cankers**: Dark sunken lesions on branches. 1cm to 30cm+. Annotate full lesion extent for canker_length regression.
-- **Nut clusters**: Multiple nuts in husks. Count individual nuts, not clusters. Overlapping husks make counting hard.
-- **Bush canopy overlap**: Adjacent bushes in hedgerow plantings grow together — instance segmentation boundaries are ambiguous.
+- **Catkin (male inflorescence):** pendulous cylindrical cluster on 1-year-old shoots; overwinters
+  short (~1-2 cm), firm, greenish-brown, then elongates to loose ~5-8 cm pale yellow-green/yellow
+  clusters that dehisce clouds of yellow pollen. Large, high-contrast against bare stems — the most
+  tractable detection target.
+- **Pistillate flower (female):** tiny bud-like structure emitting a tuft of bright red-magenta
+  styles (~1-3 mm visible); progresses red-dot → intermediate → full "spider/sunburst." Borne singly
+  or clustered in axils/terminals. Very small and low-contrast except for the red styles — needs
+  macro/close-range resolution; easily missed at drone scale.
+- **Nut cluster with involucre (husk):** 1-5 nuts, each in a leafy green bracteal husk with ragged
+  margins; green in summer, orange-brown at maturity. Nuts are hidden inside the husk on the plant.
+- **In-shell nut:** round-to-ovoid smooth brown shell, ~8-15 mm (hybrids larger); imaged on a bench
+  post-harvest.
+- **Kernel & pellicle:** cream seed under a thin brown skin (pellicle); exposed only by cracking.
+- **Multi-stem clump & root crown:** several stems from a basal root crown suckering into a clump;
+  the root crown is often occluded by suckers, mulch, or foliage.
+
+## Diseases & pests
+
+- **Eastern Filbert Blight** — *Anisogramma anomala* (biotrophic ascomycete). Elongated sunken
+  perennial cankers on 1+ year branches bearing longitudinal rows of black football-shaped
+  stromata erupting through bark; branch flagging/dieback above. Most detectable on dormant,
+  defoliated stems. Traits: `efb_presence` (binary), `efb_damage` (1-5 ordinal), `efb_canker_length`
+  (cm).
+- **Big-bud / filbert bud mite** — *Phytoptus avellanae* / *Cecidophyopsis vermiformis* (eriophyid
+  mites). Mites are microscopic and not imageable; only the sign is — abnormally swollen, rounded
+  "big buds" (pseudo-galls) versus normal slender pointed buds, on shoots in late winter-spring.
+  Trait: `big_bud_mite_damage` (1-5 ordinal).
+- **Hazelnut / filbert weevil** — *Curculio* spp. (long-snouted weevils). Imageable sign is a round
+  ~1.6 mm larval exit hole (plus frass) on harvested nuts; the larva and frass-filled kernel are
+  visible only after cracking. Trait: `weevil_damage` (1-5 ordinal).
+
+## Annotation challenges
+
+Defer annotation mechanics to the `annotation` skill. Crop-specific difficulties:
+- **Catkins** are the easy case — large, high-contrast, leafless-season. **Pistillate flowers** are
+  the hard case — ~1-3 mm of red styles that demand macro/close-range imagery and are easily missed.
+- **Nuts are occluded** inside leafy husks and canopy all season; on-plant counting is unreliable.
+- **EFB cankers and big-bud galls** are occluded by foliage — annotate on dormant, defoliated stems.
+- The **root crown** is frequently hidden by suckers, mulch, or foliage.
+
+## Measurement integrity
+
+Per the CLAUDE.md measurement-integrity invariant, **never invent a geometric or pixel proxy for a
+biological quantity**; the breeder defines each trait, and no result ships until the measurement is
+validated against expert-scored ground truth. Crop-specific traps:
+
+- **`catkin_elongation_date` is the canonical failed proxy.** A prior session defined catkin
+  "elongation" from bounding-box height and shipped fabricated phenology — invalid science, removed.
+  Elongation/anthesis is a breeder-defined *visible morphological state* (loosening + pollen shed)
+  emitted by a validated classifier, never a bbox surrogate. See the `phenology` skill for the
+  elongated-fraction definition and its `elongation_classified` guard.
+- **`catkin_*per_*` and `pistillate_*per_*` "% open"** mean the fraction of catkins/flowers at the
+  breeder-defined anthesis/receptivity state, not "% detected." No date without an expert-scored
+  "open" criterion validated against ground truth.
+- **`efb_damage`, `big_bud_mite_damage`, `weevil_damage`, `terminal_bearing`** are breeder-defined
+  ordinal rubrics; calibrate the pixel signal to the rubric — never invent the thresholds.
+- **`efb_canker_length`** needs in-image physical-scale calibration and full canker visibility; an
+  uncalibrated bbox length is not cm.
+- **`ttl_inshell_count` / `cluster_nut_count`** — nuts are occluded, so a raw detected-nut count is a
+  biased undercount, not the true count. No count without a validated occlusion/yield model.
+- **`plant_biomass`** is an allometric estimate from imaged canopy volume, not a direct measurement;
+  the equation must be validated against destructively-harvested hybrid-hazelnut biomass.
+
+## Needs expert confirmation
+
+- The program's specific hybrid selections and named releases (general species knowledge is used
+  here, not an accession list).
+- All Upper-Midwest phenophase timings — approximate and region/year/genotype-dependent; derive from
+  data each site-year.
+- Direction of dichogamy for the program's genotypes and site (protandrous vs protogynous) —
+  protogyny may predominate in cold winters; do not assume a male-then-female order.
+- Precise ordinal-scale definitions: `efb_damage` (1-5), `big_bud_mite_damage` (1-5),
+  `weevil_damage` (1-5), `kernel_fiber` (1-4), `kernel_pellicle` (1-7), `terminal_bearing` (1-5),
+  and `nut_husk_rating`.
+- Biological criteria for `catkin_elongation_date` ("most catkins elongated") and
+  `pistillate_flowering_date` ("most pistillate flowers opened"), and how they relate to the
+  05/50/95% traits (e.g., is elongation ≈ pollen shed? is `pistillate_flowering_date` ≈
+  `pistillate_50per_date`?).
+- The exact "open" definition for catkins (start of elongation vs pollen shed) vs for pistillate
+  flowers (style emergence vs full receptivity).
+- Whether `inshell_height/length/width` are intended from imagery vs calipers, and how the axes are
+  defined relative to nut orientation (provisionally placed as bench-imageable, but the split —
+  dimensions imageable, `inshell_weight` not — needs confirmation).
+- The allometric equation for `plant_biomass` and whether it is validated for hybrid hazelnut.
+- `stem_vertical_angle`: exact definition (a paired pre/post crop-load branch-angle change) and the
+  imaging protocol to capture it.
+- Whether `cluster_nut_count` and `ttl_inshell_count` are image-estimable at all, or bench/harvest
+  counts only.
+- `plant_surface_area` and `plant_volume` are defined from a 3D canopy model; under the current
+  2D-only scope these may not be computable — confirm the intended data source (drone SfM vs LiDAR)
+  and feasibility.
+- Which *Curculio* weevil species is the local pest, and whether EFB pressure is present in the
+  specific plantings (affects whether `efb_*` traits are active).
+
+## Sources
+
+- Savanna Institute — *Interested in growing hazelnuts?*
+- Upper Midwest Hazelnut Development Initiative — *Hazelnuts 101* establishment fact sheet.
+- *Yield, quality and genetic diversity of hybrid hazelnut selections in the Upper Midwest* (Experts@Minnesota).
+- *Hazelnut floral phenology in southern Ontario* (Canadian Journal of Plant Science).
+- *The Reproduction of Hazelnut (Corylus avellana L.): A Review* (ISHS Acta Horticulturae).
+- *Anisogramma anomala (eastern filbert blight)* — Bugwood Wiki; UW-Madison PDDC.
+- *Hazelnut-Filbert bud mite (Phytoptus avellanae)* — PNW Pest Management Handbooks.
+- *Biology, Ecology, and Management of the Hazelnut-Feeding Weevils (Curculio spp.)* — J. Integrated Pest Management.
+- *Corylus americana (American Hazelnut)* — Minnesota Wildflowers.
+- *Development of a uniform phenology scale (BBCH) in hazelnuts* — Scientia Horticulturae.
