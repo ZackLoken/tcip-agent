@@ -47,14 +47,14 @@ __all__ = [
     "PredBBox",
     "PredPolygon",
     "boxes_from_polygons",
-    # YOLO-specific (preserved for backwards compat)
+    # YOLO — the platform's native on-disk label format (primary read/write path)
     "parse_detect_labels",
     "parse_segment_labels",
     "parse_detect_predictions",
     "parse_segment_predictions",
     "write_detect_labels",
     "write_segment_labels",
-    # Format-agnostic API
+    # Multi-format import/export (auto-detect + dispatch; behind the load/save_annotations tools)
     "detect_format",
     "load_annotations_any",
     "save_annotations_any",
