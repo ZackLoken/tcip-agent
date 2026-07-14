@@ -324,3 +324,49 @@ Part 2 stay deferred by Zack's call; GUI-audit G0–G5 confirmed COMPLETE — it
 - **L3 (fixed):** CLAUDE.md now notes "if `mcp__tcip__*` aren't available you're not at the repo root" + the
   `$TCIP_PROJECT_ROOT` behavior. (L2 — `run_inference(tile=True)` is SAHI — was already in the phenology skill.)
 Gate: ruff clean, backend 851 passed / 6 skipped. No frontend changes this pass.
+
+---
+
+## 2026-07-14 — Skills audit + rebuild (crops / crop-science / phenology + non-core polish)
+
+Zack's overnight ask: dissect/audit/rebuild/review the skills (esp. crops, crop-science, phenology),
+guided by current Anthropic best practices, scoped to `crops.yml`. Report: `SKILLS_AUDIT_REBUILD_REPORT.md`.
+
+### Finding — systematic fabrication in the crop skills (RESOLVED)
+**Observation.** The 6 crop skills + `crop-science` asserted trait names, counts, and fixed
+sensor/ML-task tables contradicting `crops.yml` (the breeder ground truth that says "verify traits
+against this file" and deliberately excludes CV categorizations). Fabrication counts: chestnut 16,
+currant 48, elderberry 39 (+`motion_tracking`), persimmon 17, black-locust 13 (header said 16, real
+10), crop-science wrong counts for 3/6 crops. hazelnut used real names but still carried sensor/task
+tables. An agent trusting these would measure traits the program never defined.
+**Resolution.** Two quality-gated multi-agent workflows (~2.8M tokens): (1) per-crop pomology/pathology
+research grounded in 63 cited sources, each producing a `field-imageable` vs `lab/destructive` trait
+partition whose union == the exact `crops.yml` set (verified, zero fabrication); + a 4-standard audit
+of every skill. (2) rebuild fresh from research + `crops.yml` with the exact allowed trait list as a
+hard constraint, adversarially reviewed. All 7 rebuilt skills applied to live files, each verified by
+a deterministic guardrail (`verify_skill_traits.py`, in the run artifacts) = no trait token outside
+`crops.yml`. Rebuilt skills give domain knowledge (biology, phenophase→trait mapping, imagery
+appearance, disease cues) + the field-vs-lab split (integrity-positive replacement for the sensor/task
+tables), never re-listing the catalog. 70 uncertain domain claims flagged for Zack, not asserted.
+`crops.yml` untouched; nothing committed.
+
+### L-SKILL-1 — OPEN, needs Zack: `catkin_elongation_date` definition conflict
+`crops.yml` = "Date when **most** catkins have elongated" (majority); phenology skill + the locked
+implementation = "first date **any** elongation appears" (onset, Zack's 2026-07-09 ruling). Disagree.
+Flagged in the phenology skill ("Open definition question"); needs a breeder ruling to amend `crops.yml`
+text or the implementation. Not resolved autonomously (measurement-integrity #1 rule).
+
+### L-SKILL-2 — Proposal: make the trait-fidelity guardrail permanent CI
+**Observation.** The LLM reviewers **approved** drafts that still had fabricated traits (a mis-wired
+first pass produced chestnut with 14 fabrications, persimmon with a chestnut trait — verdict "approve"
+on both). The deterministic `verify_skill_traits.py` caught every one. For controlled-vocabulary
+fidelity, a deterministic check is the gate; an LLM "approve" is not sufficient.
+**Proposal.** Adopt `verify_skill_traits.py` (backticked snake_case tokens in every crop skill ⊆
+`crops.yml`, and ⊆ that crop's set) as a repo CI check so skill drift/fabrication can't recur. Status: proposed.
+
+### L-SKILL-3 — Non-core polish applied
+`delivery` had 3 fabricated example traits (`catkin_count`/`disease_severity`/`canopy_area` → real
+ones) + a pinned `confidence 0.3` (→ derive-don't-pin); fixed. Added missing "when to load" clauses to
+`annotation`/`evaluation`/`training`/`pipeline-design`/`visual-analysis`/`delivery` descriptions
+(Anthropic best practice). Deeper non-core body edits (pipeline-design Pattern C/E out-of-2D-scope
+notes, model_spec de-dup with training) noted for Zack, not applied.
