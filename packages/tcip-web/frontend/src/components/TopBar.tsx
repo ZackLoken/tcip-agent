@@ -89,7 +89,7 @@ export function TopBar() {
               : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
           }`}
         >
-          ✦ TCIP Agent
+          TCIP Agent
         </button>
       </div>
     </div>
