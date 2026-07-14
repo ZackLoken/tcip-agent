@@ -1,6 +1,6 @@
 ---
 name: annotation
-description: "Annotation and review workflows for YOLO, COCO, PASCAL VOC, and LabelMe format image data. Covers SAM-assisted labeling, review cycles with IoU matching, active learning scoring, and quality metrics."
+description: "Annotation and review workflows for YOLO, COCO, PASCAL VOC, and LabelMe format image data. Covers SAM-assisted labeling, review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running SAM-assisted labeling, or preparing/QCing training data."
 ---
 
 # Annotation Workflow
