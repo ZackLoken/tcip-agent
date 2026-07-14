@@ -117,17 +117,19 @@ export function CanvasStage(props: CanvasStageProps) {
     };
   }, [wantHiRes, props.hiResImageUrl]);
 
-  // Fit image to canvas the first time we know both dims + image size. The key includes
-  // the image dims so a fit computed from the previous image's dimensions can't latch.
+  // Fit the image to the canvas ONCE per image — not on every container resize. Refitting
+  // on resize reset the user's zoom/pan, and when a reflow briefly reported a near-zero
+  // height (e.g. the Review filter shelf expanding) it collapsed the image to sub-pixel
+  // scale so it appeared to vanish. The key omits dims so a later resize can't re-fit;
+  // it's keyed on image identity + native size so a genuine image change still fits.
   const didFit = useRef<string | null>(null);
   useEffect(() => {
     if (!img || !props.imgWidth || !props.imgHeight) return;
-    const key = `${props.imageUrl}:${dims.w}x${dims.h}:${props.imgWidth}x${props.imgHeight}`;
+    const key = `${props.imageUrl}:${props.imgWidth}x${props.imgHeight}`;
     if (didFit.current === key) return;
+    if (dims.w <= 1 || dims.h <= 1) return; // wait for a real measurement before fitting
     didFit.current = key;
-    const sx = dims.w / props.imgWidth;
-    const sy = dims.h / props.imgHeight;
-    const scale = Math.min(sx, sy);
+    const scale = Math.min(dims.w / props.imgWidth, dims.h / props.imgHeight);
     setView({
       scale,
       offset_x: (dims.w - props.imgWidth * scale) / 2,
