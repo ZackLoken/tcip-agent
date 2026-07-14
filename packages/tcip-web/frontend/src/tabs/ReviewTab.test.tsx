@@ -196,7 +196,7 @@ describe("ReviewTab in-place edit", () => {
     expect(saveBtn()).toBeInTheDocument();
     expect(screen.getByText("Cancel (Esc)")).toBeInTheDocument();
     expect(screen.getByText("Editing")).toBeInTheDocument();
-    expect(screen.queryByText(/Accept \(A\)/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Accept/)).not.toBeInTheDocument();
   });
 
   it("Enter commits the seeded GT box as an edited action, after the .original snapshot", async () => {
@@ -253,7 +253,7 @@ describe("ReviewTab in-place edit", () => {
     expect(
       screen.queryByTitle("Replace the ground-truth shape with this one (Enter)"),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/Accept \(A\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Accept/)).toBeInTheDocument();
     expect(actionSpy).not.toHaveBeenCalled();
   });
 });
