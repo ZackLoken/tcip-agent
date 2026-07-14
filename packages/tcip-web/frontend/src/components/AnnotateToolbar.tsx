@@ -1,11 +1,13 @@
 /**
- * Annotate-tab context toolbar: class/color, draw mode, snap/stream, image status, and
- * image navigation. This lives directly under the global TopBar (logo + tabs + status)
- * so tab-specific tools are decoupled — each tab owns its own toolbar rather than
- * cramming everything into the app-level bar.
+ * Annotate-tab context toolbar. Two rows matching the approved mockup:
+ *   Row 1  — draw mode (Box/Polygon), the class picker pill, an Editor toggle, then the
+ *            nav filter, image navigation, and the Complete checkbox.
+ *   Editor — a second toolbar (collapsed by default, remembered) holding the tools you
+ *            flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
+ * Lives directly under the global TopBar; Undo/Redo/Save are wired up from AnnotateTab.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { classesApi, type ImageStatus } from "@/api/classes";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
@@ -14,13 +16,57 @@ import { useStore } from "@/store";
 
 const STATUS_FILTERS: { value: "all" | ImageStatus; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "complete", label: "Complete" },
   { value: "partial", label: "Partial" },
+  { value: "complete", label: "Complete" },
   { value: "negative", label: "Negative" },
   { value: "unannotated", label: "Unannotated" },
 ];
 
-export function AnnotateToolbar() {
+/** A pressed-state tool button with a status dot, matching the mockup's Editor tools. */
+function Etool({
+  label,
+  pressed,
+  onClick,
+  disabled,
+  title,
+}: {
+  label: string;
+  pressed: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`flex h-7 items-center gap-2 rounded border px-3 text-[12px] transition-colors disabled:opacity-40 ${
+        pressed
+          ? "border-tcip-accent/55 bg-tcip-accent/20 text-tcip-fg"
+          : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
+      }`}
+    >
+      <span
+        className={`h-2 w-2 rounded-full ${pressed ? "bg-tcip-accent" : "bg-tcip-muted"}`}
+        aria-hidden
+      />
+      {label}
+    </button>
+  );
+}
+
+export function AnnotateToolbar({
+  onSave,
+  saveDisabled,
+  dirty,
+}: {
+  onSave: () => void;
+  saveDisabled: boolean;
+  dirty: boolean;
+}) {
   const dataset = useStore((s) => s.gui.dataset);
   const mode = useStore((s) => s.gui.mode);
   const setMode = useStore((s) => s.setMode);
@@ -28,7 +74,6 @@ export function AnnotateToolbar() {
   const setActiveClass = useStore((s) => s.setActiveClass);
   const classes = useStore((s) => s.classes.list);
   const upsertClass = useStore((s) => s.upsertClass);
-  const classColor = useStore((s) => s.classColor);
   const canvasBoxes = useStore((s) => s.canvas.boxes);
   const canvasPolygons = useStore((s) => s.canvas.polygons);
   const annotateUi = useStore((s) => s.annotateUi);
@@ -38,19 +83,35 @@ export function AnnotateToolbar() {
   const imageStatus = useStore((s) => s.imageStatus);
   const setStatusFilter = useStore((s) => s.setStatusFilter);
   const setImageStatus = useStore((s) => s.setImageStatus);
+  const undo = useStore((s) => s.undo);
+  const redo = useStore((s) => s.redo);
 
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // Editor shelf: collapsed by default, remembered across sessions.
+  const [editorOpen, setEditorOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("tcip.annotate.editorOpen") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("tcip.annotate.editorOpen", editorOpen ? "1" : "0");
+    } catch {
+      /* storage disabled — the shelf just won't persist */
+    }
+  }, [editorOpen]);
+
+  const [classMenuOpen, setClassMenuOpen] = useState(false);
+  const [pickerClassId, setPickerClassId] = useState<number | null>(null);
   const [counterDraft, setCounterDraft] = useState<string | null>(null);
   const counterRef = useRef<HTMLInputElement | null>(null);
 
-  // Counts per class, based on current canvas state.
+  // Counts per class from the current canvas state (box mode counts boxes, else polygons).
   const classCounts = useMemo(() => {
     const counts = new Map<number, number>();
-    if (mode === "box") {
-      for (const b of canvasBoxes) counts.set(b.class_id, (counts.get(b.class_id) ?? 0) + 1);
-    } else {
-      for (const p of canvasPolygons) counts.set(p.class_id, (counts.get(p.class_id) ?? 0) + 1);
-    }
+    const src = mode === "box" ? canvasBoxes : canvasPolygons;
+    for (const s of src) counts.set(s.class_id, (counts.get(s.class_id) ?? 0) + 1);
     return counts;
   }, [mode, canvasBoxes, canvasPolygons]);
 
@@ -58,22 +119,21 @@ export function AnnotateToolbar() {
   const currentStatus: ImageStatus | undefined = currentImage
     ? imageStatus.byImage[currentImage]
     : undefined;
-  // The canvas swaps asynchronously on flips — until it holds this image's labels,
-  // Complete would derive its status from the previous image's shapes.
   const loadedImagePath = useStore((s) => s.canvas.loadedImagePath);
   const canvasReady =
     !!dataset.dataset_root &&
     !!dataset.date &&
     loadedImagePath === `${dataset.dataset_root}/images/${dataset.date}/${currentImage}`;
-  // Shared navigation — same filtered traversal as the arrow keys and the Review tab.
   const nav = useImageNav();
+
+  const activeEntry = classes.find((c) => c.id === activeClass);
+  const activeCount = classCounts.get(activeClass) ?? 0;
 
   async function addNewClass() {
     const name = window.prompt("New class name:");
     if (!name) return;
     const trimmed = name.trim();
     if (!trimmed) return;
-    // Re-use existing class if name matches (case-insensitive)
     const existing = classes.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
     if (existing) {
       setActiveClass(existing.id);
@@ -96,13 +156,14 @@ export function AnnotateToolbar() {
   }
 
   async function commitColor(newColor: string) {
-    setPickerOpen(false);
-    const entry = classes.find((c) => c.id === activeClass);
+    const id = pickerClassId;
+    setPickerClassId(null);
+    const entry = classes.find((c) => c.id === id);
     if (!entry) return;
     const updated = { ...entry, color: newColor };
     upsertClass(updated);
     if (dataset.project_root) {
-      const next = classes.map((c) => (c.id === activeClass ? updated : c));
+      const next = classes.map((c) => (c.id === entry.id ? updated : c));
       try {
         await classesApi.save(dataset.project_root, dataset.annotation_type, next);
       } catch (e) {
@@ -116,7 +177,6 @@ export function AnnotateToolbar() {
   async function toggleComplete(next: boolean) {
     if (!currentImage || !dataset.project_root) return;
     const hasContent = canvasBoxes.length + canvasPolygons.length > 0;
-    // Complete → content:complete, empty:negative (the intentional negative); uncheck → content:partial, empty:unannotated.
     const newStatus: ImageStatus = next
       ? hasContent
         ? "complete"
@@ -134,169 +194,305 @@ export function AnnotateToolbar() {
     }
   }
 
-  // Class-dropdown options include the <New Class> sentinel
-  const classOptions = useMemo(() => {
-    const opts = classes.map((c) => ({
-      value: String(c.id),
-      label: `${c.id}: ${c.name} (${classCounts.get(c.id) ?? 0})`,
-    }));
-    opts.push({ value: "__new__", label: "<New Class>" });
-    return opts;
-  }, [classes, classCounts]);
-
-  const activeEntry = classes.find((c) => c.id === activeClass);
+  const pickerEntry = classes.find((c) => c.id === pickerClassId);
 
   return (
-    <div className="h-topbar flex items-center gap-2 px-3 border-b border-tcip-border bg-tcip-panel shrink-0">
-      {/* Color swatch */}
-      <button
-        className="w-7 h-7 rounded border border-tcip-border mr-1 shrink-0"
-        title={`Color: ${activeEntry?.color ?? "—"}  (click to edit)`}
-        style={{ background: classColor(activeClass) }}
-        onClick={() => setPickerOpen(true)}
-        disabled={!activeEntry}
-      />
-
-      {/* Class dropdown */}
-      <select
-        className="tcip-select"
-        value={String(activeClass)}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (v === "__new__") {
-            void addNewClass();
-          } else {
-            setActiveClass(Number(v));
-          }
-        }}
-      >
-        {classOptions.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-
-      {/* Visible checkbox */}
-      <label className="flex items-center gap-1 text-[11px] ml-3">
-        <input
-          type="checkbox"
-          checked={annotateUi.visible}
-          onChange={(e) => setVisible(e.target.checked)}
-        />
-        Visible
-      </label>
-
-      {/* Mode toggle */}
-      <div className="flex rounded overflow-hidden border border-tcip-border ml-3">
-        <button
-          onClick={() => setMode("box")}
-          className={`px-2 h-7 text-[11px] transition-colors ${mode === "box" ? "bg-tcip-accent text-white" : "bg-tcip-panel text-tcip-fg hover:bg-tcip-hover"}`}
+    <div className="shrink-0 border-b border-tcip-border bg-tcip-panel">
+      {/* Row 1 — mode + class + Editor toggle, then navigation */}
+      <div className="h-topbar flex items-center gap-3 px-3">
+        {/* Draw mode */}
+        <div
+          className="inline-flex gap-0.5 rounded border border-tcip-border bg-tcip-bg p-0.5"
+          role="group"
+          aria-label="Draw mode"
         >
-          Box
-        </button>
+          <button
+            aria-pressed={mode === "box"}
+            onClick={() => setMode("box")}
+            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
+              mode === "box" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
+            }`}
+          >
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+              <rect
+                x="2.5"
+                y="3.5"
+                width="11"
+                height="9"
+                rx="1"
+                stroke="currentColor"
+                strokeWidth="1.6"
+              />
+            </svg>
+            Box
+          </button>
+          <button
+            aria-pressed={mode === "polygon"}
+            onClick={() => setMode("polygon")}
+            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
+              mode === "polygon"
+                ? "bg-tcip-accent text-white"
+                : "text-tcip-muted hover:text-tcip-fg"
+            }`}
+          >
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+              <path
+                d="M8 2l5 3.5-2 6H5l-2-6z"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Polygon
+          </button>
+        </div>
+
+        {/* Class picker pill */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setClassMenuOpen((o) => !o)}
+            aria-expanded={classMenuOpen}
+            disabled={!activeEntry}
+            className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-[12px] text-tcip-fg hover:border-tcip-border-hover disabled:opacity-50"
+          >
+            <span
+              className="h-2.5 w-2.5 rounded-sm"
+              style={{ background: activeEntry?.color ?? "#666" }}
+              aria-hidden
+            />
+            <span className="font-semibold">{activeEntry?.name ?? "—"}</span>
+            <span className="font-mono text-tcip-muted">({activeCount})</span>
+            <svg viewBox="0 0 10 10" width="9" height="9" fill="none" aria-hidden="true">
+              <path
+                d="M2 4l3 3 3-3"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-tcip-muted"
+              />
+            </svg>
+          </button>
+          {classMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setClassMenuOpen(false)} />
+              <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-tcip-border bg-tcip-panel py-1 text-[12px] shadow-lg">
+                {classes.map((c) => (
+                  <div key={c.id} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">
+                    <button
+                      type="button"
+                      title="Edit colour"
+                      aria-label={`Edit colour for ${c.name}`}
+                      onClick={() => {
+                        setClassMenuOpen(false);
+                        setPickerClassId(c.id);
+                      }}
+                      className="h-3.5 w-3.5 shrink-0 rounded-sm border border-tcip-border"
+                      style={{ background: c.color }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveClass(c.id);
+                        setClassMenuOpen(false);
+                      }}
+                      className="flex flex-1 items-center py-1 text-left text-tcip-fg"
+                    >
+                      <span className={c.id === activeClass ? "font-semibold" : ""}>{c.name}</span>
+                      <span className="ml-auto font-mono text-tcip-muted">
+                        {classCounts.get(c.id) ?? 0}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+                <div className="mt-1 border-t border-tcip-border pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClassMenuOpen(false);
+                      void addNewClass();
+                    }}
+                    className="w-full px-2 py-1 text-left text-tcip-accent hover:bg-tcip-hover"
+                  >
+                    + New class
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Editor toggle — drops the second toolbar */}
         <button
-          onClick={() => setMode("polygon")}
-          className={`px-2 h-7 text-[11px] transition-colors ${mode === "polygon" ? "bg-tcip-accent text-white" : "bg-tcip-panel text-tcip-fg hover:bg-tcip-hover"}`}
+          type="button"
+          onClick={() => setEditorOpen((o) => !o)}
+          aria-expanded={editorOpen}
+          className={`flex h-[30px] items-center gap-2 rounded border px-3 text-[12px] font-semibold transition-colors ${
+            editorOpen
+              ? "border-tcip-border bg-tcip-hover text-tcip-fg"
+              : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
+          }`}
         >
-          Polygon&nbsp;&nbsp;⬡
+          <svg
+            viewBox="0 0 16 16"
+            width="11"
+            height="11"
+            fill="none"
+            aria-hidden="true"
+            className={`transition-transform ${editorOpen ? "rotate-90" : ""}`}
+          >
+            <path
+              d="M6 4l4 4-4 4"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Editor
         </button>
+
+        <div className="flex-1" />
+
+        {/* Nav filter */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">
+            Filter
+          </span>
+          <select
+            className="tcip-select text-[11px]"
+            value={imageStatus.activeFilter}
+            onChange={(e) => setStatusFilter(e.target.value as "all" | ImageStatus)}
+            title="Status filter"
+          >
+            {STATUS_FILTERS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Image navigation */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">
+            Image
+          </span>
+          <button
+            className="tcip-btn text-[11px]"
+            onClick={() => nav.stepImage(-1)}
+            disabled={!nav.canPrev}
+            aria-label="Previous image"
+          >
+            ◀
+          </button>
+          <span
+            className="max-w-[150px] truncate font-mono text-[11px] text-tcip-fg"
+            title={currentImage}
+          >
+            {currentImage}
+          </span>
+          <input
+            ref={counterRef}
+            className="tcip-input w-10 text-center font-mono text-[11px]"
+            value={counterDraft ?? (nav.position > 0 ? String(nav.position) : "")}
+            onChange={(e) => setCounterDraft(e.target.value.replace(/[^0-9]/g, ""))}
+            onFocus={() => setCounterDraft(String(nav.position || 1))}
+            onBlur={() => setCounterDraft(null)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const num = parseInt(counterDraft ?? "", 10);
+                if (!Number.isNaN(num)) nav.jumpToPosition(num);
+                setCounterDraft(null);
+                counterRef.current?.blur();
+              } else if (e.key === "Escape") {
+                setCounterDraft(null);
+                counterRef.current?.blur();
+              }
+            }}
+          />
+          <span className="font-mono text-[11px] tabular-nums text-tcip-muted">/ {nav.total}</span>
+          <button
+            className="tcip-btn text-[11px]"
+            onClick={() => nav.stepImage(1)}
+            disabled={!nav.canNext}
+            aria-label="Next image"
+          >
+            ▶
+          </button>
+        </div>
+
+        {/* Complete */}
+        <label
+          className="flex items-center gap-1.5 text-[12px]"
+          title={canvasReady ? undefined : "Loading this image's labels…"}
+        >
+          <input
+            type="checkbox"
+            checked={currentStatus === "complete" || currentStatus === "negative"}
+            onChange={(e) => void toggleComplete(e.target.checked)}
+            disabled={!currentImage || !canvasReady}
+          />
+          Complete
+        </label>
       </div>
 
-      {/* Stream / Snap (polygon only) */}
-      <button
-        className={`tcip-btn text-[11px] ml-1 ${annotateUi.stream ? "!bg-tcip-accent !text-white" : ""}`}
-        onClick={() => setStream(!annotateUi.stream)}
-        disabled={mode !== "polygon"}
-        title="Stream vertices while dragging (v)"
-      >
-        Stream: {annotateUi.stream ? "On" : "Off"}
-      </button>
-      <button
-        className={`tcip-btn text-[11px] ${annotateUi.snap ? "!bg-tcip-accent !text-white" : ""}`}
-        onClick={() => setSnap(!annotateUi.snap)}
-        disabled={mode !== "polygon"}
-        title="Snap to nearest vertex (s)"
-      >
-        Snap: {annotateUi.snap ? "On" : "Off"}
-      </button>
+      {/* Editor second toolbar — the tools, plus Undo / Redo / Save */}
+      {editorOpen && (
+        <div className="flex items-center gap-3 border-t border-tcip-border px-3 py-2">
+          <div className="flex items-center gap-2.5">
+            <Etool
+              label="Snap"
+              pressed={annotateUi.snap}
+              onClick={() => setSnap(!annotateUi.snap)}
+              disabled={mode !== "polygon"}
+              title="Snap to nearest vertex (s)"
+            />
+            <Etool
+              label="Stream"
+              pressed={annotateUi.stream}
+              onClick={() => setStream(!annotateUi.stream)}
+              disabled={mode !== "polygon"}
+              title="Stream vertices while dragging (v)"
+            />
+            <Etool
+              label="Show labels"
+              pressed={annotateUi.visible}
+              onClick={() => setVisible(!annotateUi.visible)}
+              title="Show or hide annotation overlays"
+            />
+          </div>
+          <div className="flex-1" />
+          <div className="flex items-center gap-2">
+            <button className="tcip-btn text-[12px]" onClick={() => undo()} title="Undo (Ctrl+Z)">
+              ↶&nbsp;&nbsp;Undo
+            </button>
+            <button
+              className="tcip-btn text-[12px]"
+              onClick={() => redo()}
+              title="Redo (Ctrl+Shift+Z)"
+            >
+              ↷&nbsp;&nbsp;Redo
+            </button>
+            <button
+              className={dirty ? "tcip-btn-primary text-[12px]" : "tcip-btn text-[12px]"}
+              onClick={onSave}
+              disabled={saveDisabled}
+              title="Save (Ctrl+S) — also auto-saves on image change"
+            >
+              {dirty ? "Save" : "Saved"}
+            </button>
+          </div>
+        </div>
+      )}
 
-      {/* Complete + Status filter */}
-      <label
-        className="flex items-center gap-1 text-[11px] ml-3"
-        title={canvasReady ? undefined : "Loading this image's labels…"}
-      >
-        <input
-          type="checkbox"
-          // Show a confirmed negative as checked too (completing an empty image sets "negative").
-          checked={currentStatus === "complete" || currentStatus === "negative"}
-          onChange={(e) => void toggleComplete(e.target.checked)}
-          disabled={!currentImage || !canvasReady}
-        />
-        Complete
-      </label>
-      <select
-        className="tcip-select text-[11px]"
-        value={imageStatus.activeFilter}
-        onChange={(e) => setStatusFilter(e.target.value as "all" | ImageStatus)}
-        title="Status filter"
-      >
-        {STATUS_FILTERS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-
-      <div className="flex-1" />
-
-      {/* Prev / counter / next — filtered position within the status filter */}
-      <button
-        className="tcip-btn text-[11px]"
-        onClick={() => nav.stepImage(-1)}
-        disabled={!nav.canPrev}
-      >
-        ◀&nbsp;&nbsp;Prev
-      </button>
-      <input
-        ref={counterRef}
-        className="tcip-input w-12 text-center font-mono text-[11px]"
-        value={counterDraft ?? (nav.position > 0 ? String(nav.position) : "")}
-        onChange={(e) => setCounterDraft(e.target.value.replace(/[^0-9]/g, ""))}
-        onFocus={() => setCounterDraft(String(nav.position || 1))}
-        onBlur={() => setCounterDraft(null)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            const num = parseInt(counterDraft ?? "", 10);
-            if (!Number.isNaN(num)) nav.jumpToPosition(num);
-            setCounterDraft(null);
-            counterRef.current?.blur();
-          } else if (e.key === "Escape") {
-            setCounterDraft(null);
-            counterRef.current?.blur();
-          }
-        }}
-      />
-      <span className="text-[11px] text-tcip-muted tabular-nums">/ {nav.total}</span>
-      <button
-        className="tcip-btn text-[11px]"
-        onClick={() => nav.stepImage(1)}
-        disabled={!nav.canNext}
-      >
-        Next&nbsp;&nbsp;▶
-      </button>
-
-      {/* Image name */}
-      <div className="text-[11px] text-tcip-muted font-mono max-w-[200px] truncate ml-2">
-        {currentImage}
-      </div>
-
-      {pickerOpen && activeEntry && (
+      {pickerEntry && (
         <ColorPickerModal
-          title={`Color for ${activeEntry.id}: ${activeEntry.name}`}
-          initialColor={activeEntry.color}
+          title={`Color for ${pickerEntry.id}: ${pickerEntry.name}`}
+          initialColor={pickerEntry.color}
           onSubmit={commitColor}
-          onCancel={() => setPickerOpen(false)}
+          onCancel={() => setPickerClassId(null)}
         />
       )}
     </div>
