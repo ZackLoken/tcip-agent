@@ -36,10 +36,10 @@ function clampWidth(px: number): number {
  * The greens are lifted from the #507754 accent toward legibility so the TUI keeps contrast.
  */
 const FIELD_STATION_THEME = {
-  background: "#1E1E1E",
-  foreground: "#E7E5DC",
+  background: "#20211B", // tcip-panel — the warm bark surface used across the app chrome
+  foreground: "#E7E5DC", // tcip-fg
   cursor: "#E6976B",
-  cursorAccent: "#1E1E1E",
+  cursorAccent: "#20211B",
   selectionBackground: "#50775455",
   black: "#33352C",
   red: "#EF5350",
@@ -340,7 +340,7 @@ export function TerminalRail() {
   return (
     <aside
       style={{ width }}
-      className="relative shrink-0 flex flex-col border-l border-tcip-border bg-tcip-bg"
+      className="relative shrink-0 flex flex-col border-l border-tcip-border bg-tcip-panel"
       aria-label="Agent terminal"
     >
       {/* Drag the left edge to resize; width persists. */}
