@@ -11,7 +11,12 @@ import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
-import { computePolygonBboxes, findHoveredPolygon, pointInPolygon } from "@/lib/polygonGeometry";
+import {
+  computePolygonBboxes,
+  findHoveredPolygon,
+  pointInPolygon,
+  polygonBbox,
+} from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/reviewEditGeometry";
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@/store/types";
@@ -948,6 +953,17 @@ export function AnnotateTab() {
   const hoveredIdx = annotateUi.hoveredPolygonIdx;
   const draggingIdx = annotateUi.draggingVertex?.[0];
 
+  // The detect layer is derived from polygons. In box mode, show those derived bounding
+  // boxes (read-only) so the detect layer is inspectable in real time; with no polygons,
+  // box mode edits the real boxes. Recomputed from the live polygon list each render.
+  const boxesDerived = mode === "box" && canvas.polygons.length > 0;
+  const boxesToRender = boxesDerived
+    ? canvas.polygons.map((p): Box => {
+        const [x1, y1, x2, y2] = polygonBbox(p.points);
+        return { x1, y1, x2, y2, class_id: p.class_id };
+      })
+    : canvas.boxes;
+
   return (
     <div className="flex-1 flex flex-col">
       <AnnotateToolbar
@@ -1003,12 +1019,12 @@ export function AnnotateTab() {
         >
           {/* Committed shapes — memoized, cursor-independent (see AnnotationShapes) */}
           <AnnotationShapes
-            boxes={canvas.boxes}
+            boxes={boxesToRender}
             polygons={canvas.polygons}
             mode={mode}
             activeClass={activeClass}
             selectedPolygonIdx={canvas.selectedPolygonIdx}
-            selectedBoxIdx={selectedBoxIdx}
+            selectedBoxIdx={boxesDerived ? null : selectedBoxIdx}
             hoveredIdx={hoveredIdx}
             draggingIdx={draggingIdx}
             renderLabels={renderLabels}
