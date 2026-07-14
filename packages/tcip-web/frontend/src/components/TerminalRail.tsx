@@ -30,9 +30,10 @@ function clampWidth(px: number): number {
 
 /**
  * Field-station terminal theme. Claude Code draws with the 16 ANSI slots, so mapping
- * them to the app palette re-skins the real TUI: green → canopy, yellow → late-summer
- * gold, red → FP red, dim gray → sage. Background stays tcip-bg so the rail sits flush
- * with the app chrome; the cursor is persimmon — the same accent the SeasonRail ends on.
+ * them to the app palette re-skins the real TUI: green → SI-green (the app accent), yellow
+ * → late-summer gold, red → FP red, dim gray → sage. Background stays tcip-bg so the rail
+ * sits flush with the app chrome; the cursor is persimmon — the accent the SeasonRail ends on.
+ * The greens are lifted from the #507754 accent toward legibility so the TUI keeps contrast.
  */
 const FIELD_STATION_THEME = {
   background: "#1E1E1E",
@@ -42,7 +43,7 @@ const FIELD_STATION_THEME = {
   selectionBackground: "#50775455",
   black: "#33352C",
   red: "#EF5350",
-  green: "#7FA96A",
+  green: "#6E9A72", // SI-green, lightened for terminal contrast
   yellow: "#C9A24B",
   blue: "#7E9CB9",
   magenta: "#B48EAD",
@@ -50,7 +51,7 @@ const FIELD_STATION_THEME = {
   white: "#E7E5DC",
   brightBlack: "#8C9082",
   brightRed: "#F28B82",
-  brightGreen: "#9FC48A",
+  brightGreen: "#8FC095", // brighter SI-green for the bold/success slot
   brightYellow: "#D9B96C",
   brightBlue: "#9DB8D2",
   brightMagenta: "#C9A9C0",
@@ -63,6 +64,8 @@ export function TerminalRail() {
   const setOpen = useStore((s) => s.setTerminalOpen);
   const [status, setStatus] = useState<{ available: boolean; reason?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Live PTY link state, surfaced as a header dot (green = attached, amber = (re)connecting).
+  const [conn, setConn] = useState<"connecting" | "open" | "reconnecting">("connecting");
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<string | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -118,6 +121,7 @@ export function TerminalRail() {
   // conversation) stays alive, and reopening replays the scrollback.
   useEffect(() => {
     if (!open || !status?.available || !hostRef.current) return;
+    setConn("connecting");
 
     const term = new Terminal({
       theme: FIELD_STATION_THEME,
@@ -269,6 +273,7 @@ export function TerminalRail() {
         opened = true;
         backoff = 500;
         setError(null);
+        setConn("open");
         term.reset(); // the replay repaints the screen from scratch
         send({ type: "resize", rows: term.rows, cols: term.cols });
       };
@@ -277,6 +282,7 @@ export function TerminalRail() {
       };
       socket.onclose = (ev) => {
         if (closedByClient) return;
+        setConn("reconnecting");
         // A close before open (or 1008 "unknown session") means the backend no longer
         // knows this session — e.g. it restarted. Retrying the dead id forever is the
         // silent-death failure mode; drop it so the next attempt re-creates a session.
@@ -347,22 +353,56 @@ export function TerminalRail() {
         className="absolute left-0 top-0 bottom-0 -ml-1 w-1.5 z-10 cursor-col-resize hover:bg-tcip-accent/40"
       />
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
-        <span className="tcip-eyebrow">TCIP Agent</span>
+        <div className="flex items-center gap-2">
+          <span className="tcip-eyebrow">TCIP Agent</span>
+          {status?.available && (
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                conn === "open" ? "bg-tcip-accent" : "bg-tcip-warn animate-pulse"
+              }`}
+              title={
+                conn === "open"
+                  ? "Agent connected"
+                  : conn === "reconnecting"
+                    ? "Reconnecting…"
+                    : "Connecting…"
+              }
+              aria-label={conn === "open" ? "Agent connected" : "Agent connecting"}
+            />
+          )}
+        </div>
         <div className="flex items-center gap-1">
           <button
             onClick={restart}
             title="Restart the agent (ends its current conversation)"
-            className="text-[11px] text-tcip-muted hover:text-tcip-fg px-1.5 h-6 rounded hover:bg-tcip-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
+            aria-label="Restart the agent"
+            className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
           >
-            Restart
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+              <path
+                d="M12.8 8a4.8 4.8 0 1 1-1.4-3.4"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+              <path
+                d="M12.8 2.6v3h-3"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
           <button
             onClick={() => setOpen(false)}
             aria-label="Minimize agent terminal"
-            title="Minimize — the agent keeps running; reopen from the ✦ TCIP Agent button"
-            className="text-tcip-muted hover:text-tcip-fg text-[15px] leading-none px-1.5 h-6 rounded hover:bg-tcip-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
+            title="Minimize — the agent keeps running; reopen from the TCIP Agent button"
+            className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
           >
-            –
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+              <path d="M4 11h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
           </button>
         </div>
       </div>
