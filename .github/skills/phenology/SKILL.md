@@ -1,6 +1,6 @@
 ---
 name: phenology
-description: "Catkin/pistillate bloom phenology — the 05/50/95-per-date trait. Authoritative trait definition (elongated-fraction crossing), the end-to-end pattern, and the exact pieces to compose (compute_phenology tool, phenology module, plant mapping) so it is never re-scripted per project."
+description: "Compute and deliver bloom phenology — the catkin/pistillate 05/50/95-per-date milestones — as one row per plant, by composing existing pieces instead of re-scripting. Covers the operationalization (dates a plant's validated-classifier elongated fraction crosses 5/50/95%, never a bbox-height proxy), the end-to-end pattern, the pieces to compose (compute_phenology tool, phenology module, plant mapping), and the measurement-integrity guard. Load when computing bloom milestones, building plant mapping, delivering a per-plant phenology CSV, or handling hazelnut catkin or pistillate bloom timing."
 ---
 
 # Bloom phenology — the 05/50/95-per-date trait
@@ -31,6 +31,13 @@ Milestones, per plant, from that plant's elongated-fraction time series:
 Crossings interpolate linearly between the two neighbouring capture dates. Pistillate
 milestones (`pistillate_05/50/95per_date`) are the identical pattern on the pistillate-
 flower detector/classifier.
+
+> **Open definition question (breeder to resolve).** `crops.yml` currently defines
+> `catkin_elongation_date` as *"Date when most catkins have elongated"* (a majority event),
+> while this skill and the platform's locked implementation use *"first date any elongation
+> appears"* (onset). These disagree. Until the breeder reconciles them (amend `crops.yml`
+> or the implementation), treat this one milestone's threshold as unsettled — the
+> `05/50/95` crossings are unaffected.
 
 **Not a count-of-peak, not a sigmoid fit.** Do not normalize catkin *count* to the season
 peak and call the crossings bloom — that is an abundance signal and a different (wrong)
