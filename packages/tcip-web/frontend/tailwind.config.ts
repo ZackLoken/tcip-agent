@@ -36,7 +36,7 @@ const config: Config = {
         // Detection tags — kept vivid + distinct (CV correctness).
         "tcip-tp": "#4CAF50",
         "tcip-fp": "#EF5350",
-        "tcip-fn": "#FFA726",
+        "tcip-fn": "#FFD54A", // gold — the "missed" (false-negative) signal, matches the review legend
         "tcip-pred": "#00BFFF",
         "tcip-focus": "#FFD700",
       },
