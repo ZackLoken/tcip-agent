@@ -837,11 +837,6 @@ export function ReviewTab() {
             <span className="tcip-badge bg-transparent border border-tcip-pred text-tcip-pred">
               Editing
             </span>
-            <span className="text-tcip-muted">
-              {edit.kind === "box"
-                ? "Drag a corner to resize · drag inside to move"
-                : "Drag a point to reshape · drag inside to move"}
-            </span>
             <button
               className="tcip-btn-primary"
               onClick={() => void commitEdit()}
@@ -851,14 +846,14 @@ export function ReviewTab() {
                   : "Replace the ground-truth shape with this one (Enter)"
               }
             >
-              ✓&nbsp;&nbsp;Save edit (Enter)
+              ✓&nbsp;&nbsp;Save edit
             </button>
             <button
               className="tcip-btn"
               onClick={cancelEdit}
               title="Discard this adjustment — ground truth unchanged (Esc)"
             >
-              Cancel (Esc)
+              Cancel
             </button>
           </>
         )}
@@ -907,12 +902,14 @@ function ReviewLegend({ onClose }: { onClose: () => void }) {
           ✕
         </button>
       </div>
-      <p className="mb-2 text-tcip-muted">Solid = ground truth&nbsp; | &nbsp;Dashed = prediction</p>
+      <p className="mb-2 text-tcip-muted">
+        Solid = outcome&nbsp; | &nbsp;Dashed blue = under review
+      </p>
       <ul className="space-y-1.5">
         <LegendRow color={TAG_COLORS.tp} label="Matched (TP)" />
-        <LegendRow color={TAG_COLORS.fp} dashed label="False positive (FP)" />
+        <LegendRow color={TAG_COLORS.fp} label="False positive (FP)" />
         <LegendRow color={TAG_COLORS.fn} label="Missed (FN)" />
-        <LegendRow color={ACTIVE_COLOR} label="Under review" />
+        <LegendRow color={ACTIVE_COLOR} dashed label="Under review" />
       </ul>
     </div>
   );
@@ -1004,7 +1001,22 @@ function ReviewOverlays({
   const scale = useStore((s) => s.gui.view.scale);
   const lw = 1 / (scale || 1);
 
-  // Draw non-active detections first, the active one last so its blue highlight sits on top.
+  // One annotation task at a time: an image can carry both detect (boxes) and segment
+  // (polygons) labels, and drawing both is unreadable. Show the kind being reviewed —
+  // driven by the predictions, falling back to the GT kind when there are no predictions.
+  const reviewKind: "box" | "polygon" = (() => {
+    if (matches.pred_boxes.length || matches.pred_polygons.length) {
+      return matches.pred_polygons.length && !matches.pred_boxes.length ? "polygon" : "box";
+    }
+    return matches.gt_polygons.length && !matches.gt_boxes.length ? "polygon" : "box";
+  })();
+
+  const box = (idx: number | null) => (idx !== null ? matches.gt_boxes[idx] : undefined);
+  const predBox = (idx: number | null) => (idx !== null ? matches.pred_boxes[idx] : undefined);
+  const poly = (idx: number | null) => (idx !== null ? matches.gt_polygons[idx] : undefined);
+  const predPoly = (idx: number | null) => (idx !== null ? matches.pred_polygons[idx] : undefined);
+
+  // Non-active first, the active detection last so its blue overlay sits on top.
   const order = matches.detections
     .map((_, i) => i)
     .sort((a, b) => (a === focusedIdx ? 1 : 0) - (b === focusedIdx ? 1 : 0));
@@ -1013,79 +1025,112 @@ function ReviewOverlays({
     <>
       {order.map((i) => {
         const d = matches.detections[i];
+        // Skip detections of the other annotation kind.
+        if ((d.gt_type ?? d.pred_type) !== reviewKind) return null;
         const active = i === focusedIdx;
         const outcome = TAG_COLORS[d.det_type];
         const weight = active ? 3 : 2;
+        const nodes: ReactNode[] = [];
 
-        // Line style carries the source: GT solid, prediction dashed. Colour = outcome,
-        // except the detection under review — its editable side turns blue, keeping its style:
-        // active TP → prediction blue (GT stays green); active FP → prediction blue;
-        // active FN → GT blue (no prediction).
-        const gtStroke = active && d.det_type === "fn" ? ACTIVE_COLOR : outcome;
-        const predStroke = active ? ACTIVE_COLOR : outcome;
+        if (d.det_type === "fp") {
+          // FP = a prediction with no GT. Solid outcome red as context; the detection under
+          // review turns dashed blue (see the review legend).
+          if (showPred && !(active && suppressFocusedPred)) {
+            const stroke = active ? ACTIVE_COLOR : outcome;
+            const fill = `${stroke}26`;
+            const b = predBox(d.pred_type === "box" ? d.pred_idx : null);
+            const p = predPoly(d.pred_type === "polygon" ? d.pred_idx : null);
+            if (b)
+              nodes.push(
+                <ReviewRect
+                  key="fp"
+                  box={b}
+                  stroke={stroke}
+                  lw={lw}
+                  weight={weight}
+                  dashed={active}
+                  fill={fill}
+                />,
+              );
+            else if (p)
+              nodes.push(
+                <ReviewLine
+                  key="fp"
+                  points={p.points}
+                  stroke={stroke}
+                  lw={lw}
+                  weight={weight}
+                  dashed={active}
+                  fill={fill}
+                />,
+              );
+          }
+        } else {
+          // TP / FN = ground truth, solid. Active FN turns blue; active TP keeps its green GT.
+          if (showGT && d.gt_type && !(active && suppressFocusedGt)) {
+            const stroke = active && d.det_type === "fn" ? ACTIVE_COLOR : outcome;
+            const fill = d.reviewed ? `${outcome}26` : undefined;
+            const b = box(d.gt_type === "box" ? d.gt_idx : null);
+            const p = poly(d.gt_type === "polygon" ? d.gt_idx : null);
+            if (b)
+              nodes.push(
+                <ReviewRect key="gt" box={b} stroke={stroke} lw={lw} weight={weight} fill={fill} />,
+              );
+            else if (p)
+              nodes.push(
+                <ReviewLine
+                  key="gt"
+                  points={p.points}
+                  stroke={stroke}
+                  lw={lw}
+                  weight={weight}
+                  fill={fill}
+                />,
+              );
+          }
+          // The TP under review also shows its prediction as a dashed-blue overlay (pred vs GT).
+          if (active && d.det_type === "tp" && showPred && !suppressFocusedPred) {
+            const b = predBox(d.pred_type === "box" ? d.pred_idx : null);
+            const p = predPoly(d.pred_type === "polygon" ? d.pred_idx : null);
+            if (b)
+              nodes.push(
+                <ReviewRect
+                  key="tp-pred"
+                  box={b}
+                  stroke={ACTIVE_COLOR}
+                  lw={lw}
+                  weight={3}
+                  dashed
+                />,
+              );
+            else if (p)
+              nodes.push(
+                <ReviewLine
+                  key="tp-pred"
+                  points={p.points}
+                  stroke={ACTIVE_COLOR}
+                  lw={lw}
+                  weight={3}
+                  dashed
+                />,
+              );
+          }
+        }
 
-        const gtBox = d.gt_type === "box" && d.gt_idx !== null ? matches.gt_boxes[d.gt_idx] : null;
-        const gtPoly =
-          d.gt_type === "polygon" && d.gt_idx !== null ? matches.gt_polygons[d.gt_idx] : null;
-        const predBox =
-          d.pred_type === "box" && d.pred_idx !== null ? matches.pred_boxes[d.pred_idx] : null;
-        const predPoly =
-          d.pred_type === "polygon" && d.pred_idx !== null
-            ? matches.pred_polygons[d.pred_idx]
-            : null;
+        if (active) {
+          nodes.push(
+            <HaloLabel
+              key="lbl"
+              x={d.bbox[0]}
+              y={d.bbox[1]}
+              text={`${classNameLookup(d.class_id)}${d.conf !== null ? ` ${d.conf.toFixed(2)}` : ""}`}
+              fill={ACTIVE_COLOR}
+              size={11 * lw}
+            />,
+          );
+        }
 
-        const drawGt = showGT && !(active && suppressFocusedGt);
-        const drawPred = showPred && !(active && suppressFocusedPred);
-        const gtFill = d.reviewed ? `${outcome}26` : undefined; // faint fill marks a reviewed object
-        const predFill = d.det_type === "fp" ? `${predStroke}26` : undefined; // find the empty FP box
-
-        return (
-          <Fragment key={`det-${i}`}>
-            {drawGt && gtBox && (
-              <ReviewRect box={gtBox} stroke={gtStroke} lw={lw} weight={weight} fill={gtFill} />
-            )}
-            {drawGt && gtPoly && (
-              <ReviewLine
-                points={gtPoly.points}
-                stroke={gtStroke}
-                lw={lw}
-                weight={weight}
-                fill={gtFill}
-              />
-            )}
-            {drawPred && predBox && (
-              <ReviewRect
-                box={predBox}
-                stroke={predStroke}
-                lw={lw}
-                weight={weight}
-                dashed
-                fill={predFill}
-              />
-            )}
-            {drawPred && predPoly && (
-              <ReviewLine
-                points={predPoly.points}
-                stroke={predStroke}
-                lw={lw}
-                weight={weight}
-                dashed
-                fill={predFill}
-              />
-            )}
-            {active && (
-              <HaloLabel
-                x={d.bbox[0]}
-                y={d.bbox[1]}
-                text={`${classNameLookup(d.class_id)}${
-                  d.conf !== null ? ` ${d.conf.toFixed(2)}` : ""
-                }`}
-                fill={ACTIVE_COLOR}
-                size={11 * lw}
-              />
-            )}
-          </Fragment>
-        );
+        return <Fragment key={`det-${i}`}>{nodes}</Fragment>;
       })}
     </>
   );
