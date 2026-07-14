@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Circle, Line, Rect, Text } from "react-konva";
 import type Konva from "konva";
 
@@ -18,23 +18,18 @@ import {
   type EditShape,
 } from "@/lib/reviewEditGeometry";
 import { useStore } from "@/store";
-import type {
-  Box,
-  DatasetSelection,
-  Detection,
-  MatchesResponse,
-  PolygonShape,
-  PredBox,
-  PredPolygon,
-} from "@/store/types";
+import type { Box, DatasetSelection, Detection, MatchesResponse, PredBox } from "@/store/types";
 
+// Outcome colours (color = outcome). Line style carries the source: solid = GT, dashed = prediction.
 const TAG_COLORS: Record<"tp" | "fp" | "fn", string> = {
-  tp: "#4CAF50",
-  fp: "#EF5350",
-  fn: "#FFA726",
+  tp: "#4CAF50", // matched
+  fp: "#EF5350", // false positive
+  fn: "#FFD54A", // missed (gold)
 };
 
-const EDIT_COLOR = "#00BFFF"; // tcip-pred — the shape currently picked up for adjustment
+// tcip-pred — the detection under review: its editable side turns this blue, keeping its own line style.
+const ACTIVE_COLOR = "#00BFFF";
+const EDIT_COLOR = ACTIVE_COLOR; // the shape currently picked up for adjustment shares the active blue
 const MIN_BOX_SIDE = 3;
 const HANDLE_HIT_PX = 10; // screen-px hit radius for edit handles
 
@@ -128,6 +123,22 @@ export function ReviewTab() {
   const [showGT, setShowGT] = useState(true);
   const [showPred, setShowPred] = useState(true);
   const [toolsOpen, setToolsOpen] = useState(false);
+  // The filter shelf is collapsed by default and remembers the last state across sessions.
+  const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("tcip.review.filtersOpen") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("tcip.review.filtersOpen", filtersOpen ? "1" : "0");
+    } catch {
+      /* private mode / disabled storage — the shelf just won't persist */
+    }
+  }, [filtersOpen]);
+  const [legendOpen, setLegendOpen] = useState(false);
   const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
   const [edit, setEdit] = useState<EditShape | null>(null);
   const editDrag = useRef<EditDrag | null>(null);
@@ -500,8 +511,8 @@ export function ReviewTab() {
   // Verdicts author ground truth: accept an FP adds the prediction to GT; reject a detection that
   // has GT (TP/FN) deletes that GT box; accept a TP/FN keeps the existing GT. Edit adjusts the shape
   // first, then accept commits it.
-  const acceptLabel = "Accept (A)";
-  const rejectLabel = "Reject (R)";
+  const acceptLabel = "Accept";
+  const rejectLabel = "Reject";
   const acceptTitle =
     current?.det_type === "fp"
       ? "Add this prediction to ground truth (A)"
@@ -513,122 +524,182 @@ export function ReviewTab() {
 
   return (
     <div className="flex-1 flex flex-col relative">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-tcip-border bg-tcip-panel text-[11px]">
-        <span className="text-tcip-muted">IoU ≥</span>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={filters.iou_threshold * 100}
-          disabled={!!edit}
-          onChange={(e) =>
-            patchGui({
-              review: { ...filters, iou_threshold: Number(e.target.value) / 100 },
-            })
-          }
-        />
-        <span className="tabular-nums w-10">{filters.iou_threshold.toFixed(2)}</span>
-
-        <span className="ml-3 text-tcip-muted">Conf ≥</span>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={filters.conf_threshold * 100}
-          disabled={!!edit}
-          onChange={(e) =>
-            patchGui({
-              review: { ...filters, conf_threshold: Number(e.target.value) / 100 },
-            })
-          }
-        />
-        <span className="tabular-nums w-10">{filters.conf_threshold.toFixed(2)}</span>
-
-        <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
-        <select
-          className="tcip-select"
-          value={filters.filter_type}
-          disabled={!!edit}
-          onChange={(e) =>
-            patchGui({ review: { ...filters, filter_type: e.target.value as never } })
-          }
-        >
-          <option value="all">All</option>
-          <option value="tp">TP</option>
-          <option value="fp">FP</option>
-          <option value="fn">FN</option>
-        </select>
-        <select
-          className="tcip-select"
-          value={filters.status_filter}
-          disabled={!!edit}
-          onChange={(e) =>
-            patchGui({ review: { ...filters, status_filter: e.target.value as never } })
-          }
-        >
-          <option value="all">All status</option>
-          <option value="not_reviewed">Unreviewed</option>
-          <option value="reviewed">Reviewed</option>
-        </select>
-
-        <label className="flex items-center gap-1 ml-3">
-          <input type="checkbox" checked={showGT} onChange={(e) => setShowGT(e.target.checked)} />
-          GT
-        </label>
-        <label className="flex items-center gap-1">
-          <input
-            type="checkbox"
-            checked={showPred}
-            onChange={(e) => setShowPred(e.target.checked)}
-          />
-          Pred
-        </label>
-
-        <span className="flex-1" />
-
-        {imgName && (
-          <span className="text-tcip-fg font-medium truncate max-w-[12rem]" title={imgName}>
-            {imgName}
+      <div className="relative border-b border-tcip-border bg-tcip-panel">
+        {/* Row 1 — filter shelf toggle + live summary + legend, then image / detection navigation */}
+        <div className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
+          <button
+            className="tcip-btn"
+            onClick={() => setFiltersOpen((v) => !v)}
+            aria-expanded={filtersOpen}
+            disabled={!!edit}
+            title="Show or hide the review filters"
+          >
+            <span className={`inline-block transition-transform ${filtersOpen ? "rotate-90" : ""}`}>
+              ▸
+            </span>
+            &nbsp;&nbsp;Filters
+          </button>
+          {/* Live summary — updates as the filters change, so the shelf can stay collapsed. */}
+          <span className="flex items-center gap-1.5 tabular-nums">
+            <FilterChip>IoU ≥ {filters.iou_threshold.toFixed(2)}</FilterChip>
+            <FilterChip>Conf ≥ {filters.conf_threshold.toFixed(2)}</FilterChip>
+            {filters.filter_type !== "all" && (
+              <FilterChip>{filters.filter_type.toUpperCase()}</FilterChip>
+            )}
+            {filters.status_filter !== "all" && (
+              <FilterChip>
+                {filters.status_filter === "reviewed" ? "Reviewed" : "Unreviewed"}
+              </FilterChip>
+            )}
+            {!showGT && <FilterChip>GT off</FilterChip>}
+            {!showPred && <FilterChip>Pred off</FilterChip>}
           </span>
-        )}
-        <span className={`tcip-badge ${IMAGE_STATUS_CLASS[imageStatus]}`}>
-          {IMAGE_STATUS_LABEL[imageStatus]}
-        </span>
-        {/* Same affordance as Annotate's Complete: a reversible checkbox. */}
-        <label
-          className="flex items-center gap-1"
-          title="Mark this image fully reviewed — its annotation status is confirmed from the GT files; uncheck to reopen"
-        >
-          <input
-            type="checkbox"
-            checked={imageStatus === "completed"}
-            onChange={(e) => void markImageComplete(e.target.checked)}
-            disabled={!imgName || !!edit}
-          />
-          Reviewed
-        </label>
 
-        <button className="tcip-btn" onClick={() => stepImage(-1)} disabled={!!edit}>
-          ◀&nbsp;&nbsp;Prev img
-        </button>
-        <span className="tabular-nums">
-          {matches && matches.detections.length > 0
-            ? `${detectionIdx + 1} / ${matches.detections.length}`
-            : "0 / 0"}
-        </span>
-        <button className="tcip-btn" onClick={() => stepImage(1)} disabled={!!edit}>
-          Next img&nbsp;&nbsp;▶
-        </button>
-        <button
-          className="tcip-btn ml-2"
-          onClick={() => setToolsOpen(true)}
-          disabled={!!edit}
-          title="Build training set / prioritize review queue"
-        >
-          ⚙&nbsp;&nbsp;Tools
-        </button>
+          <button
+            className="tcip-btn"
+            onClick={() => setLegendOpen((v) => !v)}
+            aria-expanded={legendOpen}
+            title="What the box colours and line styles mean"
+          >
+            Legend
+          </button>
+
+          <span className="flex-1" />
+
+          {imgName && (
+            <span className="text-tcip-fg font-medium truncate max-w-[12rem]" title={imgName}>
+              {imgName}
+            </span>
+          )}
+          <span className={`tcip-badge ${IMAGE_STATUS_CLASS[imageStatus]}`}>
+            {IMAGE_STATUS_LABEL[imageStatus]}
+          </span>
+          {/* Same affordance as Annotate's Complete: a reversible checkbox. */}
+          <label
+            className="flex items-center gap-1"
+            title="Mark this image fully reviewed — its annotation status is confirmed from the GT files; uncheck to reopen"
+          >
+            <input
+              type="checkbox"
+              checked={imageStatus === "completed"}
+              onChange={(e) => void markImageComplete(e.target.checked)}
+              disabled={!imgName || !!edit}
+            />
+            Reviewed
+          </label>
+
+          <button className="tcip-btn" onClick={() => stepImage(-1)} disabled={!!edit}>
+            ◀&nbsp;&nbsp;Prev img
+          </button>
+          <span className="tabular-nums">
+            {matches && matches.detections.length > 0
+              ? `${detectionIdx + 1} / ${matches.detections.length}`
+              : "0 / 0"}
+          </span>
+          <button className="tcip-btn" onClick={() => stepImage(1)} disabled={!!edit}>
+            Next img&nbsp;&nbsp;▶
+          </button>
+          <button
+            className="tcip-btn ml-2"
+            onClick={() => setToolsOpen(true)}
+            disabled={!!edit}
+            title="Build training set / prioritize review queue"
+          >
+            ⚙&nbsp;&nbsp;Tools
+          </button>
+        </div>
+
+        {/* Row 2 — the filter controls, collapsed by default and remembered across sessions */}
+        {filtersOpen && (
+          <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 border-t border-tcip-border text-[11px]">
+            <span className="text-tcip-muted">IoU ≥</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={filters.iou_threshold * 100}
+              disabled={!!edit}
+              onChange={(e) =>
+                patchGui({
+                  review: { ...filters, iou_threshold: Number(e.target.value) / 100 },
+                })
+              }
+            />
+            <span className="tabular-nums w-10">{filters.iou_threshold.toFixed(2)}</span>
+
+            <span className="ml-3 text-tcip-muted">Conf ≥</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={filters.conf_threshold * 100}
+              disabled={!!edit}
+              onChange={(e) =>
+                patchGui({
+                  review: { ...filters, conf_threshold: Number(e.target.value) / 100 },
+                })
+              }
+            />
+            <span className="tabular-nums w-10">{filters.conf_threshold.toFixed(2)}</span>
+
+            <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
+            <select
+              className="tcip-select"
+              value={filters.filter_type}
+              disabled={!!edit}
+              onChange={(e) =>
+                patchGui({ review: { ...filters, filter_type: e.target.value as never } })
+              }
+            >
+              <option value="all">All</option>
+              <option value="tp">TP</option>
+              <option value="fp">FP</option>
+              <option value="fn">FN</option>
+            </select>
+            <select
+              className="tcip-select"
+              value={filters.status_filter}
+              disabled={!!edit}
+              onChange={(e) =>
+                patchGui({ review: { ...filters, status_filter: e.target.value as never } })
+              }
+            >
+              <option value="all">All status</option>
+              <option value="not_reviewed">Unreviewed</option>
+              <option value="reviewed">Reviewed</option>
+            </select>
+
+            <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-tcip-muted">
+              Visibility
+            </span>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={showGT}
+                onChange={(e) => setShowGT(e.target.checked)}
+              />
+              Ground truth
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={showPred}
+                onChange={(e) => setShowPred(e.target.checked)}
+              />
+              Predictions
+            </label>
+          </div>
+        )}
+
+        {legendOpen && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setLegendOpen(false)} />
+            <ReviewLegend onClose={() => setLegendOpen(false)} />
+          </>
+        )}
       </div>
 
       <div className="relative flex-1 flex flex-col">
@@ -665,6 +736,8 @@ export function ReviewTab() {
             }}
           >
             {current.det_type.toUpperCase()}
+            <span className="mx-1 text-tcip-border">|</span>
+            <span className="font-normal text-tcip-muted">{edit ? "editing" : "reviewing"}</span>
           </span>
         )}
       </div>
@@ -713,21 +786,18 @@ export function ReviewTab() {
         </button>
         {current && (
           <>
-            <span
-              className={`tcip-badge bg-transparent border ${
-                current.det_type === "tp"
-                  ? "border-tcip-tp text-tcip-tp"
-                  : current.det_type === "fp"
-                    ? "border-tcip-fp text-tcip-fp"
-                    : "border-tcip-fn text-tcip-fn"
-              }`}
-            >
-              {current.det_type.toUpperCase()}
-            </span>
             <span className="text-tcip-muted">
-              cid {current.class_id}: {className(current.class_id)}
-              {current.conf !== null && ` · conf ${current.conf.toFixed(2)}`}
-              {current.iou !== null && ` · iou ${current.iou.toFixed(2)}`}
+              {className(current.class_id)}
+              {current.conf !== null && (
+                <>
+                  <span className="mx-1.5 text-tcip-border">|</span>conf {current.conf.toFixed(2)}
+                </>
+              )}
+              {current.iou !== null && (
+                <>
+                  <span className="mx-1.5 text-tcip-border">|</span>IoU {current.iou.toFixed(2)}
+                </>
+              )}
             </span>
             {current.reviewed && (
               <span className="text-tcip-warn">({current.reviewed_action})</span>
@@ -739,12 +809,6 @@ export function ReviewTab() {
 
         {current && !edit && (
           <>
-            <span
-              className="text-tcip-muted mr-1"
-              title="Verdicts write ground truth — each button says what it does for this detection"
-            >
-              writes GT ·
-            </span>
             <button
               className="tcip-btn-primary"
               onClick={() => void recordAction("accepted")}
@@ -757,7 +821,7 @@ export function ReviewTab() {
               onClick={startEdit}
               title="Adjust this shape on the canvas (E)"
             >
-              ✎&nbsp;&nbsp;Edit (E)
+              ✎&nbsp;&nbsp;Edit
             </button>
             <button
               className="tcip-btn-danger"
@@ -801,6 +865,55 @@ export function ReviewTab() {
       </div>
 
       <ReviewToolsDrawer open={toolsOpen} onClose={() => setToolsOpen(false)} />
+    </div>
+  );
+}
+
+function FilterChip({ children }: { children: ReactNode }) {
+  return (
+    <span className="rounded border border-tcip-border bg-tcip-bg px-1.5 py-0.5 text-tcip-muted">
+      {children}
+    </span>
+  );
+}
+
+function LegendRow({ color, dashed, label }: { color: string; dashed?: boolean; label: string }) {
+  return (
+    <li className="flex items-center gap-2.5">
+      <span
+        className="inline-block w-6 shrink-0"
+        style={{ borderTop: `2.5px ${dashed ? "dashed" : "solid"} ${color}` }}
+      />
+      <span className="text-tcip-fg">{label}</span>
+    </li>
+  );
+}
+
+/** The review symbology, keyed to what the canvas draws: line style = source, colour = outcome. */
+function ReviewLegend({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      role="dialog"
+      aria-label="Review legend"
+      className="absolute left-3 top-full z-20 mt-1 w-64 rounded-md border border-tcip-border bg-tcip-panel p-3 text-[11px] shadow-lg"
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="font-semibold text-tcip-fg">Review Legend</span>
+        <button
+          className="text-tcip-muted hover:text-tcip-fg"
+          onClick={onClose}
+          aria-label="Close legend"
+        >
+          ✕
+        </button>
+      </div>
+      <p className="mb-2 text-tcip-muted">Solid = ground truth&nbsp; | &nbsp;Dashed = prediction</p>
+      <ul className="space-y-1.5">
+        <LegendRow color={TAG_COLORS.tp} label="Matched (TP)" />
+        <LegendRow color={TAG_COLORS.fp} dashed label="False positive (FP)" />
+        <LegendRow color={TAG_COLORS.fn} label="Missed (FN)" />
+        <LegendRow color={ACTIVE_COLOR} label="Under review" />
+      </ul>
     </div>
   );
 }
@@ -890,219 +1003,148 @@ function ReviewOverlays({
 }: OverlayProps) {
   const scale = useStore((s) => s.gui.view.scale);
   const lw = 1 / (scale || 1);
-  const focused = matches.detections[focusedIdx];
 
-  // Build a lookup for which (gt_type, gt_idx) and (pred_type, pred_idx)
-  // belong to a reviewed detection — used to draw stippled / faded GT.
-  const reviewedGtKeys = new Set<string>();
-  matches.detections.forEach((d) => {
-    if (d.reviewed && d.gt_type && d.gt_idx !== null) {
-      reviewedGtKeys.add(`${d.gt_type}:${d.gt_idx}`);
-    }
-  });
-
-  const focusedGt =
-    focused && focused.gt_type && focused.gt_idx !== null
-      ? `${focused.gt_type}:${focused.gt_idx}`
-      : null;
-
-  const tagColor = focused ? TAG_COLORS[focused.det_type] : null;
+  // Draw non-active detections first, the active one last so its blue highlight sits on top.
+  const order = matches.detections
+    .map((_, i) => i)
+    .sort((a, b) => (a === focusedIdx ? 1 : 0) - (b === focusedIdx ? 1 : 0));
 
   return (
     <>
-      {showGT &&
-        matches.gt_boxes.map((b: Box, i: number) => {
-          const key = `box:${i}`;
-          const isFocused = focusedGt === key;
-          if (isFocused && suppressFocusedGt) return null;
-          const isReviewed = reviewedGtKeys.has(key);
-          return (
-            <GtBox
-              key={`gt-b-${i}`}
-              box={b}
-              focused={isFocused}
-              reviewed={isReviewed}
-              lw={lw}
-              label={`GT ${b.class_id}: ${classNameLookup(b.class_id)}`}
-            />
-          );
-        })}
-      {showGT &&
-        matches.gt_polygons.map((p: PolygonShape, i: number) => {
-          const key = `polygon:${i}`;
-          const isFocused = focusedGt === key;
-          if (isFocused && suppressFocusedGt) return null;
-          const isReviewed = reviewedGtKeys.has(key);
-          return (
-            <GtPolygon
-              key={`gt-p-${i}`}
-              polygon={p}
-              focused={isFocused}
-              reviewed={isReviewed}
-              lw={lw}
-              label={`GT ${p.class_id}: ${classNameLookup(p.class_id)}`}
-            />
-          );
-        })}
+      {order.map((i) => {
+        const d = matches.detections[i];
+        const active = i === focusedIdx;
+        const outcome = TAG_COLORS[d.det_type];
+        const weight = active ? 3 : 2;
 
-      {/* Focused prediction (only the active detection) */}
-      {showPred &&
-        !suppressFocusedPred &&
-        focused &&
-        tagColor &&
-        focused.pred_type === "box" &&
-        focused.pred_idx !== null &&
-        matches.pred_boxes[focused.pred_idx] && (
-          <FocusedPredBox
-            b={matches.pred_boxes[focused.pred_idx]}
-            color={tagColor}
-            lw={lw}
-            label={`Pred ${focused.class_id}: ${classNameLookup(focused.class_id)}${
-              focused.conf !== null ? ` (${focused.conf.toFixed(2)})` : ""
-            }`}
-            isFp={focused.det_type === "fp"}
-          />
-        )}
-      {showPred &&
-        !suppressFocusedPred &&
-        focused &&
-        tagColor &&
-        focused.pred_type === "polygon" &&
-        focused.pred_idx !== null &&
-        matches.pred_polygons[focused.pred_idx] && (
-          <FocusedPredPoly
-            p={matches.pred_polygons[focused.pred_idx]}
-            color={tagColor}
-            lw={lw}
-            label={`Pred ${focused.class_id}: ${classNameLookup(focused.class_id)}${
-              focused.conf !== null ? ` (${focused.conf.toFixed(2)})` : ""
-            }`}
-            isFp={focused.det_type === "fp"}
-          />
-        )}
+        // Line style carries the source: GT solid, prediction dashed. Colour = outcome,
+        // except the detection under review — its editable side turns blue, keeping its style:
+        // active TP → prediction blue (GT stays green); active FP → prediction blue;
+        // active FN → GT blue (no prediction).
+        const gtStroke = active && d.det_type === "fn" ? ACTIVE_COLOR : outcome;
+        const predStroke = active ? ACTIVE_COLOR : outcome;
+
+        const gtBox = d.gt_type === "box" && d.gt_idx !== null ? matches.gt_boxes[d.gt_idx] : null;
+        const gtPoly =
+          d.gt_type === "polygon" && d.gt_idx !== null ? matches.gt_polygons[d.gt_idx] : null;
+        const predBox =
+          d.pred_type === "box" && d.pred_idx !== null ? matches.pred_boxes[d.pred_idx] : null;
+        const predPoly =
+          d.pred_type === "polygon" && d.pred_idx !== null
+            ? matches.pred_polygons[d.pred_idx]
+            : null;
+
+        const drawGt = showGT && !(active && suppressFocusedGt);
+        const drawPred = showPred && !(active && suppressFocusedPred);
+        const gtFill = d.reviewed ? `${outcome}26` : undefined; // faint fill marks a reviewed object
+        const predFill = d.det_type === "fp" ? `${predStroke}26` : undefined; // find the empty FP box
+
+        return (
+          <Fragment key={`det-${i}`}>
+            {drawGt && gtBox && (
+              <ReviewRect box={gtBox} stroke={gtStroke} lw={lw} weight={weight} fill={gtFill} />
+            )}
+            {drawGt && gtPoly && (
+              <ReviewLine
+                points={gtPoly.points}
+                stroke={gtStroke}
+                lw={lw}
+                weight={weight}
+                fill={gtFill}
+              />
+            )}
+            {drawPred && predBox && (
+              <ReviewRect
+                box={predBox}
+                stroke={predStroke}
+                lw={lw}
+                weight={weight}
+                dashed
+                fill={predFill}
+              />
+            )}
+            {drawPred && predPoly && (
+              <ReviewLine
+                points={predPoly.points}
+                stroke={predStroke}
+                lw={lw}
+                weight={weight}
+                dashed
+                fill={predFill}
+              />
+            )}
+            {active && (
+              <HaloLabel
+                x={d.bbox[0]}
+                y={d.bbox[1]}
+                text={`${classNameLookup(d.class_id)}${
+                  d.conf !== null ? ` ${d.conf.toFixed(2)}` : ""
+                }`}
+                fill={ACTIVE_COLOR}
+                size={11 * lw}
+              />
+            )}
+          </Fragment>
+        );
+      })}
     </>
   );
 }
 
-function GtBox({
+function ReviewRect({
   box,
-  focused,
-  reviewed,
+  stroke,
   lw,
-  label,
+  weight,
+  dashed,
+  fill,
 }: {
-  box: Box;
-  focused: boolean;
-  reviewed: boolean;
+  box: Box | PredBox;
+  stroke: string;
   lw: number;
-  label: string;
+  weight: number;
+  dashed?: boolean;
+  fill?: string;
 }) {
-  const stroke = focused ? "#FFD700" : "#4CAF50";
-  const fill = reviewed ? "rgba(76, 175, 80, 0.18)" : "";
   return (
-    <>
-      <Rect
-        x={box.x1}
-        y={box.y1}
-        width={box.x2 - box.x1}
-        height={box.y2 - box.y1}
-        stroke={stroke}
-        strokeWidth={(focused ? 3 : 2) * lw}
-        fill={fill}
-      />
-      {focused && <HaloLabel x={box.x1} y={box.y1} text={label} fill={stroke} size={11 * lw} />}
-    </>
+    <Rect
+      x={box.x1}
+      y={box.y1}
+      width={box.x2 - box.x1}
+      height={box.y2 - box.y1}
+      stroke={stroke}
+      strokeWidth={weight * lw}
+      dash={dashed ? [8 * lw, 4 * lw] : undefined}
+      fill={fill}
+    />
   );
 }
 
-function GtPolygon({
-  polygon,
-  focused,
-  reviewed,
+function ReviewLine({
+  points,
+  stroke,
   lw,
-  label,
+  weight,
+  dashed,
+  fill,
 }: {
-  polygon: PolygonShape;
-  focused: boolean;
-  reviewed: boolean;
+  points: [number, number][];
+  stroke: string;
   lw: number;
-  label: string;
+  weight: number;
+  dashed?: boolean;
+  fill?: string;
 }) {
-  const stroke = focused ? "#FFD700" : "#4CAF50";
-  const fill = reviewed ? "rgba(76, 175, 80, 0.18)" : "";
-  if (polygon.points.length < 2) return null;
-  const [x0, y0] = polygon.points[0];
+  if (points.length < 2) return null;
   return (
-    <>
-      <Line
-        points={polygon.points.flat()}
-        closed
-        stroke={stroke}
-        strokeWidth={(focused ? 3 : 2) * lw}
-        fill={fill}
-      />
-      {focused && <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={11 * lw} />}
-    </>
-  );
-}
-
-function FocusedPredBox({
-  b,
-  color,
-  lw,
-  label,
-  isFp,
-}: {
-  b: PredBox;
-  color: string;
-  lw: number;
-  label: string;
-  isFp: boolean;
-}) {
-  return (
-    <>
-      <Rect
-        x={b.x1}
-        y={b.y1}
-        width={b.x2 - b.x1}
-        height={b.y2 - b.y1}
-        stroke={color}
-        strokeWidth={3 * lw}
-        dash={[8 * lw, 4 * lw]}
-        fill={isFp ? `${color}33` : ""}
-      />
-      <HaloLabel x={b.x1} y={b.y1 + (b.y2 - b.y1)} text={label} fill={color} size={11 * lw} />
-    </>
-  );
-}
-
-function FocusedPredPoly({
-  p,
-  color,
-  lw,
-  label,
-  isFp,
-}: {
-  p: PredPolygon;
-  color: string;
-  lw: number;
-  label: string;
-  isFp: boolean;
-}) {
-  if (p.points.length < 2) return null;
-  const [x0, y0] = p.points[p.points.length - 1];
-  return (
-    <>
-      <Line
-        points={p.points.flat()}
-        closed
-        stroke={color}
-        strokeWidth={3 * lw}
-        dash={[8 * lw, 4 * lw]}
-        fill={isFp ? `${color}33` : ""}
-      />
-      <HaloLabel x={x0} y={y0} text={label} fill={color} size={11 * lw} />
-    </>
+    <Line
+      points={points.flat()}
+      closed
+      stroke={stroke}
+      strokeWidth={weight * lw}
+      dash={dashed ? [8 * lw, 4 * lw] : undefined}
+      fill={fill}
+    />
   );
 }
 
