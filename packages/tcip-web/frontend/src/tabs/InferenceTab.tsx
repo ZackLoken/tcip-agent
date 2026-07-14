@@ -194,7 +194,7 @@ export function InferenceTab() {
           <label className="flex items-center gap-1 text-[12px] text-tcip-muted">
             Tile merge
             <select
-              className="tcip-input text-[12px]"
+              className="tcip-select text-[12px]"
               value={postprocess}
               disabled={!sahi}
               title="How boxes from adjacent tiles are combined. NMM unions a box split across a seam; NMS suppresses overlaps."
