@@ -1,6 +1,6 @@
 ---
 name: pipeline-design
-description: "Pipeline patterns for phenotyping. The composable ML component registry is a library, not a scaffold. Choose a pattern that fits the trait — do not force every trait through the same structure."
+description: "Pipeline patterns for phenotyping. The composable ML component registry is a library, not a scaffold. Choose a pattern that fits the trait — do not force every trait through the same structure. Load when deciding how to measure a new trait, choosing or composing an ML pipeline, or picking a model architecture for a trait."
 ---
 
 # Pipeline Design
