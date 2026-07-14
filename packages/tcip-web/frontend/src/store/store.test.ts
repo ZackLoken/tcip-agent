@@ -54,6 +54,16 @@ describe("canvas store", () => {
     expect(s().canvas.redoStack).toHaveLength(1);
   });
 
+  it("dragBox moves a box WITHOUT pushing an undo snapshot", () => {
+    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, class_id: 0 });
+    const before = s().canvas.undoStack.length;
+    s().dragBox(0, { x1: 2, y1: 3, x2: 9, y2: 11, class_id: 0 });
+    expect(s().canvas.boxes[0]).toEqual({ x1: 2, y1: 3, x2: 9, y2: 11, class_id: 0 });
+    // Like dragVertex: a live resize/move must not flood the undo stack.
+    expect(s().canvas.undoStack.length).toBe(before);
+    expect(s().canvas.dirty).toBe(true);
+  });
+
   it("pushUndo caps the undo stack at 30 entries", () => {
     for (let i = 0; i < 40; i++) s().pushUndo();
     expect(s().canvas.undoStack).toHaveLength(30);
