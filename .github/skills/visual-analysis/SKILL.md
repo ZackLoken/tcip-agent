@@ -1,6 +1,6 @@
 ---
 name: visual-analysis
-description: "Visual inspection of images, annotations, predictions, and training artifacts using the agent's multimodal vision capability."
+description: "Visual inspection of images, annotations, predictions, and training artifacts using the agent's multimodal vision capability. Load when inspecting an image or its labels, checking predictions on the canvas, reading a rendered visualization, or verifying a result visually before acting on it."
 ---
 
 # Visual Analysis
