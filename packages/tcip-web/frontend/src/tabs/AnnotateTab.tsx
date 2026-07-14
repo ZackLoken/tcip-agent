@@ -12,6 +12,7 @@ import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { computePolygonBboxes, findHoveredPolygon, pointInPolygon } from "@/lib/polygonGeometry";
+import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/reviewEditGeometry";
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@/store/types";
 
@@ -61,6 +62,7 @@ interface AnnotationShapesProps {
   mode: "box" | "polygon";
   activeClass: number;
   selectedPolygonIdx: number | null;
+  selectedBoxIdx: number | null;
   hoveredIdx: number | null;
   draggingIdx: number | undefined;
   renderLabels: boolean;
@@ -85,6 +87,7 @@ const AnnotationShapes = memo(function AnnotationShapes({
   mode,
   activeClass,
   selectedPolygonIdx,
+  selectedBoxIdx,
   hoveredIdx,
   draggingIdx,
   renderLabels,
@@ -106,10 +109,12 @@ const AnnotationShapes = memo(function AnnotationShapes({
             <BoxOverlay
               key={`box-${i}`}
               box={b}
-              stroke={classColor(b.class_id)}
+              stroke={i === selectedBoxIdx ? "#00BFFF" : classColor(b.class_id)}
               width={boxStroke}
               labelSize={labelSize}
               label={`${b.class_id}: ${className(b.class_id)}`}
+              selected={i === selectedBoxIdx}
+              handleR={selVertR}
             />
           ) : null,
         )}
@@ -157,6 +162,7 @@ export function AnnotateTab() {
   const canvas = useStore((s) => s.canvas);
   const loadLabels = useStore((s) => s.loadLabelsIntoCanvas);
   const addBox = useStore((s) => s.addBox);
+  const dragBox = useStore((s) => s.dragBox);
   const deleteBox = useStore((s) => s.deleteBox);
   const deletePolygon = useStore((s) => s.deletePolygon);
   const updatePolygon = useStore((s) => s.updatePolygon);
@@ -183,6 +189,10 @@ export function AnnotateTab() {
   const [drawing, setDrawing] = useState<Box | null>(null);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
+  // Box editing (mirrors polygon vertex editing): a selected box shows handles; a press on
+  // one starts a corner-resize / move drag. selectedBoxIdx is cleared on image change below.
+  const [selectedBoxIdx, setSelectedBoxIdx] = useState<number | null>(null);
+  const boxDragRef = useRef<{ idx: number; drag: EditDrag } | null>(null);
 
   // I/O safety. The canvas belongs to exactly the image last loaded from disk:
   //  - loadedPathsRef: the (image, det, seg) the current boxes/polygons came from.
@@ -212,10 +222,17 @@ export function AnnotateTab() {
   // A confirmed negative is a completed review (empty) — lock it like "complete".
   const currentStatus = currentImageName ? imageStatus.byImage[currentImageName] : undefined;
   const isLocked = currentStatus === "complete" || currentStatus === "negative";
+  const saveDisabled = !imgPath || isLocked || saveBlocked;
 
   // Image navigation (shared with TopBar + Review; honors the status filter).
   const nav = useImageNav();
   usePrefetchAdjacentImages();
+
+  // A box selection belongs to one image; leaving it drops the selection + any drag.
+  useEffect(() => {
+    setSelectedBoxIdx(null);
+    boxDragRef.current = null;
+  }, [currentImageName]);
 
   // ── Label load + save ───────────────────────────────────────────────
 
@@ -504,6 +521,10 @@ export function AnnotateTab() {
       keys: "delete",
       action: () => {
         if (canvas.selectedPolygonIdx !== null) deletePolygon(canvas.selectedPolygonIdx);
+        else if (selectedBoxIdx !== null) {
+          deleteBox(selectedBoxIdx);
+          setSelectedBoxIdx(null);
+        }
       },
       when: () => !isLocked,
     },
@@ -513,6 +534,7 @@ export function AnnotateTab() {
         setCurrentPolygon([]);
         setDrawing(null);
         selectPolygon(null);
+        setSelectedBoxIdx(null);
       },
     },
     // Held-key auto-repeat (~30/s) would queue a full image render per tick — one flip per press.
@@ -597,6 +619,28 @@ export function AnnotateTab() {
         }
         return;
       }
+      const sc = view.scale || 1;
+      // Grab a handle / body of the already-selected box to resize or move it.
+      if (selectedBoxIdx !== null && canvas.boxes[selectedBoxIdx]) {
+        const b = canvas.boxes[selectedBoxIdx];
+        const drag = hitTestEdit({ kind: "box", box: [b.x1, b.y1, b.x2, b.y2] }, ix, iy, 8 / sc);
+        if (drag) {
+          pushUndo(); // one snapshot per drag; the moves themselves don't push
+          boxDragRef.current = { idx: selectedBoxIdx, drag };
+          didDragRef.current = true;
+          return;
+        }
+      }
+      // Otherwise a press inside an existing (active-class) box selects it; empty space
+      // deselects and starts a new box.
+      for (let i = canvas.boxes.length - 1; i >= 0; i--) {
+        const b = canvas.boxes[i];
+        if (b.class_id === activeClass && ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
+          setSelectedBoxIdx(i);
+          return;
+        }
+      }
+      setSelectedBoxIdx(null);
       const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
       const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
       setDrawing({ x1: cx, y1: cy, x2: cx, y2: cy, class_id: activeClass });
@@ -681,6 +725,28 @@ export function AnnotateTab() {
       return;
     }
 
+    // Resizing / moving a selected box
+    const bDrag = boxDragRef.current;
+    if (bDrag && mode === "box") {
+      const b = canvas.boxes[bDrag.idx];
+      if (b) {
+        const r = applyEditDrag(
+          { kind: "box", box: [b.x1, b.y1, b.x2, b.y2] },
+          bDrag.drag,
+          ix,
+          iy,
+          canvas.imgWidth || ix,
+          canvas.imgHeight || iy,
+        );
+        boxDragRef.current = { idx: bDrag.idx, drag: r.drag };
+        if (r.shape.kind === "box") {
+          const [x1, y1, x2, y2] = r.shape.box;
+          dragBox(bDrag.idx, { x1, y1, x2, y2, class_id: b.class_id }); // undo captured on down
+        }
+      }
+      return;
+    }
+
     // Box drag (rubber-band stops at the image edge; polygons already clamp)
     if (drawing) {
       const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
@@ -714,6 +780,11 @@ export function AnnotateTab() {
 
   const onUp = (ix: number, iy: number) => {
     if (isLocked) return;
+    if (boxDragRef.current) {
+      boxDragRef.current = null;
+      didDragRef.current = false;
+      return;
+    }
     if (annotateUi.draggingVertex) {
       useStore.getState().setDraggingVertex(null);
       return;
@@ -854,7 +925,11 @@ export function AnnotateTab() {
   if (!imgPath || !currentImageName) {
     return (
       <div className="flex-1 flex flex-col">
-        <AnnotateToolbar />
+        <AnnotateToolbar
+          onSave={() => void save()}
+          saveDisabled={saveDisabled}
+          dirty={canvas.dirty}
+        />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
           <div className="max-w-lg rounded-lg border border-tcip-border bg-tcip-panel px-5 py-4 text-center">
             <p className="text-sm font-semibold text-tcip-fg">No image loaded</p>
@@ -875,7 +950,11 @@ export function AnnotateTab() {
 
   return (
     <div className="flex-1 flex flex-col">
-      <AnnotateToolbar />
+      <AnnotateToolbar
+        onSave={() => void save()}
+        saveDisabled={saveDisabled}
+        dirty={canvas.dirty}
+      />
       <div className="relative flex-1 flex flex-col">
         <CanvasStage
           imageUrl={imageUrl}
@@ -929,6 +1008,7 @@ export function AnnotateTab() {
             mode={mode}
             activeClass={activeClass}
             selectedPolygonIdx={canvas.selectedPolygonIdx}
+            selectedBoxIdx={selectedBoxIdx}
             hoveredIdx={hoveredIdx}
             draggingIdx={draggingIdx}
             renderLabels={renderLabels}
@@ -964,48 +1044,57 @@ export function AnnotateTab() {
               : "Locked — complete. Uncheck Complete to edit."}
           </div>
         )}
-      </div>
 
-      <div className="flex items-center gap-2 px-3 py-1.5 border-t border-tcip-border bg-tcip-panel text-[11px]">
-        <button
-          className="tcip-btn text-[11px]"
-          onClick={() => undo()}
-          title="Ctrl+Z"
-          disabled={isLocked}
-        >
-          ↶&nbsp;&nbsp;Undo
-        </button>
-        <button
-          className="tcip-btn text-[11px]"
-          onClick={() => redo()}
-          title="Ctrl+Shift+Z"
-          disabled={isLocked}
-        >
-          ↷&nbsp;&nbsp;Redo
-        </button>
-        {mode === "polygon" && (
-          <button
-            className="tcip-btn text-[11px]"
-            onClick={() => commitPolygonAndTrack()}
-            disabled={isLocked || canvas.currentPolygon.length < 3}
-            title="Double-click or Enter"
-          >
-            ✓&nbsp;&nbsp;Close polygon
-          </button>
-        )}
-        <span className="flex-1" />
-        <span className="text-tcip-muted tabular-nums">
-          Boxes: {canvas.boxes.length} · Polys: {canvas.polygons.length}
-        </span>
-        <button
-          className={canvas.dirty ? "tcip-btn-primary" : "tcip-btn"}
-          onClick={() => void save()}
-          disabled={!imgPath || isLocked || saveBlocked}
-          title="Ctrl+S (auto-save on image change)"
-        >
-          {canvas.dirty ? <>💾&nbsp;&nbsp;Save</> : "Saved"}
-        </button>
+        <AnnotateLegend />
       </div>
+    </div>
+  );
+}
+
+/** Hover-triggered legend, anchored lower-left of the canvas. Lists the project's classes
+ *  (outline colour = class) plus the selected-shape blue — the same grammar as Review. */
+function AnnotateLegend() {
+  const classes = useStore((s) => s.classes.list);
+  return (
+    <div className="group absolute bottom-3 left-3 z-20">
+      <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-52 translate-y-1 rounded-md border border-tcip-border-hover bg-tcip-panel p-3 opacity-0 shadow-lg transition-all group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
+        <h4 className="mb-2 text-[11px] font-semibold tracking-wide text-tcip-fg">
+          Annotate Legend
+        </h4>
+        <ul className="space-y-1.5">
+          {classes.map((c) => (
+            <li key={c.id} className="flex items-center gap-2.5 text-[12px]">
+              <span
+                className="inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px]"
+                style={{ borderColor: c.color }}
+              />
+              <span className="text-tcip-fg">{c.name}</span>
+            </li>
+          ))}
+          <li className="flex items-center gap-2.5 text-[12px]">
+            <span
+              className="inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px]"
+              style={{ borderColor: "#00BFFF" }}
+            />
+            <span className="text-tcip-fg">Selected</span>
+          </li>
+        </ul>
+      </div>
+      <button
+        type="button"
+        className="flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur hover:border-tcip-border-hover hover:text-tcip-fg"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" />
+          <path
+            d="M8 7.2v3.4M8 5.2v.05"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+        Legend
+      </button>
     </div>
   );
 }
@@ -1018,13 +1107,23 @@ function BoxOverlay({
   width,
   labelSize,
   label,
+  selected,
+  handleR,
 }: {
   box: Box;
   stroke: string;
   width: number;
   labelSize: number;
   label: string;
+  selected?: boolean;
+  handleR?: number;
 }) {
+  const corners: [number, number][] = [
+    [box.x1, box.y1],
+    [box.x2, box.y1],
+    [box.x2, box.y2],
+    [box.x1, box.y2],
+  ];
   return (
     <>
       <Rect
@@ -1035,6 +1134,20 @@ function BoxOverlay({
         stroke={stroke}
         strokeWidth={width}
       />
+      {selected &&
+        handleR &&
+        corners.map(([cx, cy], i) => (
+          <Rect
+            key={`h-${i}`}
+            x={cx - handleR}
+            y={cy - handleR}
+            width={handleR * 2}
+            height={handleR * 2}
+            fill="#ffffff"
+            stroke={stroke}
+            strokeWidth={width * 0.6}
+          />
+        ))}
       <HaloLabel x={box.x1} y={box.y1} text={label} fill={stroke} size={labelSize} />
     </>
   );
