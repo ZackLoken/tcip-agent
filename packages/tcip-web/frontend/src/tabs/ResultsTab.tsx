@@ -18,6 +18,7 @@ import {
   type PlantMappingSummary,
 } from "@/api/inference";
 import { useStore } from "@/store";
+import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
 interface DateRow {
   date: string;
@@ -338,24 +339,24 @@ export function ResultsTab() {
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="90%">
             <LineChart data={chartData}>
-              <CartesianGrid stroke="#3A3A3A" strokeDasharray="3 3" />
-              <XAxis dataKey="date" stroke="#8A8A8A" style={{ fontSize: 11 }} />
-              <YAxis stroke="#8A8A8A" domain={[0, 1]} style={{ fontSize: 11 }} />
+              <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
+              <XAxis dataKey="date" stroke={CHART.axis} style={{ fontSize: 11 }} />
+              <YAxis stroke={CHART.axis} domain={[0, 1]} style={{ fontSize: 11 }} />
               <Tooltip
                 contentStyle={{
-                  background: "#242424",
-                  border: "1px solid #3A3A3A",
+                  background: CHART.tooltipBg,
+                  border: `1px solid ${CHART.tooltipBorder}`,
                   borderRadius: 4,
                   fontSize: 11,
                 }}
               />
-              <Legend wrapperStyle={{ fontSize: 11, color: "#E0E0E0" }} />
+              <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
               {plantKeys.slice(0, 30).map((pid, i) => (
                 <Line
                   key={pid}
                   type="monotone"
                   dataKey={pid}
-                  stroke={`hsl(${(i * 137) % 360}, 60%, 60%)`}
+                  stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
                   dot={false}
                   strokeWidth={1}
                   isAnimationActive={false}
