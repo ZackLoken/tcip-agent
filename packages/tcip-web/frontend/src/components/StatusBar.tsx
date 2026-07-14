@@ -86,6 +86,12 @@ export function StatusBar() {
           <span className="text-tcip-fn">FN {matches.n_fn}</span>
         </span>
       )}
+      {activeTab === "review" && matches && matches.detections.length > 0 && (
+        <ReviewProgress
+          reviewed={matches.detections.filter((d) => d.reviewed).length}
+          total={matches.detections.length}
+        />
+      )}
       <div className="flex-1" />
       {showAgent && agentActivity && (
         <span className="text-tcip-accent" title={JSON.stringify(agentActivity.data)}>
@@ -104,11 +110,39 @@ export function StatusBar() {
           <span className="mx-1.5 text-tcip-border">|</span>
           <span className="font-mono">{dataset.date}</span>
           <span className="mx-1.5 text-tcip-border">|</span>
-          <span className="text-tcip-accent">Switch Project</span>
+          <span className="text-tcip-season-1">Switch Project</span>
         </button>
       ) : (
         <span>no project open</span>
       )}
     </div>
+  );
+}
+
+/** Persimmon progress wheel + count of detections reviewed on the current image. */
+function ReviewProgress({ reviewed, total }: { reviewed: number; total: number }) {
+  const C = 44; // circumference of an r=7 circle (2·π·7)
+  const frac = total ? reviewed / total : 0;
+  return (
+    <span
+      className="flex items-center gap-1.5 tabular-nums"
+      title="Detections reviewed on this image — updates as you accept, edit, or reject"
+    >
+      <svg width="13" height="13" viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="7" fill="none" stroke="#33352C" strokeWidth="3" />
+        <circle
+          cx="10"
+          cy="10"
+          r="7"
+          fill="none"
+          stroke="#E6976B"
+          strokeWidth="3"
+          strokeDasharray={`${frac * C} ${C}`}
+          strokeLinecap="round"
+          transform="rotate(-90 10 10)"
+        />
+      </svg>
+      {reviewed} / {total} reviewed
+    </span>
   );
 }
