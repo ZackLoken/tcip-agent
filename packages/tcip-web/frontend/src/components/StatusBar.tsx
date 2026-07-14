@@ -13,6 +13,8 @@ export function StatusBar() {
   const view = useStore((s) => s.gui.view);
   const canvasDims = useStore((s) => ({ w: s.canvas.imgWidth, h: s.canvas.imgHeight }));
   const dirty = useStore((s) => s.canvas.dirty);
+  const boxCount = useStore((s) => s.canvas.boxes.length);
+  const polyCount = useStore((s) => s.canvas.polygons.length);
   const matches = useStore((s) => s.review.matches);
   const activeTab = useStore((s) => s.gui.active_tab);
   const setActiveTab = useStore((s) => s.setActiveTab);
@@ -66,6 +68,14 @@ export function StatusBar() {
           Image: {canvasDims.w}×{canvasDims.h}
         </span>
       ) : null}
+      {activeTab === "annotate" && (polyCount > 0 || boxCount > 0) && (
+        <span className="tabular-nums">
+          {polyCount} polygons
+          <span className="mx-1.5 text-tcip-border">|</span>
+          {/* Detect boxes are derived from polygons when any exist, so the count tracks them live. */}
+          {polyCount > 0 ? polyCount : boxCount} boxes
+        </span>
+      )}
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}
       {activeTab === "review" && matches && (
         <span className="tabular-nums">
