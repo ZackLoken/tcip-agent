@@ -38,7 +38,9 @@ export interface CanvasStageProps {
 export function CanvasStage(props: CanvasStageProps) {
   const wrapper = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
-  const [dims, setDims] = useState({ w: 800, h: 600 });
+  // Start at 0 so the one-shot fit waits for a REAL measurement (below) instead of fitting
+  // to a placeholder size — a stale-dims fit left the image mis-scaled/off-screen on first open.
+  const [dims, setDims] = useState({ w: 0, h: 0 });
   const view = useStore((s) => s.gui.view);
   const setView = useStore((s) => s.setView);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
@@ -46,13 +48,16 @@ export function CanvasStage(props: CanvasStageProps) {
   const [hiResImg, setHiResImg] = useState<HTMLImageElement | null>(null);
   const hiResLoadedFor = useRef<string | null>(null);
 
-  // Track wrapper size
+  // Track wrapper size — measure synchronously on mount too, so the first fit uses the real
+  // canvas size immediately rather than waiting a frame for the ResizeObserver.
   useEffect(() => {
     if (!wrapper.current) return;
-    const ro = new ResizeObserver(() => {
+    const measure = () => {
       const r = wrapper.current!.getBoundingClientRect();
       setDims({ w: Math.max(1, Math.floor(r.width)), h: Math.max(1, Math.floor(r.height)) });
-    });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(wrapper.current);
     return () => ro.disconnect();
   }, []);
@@ -180,9 +185,11 @@ export function CanvasStage(props: CanvasStageProps) {
     const ix = (pointer.x - v.offset_x) / s;
     const iy = (pointer.y - v.offset_y) / s;
     // Ctrl+wheel (and precision-touchpad pinch, which browsers deliver as ctrl+wheel):
-    // continuous magnitude-proportional zoom about the pointer. A 100-delta mouse notch
-    // is ~x1.22 — about one legacy ladder stop — while small pinch deltas stay smooth.
-    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * Math.exp(-dy * 0.002)));
+    // continuous magnitude-proportional zoom about the pointer. A touchpad pinch arrives as
+    // many small deltas, a mouse notch as one large (~100) delta — so give the small deltas a
+    // higher gain (pinch-zoom felt sluggish) while the mouse wheel keeps its tuned feel.
+    const zoomGain = Math.abs(dy) < 40 ? 0.005 : 0.002;
+    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * Math.exp(-dy * zoomGain)));
     if (newScale === v.scale) return;
     setView({
       scale: newScale,
@@ -351,7 +358,10 @@ export function CanvasStage(props: CanvasStageProps) {
         >
           {img || hiResImg ? (
             <KonvaImage
-              image={hiResImg ?? img ?? undefined}
+              // Use the full-res variant only while zoomed in past the threshold; when zoomed
+              // back out, revert to the capped bitmap (the huge texture drawn small could drop
+              // out on some GPUs, making the image vanish while the overlays stayed).
+              image={(wantHiRes && hiResImg ? hiResImg : img) ?? undefined}
               x={0}
               y={0}
               width={props.imgWidth}
