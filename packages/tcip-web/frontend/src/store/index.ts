@@ -238,6 +238,9 @@ export interface AppState {
   redo: () => void;
   addBox: (box: Box) => void;
   updateBox: (idx: number, box: Box) => void;
+  /** No-undo box mutation for a live resize/move drag — undo is captured once at drag
+   *  start (see updateBox for the undo-pushing variant). */
+  dragBox: (idx: number, box: Box) => void;
   deleteBox: (idx: number) => void;
   addPolygon: (polygon: PolygonShape) => void;
   updatePolygon: (idx: number, polygon: PolygonShape) => void;
@@ -591,6 +594,14 @@ export const useStore = create<AppState>()((set, get) => ({
       const next = s.canvas.polygons.slice();
       next[polygonIdx] = { ...poly, points: pts };
       return { canvas: { ...s.canvas, polygons: next, dirty: true } };
+    }),
+
+  dragBox: (idx, box) =>
+    set((s) => {
+      if (!s.canvas.boxes[idx]) return s;
+      const next = s.canvas.boxes.slice();
+      next[idx] = box;
+      return { canvas: { ...s.canvas, boxes: next, dirty: true } };
     }),
 
   deletePolygon: (idx) => {
