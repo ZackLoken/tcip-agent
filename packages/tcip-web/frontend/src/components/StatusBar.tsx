@@ -70,9 +70,9 @@ export function StatusBar() {
       {activeTab === "review" && matches && (
         <span className="tabular-nums">
           <span className="text-tcip-tp">TP {matches.n_tp}</span>
-          {" · "}
+          <span className="mx-1.5 text-tcip-border">|</span>
           <span className="text-tcip-fp">FP {matches.n_fp}</span>
-          {" · "}
+          <span className="mx-1.5 text-tcip-border">|</span>
           <span className="text-tcip-fn">FN {matches.n_fn}</span>
         </span>
       )}
@@ -91,9 +91,10 @@ export function StatusBar() {
           className="truncate max-w-md hover:text-tcip-fg transition-colors"
         >
           <span className="font-mono">{dataset.dataset_root.split(/[/\\]/).slice(-1)[0]}</span>
-          <span className="mx-1.5 text-tcip-border">·</span>
+          <span className="mx-1.5 text-tcip-border">|</span>
           <span className="font-mono">{dataset.date}</span>
-          <span className="ml-1.5">Switch</span>
+          <span className="mx-1.5 text-tcip-border">|</span>
+          <span className="text-tcip-accent">Switch Project</span>
         </button>
       ) : (
         <span>no project open</span>
