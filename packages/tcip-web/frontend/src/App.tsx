@@ -220,7 +220,7 @@ function App() {
           The agent rail (the real Claude Code in a PTY) docks to the right; the tabs
           are its canvas — it drives them through the MCP panel channel. */}
       <div className="flex-1 flex min-h-0">
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
           <ErrorBoundary resetKey={activeTab}>
             {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <ProjectPicker />)}
             {activeTab === "review" && (datasetReady ? <ReviewTab /> : <ProjectPicker />)}
