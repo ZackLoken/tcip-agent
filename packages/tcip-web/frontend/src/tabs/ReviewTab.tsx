@@ -5,6 +5,7 @@ import type Konva from "konva";
 import { api, IMAGE_MAX_WIDTH } from "@/api/client";
 import { classesApi } from "@/api/classes";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
+import { ColorPickerModal } from "@/components/ColorPickerModal";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { ReviewToolsDrawer } from "@/components/ReviewToolsDrawer";
 import { useImageNav } from "@/hooks/useImageNav";
@@ -20,16 +21,36 @@ import {
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, Detection, MatchesResponse, PredBox } from "@/store/types";
 
-// Outcome colours (color = outcome). Line style carries the source: solid = GT, dashed = prediction.
-const TAG_COLORS: Record<"tp" | "fp" | "fn", string> = {
+// Review symbology colours (color = outcome; line style = source). User-customisable and
+// persisted, so a reviewer can retune TP/FP/FN/under-review to their imagery.
+export interface ReviewColors {
+  tp: string;
+  fp: string;
+  fn: string;
+  active: string;
+}
+const DEFAULT_REVIEW_COLORS: ReviewColors = {
   tp: "#4CAF50", // matched
   fp: "#EF5350", // false positive
   fn: "#FFD54A", // missed (gold)
+  active: "#00BFFF", // the detection under review — highlighter blue
 };
-
-// tcip-pred — the detection under review: its editable side turns this blue, keeping its own line style.
-const ACTIVE_COLOR = "#00BFFF";
-const EDIT_COLOR = ACTIVE_COLOR; // the shape currently picked up for adjustment shares the active blue
+const REVIEW_COLORS_KEY = "tcip.review.colors";
+function loadReviewColors(): ReviewColors {
+  try {
+    const raw = localStorage.getItem(REVIEW_COLORS_KEY);
+    if (raw) return { ...DEFAULT_REVIEW_COLORS, ...JSON.parse(raw) };
+  } catch {
+    /* disabled storage — fall back to defaults */
+  }
+  return DEFAULT_REVIEW_COLORS;
+}
+const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashed?: boolean }[] = [
+  { key: "tp", label: "Matched (TP)", tag: "TP" },
+  { key: "fp", label: "False positive (FP)", tag: "FP" },
+  { key: "fn", label: "Missed (FN)", tag: "FN" },
+  { key: "active", label: "Under review", tag: "active", dashed: true },
+];
 const MIN_BOX_SIDE = 3;
 const HANDLE_HIT_PX = 10; // screen-px hit radius for edit handles
 
@@ -138,8 +159,21 @@ export function ReviewTab() {
       /* private mode / disabled storage — the shelf just won't persist */
     }
   }, [filtersOpen]);
-  const [legendOpen, setLegendOpen] = useState(false);
+  const [counterDraft, setCounterDraft] = useState<string | null>(null);
+  const counterRef = useRef<HTMLInputElement | null>(null);
   const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
+  // A reviewed (completed) image is locked — no verdicts/edits until it's reopened.
+  const reviewLocked = imageStatus === "completed";
+  // User-tunable symbology colours (persisted); the legend swatches open a picker.
+  const [reviewColors, setReviewColors] = useState<ReviewColors>(loadReviewColors);
+  const [colorEditKey, setColorEditKey] = useState<keyof ReviewColors | null>(null);
+  useEffect(() => {
+    try {
+      localStorage.setItem(REVIEW_COLORS_KEY, JSON.stringify(reviewColors));
+    } catch {
+      /* disabled storage — colours just won't persist */
+    }
+  }, [reviewColors]);
   const [edit, setEdit] = useState<EditShape | null>(null);
   const editDrag = useRef<EditDrag | null>(null);
   // One GT-mutating request at a time: key auto-repeat / double-clicks must not append
@@ -304,6 +338,7 @@ export function ReviewTab() {
     edited?: { box?: [number, number, number, number]; polygon?: number[][] },
   ): Promise<boolean> {
     if (actionPending.current) return false;
+    if (reviewLocked) return false; // a completed/reviewed image is locked until reopened
     if (!current || !dataset.project_root || !imgPath || !imgName) return false;
     actionPending.current = true;
     try {
@@ -397,6 +432,7 @@ export function ReviewTab() {
   // ── In-place edit: pick the shape up on this canvas, adjust, save to GT ──
 
   function startEdit() {
+    if (reviewLocked) return;
     if (!current || !matches) return;
     const seed = seedEditShape(current, matches);
     if (!seed) {
@@ -466,14 +502,14 @@ export function ReviewTab() {
       action: (e) => {
         if (!e.repeat) void recordAction("accepted");
       },
-      when: () => !!current && !edit,
+      when: () => !!current && !edit && !reviewLocked,
     },
     {
       keys: "r",
       action: (e) => {
         if (!e.repeat) void recordAction("rejected");
       },
-      when: () => !!current && !edit,
+      when: () => !!current && !edit && !reviewLocked,
     },
     { keys: "e", action: () => startEdit(), when: () => !!current && !edit },
     {
@@ -523,7 +559,7 @@ export function ReviewTab() {
       : "Delete this ground-truth object (R)";
 
   return (
-    <div className="flex-1 flex flex-col relative">
+    <div className="flex-1 flex flex-col relative min-h-0">
       <div className="relative border-b border-tcip-border bg-tcip-panel">
         {/* Row 1 — filter shelf toggle + live summary + legend, then image / detection navigation */}
         <div className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
@@ -539,46 +575,87 @@ export function ReviewTab() {
             </span>
             &nbsp;&nbsp;Filters
           </button>
-          {/* Live summary — updates as the filters change, so the shelf can stay collapsed. */}
+          {/* Live summary — always shows every filter, so the shelf can stay collapsed. */}
           <span className="flex items-center gap-1.5 tabular-nums">
             <FilterChip>IoU ≥ {filters.iou_threshold.toFixed(2)}</FilterChip>
             <FilterChip>Conf ≥ {filters.conf_threshold.toFixed(2)}</FilterChip>
-            {filters.filter_type !== "all" && (
-              <FilterChip>{filters.filter_type.toUpperCase()}</FilterChip>
-            )}
-            {filters.status_filter !== "all" && (
-              <FilterChip>
-                {filters.status_filter === "reviewed" ? "Reviewed" : "Unreviewed"}
-              </FilterChip>
-            )}
-            {!showGT && <FilterChip>GT off</FilterChip>}
-            {!showPred && <FilterChip>Pred off</FilterChip>}
+            <FilterChip>
+              {filters.filter_type === "all" ? "All types" : filters.filter_type.toUpperCase()}
+            </FilterChip>
+            <FilterChip>
+              {filters.status_filter === "all"
+                ? "All status"
+                : filters.status_filter === "reviewed"
+                  ? "Reviewed"
+                  : "Unreviewed"}
+            </FilterChip>
+            <FilterChip>
+              {showGT && showPred
+                ? "GT + Pred"
+                : showGT
+                  ? "GT only"
+                  : showPred
+                    ? "Pred only"
+                    : "Hidden"}
+            </FilterChip>
           </span>
-
-          <button
-            className="tcip-btn"
-            onClick={() => setLegendOpen((v) => !v)}
-            aria-expanded={legendOpen}
-            title="What the box colours and line styles mean"
-          >
-            Legend
-          </button>
 
           <span className="flex-1" />
 
-          {imgName && (
-            <span className="text-tcip-fg font-medium truncate max-w-[12rem]" title={imgName}>
-              {imgName}
-            </span>
-          )}
           <span className={`tcip-badge ${IMAGE_STATUS_CLASS[imageStatus]}`}>
             {IMAGE_STATUS_LABEL[imageStatus]}
           </span>
-          {/* Same affordance as Annotate's Complete: a reversible checkbox. */}
-          <label
-            className="flex items-center gap-1"
-            title="Mark this image fully reviewed — its annotation status is confirmed from the GT files; uncheck to reopen"
-          >
+
+          {/* Image navigation — same function + layout/order as the Annotate tab */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">
+              Image
+            </span>
+            {imgName && (
+              <span className="max-w-[150px] truncate font-mono text-tcip-fg" title={imgName}>
+                {imgName}
+              </span>
+            )}
+            <button
+              className="tcip-btn"
+              onClick={() => stepImage(-1)}
+              disabled={!nav.canPrev || !!edit}
+              aria-label="Previous image"
+            >
+              ◀
+            </button>
+            <input
+              ref={counterRef}
+              className="tcip-input w-10 text-center font-mono"
+              value={counterDraft ?? (nav.position > 0 ? String(nav.position) : "")}
+              onChange={(e) => setCounterDraft(e.target.value.replace(/[^0-9]/g, ""))}
+              onFocus={() => setCounterDraft(String(nav.position || 1))}
+              onBlur={() => setCounterDraft(null)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const num = parseInt(counterDraft ?? "", 10);
+                  if (!Number.isNaN(num)) nav.jumpToPosition(num);
+                  setCounterDraft(null);
+                  counterRef.current?.blur();
+                } else if (e.key === "Escape") {
+                  setCounterDraft(null);
+                  counterRef.current?.blur();
+                }
+              }}
+            />
+            <span className="tabular-nums text-tcip-muted">/ {nav.total}</span>
+            <button
+              className="tcip-btn"
+              onClick={() => stepImage(1)}
+              disabled={!nav.canNext || !!edit}
+              aria-label="Next image"
+            >
+              ▶
+            </button>
+          </div>
+
+          {/* Reviewed — same position as Annotate's Complete; a reversible confirm. */}
+          <label className="flex items-center gap-1">
             <input
               type="checkbox"
               checked={imageStatus === "completed"}
@@ -588,19 +665,8 @@ export function ReviewTab() {
             Reviewed
           </label>
 
-          <button className="tcip-btn" onClick={() => stepImage(-1)} disabled={!!edit}>
-            ◀&nbsp;&nbsp;Prev img
-          </button>
-          <span className="tabular-nums">
-            {matches && matches.detections.length > 0
-              ? `${detectionIdx + 1} / ${matches.detections.length}`
-              : "0 / 0"}
-          </span>
-          <button className="tcip-btn" onClick={() => stepImage(1)} disabled={!!edit}>
-            Next img&nbsp;&nbsp;▶
-          </button>
           <button
-            className="tcip-btn ml-2"
+            className="tcip-btn"
             onClick={() => setToolsOpen(true)}
             disabled={!!edit}
             title="Build training set / prioritize review queue"
@@ -693,16 +759,9 @@ export function ReviewTab() {
             </label>
           </div>
         )}
-
-        {legendOpen && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setLegendOpen(false)} />
-            <ReviewLegend onClose={() => setLegendOpen(false)} />
-          </>
-        )}
       </div>
 
-      <div className="relative flex-1 flex flex-col">
+      <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
           imageUrl={imageUrl}
           hiResImageUrl={imgPath ? api.images.hiResUrl(imgPath) : null}
@@ -711,7 +770,7 @@ export function ReviewTab() {
           onPixelDown={edit ? onEditDown : undefined}
           onPixelMove={edit ? onEditMove : undefined}
           onPixelUp={edit ? onEditUp : undefined}
-          overlay={edit ? <EditShapeOverlay edit={edit} /> : undefined}
+          overlay={edit ? <EditShapeOverlay edit={edit} color={reviewColors.active} /> : undefined}
         >
           {matches && (
             <ReviewOverlays
@@ -720,6 +779,7 @@ export function ReviewTab() {
               showGT={showGT}
               showPred={showPred}
               classNameLookup={className}
+              colors={reviewColors}
               suppressFocusedGt={!!edit && current?.det_type !== "fp"}
               suppressFocusedPred={!!edit && current?.det_type === "fp"}
             />
@@ -731,8 +791,8 @@ export function ReviewTab() {
           <span
             className="absolute top-2 right-3 tcip-badge border bg-tcip-panel/90 pointer-events-none font-bold"
             style={{
-              color: TAG_COLORS[current.det_type],
-              borderColor: TAG_COLORS[current.det_type],
+              color: reviewColors[current.det_type],
+              borderColor: reviewColors[current.det_type],
             }}
           >
             {current.det_type.toUpperCase()}
@@ -740,6 +800,8 @@ export function ReviewTab() {
             <span className="font-normal text-tcip-muted">{edit ? "editing" : "reviewing"}</span>
           </span>
         )}
+
+        <ReviewLegend colors={reviewColors} onEdit={setColorEditKey} />
       </div>
 
       {/* Empty-state card: tells the reviewer WHY there is nothing to step through —
@@ -763,14 +825,20 @@ export function ReviewTab() {
       )}
 
       <div className="flex items-center gap-2 px-3 py-1.5 border-t border-tcip-border bg-tcip-panel text-[11px]">
+        <span className="text-tcip-muted">Detection</span>
         <button
           className="tcip-btn"
           onClick={() => stepDetection(-1)}
           disabled={!matches || matches.detections.length === 0 || detectionIdx <= 0 || !!edit}
           title="Previous detection (←)"
         >
-          ◀&nbsp;&nbsp;Prev
+          ◀
         </button>
+        <span className="tabular-nums">
+          {matches && matches.detections.length > 0
+            ? `${detectionIdx + 1} / ${matches.detections.length}`
+            : "0 / 0"}
+        </span>
         <button
           className="tcip-btn"
           onClick={() => stepDetection(1)}
@@ -782,7 +850,7 @@ export function ReviewTab() {
           }
           title="Next detection (→)"
         >
-          Next&nbsp;&nbsp;▶
+          ▶
         </button>
         {current && (
           <>
@@ -809,9 +877,11 @@ export function ReviewTab() {
 
         {current && !edit && (
           <>
+            {reviewLocked && <span className="text-tcip-muted">Reviewed — uncheck to edit</span>}
             <button
               className="tcip-btn-primary"
               onClick={() => void recordAction("accepted")}
+              disabled={reviewLocked}
               title={acceptTitle}
             >
               ✓&nbsp;&nbsp;{acceptLabel}
@@ -819,6 +889,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn"
               onClick={startEdit}
+              disabled={reviewLocked}
               title="Adjust this shape on the canvas (E)"
             >
               ✎&nbsp;&nbsp;Edit
@@ -826,6 +897,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn-danger"
               onClick={() => void recordAction("rejected")}
+              disabled={reviewLocked}
               title={rejectTitle}
             >
               ✕&nbsp;&nbsp;{rejectLabel}
@@ -860,6 +932,18 @@ export function ReviewTab() {
       </div>
 
       <ReviewToolsDrawer open={toolsOpen} onClose={() => setToolsOpen(false)} />
+
+      {colorEditKey && (
+        <ColorPickerModal
+          title={`${COLOR_LABELS.find((c) => c.key === colorEditKey)?.label ?? "Colour"}`}
+          initialColor={reviewColors[colorEditKey]}
+          onSubmit={(c) => {
+            setReviewColors((prev) => ({ ...prev, [colorEditKey]: c }));
+            setColorEditKey(null);
+          }}
+          onCancel={() => setColorEditKey(null)}
+        />
+      )}
     </div>
   );
 }
@@ -872,11 +956,26 @@ function FilterChip({ children }: { children: ReactNode }) {
   );
 }
 
-function LegendRow({ color, dashed, label }: { color: string; dashed?: boolean; label: string }) {
+/** A legend row whose colour swatch is a button — click it to retune that symbology colour. */
+function LegendRow({
+  color,
+  dashed,
+  label,
+  onEdit,
+}: {
+  color: string;
+  dashed?: boolean;
+  label: string;
+  onEdit: () => void;
+}) {
   return (
     <li className="flex items-center gap-2.5">
-      <span
-        className="inline-block w-6 shrink-0"
+      <button
+        type="button"
+        onClick={onEdit}
+        title="Click to change this colour"
+        aria-label={`Change ${label} colour`}
+        className="inline-block w-6 shrink-0 rounded-sm hover:opacity-70"
         style={{ borderTop: `2.5px ${dashed ? "dashed" : "solid"} ${color}` }}
       />
       <span className="text-tcip-fg">{label}</span>
@@ -884,38 +983,60 @@ function LegendRow({ color, dashed, label }: { color: string; dashed?: boolean; 
   );
 }
 
-/** The review symbology, keyed to what the canvas draws: line style = source, colour = outcome. */
-function ReviewLegend({ onClose }: { onClose: () => void }) {
+/** Hover-triggered legend anchored lower-left of the canvas (same pattern as Annotate).
+ *  Keyed to what the canvas draws: solid = outcome, dashed blue = the detection under review.
+ *  Each swatch opens a colour picker so the symbology palette is user-tunable. */
+function ReviewLegend({
+  colors,
+  onEdit,
+}: {
+  colors: ReviewColors;
+  onEdit: (key: keyof ReviewColors) => void;
+}) {
   return (
-    <div
-      role="dialog"
-      aria-label="Review legend"
-      className="absolute left-3 top-full z-20 mt-1 w-64 rounded-md border border-tcip-border bg-tcip-panel p-3 text-[11px] shadow-lg"
-    >
-      <div className="mb-2 flex items-center justify-between">
-        <span className="font-semibold text-tcip-fg">Review Legend</span>
-        <button
-          className="text-tcip-muted hover:text-tcip-fg"
-          onClick={onClose}
-          aria-label="Close legend"
-        >
-          ✕
-        </button>
+    <div className="group absolute bottom-3 left-3 z-20">
+      <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-max min-w-[10rem] translate-y-1 whitespace-nowrap rounded-md border border-tcip-border-hover bg-tcip-panel p-3 opacity-0 shadow-lg transition-all group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
+        <h4 className="mb-1.5 text-[11px] font-semibold tracking-wide text-tcip-fg">
+          Review Legend
+        </h4>
+        <p className="mb-2 text-[11px] text-tcip-muted">
+          Solid = outcome&nbsp; | &nbsp;Dashed blue = under review
+        </p>
+        <ul className="space-y-1.5">
+          {COLOR_LABELS.map((c) => (
+            <LegendRow
+              key={c.key}
+              color={colors[c.key]}
+              dashed={c.dashed}
+              label={c.label}
+              onEdit={() => onEdit(c.key)}
+            />
+          ))}
+        </ul>
+        <p className="mt-2 border-t border-tcip-border pt-1.5 text-[10px] text-tcip-muted">
+          Click a swatch to recolour
+        </p>
       </div>
-      <p className="mb-2 text-tcip-muted">
-        Solid = outcome&nbsp; | &nbsp;Dashed blue = under review
-      </p>
-      <ul className="space-y-1.5">
-        <LegendRow color={TAG_COLORS.tp} label="Matched (TP)" />
-        <LegendRow color={TAG_COLORS.fp} label="False positive (FP)" />
-        <LegendRow color={TAG_COLORS.fn} label="Missed (FN)" />
-        <LegendRow color={ACTIVE_COLOR} dashed label="Under review" />
-      </ul>
+      <button
+        type="button"
+        className="flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur hover:border-tcip-border-hover hover:text-tcip-fg"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" />
+          <path
+            d="M8 7.2v3.4M8 5.2v.05"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+        Legend
+      </button>
     </div>
   );
 }
 
-function EditShapeOverlay({ edit }: { edit: EditShape }) {
+function EditShapeOverlay({ edit, color }: { edit: EditShape; color: string }) {
   const scale = useStore((s) => s.gui.view.scale);
   const lw = 1 / (scale || 1);
   const hs = 5 * lw; // handle half-size
@@ -934,9 +1055,9 @@ function EditShapeOverlay({ edit }: { edit: EditShape }) {
           y={y1}
           width={x2 - x1}
           height={y2 - y1}
-          stroke={EDIT_COLOR}
+          stroke={color}
           strokeWidth={2.5 * lw}
-          fill="rgba(0, 191, 255, 0.08)"
+          fill={`${color}14`}
         />
         {corners.map(([cx, cy], i) => (
           <Rect
@@ -946,7 +1067,7 @@ function EditShapeOverlay({ edit }: { edit: EditShape }) {
             width={hs * 2}
             height={hs * 2}
             fill="#FFFFFF"
-            stroke={EDIT_COLOR}
+            stroke={color}
             strokeWidth={1.5 * lw}
           />
         ))}
@@ -959,9 +1080,9 @@ function EditShapeOverlay({ edit }: { edit: EditShape }) {
       <Line
         points={edit.points.flat()}
         closed
-        stroke={EDIT_COLOR}
+        stroke={color}
         strokeWidth={2.5 * lw}
-        fill="rgba(0, 191, 255, 0.08)"
+        fill={`${color}14`}
       />
       {edit.points.map(([px, py], i) => (
         <Circle
@@ -970,7 +1091,7 @@ function EditShapeOverlay({ edit }: { edit: EditShape }) {
           y={py}
           radius={4.5 * lw}
           fill="#FFFFFF"
-          stroke={EDIT_COLOR}
+          stroke={color}
           strokeWidth={1.5 * lw}
         />
       ))}
@@ -984,6 +1105,7 @@ interface OverlayProps {
   showGT: boolean;
   showPred: boolean;
   classNameLookup: (cid: number) => string;
+  colors: ReviewColors;
   /** While editing, the picked-up shape is hidden here — it renders live in the edit overlay. */
   suppressFocusedGt?: boolean;
   suppressFocusedPred?: boolean;
@@ -995,11 +1117,13 @@ function ReviewOverlays({
   showGT,
   showPred,
   classNameLookup,
+  colors,
   suppressFocusedGt,
   suppressFocusedPred,
 }: OverlayProps) {
   const scale = useStore((s) => s.gui.view.scale);
   const lw = 1 / (scale || 1);
+  const ACTIVE_COLOR = colors.active;
 
   // One annotation task at a time: an image can carry both detect (boxes) and segment
   // (polygons) labels, and drawing both is unreadable. Show the kind being reviewed —
@@ -1028,7 +1152,7 @@ function ReviewOverlays({
         // Skip detections of the other annotation kind.
         if ((d.gt_type ?? d.pred_type) !== reviewKind) return null;
         const active = i === focusedIdx;
-        const outcome = TAG_COLORS[d.det_type];
+        const outcome = colors[d.det_type];
         const weight = active ? 3 : 2;
         const nodes: ReactNode[] = [];
 
@@ -1068,8 +1192,11 @@ function ReviewOverlays({
         } else {
           // TP / FN = ground truth, solid. Active FN turns blue; active TP keeps its green GT.
           if (showGT && d.gt_type && !(active && suppressFocusedGt)) {
-            const stroke = active && d.det_type === "fn" ? ACTIVE_COLOR : outcome;
-            const fill = d.reviewed ? `${outcome}26` : undefined;
+            const activeFn = active && d.det_type === "fn";
+            const stroke = activeFn ? ACTIVE_COLOR : outcome;
+            // A faint blue wash on the shape under review reads through even where its dashed
+            // line coincides with the solid GT below it.
+            const fill = activeFn ? `${ACTIVE_COLOR}26` : d.reviewed ? `${outcome}26` : undefined;
             const b = box(d.gt_type === "box" ? d.gt_idx : null);
             const p = poly(d.gt_type === "polygon" ? d.gt_idx : null);
             if (b)
@@ -1101,6 +1228,7 @@ function ReviewOverlays({
                   lw={lw}
                   weight={3}
                   dashed
+                  fill={`${ACTIVE_COLOR}26`}
                 />,
               );
             else if (p)
@@ -1112,6 +1240,7 @@ function ReviewOverlays({
                   lw={lw}
                   weight={3}
                   dashed
+                  fill={`${ACTIVE_COLOR}26`}
                 />,
               );
           }
