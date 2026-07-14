@@ -194,7 +194,7 @@ describe("ReviewTab in-place edit", () => {
 
     fireEvent.click(editBtn());
     expect(saveBtn()).toBeInTheDocument();
-    expect(screen.getByText("Cancel (Esc)")).toBeInTheDocument();
+    expect(screen.getByText("Cancel")).toBeInTheDocument();
     expect(screen.getByText("Editing")).toBeInTheDocument();
     expect(screen.queryByText(/Accept/)).not.toBeInTheDocument();
   });
