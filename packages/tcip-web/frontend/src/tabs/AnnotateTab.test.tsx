@@ -80,7 +80,8 @@ function addBox() {
 
 const flush = () => act(async () => {});
 
-const saveButton = () => screen.getByTitle("Ctrl+S (auto-save on image change)");
+// Save now lives in the (mocked-out) toolbar's Editor shelf; drive it via its Ctrl+S shortcut.
+const pressSave = () => fireEvent.keyDown(window, { key: "s", ctrlKey: true });
 
 let loadSpy: MockInstance<typeof api.annotate.load>;
 let saveSpy: MockInstance<typeof api.annotate.save>;
@@ -106,7 +107,7 @@ describe("AnnotateTab save/load race", () => {
 
     saveSpy.mockResolvedValueOnce({ status: "ok", base_mtimes: mt(101) });
     act(addBox);
-    fireEvent.click(saveButton());
+    pressSave();
     await flush();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
@@ -116,7 +117,7 @@ describe("AnnotateTab save/load race", () => {
 
     // Second save on the same image must echo the mtimes the first save returned.
     act(addBox);
-    fireEvent.click(saveButton());
+    pressSave();
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(2);
     expect(saveSpy.mock.calls[1][0].base_mtimes).toEqual(mt(101));
@@ -158,7 +159,7 @@ describe("AnnotateTab save/load race", () => {
 
     // ...and the next save must target img2 with img2's loaded mtimes — NOT
     // img1's file with the stale save's echoed mtimes.
-    fireEvent.click(saveButton());
+    pressSave();
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(2);
     expect(saveSpy.mock.calls[1][0].image_path).toBe("C:/data/images/2026-01-01/img2.jpg");
@@ -174,7 +175,7 @@ describe("AnnotateTab save/load race", () => {
     act(addBox);
     const pending: ((r: SaveResult) => void)[] = [];
     saveSpy.mockImplementation(() => new Promise<SaveResult>((res) => pending.push(res)));
-    fireEvent.click(saveButton());
+    pressSave();
     act(() => {
       const s = useStore.getState();
       s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
