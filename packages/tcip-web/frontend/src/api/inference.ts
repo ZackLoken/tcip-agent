@@ -128,7 +128,7 @@ export interface OnsetRow {
   catkin_05per_date: string | null;
   catkin_50per_date: string | null;
   catkin_95per_date: string | null;
-  // First date any elongation appears (fraction > 0).
+  // Date most catkins have elongated (crops.yml) — the 95% majority crossing.
   catkin_elongation_date: string | null;
 }
 
