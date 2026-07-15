@@ -156,11 +156,14 @@ def main() -> int:
 
         # 3. compute_phenology — valid classified predictions.
         print("\nStep 2: compute_phenology (valid, class-carrying predictions)")
+        # Synthetic scene has no held-out validation, so acknowledge to write a clearly-flagged
+        # provisional CSV — the delivery gate itself is covered by the compute_phenology unit tests.
         r = compute_phenology(
             mapping_path=str(mapping_path),
             predictions_by_date=preds_by_date,
             output_csv_path=str(csv_out),
             elongated_class_id=ELONGATED_CLASS,
+            acknowledge_unvalidated=True,
         )
         check("no error", "error" not in r, r.get("error", ""))
         check("elongation_classified true", r.get("elongation_classified") is True)
@@ -175,12 +178,12 @@ def main() -> int:
             by_plant = {row["plant_id"]: row for row in rows}
             check("both plants present", set(by_plant) == {"P1", "P2"}, str(set(by_plant)))
             for pid, row in by_plant.items():
-                # fraction 0.0 (02-11) → 0.4 (02-25) → 1.0 (03-11): onset at first non-zero,
-                # crossings interpolate and must be strictly ordered and inside the window.
-                onset = row["catkin_elongation_date"]
+                # fraction 0.0 (02-11) → 0.4 (02-25) → 1.0 (03-11): crossings interpolate and
+                # must be ordered; catkin_elongation_date = "most elongated" (crops.yml) = 95% crossing.
+                elong_date = row["catkin_elongation_date"]
                 c05, c50, c95 = (row["catkin_05per_date"], row["catkin_50per_date"],
                                  row["catkin_95per_date"])
-                check(f"{pid} elongation_date = 2026-02-25", onset == "2026-02-25", onset)
+                check(f"{pid} elongation_date == 95per (majority)", elong_date == c95, f"{elong_date} vs {c95}")
                 check(f"{pid} all crossings present", all([c05, c50, c95]),
                       f"05={c05} 50={c50} 95={c95}")
                 check(f"{pid} crossings ordered 05<=50<=95", c05 <= c50 <= c95,
