@@ -7,6 +7,7 @@
 
 import { api, type ProjectSummary } from "@/api/client";
 import { recordRecentProject } from "@/lib/recentProjects";
+import { useStore } from "@/store";
 import type { DatasetSelection } from "@/store/types";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -24,6 +25,10 @@ export async function openWorkspaceProject(
   annotationType: string | null,
   modelName: string | null,
 ): Promise<DatasetSelection> {
+  // Snapshot the outgoing dataset's UI state before the select's broadcast can move it, then
+  // adopt the new selection with its saved position/filters restored. Every open path (picker,
+  // recent-projects fast-track, agent) funnels through here, so restore is defined once.
+  useStore.getState().saveCurrentDatasetUi();
   const res = await api.dataset.select({
     project_root: p.path,
     dataset_root: p.path,
@@ -32,6 +37,7 @@ export async function openWorkspaceProject(
     model_name: modelName || null,
   });
   recordRecentProject(p.name, p.path);
+  useStore.getState().applyRestoredDataset(res.selection);
   return res.selection;
 }
 
