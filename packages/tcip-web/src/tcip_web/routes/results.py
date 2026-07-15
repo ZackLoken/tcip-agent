@@ -157,9 +157,9 @@ def per_plant_curves(payload: PerPlantCurvesPayload) -> dict:
         for assignment in mapping[date]:
             if not assignment.plot_name:
                 continue
-            txt = pred_path / f"{assignment.stem}.txt"
+            pred_json = pred_path / f"{assignment.stem}.json"
             total, elongated, classes_seen = phenology.count_by_class(
-                txt, payload.elongated_class_id
+                pred_json, payload.elongated_class_id
             )
             all_classes |= classes_seen
             plant_id = assignment.plot_name
