@@ -23,7 +23,7 @@ Milestones, per plant, from that plant's elongated-fraction time series:
 
 | Trait | Definition |
 |-------|------------|
-| `catkin_elongation_date` | first date **any** elongation appears (fraction > 0) |
+| `catkin_elongation_date` | date **most** catkins have elongated — the elongated fraction reaches a majority (`crops.yml`: "Date when most catkins have elongated") |
 | `catkin_05per_date` | date the elongated fraction crosses **5%** |
 | `catkin_50per_date` | date the elongated fraction crosses **50%** |
 | `catkin_95per_date` | date the elongated fraction crosses **95%** |
@@ -32,12 +32,13 @@ Crossings interpolate linearly between the two neighbouring capture dates. Pisti
 milestones (`pistillate_05/50/95per_date`) are the identical pattern on the pistillate-
 flower detector/classifier.
 
-> **Open definition question (breeder to resolve).** `crops.yml` currently defines
-> `catkin_elongation_date` as *"Date when most catkins have elongated"* (a majority event),
-> while this skill and the platform's locked implementation use *"first date any elongation
-> appears"* (onset). These disagree. Until the breeder reconciles them (amend `crops.yml`
-> or the implementation), treat this one milestone's threshold as unsettled — the
-> `05/50/95` crossings are unaffected.
+> **Implementation reconciliation needed (code, not definition).** `crops.yml` is the
+> authority: `catkin_elongation_date` is a *majority* event ("most catkins have elongated"),
+> so it is the majority crossing — near `catkin_50per_date`. The platform's
+> `elongation_onset_date` helper still computes *onset* (first date any elongation appears),
+> which contradicts this. Reconcile the implementation to the majority crossing and
+> **validate** it before delivering `catkin_elongation_date`; the `05/50/95` crossings are
+> unaffected.
 
 **Not a count-of-peak, not a sigmoid fit.** Do not normalize catkin *count* to the season
 peak and call the crossings bloom — that is an abundance signal and a different (wrong)
@@ -102,6 +103,7 @@ honest, interpretable signals. It deliberately emits **no** fabricated 0–1 "co
 
 1. `elongation_classified` is **true** (predictions carry the elongation class).
 2. Every expected plant has a row; genotype/`accession` is carried through.
-3. Milestones are chronologically sane (`elongation_date` ≤ `05per` ≤ `50per` ≤ `95per`).
+3. Milestones are chronologically sane (`05per` ≤ `50per` ≤ `95per`; `elongation_date` — the
+   majority crossing — lands near `50per`, not before `05per`).
 4. Plants that never reach a level have `null` for that milestone (not a fabricated date).
 5. The `undated/` image bucket is excluded from the time series (it has no capture date).
