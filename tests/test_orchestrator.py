@@ -238,10 +238,10 @@ class TestTrainingPhaseTracking:
 
 class TestInferencePredictionFormat:
     """The inference phase must write the platform's single canonical
-    prediction format — ``cls conf cx cy w h`` (result_to_yolo_lines) — and the
+    prediction format — per-image COCO/JSON (``<stem>.json``) — and the
     cropping/export readers must consume it. Regression for the old private
-    writer that put confidence LAST, which parse_detect_predictions silently
-    mis-read (conf←cx, box←cy,w,h,conf) with no parse error."""
+    writer whose field order parse_detect_predictions silently mis-read
+    with no parse error."""
 
     PRED = {
         "width": 100,
@@ -281,14 +281,14 @@ class TestInferencePredictionFormat:
 
     def test_predictions_round_trip_through_parse_detect_predictions(
             self, inference_phase, tmp_path):
-        from tcip_annotation.label_io import parse_detect_predictions
+        from tcip_annotation import parse_detect_predictions
 
         orch = PipelineOrchestrator(work_dir=str(tmp_path / "runs"))
         result = orch.run_phase(inference_phase)
         assert result.status == "completed", result.error
 
-        txt_path = Path(result.artifacts["predictions_dir"]) / "plot.txt"
-        pred_boxes, class_ids = parse_detect_predictions(str(txt_path), 100, 50)
+        pred_path = Path(result.artifacts["predictions_dir"]) / "plot.json"
+        pred_boxes, class_ids = parse_detect_predictions(str(pred_path), 100, 50)
         assert len(pred_boxes) == 2
         assert class_ids == {0, 1}
         for pb, box, label, score in zip(
