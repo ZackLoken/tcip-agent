@@ -282,7 +282,46 @@ def test_validate_classification_metrics(tmp_path):
     assert run.best_metric == pytest.approx(last["val_loss"])  # selection falls back to val_loss
 
 
-def test_evaluate_dataset_uses_pycocotools(data_dir):
+@pytest.fixture
+def json_data_dir(tmp_path: Path) -> Path:
+    """Minimal dataset with per-image JSON labels/predictions in the canonical layout.
+
+    evaluate_dataset reads GT and predictions through the json_io per-image schema
+    (pixel COCO xywh + native ``score``). Files keep a ``.txt`` name because the tool
+    resolves them with ``fmt='yolo'`` — json_io parses the JSON *content*.
+    """
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox, PredBBox
+
+    date = "2-11-26"
+    images_dir = tmp_path / "images" / date
+    images_dir.mkdir(parents=True)
+    labels_dir = tmp_path / "annotations" / "default" / date / "detect"
+    labels_dir.mkdir(parents=True)
+    preds_dir = tmp_path / "predictions" / "live" / date / "detect"
+    preds_dir.mkdir(parents=True)
+
+    for name in ("img_001", "img_002", "img_003"):
+        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
+        json_io.write_detect(
+            str(labels_dir / f"{name}.txt"),
+            [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)],
+            640, 480,
+        )
+        # 1 matching prediction (TP) + 1 elsewhere (FP), confidence in the JSON score.
+        json_io.write_detect(
+            str(preds_dir / f"{name}.txt"),
+            [PredBBox(288, 216, 352, 264, 0, confidence=0.9),
+             PredBBox(496, 372, 528, 396, 0, confidence=0.7)],
+            640, 480,
+        )
+    return tmp_path
+
+
+def test_evaluate_dataset_uses_pycocotools(json_data_dir):
+    data_dir = json_data_dir
     from tcip_mcp.tools.annotation_tools import evaluate_dataset
     r = evaluate_dataset(str(data_dir))
     assert "map50" in r
