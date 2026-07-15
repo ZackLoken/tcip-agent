@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -16,14 +17,64 @@ from tcip_annotation import (
 )
 
 
+@pytest.fixture
+def data_dir(tmp_path: Path) -> Path:
+    """Minimal dataset in the canonical layout with per-image JSON labels/predictions.
+
+    Overrides the conftest fixture: evaluate_detections / evaluate_dataset read GT and
+    predictions through the json_io per-image schema (pixel COCO xywh + native ``score``).
+    The files keep a ``.txt`` name because the tools resolve them with ``fmt='yolo'`` — the
+    JSON *content* is what json_io parses.
+    """
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox, PredBBox
+
+    date = "2-11-26"
+    images_dir = tmp_path / "images" / date
+    images_dir.mkdir(parents=True)
+    labels_dir = tmp_path / "annotations" / "default" / date / "detect"
+    labels_dir.mkdir(parents=True)
+    preds_dir = tmp_path / "predictions" / "live" / date / "detect"
+    preds_dir.mkdir(parents=True)
+
+    for name in ("img_001", "img_002", "img_003"):
+        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
+        # 2 GT boxes per image (pixel xyxy).
+        json_io.write_detect(
+            str(labels_dir / f"{name}.txt"),
+            [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)],
+            640, 480,
+        )
+        # Predictions: 1 matching (TP) + 1 elsewhere (FP), confidence in the JSON score.
+        json_io.write_detect(
+            str(preds_dir / f"{name}.txt"),
+            [PredBBox(288, 216, 352, 264, 0, confidence=0.9),
+             PredBBox(496, 372, 528, 396, 0, confidence=0.7)],
+            640, 480,
+        )
+    return tmp_path
+
+
 def test_bbox_creation():
     b = BBox(x1=10, y1=20, x2=50, y2=60, class_id=0)
     assert b.x1 == 10
     assert b.class_id == 0
 
 
-def test_parse_detect_labels(data_dir: Path):
-    label_path = data_dir / "annotations" / "default" / "2-11-26" / "detect" / "img_001.txt"
+def test_parse_detect_labels(tmp_path: Path):
+    # Canonical on-disk label is per-image COCO/JSON: bbox is pixel xywh, class in category_id.
+    label_path = tmp_path / "img_001.json"
+    label_path.write_text(
+        json.dumps({
+            "image": "img_001", "width": 640, "height": 480,
+            "objects": [
+                {"category_id": 0, "bbox": [100, 100, 50, 50]},
+                {"category_id": 0, "bbox": [200, 200, 40, 40]},
+            ],
+        })
+    )
     boxes, class_ids = parse_detect_labels(str(label_path), 640, 480)
     assert len(boxes) == 2
     assert all(isinstance(b, BBox) for b in boxes)
@@ -35,7 +86,7 @@ def test_write_and_read_roundtrip(tmp_path: Path):
         BBox(x1=100, y1=100, x2=200, y2=200, class_id=0),
         BBox(x1=300, y1=300, x2=350, y2=350, class_id=1),
     ]
-    path = tmp_path / "test.txt"
+    path = tmp_path / "test.json"
     write_detect_labels(str(path), boxes, 640, 480)
     read_back, class_ids = parse_detect_labels(str(path), 640, 480)
     assert len(read_back) == 2
