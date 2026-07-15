@@ -161,9 +161,6 @@ export const api = {
   images: {
     url: (path: string, max_width?: number, quality?: number) =>
       `/api/images?${q({ path, max_width, quality })}`,
-    // Full-native-resolution, high-quality variant fetched on deep zoom — no width cap,
-    // minimal recompression, so pixel-level inspection isn't softened by the display cap.
-    hiResUrl: (path: string) => `/api/images?${q({ path, quality: 95 })}`,
   },
 
   annotate: {
