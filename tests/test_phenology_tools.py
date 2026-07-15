@@ -132,9 +132,9 @@ def test_compute_phenology_writes_canonical_csv(tmp_path: Path) -> None:
     assert list(rows[0].keys()) == phenology.PHENOLOGY_CSV_COLUMNS
     assert rows[0]["plant_id"] == "P1"
     assert rows[0]["accession"] == "acc-9"
-    # onset is the first non-zero fraction → the late date; the CSV must not carry
-    # the internal 'series' column.
-    assert rows[0]["catkin_elongation_date"] == "2026-03-09"
+    # catkin_elongation_date = "most catkins elongated" (crops.yml) = the 95% crossing; the CSV
+    # must not carry the internal 'series' column.
+    assert rows[0]["catkin_elongation_date"] == rows[0]["catkin_95per_date"]
     assert "series" not in rows[0]
     # the provenance stamp is written into every row
     assert rows[0]["operating_point_conf"] == "0.4"
