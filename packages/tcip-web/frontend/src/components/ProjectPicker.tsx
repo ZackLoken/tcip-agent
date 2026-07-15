@@ -12,7 +12,6 @@ import { useEffect, useRef, useState } from "react";
 import { api, type ProjectSummary } from "@/api/client";
 import { SeasonRail } from "@/components/SeasonRail";
 import { defaultDate, openWorkspaceProject } from "@/lib/openProject";
-import { useStore } from "@/store";
 
 // Session-scoped: auto-open the active project only on the app's first load, so a later
 // "Switch project" (which returns here) doesn't immediately re-open the same project.
@@ -36,7 +35,6 @@ function relativeTime(epochSeconds: number): string {
 }
 
 export function ProjectPicker() {
-  const patchGui = useStore((s) => s.patchGui);
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [workspace, setWorkspace] = useState<string>("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -85,10 +83,9 @@ export function ProjectPicker() {
     setOpening(true);
     setOpenError(null);
     try {
-      const selection = await openWorkspaceProject(p, chosenDate, chosenType, chosenModel);
+      await openWorkspaceProject(p, chosenDate, chosenType, chosenModel);
       // Mark it active so it auto-opens next time and other clients agree.
       void api.projects.setActive(p.name).catch(() => {});
-      patchGui({ dataset: selection });
     } catch (e) {
       openedRef.current = false;
       setOpenError(String(e));
@@ -134,7 +131,6 @@ export function ProjectPicker() {
       cancelled = true;
     };
     // Run once on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
