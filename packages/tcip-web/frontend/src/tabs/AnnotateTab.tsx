@@ -974,7 +974,6 @@ export function AnnotateTab() {
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
           imageUrl={imageUrl}
-          hiResImageUrl={imgPath ? api.images.hiResUrl(imgPath) : null}
           imgWidth={canvas.imgWidth}
           imgHeight={canvas.imgHeight}
           onStageRef={(st) => (stageRef.current = st)}
@@ -1050,14 +1049,6 @@ export function AnnotateTab() {
                 Reload
               </button>
             )}
-          </div>
-        )}
-
-        {isLocked && (
-          <div className="absolute top-3 right-3 rounded-md border border-tcip-border bg-tcip-panel/95 px-2 py-1 text-[11px] text-tcip-muted pointer-events-none">
-            {currentStatus === "negative"
-              ? "Locked — confirmed negative. Uncheck Complete to edit; it becomes partial when you save annotations."
-              : "Locked — complete. Uncheck Complete to edit."}
           </div>
         )}
 
