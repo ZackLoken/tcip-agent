@@ -147,13 +147,14 @@ describe("ProjectPicker", () => {
     expect(opts).not.toContain("bush");
   });
 
-  it("renders the advanced folder-open disclosure", async () => {
+  it("has no advanced folder-open escape hatch (project creation is agent-driven)", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
       projects: PROJECTS,
     });
     render(<ProjectPicker />);
-    expect(await screen.findByText(/open a folder outside the workspace/i)).toBeInTheDocument();
+    await screen.findByText(PROJECTS[0].name);
+    expect(screen.queryByText(/open a folder outside the workspace/i)).not.toBeInTheDocument();
   });
 });
