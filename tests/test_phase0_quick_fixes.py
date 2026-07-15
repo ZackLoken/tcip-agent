@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -21,10 +23,10 @@ def test_recommend_falls_back_to_torchvision_without_timm(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# export_predictions_yolo writes real, normalized YOLO prediction lines
+# export_predictions_yolo writes per-image COCO/JSON prediction files
 # --------------------------------------------------------------------------
 
-def test_export_predictions_yolo_writes_normalized_lines(tmp_path, monkeypatch):
+def test_export_predictions_yolo_writes_json(tmp_path, monkeypatch):
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")  # only existence is checked
     images_dir = tmp_path / "images"
@@ -46,12 +48,16 @@ def test_export_predictions_yolo_writes_normalized_lines(tmp_path, monkeypatch):
 
     out = tmp_path / "out"
     export_predictions_yolo(str(ckpt), str(images_dir), str(out))
-    parts = (out / "img.txt").read_text().strip().split()
-    assert len(parts) == 6                         # cls conf cx cy w h (was empty before the fix)
-    assert parts[0] == "0"                         # 1-indexed label 1 -> class 0
-    assert float(parts[1]) == pytest.approx(0.9)   # confidence
-    assert float(parts[2]) == pytest.approx(0.2)   # cx normalized = ((10+30)/2)/100
-    assert float(parts[4]) == pytest.approx(0.2)   # w normalized = (30-10)/100
+    # export_predictions_yolo now writes per-image COCO/JSON, not YOLO text lines.
+    data = json.loads((out / "img.json").read_text())
+    assert data["image"] == "img"
+    assert (data["width"], data["height"]) == (100, 100)
+    objs = data["objects"]
+    assert len(objs) == 1                              # (was an empty file before the fix)
+    assert objs[0]["category_id"] == 0                 # 1-indexed label 1 -> class max(1-1,0)=0
+    assert objs[0]["score"] == pytest.approx(0.9)      # confidence
+    # COCO xywh (pixel) from pixel-xyxy box [10,10,30,30].
+    assert objs[0]["bbox"] == pytest.approx([10.0, 10.0, 20.0, 20.0])
 
 
 # --------------------------------------------------------------------------
