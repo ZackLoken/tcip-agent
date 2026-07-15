@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { useReviewColors } from "@/lib/reviewColors";
 import { useStore } from "@/store";
 
 function fmtSeconds(totalSeconds: number): string {
@@ -22,6 +23,7 @@ export function StatusBar() {
   const agentActivity = useStore((s) => s.agentActivity);
   const dataset = useStore((s) => s.gui.dataset);
   const clearDataset = useStore((s) => s.clearDataset);
+  const [reviewColors] = useReviewColors();
 
   function switchProject() {
     clearDataset();
@@ -79,11 +81,11 @@ export function StatusBar() {
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}
       {activeTab === "review" && matches && (
         <span className="tabular-nums">
-          <span className="text-tcip-tp">TP {matches.n_tp}</span>
+          <span style={{ color: reviewColors.tp }}>TP {matches.n_tp}</span>
           <span className="mx-1.5 text-tcip-border">|</span>
-          <span className="text-tcip-fp">FP {matches.n_fp}</span>
+          <span style={{ color: reviewColors.fp }}>FP {matches.n_fp}</span>
           <span className="mx-1.5 text-tcip-border">|</span>
-          <span className="text-tcip-fn">FN {matches.n_fn}</span>
+          <span style={{ color: reviewColors.fn }}>FN {matches.n_fn}</span>
         </span>
       )}
       {activeTab === "review" && matches && matches.detections.length > 0 && (
