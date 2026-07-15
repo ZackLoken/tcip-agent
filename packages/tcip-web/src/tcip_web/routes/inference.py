@@ -1,7 +1,7 @@
 """Inference routes: async tiled runs + live progress WebSocket.
 
-Jobs run on a background thread. Each job writes YOLO-format predictions
-(one ``<stem>.txt`` per image, ``class conf cx cy w h``) to ``output_dir``
+Jobs run on a background thread. Each job writes per-image COCO/JSON predictions
+(one ``<stem>.json`` per image, pixel-xyxy boxes + per-object score) to ``output_dir``
 so they plug straight into the Review tab and the per-plant curve pipeline.
 
 Inference goes through ``build_predictor`` — the same entry point as the MCP ``run_inference``
@@ -161,7 +161,7 @@ def _worker(job: InferenceJob) -> None:
         # One inference entry point (same as MCP run_inference): build_predictor dispatches on
         # the checkpoint's model kind (torchvision-composed → native tiling; ultralytics → SAHI).
         from tcip_mcp.pipelines.inference.predictor import build_predictor
-        from tcip_mcp.pipelines.postprocessing.export import result_to_yolo_lines
+        from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
         from tcip_mcp.pipelines.resolution import raw_operating_point
         from tcip_mcp.utils.atomic_io import atomic_write_json
 
@@ -199,10 +199,8 @@ def _worker(job: InferenceJob) -> None:
                 global_nms_iou=job.iou,
                 postprocess=job.postprocess,
             )
-            lines = result_to_yolo_lines(results[0])
-            out = output_dir / f"{img.stem}.txt"
-            out.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-            job.results.append({"image": img.name, "n_detections": len(lines)})
+            write_predictions_json(output_dir / f"{img.stem}.json", results[0])
+            job.results.append({"image": img.name, "n_detections": results[0]["count"]})
             job.done += 1
 
         job.status = "cancelled" if job.cancel_event.is_set() else "completed"
