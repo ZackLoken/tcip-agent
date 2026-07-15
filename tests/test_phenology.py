@@ -20,7 +20,22 @@ _MCP_SRC = Path(__file__).resolve().parents[1] / "packages" / "tcip-mcp" / "src"
 if str(_MCP_SRC) not in sys.path:
     sys.path.insert(0, str(_MCP_SRC))
 
+from tcip_annotation import json_io  # noqa: E402
+from tcip_annotation.state import PredBBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
+
+
+def _pred_boxes(lines: list[str]) -> list[PredBBox]:
+    """Build per-image JSON prediction boxes from 'cls conf ...' YOLO-ish lines.
+
+    Only the class id and confidence carry meaning for phenology counting; geometry is a
+    placeholder box, since elongation is a class, never a geometric proxy.
+    """
+    boxes = []
+    for line in lines:
+        parts = line.split()
+        boxes.append(PredBBox(1.0, 1.0, 3.0, 3.0, int(float(parts[0])), confidence=float(parts[1])))
+    return boxes
 
 
 # ── date helpers ─────────────────────────────────────────────────────────
@@ -136,12 +151,13 @@ def test_elongation_date_is_the_95per_majority_crossing():
 
 def test_count_by_class_counts_elongated_by_class_not_geometry(tmp_path):
     # Two detections: class 0 (not elongated) and class 1 (elongated). Geometry
-    # (the last four columns) is irrelevant — elongation is the class id.
-    p = tmp_path / "img.txt"
-    p.write_text(
-        "0 0.9 0.5 0.5 0.02 0.30\n"  # tall box, but class 0 → NOT elongated
-        "1 0.8 0.4 0.4 0.40 0.02\n",  # short box, but class 1 → elongated
-        encoding="utf-8",
+    # is irrelevant — elongation is the class id.
+    p = tmp_path / "img.json"
+    json_io.write_detect(
+        p,
+        [PredBBox(1, 1, 3, 30, 0, confidence=0.9),   # tall box, but class 0 → NOT elongated
+         PredBBox(1, 1, 40, 3, 1, confidence=0.8)],  # wide box, but class 1 → elongated
+        8, 8,
     )
     total, elongated, classes_seen = phenology.count_by_class(p, elongated_class_id=1)
     assert (total, elongated) == (2, 1)
@@ -150,7 +166,7 @@ def test_count_by_class_counts_elongated_by_class_not_geometry(tmp_path):
 
 def test_count_by_class_missing_file_is_empty():
     total, elongated, classes_seen = phenology.count_by_class(
-        Path("does-not-exist.txt"), elongated_class_id=1
+        Path("does-not-exist.json"), elongated_class_id=1
     )
     assert (total, elongated, classes_seen) == (0, 0, set())
 
@@ -166,7 +182,7 @@ class _Assignment:
 
 def _write_preds(dir_path: Path, stem: str, lines: list[str]) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
-    (dir_path / f"{stem}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    json_io.write_detect(dir_path / f"{stem}.json", _pred_boxes(lines), 8, 8)
 
 
 def test_per_plant_phenology_builds_fraction_series(tmp_path):
@@ -206,7 +222,8 @@ def test_per_plant_phenology_excludes_zero_detection_date_from_milestones(tmp_pa
     d0 = tmp_path / "2024-05-01"
     d1 = tmp_path / "2024-05-15"
     d0.mkdir(parents=True, exist_ok=True)
-    (d0 / "P1_a.txt").write_text("", encoding="utf-8")  # zero detections on this date
+    # zero detections on this date: a present-but-empty prediction file (confirmed negative)
+    json_io.write_detect(d0 / "P1_a.json", [], 8, 8, keep_empty=True)
     _write_preds(d1, "P1_b", ["1 0.9 0.5 0.5 0.1 0.1", "1 0.8 0.4 0.4 0.1 0.1"])
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
