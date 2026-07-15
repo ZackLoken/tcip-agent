@@ -3,14 +3,13 @@
  * the human never browses the filesystem for two roots. Opening a project points the GUI
  * at it (project root = dataset root); a date/trait/model can be picked per project. The
  * active project (set by the agent after ingesting, or by the human here) auto-opens on
- * first load. An "Open a folder outside the workspace" disclosure keeps the old two-root
- * flow for edge cases.
+ * first load. Project creation is agent-driven (ingest_images) — the user hands the agent
+ * data paths rather than hand-structuring a folder here.
  */
 
 import { useEffect, useRef, useState } from "react";
 
 import { api, type ProjectSummary } from "@/api/client";
-import { AdvancedFolderOpen } from "@/components/AdvancedFolderOpen";
 import { SeasonRail } from "@/components/SeasonRail";
 import { defaultDate, openWorkspaceProject } from "@/lib/openProject";
 import { useStore } from "@/store";
@@ -166,7 +165,7 @@ export function ProjectPicker() {
             <span className="text-tcip-fg font-medium">No projects yet</span>
             <span>
               Ask the agent to structure your images into a project — it creates one with{" "}
-              <span className="font-mono">ingest_images</span>. Or open a folder below.
+              <span className="font-mono">ingest_images</span>.
             </span>
           </div>
         )}
@@ -297,15 +296,6 @@ export function ProjectPicker() {
         {!projects && !loadError && (
           <div className="text-[12px] text-tcip-muted">Loading projects…</div>
         )}
-
-        <details className="tcip-panel p-4 mt-2">
-          <summary className="text-[12px] text-tcip-muted cursor-pointer select-none">
-            Advanced: open a folder outside the workspace
-          </summary>
-          <div className="mt-4">
-            <AdvancedFolderOpen />
-          </div>
-        </details>
       </div>
     </div>
   );
