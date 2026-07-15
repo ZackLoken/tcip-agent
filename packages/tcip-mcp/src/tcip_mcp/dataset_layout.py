@@ -24,16 +24,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-LABEL_EXT = {"yolo": ".txt", "voc": ".xml", "coco": ".json", "labelme": ".json"}
-_ANY_EXTS = (".txt", ".xml", ".json")
+# Per-image COCO/JSON is the canonical on-disk label format; YOLO/VOC survive only for explicit
+# import/export. ``json`` is the default, and ``.json`` is preferred when resolving an existing label.
+LABEL_EXT = {"json": ".json", "yolo": ".txt", "voc": ".xml", "coco": ".json", "labelme": ".json"}
+_ANY_EXTS = (".json", ".txt", ".xml")
 DEFAULT_TRAIT = "default"
 DEFAULT_MODEL = "live"
 TASKS = ("detect", "segment")
 
 
 def label_ext(fmt: Optional[str]) -> str:
-    """File extension for a label format (defaults to YOLO ``.txt``)."""
-    return LABEL_EXT.get((fmt or "yolo").lower(), ".txt")
+    """File extension for a label format. The canonical on-disk format is per-image JSON, so an
+    unspecified format resolves to ``.json`` (YOLO/VOC only via an explicit ``fmt``)."""
+    return LABEL_EXT.get((fmt or "json").lower(), ".json")
 
 
 def parse_image_path(image_path: str | Path) -> tuple[Path, Optional[str], str]:
