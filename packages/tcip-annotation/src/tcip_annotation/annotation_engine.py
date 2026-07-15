@@ -20,7 +20,8 @@ import os
 from dataclasses import replace
 from typing import Optional
 
-from tcip_annotation.label_io import write_detect_labels, write_segment_labels
+from tcip_annotation.json_io import write_detect as write_detect_labels
+from tcip_annotation.json_io import write_segment as write_segment_labels
 from tcip_annotation.state import AnnotationState, BBox, Polygon
 
 logger = logging.getLogger(__name__)
