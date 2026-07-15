@@ -9,13 +9,14 @@ validated 2-class classifier (class ``elongated_class_id``) — never a geometri
 as bbox height/aspect. Milestones:
 
     catkin_05/50/95per_date  = the dates the elongated fraction first crosses 5/50/95%
-    catkin_elongation_date   = the first date any elongation appears (fraction > 0)
+    catkin_elongation_date   = the date most catkins have elongated (``crops.yml``) — the 95%
+                               majority crossing, i.e. synonymous with catkin_95per_date
 
-``catkin_elongation_date`` is a *discrete observation* (the first date we actually saw any
-elongation); the 05/50/95 crossings are *interpolated estimates* between neighbouring dates.
-They are different quantities, so with a sparse jump (fraction 0 → well past 5% in one step)
-the estimated 05% crossing can pre-date the first observed elongation. That is intended, not
-a bug. With realistically dense series the two effectively coincide.
+``catkin_elongation_date`` follows ``crops.yml`` ("Date when most catkins have elongated"),
+operationalized here as the 95% majority crossing. This is the current best-guess reading of
+that text, pending breeder confirmation — correct the mapping in ``plant_milestones`` if they
+rule otherwise. ``elongation_onset_date`` (the first date any elongation appears) is a
+separate helper, not the delivered trait.
 
 This module is pure (stdlib only): it consumes an already-classified per-(plant, date)
 count and never touches pixels. Because "elongated" is a classifier class, if the
@@ -130,7 +131,8 @@ def plant_milestones(series: list[tuple[str, float]]) -> dict:
     definition lives in one place instead of scattered literals.
     """
     out = {f"catkin_{key}_date": crossing_date(series, frac) for key, frac in MILESTONE_TARGETS.items()}
-    out["catkin_elongation_date"] = elongation_onset_date(series)
+    # crops.yml "most catkins elongated" = the 95% majority crossing (best-guess reading, pending breeder confirmation)
+    out["catkin_elongation_date"] = out["catkin_95per_date"]
     return out
 
 
