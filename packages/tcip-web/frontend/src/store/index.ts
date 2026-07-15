@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { autoColor, type ClassEntry, type ImageStatus } from "@/api/classes";
+import { datasetKey, loadDatasetUi, saveDatasetUi } from "@/lib/datasetUiState";
 import type {
   Box,
   DatasetSelection,
@@ -187,6 +188,13 @@ export interface AppState {
   patchGui: (partial: Partial<GuiState>) => void;
   /** Clear the dataset selection, returning the GUI to the project front door. */
   clearDataset: () => void;
+  /** Persist the current dataset's UI state (position/filters) before switching away. Call
+   *  synchronously before the async /dataset/select so a broadcast can't move it mid-await. */
+  saveCurrentDatasetUi: () => void;
+  /** Adopt a new dataset selection, restoring its saved position/filters when the user has been
+   *  here before (else the selection's own values). Establishes the new identity locally so a
+   *  same-identity backend snapshot keeps the restored index instead of resetting it to 0. */
+  applyRestoredDataset: (sel: DatasetSelection) => void;
   /**
    * Apply a backend state snapshot with ownership-aware merge (NOT a wholesale
    * replace, which used to clobber unsaved edits, the active tab, and the scroll
@@ -323,6 +331,38 @@ export const useStore = create<AppState>()((set, get) => ({
   setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
   clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: DEFAULT_DATASET } })),
+
+  saveCurrentDatasetUi: () => {
+    const s = get();
+    const key = datasetKey(s.gui.dataset);
+    if (!key) return;
+    saveDatasetUi(key, {
+      index: s.gui.dataset.current_image_index,
+      review: s.gui.review,
+      statusFilter: s.imageStatus.activeFilter,
+    });
+  },
+
+  applyRestoredDataset: (sel) =>
+    set((s) => {
+      const key = datasetKey(sel);
+      const restored = key ? loadDatasetUi(key) : null;
+      const index =
+        restored && sel.image_list.length
+          ? Math.max(0, Math.min(restored.index, sel.image_list.length - 1))
+          : sel.current_image_index;
+      return {
+        gui: {
+          ...s.gui,
+          dataset: { ...sel, current_image_index: index },
+          review: restored?.review ?? s.gui.review,
+        },
+        imageStatus: {
+          ...s.imageStatus,
+          activeFilter: restored?.statusFilter ?? s.imageStatus.activeFilter,
+        },
+      };
+    }),
 
   mergeSnapshot: (incoming, version) =>
     set((s) => {
