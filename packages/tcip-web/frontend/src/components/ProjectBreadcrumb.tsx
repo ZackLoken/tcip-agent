@@ -27,7 +27,6 @@ function currentModel(predDetectDir: string | null, predSegmentDir: string | nul
 
 export function ProjectBreadcrumb() {
   const dataset = useStore((s) => s.gui.dataset);
-  const patchGui = useStore((s) => s.patchGui);
   const clearDataset = useStore((s) => s.clearDataset);
   const activeTab = useStore((s) => s.gui.active_tab);
   const setActiveTab = useStore((s) => s.setActiveTab);
@@ -77,9 +76,10 @@ export function ProjectBreadcrumb() {
     setMenu(null);
     setBusy(true);
     try {
+      // openProjectByName funnels through openWorkspaceProject, which saves the outgoing UI state
+      // and restores this project's saved position/filters — no patchGui here.
       const sel = await openProjectByName(name);
-      if (sel) patchGui({ dataset: sel });
-      else pushToast("That project is no longer in the workspace.");
+      if (!sel) pushToast("That project is no longer in the workspace.");
     } catch (e) {
       pushToast(`Could not open project: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -104,8 +104,8 @@ export function ProjectBreadcrumb() {
         dataset.predictions_segment_dir,
       );
       const model = curModel && models.includes(curModel) ? curModel : (models[0] ?? null);
-      const sel = await openWorkspaceProject(current, newDate, trait, model);
-      patchGui({ dataset: sel });
+      // openWorkspaceProject saves the outgoing date's UI state and restores the new date's.
+      await openWorkspaceProject(current, newDate, trait, model);
     } catch (e) {
       pushToast(`Could not switch date: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
