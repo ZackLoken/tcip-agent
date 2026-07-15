@@ -117,7 +117,7 @@ def compute_phenology(
     classifier (class ``elongated_class_id``), never a geometric proxy such as bounding-box
     height. For each plant this reports:
 
-        catkin_elongation_date   first date any elongation appears (fraction > 0)
+        catkin_elongation_date   date most catkins have elongated (crops.yml) = the 95% crossing
         catkin_05/50/95per_date  dates the elongated fraction crosses 5/50/95%
 
     Args:
