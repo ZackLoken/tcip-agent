@@ -187,11 +187,15 @@ def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -
 
 
 def test_save_gt_writes_both_files(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
+    from tcip_annotation.json_io import read_detect, read_segment
+
     ctx.gt_boxes = [BBox(100, 100, 200, 200, class_id=0)]
     ctx.gt_polygons = [Polygon([(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)], class_id=1)]
-    det_path = tmp_path / "out_detect" / "IMG.txt"
-    seg_path = tmp_path / "out_segment" / "IMG.txt"
+    det_path = tmp_path / "out_detect" / "IMG.json"
+    seg_path = tmp_path / "out_segment" / "IMG.json"
     ok = engine.save_gt(ctx, detect_path=str(det_path), segment_path=str(seg_path))
     assert ok
-    assert det_path.read_text().startswith("0 ")
-    assert seg_path.read_text().startswith("1 ")
+    det_boxes, _ = read_detect(str(det_path))
+    assert len(det_boxes) == 1 and det_boxes[0].class_id == 0
+    seg_polys, _ = read_segment(str(seg_path))
+    assert len(seg_polys) == 1 and seg_polys[0].class_id == 1
