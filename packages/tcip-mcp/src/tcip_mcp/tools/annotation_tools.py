@@ -98,7 +98,7 @@ def load_annotations(image_path: str, fmt: str | None = None) -> dict:
             )
 
     # Look for predictions (YOLO format — predictions are always YOLO)
-    pred_det = find_prediction(image_path, "detect", fmt="yolo")
+    pred_det = find_prediction(image_path, "detect")
     if pred_det is not None:
         pred_boxes, class_ids = parse_detect_predictions(str(pred_det), w, h)
         result["detect_predictions"] = {
@@ -114,7 +114,7 @@ def load_annotations(image_path: str, fmt: str | None = None) -> dict:
             ],
         }
 
-    pred_seg = find_prediction(image_path, "segment", fmt="yolo")
+    pred_seg = find_prediction(image_path, "segment")
     if pred_seg is not None:
         pred_polys, class_ids = parse_segment_predictions(str(pred_seg), w, h)
         result["segment_predictions"] = {
@@ -132,7 +132,7 @@ def save_annotations(
     image_path: str,
     boxes: list[dict] | None = None,
     polygons: list[dict] | None = None,
-    fmt: str = "yolo",
+    fmt: str = "json",
     trait: str = DEFAULT_TRAIT,
     date: str | None = None,
     detect_path: str | None = None,
@@ -241,16 +241,16 @@ def _load_image_annotations(image_path: str):
     pred_boxes: list = []
     pred_polys: list = []
 
-    detect_label = find_gt_label(image_path, "detect", fmt="yolo")
+    detect_label = find_gt_label(image_path, "detect")
     if detect_label:
         gt_boxes, _ = parse_detect_labels(str(detect_label), w, h)
-    segment_label = find_gt_label(image_path, "segment", fmt="yolo")
+    segment_label = find_gt_label(image_path, "segment")
     if segment_label:
         gt_polys, _ = parse_segment_labels(str(segment_label), w, h)
-    detect_pred = find_prediction(image_path, "detect", fmt="yolo")
+    detect_pred = find_prediction(image_path, "detect")
     if detect_pred:
         pred_boxes, _ = parse_detect_predictions(str(detect_pred), w, h)
-    segment_pred = find_prediction(image_path, "segment", fmt="yolo")
+    segment_pred = find_prediction(image_path, "segment")
     if segment_pred:
         pred_polys, _ = parse_segment_predictions(str(segment_pred), w, h)
 
@@ -498,10 +498,10 @@ def run_matching(
     # Get image dimensions
     img_w, img_h = get_image_dimensions(image_path)
 
-    gt_det = find_gt_label(image_path, "detect", fmt="yolo")
-    gt_seg = find_gt_label(image_path, "segment", fmt="yolo")
-    pred_det = find_prediction(image_path, "detect", fmt="yolo")
-    pred_seg = find_prediction(image_path, "segment", fmt="yolo")
+    gt_det = find_gt_label(image_path, "detect")
+    gt_seg = find_gt_label(image_path, "segment")
+    pred_det = find_prediction(image_path, "detect")
+    pred_seg = find_prediction(image_path, "segment")
 
     gt_boxes, _ = parse_detect_labels(str(gt_det), img_w, img_h) if gt_det else ([], set())
     gt_polys, _ = parse_segment_labels(str(gt_seg), img_w, img_h) if gt_seg else ([], set())
@@ -658,23 +658,22 @@ def focus_annotate(
     det_dir = Path(annotation_dir(dataset_root, trait, date, "detect"))
 
     def _label_task(stem: str) -> str | None:
-        # "segment"/"detect" if a NON-EMPTY label exists (something to show), else None.
+        # "segment"/"detect" if a label with OBJECTS exists (something to show), else None. A
+        # confirmed negative (a present {"objects": []}) has size > 0 but nothing to show — read it.
         for task, d in (("segment", seg_dir), ("detect", det_dir)):
-            f = d / f"{stem}.txt"
-            if f.is_file() and f.stat().st_size > 0:
+            f = d / f"{stem}.json"
+            if not f.is_file():
+                continue
+            shapes, _ = (parse_segment_labels if task == "segment" else parse_detect_labels)(str(f))
+            if shapes:
                 return task
         return None
 
     def _first_class(stem: str, task: str) -> int | None:
         d = seg_dir if task == "segment" else det_dir
-        try:
-            for line in (d / f"{stem}.txt").read_text(encoding="utf-8").splitlines():
-                parts = line.split()
-                if parts:
-                    return int(float(parts[0]))
-        except (OSError, ValueError):
-            pass
-        return None
+        parser = parse_segment_labels if task == "segment" else parse_detect_labels
+        shapes, _ = parser(str(d / f"{stem}.json"))
+        return shapes[0].class_id if shapes else None
 
     n_annotated = 0
     first_idx: int | None = None
@@ -786,8 +785,8 @@ def focus_review(
     pred_dir = Path(prediction_dir(dataset_root, model_name, date, "detect"))
 
     def _has_pred(stem: str) -> bool:
-        f = pred_dir / f"{stem}.txt"
-        return f.is_file() and f.stat().st_size > 0
+        boxes, _ = parse_detect_predictions(str(pred_dir / f"{stem}.json"))
+        return bool(boxes)
 
     n_with_preds = 0
     first_idx: int | None = None
@@ -839,7 +838,7 @@ def stage_proposals(
     boxes: list[dict] | None = None,
     polygons: list[dict] | None = None,
 ) -> dict:
-    """Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<task>/<stem>.txt`` for
+    """Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<task>/<stem>.json`` for
     canvas review — the "show on canvas before writing ground truth" guardrail.
 
     Anything a model produces (a SAM mask, a groundingDINO/baseline detection, a shape the agent
@@ -859,8 +858,10 @@ def stage_proposals(
         polygons: ``[{class_id, conf, points: [[x, y], ...]}]`` with points normalized to [0, 1]
             (>=3 points each) — SAM's mask-quality score is a natural ``conf``.
     """
-    from tcip_mcp.dataset_layout import prediction_dir
-    from tcip_mcp.utils.atomic_io import atomic_write_text
+    from tcip_annotation import json_io
+    from tcip_annotation.state import PredBBox, PredPolygon
+
+    from tcip_mcp.dataset_layout import image_dir, prediction_dir
     from tcip_mcp.workspace import is_valid_name
 
     # Confine the path segments so a malformed model/date/stem (an absolute path, a stray ``..``)
@@ -878,10 +879,11 @@ def stage_proposals(
         # Pixel coords slipping in would render off-canvas and corrupt the review.
         return any(v < -0.01 or v > 1.5 for v in vals)
 
-    # Build + validate every line before writing anything, so a bad shape can't leave a partial stage.
-    detect_lines: list[str] | None = None
+    # Validate every normalized shape before touching the image or writing anything, so a bad shape
+    # can't leave a partial stage. json_io is pixel-space, so we denormalize after resolving dims.
+    norm_boxes: list[tuple[int, float, float, float, float, float]] | None = None
     if boxes:
-        detect_lines = []
+        norm_boxes = []
         for i, b in enumerate(boxes):
             try:
                 cx, cy, w, h = float(b["cx"]), float(b["cy"]), float(b["w"]), float(b["h"])
@@ -892,11 +894,11 @@ def stage_proposals(
             if _unnormalized((cx, cy, w, h)):
                 return {"error": (f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be "
                                   f"in [0,1] (divide pixel coords by image width/height)")}
-            detect_lines.append(f"{cls} {conf:.4f} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+            norm_boxes.append((cls, conf, cx, cy, w, h))
 
-    segment_lines: list[str] | None = None
+    norm_polys: list[tuple[int, float, list[tuple[float, float]]]] | None = None
     if polygons:
-        segment_lines = []
+        norm_polys = []
         for i, p in enumerate(polygons):
             try:
                 cls = int(p.get("class_id", 0))
@@ -910,18 +912,44 @@ def stage_proposals(
             if _unnormalized(flat):
                 return {"error": (f"polygon {i} points look un-normalized; x/y must be in [0,1] "
                                   f"(divide pixel coords by image width/height)")}
-            coords = " ".join(f"{v:.6f}" for v in flat)
-            segment_lines.append(f"{cls} {conf:.4f} {coords}")
+            norm_polys.append((cls, conf, pts))
 
-    def _write(task: str, lines: list[str]) -> str:
-        pdir = Path(prediction_dir(dataset_root, model_name, date, task))
-        pdir.mkdir(parents=True, exist_ok=True)
-        out = pdir / f"{stem}.txt"
-        atomic_write_text(out, "\n".join(lines) + ("\n" if lines else ""))
-        return str(out)
+    # Resolve the source image to convert normalized shapes to pixel space (json_io is pixel-space).
+    img_file = None
+    for idir in (image_dir(dataset_root, date), image_dir(dataset_root, None)):
+        for cand in sorted(Path(idir).glob(f"{stem}.*")):
+            if cand.is_file():
+                img_file = cand
+                break
+        if img_file is not None:
+            break
+    if img_file is None:
+        return {"error": f"no image found for stem {stem!r} under {image_dir(dataset_root, date)}"}
+    img_w, img_h = get_image_dimensions(str(img_file))
 
-    detect_path = _write("detect", detect_lines) if detect_lines is not None else None
-    segment_path = _write("segment", segment_lines) if segment_lines is not None else None
+    detect_path = None
+    if norm_boxes is not None:
+        pred_boxes = [
+            PredBBox(
+                (cx - w / 2) * img_w, (cy - h / 2) * img_h,
+                (cx + w / 2) * img_w, (cy + h / 2) * img_h,
+                cls, confidence=conf,
+            )
+            for (cls, conf, cx, cy, w, h) in norm_boxes
+        ]
+        out = Path(prediction_dir(dataset_root, model_name, date, "detect")) / f"{stem}.json"
+        json_io.write_detect(out, pred_boxes, img_w, img_h)
+        detect_path = str(out)
+
+    segment_path = None
+    if norm_polys is not None:
+        pred_polys = [
+            PredPolygon([(x * img_w, y * img_h) for x, y in pts], cls, confidence=conf)
+            for (cls, conf, pts) in norm_polys
+        ]
+        out = Path(prediction_dir(dataset_root, model_name, date, "segment")) / f"{stem}.json"
+        json_io.write_segment(out, pred_polys, img_w, img_h)
+        segment_path = str(out)
 
     return {
         "staged": len(boxes) + len(polygons),
@@ -956,13 +984,18 @@ def write_class_map(labels_dir: str, class_names: str = "", output_path: str = "
     if not ld.is_dir():
         return {"error": f"labels_dir not found: {labels_dir}"}
     ids: set[int] = set()
-    for txt in ld.glob("*.txt"):
-        for line in txt.read_text(encoding="utf-8").splitlines():
-            parts = line.split()
-            if parts:
+    for jf in ld.glob("*.json"):
+        try:
+            data = _json.loads(jf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for o in data.get("objects") or []:
+            if isinstance(o, dict) and "category_id" in o:
                 try:
-                    ids.add(int(float(parts[0])))
-                except ValueError:
+                    ids.add(int(o["category_id"]))
+                except (TypeError, ValueError):
                     continue
     if not ids:
         return {"error": f"no class ids found in {labels_dir}"}
