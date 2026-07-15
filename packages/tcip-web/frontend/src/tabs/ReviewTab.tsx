@@ -69,16 +69,16 @@ function labelPaths(dataset: DatasetSelection, name: string | null) {
   const stem = name.replace(/\.[^.]+$/, "");
   return {
     gt_detect: dataset.annotations_detect_dir
-      ? `${dataset.annotations_detect_dir}/${stem}.txt`
+      ? `${dataset.annotations_detect_dir}/${stem}.json`
       : null,
     gt_segment: dataset.annotations_segment_dir
-      ? `${dataset.annotations_segment_dir}/${stem}.txt`
+      ? `${dataset.annotations_segment_dir}/${stem}.json`
       : null,
     pred_detect: dataset.predictions_detect_dir
-      ? `${dataset.predictions_detect_dir}/${stem}.txt`
+      ? `${dataset.predictions_detect_dir}/${stem}.json`
       : null,
     pred_segment: dataset.predictions_segment_dir
-      ? `${dataset.predictions_segment_dir}/${stem}.txt`
+      ? `${dataset.predictions_segment_dir}/${stem}.json`
       : null,
   };
 }
