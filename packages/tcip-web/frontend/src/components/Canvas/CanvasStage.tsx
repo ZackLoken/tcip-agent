@@ -11,16 +11,13 @@ import Konva from "konva";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { useStore } from "@/store";
 
-// Above this magnification the display-capped bitmap is visibly upscaled; fetch the
-// full-native-resolution variant so pixel-level inspection isn't softened by the cap.
-const HIRES_SCALE = 1.5;
-
 export interface CanvasStageProps {
   imageUrl: string | null;
   imgWidth: number;
   imgHeight: number;
-  /** Optional full-resolution variant, loaded lazily once zoomed past HIRES_SCALE. */
-  hiResImageUrl?: string | null;
+  /** Auto-fit the image to the canvas once per image (default true). The Review tab sets this
+   *  false so its zoom-to-detection view is not overridden by the fit. */
+  autoFit?: boolean;
   /** Static shapes — rendered in the content layer (below the overlay). */
   children?: React.ReactNode;
   /** Cursor-following / transient shapes — rendered in a separate top layer so they
@@ -45,8 +42,6 @@ export function CanvasStage(props: CanvasStageProps) {
   const setView = useStore((s) => s.setView);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [imgError, setImgError] = useState(false);
-  const [hiResImg, setHiResImg] = useState<HTMLImageElement | null>(null);
-  const hiResLoadedFor = useRef<string | null>(null);
 
   // Track wrapper size — measure synchronously on mount too, so the first fit uses the real
   // canvas size immediately rather than waiting a frame for the ResizeObserver.
@@ -93,35 +88,6 @@ export function CanvasStage(props: CanvasStageProps) {
     };
   }, [props.imageUrl]);
 
-  // A new source image invalidates any full-res variant held for the previous one.
-  useEffect(() => {
-    setHiResImg(null);
-    hiResLoadedFor.current = null;
-  }, [props.hiResImageUrl]);
-
-  // Fetch the full-res variant once zoomed in far enough to see the difference. It swaps
-  // in when ready (the capped bitmap covers the wait) and then stays — one big texture
-  // per image, dropped on image change; loaded at most once per image.
-  const wantHiRes = view.scale > HIRES_SCALE && !!props.hiResImageUrl;
-  useEffect(() => {
-    const url = props.hiResImageUrl;
-    if (!wantHiRes || !url || hiResLoadedFor.current === url) return;
-    let cancelled = false;
-    const el = new Image();
-    el.crossOrigin = "anonymous";
-    el.onload = () => {
-      if (cancelled) return;
-      hiResLoadedFor.current = url; // guard set only on success, so a cancel can retry
-      setHiResImg(el);
-    };
-    el.src = url;
-    return () => {
-      cancelled = true;
-      el.onload = null;
-      el.src = "";
-    };
-  }, [wantHiRes, props.hiResImageUrl]);
-
   // Fit the image to the canvas ONCE per image — not on every container resize. Refitting
   // on resize reset the user's zoom/pan, and when a reflow briefly reported a near-zero
   // height (e.g. the Review filter shelf expanding) it collapsed the image to sub-pixel
@@ -129,6 +95,7 @@ export function CanvasStage(props: CanvasStageProps) {
   // it's keyed on image identity + native size so a genuine image change still fits.
   const didFit = useRef<string | null>(null);
   useEffect(() => {
+    if (props.autoFit === false) return; // consumer controls the view (e.g. Review zoom-to-detection)
     if (!img || !props.imgWidth || !props.imgHeight) return;
     const key = `${props.imageUrl}:${props.imgWidth}x${props.imgHeight}`;
     if (didFit.current === key) return;
@@ -140,7 +107,7 @@ export function CanvasStage(props: CanvasStageProps) {
       offset_x: (dims.w - props.imgWidth * scale) / 2,
       offset_y: (dims.h - props.imgHeight * scale) / 2,
     });
-  }, [img, props.imageUrl, props.imgWidth, props.imgHeight, dims, setView]);
+  }, [img, props.imageUrl, props.imgWidth, props.imgHeight, props.autoFit, dims, setView]);
 
   // Expose stage ref
   const { onStageRef } = props;
@@ -356,17 +323,8 @@ export function CanvasStage(props: CanvasStageProps) {
           scaleX={view.scale}
           scaleY={view.scale}
         >
-          {img || hiResImg ? (
-            <KonvaImage
-              // Use the full-res variant only while zoomed in past the threshold; when zoomed
-              // back out, revert to the capped bitmap (the huge texture drawn small could drop
-              // out on some GPUs, making the image vanish while the overlays stayed).
-              image={(wantHiRes && hiResImg ? hiResImg : img) ?? undefined}
-              x={0}
-              y={0}
-              width={props.imgWidth}
-              height={props.imgHeight}
-            />
+          {img ? (
+            <KonvaImage image={img} x={0} y={0} width={props.imgWidth} height={props.imgHeight} />
           ) : null}
         </Layer>
         <Layer
