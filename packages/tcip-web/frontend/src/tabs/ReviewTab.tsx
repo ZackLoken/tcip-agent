@@ -18,33 +18,10 @@ import {
   type EditDrag,
   type EditShape,
 } from "@/lib/reviewEditGeometry";
+import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, Detection, MatchesResponse, PredBox } from "@/store/types";
 
-// Review symbology colours (color = outcome; line style = source). User-customisable and
-// persisted, so a reviewer can retune TP/FP/FN/under-review to their imagery.
-export interface ReviewColors {
-  tp: string;
-  fp: string;
-  fn: string;
-  active: string;
-}
-const DEFAULT_REVIEW_COLORS: ReviewColors = {
-  tp: "#4CAF50", // matched
-  fp: "#EF5350", // false positive
-  fn: "#FFD54A", // missed (gold)
-  active: "#00BFFF", // the detection under review — highlighter blue
-};
-const REVIEW_COLORS_KEY = "tcip.review.colors";
-function loadReviewColors(): ReviewColors {
-  try {
-    const raw = localStorage.getItem(REVIEW_COLORS_KEY);
-    if (raw) return { ...DEFAULT_REVIEW_COLORS, ...JSON.parse(raw) };
-  } catch {
-    /* disabled storage — fall back to defaults */
-  }
-  return DEFAULT_REVIEW_COLORS;
-}
 const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashed?: boolean }[] = [
   { key: "tp", label: "Matched (TP)", tag: "TP" },
   { key: "fp", label: "False positive (FP)", tag: "FP" },
@@ -164,16 +141,10 @@ export function ReviewTab() {
   const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
   // A reviewed (completed) image is locked — no verdicts/edits until it's reopened.
   const reviewLocked = imageStatus === "completed";
-  // User-tunable symbology colours (persisted); the legend swatches open a picker.
-  const [reviewColors, setReviewColors] = useState<ReviewColors>(loadReviewColors);
+  // User-tunable symbology colours (persisted + shared with the status bar); legend swatches
+  // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
+  const [reviewColors, setReviewColors] = useReviewColors();
   const [colorEditKey, setColorEditKey] = useState<keyof ReviewColors | null>(null);
-  useEffect(() => {
-    try {
-      localStorage.setItem(REVIEW_COLORS_KEY, JSON.stringify(reviewColors));
-    } catch {
-      /* disabled storage — colours just won't persist */
-    }
-  }, [reviewColors]);
   const [edit, setEdit] = useState<EditShape | null>(null);
   const editDrag = useRef<EditDrag | null>(null);
   // One GT-mutating request at a time: key auto-repeat / double-clicks must not append
@@ -184,15 +155,26 @@ export function ReviewTab() {
     if (!dataset.project_root || !imgPath || !imgName) return;
     setLoading(true);
     try {
+      // Review ONE annotation kind at a time. An image often carries both detect boxes AND
+      // segment polygons for the same objects (detect is derived from polygons), so passing
+      // both makes compute_matches emit two detections per object (2 objects -> 4). Scope to
+      // the kind being reviewed — predictions decide it, falling back to whichever GT exists.
+      const kind: "box" | "polygon" = dataset.predictions_detect_dir
+        ? "box"
+        : dataset.predictions_segment_dir
+          ? "polygon"
+          : dataset.annotations_detect_dir
+            ? "box"
+            : "polygon";
       const res = await api.review.matches(
         {
           project_root: dataset.project_root,
           image_name: imgName,
           image_path: imgPath,
-          gt_detect_path: paths.gt_detect,
-          gt_segment_path: paths.gt_segment,
-          pred_detect_path: paths.pred_detect,
-          pred_segment_path: paths.pred_segment,
+          gt_detect_path: kind === "box" ? paths.gt_detect : null,
+          gt_segment_path: kind === "polygon" ? paths.gt_segment : null,
+          pred_detect_path: kind === "box" ? paths.pred_detect : null,
+          pred_segment_path: kind === "polygon" ? paths.pred_segment : null,
           iou_threshold: filters.iou_threshold,
           conf_threshold: filters.conf_threshold,
           filter_type: filters.filter_type,
@@ -764,7 +746,7 @@ export function ReviewTab() {
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
           imageUrl={imageUrl}
-          hiResImageUrl={imgPath ? api.images.hiResUrl(imgPath) : null}
+          autoFit={false}
           imgWidth={imgW}
           imgHeight={imgH}
           onPixelDown={edit ? onEditDown : undefined}
@@ -797,7 +779,9 @@ export function ReviewTab() {
           >
             {current.det_type.toUpperCase()}
             <span className="mx-1 text-tcip-border">|</span>
-            <span className="font-normal text-tcip-muted">{edit ? "editing" : "reviewing"}</span>
+            <span className="font-normal text-tcip-muted">
+              {edit ? "editing" : current.reviewed ? current.reviewed_action : "reviewing"}
+            </span>
           </span>
         )}
 
@@ -867,9 +851,6 @@ export function ReviewTab() {
                 </>
               )}
             </span>
-            {current.reviewed && (
-              <span className="text-tcip-warn">({current.reviewed_action})</span>
-            )}
           </>
         )}
 
@@ -983,9 +964,9 @@ function LegendRow({
   );
 }
 
-/** Hover-triggered legend anchored lower-left of the canvas (same pattern as Annotate).
- *  Keyed to what the canvas draws: solid = outcome, dashed blue = the detection under review.
- *  Each swatch opens a colour picker so the symbology palette is user-tunable. */
+/** Legend anchored lower-left of the canvas (same pattern as Annotate). Opens on hover for a
+ *  quick view and pins open on click so a swatch can be recoloured without the popover slipping
+ *  away; clicking outside unpins. Solid = outcome, dashed blue = the detection under review. */
 function ReviewLegend({
   colors,
   onEdit,
@@ -993,15 +974,25 @@ function ReviewLegend({
   colors: ReviewColors;
   onEdit: (key: keyof ReviewColors) => void;
 }) {
+  const [pinned, setPinned] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pinned) return;
+    const onDoc = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setPinned(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [pinned]);
+  const shown = pinned
+    ? "pointer-events-auto translate-y-0 opacity-100"
+    : "pointer-events-none translate-y-1 opacity-0 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100";
   return (
-    <div className="group absolute bottom-3 left-3 z-20">
-      <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-max min-w-[10rem] translate-y-1 whitespace-nowrap rounded-md border border-tcip-border-hover bg-tcip-panel p-3 opacity-0 shadow-lg transition-all group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
-        <h4 className="mb-1.5 text-[11px] font-semibold tracking-wide text-tcip-fg">
-          Review Legend
-        </h4>
-        <p className="mb-2 text-[11px] text-tcip-muted">
-          Solid = outcome&nbsp; | &nbsp;Dashed blue = under review
-        </p>
+    <div ref={rootRef} className="group absolute bottom-3 left-3 z-20">
+      <div
+        className={`absolute bottom-full left-0 mb-2 w-max min-w-[10rem] whitespace-nowrap rounded-md border border-tcip-border-hover bg-tcip-panel p-3 shadow-lg transition-all ${shown}`}
+      >
+        <h4 className="mb-2 text-[11px] font-semibold tracking-wide text-tcip-fg">Review Legend</h4>
         <ul className="space-y-1.5">
           {COLOR_LABELS.map((c) => (
             <LegendRow
@@ -1019,7 +1010,9 @@ function ReviewLegend({
       </div>
       <button
         type="button"
-        className="flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur hover:border-tcip-border-hover hover:text-tcip-fg"
+        onClick={() => setPinned((p) => !p)}
+        aria-pressed={pinned}
+        className={`flex items-center gap-1.5 rounded-full border bg-tcip-panel/90 px-2.5 py-1 text-[11px] backdrop-blur hover:border-tcip-border-hover hover:text-tcip-fg ${pinned ? "border-tcip-border-hover text-tcip-fg" : "border-tcip-border text-tcip-muted"}`}
       >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.4" />
