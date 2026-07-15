@@ -759,10 +759,9 @@ def get_worst_predictions(
     at; for true TP/FP/FN ranking use ``run_matching`` / ``evaluate_detections`` (IoU-matched).
 
     Args:
-        predictions_dir: Directory with prediction files in the canonical
-            ``cls conf cx cy w h`` format written by run_inference /
-            export_predictions_yolo.
-        labels_dir: Directory with ground-truth label files (YOLO format).
+        predictions_dir: Directory with per-image JSON prediction files
+            (``<stem>.json``) written by run_inference / the review engine.
+        labels_dir: Directory with per-image JSON ground-truth label files.
         n: Number of worst images to return.
     """
     pred_path = Path(predictions_dir)
@@ -773,30 +772,23 @@ def get_worst_predictions(
     if not gt_path.is_dir():
         return {"error": f"Labels directory not found: {labels_dir}"}
 
-    scores: list[tuple[str, float]] = []
-    for pred_file in pred_path.glob("*.txt"):
-        gt_file = gt_path / pred_file.name
-        pred_lines = pred_file.read_text().strip().splitlines()
-        gt_lines = gt_file.read_text().strip().splitlines() if gt_file.is_file() else []
+    from tcip_annotation import json_io
 
-        n_pred = len(pred_lines)
-        n_gt = len(gt_lines)
+    scores: list[tuple[str, float]] = []
+    for pred_file in pred_path.glob("*.json"):
+        gt_file = gt_path / pred_file.name
+        preds, _ = json_io.read_detect_pred(pred_file)
+        gt_boxes, _ = json_io.read_detect(gt_file) if gt_file.is_file() else ([], set())
+
+        n_pred = len(preds)
+        n_gt = len(gt_boxes)
 
         # Simple error heuristic: |pred - gt| + missed + extra + low confidence
         missed = max(0, n_gt - n_pred)
         extra = max(0, n_pred - n_gt)
         avg_conf = 0.0
         if n_pred > 0:
-            confs = []
-            for line in pred_lines:
-                parts = line.split()
-                # Canonical prediction format (result_to_yolo_lines /
-                # parse_detect_predictions): cls conf cx cy w h
-                if len(parts) >= 6:
-                    try:
-                        confs.append(float(parts[1]))
-                    except ValueError:
-                        pass
+            confs = [p.confidence for p in preds]
             avg_conf = sum(confs) / len(confs) if confs else 0.5
 
         # Higher score = worse prediction
@@ -805,12 +797,12 @@ def get_worst_predictions(
         scores.append((stem, error_score))
 
     # Also include GT images with no predictions at all (completely missed)
-    for gt_file in gt_path.glob("*.txt"):
+    for gt_file in gt_path.glob("*.json"):
         pred_file = pred_path / gt_file.name
         if not pred_file.is_file():
-            gt_lines = gt_file.read_text().strip().splitlines()
-            if gt_lines:
-                scores.append((gt_file.stem, len(gt_lines) * 3.0))
+            gt_boxes, _ = json_io.read_detect(gt_file)
+            if gt_boxes:
+                scores.append((gt_file.stem, len(gt_boxes) * 3.0))
 
     scores.sort(key=lambda x: x[1], reverse=True)
     worst = scores[:n]
