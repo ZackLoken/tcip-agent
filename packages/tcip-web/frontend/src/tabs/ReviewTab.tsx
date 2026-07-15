@@ -19,6 +19,7 @@ import {
   type EditShape,
 } from "@/lib/reviewEditGeometry";
 import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
+import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, Detection, MatchesResponse, PredBox } from "@/store/types";
 
@@ -120,6 +121,22 @@ export function ReviewTab() {
 
   const [showGT, setShowGT] = useState(true);
   const [showPred, setShowPred] = useState(true);
+  // GT/Pred visibility is remembered per (project, date, trait/model): restore on dataset change,
+  // save on toggle. (Position + filters are persisted centrally in the open path.)
+  const visKey = datasetKey(dataset);
+  useEffect(() => {
+    const v = visKey ? loadDatasetVisibility(visKey) : null;
+    setShowGT(v ? v.showGT : true);
+    setShowPred(v ? v.showPred : true);
+  }, [visKey]);
+  const updateShowGT = (v: boolean) => {
+    setShowGT(v);
+    if (visKey) saveDatasetVisibility(visKey, { showGT: v, showPred });
+  };
+  const updateShowPred = (v: boolean) => {
+    setShowPred(v);
+    if (visKey) saveDatasetVisibility(visKey, { showGT, showPred: v });
+  };
   const [toolsOpen, setToolsOpen] = useState(false);
   // The filter shelf is collapsed by default and remembers the last state across sessions.
   const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
@@ -742,7 +759,7 @@ export function ReviewTab() {
               <input
                 type="checkbox"
                 checked={showGT}
-                onChange={(e) => setShowGT(e.target.checked)}
+                onChange={(e) => updateShowGT(e.target.checked)}
               />
               Ground truth
             </label>
@@ -750,7 +767,7 @@ export function ReviewTab() {
               <input
                 type="checkbox"
                 checked={showPred}
-                onChange={(e) => setShowPred(e.target.checked)}
+                onChange={(e) => updateShowPred(e.target.checked)}
               />
               Predictions
             </label>
