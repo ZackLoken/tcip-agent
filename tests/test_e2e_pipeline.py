@@ -52,25 +52,32 @@ def project_dir(tmp_path: Path) -> Path:
     for d in (images, labels_det, preds_det):
         d.mkdir(parents=True)
 
+    from tcip_annotation import json_io
+    from tcip_annotation.state import PredBBox
+
     # 5 synthetic images (640x480 grey) with GT labels and predictions
     for i in range(5):
         name = f"img_{i:03d}"
         img = Image.new("RGB", (640, 480), color=(100 + i * 20, 100, 100))
         img.save(images / f"{name}.jpg")
 
-        # GT: 2 boxes per image (YOLO normalised: class cx cy w h)
+        # GT: 2 boxes per image. load_annotations / validate_data_quality read GT through
+        # format_io, which understands YOLO .txt (not the json_io per-image schema).
         gt_lines = [
             "0 0.5 0.5 0.10 0.10",
             "0 0.3 0.3 0.05 0.05",
         ]
         (labels_det / f"{name}.txt").write_text("\n".join(gt_lines) + "\n")
 
-        # Predictions: 1 matching, 1 false positive (class conf cx cy w h)
-        pred_lines = [
-            "0 0.92 0.5 0.5 0.10 0.10",   # TP
-            "0 0.60 0.8 0.8 0.04 0.04",    # FP
-        ]
-        (preds_det / f"{name}.txt").write_text("\n".join(pred_lines) + "\n")
+        # Predictions: 1 matching (TP) + 1 false positive (FP), per-image JSON with a native
+        # score. The file keeps a .txt name because find_prediction resolves it with fmt='yolo';
+        # json_io parses the JSON content.
+        json_io.write_detect(
+            str(preds_det / f"{name}.txt"),
+            [PredBBox(288, 216, 352, 264, 0, confidence=0.92),
+             PredBBox(499.2, 374.4, 524.8, 393.6, 0, confidence=0.60)],
+            640, 480,
+        )
 
     return root
 
@@ -140,10 +147,12 @@ class TestE2EPipeline:
         assert save_result["count"] == 1
         assert len(save_result["written"]) == 1
 
-        # Verify file was updated
-        label_path = project_dir / "annotations" / "default" / "2-11-26" / "detect" / "img_000.txt"
-        lines = label_path.read_text().strip().splitlines()
-        assert len(lines) == 3  # we wrote 3 boxes
+        # Verify file was updated (canonical per-image JSON)
+        from tcip_annotation import json_io
+
+        label_path = project_dir / "annotations" / "default" / "2-11-26" / "detect" / "img_000.json"
+        boxes, _ = json_io.read_detect(str(label_path))
+        assert len(boxes) == 3  # we wrote 3 boxes
 
         append_session_event(root, sid, "tool_call", {
             "tool": "save_annotations", "image": "img_000.jpg",
@@ -274,4 +283,4 @@ class TestE2EPipelineEdgeCases:
             {"x1": 10, "y1": 10, "x2": 50, "y2": 50, "class_id": 0},
         ])
         assert result["count"] == 1
-        assert (tmp_path / "annotations" / "default" / "detect" / "new_img.txt").is_file()
+        assert (tmp_path / "annotations" / "default" / "detect" / "new_img.json").is_file()
