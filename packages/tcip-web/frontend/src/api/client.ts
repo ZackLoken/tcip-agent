@@ -248,12 +248,18 @@ export const api = {
       edited_polygon?: number[][] | null;
       iou_threshold?: number;
       conf_threshold?: number;
+      // Active filters, so the fresh matches the server returns are scoped like the current view.
+      filter_type?: string;
+      filter_class?: string | number;
+      status_filter?: string;
     }) =>
       call<{
         status: string;
         image_status: MatchesResponse["image_status"];
         // Per-image annotation status after the GT write (null when unchanged), for the client to sync.
         annotation_status: "complete" | "partial" | "negative" | "unannotated" | null;
+        // Fresh matches recomputed against the written GT — install these instead of re-fetching.
+        matches: MatchesResponse;
       }>("/api/review/action", {
         method: "POST",
         body: JSON.stringify(body),
