@@ -139,30 +139,19 @@ def plant_milestones(series: list[tuple[str, float]]) -> dict:
 # ── elongated-fraction from classified predictions ───────────────────────
 
 
-def count_by_class(txt_path: Path, elongated_class_id: int) -> tuple[int, int, set[int]]:
-    """``(total_detections, n_elongated, classes_seen)`` from a YOLO prediction file.
+def count_by_class(json_path: Path, elongated_class_id: int) -> tuple[int, int, set[int]]:
+    """``(total_detections, n_elongated, classes_seen)`` from a per-image JSON prediction file.
 
     A detection is elongated when its class id equals ``elongated_class_id`` — the class the
     validated classifier writes. Never inferred from geometry. ``classes_seen`` lets callers
-    tell whether the predictions carry any elongation classification at all.
+    tell whether the predictions carry any elongation classification at all. A missing file is
+    unannotated → ``(0, 0, set())``.
     """
-    if not txt_path.exists():
-        return (0, 0, set())
-    total = 0
-    elongated = 0
-    classes_seen: set[int] = set()
-    for line in txt_path.read_text(encoding="utf-8").splitlines():
-        parts = line.strip().split()
-        if len(parts) < 6:
-            continue
-        try:
-            cls = int(float(parts[0]))
-        except ValueError:
-            continue
-        total += 1
-        classes_seen.add(cls)
-        if cls == elongated_class_id:
-            elongated += 1
+    from tcip_annotation import json_io
+
+    preds, classes_seen = json_io.read_detect_pred(json_path)
+    total = len(preds)
+    elongated = sum(1 for p in preds if p.class_id == elongated_class_id)
     return total, elongated, classes_seen
 
 
@@ -194,7 +183,7 @@ def per_plant_series(
             if not plant_id:
                 continue
             total, elongated, classes_seen = count_by_class(
-                pred_path / f"{_attr(a, 'stem')}.txt", elongated_class_id
+                pred_path / f"{_attr(a, 'stem')}.json", elongated_class_id
             )
             all_classes |= classes_seen
             acc = by_plant.setdefault(plant_id, [0, 0])
