@@ -374,7 +374,7 @@ export function ResultsTab() {
 
       <div className="tcip-panel p-4">
         <div className="tcip-heading mb-3">
-          Onset dates (elongation + catkin_05 / 50 / 95 per plant) — {onset.length} rows
+          Phenology milestones (elongation + catkin_05 / 50 / 95 per plant) — {onset.length} rows
         </div>
         {onset.length > 0 ? (
           <div className="overflow-auto max-h-96">
