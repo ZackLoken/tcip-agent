@@ -7,7 +7,7 @@ from pathlib import Path
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.postprocessing.export import export_detection_csv, result_to_yolo_lines
+from tcip_mcp.pipelines.postprocessing.export import export_detection_csv, write_predictions_json
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
     DEFAULT_MAX_DETS,
@@ -159,17 +159,17 @@ def export_predictions_yolo(
     global_nms_iou: float = DEFAULT_NMS_IOU,
     max_dets: int = DEFAULT_MAX_DETS,
 ) -> dict:
-    """Run inference and save predictions as YOLO-format text files.
+    """Run inference and save predictions as per-image COCO/JSON files.
 
-    Routes through ``run_inference`` so this delivery door resolves the SAME firewalled
+    Routes through ``run_inference`` so this delivery door resolves the same firewalled
     operating point (conf/NMS/tiling/max_dets) — earlier it built its own bare predictor and
     so truncated the count at the framework default and shipped labels with no provenance.
-    Writes ``<stem>.txt`` per image plus an ``operating_point.json`` stamp beside them.
+    Writes ``<stem>.json`` per image plus an ``operating_point.json`` stamp beside them.
 
     Args:
         checkpoint_path: Path to model .pt checkpoint.
         images_dir: Directory containing input images.
-        output_dir: Directory for output .txt prediction files.
+        output_dir: Directory for output .json prediction files.
         score_threshold: Minimum confidence score.
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects.
@@ -192,10 +192,9 @@ def export_predictions_yolo(
     out.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     for r in result["results"]:
-        out_txt = out / f"{Path(r['image']).stem}.txt"
-        lines = result_to_yolo_lines(r)
-        out_txt.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-        written.append(str(out_txt))
+        out_json = out / f"{Path(r['image']).stem}.json"
+        write_predictions_json(out_json, r)
+        written.append(str(out_json))
 
     # Stamp the operating point beside the delivered labels (raw inference conf is unvalidated).
     atomic_write_json(out / "operating_point.json",
