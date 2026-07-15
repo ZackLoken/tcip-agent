@@ -13,6 +13,9 @@ from PIL import Image
 @pytest.fixture
 def viz_dataset(tmp_path: Path) -> Path:
     """Create a dataset with images, labels, and predictions."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox, PredBBox
+
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     labels_dir = tmp_path / "annotations" / "default" / "detect"
@@ -23,13 +26,18 @@ def viz_dataset(tmp_path: Path) -> Path:
     for name in ("img_001", "img_002", "img_003", "img_004"):
         img = Image.new("RGB", (640, 480), color=(100, 120, 80))
         img.save(images_dir / f"{name}.jpg")
-        # YOLO: class_id cx cy w h
-        (labels_dir / f"{name}.txt").write_text(
-            "0 0.5 0.5 0.1 0.1\n1 0.3 0.3 0.05 0.05\n"
+        # Per-image JSON GT: two pixel-space boxes (classes 0 and 1).
+        json_io.write_detect(
+            labels_dir / f"{name}.json",
+            [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 1)],
+            640, 480,
         )
-        # Predictions: class_id conf cx cy w h
-        (preds_dir / f"{name}.txt").write_text(
-            "0 0.95 0.5 0.5 0.1 0.1\n1 0.6 0.8 0.8 0.05 0.05\n"
+        # Per-image JSON predictions carry a score.
+        json_io.write_detect(
+            preds_dir / f"{name}.json",
+            [PredBBox(288, 216, 352, 264, 0, confidence=0.95),
+             PredBBox(496, 372, 528, 396, 1, confidence=0.6)],
+            640, 480,
         )
 
     return tmp_path
@@ -498,11 +506,17 @@ class TestAcceptCandidatesTool:
         assert result["segmentation_count"] == 2
         assert Path(result["image_path"]).is_file()
 
-        # Verify labels were written
-        det_file = viz_dataset / "annotations" / "default" / "detect" / "img_001.txt"
+        # Verify GT was written as per-image COCO/JSON
+        from tcip_annotation import json_io
+
+        det_file = viz_dataset / "annotations" / "default" / "detect" / "img_001.json"
         assert det_file.is_file()
-        seg_file = viz_dataset / "annotations" / "default" / "segment" / "img_001.txt"
+        seg_file = viz_dataset / "annotations" / "default" / "segment" / "img_001.json"
         assert seg_file.is_file()
+        det_boxes, _ = json_io.read_detect(det_file)
+        assert len(det_boxes) == 2
+        seg_polys, _ = json_io.read_segment(seg_file)
+        assert len(seg_polys) == 2
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -791,8 +805,9 @@ class TestFullPipelineIntegration:
             json.dumps(candidates, default=str), encoding="utf-8",
         )
 
-    def test_accept_writes_correct_yolo_detect(self, pipeline_dataset: Path):
-        """Verify YOLO detection labels: normalized cx cy w h format."""
+    def test_accept_writes_json_detect(self, pipeline_dataset: Path):
+        """Verify JSON detection GT: pixel bbox, class ids preserved."""
+        from tcip_annotation import json_io
         from tcip_mcp.tools.vision_tools import accept_candidates
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
@@ -807,27 +822,20 @@ class TestFullPipelineIntegration:
         )
         assert "error" not in result
         assert result["detection_count"] == 2
-        assert result["format"] == "yolo"
 
-        det_file = pipeline_dataset / "annotations" / "default" / "detect" / "sample.txt"
+        det_file = pipeline_dataset / "annotations" / "default" / "detect" / "sample.json"
         assert det_file.is_file()
-        lines = det_file.read_text().strip().splitlines()
-        assert len(lines) == 2
+        boxes, class_ids = json_io.read_detect(det_file)
+        assert len(boxes) == 2
+        assert class_ids == {0, 1}
+        # Pixel coords within the 640x480 image, GT carries no score.
+        for b in boxes:
+            assert 0.0 <= b.x1 < b.x2 <= 640.0
+            assert 0.0 <= b.y1 < b.y2 <= 480.0
 
-        # Verify YOLO format: class_id cx cy w h (normalized)
-        for line in lines:
-            parts = line.split()
-            assert len(parts) == 5
-            class_id = int(parts[0])
-            cx, cy, w, h = [float(p) for p in parts[1:]]
-            assert class_id in (0, 1)
-            assert 0.0 <= cx <= 1.0, f"cx out of range: {cx}"
-            assert 0.0 <= cy <= 1.0, f"cy out of range: {cy}"
-            assert 0.0 < w <= 1.0, f"w out of range: {w}"
-            assert 0.0 < h <= 1.0, f"h out of range: {h}"
-
-    def test_accept_writes_correct_yolo_segment(self, pipeline_dataset: Path):
-        """Verify YOLO segmentation labels: normalized polygon vertices."""
+    def test_accept_writes_json_segment(self, pipeline_dataset: Path):
+        """Verify JSON segmentation GT: pixel polygon vertices, class id preserved."""
+        from tcip_annotation import json_io
         from tcip_mcp.tools.vision_tools import accept_candidates
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
@@ -840,23 +848,20 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["segmentation_count"] == 1
 
-        seg_file = pipeline_dataset / "annotations" / "default" / "segment" / "sample.txt"
+        seg_file = pipeline_dataset / "annotations" / "default" / "segment" / "sample.json"
         assert seg_file.is_file()
-        lines = seg_file.read_text().strip().splitlines()
-        assert len(lines) == 1
-
-        parts = lines[0].split()
-        class_id = int(parts[0])
-        assert class_id == 2
-        # Remaining values are x y x y ... (normalized pairs)
-        coords = [float(p) for p in parts[1:]]
-        assert len(coords) >= 6  # at least 3 vertices Ã— 2
-        assert len(coords) % 2 == 0
-        for c in coords:
-            assert 0.0 <= c <= 1.0, f"normalized coord out of range: {c}"
+        polys, class_ids = json_io.read_segment(seg_file)
+        assert len(polys) == 1
+        assert class_ids == {2}
+        pts = polys[0].points
+        assert len(pts) >= 3
+        for x, y in pts:
+            assert 0.0 <= x <= 640.0
+            assert 0.0 <= y <= 480.0
 
     def test_detect_and_segment_consistent(self, pipeline_dataset: Path):
         """Detection and segmentation labels cover the same objects."""
+        from tcip_annotation import json_io
         from tcip_mcp.tools.vision_tools import accept_candidates
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
@@ -872,17 +877,14 @@ class TestFullPipelineIntegration:
         assert result["detection_count"] == 2
         assert result["segmentation_count"] == 2
 
-        # Parse back detection labels
-        det_file = pipeline_dataset / "annotations" / "default" / "detect" / "sample.txt"
-        det_lines = det_file.read_text().strip().splitlines()
-        det_class_ids = sorted(int(l.split()[0]) for l in det_lines)
+        det_file = pipeline_dataset / "annotations" / "default" / "detect" / "sample.json"
+        _, det_class_ids = json_io.read_detect(det_file)
 
-        seg_file = pipeline_dataset / "annotations" / "default" / "segment" / "sample.txt"
-        seg_lines = seg_file.read_text().strip().splitlines()
-        seg_class_ids = sorted(int(l.split()[0]) for l in seg_lines)
+        seg_file = pipeline_dataset / "annotations" / "default" / "segment" / "sample.json"
+        _, seg_class_ids = json_io.read_segment(seg_file)
 
         # Same class IDs in both
-        assert det_class_ids == seg_class_ids
+        assert sorted(det_class_ids) == sorted(seg_class_ids)
 
     def test_partial_accept_skips_rejected(self, pipeline_dataset: Path):
         """Only accepted candidates appear in output; rejected are omitted."""
@@ -1030,8 +1032,8 @@ class TestGridCellToSamPrompt:
         assert "error" in result
 
 
-class TestMultiFormatOutput:
-    """Verify accept_candidates produces valid output for multiple formats."""
+class TestJsonGroundTruthOutput:
+    """accept_candidates writes ground truth as per-image COCO/JSON (the canonical format)."""
 
     @pytest.fixture
     def format_dataset(self, tmp_path: Path) -> Path:
@@ -1048,62 +1050,40 @@ class TestMultiFormatOutput:
             json.dumps(MOCK_CANDIDATES, default=str), encoding="utf-8",
         )
 
-    def test_yolo_format_output(self, format_dataset: Path):
+    def test_json_detect_and_segment_written(self, format_dataset: Path):
+        from tcip_annotation import json_io
         from tcip_mcp.tools.vision_tools import accept_candidates
 
         self._cache("fmt_test")
         result = accept_candidates(
             image_path=str(format_dataset / "images" / "fmt_test.jpg"),
             assignments=[{"candidate_id": 0, "class_id": 0}],
-            fmt="yolo",
         )
         assert "error" not in result
-        assert result["format"] == "yolo"
-        det = format_dataset / "annotations" / "default" / "detect" / "fmt_test.txt"
-        assert det.is_file()
-        # YOLO: 5 fields per line
-        parts = det.read_text().strip().split()
-        assert len(parts) == 5
-
-    def test_labelme_format_output(self, format_dataset: Path):
-        from tcip_mcp.tools.vision_tools import accept_candidates
-
-        self._cache("fmt_test")
-        result = accept_candidates(
-            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
-            assignments=[{"candidate_id": 0, "class_id": 0}],
-            fmt="labelme",
-        )
-        assert "error" not in result
-        assert result["format"] == "labelme"
-
-    def test_voc_format_detect_only(self, format_dataset: Path):
-        """VOC has no segmentation support â€” only detect labels should be saved."""
-        from tcip_mcp.tools.vision_tools import accept_candidates
-
-        self._cache("fmt_test")
-        result = accept_candidates(
-            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
-            assignments=[{"candidate_id": 0, "class_id": 0}],
-            fmt="voc",
-        )
-        assert "error" not in result
-        assert result["format"] == "voc"
+        assert "format" not in result  # fmt param dropped in the JSON cutover
         assert result["detection_count"] == 1
-        det = format_dataset / "annotations" / "default" / "detect" / "fmt_test.xml"
-        assert det.is_file()
-        content = det.read_text()
-        assert "<annotation>" in content
+        assert result["segmentation_count"] == 1
 
-    def test_coco_format_output(self, format_dataset: Path):
+        det = format_dataset / "annotations" / "default" / "detect" / "fmt_test.json"
+        assert det.is_file()
+        boxes, class_ids = json_io.read_detect(det)
+        assert len(boxes) == 1 and class_ids == {0}
+
+        seg = format_dataset / "annotations" / "default" / "segment" / "fmt_test.json"
+        assert seg.is_file()
+        polys, _ = json_io.read_segment(seg)
+        assert len(polys) == 1
+
+    def test_gt_carries_no_prediction_score(self, format_dataset: Path):
+        """Accepted GT is a BBox/Polygon, not a prediction — no ``score`` key on disk."""
+        self._cache("fmt_test")
         from tcip_mcp.tools.vision_tools import accept_candidates
 
-        self._cache("fmt_test")
-        result = accept_candidates(
+        accept_candidates(
             image_path=str(format_dataset / "images" / "fmt_test.jpg"),
             assignments=[{"candidate_id": 0, "class_id": 0}],
-            fmt="coco",
         )
-        assert "error" not in result
-        assert result["format"] == "coco"
+        det = format_dataset / "annotations" / "default" / "detect" / "fmt_test.json"
+        data = json.loads(det.read_text(encoding="utf-8"))
+        assert data["objects"] and all("score" not in o for o in data["objects"])
 
