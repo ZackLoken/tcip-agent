@@ -59,11 +59,13 @@ def test_resolve_spec_derivations_respects_explicit(tmp_path):
 
 def test_write_class_map(tmp_path):
     import json
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
     from tcip_mcp.tools.annotation_tools import write_class_map
     ld = tmp_path / "labels"
     ld.mkdir()
-    (ld / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n1 0.2 0.2 0.1 0.1\n")
-    (ld / "b.txt").write_text("0 0.3 0.3 0.1 0.1\n")
+    json_io.write_detect(ld / "a.json", [BBox(0, 0, 10, 10, 0), BBox(0, 0, 10, 10, 1)], 100, 100)
+    json_io.write_detect(ld / "b.json", [BBox(0, 0, 10, 10, 0)], 100, 100)
     out = tmp_path / "classes.json"
     res = write_class_map(str(ld), class_names="dormant,elongated", output_path=str(out))
     assert res["num_classes"] == 2
