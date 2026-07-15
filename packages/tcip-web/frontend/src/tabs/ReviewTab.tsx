@@ -150,6 +150,29 @@ export function ReviewTab() {
   // One GT-mutating request at a time: key auto-repeat / double-clicks must not append
   // or delete twice, and no verdict may land while indices are stale mid-reload.
   const actionPending = useRef(false);
+  // Label-dir sets whose .original/ baseline is already captured this session (see ensureBackup).
+  const backedUpKeys = useRef<Set<string>>(new Set());
+
+  // Install a matches payload (from /matches or a verdict's /action response) onto the canvas: set
+  // state, then land on the hinted detection (else the first unreviewed) and zoom to it. A pending
+  // `review_focus` index (the agent asked to center on detection N) wins for one install.
+  function applyMatches(res: MatchesResponse, indexHint?: number) {
+    setMatches(res);
+    setImageStatus(res.image_status);
+    const focusIdx = useStore.getState().review.focusDetectionIdx;
+    const effectiveHint = indexHint ?? focusIdx ?? undefined;
+    if (focusIdx !== null && focusIdx !== undefined) useStore.getState().setReviewFocusIdx(null);
+    if (effectiveHint === undefined) {
+      const firstUnreviewed = res.detections.findIndex((d) => !d.reviewed);
+      const target = firstUnreviewed >= 0 ? firstUnreviewed : 0;
+      setDetectionIdx(target);
+      zoomToDetection(res.detections[target]?.bbox);
+    } else {
+      const clamped = Math.max(0, Math.min(res.detections.length - 1, effectiveHint));
+      setDetectionIdx(clamped);
+      zoomToDetection(res.detections[clamped]?.bbox);
+    }
+  }
 
   async function reloadMatches(indexHint?: number, signal?: AbortSignal) {
     if (!dataset.project_root || !imgPath || !imgName) return;
@@ -187,23 +210,7 @@ export function ReviewTab() {
       // response would put another image's matches under the current image.
       const now = useStore.getState().gui.dataset;
       if ((now.image_list[now.current_image_index] ?? null) !== imgName) return;
-      setMatches(res);
-      setImageStatus(res.image_status);
-      // A pending `review_focus` index (the agent asked to center on detection N) wins for one
-      // reload; otherwise honor an explicit hint, else jump to the first unreviewed detection.
-      const focusIdx = useStore.getState().review.focusDetectionIdx;
-      const effectiveHint = indexHint ?? focusIdx ?? undefined;
-      if (focusIdx !== null && focusIdx !== undefined) useStore.getState().setReviewFocusIdx(null);
-      if (effectiveHint === undefined) {
-        const firstUnreviewed = res.detections.findIndex((d) => !d.reviewed);
-        const target = firstUnreviewed >= 0 ? firstUnreviewed : 0;
-        setDetectionIdx(target);
-        zoomToDetection(res.detections[target]?.bbox);
-      } else {
-        const clamped = Math.max(0, Math.min(res.detections.length - 1, effectiveHint));
-        setDetectionIdx(clamped);
-        zoomToDetection(res.detections[clamped]?.bbox);
-      }
+      applyMatches(res, indexHint);
     } catch (e) {
       // A superseded (aborted) request is expected during slider drags — ignore it.
       if (signal?.aborted || (e instanceof DOMException && e.name === "AbortError")) return;
@@ -349,15 +356,18 @@ export function ReviewTab() {
         edited_polygon: edited?.polygon ?? null,
         iou_threshold: filters.iou_threshold,
         conf_threshold: filters.conf_threshold,
+        filter_type: filters.filter_type,
+        filter_class: filters.filter_class,
+        status_filter: filters.status_filter,
       });
       setImageStatus(res.image_status);
       markDetReviewed(detectionIdx, action);
       advanceToNextUnreviewed();
       if (res.annotation_status) {
-        // GT changed: sync the status, then refresh so gt_idx/pred_idx are rebuilt from the
-        // written files — awaited, so no verdict can land against the stale indices.
+        // GT changed: the verdict already recomputed matches server-side (gt_idx/pred_idx rebuilt
+        // from the written files), so install them directly — no second /matches round-trip.
         setStoreImageStatus(imgName, res.annotation_status);
-        await reloadMatches(useStore.getState().gui.review.detection_idx);
+        applyMatches(res.matches, useStore.getState().gui.review.detection_idx);
       }
       return true;
     } catch (e) {
@@ -376,8 +386,13 @@ export function ReviewTab() {
       Boolean,
     ) as string[];
     if (!dirs.length) return true;
+    // backup_original_labels captures every original file in the dir in one pass, so it only needs
+    // running once per label-dir set — skip the (whole-dir-scanning) call once it's done this session.
+    const key = `${dataset.project_root} ${dirs.join(" ")}`;
+    if (backedUpKeys.current.has(key)) return true;
     try {
       await api.review.backupLabels(dataset.project_root, dirs);
+      backedUpKeys.current.add(key);
       return true;
     } catch {
       useStore
