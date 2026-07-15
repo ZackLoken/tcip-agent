@@ -23,7 +23,7 @@ Milestones, per plant, from that plant's elongated-fraction time series:
 
 | Trait | Definition |
 |-------|------------|
-| `catkin_elongation_date` | date **most** catkins have elongated — the elongated fraction reaches a majority (`crops.yml`: "Date when most catkins have elongated") |
+| `catkin_elongation_date` | date **most** catkins have elongated (`crops.yml`: "Date when most catkins have elongated") — operationalized as the **95% majority crossing**, i.e. synonymous with `catkin_95per_date` |
 | `catkin_05per_date` | date the elongated fraction crosses **5%** |
 | `catkin_50per_date` | date the elongated fraction crosses **50%** |
 | `catkin_95per_date` | date the elongated fraction crosses **95%** |
@@ -32,13 +32,12 @@ Crossings interpolate linearly between the two neighbouring capture dates. Pisti
 milestones (`pistillate_05/50/95per_date`) are the identical pattern on the pistillate-
 flower detector/classifier.
 
-> **Implementation reconciliation needed (code, not definition).** `crops.yml` is the
-> authority: `catkin_elongation_date` is a *majority* event ("most catkins have elongated"),
-> so it is the majority crossing — near `catkin_50per_date`. The platform's
-> `elongation_onset_date` helper still computes *onset* (first date any elongation appears),
-> which contradicts this. Reconcile the implementation to the majority crossing and
-> **validate** it before delivering `catkin_elongation_date`; the `05/50/95` crossings are
-> unaffected.
+> **Provisional operationalization (pending breeder confirmation).** `crops.yml` is the
+> immutable authority ("Date when most catkins have elongated"). The implementation computes
+> `catkin_elongation_date` as the **95% majority crossing** (= `catkin_95per_date`) — the
+> current best-guess reading of that text, to be confirmed with the breeders; correct the
+> mapping in `phenology.plant_milestones` if they rule otherwise. `elongation_onset_date`
+> (first date any elongation appears) remains a **separate** helper, not the delivered trait.
 
 **Not a count-of-peak, not a sigmoid fit.** Do not normalize catkin *count* to the season
 peak and call the crossings bloom — that is an abundance signal and a different (wrong)
@@ -58,7 +57,7 @@ when it is false, the milestones are **not** a measurement — do not deliver th
 per date:  images ─► detect catkins ─► classify each elongated vs not (validated 2-class)
                   ─► write YOLO preds (class id = elongation class)
 across dates: plant mapping (image → plant_id) ─► per (plant, date) elongated fraction
-                  ─► crossings at 5/50/95% + first-elongation date ─► per-plant CSV
+                  ─► crossings at 5/50/95% (elongation_date = the 95% crossing) ─► per-plant CSV
                   ─► carry genotype/accession through to the deliverable
 ```
 
@@ -104,6 +103,6 @@ honest, interpretable signals. It deliberately emits **no** fabricated 0–1 "co
 1. `elongation_classified` is **true** (predictions carry the elongation class).
 2. Every expected plant has a row; genotype/`accession` is carried through.
 3. Milestones are chronologically sane (`05per` ≤ `50per` ≤ `95per`; `elongation_date` — the
-   majority crossing — lands near `50per`, not before `05per`).
+   majority crossing — equals `95per`).
 4. Plants that never reach a level have `null` for that milestone (not a fabricated date).
 5. The `undated/` image bucket is excluded from the time series (it has no capture date).
