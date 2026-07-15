@@ -836,22 +836,28 @@ def stage_proposals(
     model_name: str,
     date: str,
     stem: str,
-    boxes: list[dict],
+    boxes: list[dict] | None = None,
+    polygons: list[dict] | None = None,
 ) -> dict:
-    """Stage agent-proposed detections to ``predictions/<model>/<date>/detect/<stem>.txt`` for
+    """Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<task>/<stem>.txt`` for
     canvas review — the "show on canvas before writing ground truth" guardrail.
 
-    Proposals (a corrected detection, a SAM output, a model prediction the agent wants a human to
-    vet) go to the PREDICTIONS tree, never ``annotations/``, so the human reviews them on the
-    Review canvas and accepts/rejects/edits before they become GT. This never writes ground truth.
-    Pair with ``focus_review`` to send the human straight to them.
+    Anything a model produces (a SAM mask, a groundingDINO/baseline detection, a shape the agent
+    wants a human to vet) goes to the PREDICTIONS tree, never ``annotations/``, so the human reviews
+    it on the Review canvas and accepts/rejects/edits before it becomes GT. Only human-accepted
+    shapes reach ground truth. Boxes land under ``detect/``, polygons (e.g. SAM masks) under
+    ``segment/`` — pass either or both. This never writes ground truth. Pair with ``focus_review``
+    to send the human straight to them.
 
     Args:
         dataset_root: Dataset root holding ``predictions/``.
-        model_name: Predictions bucket to stage under (e.g. "agent_proposals").
+        model_name: Predictions bucket to stage under, one per source (e.g. "sam", "claude",
+            "groundingdino", "agent_proposals").
         date: Capture-date bucket (e.g. "2026-02-11").
         stem: Image stem (filename without extension).
         boxes: ``[{class_id, conf, cx, cy, w, h}]`` with cx/cy/w/h normalized to [0, 1].
+        polygons: ``[{class_id, conf, points: [[x, y], ...]}]`` with points normalized to [0, 1]
+            (>=3 points each) — SAM's mask-quality score is a natural ``conf``.
     """
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.utils.atomic_io import atomic_write_text
@@ -863,27 +869,66 @@ def stage_proposals(
         if not is_valid_name(val):
             return {"error": f"{label} must be a single safe path segment (no separators/'..'), got {val!r}"}
 
-    lines: list[str] = []
-    for i, b in enumerate(boxes):
-        try:
-            cx, cy, w, h = float(b["cx"]), float(b["cy"]), float(b["w"]), float(b["h"])
-            cls = int(b.get("class_id", 0))
-            conf = float(b.get("conf", 1.0))
-        except (KeyError, TypeError, ValueError):
-            return {"error": f"box {i} needs numeric class_id, conf, cx, cy, w, h (normalized): {b!r}"}
-        # Guard against pixel coords slipping in — they'd render off-canvas and corrupt the review.
-        if any(v < -0.01 or v > 1.5 for v in (cx, cy, w, h)):
-            return {"error": (f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be "
-                              f"in [0,1] (divide pixel coords by image width/height)")}
-        lines.append(f"{cls} {conf:.4f} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+    boxes = boxes or []
+    polygons = polygons or []
+    if not boxes and not polygons:
+        return {"error": "provide at least one of boxes or polygons to stage"}
 
-    pdir = Path(prediction_dir(dataset_root, model_name, date, "detect"))
-    pdir.mkdir(parents=True, exist_ok=True)
-    out = pdir / f"{stem}.txt"
-    atomic_write_text(out, "\n".join(lines) + ("\n" if lines else ""))
+    def _unnormalized(vals: tuple[float, ...]) -> bool:
+        # Pixel coords slipping in would render off-canvas and corrupt the review.
+        return any(v < -0.01 or v > 1.5 for v in vals)
+
+    # Build + validate every line before writing anything, so a bad shape can't leave a partial stage.
+    detect_lines: list[str] | None = None
+    if boxes:
+        detect_lines = []
+        for i, b in enumerate(boxes):
+            try:
+                cx, cy, w, h = float(b["cx"]), float(b["cy"]), float(b["w"]), float(b["h"])
+                cls = int(b.get("class_id", 0))
+                conf = float(b.get("conf", 1.0))
+            except (KeyError, TypeError, ValueError):
+                return {"error": f"box {i} needs numeric class_id, conf, cx, cy, w, h (normalized): {b!r}"}
+            if _unnormalized((cx, cy, w, h)):
+                return {"error": (f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be "
+                                  f"in [0,1] (divide pixel coords by image width/height)")}
+            detect_lines.append(f"{cls} {conf:.4f} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+
+    segment_lines: list[str] | None = None
+    if polygons:
+        segment_lines = []
+        for i, p in enumerate(polygons):
+            try:
+                cls = int(p.get("class_id", 0))
+                conf = float(p.get("conf", 1.0))
+                pts = [(float(x), float(y)) for x, y in p["points"]]
+            except (KeyError, TypeError, ValueError):
+                return {"error": f"polygon {i} needs class_id, conf, points [[x,y],...] (normalized): {p!r}"}
+            if len(pts) < 3:
+                return {"error": f"polygon {i} needs at least 3 points, got {len(pts)}"}
+            flat = tuple(v for xy in pts for v in xy)
+            if _unnormalized(flat):
+                return {"error": (f"polygon {i} points look un-normalized; x/y must be in [0,1] "
+                                  f"(divide pixel coords by image width/height)")}
+            coords = " ".join(f"{v:.6f}" for v in flat)
+            segment_lines.append(f"{cls} {conf:.4f} {coords}")
+
+    def _write(task: str, lines: list[str]) -> str:
+        pdir = Path(prediction_dir(dataset_root, model_name, date, task))
+        pdir.mkdir(parents=True, exist_ok=True)
+        out = pdir / f"{stem}.txt"
+        atomic_write_text(out, "\n".join(lines) + ("\n" if lines else ""))
+        return str(out)
+
+    detect_path = _write("detect", detect_lines) if detect_lines is not None else None
+    segment_path = _write("segment", segment_lines) if segment_lines is not None else None
+
     return {
-        "staged": len(lines),
-        "path": str(out),
+        "staged": len(boxes) + len(polygons),
+        "n_detect": len(boxes),
+        "n_segment": len(polygons),
+        "detect_path": detect_path,
+        "segment_path": segment_path,
         "model_name": model_name,
         "date": date,
         "stem": stem,
