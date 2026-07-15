@@ -6,7 +6,7 @@
  * controls, three orders). The pure helpers are exported for unit testing.
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { api } from "@/api/client";
 import type { ImageStatus } from "@/api/classes";
@@ -98,6 +98,19 @@ export function useImageNav() {
     (oneBased: number) => goTo(jumpTarget(filteredIndices, oneBased)),
     [filteredIndices, goTo],
   );
+
+  // When the status filter changes and the current image falls outside the new set, enter the
+  // set at its first member. Without this the old image stays on the canvas and the index counter
+  // reads empty (current isn't a member -> position 0) until the user manually steps. Gated on a
+  // real filter change so reviewing an image (which shifts byImage) doesn't auto-advance.
+  const prevFilterRef = useRef(activeFilter);
+  useEffect(() => {
+    const filterChanged = prevFilterRef.current !== activeFilter;
+    prevFilterRef.current = activeFilter;
+    if (!filterChanged || filteredIndices.length === 0) return;
+    if (filteredIndices.includes(currentIndex)) return;
+    goTo(filteredIndices[0]);
+  }, [activeFilter, filteredIndices, currentIndex, goTo]);
 
   const total = filteredIndices.length;
   // 1-based position of the current image within the filtered list; 0 if it isn't a
