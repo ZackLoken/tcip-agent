@@ -149,7 +149,7 @@ def _viz_predictions(
 
     from tcip_mcp.dataset_layout import find_prediction
 
-    pred_file = find_prediction(image_path, task, fmt="yolo")
+    pred_file = find_prediction(image_path, task)
     if pred_file is None:
         return {"error": f"No {task} predictions found for {stem}"}
 
@@ -235,7 +235,7 @@ def visualize_comparison(
     # Load predictions
     from tcip_mcp.dataset_layout import find_prediction
 
-    pred_file = find_prediction(image_path, task, fmt="yolo")
+    pred_file = find_prediction(image_path, task)
     pred_dicts: list[dict] = []
     matches_out: list[dict] = []
     if pred_file is not None:
@@ -331,7 +331,7 @@ def visualize_worst_predictions(
 
         # Parse GT boxes
         from tcip_annotation import parse_detect_labels
-        gt_file = Path(labels_dir) / f"{stem}.txt"
+        gt_file = Path(labels_dir) / f"{stem}.json"
         gt_dicts = []
         if gt_file.is_file():
             gt_boxes, _ = parse_detect_labels(str(gt_file), w, h)
@@ -342,7 +342,7 @@ def visualize_worst_predictions(
 
         # Parse pred boxes
         from tcip_annotation import parse_detect_predictions
-        pred_file = Path(predictions_dir) / f"{stem}.txt"
+        pred_file = Path(predictions_dir) / f"{stem}.json"
         pred_dicts = []
         if pred_file.is_file():
             pred_boxes, _ = parse_detect_predictions(str(pred_file), w, h)
@@ -541,22 +541,21 @@ def sam_auto_label(
 def accept_candidates(
     image_path: str,
     assignments: list[dict],
-    fmt: str = "yolo",
 ) -> dict:
-    """Accept SAM candidates with class assignments and save as annotations.
+    """Accept SAM candidates with class assignments and save as ground-truth annotations.
 
     After reviewing sam_auto_label output, the agent calls this tool
     with a mapping from candidate IDs to class IDs. Rejected candidates
-    are simply omitted from the assignments list.
+    are simply omitted from the assignments list. Ground truth is written
+    as per-image COCO/JSON (the canonical on-disk label format).
 
     Args:
         image_path: Absolute path to the image (same as sam_auto_label).
         assignments: List of dicts, each with 'candidate_id' (int) and
             'class_id' (int). Only listed candidates are saved.
-        fmt: Output annotation format ('yolo', 'coco', 'voc', 'labelme').
     """
     import json
-    from tcip_annotation.format_io import save_annotations as format_save
+    from tcip_annotation import json_io
     from tcip_annotation.state import BBox, Polygon
 
     img = Path(image_path)
@@ -601,18 +600,15 @@ def accept_candidates(
             class_id=class_id,
         ))
 
-    # Determine save path (canonical layout, see tcip_mcp.dataset_layout)
+    # Write GT as per-image COCO/JSON (canonical layout, see tcip_mcp.dataset_layout).
     from tcip_mcp.dataset_layout import annotation_path_for_image
 
     if boxes:
-        det_path = annotation_path_for_image(str(img), "detect", fmt)
-        det_path.parent.mkdir(parents=True, exist_ok=True)
-        format_save(str(det_path), boxes, w, h, task="detect", fmt=fmt)
-    if polygons and fmt != "voc":
-        # VOC has no native polygon/segmentation support
-        seg_path = annotation_path_for_image(str(img), "segment", fmt)
-        seg_path.parent.mkdir(parents=True, exist_ok=True)
-        format_save(str(seg_path), polygons, w, h, task="segment", fmt=fmt)
+        det_path = annotation_path_for_image(str(img), "detect", "json")
+        json_io.write_detect(det_path, boxes, w, h)
+    if polygons:
+        seg_path = annotation_path_for_image(str(img), "segment", "json")
+        json_io.write_segment(seg_path, polygons, w, h)
 
     # Render final result for QA
     from tcip_annotation.viz import render_detections
@@ -625,10 +621,9 @@ def accept_candidates(
     return {
         "image_path": out,
         "summary": f"Saved {len(boxes)} detections and {len(polygons)} segmentations "
-                   f"from {len(assignments)} accepted candidates in {fmt} format.",
+                   f"from {len(assignments)} accepted candidates as JSON ground truth.",
         "detection_count": len(boxes),
         "segmentation_count": len(polygons),
-        "format": fmt,
     }
 
 
