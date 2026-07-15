@@ -5,7 +5,7 @@ Bloom is the fraction of a plant's detected catkins that are *elongated*, where
 authoritative trait definitions:
 
     catkin_05/50/95per_date  = dates the elongated fraction crosses 5/50/95%
-    catkin_elongation_date   = first date any elongation appears (fraction > 0)
+    catkin_elongation_date   = date most catkins have elongated (crops.yml) = the 95% crossing
 
 and the guard that makes an unclassified prediction set impossible to pass off as a
 bloom measurement (elongation_classified == False).
@@ -115,23 +115,20 @@ def test_plant_milestones_returns_four_dates():
         "catkin_95per_date",
         "catkin_elongation_date",
     }
-    # onset = first date with any elongation (discrete observation). The 05/50/95 crossings
-    # interpolate. Here onset (first >0 is the 0.04 point) equals the 05% crossing because
-    # the fraction rises gradually; with a sparse 0→1 jump the discrete onset can land LATER
-    # than the interpolated 05% crossing — see test_onset_can_trail_interpolated_05per.
-    assert m["catkin_elongation_date"] == "2024-05-06"
+    # catkin_elongation_date = "most catkins elongated" (crops.yml) = the 95% majority crossing,
+    # i.e. synonymous with catkin_95per_date.
+    assert m["catkin_elongation_date"] == m["catkin_95per_date"]
     assert m["catkin_50per_date"] == "2024-05-11"
 
 
-def test_onset_can_trail_interpolated_05per():
-    # Definitional subtlety (locked by Zack): onset is the first OBSERVED elongation, the
-    # crossings are interpolated ESTIMATES. On a sparse 0→1 jump the estimate lands earlier
-    # than the first observation, so catkin_elongation_date > catkin_05per_date. This is
-    # intended, not a bug — the two are different quantities.
+def test_elongation_date_is_the_95per_majority_crossing():
+    # catkin_elongation_date follows crops.yml ("most catkins elongated"), operationalized as
+    # the 95% majority crossing (synonymous with catkin_95per_date). elongation_onset_date
+    # (first observed elongation) is a distinct quantity, kept but not the delivered trait.
     series = [("2024-05-01", 0.0), ("2024-05-15", 1.0)]
     m = phenology.plant_milestones(series)
-    assert m["catkin_elongation_date"] == "2024-05-15"  # first observed
-    assert m["catkin_05per_date"] == "2024-05-02"  # interpolated estimate (earlier)
+    assert m["catkin_elongation_date"] == m["catkin_95per_date"] == "2024-05-14"  # 95% crossing
+    assert phenology.elongation_onset_date(series) == "2024-05-15"  # onset: first observed, distinct
 
 
 # ── elongated-fraction from classified predictions ───────────────────────
@@ -193,12 +190,12 @@ def test_per_plant_phenology_builds_fraction_series(tmp_path):
     assert row["plant_id"] == "P1"
     assert row["accession"] == "acc-9"
     assert row["n_dates"] == 2
-    # Fraction rises 0.0 (May 1) → 1.0 (May 15). Onset is the first non-zero
-    # observation (May 15); the crossings interpolate between the two dates:
-    # 50% at the midpoint (May 8), 95% near the top (May 14).
-    assert row["catkin_elongation_date"] == "2024-05-15"
+    # Fraction rises 0.0 (May 1) → 1.0 (May 15); crossings interpolate between the two dates:
+    # 50% at the midpoint (May 8), 95% near the top (May 14). catkin_elongation_date = "most
+    # catkins elongated" (crops.yml) = the 95% crossing.
     assert row["catkin_50per_date"] == "2024-05-08"
     assert row["catkin_95per_date"] == "2024-05-14"
+    assert row["catkin_elongation_date"] == row["catkin_95per_date"]
 
 
 def test_per_plant_phenology_excludes_zero_detection_date_from_milestones(tmp_path):
@@ -222,8 +219,8 @@ def test_per_plant_phenology_excludes_zero_detection_date_from_milestones(tmp_pa
     # the zero-detection date is kept in the raw series but flagged as no-observation (ratio None)
     assert row["series"][0] == {"date": "2024-05-01", "n_total": 0, "n_elongated": 0, "ratio": None}
     assert row["n_dates"] == 2 and row["n_observed_dates"] == 1
-    # ...and it does not feed the milestones: onset + 50% crossing are the first real observation.
-    assert row["catkin_elongation_date"] == "2024-05-15"
+    # ...and it does not feed the milestones: every crossing is the first real observation.
+    assert row["catkin_elongation_date"] == "2024-05-15"  # = catkin_95per_date
     assert row["catkin_50per_date"] == "2024-05-15"
 
 
