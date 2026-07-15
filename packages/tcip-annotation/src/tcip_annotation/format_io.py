@@ -31,7 +31,7 @@ from tcip_annotation.label_io import (
     write_segment_labels,
 )
 
-AnnotFormat = Literal["yolo", "coco", "voc", "labelme"]
+AnnotFormat = Literal["yolo", "coco", "voc", "labelme", "json"]
 Task = Literal["detect", "segment"]
 
 
@@ -94,6 +94,8 @@ def _detect_json_format(path: Path) -> AnnotFormat | None:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
+            if "objects" in data:
+                return "json"  # the canonical per-image label file (json_io schema)
             if "shapes" in data:
                 return "labelme"
             if "images" in data or "annotations" in data:
@@ -502,6 +504,12 @@ def load_annotations(
             return parse_detect_labels(path, img_w, img_h)
         else:
             return parse_segment_labels(path, img_w, img_h)
+    elif fmt == "json":  # canonical per-image COCO/JSON
+        from tcip_annotation import json_io
+
+        if task == "detect":
+            return json_io.read_detect(path, img_w, img_h)
+        return json_io.read_segment(path, img_w, img_h)
     elif fmt == "coco":
         coco = _parse_coco_json(path)
         if task == "detect":
@@ -551,6 +559,13 @@ def save_annotations(
             write_detect_labels(path, annotations, img_w, img_h)  # type: ignore[arg-type]
         else:
             write_segment_labels(path, annotations, img_w, img_h)  # type: ignore[arg-type]
+    elif fmt == "json":  # canonical per-image COCO/JSON
+        from tcip_annotation import json_io
+
+        if task == "detect":
+            json_io.write_detect(path, annotations, img_w, img_h)  # type: ignore[arg-type]
+        else:
+            json_io.write_segment(path, annotations, img_w, img_h)  # type: ignore[arg-type]
     elif fmt == "coco":
         fname = file_name or Path(path).stem
         images_dict = {fname: (annotations, img_w, img_h)}
