@@ -200,8 +200,8 @@ export function ProjectPicker() {
                       <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent">active</span>
                     )}
                   </div>
-                  {/* Signature: the project's captures across the season. */}
-                  <SeasonRail dates={p.dates} className="my-0.5" />
+                  {/* Signature: the project's captures across the season, each date labelled. */}
+                  <SeasonRail dates={p.dates} showLabels active={date || null} className="my-0.5" />
                   <div className="text-[11px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">
                     <span>{p.image_count} image(s)</span>
                     <span>
