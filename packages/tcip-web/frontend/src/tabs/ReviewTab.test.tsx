@@ -181,6 +181,8 @@ describe("ReviewTab in-place edit", () => {
       status: "ok",
       image_status: "started",
       annotation_status: "partial",
+      // /action now returns the fresh matches; the edit tests install them via applyMatches.
+      matches: { ...matchesRes([det()]), gt_boxes: [gtBox] },
     });
     backupSpy = vi.spyOn(api.review, "backupLabels").mockResolvedValue({
       status: "ok",
