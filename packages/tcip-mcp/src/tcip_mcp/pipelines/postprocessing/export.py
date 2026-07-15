@@ -31,6 +31,29 @@ def result_to_yolo_lines(result: dict) -> list[str]:
     return lines
 
 
+def write_predictions_json(json_path: str | Path, result: dict) -> None:
+    """Write a ``GenericPredictor`` detection result as a per-image COCO/JSON prediction file.
+
+    JSON counterpart of :func:`result_to_yolo_lines`: each detection becomes a pixel-xyxy
+    ``PredBBox`` (``class_id = max(label-1, 0)`` to undo the 1-indexed torchvision label,
+    ``confidence`` from the score) and is written via ``json_io.write_detect``. ``keep_empty=True``
+    so a processed image with zero detections still yields a ``{"objects": []}`` confirmed-negative
+    file — preserving the behavior of the YOLO text writer that emitted an empty ``<stem>.txt``.
+    """
+    from tcip_annotation import json_io
+    from tcip_annotation.state import PredBBox
+
+    w = result.get("width") or 0
+    h = result.get("height") or 0
+    preds: list[PredBBox] = []
+    for box, score, label in zip(
+        result.get("boxes", []), result.get("scores", []), result.get("labels", [])
+    ):
+        x1, y1, x2, y2 = box
+        preds.append(PredBBox(x1, y1, x2, y2, max(int(label) - 1, 0), confidence=float(score)))
+    json_io.write_detect(str(json_path), preds, int(w), int(h), keep_empty=True)
+
+
 def export_detection_csv(
     image_results: list[dict],
     output_path: str,
