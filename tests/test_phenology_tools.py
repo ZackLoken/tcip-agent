@@ -15,8 +15,19 @@ from pathlib import Path
 
 from PIL import Image
 
+from tcip_annotation import json_io
+from tcip_annotation.state import PredBBox
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, compute_phenology
+
+
+def _pred_boxes(lines: list[str]) -> list[PredBBox]:
+    """Per-image JSON prediction boxes from 'cls conf ...' YOLO-ish lines (class + conf only)."""
+    boxes = []
+    for line in lines:
+        parts = line.split()
+        boxes.append(PredBBox(1.0, 1.0, 3.0, 3.0, int(float(parts[0])), confidence=float(parts[1])))
+    return boxes
 
 
 def _plant_csv(path: Path) -> None:
@@ -88,7 +99,7 @@ def _write_mapping(path: Path, mapping: dict) -> None:
 
 def _write_preds(dir_path: Path, stem: str, lines: list[str]) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
-    (dir_path / f"{stem}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    json_io.write_detect(dir_path / f"{stem}.json", _pred_boxes(lines), 8, 8)
 
 
 def test_compute_phenology_writes_canonical_csv(tmp_path: Path) -> None:
