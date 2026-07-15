@@ -34,6 +34,8 @@ if str(_MCP_SRC) not in sys.path:
 
 from PIL import Image  # noqa: E402
 
+from tcip_annotation import json_io  # noqa: E402
+from tcip_annotation.state import PredBBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
 from tcip_mcp.tools.phenology_tools import (  # noqa: E402
     build_plant_mapping,
@@ -88,13 +90,13 @@ def _write_geo_image(path: Path, lat: float, lon: float, when: datetime) -> None
     Image.new("RGB", (8, 8)).save(path, exif=exif)
 
 
-def _pred_lines(n_elongated: int, n_total: int) -> list[str]:
-    """YOLO pred lines 'cls conf cx cy w h'; first n_elongated are the elongated class."""
-    lines = []
+def _pred_boxes(n_elongated: int, n_total: int) -> list[PredBBox]:
+    """Per-image JSON prediction boxes; first n_elongated carry the elongated class."""
+    boxes = []
     for i in range(n_total):
         cls = ELONGATED_CLASS if i < n_elongated else 0
-        lines.append(f"{cls} 0.90 0.5 0.5 0.10 0.10")
-    return lines
+        boxes.append(PredBBox(1.0, 1.0, 3.0, 3.0, cls, confidence=0.90))
+    return boxes
 
 
 def _stem(plot: str, date: str) -> str:
@@ -123,12 +125,14 @@ def main() -> int:
                     plant["lat"], plant["lon"], base_time + timedelta(minutes=j),
                 )
                 (preds_root / date).mkdir(parents=True, exist_ok=True)
-                (preds_root / date / f"{stem}.txt").write_text(
-                    "\n".join(_pred_lines(n_elong, N_DETECTIONS)) + "\n", encoding="utf-8"
+                json_io.write_detect(
+                    preds_root / date / f"{stem}.json",
+                    _pred_boxes(n_elong, N_DETECTIONS), 8, 8,
                 )
                 (preds_flat / date).mkdir(parents=True, exist_ok=True)
-                (preds_flat / date / f"{stem}.txt").write_text(
-                    "\n".join(_pred_lines(0, N_DETECTIONS)) + "\n", encoding="utf-8"
+                json_io.write_detect(
+                    preds_flat / date / f"{stem}.json",
+                    _pred_boxes(0, N_DETECTIONS), 8, 8,
                 )
 
         plant_csv = root / "plants.csv"
