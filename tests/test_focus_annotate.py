@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tcip_annotation import json_io
+from tcip_annotation.state import BBox, Polygon
 from tcip_mcp.dataset_layout import annotation_dir, image_dir
 from tcip_mcp.tools.annotation_tools import focus_annotate
 
@@ -20,10 +22,17 @@ def _scene(root: Path, date: str, images: list[str]) -> None:
         (idir / name).write_bytes(b"x")  # the tool lists by suffix, never opens
 
 
-def _label(root: Path, trait: str, date: str, task: str, stem: str, text: str) -> None:
+def _label(root: Path, trait: str, date: str, task: str, stem: str, classes: list[int]) -> None:
+    # Write a per-image JSON label. An empty `classes` writes a present {"objects": []}
+    # (confirmed negative); a non-empty list writes one shape per class id.
     d = Path(annotation_dir(root, trait, date, task))
-    d.mkdir(parents=True, exist_ok=True)
-    (d / f"{stem}.txt").write_text(text, encoding="utf-8")
+    path = str(d / f"{stem}.json")
+    if task == "segment":
+        polys = [Polygon([(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)], c) for c in classes]
+        json_io.write_segment(path, polys, 100, 100, keep_empty=True)
+    else:
+        boxes = [BBox(10.0, 10.0, 20.0, 20.0, c) for c in classes]
+        json_io.write_detect(path, boxes, 100, 100, keep_empty=True)
 
 
 def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -> None:
@@ -32,8 +41,8 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -
     imgs = [f"IMG_{i:04d}.JPG" for i in range(5)]  # 0000..0004
     _scene(root, date, imgs)
     # bush polygons (segment) on the 3rd and 4th image only.
-    _label(root, "bush", date, "segment", "IMG_0002", "0 0.1 0.1 0.2 0.2 0.3 0.1\n")
-    _label(root, "bush", date, "segment", "IMG_0003", "0 0.4 0.4 0.5 0.5 0.6 0.4\n")
+    _label(root, "bush", date, "segment", "IMG_0002", [0])
+    _label(root, "bush", date, "segment", "IMG_0003", [0])
 
     res = focus_annotate(str(root), str(root), "bush", date)
 
@@ -56,7 +65,7 @@ def test_focus_annotate_resolves_active_class_from_the_frame(tmp_path: Path) -> 
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
     _scene(root, date, imgs)
-    _label(root, "bush", date, "segment", "IMG_0001", "1 0.1 0.1 0.2 0.2 0.3 0.3\n")
+    _label(root, "bush", date, "segment", "IMG_0001", [1])
 
     res = focus_annotate(str(root), str(root), "bush", date)
     assert res["image_index"] == 1
@@ -70,8 +79,8 @@ def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(tmp_
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(8)]
     _scene(root, date, imgs)
-    _label(root, "bush", date, "segment", "IMG_0002", "0 0.1 0.1 0.2 0.2 0.3 0.3\n")
-    _label(root, "bush", date, "detect", "IMG_0007", "3 0.5 0.5 0.1 0.1\n")
+    _label(root, "bush", date, "segment", "IMG_0002", [0])
+    _label(root, "bush", date, "detect", "IMG_0007", [3])
 
     res = focus_annotate(str(root), str(root), "bush", date, image_index=7)
     assert res["image_index"] == 7
@@ -89,7 +98,7 @@ def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(tmp_pa
     (idir / "IMG_0000.JPG").write_bytes(b"x")
     (idir / "IMG_0001.png").mkdir()  # a directory with an image suffix — must be ignored
     (idir / "IMG_0002.JPG").write_bytes(b"x")
-    _label(root, "bush", date, "segment", "IMG_0002", "0 0.1 0.1 0.2 0.2 0.3 0.3\n")
+    _label(root, "bush", date, "segment", "IMG_0002", [0])
 
     res = focus_annotate(str(root), str(root), "bush", date)
     assert res["n_images"] == 2  # the directory is not counted
@@ -102,7 +111,7 @@ def test_focus_annotate_infers_box_mode_from_detect_labels(tmp_path: Path) -> No
     date = "2026-02-11"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
     _scene(root, date, imgs)
-    _label(root, "catkin", date, "detect", "IMG_0001", "0 0.5 0.5 0.1 0.1\n")
+    _label(root, "catkin", date, "detect", "IMG_0001", [0])
 
     res = focus_annotate(str(root), str(root), "catkin", date)
     assert res["image_index"] == 1
@@ -115,8 +124,8 @@ def test_focus_annotate_empty_label_is_not_a_focus_target(tmp_path: Path) -> Non
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
     _scene(root, date, imgs)
-    _label(root, "bush", date, "segment", "IMG_0000", "")  # empty negative
-    _label(root, "bush", date, "segment", "IMG_0002", "0 0.1 0.1 0.2 0.2 0.3 0.3\n")
+    _label(root, "bush", date, "segment", "IMG_0000", [])  # empty negative ({"objects": []})
+    _label(root, "bush", date, "segment", "IMG_0002", [0])
 
     res = focus_annotate(str(root), str(root), "bush", date)
     assert res["image_index"] == 2  # skipped the empty-negative frame 0
@@ -128,7 +137,7 @@ def test_focus_annotate_explicit_mode_and_index_override(tmp_path: Path) -> None
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(4)]
     _scene(root, date, imgs)
-    _label(root, "bush", date, "segment", "IMG_0003", "0 0.1 0.1 0.2 0.2 0.3 0.3\n")
+    _label(root, "bush", date, "segment", "IMG_0003", [0])
 
     res = focus_annotate(str(root), str(root), "bush", date, mode="box", image_index=1)
     assert res["image_index"] == 1  # explicit override
