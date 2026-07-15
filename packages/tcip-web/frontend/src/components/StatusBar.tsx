@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { useReviewColors } from "@/lib/reviewColors";
 import { useStore } from "@/store";
 
@@ -18,18 +19,9 @@ export function StatusBar() {
   const polyCount = useStore((s) => s.canvas.polygons.length);
   const matches = useStore((s) => s.review.matches);
   const activeTab = useStore((s) => s.gui.active_tab);
-  const setActiveTab = useStore((s) => s.setActiveTab);
   const sessionTracking = useStore((s) => s.sessionTracking);
   const agentActivity = useStore((s) => s.agentActivity);
-  const dataset = useStore((s) => s.gui.dataset);
-  const clearDataset = useStore((s) => s.clearDataset);
   const [reviewColors] = useReviewColors();
-
-  function switchProject() {
-    clearDataset();
-    // Land on a dataset-dependent tab so the project front door is shown.
-    if (!["annotate", "review", "results"].includes(activeTab)) setActiveTab("annotate");
-  }
 
   // Per-image timer. Compute the elapsed seconds inside the interval (not in the
   // render body) so there's no Date.now()-during-render hack.
@@ -101,22 +93,8 @@ export function StatusBar() {
           {agentStem ? ` (${agentStem})` : ""}
         </span>
       )}
-      {/* Project breadcrumb — lower-right corner; click to switch projects. */}
-      {dataset.dataset_root && dataset.date ? (
-        <button
-          onClick={switchProject}
-          title="Switch project"
-          className="truncate max-w-md hover:text-tcip-fg transition-colors"
-        >
-          <span className="font-mono">{dataset.dataset_root.split(/[/\\]/).slice(-1)[0]}</span>
-          <span className="mx-1.5 text-tcip-border">|</span>
-          <span className="font-mono">{dataset.date}</span>
-          <span className="mx-1.5 text-tcip-border">|</span>
-          <span className="text-tcip-season-1">Switch Project</span>
-        </button>
-      ) : (
-        <span>no project open</span>
-      )}
+      {/* Project breadcrumb — lower-right: project (recent) · date (switch) · Switch Project (all). */}
+      <ProjectBreadcrumb />
     </div>
   );
 }
