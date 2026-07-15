@@ -396,10 +396,10 @@ export function AnnotateTab() {
     if (!imgPath || !currentImageName) return;
     const stem = currentImageName.replace(/\.[^.]+$/, "");
     const det = dataset.annotations_detect_dir
-      ? `${dataset.annotations_detect_dir}/${stem}.txt`
+      ? `${dataset.annotations_detect_dir}/${stem}.json`
       : null;
     const seg = dataset.annotations_segment_dir
-      ? `${dataset.annotations_segment_dir}/${stem}.txt`
+      ? `${dataset.annotations_segment_dir}/${stem}.json`
       : null;
     const key = `${imgPath}\0${det ?? ""}\0${seg ?? ""}`;
 
