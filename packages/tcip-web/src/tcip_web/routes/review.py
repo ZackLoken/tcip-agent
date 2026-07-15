@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import threading
 import uuid
 from dataclasses import dataclass, field, replace
@@ -143,6 +144,26 @@ def _guard_path(path: Optional[str]) -> None:
         raise HTTPException(403, str(exc)) from exc
 
 
+def _ensure_original_backup(label_path: Optional[str]) -> None:
+    """Snapshot a label file to ``<dir>/.original/<name>`` before its first mutation, if no baseline
+    exists yet — a per-file, O(1) safety net so a verdict never overwrites the pristine original
+    without a copy, independent of (and closing any gap in) the client's dir-level backup. New GT
+    files a verdict is creating have no original to preserve, so they're skipped. Best-effort."""
+    if not label_path:
+        return
+    src = Path(label_path)
+    if not src.is_file():
+        return
+    dst = src.parent / ".original" / src.name
+    if dst.exists():
+        return
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+    except OSError:
+        pass
+
+
 def _load_ctx(
     image_name: str,
     image_path: str,
@@ -216,35 +237,22 @@ class MatchesResponse(BaseModel):
     image_status: str  # "not_started" | "started" | "completed"
 
 
-@router.post("/matches")
-def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
-    """Compute TP/FP/FN, decorate with review status, and return everything the canvas needs."""
-    ctx = _load_ctx(
-        image_name=req.image_name,
-        image_path=req.image_path,
-        gt_detect_path=req.gt_detect_path,
-        gt_segment_path=req.gt_segment_path,
-        pred_detect_path=req.pred_detect_path,
-        pred_segment_path=req.pred_segment_path,
-    )
-    engine = _get_engine(req.project_root)
-
-    matches = compute_matches(
-        gt_boxes=ctx.gt_boxes,
-        gt_polygons=ctx.gt_polygons,
-        pred_boxes=ctx.pred_boxes,
-        pred_polygons=ctx.pred_polygons,
-        iou_threshold=req.iou_threshold,
-        conf_threshold=req.conf_threshold,
-    )
+def _matches_response(
+    ctx: ReviewContext,
+    matches: dict,
+    engine: ReviewEngine,
+    image_name: str,
+    *,
+    filter_type: str,
+    filter_class: str | int,
+    status_filter: str,
+) -> MatchesResponse:
+    """Build the canvas payload (filtered + review-decorated detections, GT/pred shapes, status)
+    from an already-computed match set. Shared by /matches and /action so both surfaces return the
+    identical shape — letting a verdict return its fresh matches instead of forcing a second fetch."""
     dets = engine.build_detection_list(
-        ctx,
-        matches,
-        filter_type=req.filter_type,
-        filter_class=req.filter_class,
-        status_filter=req.status_filter,
+        ctx, matches, filter_type=filter_type, filter_class=filter_class, status_filter=status_filter
     )
-    # Decorate with review status
     out_dets: list[Detection] = []
     for d in dets:
         entry = engine.find_reviewed_entry(d, ctx)
@@ -291,7 +299,34 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
         gt_polygons=[_poly_dict(p) for p in ctx.gt_polygons],
         pred_boxes=[_pred_box_dict(b) for b in ctx.pred_boxes],
         pred_polygons=[_pred_poly_dict(p) for p in ctx.pred_polygons],
-        image_status=engine.get_image_review_status(req.image_name),
+        image_status=engine.get_image_review_status(image_name),
+    )
+
+
+@router.post("/matches")
+def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
+    """Compute TP/FP/FN, decorate with review status, and return everything the canvas needs."""
+    ctx = _load_ctx(
+        image_name=req.image_name,
+        image_path=req.image_path,
+        gt_detect_path=req.gt_detect_path,
+        gt_segment_path=req.gt_segment_path,
+        pred_detect_path=req.pred_detect_path,
+        pred_segment_path=req.pred_segment_path,
+    )
+    engine = _get_engine(req.project_root)
+
+    matches = compute_matches(
+        gt_boxes=ctx.gt_boxes,
+        gt_polygons=ctx.gt_polygons,
+        pred_boxes=ctx.pred_boxes,
+        pred_polygons=ctx.pred_polygons,
+        iou_threshold=req.iou_threshold,
+        conf_threshold=req.conf_threshold,
+    )
+    return _matches_response(
+        ctx, matches, engine, req.image_name,
+        filter_type=req.filter_type, filter_class=req.filter_class, status_filter=req.status_filter,
     )
 
 
@@ -322,6 +357,11 @@ class ActionPayload(BaseModel):
     # this verdict was the last one and the image should flip to 'completed'.
     iou_threshold: float = 0.5
     conf_threshold: float = 0.25
+    # Active review filters, so the fresh matches this route returns are scoped identically to
+    # what /matches would have returned (the client installs them without a second fetch).
+    filter_type: str = "all"
+    filter_class: str | int = "all"
+    status_filter: str = "all"
 
 
 def _apply_gt_mutation(
@@ -422,12 +462,14 @@ def record_action(payload: ActionPayload) -> dict:
     # not deleted). accept-TP/FN and reject-FP are no-ops.
     if changed == "detect" and payload.gt_detect_path:
         _guard_path(payload.gt_detect_path)
+        _ensure_original_backup(payload.gt_detect_path)  # baseline this file before its first mutation
         os.makedirs(os.path.dirname(payload.gt_detect_path) or ".", exist_ok=True)
         write_detect_labels(
             payload.gt_detect_path, work.gt_boxes, ctx.img_width, ctx.img_height, keep_empty=True
         )
     elif changed == "segment" and payload.gt_segment_path:
         _guard_path(payload.gt_segment_path)
+        _ensure_original_backup(payload.gt_segment_path)  # baseline this file before its first mutation
         os.makedirs(os.path.dirname(payload.gt_segment_path) or ".", exist_ok=True)
         write_segment_labels(
             payload.gt_segment_path, work.gt_polygons, ctx.img_width, ctx.img_height, keep_empty=True
@@ -457,10 +499,18 @@ def record_action(payload: ActionPayload) -> dict:
         "action": payload.action,
         "gt_changed": changed,
     })
+    # Return the fresh matches this verdict just recomputed (gt_idx/pred_idx rebuilt against the
+    # written GT), so the client installs them without a second /matches round-trip.
+    fresh = _matches_response(
+        work, matches, engine, payload.image_name,
+        filter_type=payload.filter_type, filter_class=payload.filter_class,
+        status_filter=payload.status_filter,
+    )
     return {
         "status": "ok",
         "image_status": engine.get_image_review_status(payload.image_name),
         "annotation_status": annotation_status,
+        "matches": fresh,
     }
 
 
