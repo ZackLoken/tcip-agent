@@ -82,17 +82,19 @@ def _read_registry(path: Path) -> ClassRegistry:
 
 def _class_ids_in_dir(d: Path) -> set[int]:
     ids: set[int] = set()
-    for txt in d.glob("*.txt"):
+    for jf in d.glob("*.json"):
         try:
-            for line in txt.read_text(encoding="utf-8").splitlines():
-                parts = line.split()
-                if parts:
-                    try:
-                        ids.add(int(float(parts[0])))
-                    except ValueError:
-                        continue
-        except OSError:
+            data = json.loads(jf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             continue
+        if not isinstance(data, dict):
+            continue
+        for o in data.get("objects") or []:
+            if isinstance(o, dict) and "category_id" in o:
+                try:
+                    ids.add(int(o["category_id"]))
+                except (TypeError, ValueError):
+                    continue
     return ids
 
 
@@ -257,15 +259,13 @@ def derive_image_status(payload: DerivePayload) -> dict:
         for label_dir in (det, seg):
             if not label_dir:
                 continue
-            txt = label_dir / f"{stem}.txt"
-            if not txt.exists():
+            jf = label_dir / f"{stem}.json"
+            if not jf.exists():
                 continue
             try:
-                with txt.open("r", encoding="utf-8") as f:
-                    for line in f:
-                        if line.strip():
-                            has_any = True
-                            break
+                data = json.loads(jf.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and data.get("objects"):
+                    has_any = True
             except Exception:
                 pass
             if has_any:
