@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from tcip_annotation import json_io
+from tcip_annotation.state import PredBBox
 
 from tcip_web.app import app
 
@@ -14,6 +16,12 @@ from tcip_web.app import app
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)
+
+
+def _write_preds(path: Path, cls_ids: list[int]) -> None:
+    """Per-image JSON prediction file with one box per class id (elongation is a class)."""
+    boxes = [PredBBox(1.0, 1.0, 3.0, 3.0, c, confidence=0.9) for c in cls_ids]
+    json_io.write_detect(path, boxes, 8, 8)
 
 
 def test_plant_mapping_build_with_empty_images(client: TestClient, tmp_path: Path) -> None:
@@ -87,18 +95,11 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
     # Predictions from the 2-class elongation classifier: class 0 = non-elongated,
     # class 1 = elongated. Elongation is a CLASS, never a bbox-height proxy.
     # PLANT_A on 2-11 → 4 detections, none elongated (class 0)
-    (preds_211 / "IMG_A.txt").write_text(
-        "\n".join("0 0.9 0.5 0.5 0.01 0.01" for _ in range(4)), encoding="utf-8"
-    )
+    _write_preds(preds_211 / "IMG_A.json", [0, 0, 0, 0])
     # PLANT_B on 2-11 → 2 detections, both elongated (class 1)
-    (preds_211 / "IMG_B.txt").write_text(
-        "1 0.9 0.5 0.5 0.01 0.05\n1 0.9 0.4 0.4 0.01 0.05\n", encoding="utf-8"
-    )
+    _write_preds(preds_211 / "IMG_B.json", [1, 1])
     # PLANT_A on 3-24 → 3 detections, all elongated (class 1)
-    (preds_324 / "IMG_A2.txt").write_text(
-        "1 0.9 0.5 0.5 0.01 0.05\n1 0.9 0.4 0.4 0.01 0.05\n1 0.9 0.3 0.3 0.01 0.05\n",
-        encoding="utf-8",
-    )
+    _write_preds(preds_324 / "IMG_A2.json", [1, 1, 1])
 
     resp = client.post(
         "/api/results/per_plant_curves",
@@ -151,7 +152,7 @@ def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp
     preds = tmp_path / "preds"
     preds.mkdir()
     # Raw single-class catkin detections: class 0 only, no elongation call.
-    (preds / "IMG_A.txt").write_text("0 0.9 0.5 0.5 0.01 0.05\n0 0.9 0.4 0.4 0.01 0.05\n", encoding="utf-8")
+    _write_preds(preds / "IMG_A.json", [0, 0])
 
     body = client.post(
         "/api/results/per_plant_curves",
