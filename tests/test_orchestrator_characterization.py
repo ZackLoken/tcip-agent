@@ -15,6 +15,8 @@ import logging
 from pathlib import Path
 
 import pytest
+from tcip_annotation import json_io
+from tcip_annotation.state import PredBBox
 
 from tcip_mcp.pipelines.orchestrator import (
     _PHASE_RUNNERS,
@@ -411,8 +413,8 @@ class TestInferencePhaseBranches:
                                  "checkpoint": "x.pt", "images_dir": str(images_dir)})
         assert result.status == "completed", result.error
         assert result.artifacts["count"] == 2
-        written = sorted(p.name for p in Path(result.artifacts["predictions_dir"]).glob("*.txt"))
-        assert written == ["a.txt", "b.txt"]
+        written = sorted(p.name for p in Path(result.artifacts["predictions_dir"]).glob("*.json"))
+        assert written == ["a.json", "b.json"]
 
 
 # ====================================================================
@@ -431,7 +433,8 @@ class TestCroppingPhaseBranches:
         images_dir = tmp_path / "images"
         preds_dir.mkdir()
         images_dir.mkdir()
-        (preds_dir / "ghost.txt").write_text("0 0.9 0.5 0.5 0.2 0.2\n")
+        json_io.write_detect(preds_dir / "ghost.json",
+                             [PredBBox(10, 10, 30, 30, 0, confidence=0.9)], 100, 100)
 
         result = PipelineOrchestrator(work_dir=str(tmp_path / "runs")).run_phase(
             {"name": "crop", "task": "detection", "type": "cropping", "input": "dets"},
@@ -441,7 +444,7 @@ class TestCroppingPhaseBranches:
         assert result.status == "completed", result.error
         assert result.artifacts["count"] == 0
 
-    def test_line_filtering_clamping_and_crop_naming(self, tmp_path):
+    def test_object_filtering_clamping_and_crop_naming(self, tmp_path):
         from PIL import Image
 
         preds_dir = tmp_path / "preds"
@@ -449,12 +452,14 @@ class TestCroppingPhaseBranches:
         preds_dir.mkdir()
         images_dir.mkdir()
         Image.new("RGB", (100, 50), color=(100, 100, 100)).save(images_dir / "plot.jpg")
-        (preds_dir / "plot.txt").write_text("\n".join([
-            "0 0.9 0.5",                    # < 6 parts → skipped
-            "0 0.9 0.5 0.5 0.01 0.5",       # 1px wide → skipped (< 2px)
-            "0 0.9 0.95 0.5 0.3 0.4",       # overflows right edge → clamped to 20x20
-            "0 0.9 0.5 0.5 0.2 0.2",        # normal → 20x10
-        ]))
+        # Pixel-xyxy PredBBoxes (COCO/JSON is pixel-space); the crop index is the object
+        # index in the file, so filtered objects leave gaps in the crop names.
+        json_io.write_detect(preds_dir / "plot.json", [
+            PredBBox(49.5, 12.5, 50.5, 37.5, 0, confidence=0.9),   # 1px wide → skipped (< 2px)
+            PredBBox(49.5, 12.5, 50.5, 37.5, 0, confidence=0.9),   # 1px wide → skipped (< 2px)
+            PredBBox(80.0, 15.0, 110.0, 35.0, 0, confidence=0.9),  # overflows right edge → clamped to 20x20
+            PredBBox(40.0, 20.0, 60.0, 30.0, 0, confidence=0.9),   # normal → 20x10
+        ], 100, 50)
 
         result = PipelineOrchestrator(work_dir=str(tmp_path / "runs")).run_phase(
             {"name": "crop", "task": "detection", "type": "cropping", "input": "dets"},
@@ -465,7 +470,7 @@ class TestCroppingPhaseBranches:
         assert result.artifacts["count"] == 2
         crops = {p.name: Image.open(p).size
                  for p in Path(result.artifacts["images_dir"]).glob("*.jpg")}
-        # Crop index is the source line index, so skipped lines leave gaps.
+        # Crop index is the source object index, so skipped objects leave gaps.
         assert crops == {"plot_crop2.jpg": (20, 20), "plot_crop3.jpg": (20, 10)}
 
 
@@ -478,9 +483,12 @@ class TestAggregationPhaseBranches:
         preds_dir = tmp_path / "preds"
         preds_dir.mkdir()
         # Stems group by _extract_plant_id (strips last two underscore tokens).
-        (preds_dir / "plant1_a_1.txt").write_text("0 0.9 0.5 0.5 0.2 0.2\n0 0.8 0.3 0.3 0.1 0.1\n")
-        (preds_dir / "plant1_a_2.txt").write_text("\n".join(["0 0.9 0.5 0.5 0.2 0.2"] * 4))
-        (preds_dir / "plant2_b_1.txt").write_text("")  # empty file → count 0
+        def _box() -> PredBBox:
+            return PredBBox(10, 10, 30, 30, 0, confidence=0.9)
+        json_io.write_detect(preds_dir / "plant1_a_1.json", [_box(), _box()], 100, 100)
+        json_io.write_detect(preds_dir / "plant1_a_2.json", [_box(), _box(), _box(), _box()], 100, 100)
+        # Present {"objects": []} confirmed negative → count 0, still counted as an image.
+        json_io.write_detect(preds_dir / "plant2_b_1.json", [], 100, 100, keep_empty=True)
 
         result = PipelineOrchestrator(work_dir=str(tmp_path / "runs")).run_phase(
             {"name": "agg", "task": "aggregation", "input": "dets",
@@ -504,7 +512,8 @@ class TestAggregationPhaseBranches:
     def test_precomputed_results_override_predictions_dir(self, tmp_path):
         preds_dir = tmp_path / "preds"
         preds_dir.mkdir()
-        (preds_dir / "ignored_a_1.txt").write_text("0 0.9 0.5 0.5 0.2 0.2\n")
+        json_io.write_detect(preds_dir / "ignored_a_1.json",
+                             [PredBBox(10, 10, 30, 30, 0, confidence=0.9)], 100, 100)
 
         result = PipelineOrchestrator(work_dir=str(tmp_path / "runs")).run_phase(
             {"name": "agg", "task": "aggregation", "input": "dets"},
@@ -564,14 +573,20 @@ class TestExportPhaseBranches:
         assert out.name == "results.csv"
         assert out.read_text() == src_csv.read_text()
 
-    def test_unparseable_confidence_is_skipped_but_line_still_counted(self, tmp_path):
+    def test_missing_score_reads_as_zero_but_object_still_counted(self, tmp_path):
         preds_dir = tmp_path / "preds"
         preds_dir.mkdir()
-        (preds_dir / "img.txt").write_text("\n".join([
-            "0 0.5000 0.5 0.5 0.2 0.2",   # good score
-            "0 abc 0.5 0.5 0.2 0.2",      # non-float conf → no score, still a detection
-            "0 0.9",                       # < 6 parts → no score, still a detection
-        ]))
+        # A per-image COCO/JSON prediction file. An object with a null/absent score is
+        # tolerated (read as 0.0) and still counts as a detection — so the count reflects
+        # all three objects while the average is dragged down by the two zero scores.
+        (preds_dir / "img.json").write_text(json.dumps({
+            "image": "img", "width": 100, "height": 50,
+            "objects": [
+                {"category_id": 0, "bbox": [40, 20, 20, 10], "score": 0.5},   # good score
+                {"category_id": 0, "bbox": [40, 20, 20, 10], "score": None},  # null → 0.0
+                {"category_id": 0, "bbox": [40, 20, 20, 10]},                 # absent → 0.0
+            ],
+        }))
         result = PipelineOrchestrator(work_dir=str(tmp_path / "runs")).run_phase(
             {"name": "exp", "task": "export", "input": "prev"},
             context={"prev": {"predictions_dir": str(preds_dir)}},
@@ -579,7 +594,8 @@ class TestExportPhaseBranches:
         assert result.status == "completed", result.error
         with open(result.artifacts["csv_path"], newline="") as f:
             rows = list(csv.DictReader(f))
-        assert rows == [{"image": "img", "detection_count": "3", "avg_confidence": "0.5"}]
+        # avg_confidence = (0.5 + 0.0 + 0.0) / 3 = 0.1667.
+        assert rows == [{"image": "img", "detection_count": "3", "avg_confidence": "0.1667"}]
 
 
 # ====================================================================
