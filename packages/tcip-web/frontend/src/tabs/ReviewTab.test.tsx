@@ -264,7 +264,7 @@ describe("ReviewTab matches-recompute effect", () => {
   it("re-fetches when the prediction dirs change under the same image (agent swaps model)", async () => {
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
-    expect(matchesSpy.mock.calls[0][0].pred_detect_path).toBe(`${PRED_DIR_A}/img1.txt`);
+    expect(matchesSpy.mock.calls[0][0].pred_detect_path).toBe(`${PRED_DIR_A}/img1.json`);
 
     // mergeSnapshot's same-identity branch adopts backend-changed prediction dirs
     // without changing imgPath — the tab must not keep showing the old model's matches.
@@ -273,7 +273,7 @@ describe("ReviewTab matches-recompute effect", () => {
       s.patchGui({ dataset: { ...s.gui.dataset, predictions_detect_dir: PRED_DIR_B } });
     });
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(2));
-    expect(matchesSpy.mock.calls[1][0].pred_detect_path).toBe(`${PRED_DIR_B}/img1.txt`);
+    expect(matchesSpy.mock.calls[1][0].pred_detect_path).toBe(`${PRED_DIR_B}/img1.json`);
   });
 
   it("does NOT re-fetch when a WS snapshot rebuilds the dataset object with identical paths", async () => {
