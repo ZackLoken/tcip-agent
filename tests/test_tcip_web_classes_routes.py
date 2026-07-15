@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tcip_annotation import json_io
+from tcip_annotation.state import BBox
 from tcip_web.app import app
 
 
@@ -75,7 +77,12 @@ def test_load_derives_from_labels_when_map_absent(client: TestClient, tmp_path: 
     # canvas never loads empty (names default to class_<id>).
     det = tmp_path / "annotations" / "catkin" / "d" / "detect"
     det.mkdir(parents=True)
-    (det / "IMG_A.txt").write_text("0 0.5 0.5 0.1 0.1\n2 0.2 0.2 0.1 0.1\n")
+    json_io.write_detect(
+        str(det / "IMG_A.json"),
+        [BBox(50.0, 50.0, 60.0, 60.0, 0), BBox(20.0, 20.0, 30.0, 30.0, 2)],
+        100,
+        100,
+    )
     load = client.get(
         "/api/classes/load",
         params={"project_root": str(tmp_path), "trait": "catkin", "annotations_detect_dir": str(det)},
@@ -120,10 +127,10 @@ def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path:
     # so an accidental empty file, or flipping through an image, doesn't become a training negative.
     det = tmp_path / "detect"
     det.mkdir()
-    (det / "IMG_A.txt").write_text("0 0.5 0.5 0.1 0.1\n")  # has objects, not completed
-    (det / "IMG_B.txt").write_text("")  # empty file, not completed
-    (det / "IMG_E.txt").write_text("0 0.5 0.5 0.1 0.1\n")  # has objects, completed
-    # IMG_C.txt missing; IMG_D completed but has no file (empty)
+    json_io.write_detect(str(det / "IMG_A.json"), [BBox(50.0, 50.0, 60.0, 60.0, 0)], 100, 100)  # has objects, not completed
+    json_io.write_detect(str(det / "IMG_B.json"), [], 100, 100, keep_empty=True)  # present {"objects": []}, not completed
+    json_io.write_detect(str(det / "IMG_E.json"), [BBox(50.0, 50.0, 60.0, 60.0, 0)], 100, 100)  # has objects, completed
+    # IMG_C.json missing; IMG_D completed but has no file (empty)
 
     resp = client.post(
         "/api/classes/image_status/derive",
