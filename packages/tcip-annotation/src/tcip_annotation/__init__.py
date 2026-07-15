@@ -8,13 +8,15 @@ from tcip_annotation.state import (
     PredPolygon,
     boxes_from_polygons,
 )
-from tcip_annotation.label_io import (
-    parse_detect_labels,
-    parse_segment_labels,
-    parse_detect_predictions,
-    parse_segment_predictions,
-    write_detect_labels,
-    write_segment_labels,
+# Canonical label I/O is now per-image COCO/JSON (json_io). The YOLO functions in label_io survive
+# only behind format_io for explicit import/export; these public names intentionally bind to JSON.
+from tcip_annotation.json_io import (
+    read_detect as parse_detect_labels,
+    read_segment as parse_segment_labels,
+    read_detect_pred as parse_detect_predictions,
+    read_segment_pred as parse_segment_predictions,
+    write_detect as write_detect_labels,
+    write_segment as write_segment_labels,
 )
 from tcip_annotation.format_io import (
     detect_format,
