@@ -63,7 +63,6 @@ function App() {
         void openProjectByName(name)
           .then((selection) => {
             if (!selection) return;
-            useStore.getState().patchGui({ dataset: selection });
             if (!selection.date) {
               // No dated capture to land on — say so instead of appearing to do nothing.
               useStore
