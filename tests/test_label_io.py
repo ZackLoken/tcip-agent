@@ -11,6 +11,8 @@ from tcip_annotation import (
     Polygon,
     PredBBox,
     PredPolygon,
+)
+from tcip_annotation.label_io import (
     parse_detect_labels,
     parse_segment_labels,
     parse_detect_predictions,
