@@ -123,34 +123,37 @@ def test_delete_polygon_clears_selection_when_same(state: AnnotationState) -> No
     assert state.selected_polygon_idx is None
 
 
-def test_save_writes_yolo_files(state: AnnotationState, tmp_path: Path) -> None:
+def test_save_writes_json_files(state: AnnotationState, tmp_path: Path) -> None:
+    from tcip_annotation.json_io import read_detect, read_segment
+
     state.img_width = 1000
     state.img_height = 500
     state.boxes = [BBox(x1=100.0, y1=50.0, x2=200.0, y2=150.0, class_id=0)]
     state.polygons = [Polygon(points=[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)], class_id=1)]
 
     eng = AnnotationEngine(state)
-    det_path = tmp_path / "detect" / "img.txt"
-    seg_path = tmp_path / "segment" / "img.txt"
+    det_path = tmp_path / "detect" / "img.json"
+    seg_path = tmp_path / "segment" / "img.json"
     assert eng.save(detect_path=str(det_path), segment_path=str(seg_path)) is True
 
-    det_content = det_path.read_text().strip().split("\n")
-    assert len(det_content) == 1
-    parts = det_content[0].split()
-    # class cx cy w h, normalized
-    assert parts[0] == "0"
-    assert float(parts[1]) == pytest.approx(0.15)  # (100+200)/2 / 1000
-    assert float(parts[3]) == pytest.approx(0.1)   # 100 / 1000
+    # Detect: one box, pixel xyxy preserved, class in category_id.
+    det_boxes, _ = read_detect(str(det_path))
+    assert len(det_boxes) == 1
+    b = det_boxes[0]
+    assert b.class_id == 0
+    assert (b.x1, b.y1, b.x2, b.y2) == (100.0, 50.0, 200.0, 150.0)
 
-    seg_content = seg_path.read_text().strip()
-    assert seg_content.startswith("1 ")
+    # Segment: one polygon, class 1.
+    seg_polys, _ = read_segment(str(seg_path))
+    assert len(seg_polys) == 1
+    assert seg_polys[0].class_id == 1
 
 
 def test_save_rejects_invalid_image_dimensions(state: AnnotationState, tmp_path: Path) -> None:
     state.img_width = 0
     state.img_height = 0
     eng = AnnotationEngine(state)
-    assert eng.save(detect_path=str(tmp_path / "out.txt")) is False
+    assert eng.save(detect_path=str(tmp_path / "out.json")) is False
 
 
 def test_ensure_poly_bboxes_caches_bounds(state: AnnotationState) -> None:
