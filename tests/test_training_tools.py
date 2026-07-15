@@ -222,13 +222,14 @@ def test_run_hpo_trials_use_base_augmentation_and_loss(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 
 def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch):
-    """Prediction files are 'cls conf cx cy w h' (result_to_yolo_lines /
-    parse_detect_predictions). The old parser read parts[5] — the normalized
-    box HEIGHT — as confidence, so the (1 - avg_conf) ranking term was ~1.0
-    for every image with small boxes (e.g. catkins)."""
+    """Prediction files are per-image JSON with a native ``score`` (json_io); confidence
+    reads from that field, not from box geometry. The old parser read a normalized box
+    HEIGHT as confidence, so the (1 - avg_conf) ranking term was ~1.0 for every image with
+    small boxes (e.g. catkins)."""
     pytest.importorskip("torch")
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.pipelines.postprocessing.export import result_to_yolo_lines
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox, PredBBox
     from tcip_mcp.tools.training_tools import get_worst_predictions
 
     preds = tmp_path / "preds"
@@ -237,13 +238,13 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
     gts.mkdir()
 
     def write_image(stem: str, scores: list[float]) -> None:
-        # Catkin-sized boxes: bh = 0.02, so height != confidence for both stems.
-        result = {"width": 100, "height": 100,
-                  "boxes": [[10.0, 10.0, 30.0, 12.0]] * len(scores),
-                  "scores": scores, "labels": [1] * len(scores)}
-        (preds / f"{stem}.txt").write_text("\n".join(result_to_yolo_lines(result)) + "\n")
+        # Confidence lives in the JSON `score`; box geometry is irrelevant to this
+        # count + confidence heuristic (no IoU matching), so the boxes can be anything.
+        pred_boxes = [PredBBox(10.0, 10.0, 40.0, 22.0, 1, confidence=s) for s in scores]
+        json_io.write_detect(str(preds / f"{stem}.json"), pred_boxes, 100, 100)
         # Matching GT count → missed = extra = 0, error is exactly (1 - avg_conf).
-        (gts / f"{stem}.txt").write_text("0 0.2 0.11 0.2 0.02\n" * len(scores))
+        gt_boxes = [BBox(20.0, 11.0, 40.0, 31.0, 0) for _ in scores]
+        json_io.write_detect(str(gts / f"{stem}.json"), gt_boxes, 100, 100)
 
     write_image("confident", [0.9, 0.9])
     write_image("shaky", [0.1, 0.1])
