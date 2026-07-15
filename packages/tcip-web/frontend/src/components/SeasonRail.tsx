@@ -58,9 +58,11 @@ interface SeasonRailProps {
   dates: string[];
   active?: string | null;
   className?: string;
+  /** Print each tick's date below the rail (staggered two rows to limit overlap). */
+  showLabels?: boolean;
 }
 
-export function SeasonRail({ dates, active, className }: SeasonRailProps) {
+export function SeasonRail({ dates, active, className, showLabels }: SeasonRailProps) {
   // Keep only real calendar dates; everything else (undated bucket, invalid folder
   // names) is counted as undated so nothing renders a bogus tick.
   const iso = dates.filter((d) => ISO.test(d) && timeOf(d) !== null).sort();
@@ -82,14 +84,24 @@ export function SeasonRail({ dates, active, className }: SeasonRailProps) {
         (undated ? `, plus ${undated} undated` : "")
       : `${undated} undated capture${undated === 1 ? "" : "s"}`;
 
+  // When labelled, pin the rail near the top of a taller strip and drop the date captions
+  // below it; otherwise keep the compact vertically-centred rail.
+  const railTop = showLabels ? "7px" : "50%";
   return (
-    <div className={`flex items-center gap-2 ${className ?? ""}`} role="img" aria-label={summary}>
+    <div
+      className={`flex ${showLabels ? "items-start" : "items-center"} gap-2 ${className ?? ""}`}
+      role="img"
+      aria-label={summary}
+    >
       {iso.length > 0 && (
-        <div className="relative flex-1 h-4" data-testid="season-rail-axis">
+        <div
+          className={`relative flex-1 ${showLabels ? "h-9" : "h-4"}`}
+          data-testid="season-rail-axis"
+        >
           {/* Seasonal baseline: dormant → fruit */}
           <div
-            className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[3px] rounded-full opacity-70"
-            style={{ background: `linear-gradient(90deg, ${SEASON.join(", ")})` }}
+            className="absolute left-0 right-0 -translate-y-1/2 h-[3px] rounded-full opacity-70"
+            style={{ top: railTop, background: `linear-gradient(90deg, ${SEASON.join(", ")})` }}
           />
           {iso.map((d) => {
             const isActive = d === active;
@@ -99,13 +111,25 @@ export function SeasonRail({ dates, active, className }: SeasonRailProps) {
                 key={d}
                 data-testid="season-tick"
                 title={label(d)}
-                className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ${
+                className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full ${
                   isActive ? "h-3 w-3 ring-2 ring-tcip-fg/70" : "h-2 w-2"
                 }`}
-                style={{ left: `${posOf(d)}%`, background: seasonColor(mo) }}
+                style={{ left: `${posOf(d)}%`, top: railTop, background: seasonColor(mo) }}
               />
             );
           })}
+          {showLabels &&
+            iso.map((d, i) => (
+              <span
+                key={`lbl-${d}`}
+                className={`absolute -translate-x-1/2 text-[9px] leading-none tabular-nums whitespace-nowrap ${
+                  d === active ? "font-medium text-tcip-fg" : "text-tcip-muted"
+                }`}
+                style={{ left: `${posOf(d)}%`, top: i % 2 === 0 ? "15px" : "26px" }}
+              >
+                {label(d)}
+              </span>
+            ))}
         </div>
       )}
       {undated > 0 && (
