@@ -10,6 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from tcip_annotation.json_io import read_detect, write_detect
+from tcip_annotation.state import BBox, PredBBox
 from tcip_web.app import app
 from tcip_web.paths import safe_join
 
@@ -17,6 +19,24 @@ from tcip_web.paths import safe_join
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)
+
+
+# ── per-image JSON label fixtures (canonical on-disk format) ─────────────────
+
+
+def _write_gt_detect(path, boxes, *, w: int = 100, h: int = 80, keep_empty: bool = False) -> None:
+    """Author a per-image JSON GT label; each box is a pixel-xyxy ``(x1, y1, x2, y2, class_id)``."""
+    write_detect(str(path), [BBox(*b) for b in boxes], w, h, keep_empty=keep_empty)
+
+
+def _write_pred_detect(path, preds, *, w: int = 100, h: int = 80) -> None:
+    """Author a per-image JSON prediction label; each pred is ``(x1, y1, x2, y2, class_id, conf)``."""
+    write_detect(
+        str(path),
+        [PredBBox(p[0], p[1], p[2], p[3], p[4], confidence=p[5]) for p in preds],
+        w,
+        h,
+    )
 
 
 # ── paths.safe_join ──────────────────────────────────────────────────────
@@ -87,10 +107,10 @@ def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_pa
     # catkin labelled + baseline predicted on 02-11; nothing on 03-24.
     det = root / "annotations" / "catkin" / "2026-02-11" / "detect"
     det.mkdir(parents=True)
-    (det / "IMG_1.txt").write_text("0 0.5 0.5 0.1 0.1\n", encoding="utf-8")
+    _write_gt_detect(det / "IMG_1.json", [(1, 1, 3, 3, 0)], w=8, h=8)
     pdet = root / "predictions" / "baseline" / "2026-02-11" / "detect"
     pdet.mkdir(parents=True)
-    (pdet / "IMG_1.txt").write_text("0 0.9 0.5 0.5 0.1 0.1\n", encoding="utf-8")
+    _write_pred_detect(pdet / "IMG_1.json", [(1, 1, 3, 3, 0, 0.9)], w=8, h=8)
 
     body = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
     assert body["traits_by_date"]["2026-02-11"] == ["catkin"]
@@ -150,12 +170,13 @@ def test_dataset_select_advisory_reflects_actual_labels(
     assert r1["predictions_present"] is False
 
     # Drop in a real label + prediction; the advisory flips to present (never rejects either way).
-    (dataset_root / "annotations" / "catkin" / "2-11-26" / "detect" / "IMG_0000.txt").write_text(
-        "0 0.5 0.5 0.1 0.1\n", encoding="utf-8"
+    _write_gt_detect(
+        dataset_root / "annotations" / "catkin" / "2-11-26" / "detect" / "IMG_0000.json",
+        [(40, 32, 60, 48, 0)],
     )
     pdet = dataset_root / "predictions" / "baseline" / "2-11-26" / "detect"
     pdet.mkdir(parents=True, exist_ok=True)
-    (pdet / "IMG_0000.txt").write_text("0 0.9 0.5 0.5 0.1 0.1\n", encoding="utf-8")
+    _write_pred_detect(pdet / "IMG_0000.json", [(40, 32, 60, 48, 0, 0.9)])
     r2 = client.post("/api/dataset/select", json=body).json()
     assert r2["annotations_present"] is True
     assert r2["predictions_present"] is True
@@ -245,8 +266,8 @@ def test_images_not_found(client: TestClient) -> None:
 
 def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.txt"
-    seg_path = tmp_path / "segment" / "IMG_0000.txt"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
+    seg_path = tmp_path / "segment" / "IMG_0000.json"
 
     # Save
     resp = client.post(
@@ -292,7 +313,7 @@ def test_annotate_save_empty_preserves_negative(
     # Clearing all boxes and saving must keep a 0-byte label file, not delete it — the empty file
     # is a valid on-disk state (it becomes a confirmed negative once the image is explicitly completed).
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.txt"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
 
     client.post(
         "/api/annotate/labels",
@@ -315,8 +336,10 @@ def test_annotate_save_empty_preserves_negative(
         },
     )
     assert resp.status_code == 200
+    # A present file with no objects is a confirmed negative (kept, not deleted).
     assert det_path.exists()
-    assert det_path.read_text() == ""
+    boxes, _ = read_detect(str(det_path))
+    assert boxes == []
 
 
 def test_annotate_save_label_path_outside_allowed_root_403(
@@ -326,7 +349,7 @@ def test_annotate_save_label_path_outside_allowed_root_403(
     # write_detect_labels is otherwise an arbitrary file write/delete primitive.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(dataset_root.resolve()))
-    outside = tmp_path / "evil" / "IMG_0000.txt"
+    outside = tmp_path / "evil" / "IMG_0000.json"
     resp = client.post(
         "/api/annotate/labels",
         json={
@@ -360,11 +383,11 @@ def test_annotate_save_stale_mtime_conflicts(
     import os
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.txt"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
     base = _save_box(client, img_path, det_path).json()["base_mtimes"]
 
     # A concurrent writer changes the file after our client loaded it.
-    det_path.write_text("0 0.5 0.5 0.2 0.2\n")
+    det_path.write_text('{"image": "IMG_0000", "width": 100, "height": 80, "objects": []}')
     bumped = int(base["detect"]) + 1_000_000
     os.utime(det_path, ns=(bumped, bumped))
 
@@ -385,7 +408,7 @@ def test_annotate_save_matching_mtime_ok(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.txt"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
     base = _save_box(client, img_path, det_path).json()["base_mtimes"]
 
     # No external change → the current mtime still matches → the save is accepted
@@ -403,8 +426,8 @@ def test_annotate_save_derives_detect_from_polygons(client, dataset_root, tmp_pa
     # When polygons exist, detect is their bbox — a drawn box that disagrees is ignored,
     # so editing a polygon can never leave a stale box twin behind. Image is 100x80.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.txt"
-    seg_path = tmp_path / "segment" / "IMG_0000.txt"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
+    seg_path = tmp_path / "segment" / "IMG_0000.json"
     resp = client.post(
         "/api/annotate/labels",
         json={
@@ -418,18 +441,18 @@ def test_annotate_save_derives_detect_from_polygons(client, dataset_root, tmp_pa
     )
     assert resp.status_code == 200
     assert resp.json()["detect_derived"] is True
-    lines = [ln for ln in det_path.read_text().splitlines() if ln.strip()]
-    assert len(lines) == 1
-    # Polygon bbox (10,10)-(30,30) → cx=0.2, not the drawn box's cx=0.55.
-    assert float(lines[0].split()[1]) == pytest.approx(0.2)
-    assert float(lines[0].split()[2]) == pytest.approx(0.25)  # cy=(10+30)/2/80
+    boxes, _ = read_detect(str(det_path))
+    assert len(boxes) == 1
+    # Detect is the polygon bbox (10,10)-(30,30), not the drawn box.
+    b = boxes[0]
+    assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 10.0, 30.0, 30.0)
 
 
 def test_annotate_save_keeps_boxes_when_no_polygons(client, dataset_root, tmp_path) -> None:
     # No polygons → detect is authoritative, boxes written as drawn (detect-primary project).
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.txt"
-    seg_path = tmp_path / "segment" / "IMG_0000.txt"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
+    seg_path = tmp_path / "segment" / "IMG_0000.json"
     resp = client.post(
         "/api/annotate/labels",
         json={
@@ -442,9 +465,10 @@ def test_annotate_save_keeps_boxes_when_no_polygons(client, dataset_root, tmp_pa
     )
     assert resp.status_code == 200
     assert resp.json()["detect_derived"] is False
-    lines = [ln for ln in det_path.read_text().splitlines() if ln.strip()]
-    assert len(lines) == 1
-    assert float(lines[0].split()[1]) == pytest.approx(0.6)  # drawn box cx=(50+70)/2/100
+    boxes, _ = read_detect(str(det_path))
+    assert len(boxes) == 1
+    b = boxes[0]
+    assert (b.x1, b.y1, b.x2, b.y2) == (50.0, 40.0, 70.0, 60.0)  # drawn box, written as-is
 
 
 def test_annotate_save_writes_audit_entry(
@@ -452,7 +476,7 @@ def test_annotate_save_writes_audit_entry(
 ) -> None:
     proj = tmp_path / "proj"
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.txt"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
     resp = _save_box(client, img_path, det_path, project_root=str(proj))
     assert resp.status_code == 200
 
@@ -466,12 +490,12 @@ def test_annotate_save_writes_audit_entry(
 
 def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.txt"
-    # Image is 100x80; write one GT covering the center
-    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
-    pred_det = tmp_path / "pred_detect.txt"
-    pred_det.write_text("0 0.9 0.5 0.5 0.2 0.2\n")  # match
-    pred_det.write_text("0 0.9 0.5 0.5 0.2 0.2\n0 0.8 0.8 0.8 0.1 0.1\n")  # add FP
+    det_gt = tmp_path / "gt_detect.json"
+    # Image is 100x80; one GT covering the center (pixel xyxy [40,32,60,48]).
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    pred_det = tmp_path / "pred_detect.json"
+    # One prediction matching the GT (TP) + one off-center prediction (FP).
+    _write_pred_detect(pred_det, [(40, 32, 60, 48, 0, 0.9), (75, 60, 85, 68, 0, 0.8)])
     project_root = tmp_path / "proj"
     project_root.mkdir()
 
@@ -496,10 +520,10 @@ def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_p
 
 def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.txt"
-    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
-    pred_det = tmp_path / "pred_detect.txt"
-    pred_det.write_text("0 0.9 0.5 0.5 0.2 0.2\n")
+    det_gt = tmp_path / "gt_detect.json"
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    pred_det = tmp_path / "pred_detect.json"
+    _write_pred_detect(pred_det, [(40, 32, 60, 48, 0, 0.9)])
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
@@ -554,10 +578,10 @@ def _review_action(client, img_path, det_gt, project_root, **over):
 
 def test_review_accept_fp_adds_prediction_to_gt(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.txt"
-    det_gt.write_text("")  # start with a confirmed negative (empty GT)
-    pred_det = tmp_path / "pred_detect.txt"
-    pred_det.write_text("0 0.9 0.5 0.5 0.2 0.2\n")
+    det_gt = tmp_path / "gt_detect.json"
+    _write_gt_detect(det_gt, [], keep_empty=True)  # start with a confirmed negative (empty GT)
+    pred_det = tmp_path / "pred_detect.json"
+    _write_pred_detect(pred_det, [(40, 32, 60, 48, 0, 0.9)])
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
@@ -567,30 +591,31 @@ def test_review_accept_fp_adds_prediction_to_gt(client, dataset_root, tmp_path) 
     )
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] == "partial"  # GT now has the promoted box
-    lines = [ln for ln in det_gt.read_text().splitlines() if ln.strip()]
-    assert len(lines) == 1 and lines[0].split()[0] == "0"
+    boxes, _ = read_detect(str(det_gt))
+    assert len(boxes) == 1 and boxes[0].class_id == 0
 
 
 def test_review_reject_deletes_reviewed_gt(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.txt"
-    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")  # one GT box (a missed FN)
+    det_gt = tmp_path / "gt_detect.json"
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])  # one GT box (a missed FN)
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(client, img_path, det_gt, project_root, det_type="fn", action="rejected")
     assert resp.status_code == 200
     # Emptying GT does NOT auto-confirm a negative (that needs an explicit Complete) — it reads as
-    # needing review. The label file is kept as a 0-byte file, not deleted.
+    # needing review. The label file is kept (empty-objects negative), not deleted.
     assert resp.json()["annotation_status"] == "unannotated"
     assert det_gt.is_file()
-    assert [ln for ln in det_gt.read_text().splitlines() if ln.strip()] == []
+    boxes, _ = read_detect(str(det_gt))
+    assert boxes == []
 
 
 def test_review_accept_tp_keeps_gt_untouched(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.txt"
-    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
+    det_gt = tmp_path / "gt_detect.json"
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
     before = det_gt.read_text()
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
@@ -603,8 +628,8 @@ def test_review_accept_tp_keeps_gt_untouched(client, dataset_root, tmp_path) -> 
 
 def test_review_edit_writes_edited_box_as_gt(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.txt"
-    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
+    det_gt = tmp_path / "gt_detect.json"
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
@@ -614,16 +639,16 @@ def test_review_edit_writes_edited_box_as_gt(client, dataset_root, tmp_path) -> 
     )
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] == "partial"
-    lines = [ln for ln in det_gt.read_text().splitlines() if ln.strip()]
-    assert len(lines) == 1  # replaced the matched GT, still one box
-    # image is 100x80: edited box [10,10,30,30] → cx=0.2, cy=0.25
-    assert float(lines[0].split()[1]) == pytest.approx(0.2)
+    boxes, _ = read_detect(str(det_gt))
+    assert len(boxes) == 1  # replaced the matched GT, still one box
+    b = boxes[0]
+    assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 10.0, 30.0, 30.0)  # the edited geometry
 
 
 def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.txt"
-    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")  # one GT box, no predictions → an FN
+    det_gt = tmp_path / "gt_detect.json"
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])  # one GT box, no predictions → an FN
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
@@ -653,8 +678,8 @@ def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_roo
 
 def test_review_gt_write_without_path_is_rejected(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    pred_det = tmp_path / "pred_detect.txt"
-    pred_det.write_text("0 0.9 0.5 0.5 0.2 0.2\n")
+    pred_det = tmp_path / "pred_detect.json"
+    _write_pred_detect(pred_det, [(40, 32, 60, 48, 0, 0.9)])
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
@@ -679,10 +704,10 @@ def test_review_action_auto_completes_and_audits(
     # A single detection on the image: reviewing it flips the image to 'completed'
     # (the only GUI path to that status) and leaves an audit-trail entry.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt.txt"
-    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
-    pred = tmp_path / "pred.txt"
-    pred.write_text("0 0.9 0.5 0.5 0.2 0.2\n")  # one matching prediction -> one TP
+    det_gt = tmp_path / "gt.json"
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    pred = tmp_path / "pred.json"
+    _write_pred_detect(pred, [(40, 32, 60, 48, 0, 0.9)])  # one matching prediction -> one TP
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
@@ -730,10 +755,10 @@ def test_review_action_records_real_class_name_and_reviewer(
     # With classes.json present the engine records the real class name + a reviewer,
     # instead of the "class_{id}" placeholder / empty reviewer the audit flagged.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt.txt"
-    det_gt.write_text("0 0.5 0.5 0.2 0.2\n")
-    pred = tmp_path / "pred.txt"
-    pred.write_text("0 0.9 0.5 0.5 0.2 0.2\n")
+    det_gt = tmp_path / "gt.json"
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    pred = tmp_path / "pred.json"
+    _write_pred_detect(pred, [(40, 32, 60, 48, 0, 0.9)])
     project_root = tmp_path / "proj"
     state = project_root / ".tcip" / "state"
     state.mkdir(parents=True)
