@@ -131,7 +131,7 @@ def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -
 
     try:
         from tcip_mcp.pipelines.inference.predictor import build_predictor
-        from tcip_mcp.pipelines.postprocessing.export import result_to_yolo_lines
+        from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
         ckpt = phase.get("checkpoint")
         input_ref = phase.get("input")
@@ -159,10 +159,9 @@ def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -
         for ip in img_paths:
             pred = predictor.predict(str(ip))
             results_list.append(pred)
-            # Save predictions in the canonical "cls conf cx cy w h" format
-            # that parse_detect_predictions / the Review tab consume.
-            txt_path = preds_dir / f"{ip.stem}.txt"
-            txt_path.write_text("\n".join(result_to_yolo_lines(pred)))
+            # Save predictions as the canonical per-image COCO/JSON that
+            # parse_detect_predictions / the Review tab consume.
+            write_predictions_json(preds_dir / f"{ip.stem}.json", pred)
 
         result.status = "completed"
         result.artifacts = {"predictions_dir": str(preds_dir), "images_dir": images_dir, "count": len(results_list)}
@@ -183,6 +182,7 @@ def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
     t0 = time.perf_counter()
 
     try:
+        from tcip_annotation import json_io
         from tcip_mcp.pipelines.image_utils import load_image
 
         input_ref = phase.get("input")
@@ -197,8 +197,8 @@ def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
         crops_dir.mkdir(parents=True, exist_ok=True)
 
         crop_count = 0
-        for txt_path in sorted(preds_dir.glob("*.txt")):
-            stem = txt_path.stem
+        for pred_path in sorted(preds_dir.glob("*.json")):
+            stem = pred_path.stem
             # Find original image
             img_path = None
             for ext in (".jpg", ".jpeg", ".png", ".tif"):
@@ -213,18 +213,13 @@ def _run_cropping_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
             # same upright frame via load_image), not the raw sensor frame.
             img = load_image(img_path, 3)
             w, h = img.size
-            for i, line in enumerate(txt_path.read_text().splitlines()):
-                # Canonical prediction format: "cls conf cx cy w h" (normalized).
-                parts = line.strip().split()
-                if len(parts) < 6:
-                    continue
-                cx, cy, bw, bh = float(parts[2]), float(parts[3]), float(parts[4]), float(parts[5])
-                x1 = int((cx - bw / 2) * w)
-                y1 = int((cy - bh / 2) * h)
-                x2 = int((cx + bw / 2) * w)
-                y2 = int((cy + bh / 2) * h)
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(w, x2), min(h, y2)
+            # Canonical per-image COCO/JSON predictions — geometry is already pixel-xyxy.
+            boxes, _ = json_io.read_detect_pred(pred_path, w, h)
+            for i, b in enumerate(boxes):
+                x1 = max(0, int(b.x1))
+                y1 = max(0, int(b.y1))
+                x2 = min(w, int(b.x2))
+                y2 = min(h, int(b.y2))
                 if x2 - x1 < 2 or y2 - y1 < 2:
                     continue
                 crop = img.crop((x1, y1, x2, y2))
@@ -250,6 +245,7 @@ def _run_aggregation_phase(phase: dict, context: dict[str, Any], work_dir: Path)
     t0 = time.perf_counter()
 
     try:
+        from tcip_annotation import json_io
         from tcip_mcp.pipelines.postprocessing.aggregation import (
             aggregate_per_plant,
             export_aggregated_csv,
@@ -269,11 +265,11 @@ def _run_aggregation_phase(phase: dict, context: dict[str, Any], work_dir: Path)
             preds_dir = prev.get("predictions_dir")
             if preds_dir:
                 preds_path = Path(preds_dir)
-                for txt_path in sorted(preds_path.glob("*.txt")):
-                    lines = txt_path.read_text().strip().splitlines()
+                for pred_path in sorted(preds_path.glob("*.json")):
+                    boxes, _ = json_io.read_detect_pred(pred_path)
                     image_results.append({
-                        "image": txt_path.stem,
-                        "count": len(lines),
+                        "image": pred_path.stem,
+                        "count": len(boxes),
                     })
             # Also check for pre-computed results list
             if "results" in prev:
@@ -318,6 +314,7 @@ def _run_export_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> P
     t0 = time.perf_counter()
 
     try:
+        from tcip_annotation import json_io
         from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
         input_ref = phase.get("input")
@@ -336,21 +333,13 @@ def _run_export_phase(phase: dict, context: dict[str, Any], work_dir: Path) -> P
             # Build image_results from predictions dir
             preds_path = Path(prev["predictions_dir"])
             image_results = []
-            for txt_path in sorted(preds_path.glob("*.txt")):
-                lines = txt_path.read_text().strip().splitlines()
-                scores = []
-                for line in lines:
-                    # Canonical prediction format: "cls conf cx cy w h".
-                    parts = line.split()
-                    if len(parts) >= 6:
-                        try:
-                            scores.append(float(parts[1]))
-                        except ValueError:
-                            pass
+            for pred_path in sorted(preds_path.glob("*.json")):
+                # Canonical per-image COCO/JSON predictions — count + per-object confidence.
+                boxes, _ = json_io.read_detect_pred(pred_path)
                 image_results.append({
-                    "image": txt_path.stem,
-                    "count": len(lines),
-                    "scores": scores,
+                    "image": pred_path.stem,
+                    "count": len(boxes),
+                    "scores": [b.confidence for b in boxes],
                 })
             export_detection_csv(image_results, str(out_path))
         else:
