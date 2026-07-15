@@ -67,6 +67,18 @@ permission fence: the breeder-lane agent may only *write to the journal* (propos
 dev-lane owner distills and applies. Distillation touches the contract, so it is a dev-lane
 act — not a breeder-facing one.
 
+## Prune — keep the buffer a buffer
+
+The journal is a **capture buffer, not a changelog.** The moment an entry is distilled into an
+**approved** artifact (a skill, a `CLAUDE.md` edit, a tool, a config fix), its knowledge now lives
+in that durable home — so **remove the entry from `journal.md`** and record a one-line note in the
+journal's **Graduated** ledger (`<id> — <what> → <where it landed>`). Move the removed text verbatim
+to `_learning/archive/<YYYY-MM>.md` (create it if absent) so the full narrative is never lost. What
+stays in `journal.md` is only **open, not-yet-distilled friction** — a short list readable at a
+glance. Prune at the end of every distillation pass; a `RESOLVED`/`SHIPPED` entry still sitting in
+the buffer is the signal to move it. An append-only journal that never prunes slowly degrades the
+distill step it exists to serve.
+
 ## Close the loop
 
 Approved skills live in `.github/skills/` and are discoverable — CLAUDE.md instructs agents to
