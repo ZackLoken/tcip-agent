@@ -208,7 +208,7 @@ def onset_dates(payload: OnsetDatesPayload) -> dict:
     Delegates to the canonical ``phenology`` module so a milestone date means the same
     thing here and in the ``compute_phenology`` MCP tool: ``catkin_05/50/95per_date`` are
     the dates the elongated fraction crosses those levels; ``catkin_elongation_date`` is the
-    first date any elongation appears (fraction > 0).
+    date most catkins have elongated (``crops.yml``) — the 95% majority crossing.
     """
     plants: dict[str, list[dict]] = {}
     for row in payload.curves:
