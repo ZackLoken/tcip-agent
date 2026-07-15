@@ -42,15 +42,20 @@ def test_save_gt_labelme_writes_box_and_polygon(tmp_path):
 
 def test_save_gt_yolo_default_unchanged(tmp_path):
     eng, ctx = _engine_and_ctx(tmp_path, "yolo")
-    detect = tmp_path / "labels" / "img0.txt"
+    detect = tmp_path / "labels" / "img0.json"
     assert eng.save_gt(ctx, detect_path=str(detect)) is True
-    fields = detect.read_text().split()
-    assert fields and len(fields) % 5 == 0       # YOLO "cls cx cy w h"
+    data = json.loads(detect.read_text())        # canonical per-image JSON
+    assert data["objects"]
+    obj = data["objects"][0]
+    assert obj["category_id"] == 0
+    assert len(obj["bbox"]) == 4                  # COCO xywh pixel bbox
 
 
 def test_save_gt_coco_falls_back_to_yolo(tmp_path):
     eng, ctx = _engine_and_ctx(tmp_path, "coco")
-    detect = tmp_path / "labels" / "img0.txt"
+    detect = tmp_path / "labels" / "img0.json"
     assert eng.save_gt(ctx, detect_path=str(detect)) is True
     assert detect.is_file()                       # GT not lost
+    data = json.loads(detect.read_text())
+    assert len(data["objects"]) == 1
     assert not (tmp_path / "labels" / "img0.xml").exists()
