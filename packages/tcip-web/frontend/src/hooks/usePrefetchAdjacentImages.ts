@@ -22,7 +22,11 @@ export function usePrefetchAdjacentImages(): void {
     if (!datasetRoot || !date) return;
     const pos = filteredIndices.indexOf(currentIndex);
     if (pos < 0) return;
-    const targets = [filteredIndices[pos + 1], filteredIndices[pos - 1]]
+    // Forward-biased lookahead: the user mostly steps forward, so warm the next few frames in the
+    // direction of travel plus one back (for reviewing completed work). Deeper than ±1 so stepping
+    // faster than a cold ~2 s server render still lands on an already-warm frame.
+    const targets = [1, 2, 3, -1]
+      .map((d) => filteredIndices[pos + d])
       .filter((i): i is number => typeof i === "number")
       .map((i) => imageList[i])
       .filter(Boolean);
