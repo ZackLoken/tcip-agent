@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+# Provenance travels with a shape: who authored it (`created_by`, e.g. "user:zack", "sam",
+# "claude", "model:baseline@<path>") and, once a prediction is accepted into GT, who accepted it.
+# The four fields below are keyword-only so `PredBBox`/`PredPolygon`'s positional `confidence`
+# field is unaffected (verified: `PredBBox(x1,y1,x2,y2,class_id,confidence)` still works).
 @dataclass
 class BBox:
     """Axis-aligned bounding box in pixel coordinates."""
@@ -14,6 +18,10 @@ class BBox:
     x2: float
     y2: float
     class_id: int
+    created_by: "str | None" = field(default=None, kw_only=True)
+    created_at: "str | None" = field(default=None, kw_only=True)
+    accepted_by: "str | None" = field(default=None, kw_only=True)
+    accepted_at: "str | None" = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -22,6 +30,10 @@ class Polygon:
 
     points: list[tuple[float, float]]
     class_id: int
+    created_by: "str | None" = field(default=None, kw_only=True)
+    created_at: "str | None" = field(default=None, kw_only=True)
+    accepted_by: "str | None" = field(default=None, kw_only=True)
+    accepted_at: "str | None" = field(default=None, kw_only=True)
 
 
 def boxes_from_polygons(polygons: list["Polygon"]) -> list["BBox"]:
