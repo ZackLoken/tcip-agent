@@ -34,6 +34,11 @@ router = APIRouter(prefix="/api/dataset", tags=["dataset"])
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp")
 
+# Whether this server process has selected a dataset yet. Resuming the persisted image index
+# is helpful within a running session, but a fresh process opening a project should start at
+# the first image — resuming a prior session's position across a restart reads as stale state.
+_selected_this_session = False
+
 
 class DatasetTree(BaseModel):
     dataset_root: str
@@ -138,16 +143,21 @@ async def select_dataset(req: SelectionRequest) -> dict:
         str(prediction_dir(root, req.model_name, req.date, "segment")) if req.model_name else None
     )
 
-    # Re-selecting the same (root, trait, date) — e.g. the auto-open on app load — resumes
-    # at the persisted position instead of clobbering it back to image 0.
+    # Re-selecting the same (root, trait, date) within a session resumes at the persisted
+    # position instead of clobbering it back to image 0. The first select of a fresh process
+    # (the auto-open on app load) starts at image 0 rather than resurfacing a prior session's
+    # position — that stale resume is bug #1 (opening a project landed on image 3/112).
+    global _selected_this_session
     prev = store.state.dataset
     same_identity = (
-        prev.dataset_root == req.dataset_root
+        _selected_this_session
+        and prev.dataset_root == req.dataset_root
         and prev.date == req.date
         and prev.annotation_type == req.annotation_type
     )
     index = prev.current_image_index if same_identity else 0
     index = max(0, min(index, len(image_list) - 1)) if image_list else 0
+    _selected_this_session = True
 
     selection = DatasetSelection(
         project_root=req.project_root,
