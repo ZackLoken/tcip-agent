@@ -211,9 +211,9 @@ def test_onset_dates_finds_crossings(client: TestClient) -> None:
     assert onset["catkin_05per_date"] is not None  # reached between 2-11 and 3-2
     assert onset["catkin_50per_date"] is not None  # reached between 3-2 and 3-9
     assert onset["catkin_95per_date"] is not None  # reached between 3-9 and 3-18
-    # First date any elongation appears (fraction > 0): the 03-02 point (0.10),
-    # since 02-11 is still 0.0.
-    assert onset["catkin_elongation_date"] == "2026-03-02"
+    # catkin_elongation_date = "most catkins elongated" (crops.yml) = the 95% majority crossing,
+    # synonymous with catkin_95per_date.
+    assert onset["catkin_elongation_date"] == onset["catkin_95per_date"]
 
 
 def test_onset_dates_ignores_undated_bucket(client: TestClient) -> None:
