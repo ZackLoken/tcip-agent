@@ -6,6 +6,7 @@
  */
 
 import { api, type ProjectSummary } from "@/api/client";
+import { recordRecentProject } from "@/lib/recentProjects";
 import type { DatasetSelection } from "@/store/types";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -30,6 +31,7 @@ export async function openWorkspaceProject(
     date: date || null,
     model_name: modelName || null,
   });
+  recordRecentProject(p.name, p.path);
   return res.selection;
 }
 
