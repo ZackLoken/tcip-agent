@@ -17,7 +17,32 @@ def test_result_to_yolo_lines_normalizes():
     assert float(parts[2]) == pytest.approx(0.2)    # cx = ((10+30)/2)/100
 
 
-def test_web_worker_uses_generic_predictor_and_writes_yolo(tmp_path, monkeypatch):
+def test_write_predictions_json_roundtrip_and_negative(tmp_path):
+    import json
+
+    from tcip_annotation import json_io
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+
+    p = tmp_path / "img.json"
+    write_predictions_json(p, {
+        "width": 100, "height": 100,
+        "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
+    })
+    data = json.loads(p.read_text())
+    assert data["objects"][0]["category_id"] == 0          # 1-indexed label 1 -> class 0
+    assert data["objects"][0]["bbox"] == [10.0, 10.0, 20.0, 20.0]
+    assert data["objects"][0]["score"] == pytest.approx(0.9)
+    boxes, _ = json_io.read_detect_pred(p)                  # symmetric read
+    assert len(boxes) == 1 and boxes[0].confidence == pytest.approx(0.9)
+
+    # Negative invariant: a zero-detection image still yields a {"objects": []} confirmed negative.
+    neg = tmp_path / "empty.json"
+    write_predictions_json(neg, {"width": 100, "height": 100,
+                                 "boxes": [], "scores": [], "labels": [], "count": 0})
+    assert json.loads(neg.read_text())["objects"] == []
+
+
+def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     from PIL import Image
 
@@ -59,6 +84,8 @@ def test_web_worker_uses_generic_predictor_and_writes_yolo(tmp_path, monkeypatch
     assert captured["checkpoint"] == str(ckpt)
     assert captured["tile"] is True                 # sahi=True -> pipeline tiling
     assert captured["postprocess"] == "nmm"         # the GUI's tile-merge choice reaches inference
-    parts = (out_dir / "img.txt").read_text().strip().split()
-    assert len(parts) == 6 and parts[0] == "0"      # YOLO "cls conf cx cy w h"
-    assert float(parts[2]) == pytest.approx(0.2)
+    import json
+    obj = json.loads((out_dir / "img.json").read_text())["objects"][0]
+    assert obj["category_id"] == 0                   # 1-indexed label 1 -> class 0
+    assert obj["score"] == pytest.approx(0.9)        # per-object confidence preserved
+    assert obj["bbox"] == [10.0, 10.0, 20.0, 20.0]   # pixel COCO xywh from xyxy [10,10,30,30]
