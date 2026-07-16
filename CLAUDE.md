@@ -91,7 +91,7 @@ that silently corrupts results and compounds across sessions. So:
 - **No universal pipeline** — match the pattern to the trait (see `pipeline-design` skill).
 - Models compose from a spec (`backbone → neck → heads → loss`); the component
   registry is a **library, not a constraint** — compose, or build a module in
-  PyTorch from scratch. Use `recommend_model_spec` for a starting point.
+  PyTorch from scratch. Use `recommend_model` for a starting point.
 - **Parameters: derive, don't pin.** When a threshold or operating point varies by
   dataset / model / trait (conf, IoU-for-a-hit, NMS, tile, anchors, `max_dets`), the deliverable
   is never the *value* — not one you pick, not one you derive from the current dataset and freeze
@@ -101,13 +101,12 @@ that silently corrupts results and compounds across sessions. So:
 
 ## Visual analysis loop
 
-You can see images: call `visualize` (with `source="annotations"|"predictions"|"dataset"`)
-or a specialized renderer (`visualize_comparison`, `visualize_worst_predictions`,
-`visualize_grid_overlay`, `visualize_canvas`, `sam_auto_label`) → it writes to
-`.tcip/artifacts/viz/` and returns `image_path` → call `view_image` on it → describe what
-you see, then recommend. `visualize_canvas` shows the human's live GUI canvas — their
-image, viewport, and unsaved shapes with the GUI's own symbology. See the
-`visual-analysis` skill.
+You can see images: call `visualize` (with `source="annotations"|"predictions"|"comparison"|
+"dataset"`) or a specialized renderer (`visualize_worst_predictions`, `visualize_grid_overlay`,
+`visualize_canvas`, `sam_auto_label`) → it writes to `.tcip/artifacts/viz/` and returns
+`image_path` → call `view_image` on it → describe what you see, then recommend.
+`visualize_canvas` shows the human's live GUI canvas — their image, viewport, and unsaved
+shapes with the GUI's own symbology. See the `visual-analysis` skill.
 
 ## Commands
 
@@ -143,5 +142,6 @@ repo root at startup), so a process started from a subdir no longer fragments `.
 ## Pointers
 
 - `README.md` — setup, layout, running, roadmap.
-- `.github/skills/` — crops, crop-science, annotation, training, evaluation,
-  pipeline-design, visual-analysis, delivery. Load before acting in a domain.
+- `.github/skills/` — crops, crop-science, project-setup, annotation, training, evaluation,
+  pipeline-design, phenology, visual-analysis, delivery, self-improvement. Load before acting
+  in a domain (current list: `ls .github/skills/`).
