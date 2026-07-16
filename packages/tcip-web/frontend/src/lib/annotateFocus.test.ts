@@ -95,7 +95,7 @@ describe("applyAnnotateFocus", () => {
       mode: "polygon",
     });
 
-    // Emulate the backend's /select broadcast landing AFTER the local setters: same identity
+    // Emulate the backend's /select broadcast landing after the local setters: same identity
     // now, so mergeSnapshot must keep the local (focus) index, not reset to 0.
     useStore
       .getState()
@@ -104,7 +104,7 @@ describe("applyAnnotateFocus", () => {
     expect(useStore.getState().gui.dataset.current_image_index).toBe(47);
   });
 
-  it("does NOT re-select when the dataset identity already matches, but still applies view", async () => {
+  it("does not re-select when the dataset identity already matches, but still applies view", async () => {
     seedDataset({
       dataset_root: "/ws/proj",
       annotation_type: "bush",
