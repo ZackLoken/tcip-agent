@@ -221,7 +221,7 @@ def render_comparison(
         image_path: Path to the source image.
         gt_boxes: Ground truth boxes (x1, y1, x2, y2, class_id).
         pred_boxes: Prediction boxes (x1, y1, x2, y2, class_id, confidence).
-        matches: Output from run_matching — list of matched pairs.
+        matches: Matched pairs from compute_matches (evaluate_detections detail=True).
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
     """
@@ -614,7 +614,7 @@ def render_canvas_state(
         return ((float(p[0]) - ox) * k, (float(p[1]) - oy) * k)
 
     # Two passes over one overlay: all fills first, then all outlines/vertices. ImageDraw
-    # REPLACES pixels (it does not composite), so a later shape's translucent fill would
+    # replaces pixels (it does not composite), so a later shape's translucent fill would
     # otherwise punch its silhouette out of earlier shapes' opaque outlines.
     parsed: list[tuple[dict, list[tuple[float, float]], tuple[int, int, int], bool]] = []
     labels: list[tuple[tuple[float, float], str, tuple[int, int, int]]] = []
