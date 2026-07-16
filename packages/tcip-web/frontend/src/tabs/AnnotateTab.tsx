@@ -12,6 +12,14 @@ import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import {
+  buildAnnotateShapes,
+  computeViewport,
+  createCanvasPusher,
+  measureCanvasHost,
+  onCanvasStateRequest,
+  type CanvasStateBody,
+} from "@/lib/canvasSync";
+import {
   computePolygonBboxes,
   findHoveredPolygon,
   pointInPolygon,
@@ -241,6 +249,84 @@ export function AnnotateTab() {
     boxDragRef.current = null;
     streamingRef.current = false;
   }, [currentImageName]);
+
+  // ── Live canvas push (agent visibility: visualize_canvas) ──────────────
+  // The ref always holds the freshest closure so the debounced pusher never reads stale state.
+  const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
+  buildCanvasBodyRef.current = () => {
+    if (!imgPath || !dataset.project_root) return null;
+    // Never push mid-transition: after an image change the canvas briefly still holds the
+    // previous image's shapes — attaching them to the new image_path would show the agent a
+    // false canvas. Wait until the loaded-labels identity matches (the post-load push covers it).
+    if (loadedPathsRef.current?.image !== imgPath) return null;
+    const host = measureCanvasHost();
+    return {
+      schema_version: 1,
+      project_root: dataset.project_root,
+      tab: "annotate",
+      image_path: imgPath,
+      image: currentImageName ?? "",
+      img_width: canvas.imgWidth,
+      img_height: canvas.imgHeight,
+      viewport: host ? computeViewport(view, host, canvas.imgWidth, canvas.imgHeight) : null,
+      mode,
+      active_class: activeClass,
+      dirty: canvas.dirty,
+      user: useStore.getState().user || undefined,
+      classes: classList,
+      counts: {
+        boxes: canvas.boxes.length,
+        polygons: canvas.polygons.length,
+        drawing_points: canvas.currentPolygon.length,
+      },
+      shapes: buildAnnotateShapes({
+        boxes: canvas.boxes,
+        polygons: canvas.polygons,
+        currentPolygon: canvas.currentPolygon,
+        drawingBox: drawing,
+        selectedPolygonIdx: canvas.selectedPolygonIdx,
+        selectedBoxIdx,
+        mode,
+        activeClass,
+        visible: annotateUi.visible,
+        colorFor: classColor,
+        nameFor: className,
+      }),
+    };
+  };
+  const canvasPusherRef = useRef(createCanvasPusher((b) => api.canvas.pushState(b)));
+  useEffect(() => () => canvasPusherRef.current.dispose(), []);
+  // Anything that changes WHICH shapes the canvas draws → full push (geometry travels), except
+  // mid-drag/stream where committed geometry re-serializing per tick would jank dense images —
+  // those downgrade to heartbeats and the release (drag ref clearing, commit) sends the full.
+  useEffect(() => {
+    const interacting =
+      !!annotateUi.draggingVertex || streamingRef.current || !!drawing || !!boxDragRef.current;
+    canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), !interacting);
+  }, [
+    canvas.boxes,
+    canvas.polygons,
+    canvas.currentPolygon,
+    canvas.selectedPolygonIdx,
+    imgPath,
+    mode,
+    activeClass,
+    selectedBoxIdx,
+    annotateUi.visible,
+    annotateUi.draggingVertex,
+    drawing,
+  ]);
+  useEffect(() => {
+    canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
+  }, [view, classList, canvas.dirty]);
+  useEffect(
+    () =>
+      onCanvasStateRequest(() => {
+        canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
+        canvasPusherRef.current.flush();
+      }),
+    [],
+  );
 
   // Leaving Stream mode ends any live stream (the in-progress polygon is left for the user).
   useEffect(() => {
@@ -780,7 +866,7 @@ export function AnnotateTab() {
         boxDragRef.current = { idx: bDrag.idx, drag: r.drag };
         if (r.shape.kind === "box") {
           const [x1, y1, x2, y2] = r.shape.box;
-          dragBox(bDrag.idx, { x1, y1, x2, y2, class_id: b.class_id }); // undo captured on down
+          dragBox(bDrag.idx, { ...b, x1, y1, x2, y2 }); // undo captured on down; spread keeps provenance
         }
       }
       return;
@@ -822,6 +908,8 @@ export function AnnotateTab() {
     if (boxDragRef.current) {
       boxDragRef.current = null;
       didDragRef.current = false;
+      // The drag suppressed full pushes; the settled geometry ships now.
+      canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
       return;
     }
     if (annotateUi.draggingVertex) {
