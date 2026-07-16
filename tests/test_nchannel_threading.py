@@ -52,13 +52,16 @@ def test_train_start_channel_guard():
 def test_build_dataset_sets_expected_channels(tmp_path):
     from PIL import Image
 
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
     from tcip_mcp.pipelines.data.datasets import build_dataset
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir()
     Image.new("RGB", (16, 16)).save(images_dir / "a.png")
-    (labels_dir / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n")
+    json_io.write_detect(str(labels_dir / "a.json"),
+                         [BBox(6.4, 6.4, 9.6, 9.6, 0)], 16, 16, keep_empty=True)
 
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
                        num_classes=1, num_channels=4)
