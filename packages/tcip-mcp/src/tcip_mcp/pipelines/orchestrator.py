@@ -4,7 +4,7 @@ Chains phases that pass artifacts to each other. The agent designs a
 PipelineSpec; the orchestrator validates structure (not content) and executes it.
 
 Five built-in phase runners are provided: training, inference, cropping,
-aggregation, export. These cover common multi-phase ML shapes but are NOT
+aggregation, export. These cover common multi-phase ML shapes but are not
 the only allowed phase types. Pipelines can declare custom phase types and
 register runners for them via ``register_phase_runner``. The orchestrator
 does not gate on a closed set of phase or task names.
@@ -64,7 +64,7 @@ class PipelineResult:
 # ====================================================================
 
 # Reference list of tasks the built-in phase runners know how to handle.
-# This is a hint for autocomplete and documentation, NOT a gate — custom
+# This is a hint for autocomplete and documentation, not a gate — custom
 # phase runners registered via register_phase_runner() can use any task name.
 KNOWN_TASKS = {
     "detection",
@@ -81,7 +81,7 @@ def validate_pipeline(spec: dict) -> list[str]:
     """Check a PipelineSpec for structural issues before execution.
 
     Only catches wiring errors (missing names, dangling input references,
-    duplicate output names). Does NOT gate on a closed set of phase types
+    duplicate output names). Does not gate on a closed set of phase types
     or tasks — runners can be extended via register_phase_runner().
 
     Returns list of human-readable issue strings (empty = valid).
