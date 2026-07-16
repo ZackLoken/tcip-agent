@@ -18,6 +18,14 @@ import {
   type EditDrag,
   type EditShape,
 } from "@/lib/reviewEditGeometry";
+import {
+  buildReviewShapes,
+  computeViewport,
+  createCanvasPusher,
+  measureCanvasHost,
+  onCanvasStateRequest,
+  type CanvasStateBody,
+} from "@/lib/canvasSync";
 import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
 import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
@@ -161,6 +169,63 @@ export function ReviewTab() {
   // User-tunable symbology colours (persisted + shared with the status bar); legend swatches
   // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
   const [reviewColors, setReviewColors] = useReviewColors();
+  const classList = useStore((s) => s.classes.list);
+
+  // ── Live canvas push (agent visibility: visualize_canvas) ──────────────
+  // Which image the installed matches belong to — identity beats the loading flag (a failed or
+  // superseded reload leaves stale matches with loading=false; identity still blocks the push).
+  const matchesImageRef = useRef<string | null>(null);
+  const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
+  buildCanvasBodyRef.current = () => {
+    if (!imgPath || !dataset.project_root || !matches) return null;
+    // Mid-transition guards: the store must hold THIS image's matches, and not be mid-reload —
+    // otherwise the previous image's shapes would push under the new image_path (a false canvas).
+    if (matchesImageRef.current !== imgName) return null;
+    if (useStore.getState().review.loading) return null;
+    const host = measureCanvasHost();
+    return {
+      schema_version: 1,
+      project_root: dataset.project_root,
+      tab: "review",
+      image_path: imgPath,
+      image: imgName ?? "",
+      img_width: matches.img_width,
+      img_height: matches.img_height,
+      viewport: host
+        ? computeViewport(gui.view, host, matches.img_width, matches.img_height)
+        : null,
+      user: useStore.getState().user || undefined,
+      classes: classList,
+      legend: {
+        tp: reviewColors.tp,
+        fp: reviewColors.fp,
+        fn: reviewColors.fn,
+        active: reviewColors.active,
+      },
+      counts: { tp: matches.n_tp, fp: matches.n_fp, fn: matches.n_fn },
+      shapes: buildReviewShapes(matches, reviewColors, detectionIdx, className, {
+        showGT,
+        showPred,
+      }),
+    };
+  };
+  const canvasPusherRef = useRef(createCanvasPusher((b) => api.canvas.pushState(b)));
+  useEffect(() => () => canvasPusherRef.current.dispose(), []);
+  // Verdicts / detection focus / visibility change the drawn shapes → full push; pan/zoom → heartbeat.
+  useEffect(() => {
+    canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
+  }, [matches, reviewColors, detectionIdx, showGT, showPred, imgPath]);
+  useEffect(() => {
+    canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
+  }, [gui.view, classList]);
+  useEffect(
+    () =>
+      onCanvasStateRequest(() => {
+        canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
+        canvasPusherRef.current.flush();
+      }),
+    [],
+  );
   const [colorEditKey, setColorEditKey] = useState<keyof ReviewColors | null>(null);
   const [edit, setEdit] = useState<EditShape | null>(null);
   const editDrag = useRef<EditDrag | null>(null);
@@ -175,6 +240,7 @@ export function ReviewTab() {
   // `review_focus` index (the agent asked to center on detection N) wins for one install.
   function applyMatches(res: MatchesResponse, indexHint?: number) {
     setMatches(res);
+    matchesImageRef.current = imgName; // which image these matches belong to (canvas-push guard)
     setImageStatus(res.image_status);
     const focusIdx = useStore.getState().review.focusDetectionIdx;
     const effectiveHint = indexHint ?? focusIdx ?? undefined;
