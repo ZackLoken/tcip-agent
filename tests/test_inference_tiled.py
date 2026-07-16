@@ -59,13 +59,13 @@ def test_run_inference_tile_flag(tmp_path):
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
 
-    r = run_inference(ckpt, image_paths=[img], tile=True, tile_size=TILE, score_threshold=0.0)
+    r = run_inference(ckpt, image_paths=[img], tile=True, tile_size=TILE, conf_threshold=0.0)
     assert r["tiled"] is True
     assert r["total_detections"] == sum(x["count"] for x in r["results"])
     assert len(r["results"]) == 1
     # the count carries a resolved-bundle operating point, unvalidated for raw inference
     assert r["operating_point"]["conf"]["validated_vs_gt"] == "false"
 
-    r2 = run_inference(ckpt, image_paths=[img], tile=False, score_threshold=0.0)
+    r2 = run_inference(ckpt, image_paths=[img], tile=False, conf_threshold=0.0)
     assert r2["tiled"] is False
     assert len(r2["results"]) == 1  # non-tiled path still works
