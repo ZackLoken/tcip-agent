@@ -66,6 +66,8 @@ export interface SaveLabelsBody {
   project_root?: string | null;
   /** Echo the loaded mtimes so the backend can 409 a stale (lost-update) write. */
   base_mtimes?: Mtimes | null;
+  /** GUI-set annotator identity; stamped as created_by ("user:<name>") on saved GT. */
+  user?: string | null;
 }
 
 export type SaveResult = { status: "ok"; base_mtimes: Mtimes } | { status: "conflict" };
@@ -252,6 +254,8 @@ export const api = {
       filter_type?: string;
       filter_class?: string | number;
       status_filter?: string;
+      /** GUI-set reviewer identity; stamped as accepted_by/created_by ("user:<name>") on GT. */
+      user?: string | null;
     }) =>
       call<{
         status: string;
