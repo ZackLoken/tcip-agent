@@ -22,6 +22,8 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     task_collate,
     train,
 )
+from tcip_annotation import json_io  # noqa: E402
+from tcip_annotation.state import BBox  # noqa: E402
 
 IMG = 64
 
@@ -44,7 +46,13 @@ def _detection_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), ti
         for t in range(tiles):
             stem = f"{pref}_{t}_0"
             _save_png(images_dir / f"{stem}.png")
-            (labels_dir / f"{stem}.txt").write_text("0 0.5 0.5 0.4 0.4\n")
+            json_io.write_detect(
+                str(labels_dir / f"{stem}.json"),
+                [BBox(19.2, 19.2, 44.8, 44.8, 0)],
+                IMG,
+                IMG,
+                keep_empty=True,
+            )
             all_stems.append(stem)
     return images_dir, labels_dir, all_stems
 
@@ -86,7 +94,13 @@ def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
     _save_png(images_dir / "src_0_0.png")
-    (labels_dir / "src_0_0.txt").write_text("0 0.5 0.5 0.4 0.4\n")
+    json_io.write_detect(
+        str(labels_dir / "src_0_0.json"),
+        [BBox(19.2, 19.2, 44.8, 44.8, 0)],
+        IMG,
+        IMG,
+        keep_empty=True,
+    )
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "auto_val": True}
     _train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
