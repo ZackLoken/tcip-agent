@@ -206,7 +206,7 @@ def per_plant_phenology(
     Returns ``{rows: [...], elongation_classified: bool, classes_seen: [...]}``. Each row has
     the elongated-fraction series and the four milestone dates. When
     ``elongation_classified`` is false the predictions carried no elongation class, so the
-    milestones are NOT a valid bloom measurement (do not deliver them).
+    milestones are not a valid bloom measurement (do not deliver them).
     """
     per_plant, all_classes = per_plant_series(mapping, predictions_by_date, elongated_class_id)
     rows = []
