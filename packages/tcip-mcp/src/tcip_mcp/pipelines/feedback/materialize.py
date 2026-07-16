@@ -1,6 +1,6 @@
 """Materialize a curated detection dataset from human review verdicts (W5).
 
-Torch-free. Turns ``review_stats.json`` verdicts back into training data:
+Torch-free. Turns review verdicts (per-image shards under ``.tcip/state/review/``) into training data:
   - accepted / edited GT boxes  -> positive per-image JSON labels (the canonical format)
   - rejected-only images        -> confirmed-negative JSON (``{"objects": []}``) backgrounds
 plus a ``curated_manifest.json`` for provenance. The output layout (``images/`` +
