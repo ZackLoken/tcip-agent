@@ -98,7 +98,7 @@ def validate_train_config_schema(config: dict) -> list[str]:
     """Validate a training config against the pydantic schema; return issue strings.
 
     Catches type errors (e.g. ``batch_size="big"``), empty ``heads``, and — via
-    ``ModelSpecSchema`` — registry/channel-compat issues. Does NOT enforce
+    ``ModelSpecSchema`` — registry/channel-compat issues. Does not enforce
     ``model_spec`` presence (``validate_config`` keeps its own alias for that).
     """
     issues: list[str] = []
