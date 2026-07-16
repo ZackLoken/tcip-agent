@@ -37,10 +37,15 @@ Examples use real `crops.yml` trait names — verify any trait against `crops.ym
 
 | Tool | Purpose |
 |------|---------|
-| `export_results_csv` | Generate per-plant CSV from inference results |
+| `run_pipeline` (`aggregation`-type phase) | Produces the Per-Plant CSV Schema above (`aggregate_per_plant` / `export_aggregated_csv`) — see `pipeline-design` skill for phase specs |
 | `export_predictions` | Export predictions as per-image JSON (COCO-shaped) |
 | `run_inference` | Run batch inference on images |
 | `compute_phenology` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping — its own column schema; see `phenology` skill |
+| `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction — see `annotation` skill |
+
+`export_results_csv` produces a **different**, per-image `image, detection_count,
+avg_confidence` CSV — not the per-plant schema above. Don't reach for it when the
+per-plant schema is what's wanted.
 
 ## Quality Control
 
