@@ -54,7 +54,7 @@ describe("openProjectByName", () => {
     await openProjectByName("hz");
 
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
-    // Lands on 2026-02-11 (newest date WITH labels) + its trait, NOT the empty newest date.
+    // Lands on 2026-02-11 (newest date with labels) + its trait, not the empty newest date.
     expect(arg.date).toBe("2026-02-11");
     expect(arg.annotation_type).toBe("catkin");
     expect(arg.model_name).toBe("baseline");
