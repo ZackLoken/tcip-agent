@@ -227,10 +227,10 @@ class TestVisualizePredictions:
 
 class TestVisualizeComparison:
     def test_basic(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import visualize_comparison
+        from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_dataset / "images" / "img_001.jpg")
-        result = visualize_comparison(img)
+        result = visualize("comparison", img)
         assert "error" not in result
         assert Path(result["image_path"]).is_file()
         assert result["gt_count"] == 2
@@ -470,7 +470,9 @@ class TestAcceptCandidatesTool:
         from tcip_mcp.tools.vision_tools import accept_candidates
 
         # Simulate cached candidates from sam_auto_label
-        state_dir = Path(".tcip") / "state"
+        from tcip_mcp.project_paths import resolve_state
+
+        state_dir = resolve_state(Path(".tcip") / "state")
         state_dir.mkdir(parents=True, exist_ok=True)
         candidates = [
             {
@@ -807,7 +809,9 @@ class TestFullPipelineIntegration:
         return tmp_path
 
     def _cache_candidates(self, stem: str, candidates: list[dict]) -> None:
-        state_dir = Path(".tcip") / "state"
+        from tcip_mcp.project_paths import resolve_state
+
+        state_dir = resolve_state(Path(".tcip") / "state")
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / f"candidates_{stem}.json").write_text(
             json.dumps(candidates, default=str), encoding="utf-8",
@@ -1058,7 +1062,9 @@ class TestSamPredictionStaging:
         return tmp_path
 
     def _cache(self, stem: str) -> None:
-        state_dir = Path(".tcip") / "state"
+        from tcip_mcp.project_paths import resolve_state
+
+        state_dir = resolve_state(Path(".tcip") / "state")
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / f"candidates_{stem}.json").write_text(
             json.dumps(MOCK_CANDIDATES, default=str), encoding="utf-8",
