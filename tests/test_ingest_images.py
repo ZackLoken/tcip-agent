@@ -112,9 +112,8 @@ def test_ingest_exif_buckets_and_undated(tmp_path):
     assert (proj / "images" / "2026-02-11" / "a.jpg").is_file()
     assert (proj / "images" / "2026-03-01" / "c.jpg").is_file()
     assert (proj / "images" / "undated" / "no_exif.png").is_file()
-    # .tcip scaffolding created
+    # .tcip scaffolding created (the sessions/ event log was retired with its tools)
     assert (proj / ".tcip" / "config.toml").is_file()
-    assert (proj / ".tcip" / "sessions").is_dir()
 
 
 def test_ingest_copies_leave_originals_byte_identical(tmp_path):
