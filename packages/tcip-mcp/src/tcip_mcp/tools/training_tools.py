@@ -8,7 +8,7 @@ from pathlib import Path
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_NMS_IOU
 
 logger = logging.getLogger(__name__)
 
@@ -853,6 +853,8 @@ def evaluate_model(
     max_dets: int = 100,
     tiling: dict | None = None,
     use_tiled_inference: bool = False,
+    global_nms_iou: float = DEFAULT_NMS_IOU,
+    postprocess: str = "nms",
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
@@ -907,10 +909,13 @@ def evaluate_model(
     # Delivery-grade full-frame path (tiled inference + full-frame GT matching).
     if use_tiled_inference and task == "detection":
         tcfg = tiling or run_tiling or {}
+        # Thread the merge settings through — evaluating at a derived (non-default) NMS is
+        # exactly the point of this path; dropping them silently re-pins 0.3.
         return run_full_frame_evaluation(
             ckpt, images_dir, labels_dir, str(Path(ckpt).parent),
             conf_threshold=conf_threshold, iou_threshold=iou_threshold,
             tile_size=int(tcfg.get("tile_size", 640)), overlap=float(tcfg.get("overlap", 0.2)),
+            global_nms_iou=global_nms_iou, postprocess=postprocess,
             max_dets=max_dets if max_dets > 100 else 1000,
         )
 
