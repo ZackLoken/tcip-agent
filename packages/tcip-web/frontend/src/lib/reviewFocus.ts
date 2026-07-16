@@ -65,5 +65,7 @@ export async function applyReviewFocus(d: ReviewFocusData): Promise<void> {
   // gui.review.detection_idx directly would be clobbered by the reload's "jump to first
   // unreviewed" when the frame/filters change (which this focus always causes).
   if (typeof d.detection_idx === "number") useStore.getState().setReviewFocusIdx(d.detection_idx);
+  // Re-focusing the already-open image leaves paths unchanged; force a refetch past the effect's identical-path skip.
+  useStore.getState().bumpReviewRefetch();
   useStore.getState().setActiveTab("review");
 }
