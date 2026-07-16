@@ -102,8 +102,9 @@ def test_build_dataset_detection_autoresolves_json(tmp_path):
     assert ds.class_distribution == {0: 1}
 
 
-def test_build_dataset_detection_yolo_unaffected(tmp_path):
-    """A legacy YOLO ``.txt`` dir still trains through the YOLO path (no assembly)."""
+def test_build_dataset_detection_rejects_yolo_txt(tmp_path):
+    """A legacy YOLO ``.txt`` dir is import-only — build_dataset rejects it (convert to JSON first)
+    rather than silently reading it as all-empty negatives."""
     from tcip_mcp.pipelines.data.datasets import build_dataset
     images = tmp_path / "images"
     labels = tmp_path / "detect"
@@ -111,10 +112,8 @@ def test_build_dataset_detection_yolo_unaffected(tmp_path):
     _make_images(images, ["img0"])
     (labels / "img0.txt").write_text("0 0.3 0.3 0.4 0.4\n")
 
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
-    assert ds.label_format == "yolo"
-    _, target = ds[0]
-    assert target["boxes"].shape == (1, 4)
+    with pytest.raises(ValueError, match="YOLO"):
+        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
 
 
 def test_build_dataset_respects_explicit_format(tmp_path):
@@ -150,7 +149,8 @@ def test_build_dataset_instance_seg_autoresolves_json(tmp_path):
     assert int(target["masks"].sum()) > 0  # polygon rasterized to a non-empty mask
 
 
-def test_build_dataset_instance_seg_yolo_polygon_unaffected(tmp_path):
+def test_build_dataset_instance_seg_rejects_yolo_txt(tmp_path):
+    """Instance-seg likewise rejects a legacy YOLO-polygon ``.txt`` dir (import to JSON first)."""
     from tcip_mcp.pipelines.data.datasets import build_dataset
     images = tmp_path / "images"
     labels = tmp_path / "segment"
@@ -158,10 +158,8 @@ def test_build_dataset_instance_seg_yolo_polygon_unaffected(tmp_path):
     _make_images(images, ["img0"])
     (labels / "img0.txt").write_text("0 0.1 0.1 0.5 0.1 0.5 0.5 0.1 0.5\n")
 
-    ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels), num_classes=1)
-    assert ds.label_format == "yolo"
-    _, target = ds[0]
-    assert target["masks"].shape[0] == 1
+    with pytest.raises(ValueError, match="YOLO"):
+        build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels), num_classes=1)
 
 
 # ── stratification line count ───────────────────────────────────────────────
