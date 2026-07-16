@@ -94,6 +94,10 @@ class YoloPredictor:
         self.in_chans = 3  # ultralytics YOLO is RGB
         self.checkpoint_path = checkpoint_path
         self.training_imgsz = _training_imgsz(checkpoint_path)
+        # Uniform train-geometry surface with GenericPredictor so run_inference can derive the tile
+        # scale from the checkpoint (CV2). YOLO trains square, so overlap has no persisted analog.
+        self.train_tile_size = self.training_imgsz
+        self.train_overlap = None
 
         self.model = AutoDetectionModel.from_pretrained(
             model_type="ultralytics",
