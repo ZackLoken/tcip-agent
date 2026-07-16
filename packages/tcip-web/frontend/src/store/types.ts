@@ -61,11 +61,21 @@ export interface Box {
   x2: number;
   y2: number;
   class_id: number;
+  // Provenance round-trips through the canvas: loaded shapes carry it back on save so a
+  // re-save never re-stamps the original creator (new shapes omit it and get stamped).
+  created_by?: string | null;
+  created_at?: string | null;
+  accepted_by?: string | null;
+  accepted_at?: string | null;
 }
 
 export interface PolygonShape {
   points: [number, number][];
   class_id: number;
+  created_by?: string | null;
+  created_at?: string | null;
+  accepted_by?: string | null;
+  accepted_at?: string | null;
 }
 
 export interface PredBox {
