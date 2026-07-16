@@ -184,6 +184,50 @@ def test_resolve_operating_point_no_gt_placeholder_unshippable():
     assert b.get("conf").unvalidated_value(acknowledge_unvalidated=True) == 0.5
 
 
+def _overlap_records(idp="d"):
+    """Calibration records whose GT boxes overlap (20px, offset 8px), so cross_tile_nms is derivable."""
+    boxes = [_box(100, 100), _box(108, 100), _box(116, 100)]  # neighbor IoU ~0.43
+    return [{"width": 400, "height": 400, "image_id": f"{idp}_{i}",
+             "gt": [{"category_id": 1, "bbox": bx} for bx in boxes],
+             "dt": [{"category_id": 1, "bbox": bx, "score": 0.9} for bx in boxes]}
+            for i in range(2)]
+
+
+def test_resolve_operating_point_derives_cross_tile_nms_from_gt():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_overlap_records())
+    p = b.get("cross_tile_nms")
+    assert p.source == "derived"
+    assert p.derivation_class == "distribution"
+    assert "neighbor-IoU" in p.derived_from
+    assert 0.2 <= p.value <= 0.8
+    assert p.value == pytest.approx(0.4286 + 0.05, abs=1e-2)  # p99 of the GT neighbor-IoU tail + margin
+
+
+def test_resolve_operating_point_explicit_cross_tile_nms_not_labeled_derived():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    # An explicit override is honest even when overlapping GT was present to derive from.
+    b = resolve_operating_point("catkin", dataset_hash="h1",
+                                calibration_records=_overlap_records(), cross_tile_nms=0.55)
+    p = b.get("cross_tile_nms")
+    assert p.source == "explicit"
+    assert p.value == pytest.approx(0.55)
+    assert p.derived_from == "caller override"  # not a derivation costume on a caller-supplied number
+    assert "neighbor-IoU" not in p.derived_from
+
+
+def test_resolve_operating_point_cross_tile_nms_honest_default_when_underivable():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    # No GT at all -> honest default, never a derivation label on an underived number.
+    p_no_gt = resolve_operating_point("catkin", dataset_hash="h1").get("cross_tile_nms")
+    assert p_no_gt.source == "default"
+    assert "neighbor-IoU" not in p_no_gt.derived_from
+    # Sparse, non-overlapping GT is likewise underivable -> still an honest default.
+    p_sparse = resolve_operating_point("catkin", dataset_hash="h1",
+                                       calibration_records=_records("c")).get("cross_tile_nms")
+    assert p_sparse.source == "default"
+
+
 def test_resolve_operating_point_tile_size_derived():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     b = resolve_operating_point("catkin", dataset_hash="h1", tile_size=640)
