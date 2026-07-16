@@ -7,6 +7,7 @@ detections to the PREDICTIONS tree (never GT) for canvas sign-off.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -105,10 +106,10 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
         {"class_id": 0, "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1},
         {"class_id": 1, "conf": 0.6, "cx": 0.25, "cy": 0.25, "w": 0.05, "h": 0.05},
     ]
-    res = stage_proposals(str(root), "agent_proposals", date, "IMG_0001", boxes)
+    res = stage_proposals(str(root), "claude", date, "IMG_0001", boxes)
     assert res["staged"] == 2
 
-    out = Path(prediction_dir(root, "agent_proposals", date, "detect")) / "IMG_0001.json"
+    out = Path(prediction_dir(root, "claude", date, "detect")) / "IMG_0001.json"
     assert out.is_file()
     assert res["detect_path"] == str(out)
     preds, _ = json_io.read_detect_pred(out)
@@ -118,6 +119,12 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
     assert b0.class_id == 0
     assert b0.confidence == pytest.approx(0.8)
     assert (b0.x1, b0.y1, b0.x2, b0.y2) == pytest.approx((288.0, 216.0, 352.0, 264.0))
+    # Every staged object stamps the producer (model_name) as created_by + a created_at.
+    data = json.loads(out.read_text())
+    assert len(data["objects"]) == 2
+    for obj in data["objects"]:
+        assert obj["created_by"] == "claude"
+        assert obj["created_at"]
     # It must not have written into annotations/ (GT).
     assert not (root / "annotations").exists()
 
@@ -185,6 +192,11 @@ def test_stage_proposals_writes_polygons_to_segment(tmp_path: Path) -> None:
     assert p0.confidence == pytest.approx(0.91)
     assert len(p0.points) == 4
     assert p0.points[0] == pytest.approx((64.0, 48.0))
+    # Each staged polygon stamps the producer (model_name) as created_by + a created_at.
+    data = json.loads(out.read_text())
+    assert len(data["objects"]) == 1
+    assert data["objects"][0]["created_by"] == "sam"
+    assert data["objects"][0]["created_at"]
     # It must not touch GT, nor write a detect prediction for a polygon.
     assert not (root / "annotations").exists()
     assert not (Path(prediction_dir(root, "sam", date, "detect")) / "IMG_0132.json").exists()
@@ -198,8 +210,16 @@ def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> N
     polygons = [{"class_id": 1, "conf": 0.8, "points": [[0.1, 0.1], [0.2, 0.1], [0.15, 0.2]]}]
     res = stage_proposals(str(root), "claude", date, "IMG_0001", boxes, polygons)
     assert res["n_detect"] == 1 and res["n_segment"] == 1 and res["staged"] == 2
-    assert (Path(prediction_dir(root, "claude", date, "detect")) / "IMG_0001.json").is_file()
-    assert (Path(prediction_dir(root, "claude", date, "segment")) / "IMG_0001.json").is_file()
+    detect_out = Path(prediction_dir(root, "claude", date, "detect")) / "IMG_0001.json"
+    segment_out = Path(prediction_dir(root, "claude", date, "segment")) / "IMG_0001.json"
+    assert detect_out.is_file()
+    assert segment_out.is_file()
+    # Both the box and the polygon stamp the producer (model_name) as created_by + a created_at.
+    for out in (detect_out, segment_out):
+        objs = json.loads(out.read_text())["objects"]
+        assert len(objs) == 1
+        assert objs[0]["created_by"] == "claude"
+        assert objs[0]["created_at"]
     assert not (root / "annotations").exists()
 
 
