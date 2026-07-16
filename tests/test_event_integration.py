@@ -203,7 +203,7 @@ class TestInferenceToolOutputSchema:
     def test_export_predictions_schema(self) -> None:
         from tcip_mcp.tools import inference_tools
 
-        assert hasattr(inference_tools, "export_predictions_yolo")
+        assert hasattr(inference_tools, "export_predictions")
 
     def test_export_results_csv_schema(self) -> None:
         from tcip_mcp.tools import inference_tools
