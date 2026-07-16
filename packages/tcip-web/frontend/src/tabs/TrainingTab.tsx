@@ -98,7 +98,7 @@ export function TrainingTab() {
 
   useEffect(() => {
     if (!selectedRun || !projectRoot) return;
-    // Clear the previous run's curve; the stream replays THIS run from the start, so a
+    // Clear the previous run's curve; the stream replays this run from the start, so a
     // seed GET would just double-load the same rows. The WS is the single source now.
     setMetrics([]);
     streamRef.current?.();
