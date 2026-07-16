@@ -548,13 +548,11 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
         },
     )
     assert resp.status_code == 200
-    # review_stats.json should now exist
-    stats_path = project_root / ".tcip" / "state" / "review_stats.json"
-    assert stats_path.exists()
-    data = json.loads(stats_path.read_text(encoding="utf-8"))
-    assert "image" in data
-    assert "IMG_0000.JPG" in data["image"]
-    assert data["image"]["IMG_0000.JPG"]["detections"][0]["action"] == "accepted"
+    # the image's review shard should now exist (per-image file, not one whole-state file)
+    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
+    assert shard_path.exists()
+    data = json.loads(shard_path.read_text(encoding="utf-8"))
+    assert data["state"]["detections"][0]["action"] == "accepted"  # payload wraps {img_name, state}
 
 
 def _review_action(client, img_path, det_gt, project_root, **over):
@@ -604,7 +602,7 @@ def test_review_reject_deletes_reviewed_gt(client, dataset_root, tmp_path) -> No
 
     resp = _review_action(client, img_path, det_gt, project_root, det_type="fn", action="rejected")
     assert resp.status_code == 200
-    # Emptying GT does NOT auto-confirm a negative (that needs an explicit Complete) — it reads as
+    # Emptying GT does not auto-confirm a negative (that needs an explicit Complete) — it reads as
     # needing review. The label file is kept (empty-objects negative), not deleted.
     assert resp.json()["annotation_status"] == "unannotated"
     assert det_gt.is_file()
@@ -692,10 +690,10 @@ def test_review_gt_write_without_path_is_rejected(client, dataset_root, tmp_path
     assert resp.status_code == 400
     assert "no detect annotations path" in resp.json()["detail"]
     # The refused verdict must not have been recorded as reviewed.
-    stats_path = project_root / ".tcip" / "state" / "review_stats.json"
-    if stats_path.exists():
-        data = json.loads(stats_path.read_text(encoding="utf-8"))
-        assert not data.get("image", {}).get("IMG_0000.JPG", {}).get("detections")
+    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
+    if shard_path.exists():
+        data = json.loads(shard_path.read_text(encoding="utf-8"))
+        assert not data.get("state", {}).get("detections")
 
 
 def test_review_action_auto_completes_and_audits(
@@ -779,9 +777,7 @@ def test_review_action_records_real_class_name_and_reviewer(
         },
     )
     assert resp.status_code == 200
-    entry = json.loads((state / "review_stats.json").read_text())["image"]["IMG_0000.JPG"][
-        "detections"
-    ][0]
+    entry = json.loads((state / "review" / "IMG_0000.JPG.json").read_text())["state"]["detections"][0]
     assert entry["class_name"] == "catkin"  # real name, not "class_0"
     assert entry["reviewed_by"]  # non-empty reviewer
 
