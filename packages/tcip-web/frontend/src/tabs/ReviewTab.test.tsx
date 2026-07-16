@@ -276,7 +276,7 @@ describe("ReviewTab matches-recompute effect", () => {
     expect(matchesSpy.mock.calls[1][0].pred_detect_path).toBe(`${PRED_DIR_B}/img1.json`);
   });
 
-  it("does NOT re-fetch when a WS snapshot rebuilds the dataset object with identical paths", async () => {
+  it("does not re-fetch when a WS snapshot rebuilds the dataset object with identical paths", async () => {
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
 
