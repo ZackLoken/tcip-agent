@@ -199,7 +199,8 @@ def _worker(job: InferenceJob) -> None:
                 global_nms_iou=job.iou,
                 postprocess=job.postprocess,
             )
-            write_predictions_json(output_dir / f"{img.stem}.json", results[0])
+            write_predictions_json(output_dir / f"{img.stem}.json", results[0],
+                                   created_by=f"model:{Path(job.checkpoint_path).stem}")
             job.results.append({"image": img.name, "n_detections": results[0]["count"]})
             job.done += 1
 
