@@ -16,8 +16,18 @@ from tcip_mcp.pipelines.feedback.materialize import (
     materialize_dataset, reviewed_image_names, select_unreviewed,
 )
 
-REVIEW_STATE_FILENAME = "review_stats.json"
+REVIEW_STATE_FILENAME = "review_stats.json"  # legacy single-file layout; ReviewEngine migrates it
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+
+
+def _review_state_exists(review_state_dir: str) -> bool:
+    """True if there's a legacy ``review_stats.json`` or a non-empty ``review/`` shard dir."""
+    d = Path(review_state_dir)
+    if (d / REVIEW_STATE_FILENAME).is_file():
+        return True
+    from tcip_annotation.review_engine import REVIEW_SHARD_DIRNAME
+    shard_dir = d / REVIEW_SHARD_DIRNAME
+    return shard_dir.is_dir() and any(shard_dir.glob("*.json"))
 
 
 @mcp.tool()
@@ -39,7 +49,8 @@ def materialize_review_dataset(
     straight into ``split_dataset`` / ``launch_training``.
 
     Args:
-        review_state_dir: Directory containing ``review_stats.json``.
+        review_state_dir: Directory holding the review state (``review/`` shards, or a
+            legacy ``review_stats.json``).
         source_images_dir: Directory of the reviewed source images.
         output_dir: Destination for the curated dataset (distinct from the source).
         experiment_id: Optional experiment to record the review-session lineage on.
@@ -47,14 +58,15 @@ def materialize_review_dataset(
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
         copy_files: Copy images (True) or symlink (False).
     """
-    state_path = Path(review_state_dir) / REVIEW_STATE_FILENAME
-    if not state_path.is_file():
-        return {"error": f"review_stats.json not found in {review_state_dir}"}
+    if not _review_state_exists(review_state_dir):
+        return {"error": f"no review state (review/ shards or legacy review_stats.json) in {review_state_dir}"}
     if not Path(source_images_dir).is_dir():
         return {"error": f"Source images dir not found: {source_images_dir}"}
 
     from tcip_annotation.review_engine import ReviewEngine
-    review_state = ReviewEngine(review_state_dir).raw_state
+    engine = ReviewEngine(review_state_dir)  # migrates a legacy review_stats.json, if any
+    review_state = engine.raw_state
+    state_path = engine.shard_dir
 
     result = materialize_dataset(
         review_state, source_images_dir, output_dir,
@@ -92,25 +104,41 @@ def prioritize_review_queue(
     checkpoint_path: str,
     images_dir: str,
     review_state_dir: str = "",
+    strategy: str = "informativeness",
     method: str = "combined",
     task: str = "detection",
     budget: int = 50,
     skip_reviewed: bool = True,
+    low: float = 0.3,
+    high: float = 0.8,
+    auto_threshold: float = 0.8,
 ) -> dict:
-    """Rank un-reviewed images by active-learning informativeness for the next review batch.
+    """Order un-reviewed images for the next review batch.
+
+    Two strategies:
+    - ``informativeness`` (default): rank by active-learning score (``method``) — the most
+      uncertain/diverse frames first.
+    - ``confidence_triage``: partition by prediction confidence into auto-accept
+      (>= ``auto_threshold``) vs needs-review (in ``[low, high]``) queues.
 
     Args:
-        checkpoint_path: Trained model checkpoint (drives uncertainty/diversity scoring).
+        checkpoint_path: Trained model checkpoint (drives scoring / predictions).
         images_dir: Directory of candidate images.
         review_state_dir: Optional review-state dir; with ``skip_reviewed`` excludes
             already-completed images.
-        method: ``uncertainty`` | ``diversity`` | ``combined``.
+        strategy: ``informativeness`` | ``confidence_triage``.
+        method: Informativeness scorer — ``uncertainty`` | ``diversity`` | ``combined``.
         task: Task type for the uncertainty scorer.
-        budget: Number of images to return.
+        budget: Number of images to return (``informativeness`` only).
         skip_reviewed: Exclude already-completed images from the queue.
+        low: Lower confidence bound for the review band (``confidence_triage`` only).
+        high: Upper confidence bound for the review band (``confidence_triage`` only).
+        auto_threshold: Confidence at/above which a label auto-accepts (``confidence_triage`` only).
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
+    if strategy not in ("informativeness", "confidence_triage"):
+        return {"error": f"Unknown strategy {strategy!r}; use 'informativeness' or 'confidence_triage'"}
     images_path = Path(images_dir)
     if not images_path.is_dir():
         return {"error": f"Images dir not found: {images_dir}"}
@@ -120,20 +148,44 @@ def prioritize_review_queue(
 
     reviewed_skipped = 0
     if review_state_dir and skip_reviewed:
-        state_path = Path(review_state_dir) / REVIEW_STATE_FILENAME
-        if state_path.is_file():
+        if _review_state_exists(review_state_dir):
             from tcip_annotation.review_engine import ReviewEngine
             reviewed = reviewed_image_names(ReviewEngine(review_state_dir).raw_state)
             before = len(paths)
             paths = select_unreviewed(paths, reviewed)
             reviewed_skipped = before - len(paths)
 
+    try:
+        from tcip_mcp.pipelines.inference.predictor import build_predictor
+    except (ImportError, OSError) as e:
+        return {"error": f"torch/torchvision unavailable: {e}"}
+
+    if strategy == "confidence_triage":
+        from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue
+
+        if not paths:
+            return {"strategy": strategy, "total_images": 0, "reviewed_skipped": reviewed_skipped,
+                    "auto_accepted": 0, "needs_review": 0, "review_images": [],
+                    "auto_accepted_images": []}
+        predictor = build_predictor(checkpoint_path)
+        predictions = predictor.predict_batch(paths)
+        accepted = auto_accept(predictions, threshold=auto_threshold)
+        needs_review = review_queue(predictions, low=low, high=high)
+        return {
+            "strategy": strategy,
+            "total_images": len(predictions),
+            "reviewed_skipped": reviewed_skipped,
+            "auto_accepted": len(accepted),
+            "needs_review": len(needs_review),
+            "review_images": [r.get("image", "") for r in needs_review],
+            "auto_accepted_images": [a.get("image", "") for a in accepted],
+        }
+
     if not paths:
-        return {"method": method, "task": task, "total_candidates": 0,
+        return {"strategy": strategy, "method": method, "task": task, "total_candidates": 0,
                 "reviewed_skipped": reviewed_skipped, "selected_count": 0, "queue": []}
 
     try:
-        from tcip_mcp.pipelines.inference.predictor import build_predictor
         from tcip_mcp.pipelines.active_learning.helpers import build_scorer, require_composed_detector
     except (ImportError, OSError) as e:
         return {"error": f"torch/torchvision unavailable: {e}"}
@@ -146,6 +198,7 @@ def prioritize_review_queue(
 
     scored = scorer.score(paths, predictor.model, predictor.device)[:budget]
     return {
+        "strategy": strategy,
         "method": method,
         "task": task,
         "total_candidates": len(paths),
