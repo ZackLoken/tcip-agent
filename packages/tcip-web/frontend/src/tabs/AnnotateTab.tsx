@@ -65,7 +65,7 @@ function pointToSegmentDist(
 
 /**
  * The committed boxes + polygons (content layer). Memoized and — crucially — the mouse
- * cursor is NOT one of its props, so a mouse move (which only updates cursor-following
+ * cursor is not one of its props, so a mouse move (which only updates cursor-following
  * overlays) does not re-render/reconcile these hundreds–thousands of Konva nodes. It
  * re-renders only when the shapes, selection/hover, active class, or zoom-derived stroke
  * sizes actually change.
@@ -210,7 +210,7 @@ export function AnnotateTab() {
 
   // I/O safety. The canvas belongs to exactly the image last loaded from disk:
   //  - loadedPathsRef: the (image, det, seg) the current boxes/polygons came from.
-  //    save() writes THERE — never to paths recomputed from a since-changed dataset,
+  //    save() writes there — never to paths recomputed from a since-changed dataset,
   //    which is how the old code could write one image's boxes onto another's file.
   //  - loadedKeyRef: gates reloads to a genuine image-identity change, so unrelated
   //    store updates (a WS snapshot, a mode/class toggle) don't re-read disk and
@@ -296,7 +296,7 @@ export function AnnotateTab() {
   };
   const canvasPusherRef = useRef(createCanvasPusher((b) => api.canvas.pushState(b)));
   useEffect(() => () => canvasPusherRef.current.dispose(), []);
-  // Anything that changes WHICH shapes the canvas draws → full push (geometry travels), except
+  // Anything that changes which shapes the canvas draws → full push (geometry travels), except
   // mid-drag/stream where committed geometry re-serializing per tick would jank dense images —
   // those downgrade to heartbeats and the release (drag ref clearing, commit) sends the full.
   useEffect(() => {
@@ -420,7 +420,7 @@ export function AnnotateTab() {
     }
 
     // Staleness guard: flushLeaving() fires this save without awaiting it, so by
-    // the time the POST resolves the load effect may already have loaded the NEXT
+    // the time the POST resolves the load effect may already have loaded the next
     // image and repointed loadedPathsRef. Rewinding the ref here would make every
     // later save write the new image's shapes onto the old image's label file
     // (with echoed mtimes that match it, so the backend's 409 guard can't catch
@@ -574,6 +574,9 @@ export function AnnotateTab() {
 
   function commitPolygonAndTrack() {
     if (isLocked) return;
+    // Closing always ends a live stream — a double-click's leading clicks re-arm streaming,
+    // and a stale flag would immediately stream a fresh polygon from the next mouse move.
+    streamingRef.current = false;
     if (commitCurrentPolygon()) incrementAnnotationsAdded(1);
   }
 
@@ -805,6 +808,22 @@ export function AnnotateTab() {
   // scan reject most polygons with four comparisons before the O(vertices) ray-cast.
   const polygonBboxes = useMemo(() => computePolygonBboxes(canvas.polygons), [canvas.polygons]);
 
+  // The detect layer is derived from polygons whenever any exist. In box mode, show those
+  // derived boxes (read-only); with no polygons, box mode edits the real boxes. Memoized
+  // (like polygonBboxes) so a pan/zoom tick doesn't rebuild all N boxes and defeat the
+  // AnnotationShapes memo it feeds.
+  const boxesDerived = mode === "box" && canvas.polygons.length > 0;
+  const boxesToRender = useMemo(
+    () =>
+      boxesDerived
+        ? canvas.polygons.map((p): Box => {
+            const [x1, y1, x2, y2] = polygonBbox(p.points);
+            return { x1, y1, x2, y2, class_id: p.class_id };
+          })
+        : canvas.boxes,
+    [boxesDerived, canvas.polygons, canvas.boxes],
+  );
+
   // rAF-throttle mouse moves: coalesce a burst of pointer events into one update per frame.
   // The ref always holds the freshest closure, so a re-render between scheduling and the
   // frame firing means the callback runs on current — never stale — state.
@@ -944,21 +963,26 @@ export function AnnotateTab() {
       return;
     }
 
-    // Stream (freehand): click to start, click again to stop + commit. Between the two clicks the
-    // vertices follow the cursor (see processMove) — the button is never held down. Right-click
-    // (onContextMenu) cancels a live stream.
+    // Stream (freehand): click starts laying vertices, click again pauses (the polygon stays
+    // open — resume with another click), and double-click closes it, exactly like non-stream
+    // drawing. The button is never held; right-click (onContextMenu) cancels outright.
     if (annotateUi.stream) {
       if (streamingRef.current) {
-        streamingRef.current = false;
-        if (canvas.currentPolygon.length >= 3) commitPolygonAndTrack();
-        else setCurrentPolygon([]);
-      } else {
-        if (canvas.selectedPolygonIdx !== null) selectPolygon(null);
-        pushUndo();
-        const [sx, sy] = snapImagePoint(ix, iy);
-        setCurrentPolygon([[sx, sy]]);
-        streamingRef.current = true;
+        streamingRef.current = false; // pause — closing is double-click's job, same as always
+        return;
       }
+      if (canvas.currentPolygon.length === 0 && canvas.selectedPolygonIdx !== null) {
+        selectPolygon(null); // one click = one action: deselect first, stream on the next click
+        return;
+      }
+      const [sx, sy] = snapImagePoint(ix, iy);
+      if (canvas.currentPolygon.length === 0) {
+        pushUndo();
+        setCurrentPolygon([[sx, sy]]);
+      } else {
+        setCurrentPolygon([...canvas.currentPolygon, [sx, sy]]); // resume the open polygon
+      }
+      streamingRef.current = true;
       return;
     }
 
@@ -989,6 +1013,7 @@ export function AnnotateTab() {
   const onDoubleClick = (_ix: number, _iy: number) => {
     if (isLocked) return;
     if (mode !== "polygon") return;
+    streamingRef.current = false; // a double-click ends laying even when too short to close
     if (canvas.currentPolygon.length >= 3) {
       commitPolygonAndTrack();
     }
@@ -1093,17 +1118,6 @@ export function AnnotateTab() {
   const renderLabels = annotateUi.visible;
   const hoveredIdx = annotateUi.hoveredPolygonIdx;
   const draggingIdx = annotateUi.draggingVertex?.[0];
-
-  // The detect layer is derived from polygons. In box mode, show those derived bounding
-  // boxes (read-only) so the detect layer is inspectable in real time; with no polygons,
-  // box mode edits the real boxes. Recomputed from the live polygon list each render.
-  const boxesDerived = mode === "box" && canvas.polygons.length > 0;
-  const boxesToRender = boxesDerived
-    ? canvas.polygons.map((p): Box => {
-        const [x1, y1, x2, y2] = polygonBbox(p.points);
-        return { x1, y1, x2, y2, class_id: p.class_id };
-      })
-    : canvas.boxes;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -1249,7 +1263,10 @@ function AnnotateLegend() {
 
 /* ── Subcomponents ───────────────────────────────────────────────────── */
 
-function BoxOverlay({
+// Per-shape memo: dragVertex/dragBox replace the whole polygons/boxes array on each RAF
+// tick (slice() keeps the unchanged elements' identity), so an unrelated shape's props are
+// referentially equal and it skips re-render — containing a one-shape drag to that shape.
+const BoxOverlay = memo(function BoxOverlay({
   box,
   stroke,
   width,
@@ -1299,9 +1316,9 @@ function BoxOverlay({
       <HaloLabel x={box.x1} y={box.y1} text={label} fill={stroke} size={labelSize} />
     </>
   );
-}
+});
 
-function PolygonOverlay({
+const PolygonOverlay = memo(function PolygonOverlay({
   polygon,
   stroke,
   width,
@@ -1339,7 +1356,7 @@ function PolygonOverlay({
       <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={labelSize} />
     </>
   );
-}
+});
 
 function InProgressPolygon({
   points,
