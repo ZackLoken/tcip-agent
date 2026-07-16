@@ -12,6 +12,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 from tcip_mcp.pipelines.resolution import (
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
@@ -156,11 +157,24 @@ def resolve_operating_point(
         if tile_size else default("tile_size", _DEFAULT_TILE_SIZE)
     )
     params["tiled"] = default("tiled", _DEFAULT_TILED if tiled is None else bool(tiled))
-    params["cross_tile_nms"] = (
-        derived("cross_tile_nms", float(cross_tile_nms), derivation_class="distribution",
-                derived_from="GT neighbor-IoU distribution")
-        if cross_tile_nms is not None else default("cross_tile_nms", _DEFAULT_CROSS_TILE_NMS)
-    )
+    # cross_tile_nms: an explicit override wins and is stamped as such; otherwise derive it from the
+    # calibration GT's neighbor-IoU distribution; failing that (no GT / no genuine overlaps) an honest
+    # default — never a derivation label on a number no derivation produced.
+    if cross_tile_nms is not None:
+        params["cross_tile_nms"] = ResolvedParam(
+            "cross_tile_nms", float(cross_tile_nms), source="explicit",
+            derivation_class="distribution", derived_from="caller override")
+    else:
+        nms = None
+        if calibration_records:
+            nms = derive_cross_tile_nms([[a["bbox"] for a in rec.get("gt", [])]
+                                         for rec in calibration_records])
+        params["cross_tile_nms"] = (
+            derived("cross_tile_nms", nms, derivation_class="distribution",
+                    derived_from="GT neighbor-IoU distribution (p99 + margin)")
+            if nms is not None
+            else default("cross_tile_nms", _DEFAULT_CROSS_TILE_NMS, derivation_class="distribution")
+        )
     params["max_dets"] = (
         derived("max_dets", int(max_dets), derivation_class="distribution",
                 derived_from="~1.5x p99 GT objects/image")
