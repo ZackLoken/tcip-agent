@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Circle, Line, Rect, Text } from "react-konva";
 import type Konva from "konva";
 
@@ -107,7 +107,11 @@ const IMAGE_STATUS_CLASS: Record<MatchesResponse["image_status"], string> = {
 export function ReviewTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const patchGui = useStore((s) => s.patchGui);
-  const gui = useStore((s) => s.gui);
+  // Narrow subscriptions: pan/zoom mutates gui.view (the whole gui object is replaced by
+  // setView), so subscribing to the whole gui slice re-rendered this tab — and its overlays —
+  // on every tick. Take only view (needed for the canvas-push heartbeat) and the review filters.
+  const view = useStore((s) => s.gui.view);
+  const filters = useStore((s) => s.gui.review);
   const setView = useStore((s) => s.setView);
   const matches = useStore((s) => s.review.matches);
   const setMatches = useStore((s) => s.setMatches);
@@ -122,8 +126,7 @@ export function ReviewTab() {
   const nav = useImageNav();
   usePrefetchAdjacentImages();
 
-  const detectionIdx = gui.review.detection_idx;
-  const filters = gui.review;
+  const detectionIdx = filters.detection_idx;
   const { path: imgPath, name: imgName } = currentImagePath(dataset);
   const paths = useMemo(() => labelPaths(dataset, imgName), [dataset, imgName]);
 
@@ -178,7 +181,7 @@ export function ReviewTab() {
   const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
   buildCanvasBodyRef.current = () => {
     if (!imgPath || !dataset.project_root || !matches) return null;
-    // Mid-transition guards: the store must hold THIS image's matches, and not be mid-reload —
+    // Mid-transition guards: the store must hold this image's matches, and not be mid-reload —
     // otherwise the previous image's shapes would push under the new image_path (a false canvas).
     if (matchesImageRef.current !== imgName) return null;
     if (useStore.getState().review.loading) return null;
@@ -191,9 +194,7 @@ export function ReviewTab() {
       image: imgName ?? "",
       img_width: matches.img_width,
       img_height: matches.img_height,
-      viewport: host
-        ? computeViewport(gui.view, host, matches.img_width, matches.img_height)
-        : null,
+      viewport: host ? computeViewport(view, host, matches.img_width, matches.img_height) : null,
       user: useStore.getState().user || undefined,
       classes: classList,
       legend: {
@@ -217,7 +218,7 @@ export function ReviewTab() {
   }, [matches, reviewColors, detectionIdx, showGT, showPred, imgPath]);
   useEffect(() => {
     canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
-  }, [gui.view, classList]);
+  }, [view, classList]);
   useEffect(
     () =>
       onCanvasStateRequest(() => {
@@ -332,7 +333,7 @@ export function ReviewTab() {
       clearTimeout(t);
       ac.abort();
     };
-    // The four path STRINGS (not the `paths` object — mergeSnapshot rebuilds the
+    // The four path strings (not the `paths` object — mergeSnapshot rebuilds the
     // dataset object on every WS snapshot, which would spuriously re-fire this and
     // reset the detection index/zoom) so a backend-adopted change of prediction
     // dirs (e.g. the agent re-selects the dataset with a different model) refreshes
@@ -1203,7 +1204,10 @@ interface OverlayProps {
   suppressFocusedPred?: boolean;
 }
 
-function ReviewOverlays({
+// Memoized, and scale is read from the store internally (not a prop) so pan/zoom re-renders
+// of ReviewTab don't rebuild this O(detection count) shape list — it re-runs only when the
+// matches/filters/colors props actually change (or its own scale subscription fires).
+const ReviewOverlays = memo(function ReviewOverlays({
   matches,
   focusedIdx,
   showGT,
@@ -1355,7 +1359,7 @@ function ReviewOverlays({
       })}
     </>
   );
-}
+});
 
 function ReviewRect({
   box,
