@@ -9,19 +9,22 @@ description: "Model evaluation methods, metrics interpretation, failure triage, 
 
 | Task | Primary Metric | Secondary Metrics |
 |------|---------------|-------------------|
-| Detection | mAP@50 | mAP@50:95, precision, recall, per-class AP |
+| Detection | mAP@50 | mAP@50:95, precision, recall |
 | Instance Segmentation | mask mAP@50 | box mAP, mask quality (IoU distribution) |
 | Classification | Accuracy | F1 (macro/weighted), confusion matrix, per-class precision/recall |
 | Regression | RMSE | R², MAE, residual distribution |
 | Ordinal | Quadratic weighted κ | Adjacent accuracy, confusion matrix |
-| Change Detection | F1-score | Temporal consistency, event date accuracy |
+
+Detection/instance-seg metrics (`coco_detection_metrics`) are aggregate only — no per-class AP
+today. Per-class precision/recall/F1 is real for classification/ordinal (`evaluate_model`).
+Change detection is not a built task type — see README's Roadmap.
 
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
-| `evaluate_detections` | Compute precision/recall/AP from matched boxes |
-| `evaluate_dataset` | Full dataset evaluation with per-class breakdown |
+| `evaluate_detections` | Compute precision/recall/AP from matched boxes for one image |
+| `evaluate_dataset` | Aggregate detection metrics across a dataset, with a per-image TP/FP/FN breakdown |
 | `get_worst_predictions` | Find N images with highest error |
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment_lineage` | Trace data → model → predictions chain |
@@ -32,7 +35,9 @@ When metrics are poor, investigate systematically:
 
 1. **Data issues**: `validate_data_quality` — check for missing labels, format errors, class imbalance
 2. **Worst cases**: `get_worst_predictions` — visually inspect the worst N images
-3. **Class breakdown**: `evaluate_dataset` — identify which classes are failing
+3. **Per-image breakdown**: `evaluate_dataset` — find images with the highest FP/FN counts
+   (no built-in per-class breakdown for detection; use `evaluate_detections(detail=True)`
+   per image and aggregate by `class_id` if class-level numbers are needed)
 4. **Training dynamics**: Check metrics.jsonl — is loss still decreasing? Overfitting?
 5. **Architecture**: Is the model appropriate for the task and data scale?
 
@@ -42,5 +47,7 @@ When comparing models:
 1. Same dataset split (use `split_dataset` with fixed seed)
 2. Same evaluation set
 3. Compare on primary metric for the task
-4. Check per-class performance — overall mAP can hide class-specific failures
+4. For classification/ordinal, check per-class performance — overall accuracy can hide
+   class-specific failures; for detection, check per-image FP/FN patterns instead (see
+   Failure Triage above — there's no per-class AP today)
 5. Use `compare_experiments` for side-by-side analysis
