@@ -155,7 +155,7 @@ def test_count_by_class_counts_elongated_by_class_not_geometry(tmp_path):
     p = tmp_path / "img.json"
     json_io.write_detect(
         p,
-        [PredBBox(1, 1, 3, 30, 0, confidence=0.9),   # tall box, but class 0 → NOT elongated
+        [PredBBox(1, 1, 3, 30, 0, confidence=0.9),   # tall box, but class 0 → not elongated
          PredBBox(1, 1, 40, 3, 1, confidence=0.8)],  # wide box, but class 1 → elongated
         8, 8,
     )
