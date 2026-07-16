@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type ProjectSummary } from "@/api/client";
 import { SeasonRail } from "@/components/SeasonRail";
 import { defaultDate, openWorkspaceProject } from "@/lib/openProject";
+import { useStore } from "@/store";
 
 // Session-scoped: auto-open the active project only on the app's first load, so a later
 // "Switch project" (which returns here) doesn't immediately re-open the same project.
@@ -35,6 +36,8 @@ function relativeTime(epochSeconds: number): string {
 }
 
 export function ProjectPicker() {
+  const user = useStore((s) => s.user);
+  const setUser = useStore((s) => s.setUser);
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [workspace, setWorkspace] = useState<string>("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -149,6 +152,24 @@ export function ProjectPicker() {
             )}
           </p>
         </div>
+
+        <label className="flex flex-col gap-1 animate-tcip-rise">
+          <span className="tcip-label">Annotator</span>
+          <input
+            type="text"
+            className="tcip-input max-w-xs"
+            placeholder="your name (e.g. zack)"
+            value={user}
+            onChange={(e) => setUser(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <span className="text-[11px] text-tcip-muted">
+            Stamped as the author (<span className="font-mono">created_by</span>) of every label you
+            draw or accept — so your work and Emily&apos;s stay distinguishable. Shown in the status
+            bar.
+          </span>
+        </label>
 
         {loadError && (
           <div className="tcip-panel p-4 text-[12px] text-tcip-fp">
