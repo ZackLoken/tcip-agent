@@ -173,7 +173,7 @@ class RegressionHead(BaseHead):
 class AnchorDetectionHead(BaseHead):
     """Registry/validation marker for two-stage anchor-based detection (Faster R-CNN).
 
-    NOT run standalone: ``compose_model`` routes a single ``anchor_detection`` head to
+    Not run standalone: ``compose_model`` routes a single ``anchor_detection`` head to
     ``DetectionModel``, which builds the actual detector over the shared backbone+neck via
     the DETECTORS factory (``components/detectors.py``). This class exists so the head name
     validates and so a spec can carry detection kwargs (detector, min_size, ...).
