@@ -1,11 +1,20 @@
 ---
 name: annotation
-description: "Annotation and review workflows for YOLO, COCO, PASCAL VOC, and LabelMe format image data. Covers SAM-assisted labeling, review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running SAM-assisted labeling, or preparing/QCing training data."
+description: "Annotation and review workflows for TCIP's native per-image JSON labels, with import/export to YOLO, COCO, PASCAL VOC, and LabelMe. Covers SAM-assisted labeling, review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running SAM-assisted labeling, or preparing/QCing training data."
 ---
 
 # Annotation Workflow
 
-## Supported Formats
+## Canonical format — per-image JSON with provenance
+
+The on-disk default for both GT and predictions is **one per-image, COCO-shaped `.json`**
+(`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
+`accepted_at` provenance per object. `stage_proposals`, `accept_candidates`, and
+`export_predictions` all read/write this schema; a dataset-level COCO training set is
+assembled from these per-image files (`datasets.py`'s `to_coco_dataset`), not authored
+directly. An unspecified format resolves to `.json` (`dataset_layout.py`'s `label_ext()`).
+
+## Import/export formats
 
 | Format | Files | Coordinates | Auto-detected by |
 |--------|-------|------------|------------------|
@@ -14,7 +23,8 @@ description: "Annotation and review workflows for YOLO, COCO, PASCAL VOC, and La
 | **PASCAL VOC** | One `.xml` per image | Pixel coordinates | `.xml` extension |
 | **LabelMe** | One `.json` per image | Pixel coordinates | `.json` + `"shapes"` key |
 
-Use `detect_format()` from `tcip_annotation.format_io` to auto-detect.
+These are explicit import/export paths via `tcip_annotation.format_io`, not the default
+write path. Use `detect_format()` from `format_io` to auto-detect.
 Use `load_annotations` / `save_annotations` from `format_io` for format-agnostic I/O.
 
 ## Coordinate frame — upright, EXIF applied once
@@ -43,11 +53,10 @@ applied twice or skipped.
 | `load_annotations` | Load labels for a set of images (auto-detects format) |
 | `save_annotations` | Write annotations to any supported format |
 | `sam_predict` | SAM-assisted polygon generation from point/box prompts |
-| `run_matching` | Match predictions to ground truth by IoU |
-| `evaluate_detections` | Compute precision/recall/AP from matched pairs |
+| `evaluate_detections` | Compute precision/recall/AP; `detail=True` adds per-detection TP/FP/FN match data |
 | `push_panel_data` | Send images + annotations to the annotation or review panel |
-| `prioritize_review_queue` | Rank unlabeled images by model uncertainty/diversity |
-| `get_review_queue` | Get prioritized list of images needing review |
+| `prioritize_review_queue` | Rank unlabeled images by uncertainty/diversity (`strategy="informativeness"`, default), or `strategy="confidence_triage"` to partition by confidence |
+| `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage |
 
 ## SAM-Assisted Labeling
 
@@ -65,8 +74,10 @@ and its multimodal vision for classification and QA.
 **Full workflow:**
 1. `sam_auto_label(image_path)` → SAM generates candidate masks, renders numbered overlay
 2. Agent `view_image` on overlay → identifies and classifies each candidate
-3. `accept_candidates(image_path, assignments=[{candidate_id: 0, class_id: 1}, ...])` → saves accepted candidates as annotations
-4. Agent `view_image` on the saved result → visual QA pass
+3. `accept_candidates(image_path, assignments=[{candidate_id: 0, class_id: 1}, ...])` → stages
+   accepted candidates as SAM predictions (`created_by="sam"`) in the predictions tree for
+   human review on the Review canvas — never writes GT directly
+4. Agent `view_image` on the staged result → visual QA pass
 
 **Corrective loop (for missed objects):**
 1. `visualize_grid_overlay(image_path)` → labeled grid (A1–H6) for spatial reference
@@ -82,7 +93,7 @@ and its multimodal vision for classification and QA.
 | Tool | Role | Phase |
 |------|------|-------|
 | `sam_auto_label` | Generate all candidate masks | Discovery |
-| `accept_candidates` | Save classified candidates | Classification |
+| `accept_candidates` | Stage classified candidates as predictions | Classification |
 | `visualize_grid_overlay` | Spatial reference for corrections | Correction |
 | `sam_predict(grid_cells=...)` | Targeted segmentation | Correction |
 | `view_image` | Agent visual review | All phases |
@@ -91,9 +102,10 @@ and its multimodal vision for classification and QA.
 
 1. Load ground truth with `load_annotations`
 2. Load predictions (from inference or prior annotation)
-3. `run_matching` pairs predictions to GT by IoU (default threshold: 0.5)
-4. `evaluate_detections` computes TP/FP/FN per class
-5. Review in panel: accept correct predictions, correct errors, add missed objects
+3. `evaluate_detections` pairs predictions to GT by IoU (default threshold: 0.5) and returns
+   aggregate TP/FP/FN; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with
+   its class id, box/polygon, IoU, and confidence)
+4. Review in panel: accept correct predictions, correct errors, add missed objects
 
 ### The review channel — propose on canvas, never write GT blind
 
@@ -126,4 +138,4 @@ frames → they accept on the canvas → only then does it become GT. See
 `prioritize_review_queue` ranks images by model uncertainty/diversity:
 - High uncertainty = model unsure = most valuable to annotate
 - Supports uncertainty, diversity, and combined scoring; can skip already-reviewed images
-- `get_review_queue` returns a prioritized list for the annotator
+- `prioritize_review_queue` returns a prioritized list for the annotator
