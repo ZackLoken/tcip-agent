@@ -288,17 +288,17 @@ class TestEvaluateDetections:
         assert "recall" in result
 
 
-# ── Run matching integration test ───────────────────────────────────────────
+# ── Detail-mode matching integration test ───────────────────────────────────
 
 
-class TestRunMatching:
-    """Test run_matching with actual file I/O."""
+class TestEvaluateDetectionsDetail:
+    """Test evaluate_detections(detail=True) per-detection breakdown with actual file I/O."""
 
-    def test_run_matching(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import run_matching
+    def test_detail_breakdown(self, yolo_dataset: Path):
+        from tcip_mcp.tools.annotation_tools import evaluate_detections
 
         img = str(yolo_dataset / "images" / "img_001.jpg")
-        result = run_matching(img, iou_threshold=0.5)
+        result = evaluate_detections(img, iou_threshold=0.5, detail=True)
         assert "error" not in result
         assert "detections" in result
 
