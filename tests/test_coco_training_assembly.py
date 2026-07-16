@@ -65,9 +65,28 @@ def test_assemble_coco_pairs_labels_with_images(tmp_path):
     json_io.write_detect(labels / "img1.json", [], 100, 100, keep_empty=True)  # confirmed negative
 
     coco = assemble_coco(labels, images)
-    assert {im["file_name"] for im in coco["images"]} == {"img0.jpg", "img1.jpg"}  # negative kept
+    # img1's empty file is NOT human-confirmed negative -> excluded (treated as unannotated)
+    assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}
     assert len(coco["annotations"]) == 2
     assert {a["category_id"] for a in coco["annotations"]} == {0, 1}
+
+
+def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):
+    import json as _json
+
+    from tcip_mcp.pipelines.data.datasets import assemble_coco
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations" / "default" / "detect"
+    labels.mkdir(parents=True)
+    _make_images(images, ["img0", "img1"])
+    json_io.write_detect(labels / "img0.json", [], 100, 100, keep_empty=True)  # confirmed below
+    json_io.write_detect(labels / "img1.json", [], 100, 100, keep_empty=True)  # emptied mid-work
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    (state / "image_status.json").write_text(_json.dumps({"img0.jpg": "negative",
+                                                          "img1.jpg": "partial"}))
+    coco = assemble_coco(labels, images)
+    assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}  # human-confirmed only
 
 
 def test_assemble_coco_skips_stem_without_image(tmp_path):
