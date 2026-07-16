@@ -33,7 +33,7 @@ def test_materialize_review_dataset_end_to_end(tmp_path):
     assert "error" not in r
     assert r["positive"] == 1 and r["hard_negative"] == 1
     assert (out / "images" / "imgA.png").is_file()
-    assert (out / "labels" / "detect" / "imgA.txt").is_file()
+    assert (out / "labels" / "detect" / "imgA.json").is_file()
 
 
 def test_materialize_review_dataset_records_lineage(tmp_path, monkeypatch):
