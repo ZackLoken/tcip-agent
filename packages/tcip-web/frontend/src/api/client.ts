@@ -4,6 +4,7 @@
  */
 
 import { asJson } from "@/api/http";
+import type { CanvasStateBody } from "@/lib/canvasSync";
 import type {
   Box,
   Detection,
@@ -158,6 +159,15 @@ export const api = {
   fs: {
     // List sub-directories of `path` (omit for the top-level drives/roots view).
     list: (path?: string) => call<FsListing>(`/api/fs/list?${q({ path })}`),
+  },
+
+  canvas: {
+    // Live canvas-state push (heartbeat or full geometry) — fire-and-forget from the tabs.
+    pushState: (body: CanvasStateBody) =>
+      call<{ status: string; shapes_stored: boolean }>("/api/canvas/state", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   },
 
   images: {
