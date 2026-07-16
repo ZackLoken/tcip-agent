@@ -38,6 +38,7 @@ from tcip_annotation import (
 )
 from tcip_annotation.utils import get_image_dimensions
 from tcip_mcp.utils.atomic_io import append_jsonl, read_json
+from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
 
 logger = logging.getLogger(__name__)
@@ -71,16 +72,10 @@ def _load_class_names(project_root: str) -> dict[int, str]:
 
 
 def _current_user() -> str:
-    """Reviewer recorded on every verdict — ``TCIP_REVIEW_USER`` override else the OS user."""
-    user = os.environ.get("TCIP_REVIEW_USER", "").strip()
-    if user:
-        return user
-    try:
-        import getpass
+    """Reviewer fallback when the GUI request omits ``user`` — env override else the OS login."""
+    from tcip_web.identity import current_user
 
-        return getpass.getuser() or "gui"
-    except Exception:
-        return "gui"
+    return current_user()
 
 
 def _get_engine(project_root: str) -> ReviewEngine:
@@ -349,6 +344,9 @@ class ActionPayload(BaseModel):
     pred_idx: Optional[int] = None
     bbox: tuple[float, float, float, float]
     action: str  # "accepted" | "rejected" | "edited"
+    # GUI-set reviewer identity (bare name, e.g. "zack"); stamped as accepted_by/created_by
+    # ("user:<name>"). Omitted by non-GUI callers -> backend falls back to the OS/env user.
+    user: Optional[str] = None
     # Edited shape committed from the Review canvas (only for action="edited"): a box, or a
     # polygon's points. Accept/Reject don't carry these — they act on the loaded pred/gt by index.
     edited_box: Optional[tuple[float, float, float, float]] = None
@@ -365,18 +363,23 @@ class ActionPayload(BaseModel):
 
 
 def _apply_gt_mutation(
-    ctx: ReviewContext, payload: "ActionPayload"
+    ctx: ReviewContext, payload: "ActionPayload", reviewer: str, now_iso: str
 ) -> tuple[Optional[str], Optional[int]]:
     """Author GT from a verdict; return (task changed: "detect"/"segment"/None, index the
     written shape landed at in ctx's GT list — edited/accepted writes only). Accept an FP adds
     the prediction; accept a TP/FN keeps GT; reject a TP/FN deletes that GT; reject an FP is a
-    no-op; edit writes the edited shape (replacing the matched GT, or adding it)."""
+    no-op; edit writes the edited shape (replacing the matched GT, or adding it).
+
+    Provenance (``reviewer`` = ``user:<name>``, ``now_iso`` = UTC): an accepted prediction
+    **carries** its ``created_by``/``created_at`` into GT (origin travels) and gets
+    ``accepted_by``/``accepted_at``; a reviewer-drawn edit is stamped ``created_by`` = reviewer."""
     dt, act = payload.det_type, payload.action
 
     if act == "edited":
         if payload.edited_box is not None:
             x1, y1, x2, y2 = payload.edited_box
-            nb = BBox(x1=x1, y1=y1, x2=x2, y2=y2, class_id=payload.class_id)
+            nb = BBox(x1=x1, y1=y1, x2=x2, y2=y2, class_id=payload.class_id,
+                      created_by=reviewer, created_at=now_iso)
             if dt in ("tp", "fn") and payload.gt_type == "box" and payload.gt_idx is not None \
                     and 0 <= payload.gt_idx < len(ctx.gt_boxes):
                 ctx.gt_boxes[payload.gt_idx] = nb
@@ -384,7 +387,8 @@ def _apply_gt_mutation(
             ctx.gt_boxes.append(nb)
             return "detect", len(ctx.gt_boxes) - 1
         if payload.edited_polygon is not None:
-            npg = Polygon(points=[tuple(pt) for pt in payload.edited_polygon], class_id=payload.class_id)
+            npg = Polygon(points=[tuple(pt) for pt in payload.edited_polygon], class_id=payload.class_id,
+                          created_by=reviewer, created_at=now_iso)
             if dt in ("tp", "fn") and payload.gt_type == "polygon" and payload.gt_idx is not None \
                     and 0 <= payload.gt_idx < len(ctx.gt_polygons):
                 ctx.gt_polygons[payload.gt_idx] = npg
@@ -405,11 +409,17 @@ def _apply_gt_mutation(
     if act == "accepted" and dt == "fp" and payload.pred_idx is not None:
         if payload.pred_type == "box" and 0 <= payload.pred_idx < len(ctx.pred_boxes):
             pb = ctx.pred_boxes[payload.pred_idx]
-            ctx.gt_boxes.append(BBox(x1=pb.x1, y1=pb.y1, x2=pb.x2, y2=pb.y2, class_id=pb.class_id))
+            ctx.gt_boxes.append(BBox(
+                x1=pb.x1, y1=pb.y1, x2=pb.x2, y2=pb.y2, class_id=pb.class_id,
+                created_by=pb.created_by, created_at=pb.created_at,
+                accepted_by=reviewer, accepted_at=now_iso))
             return "detect", len(ctx.gt_boxes) - 1
         if payload.pred_type == "polygon" and 0 <= payload.pred_idx < len(ctx.pred_polygons):
             pp = ctx.pred_polygons[payload.pred_idx]
-            ctx.gt_polygons.append(Polygon(points=list(pp.points), class_id=pp.class_id))
+            ctx.gt_polygons.append(Polygon(
+                points=list(pp.points), class_id=pp.class_id,
+                created_by=pp.created_by, created_at=pp.created_at,
+                accepted_by=reviewer, accepted_at=now_iso))
             return "segment", len(ctx.gt_polygons) - 1
     return None, None  # accept TP/FN and reject FP leave GT untouched
 
@@ -426,6 +436,12 @@ def record_action(payload: ActionPayload) -> dict:
         pred_segment_path=payload.pred_segment_path,
     )
     engine = _get_engine(payload.project_root)
+    # GUI-set reviewer drives both the verdict log (reviewed_by, bare) and the GT provenance
+    # (accepted_by/created_by, "user:<name>") so the two never disagree on who acted.
+    reviewer_name = resolve_user(payload.user)
+    engine.current_user = reviewer_name
+    reviewer = user_id(reviewer_name)
+    now_iso = datetime.now(timezone.utc).isoformat()
     det = ReviewDetection(
         det_type=payload.det_type,
         class_id=payload.class_id,
@@ -441,7 +457,7 @@ def record_action(payload: ActionPayload) -> dict:
     # Author GT on a copy so the guard can 400 before anything is recorded, and so the
     # verdict entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
     work = replace(ctx, gt_boxes=list(ctx.gt_boxes), gt_polygons=list(ctx.gt_polygons))
-    changed, landed_idx = _apply_gt_mutation(work, payload)
+    changed, landed_idx = _apply_gt_mutation(work, payload, reviewer, now_iso)
     if changed == "detect" and not payload.gt_detect_path:
         raise HTTPException(400, "this verdict writes detect ground truth, but no detect annotations path was provided")
     if changed == "segment" and not payload.gt_segment_path:
@@ -583,6 +599,7 @@ class SaveGtPayload(BaseModel):
     segment_path: Optional[str] = None
     boxes: list[dict] = []        # [{x1,y1,x2,y2,class_id}]
     polygons: list[dict] = []     # [{points: [[x,y]...], class_id}]
+    user: Optional[str] = None    # GUI-set author; stamped as created_by unless the shape carries one
 
 
 @router.post("/save_gt")
@@ -593,6 +610,9 @@ def save_gt(payload: SaveGtPayload) -> dict:
     _guard_path(payload.segment_path)
     engine = _get_engine(payload.project_root)
 
+    # The reviewer authors this committed GT; a shape that round-trips its own provenance keeps it.
+    author = user_id(resolve_user(payload.user))
+    now_iso = datetime.now(timezone.utc).isoformat()
     ctx = ReviewContext(
         img_name=payload.image_name,
         img_width=w,
@@ -601,6 +621,9 @@ def save_gt(payload: SaveGtPayload) -> dict:
             BBox(
                 x1=b["x1"], y1=b["y1"], x2=b["x2"], y2=b["y2"],
                 class_id=int(b.get("class_id", 0)),
+                created_by=b.get("created_by") or author,
+                created_at=b.get("created_at") or now_iso,
+                accepted_by=b.get("accepted_by"), accepted_at=b.get("accepted_at"),
             )
             for b in payload.boxes
         ],
@@ -608,6 +631,9 @@ def save_gt(payload: SaveGtPayload) -> dict:
             Polygon(
                 points=[tuple(pt) for pt in p["points"]],
                 class_id=int(p.get("class_id", 0)),
+                created_by=p.get("created_by") or author,
+                created_at=p.get("created_at") or now_iso,
+                accepted_by=p.get("accepted_by"), accepted_at=p.get("accepted_at"),
             )
             for p in payload.polygons
         ],
