@@ -27,6 +27,7 @@ function currentModel(predDetectDir: string | null, predSegmentDir: string | nul
 
 export function ProjectBreadcrumb() {
   const dataset = useStore((s) => s.gui.dataset);
+  const user = useStore((s) => s.user);
   const clearDataset = useStore((s) => s.clearDataset);
   const activeTab = useStore((s) => s.gui.active_tab);
   const setActiveTab = useStore((s) => s.setActiveTab);
@@ -123,6 +124,17 @@ export function ProjectBreadcrumb() {
 
   return (
     <div ref={rootRef} className="relative flex items-center">
+      <span
+        title={
+          user
+            ? `Annotator: ${user} — set on the workspace page; stamped as the author of your labels`
+            : "No annotator set — open the workspace page to set who you are"
+        }
+        className={`font-mono ${user ? "text-tcip-fg" : "text-tcip-warn"}`}
+      >
+        {user || "no annotator"}
+      </span>
+      <span className="mx-1.5 text-tcip-border">|</span>
       <button
         onClick={() => setMenu((m) => (m === "project" ? null : "project"))}
         disabled={busy}
