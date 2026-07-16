@@ -72,12 +72,18 @@ class GenericPredictor:
         self.model_spec = ckpt["model_spec"]
         self.config = ckpt.get("config", {})
 
+        # Training tile geometry, so inference can derive the tile scale from the checkpoint instead
+        # of a mismatched default (CV2). None when this checkpoint carried no tiling geometry.
+        _tiling = (self.config.get("data") or {}).get("tiling") or {}
+        self.train_tile_size = _tiling.get("tile_size")
+        self.train_overlap = _tiling.get("overlap")
+
         self.model = compose_model(self.model_spec)
         self.model.load_state_dict(ckpt["model_state_dict"])
         self.model.to(self.device)
         self.model.eval()
 
-        # Make the operating point GOVERN which boxes exist (in-model thresholds), not just a
+        # Make the operating point govern which boxes exist (in-model thresholds), not just a
         # post-hoc filter that can never recover a box the model already discarded (the audit's
         # finding). No-op for non-detection models. See pipelines/operating_point.py.
         from tcip_mcp.pipelines.operating_point import set_detector_operating_point
@@ -212,7 +218,7 @@ class GenericPredictor:
             keep = global_nms(boxes, scores, labels, global_nms_iou)
             boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
 
-        # Enforce the full-frame detection cap AFTER the cross-tile merge (highest score first);
+        # Enforce the full-frame detection cap after the cross-tile merge (highest score first);
         # the in-model detections_per_img only caps per tile, so a dense image can exceed it.
         if self.max_dets is not None and len(scores) > self.max_dets:
             top = np.argsort(scores)[::-1][: self.max_dets]
