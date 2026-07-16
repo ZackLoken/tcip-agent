@@ -1,16 +1,15 @@
-"""Project & session management tools."""
+"""Project management tools."""
 
 from __future__ import annotations
 
 import json
 import shutil
-import time
 import zipfile
 from pathlib import Path
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_text
+from tcip_mcp.utils.atomic_io import atomic_write_text
 
 
 def _project_dir(project_path: str) -> Path:
@@ -20,21 +19,14 @@ def _project_dir(project_path: str) -> Path:
     return p
 
 
-def _sessions_dir(project_path: str) -> Path:
-    d = _project_dir(project_path) / "sessions"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
 def _scaffold_project(project_path: str) -> dict:
-    """Create ``.tcip/`` (sessions/artifacts/models) + a default config.toml.
+    """Create ``.tcip/`` (artifacts/models) + a default config.toml.
 
     The internals of :func:`init_project`, factored out so other tools that
     stand up a project (e.g. ``ingest_images``) reuse the exact same scaffolding
     instead of re-implementing it. Idempotent — re-running only re-mkdirs.
     """
     tcip = _project_dir(project_path)
-    (tcip / "sessions").mkdir(exist_ok=True)
     (tcip / "artifacts").mkdir(exist_ok=True)
     (tcip / "models").mkdir(exist_ok=True)
 
@@ -58,7 +50,7 @@ def _scaffold_project(project_path: str) -> dict:
     return {
         "project_path": project_path,
         "tcip_dir": str(tcip),
-        "created": [".tcip/", ".tcip/sessions/", ".tcip/artifacts/", ".tcip/models/"],
+        "created": [".tcip/", ".tcip/artifacts/", ".tcip/models/"],
     }
 
 
@@ -67,7 +59,7 @@ def _scaffold_project(project_path: str) -> dict:
 def init_project(project_path: str) -> dict:
     """Initialise a TCIP project directory.
 
-    Creates ``.tcip/`` with default config, sessions dir, and artifacts dir.
+    Creates ``.tcip/`` with default config, artifacts dir, and models dir.
 
     Args:
         project_path: Root directory of the project.
@@ -106,102 +98,6 @@ def set_active_project(name: str) -> dict:
         "marker": str(marker),
         "gui_notified": bool(delivery.get("delivered")),
     }
-
-
-@mcp.tool()
-@audited
-def create_session(project_path: str, description: str = "") -> dict:
-    """Start a new agent session for this project.
-
-    Args:
-        project_path: Root directory of the project.
-        description: Human-readable session description.
-    """
-    sessions = _sessions_dir(project_path)
-    session_id = f"session_{int(time.time())}"
-    session_file = sessions / f"{session_id}.jsonl"
-
-    entry = {
-        "type": "session_start",
-        "id": session_id,
-        "timestamp": time.time(),
-        "description": description,
-    }
-    atomic_write_text(session_file, json.dumps(entry) + "\n")
-
-    return {"session_id": session_id, "path": str(session_file)}
-
-
-@mcp.tool()
-@audited
-def append_session_event(project_path: str, session_id: str, event_type: str, data: dict) -> dict:
-    """Append an event to a session log.
-
-    Args:
-        project_path: Root directory of the project.
-        session_id: Session identifier.
-        event_type: Type of event (e.g. 'tool_call', 'hitl_checkpoint', 'result').
-        data: Event payload.
-    """
-    session_file = _sessions_dir(project_path) / f"{session_id}.jsonl"
-    if not session_file.is_file():
-        return {"error": f"Session not found: {session_id}"}
-
-    entry = {"type": event_type, "timestamp": time.time(), **data}
-    append_jsonl(session_file, entry)
-
-    return {"session_id": session_id, "event_type": event_type}
-
-
-@mcp.tool()
-@audited
-def list_sessions(project_path: str) -> dict:
-    """List all sessions for a project.
-
-    Args:
-        project_path: Root directory of the project.
-    """
-    sessions = _sessions_dir(project_path)
-    results: list[dict] = []
-    for f in sorted(sessions.glob("*.jsonl")):
-        with open(f) as fh:
-            first_line = fh.readline()
-            try:
-                header = json.loads(first_line)
-            except json.JSONDecodeError:
-                header = {}
-        # Count lines
-        with open(f) as fh:
-            event_count = sum(1 for _ in fh)
-        results.append({
-            "session_id": f.stem,
-            "description": header.get("description", ""),
-            "started": header.get("timestamp"),
-            "event_count": event_count,
-        })
-    return {"sessions": results, "count": len(results)}
-
-
-@mcp.tool()
-@audited
-def get_session(project_path: str, session_id: str) -> dict:
-    """Get all events from a session.
-
-    Args:
-        project_path: Root directory of the project.
-        session_id: Session identifier.
-    """
-    session_file = _sessions_dir(project_path) / f"{session_id}.jsonl"
-    if not session_file.is_file():
-        return {"error": f"Session not found: {session_id}"}
-
-    events = []
-    with open(session_file) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                events.append(json.loads(line))
-    return {"session_id": session_id, "events": events, "count": len(events)}
 
 
 def _resolve_project_path(project_path: str) -> str:
@@ -274,11 +170,6 @@ def get_project_status(project_path: str = "") -> dict:
     config_path = tcip / "config.toml"
     status["has_config"] = config_path.is_file()
 
-    # Sessions
-    sessions_dir = tcip / "sessions"
-    if sessions_dir.is_dir():
-        status["session_count"] = len(list(sessions_dir.glob("*.jsonl")))
-
     # Models
     models_dir = tcip / "models"
     if models_dir.is_dir():
@@ -312,7 +203,7 @@ def export_project(project_path: str, output_path: str = "", include_models: boo
 
     Scans the canonical dataset layout (see :mod:`tcip_mcp.dataset_layout`): images under
     ``<root>/images/<date>/`` and ground truth under
-    ``<root>/annotations/<trait>/<date>/<task>/``, plus the ``.tcip`` config, session logs,
+    ``<root>/annotations/<trait>/<date>/<task>/``, plus the ``.tcip`` config
     and the class map (``.tcip/state/classes.json``). Optionally includes trained checkpoints.
 
     Args:
@@ -344,7 +235,7 @@ def export_project(project_path: str, output_path: str = "", include_models: boo
                         zf.write(sub, sub.relative_to(root))
                         files_added += 1
 
-        # .tcip config + sessions + the class map at .tcip/state/classes.json
+        # .tcip config + the class map at .tcip/state/classes.json
         tcip_dir = root / ".tcip"
         if tcip_dir.is_dir():
             for f in tcip_dir.rglob("*"):
