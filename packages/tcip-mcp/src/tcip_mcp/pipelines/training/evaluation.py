@@ -118,6 +118,21 @@ def _counts_at_operating_point(coco_eval, iou_threshold: float, conf_threshold: 
     return {"tp": tp, "fp": fp, "fn": max(total_gt - tp, 0), "per_image_counts": per_image_counts}
 
 
+def _ap_from_precision(coco_eval, *, iou: float | None, maxdet: int) -> float:
+    """Mean AP from ``coco_eval.eval['precision']`` at a given IoU / maxDet, mirroring
+    pycocotools' ``_summarize(ap=1)`` (area='all'), but indexed explicitly so we can read AP at
+    BOTH the standard 100 cap and a non-100 operating cap without summarize()'s hardcoded 100."""
+    p = coco_eval.params
+    s = coco_eval.eval["precision"]  # [T(iou), R(rec), K(cat), A(area), M(maxDet)]
+    if iou is not None:
+        t = np.where(np.isclose(p.iouThrs, iou))[0]
+        s = s[t]
+    mind = list(p.maxDets).index(maxdet)
+    s = s[:, :, :, 0, mind]  # area 'all' is index 0
+    valid = s[s > -1]
+    return float(valid.mean()) if valid.size else 0.0
+
+
 def coco_detection_metrics(
     per_image: list[dict],
     *,
@@ -128,8 +143,9 @@ def coco_detection_metrics(
 ) -> dict:
     """Run ``COCOeval`` once over ``per_image`` records and return COCO metrics.
 
-    Returns mAP (``map``/``map50``/``map75``) plus operating-point
-    ``precision``/``recall``/``f1``/``tp``/``fp``/``fn`` and per-image counts.
+    Returns mAP at the STANDARD 100-detection cap (``map``/``map50``/``map75`` — comparable across
+    runs and caps) plus the same at the operating cap (``map_at_maxdets``/``map50_at_maxdets``),
+    and operating-point ``precision``/``recall``/``f1``/``tp``/``fp``/``fn`` with per-image counts.
     Short-circuits to all-zero metrics (no exception) for empty predictions
     (``loadRes([])`` raises ``IndexError``), empty GT (COCOeval ``stats == -1``),
     or a fully empty set.
@@ -161,6 +177,7 @@ def coco_detection_metrics(
 
     base = {
         "map": 0.0, "map50": 0.0, "map75": 0.0,
+        "map_at_maxdets": 0.0, "map50_at_maxdets": 0.0,
         "precision": 0.0, "recall": 0.0, "f1": 0.0,
         "tp": 0, "fp": 0, "fn": n_gt,
         "n_images": len(per_image), "n_gt": n_gt, "n_pred": n_pred,
@@ -188,12 +205,17 @@ def coco_detection_metrics(
         except IndexError:
             return base
         coco_eval = COCOeval(coco_gt, coco_dt, iouType=iou_type)
-        coco_eval.params.maxDets = [1, 10, max_dets]
+        # Include 100 so map/map50/map75 stay the standard, cap-comparable AP (the old [1,10,max_dets]
+        # made summarize() report AP=0.0 for any non-100 cap); max_dets adds the operating-cap figures.
+        coco_eval.params.maxDets = sorted({1, 100, int(max_dets)})
         coco_eval.params.imgIds = [im["id"] for im in images]
         coco_eval.evaluate()
         coco_eval.accumulate()
-        coco_eval.summarize()
-        stats = coco_eval.stats
+        m_ap = _ap_from_precision(coco_eval, iou=None, maxdet=100)
+        m_ap50 = _ap_from_precision(coco_eval, iou=0.5, maxdet=100)
+        m_ap75 = _ap_from_precision(coco_eval, iou=0.75, maxdet=100)
+        m_ap_md = _ap_from_precision(coco_eval, iou=None, maxdet=int(max_dets))
+        m_ap50_md = _ap_from_precision(coco_eval, iou=0.5, maxdet=int(max_dets))
         counts = _counts_at_operating_point(coco_eval, iou_threshold, conf_threshold)
 
     tp, fp, fn = counts["tp"], counts["fp"], counts["fn"]
@@ -201,9 +223,11 @@ def coco_detection_metrics(
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
     return {
-        "map": max(float(stats[0]), 0.0),
-        "map50": max(float(stats[1]), 0.0),
-        "map75": max(float(stats[2]), 0.0),
+        "map": max(m_ap, 0.0), "map50": max(m_ap50, 0.0), "map75": max(m_ap75, 0.0),
+        "map_at_maxdets": max(m_ap_md, 0.0), "map50_at_maxdets": max(m_ap50_md, 0.0),
+        # map/map50/map75 are standard COCO AP@100 as of this marker; older stored metrics
+        # (no marker) used maxDets=max_dets and are not numerically comparable.
+        "map_convention": "coco_ap100",
         "precision": precision, "recall": recall, "f1": f1,
         "tp": tp, "fp": fp, "fn": fn,
         "n_images": len(per_image), "n_gt": n_gt, "n_pred": n_pred,
@@ -218,7 +242,7 @@ def coco_detection_metrics(
 # ====================================================================
 # For small objects (e.g. ~40px catkins) IoU is noise; a detection counts as finding an object when
 # its center lands within a derived tolerance of a GT center. The operating point (conf) is then
-# derived to minimize the signed per-image count bias E[FP-FN] — NOT F1 — because the phenotype is a
+# derived to minimize the signed per-image count bias E[FP-FN] — not F1 — because the phenotype is a
 # count (Sigma pred ~= Sigma gt). See traits.py (count_objective=count_unbiased, localization=center_match).
 
 def _centers_xywh(anns: list[dict]) -> list[tuple[float, float]]:
@@ -311,7 +335,7 @@ def pick_count_unbiased(sweep: dict) -> float | None:
     """The conf that minimizes |mean per-image count bias| (tie-break: higher F1, lower |error|).
 
     This is the count-trait operating point — where the model's totals match GT totals — which is
-    generally NOT the F1-max point (that optimizes matching, not count agreement).
+    generally not the F1-max point (that optimizes matching, not count agreement).
     """
     curve = sweep.get("curve") or []
     if not curve:
@@ -530,18 +554,17 @@ def evaluate(
             images, targets = batch
             images = [img.to(device) for img in images]
             targets = [{k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in t.items()} for t in targets]
-            # Loss pass.
+            # Loss pass over the FULL batch — all-negative (empty-box) images contribute their
+            # background/objectness loss, so val_loss penalizes false positives on empty frames and
+            # matches the train loop's distribution (CV9). BN stays eval via the train()+BN.eval() trick.
             if detector is not None:
-                keep = [(im, t) for im, t in zip(images, targets)
-                        if isinstance(t.get("boxes"), torch.Tensor) and t["boxes"].numel() > 0]
-                if keep:
-                    detector.train()
-                    for m in detector.modules():
-                        if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-                            m.eval()
-                    ld = detector([im for im, _ in keep], [t for _, t in keep])
-                    total_loss += float(sum(ld.values()).item())
-                    n_loss += 1
+                detector.train()
+                for m in detector.modules():
+                    if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                        m.eval()
+                ld = detector(images, targets)
+                total_loss += float(sum(ld.values()).item())
+                n_loss += 1
             else:
                 model.training = True
                 for head in getattr(model, "heads", []):
@@ -588,11 +611,13 @@ def evaluate(
         result.update({
             "precision": round(m["precision"], 6), "recall": round(m["recall"], 6),
             "f1": round(m["f1"], 6), "map50": round(m["map50"], 6), "map": round(m["map"], 6),
+            "map_at_maxdets": round(m["map_at_maxdets"], 6),
+            "map50_at_maxdets": round(m["map50_at_maxdets"], 6),
         })
         result["objective"] = round(compute_composite_objective(loss, m["f1"], m["map50"], score_weights), 6)
     elif task == "classification" and cls_p:
         num_classes = getattr(model.heads[0], "num_classes", int(torch.cat(cls_g).max()) + 1)
-        # classification_metrics now also returns per_class/count_bias DICTS — round only the scalars.
+        # classification_metrics now also returns per_class/count_bias dicts — round only the scalars.
         result.update({k: (round(v, 6) if isinstance(v, (int, float)) else v)
                        for k, v in classification_metrics(torch.cat(cls_p), torch.cat(cls_g), num_classes).items()})
     elif task == "ordinal" and ord_p:
@@ -607,8 +632,15 @@ def run_test_evaluation(
     ckpt_path: str, loader, device, task: str, output_dir: str, *,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
+    tiling: dict | None = None,
 ) -> dict:
-    """Load ``model_best.pt``, evaluate ``loader``, write ``test_results.json``."""
+    """Load ``model_best.pt``, evaluate ``loader``, write ``test_results.json``.
+
+    ``tiling`` describes the eval dataset regime for provenance only (the loader is built by the
+    caller): a tile-level run scores per-tile predictions against per-tile GT (a diagnostic that
+    matches the training-run val mAP), not the delivery regime — the stamp keeps the two from being
+    silently conflated. See CV1: use ``run_full_frame_evaluation`` for a delivery-grade metric.
+    """
     from tcip_mcp.pipelines.composer import compose_model
 
     ckpt = torch.load(ckpt_path, map_location=device)
@@ -619,11 +651,74 @@ def run_test_evaluation(
     metrics = evaluate(model, loader, device, task, conf_threshold=conf_threshold,
                        iou_threshold=iou_threshold, iou_type=iou_type, max_dets=max_dets,
                        score_weights=score_weights)
+    tiled = bool(tiling and tiling.get("enabled", True) and task == "detection")
     result = {
         **metrics,
         "model_path": str(ckpt_path), "task": task,
         "iou_type": effective_iou_type(task, iou_type),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
+        "tiled": tiled,
+        "eval_regime": "tile-level" if tiled else "full-frame-single-pass",
+    }
+    out = Path(output_dir) / "test_results.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
+        json.dump(result, f, indent=2)
+    result["results_path"] = str(out)
+    return result
+
+
+def run_full_frame_evaluation(
+    ckpt_path: str, images_dir: str, labels_dir: str, output_dir: str, *,
+    conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
+    tile_size: int = 640, overlap: float = 0.2, global_nms_iou: float = 0.3,
+    max_dets: int = 1000, postprocess: str = "nms", device: str | None = None,
+) -> dict:
+    """Delivery-grade detection eval (CV1 Tier-2): tiled INFERENCE reconstructed to full frame,
+    matched to full-frame GT.
+
+    Unlike tile-level eval this exercises the cross-tile merge and scores against un-fragmented GT,
+    so it answers "how well does the shipped full-frame count match ground truth" — the number that
+    gates a phenotype delivery. Tile-level (``run_test_evaluation`` with ``tiling``) is a diagnostic
+    that matches the training-run val mAP; it must not be reported as the delivery metric.
+    """
+    from tcip_annotation import json_io
+
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    predictor = build_predictor(
+        checkpoint_path=str(ckpt_path), device=device,
+        score_threshold=conf_threshold, nms_iou=global_nms_iou, max_dets=max_dets)
+
+    img_dir, lbl_dir = Path(images_dir), Path(labels_dir)
+    image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+    paths = sorted(p for p in img_dir.iterdir() if p.suffix.lower() in image_exts)
+    per_image: list[dict] = []
+    for p in paths:
+        r = predictor.predict_tiled(str(p), tile_size=tile_size, overlap=overlap,
+                                    global_nms_iou=global_nms_iou, postprocess=postprocess)
+        w, h = int(r["width"]), int(r["height"])
+        dt = [{"category_id": int(lab), "bbox": _xyxy_to_xywh(*b), "score": float(s)}
+              for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
+        gt = []
+        gt_file = lbl_dir / f"{p.stem}.json"
+        if gt_file.is_file():
+            for b in json_io.read_detect(str(gt_file))[0]:
+                # GT category_id is 0-indexed foreground; predictor labels are 1-indexed
+                # (torchvision background=0), so lift GT to match before matching.
+                gt.append({"category_id": int(b.class_id) + 1,
+                           "bbox": _xyxy_to_xywh(b.x1, b.y1, b.x2, b.y2), "iscrowd": 0})
+        per_image.append(build_coco_image_record(w, h, gt, dt, image_id=p.stem))
+
+    m = coco_detection_metrics(per_image, iou_threshold=iou_threshold,
+                               conf_threshold=conf_threshold, max_dets=max_dets)
+    keys = ("map", "map50", "map75", "map_at_maxdets", "map50_at_maxdets",
+            "precision", "recall", "f1", "tp", "fp", "fn", "n_images", "n_gt", "n_pred")
+    result = {
+        **{k: m[k] for k in keys},
+        "model_path": str(ckpt_path), "task": "detection", "iou_type": "bbox",
+        "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
+        "tile_size": tile_size, "tiled": True, "eval_regime": "full-frame-tiled-inference",
     }
     out = Path(output_dir) / "test_results.json"
     out.parent.mkdir(parents=True, exist_ok=True)
