@@ -33,12 +33,12 @@ def test_global_merge_keeps_different_classes_apart():
 def test_global_merge_absorbs_low_iou_fragment_via_ios():
     from tcip_mcp.pipelines.data.tiling import global_merge
 
-    # A small partial fragment mostly INSIDE a fuller detection: IoU ≈ 0.04 (NMS would keep both),
+    # A small partial fragment mostly inside a fuller detection: IoU ≈ 0.04 (NMS would keep both),
     # IoS = 1.0 (fully contained). NMM must merge it — the seam-split case merging exists for.
     boxes = np.array([[0, 0, 10, 10], [4, 4, 6, 6]], dtype=np.float32)
     scores = np.array([0.9, 0.6], dtype=np.float32)
     labels = np.array([1, 1], dtype=np.int64)
-    mb, _, _ = global_merge(boxes, scores, labels, iou_thresh=0.3)  # 0.3 would NOT merge on IoU
+    mb, _, _ = global_merge(boxes, scores, labels, iou_thresh=0.3)  # 0.3 would not merge on IoU
     assert len(mb) == 1
     assert list(mb[0]) == [0.0, 0.0, 10.0, 10.0]
 
