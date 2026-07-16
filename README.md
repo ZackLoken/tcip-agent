@@ -96,7 +96,7 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 
 ## Conventions
 
-- **Annotations**: YOLO by default. Auto-detects YOLO / COCO / PASCAL VOC / LabelMe. Empty label files are valid negatives.
+- **Annotations**: canonical on-disk format is per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance). Also imports/exports YOLO / COCO (dataset-level) / PASCAL VOC / LabelMe via an explicit format. Empty label files are valid negatives.
 - **Experiments**: tracked in `.tcip/experiments/<id>/` with config, metrics JSONL, artifacts, lineage.
 - **Audit log**: all MCP tool calls logged to `.tcip/audit.jsonl` via `@audited` decorator.
 - **Lazy imports**: heavy deps (torch, torchvision) imported inside function bodies for fast MCP startup.
@@ -112,8 +112,9 @@ segmentation, classification, ordinal, regression — via the composable
 backbone/neck/head spec (detectors built through a registry-driven `DETECTORS`
 factory; `instance_seg` via Mask R-CNN), on **RGB and N-channel imagery** (multi-band
 GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`), with
-training that loads YOLO / COCO / PASCAL VOC / LabelMe labels directly, experiment
-tracking, annotation/review, SAM-assisted labeling, and per-plant CSV export — including the
+training that loads the native per-image JSON labels directly (YOLO / COCO / PASCAL VOC /
+LabelMe import/export via an explicit format), experiment tracking, annotation/review,
+SAM-assisted labeling, and per-plant CSV export — including the
 Phase 1 **catkin bloom phenology** deliverable (per-plant `catkin_05/50/95per_date` = the
 dates a plant's *elongated fraction* of detected catkins crosses 5/50/95%; elongation is a
 validated classifier class, never a geometric proxy). The agent composes it end to end via
