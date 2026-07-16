@@ -67,7 +67,7 @@ def test_point_in_polygon_outside():
 
 
 def test_point_in_polygon_on_edge():
-    """Points on the boundary are NOT inside (Shapely convention)."""
+    """Points on the boundary are not inside (Shapely convention)."""
     poly = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)], 0)
     assert point_in_polygon(0, 50, poly) is False
 
