@@ -108,7 +108,7 @@ function App() {
   // OS user; the backend can rewrite this from a header later if needed.
   useEffect(() => {
     if (!projectRoot) return;
-    const user = localStorage.getItem("tcip.user") || "web";
+    const user = useStore.getState().user || "web";
     // Best-effort telemetry — never surface a failure to the user.
     void sessionsApi.start(projectRoot, user).catch(() => {});
     endedSessionForRoot.current = null;
