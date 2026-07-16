@@ -85,6 +85,36 @@ def test_heartbeat_updates_meta_without_touching_geometry(client, tmp_path):
     assert after == before                                              # geometry blob untouched
 
 
+def test_push_state_rejects_project_root_outside_image_roots(client, tmp_path, monkeypatch):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    r = client.post("/api/canvas/state", json=_payload(outside, "C:/img/a.jpg"))
+    assert r.status_code == 403
+    assert not (outside / ".tcip" / "state" / "canvas_live.json").exists()
+
+
+def test_push_state_allows_project_root_inside_image_roots(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path))
+    r = client.post("/api/canvas/state", json=_payload(tmp_path, "C:/img/a.jpg"))
+    assert r.status_code == 200
+
+
+def test_push_state_does_not_fsync(client, tmp_path, monkeypatch):
+    """canvas_live/canvas_shapes are ephemeral — a push must not depend on fsync."""
+    import os as _os
+
+    def _boom(*_a, **_kw):
+        raise AssertionError("fsync should not be called for canvas state")
+
+    monkeypatch.setattr(_os, "fsync", _boom)
+    r = client.post("/api/canvas/state", json=_payload(tmp_path, "C:/img/a.jpg", shapes=SHAPES))
+    assert r.status_code == 200
+    assert _meta(tmp_path)["image_path"] == "C:/img/a.jpg"
+
+
 def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, tmp_path):
     client.post("/api/canvas/state", json=_payload(tmp_path, "C:/img/a.jpg", shapes=SHAPES))
     client.post("/api/canvas/state", json=_payload(tmp_path, "C:/img/b.jpg", shapes=None))
