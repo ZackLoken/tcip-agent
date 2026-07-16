@@ -38,7 +38,7 @@ _PROTECTED = re.compile(
 )
 
 # Start of a statement / pipeline segment — where an invoked verb (or its alias) appears.
-# Anchoring the SHORT aliases here stops them false-matching a bareword buried in an argument
+# Anchoring the short aliases here stops them false-matching a bareword buried in an argument
 # (e.g. ``Get-Content del-notes.txt`` must not read as the ``del`` alias).
 _STMT = r"(?:^|[\n;|&(){}]\s*)"
 
@@ -61,7 +61,7 @@ _WRITE_ALIAS = re.compile(
     re.IGNORECASE,
 )
 
-# Deletes — blocked UNCONDITIONALLY, mirroring the Bash fence's blanket ``Bash(rm:*)`` /
+# Deletes — blocked unconditionally, mirroring the Bash fence's blanket ``Bash(rm:*)`` /
 # ``Bash(rmdir:*)`` deny: the agent mutates data through audited MCP tools, not raw shell
 # deletion (of platform code OR of a breeder's labels).
 _DELETE_OP = re.compile(
@@ -71,7 +71,7 @@ _DELETE_OP = re.compile(
 _DELETE_ALIAS = re.compile(_STMT + r"(?:ri|rm|rmdir|rd|del|erase)\b", re.IGNORECASE)
 
 # Inline / arbitrary code execution — blocked unconditionally. Covers Invoke-Expression, a
-# spawned interpreter (``python -c``…), AND a NESTED shell (``powershell -EncodedCommand``,
+# spawned interpreter (``python -c``…), and a nested shell (``powershell -EncodedCommand``,
 # ``pwsh -Command``, ``cmd /c``) whose payload the guard can't see through.
 _INLINE_INTERP = re.compile(
     r"\bInvoke-Expression\b|\biex\b"
