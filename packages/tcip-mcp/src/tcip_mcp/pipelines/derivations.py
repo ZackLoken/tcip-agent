@@ -83,7 +83,7 @@ def resolve_spec_derivations(model_spec: dict, *, sample_image: str | Path | Non
 
     bb = model_spec.get("backbone")
     if isinstance(bb, dict) and sample_image is not None and "in_chans" not in bb:
-        # Isolate the probe: a raster-read failure must NOT suppress the num_classes derivation below
+        # Isolate the probe: a raster-read failure must not suppress the num_classes derivation below
         # (which would then surface as an opaque compose-time TypeError with the real cause hidden).
         try:
             ch = probe_channels(sample_image)
@@ -96,7 +96,7 @@ def resolve_spec_derivations(model_spec: dict, *, sample_image: str | Path | Non
 
     if class_distribution:
         nc = num_classes_from_distribution(class_distribution)
-        # Real detection head names (composer _DETECTION_HEADS + instance_seg) — NOT "detection".
+        # Real detection head names (composer _DETECTION_HEADS + instance_seg) — not "detection".
         # Missing anchor_free_detection meant FCOS (the catkin detector) never derived num_classes.
         for h in model_spec.get("heads", []):
             if h.get("name") in ("anchor_detection", "anchor_free_detection", "instance_seg") and "num_classes" not in h:
