@@ -35,7 +35,8 @@ Claude ──MCP(stdio)──▶ tcip-mcp ──HTTP/WS──▶ tcip-web (FastA
 - `packages/tcip-annotation/` — headless annotation/review engine (label & format I/O, IoU matching, SAM).
 - `packages/tcip-web/` — FastAPI backend + Vite/React/TS/Tailwind/Konva frontend. The human's UI.
 - `scripts/` — one-off scripts you write (see "Scripts vs tools").
-- `.github/skills/` — domain knowledge. **Load the relevant skill before acting** in its domain.
+- `.github/skills/` — domain knowledge. **Read the relevant `SKILL.md` before acting** in its
+  domain (these are repo files, not registered skills — use Read, not the Skill tool).
 
 Crops: hazelnut, chestnut, currant, elderberry, persimmon, black_locust.
 
@@ -46,7 +47,10 @@ blanks silently, treating an uncertain read as settled. In a scientific pipeline
 that silently corrupts results and compounds across sessions. So:
 
 - **Start a session** with `load_reports` and `load_retrospectives` to pick up open
-  friction and prior context, then `get_project_status` before acting.
+  friction and prior context, then `get_project_status`, then run
+  `python scripts/doctor.py <project_root>` — it flags data-state inconsistencies
+  (unconfirmed negatives, registry pollution, provenance smells) that code reads miss.
+  Report anything it finds via `claude_reports` before acting on the data.
 - **Surface friction with `claude_reports` the moment you hit it** — missing tool,
   ambiguous data, missing path, unclear domain concept, an op that failed 2–3×, a
   decision needing human judgment, or behavior that surprised you. The free-text
@@ -75,7 +79,9 @@ that silently corrupts results and compounds across sessions. So:
   - **Never commit unvalidated domain logic as if it were a definition.** Provisional logic
     is flagged provisional and validated or removed; it must not silently become
     institutional truth that the next session reuses.
-- **Empty label files are valid negatives**, not noise. Never delete/skip without asking.
+- **A negative is empty labels + an explicit human Complete** (the `image_status.json` store) —
+  an empty label file alone is never a negative (it may be emptied mid-work) and never trains
+  as one. Don't delete empty label files without asking.
 - **Never train or evaluate on an unconfirmed format.** If `load_annotations`
   returns `"format_confident": false`, stop and confirm the format — an undetected
   mismatch makes real annotations read as empty negatives.
