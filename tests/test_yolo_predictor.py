@@ -45,14 +45,18 @@ def test_build_result_caps_at_max_dets_by_score():
     assert r["tiles"] == 9
 
 
-def test_build_result_round_trips_through_yolo_lines():
+def test_build_result_round_trips_through_json_export(tmp_path):
+    import json
+
     from tcip_mcp.pipelines.inference.yolo_predictor import build_result
-    from tcip_mcp.pipelines.postprocessing.export import result_to_yolo_lines
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     r = build_result([_fake_pred(0, 0.8, (40, 40, 60, 60))], "img.jpg", 100, 100)
-    lines = result_to_yolo_lines(r)
-    # 1-indexed dict label 1 -> 0-indexed YOLO class 0; centered box -> cx=cy=0.5
-    assert lines[0].startswith("0 0.8000 0.500000 0.500000 0.200000 0.200000")
+    write_predictions_json(tmp_path / "img.json", r)
+    obj = json.loads((tmp_path / "img.json").read_text())["objects"][0]
+    assert obj["category_id"] == 0                 # 1-indexed dict label 1 -> 0-indexed class 0
+    assert obj["score"] == 0.8
+    assert obj["bbox"] == [40.0, 40.0, 20.0, 20.0]  # pixel COCO xywh from xyxy [40,40,60,60]
 
 
 def test_detect_kind_sniffs_ultralytics_shaped_checkpoint(tmp_path):
