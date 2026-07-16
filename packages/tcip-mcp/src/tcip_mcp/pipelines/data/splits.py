@@ -23,6 +23,7 @@ splits), annotation-balanced, and deterministic in ``seed``.
 
 from __future__ import annotations
 
+import json
 import random
 import re
 from collections import defaultdict
@@ -65,7 +66,17 @@ def count_lines(label_path: str | Path) -> int:
 
 
 def count_label_lines(labels_dir: str | Path, stem: str) -> int:
-    """Annotation count for ``stem`` = non-empty lines of ``labels_dir/<stem>.txt``."""
+    """Annotation count for ``stem`` — objects in the canonical per-image ``<stem>.json``, else
+    non-empty lines of the legacy ``<stem>.txt``. Reading only the YOLO name would score every
+    JSON-labelled stem as 0 foreground and silently defeat stratified splitting."""
+    jp = Path(labels_dir) / f"{stem}.json"
+    if jp.is_file():
+        try:
+            data = json.loads(jp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return 0
+        objs = data.get("objects") if isinstance(data, dict) else None
+        return len(objs) if isinstance(objs, list) else 0
     return count_lines(Path(labels_dir) / f"{stem}.txt")
 
 
