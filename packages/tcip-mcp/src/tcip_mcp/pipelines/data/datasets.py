@@ -91,6 +91,25 @@ def dir_label_format(labels_dir) -> str | None:
     return "yolo" if any(d.glob("*.txt")) else None
 
 
+def confirmed_negative_names(labels_dir) -> set[str]:
+    """Image names a human explicitly marked negative (empty + Complete) for this label dir.
+
+    Walks up from ``labels_dir`` to the project's ``.tcip/state/image_status.json`` (the GUI's
+    completion store). An empty label file alone is never a negative — someone may have just
+    emptied it mid-work — so training trusts only this human confirmation. No store → empty set.
+    """
+    d = Path(labels_dir).resolve()
+    for parent in (d, *d.parents):
+        status_file = parent / ".tcip" / "state" / "image_status.json"
+        if status_file.is_file():
+            try:
+                statuses = json.loads(status_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return set()
+            return {name for name, s in statuses.items() if s == "negative"}
+    return set()
+
+
 def assemble_coco(labels_dir, images_dir, stems=None, categories=None) -> dict:
     """Assemble a dataset-level COCO dict from per-image JSON labels (the json_io schema).
 
@@ -113,7 +132,10 @@ def assemble_coco(labels_dir, images_dir, stems=None, categories=None) -> dict:
         except FileNotFoundError:
             continue
         entries.append((str(labels_dir / f"{stem}.json"), file_name))
-    return json_io.to_coco_dataset(entries, categories=categories)
+    return json_io.to_coco_dataset(
+        entries, categories=categories,
+        confirmed_negative_names=confirmed_negative_names(labels_dir),
+    )
 
 
 class BaseDataset(Dataset, ABC):
