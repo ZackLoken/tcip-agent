@@ -36,14 +36,13 @@ early_stopping:
 
 ## Config Structure
 
+`model_spec` composes from the registry (`backbone → neck → heads → loss`) — see the
+canonical example and current component names in `pipeline-design/SKILL.md`; don't
+re-derive it here.
+
 ```python
 config = {
-    "model_spec": {
-        "backbone": {"name": "resnet50", "pretrained": True},
-        "neck": {"name": "fpn"},
-        "heads": [{"name": "detection_head", "task": "detection", "num_classes": 3}],
-        "loss": {"name": "focal_loss"}
-    },
+    "model_spec": {...},  # see pipeline-design skill
     "data": {
         "images_dir": "data/images",
         "labels_dir": "data/labels/detect",
@@ -98,6 +97,10 @@ run_hpo(base_config=config, n_trials=20, output_dir="runs/hpo_1")
 ## Dataset Splits
 
 Use `split_dataset` to create train/val/test splits:
-- Default: 70/20/10
-- Stratified by class distribution
+- Default: 70/20/10, leakage-free (sibling tiles of one source image stay in the same split)
+- `stratified=True` (opt-in, default `False`) balances splits by each source's foreground
+  annotation count — not per-class distribution
 - Reproducible with random seed
+
+Feeding review-corrected labels back into training? `materialize_review_dataset` (see the
+`annotation` skill) builds the curated dataset from review verdicts before you split/train.
