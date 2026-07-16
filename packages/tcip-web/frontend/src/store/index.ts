@@ -50,7 +50,7 @@ const DEFAULT_STATE: GuiState = {
 
 /**
  * Local canvas state — per-image draft annotations shown on the canvas.
- * These are NOT synced to the backend until the user hits save.
+ * These are not synced to the backend until the user hits save.
  */
 export interface CanvasState {
   imgWidth: number;
@@ -201,7 +201,7 @@ export interface AppState {
    *  same-identity backend snapshot keeps the restored index instead of resetting it to 0. */
   applyRestoredDataset: (sel: DatasetSelection) => void;
   /**
-   * Apply a backend state snapshot with ownership-aware merge (NOT a wholesale
+   * Apply a backend state snapshot with ownership-aware merge (not a wholesale
    * replace, which used to clobber unsaved edits, the active tab, and the scroll
    * position). Backend owns the dataset selection; the browser owns
    * navigation/view/mode/class/review-filter state and keeps its own copy.
