@@ -157,9 +157,15 @@ def parse_coco_detect(
             continue
         x, y, bw, bh = bbox
         cid = ann.get("category_id", 0)
-        boxes.append(BBox(x, y, x + bw, y + bh, cid))
+        boxes.append(BBox(x, y, x + bw, y + bh, cid, **_coco_prov(ann)))
         class_ids.add(cid)
     return boxes, class_ids
+
+
+def _coco_prov(ann: dict) -> dict:
+    """Provenance extension keys of a COCO annotation record, when present."""
+    return {k: ann[k] for k in ("created_by", "created_at", "accepted_by", "accepted_at")
+            if ann.get(k)}
 
 
 def parse_coco_segment(
@@ -183,12 +189,27 @@ def parse_coco_segment(
             if not isinstance(coords, list) or len(coords) < 6:
                 continue
             points = [(coords[i], coords[i + 1]) for i in range(0, len(coords), 2)]
-            polygons.append(Polygon(points, cid))
+            polygons.append(Polygon(points, cid, **_coco_prov(ann)))
             class_ids.add(cid)
     return polygons, class_ids
 
 
 # ── COCO JSON writing ──────────────────────────────────────────────────────
+
+
+def _emit_coco_extras(rec: dict, shape) -> None:
+    """Carry provenance (and a Pred shape's score) into a COCO annotation record.
+
+    Extension keys, same names as the canonical per-image JSON — without them a GT
+    round-trip through dataset-COCO export silently strips created_by/accepted_by.
+    """
+    for key in ("created_by", "created_at", "accepted_by", "accepted_at"):
+        val = getattr(shape, key, None)
+        if val:
+            rec[key] = val
+    conf = getattr(shape, "confidence", None)
+    if conf is not None:
+        rec["score"] = float(conf)
 
 
 def write_coco_detect(
@@ -217,14 +238,16 @@ def write_coco_detect(
         for box in boxes:
             bw = box.x2 - box.x1
             bh = box.y2 - box.y1
-            coco["annotations"].append({
+            rec = {
                 "id": ann_id,
                 "image_id": img_id,
                 "category_id": box.class_id,
                 "bbox": [round(box.x1, 2), round(box.y1, 2), round(bw, 2), round(bh, 2)],
                 "area": round(bw * bh, 2),
                 "iscrowd": 0,
-            })
+            }
+            _emit_coco_extras(rec, box)
+            coco["annotations"].append(rec)
             ann_id += 1
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -265,7 +288,7 @@ def write_coco_segment(
             y_min, y_max = min(ys), max(ys)
             bw = x_max - x_min
             bh = y_max - y_min
-            coco["annotations"].append({
+            rec = {
                 "id": ann_id,
                 "image_id": img_id,
                 "category_id": poly.class_id,
@@ -273,7 +296,9 @@ def write_coco_segment(
                 "bbox": [round(x_min, 2), round(y_min, 2), round(bw, 2), round(bh, 2)],
                 "area": round(bw * bh, 2),
                 "iscrowd": 0,
-            })
+            }
+            _emit_coco_extras(rec, poly)
+            coco["annotations"].append(rec)
             ann_id += 1
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -546,6 +571,7 @@ def save_annotations(
     fmt: AnnotFormat = "yolo",
     file_name: str | None = None,
     id_to_name: dict[int, str] | None = None,
+    keep_empty: bool = False,
 ) -> None:
     """Save annotations to the specified format.
 
@@ -553,6 +579,8 @@ def save_annotations(
     For COCO: writes/updates a .json file (pass file_name for image identification).
     For VOC: writes a single .xml file (detection only).
     For LabelMe: writes a single .json file (rectangles or polygons).
+    ``keep_empty`` (json format): an empty list writes a confirmed-negative ``objects: []``
+    file instead of deleting the label — without it a save of zero shapes erases GT.
     """
     if fmt == "yolo":
         if task == "detect":
@@ -563,9 +591,9 @@ def save_annotations(
         from tcip_annotation import json_io
 
         if task == "detect":
-            json_io.write_detect(path, annotations, img_w, img_h)  # type: ignore[arg-type]
+            json_io.write_detect(path, annotations, img_w, img_h, keep_empty=keep_empty)  # type: ignore[arg-type]
         else:
-            json_io.write_segment(path, annotations, img_w, img_h)  # type: ignore[arg-type]
+            json_io.write_segment(path, annotations, img_w, img_h, keep_empty=keep_empty)  # type: ignore[arg-type]
     elif fmt == "coco":
         fname = file_name or Path(path).stem
         images_dict = {fname: (annotations, img_w, img_h)}
