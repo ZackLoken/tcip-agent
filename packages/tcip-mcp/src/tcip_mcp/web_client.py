@@ -5,8 +5,12 @@ Replaces the legacy ``.tcip/events/`` file-bridge. MCP tools call
 
 Port discovery order:
   1. ``TCIP_WEB_PORT`` environment variable.
-  2. ``.tcip/state/web_port.txt`` (written by the FastAPI backend on startup).
-  3. Default: 8765.
+  2. ``.tcip/state/web_port.txt`` under the pinned platform root.
+  3. The same file under the repo root — the backend writes it at ITS startup root (the repo,
+     pre-adoption), so after ``set_active_project`` repins this process's root to a project the
+     pinned location no longer holds the file; without this fallback the ping silently degraded
+     to the default port whenever the backend ran on a non-default one.
+  4. Default: 8765.
 
 Host discovery:
   1. ``TCIP_WEB_HOST`` environment variable.
@@ -25,6 +29,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from tcip_mcp.project_paths import project_root as _platform_root
+from tcip_mcp.project_paths import repo_root_from_here as _repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +59,14 @@ def resolve_web_port(project_root: Optional[Path] = None) -> int:
         except ValueError:
             logger.warning("TCIP_WEB_PORT=%r is not an integer; falling back", env)
 
-    root = Path(project_root) if project_root else _platform_root()
-    port_file = root / PORT_FILE_RELATIVE
-    if port_file.exists():
-        try:
-            return int(port_file.read_text(encoding="utf-8").strip())
-        except ValueError:
-            logger.warning("Cannot parse port from %s; using default", port_file)
+    roots = [Path(project_root)] if project_root else [_platform_root(), _repo_root()]
+    for root in roots:
+        port_file = root / PORT_FILE_RELATIVE
+        if port_file.exists():
+            try:
+                return int(port_file.read_text(encoding="utf-8").strip())
+            except ValueError:
+                logger.warning("Cannot parse port from %s; using default", port_file)
 
     return DEFAULT_PORT
 
@@ -93,6 +99,12 @@ def post_panel_event(
     import json
     import urllib.error
     import urllib.request
+
+    # Hermetic under pytest: focus/web tests must never steer a LIVE GUI session to ephemeral
+    # fixture paths (the browser then 404s on deleted tmp dirs). Tests that exercise real
+    # delivery opt back in with TCIP_ALLOW_PANEL_EVENTS=1.
+    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("TCIP_ALLOW_PANEL_EVENTS"):
+        return {"status": "suppressed_under_pytest", "delivered": False, "url": ""}
 
     url = backend_url(f"/api/events/{panel}", project_root=project_root)
     payload = json.dumps({"panel": panel, "event_type": event_type, "data": data}).encode("utf-8")
