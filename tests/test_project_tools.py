@@ -6,47 +6,18 @@ from pathlib import Path
 
 from tcip_mcp.tools.project_tools import (
     init_project,
-    create_session,
-    append_session_event,
-    list_sessions,
-    get_session,
     get_project_status,
+    export_project,
+    import_project,
 )
 
 
 def test_init_project(tmp_path: Path):
     result = init_project(str(tmp_path))
     assert (tmp_path / ".tcip").is_dir()
-    assert (tmp_path / ".tcip" / "sessions").is_dir()
+    assert (tmp_path / ".tcip" / "artifacts").is_dir()
     assert (tmp_path / ".tcip" / "config.toml").is_file()
     assert ".tcip/" in result["created"]
-
-
-def test_create_and_get_session(tmp_path: Path):
-    init_project(str(tmp_path))
-    session = create_session(str(tmp_path), description="Test session")
-    assert "session_id" in session
-
-    sessions = list_sessions(str(tmp_path))
-    assert sessions["count"] == 1
-    assert sessions["sessions"][0]["description"] == "Test session"
-
-    detail = get_session(str(tmp_path), session["session_id"])
-    assert detail["count"] == 1
-    assert detail["events"][0]["type"] == "session_start"
-
-
-def test_append_session_event(tmp_path: Path):
-    init_project(str(tmp_path))
-    session = create_session(str(tmp_path))
-    result = append_session_event(
-        str(tmp_path), session["session_id"], "tool_call",
-        {"tool": "load_dataset", "result": "ok"},
-    )
-    assert result["event_type"] == "tool_call"
-
-    detail = get_session(str(tmp_path), session["session_id"])
-    assert detail["count"] == 2
 
 
 def test_get_project_status(tmp_path: Path):
@@ -57,3 +28,38 @@ def test_get_project_status(tmp_path: Path):
     status = get_project_status(str(tmp_path))
     assert status["initialized"] is True
     assert status["has_config"] is True
+
+
+def test_export_import_roundtrip(tmp_path: Path):
+    """export_project -> import_project -> get_project_status recovers the project."""
+    from PIL import Image
+
+    src = tmp_path / "src_project"
+    date = "2-11-26"
+    images = src / "images" / date
+    labels = src / "annotations" / "default" / date / "detect"
+    for d in (images, labels):
+        d.mkdir(parents=True)
+    init_project(str(src))
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
+
+    Image.new("RGB", (64, 64)).save(images / "img_000.jpg")
+    json_io.write_detect(str(labels / "img_000.json"), [BBox(10, 10, 30, 30, 0)], 64, 64)
+
+    zip_path = tmp_path / "export.zip"
+    exported = export_project(str(src), str(zip_path))
+    assert "error" not in exported
+    assert zip_path.is_file()
+
+    dest = tmp_path / "restored"
+    imported = import_project(str(zip_path), str(dest))
+    assert "error" not in imported
+    assert imported["files_extracted"] == exported["files_added"]
+
+    status = get_project_status(str(dest))
+    assert status["initialized"] is True
+    assert status["has_config"] is True
+    assert status["image_count"] == 1
+    assert (dest / "annotations" / "default" / date / "detect" / "img_000.json").is_file()
