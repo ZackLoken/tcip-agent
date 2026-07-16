@@ -58,6 +58,129 @@ def test_persistence_round_trip(tmp_path: Path) -> None:
     assert eng2.is_image_reviewed("IMG_0001.JPG")
 
 
+def test_save_review_state_is_compact_json(engine: ReviewEngine, tmp_path: Path) -> None:
+    # No indent/whitespace: a shard is rewritten whole on every verdict to that image, so
+    # compact serialization roughly halves the bytes serialized and written per save.
+    engine.mark_image_reviewed("IMG_0133.JPG")
+    raw = (tmp_path / "review" / "IMG_0133.JPG.json").read_text(encoding="utf-8")
+    assert "\n" not in raw and "  " not in raw
+    assert engine.raw_state["image"]["IMG_0133.JPG"]["img_status"] == "completed"
+
+
+def test_verdict_writes_only_its_own_shard(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
+    """A verdict on one image must not touch another image's shard file (O(dets on this
+    image), not O(all-reviewed))."""
+    engine.mark_image_reviewed("IMG_OTHER.JPG")
+    other_shard = tmp_path / "review" / "IMG_OTHER.JPG.json"
+    before = other_shard.stat().st_mtime_ns
+
+    matches = compute_matches(
+        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
+        iou_threshold=0.5, conf_threshold=0.25,
+    )
+    dets = engine.build_detection_list(ctx, matches)
+    engine.record_detection_action(dets[0], ctx, action="accepted")
+
+    assert (tmp_path / "review" / "IMG_0133.JPG.json").is_file()
+    assert other_shard.stat().st_mtime_ns == before  # untouched
+
+
+def test_verdict_calls_shard_writer_exactly_once(
+    engine: ReviewEngine, ctx: ReviewContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    orig = ReviewEngine._save_image
+
+    def spy(self: ReviewEngine, img_name: str) -> None:
+        calls.append(img_name)
+        orig(self, img_name)
+
+    monkeypatch.setattr(ReviewEngine, "_save_image", spy)
+
+    matches = compute_matches(
+        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
+        iou_threshold=0.5, conf_threshold=0.25,
+    )
+    dets = engine.build_detection_list(ctx, matches)
+    engine.record_detection_action(dets[0], ctx, action="accepted")
+    assert calls == [ctx.img_name]  # exactly one shard write, for the touched image only
+
+
+def test_verdicts_across_images_produce_one_shard_each(engine: ReviewEngine, ctx: ReviewContext) -> None:
+    matches = compute_matches(
+        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
+        iou_threshold=0.5, conf_threshold=0.25,
+    )
+    dets = engine.build_detection_list(ctx, matches)
+    engine.record_detection_action(dets[0], ctx, action="accepted")
+    engine.mark_image_reviewed("IMG_0200.JPG")
+
+    shards = sorted(p.name for p in engine.shard_dir.glob("*.json"))
+    assert shards == ["IMG_0133.JPG.json", "IMG_0200.JPG.json"]
+    # Each shard holds only its own image's data.
+    assert engine.raw_state["image"]["IMG_0133.JPG"]["detections"]
+    assert engine.raw_state["image"]["IMG_0200.JPG"]["detections"] == []
+
+
+def test_raw_state_round_trips_through_reload(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
+    matches = compute_matches(
+        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
+        iou_threshold=0.5, conf_threshold=0.25,
+    )
+    dets = engine.build_detection_list(ctx, matches)
+    for det in dets:
+        engine.record_detection_action(det, ctx, action="accepted")
+    before = engine.raw_state
+
+    reloaded = ReviewEngine(state_dir=tmp_path)
+    assert reloaded.raw_state == before
+
+
+def test_legacy_single_file_migrates_to_shards_on_load(tmp_path: Path) -> None:
+    import json
+
+    legacy = {"image": {
+        "IMG_A.JPG": {"img_status": "completed", "detections": [
+            {"action": "accepted", "class_id": 0, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+        "IMG_B.JPG": {"img_status": "started", "detections": []},
+    }}
+    (tmp_path / "review_stats.json").write_text(json.dumps(legacy))
+
+    eng = ReviewEngine(tmp_path)
+    assert not (tmp_path / "review_stats.json").exists()  # legacy file removed
+    assert eng.raw_state == legacy  # content preserved
+    assert (tmp_path / "review" / "IMG_A.JPG.json").is_file()
+    assert (tmp_path / "review" / "IMG_B.JPG.json").is_file()
+    assert eng.is_image_reviewed("IMG_A.JPG")
+    assert not eng.is_image_reviewed("IMG_B.JPG")
+
+
+def test_shard_key_with_separator_round_trips(tmp_path: Path) -> None:
+    """A key bearing a path separator survives a save/reload without mutation (the shard filename
+    is sanitized, but the true key is read back from the payload)."""
+    eng = ReviewEngine(tmp_path)
+    eng.mark_image_reviewed("sub/img.jpg")
+    before = eng.raw_state
+
+    reloaded = ReviewEngine(state_dir=tmp_path)
+    assert reloaded.raw_state == before
+    assert reloaded.is_image_reviewed("sub/img.jpg")
+
+
+def test_shard_keys_colliding_after_sanitization_stay_distinct(tmp_path: Path) -> None:
+    """'a/b.jpg' and 'a_b.jpg' sanitize to the same base but must not share a shard or merge state."""
+    eng = ReviewEngine(tmp_path)
+    eng.mark_image_reviewed("a/b.jpg")       # completed
+    eng.mark_image_reviewed("a_b.jpg")
+    eng.unmark_image_reviewed("a_b.jpg")     # -> not_started (no detections)
+    assert len(list(eng.shard_dir.glob("*.json"))) == 2  # two distinct files, no clobber
+
+    reloaded = ReviewEngine(state_dir=tmp_path)
+    assert set(reloaded.raw_state["image"]) == {"a/b.jpg", "a_b.jpg"}  # keys preserved, not merged
+    assert reloaded.is_image_reviewed("a/b.jpg")
+    assert not reloaded.is_image_reviewed("a_b.jpg")
+
+
 def test_build_detection_list_tp_fp_fn(engine: ReviewEngine, ctx: ReviewContext) -> None:
     matches = compute_matches(
         gt_boxes=ctx.gt_boxes,
