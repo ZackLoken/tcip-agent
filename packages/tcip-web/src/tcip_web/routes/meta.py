@@ -17,11 +17,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+
+from tcip_web.paths import assert_project_root_allowed
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
+
+
+def _guard(project_root: str) -> None:
+    """Confine a client-supplied project_root (no-op unless TCIP_IMAGE_ROOTS is set)."""
+    try:
+        assert_project_root_allowed(project_root)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 def _reports_dir(project_root: str) -> Path:
@@ -35,6 +45,7 @@ def _retrospectives_dir(project_root: str) -> Path:
 @router.get("/reports")
 def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
     """Return recent friction reports, most recent first."""
+    _guard(project_root)
     reports_dir = _reports_dir(project_root)
     if not reports_dir.exists():
         return {"reports": [], "count": 0, "total_available": 0}
@@ -66,6 +77,7 @@ def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
 @router.get("/retrospectives")
 def get_retrospectives(project_root: str, limit: int = 20) -> dict[str, Any]:
     """Return recent retrospectives (markdown), most recent first."""
+    _guard(project_root)
     retros_dir = _retrospectives_dir(project_root)
     if not retros_dir.exists():
         return {"retrospectives": [], "count": 0, "total_available": 0}
