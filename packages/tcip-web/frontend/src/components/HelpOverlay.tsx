@@ -18,7 +18,7 @@ const ANNOTATE: Shortcut[] = [
   { key: "Ctrl+Shift+Z", desc: "Redo" },
   { key: "Ctrl+Y", desc: "Redo (alias)" },
   { key: "Ctrl+S", desc: "Save labels" },
-  { key: "v", desc: "Toggle stream drawing (polygon mode)" },
+  { key: "v", desc: "Toggle stream drawing — click starts/pauses laying, double-click closes" },
   { key: "s", desc: "Toggle vertex snapping (polygon mode)" },
   { key: "0–9", desc: "Select class by ID" },
   { key: "Enter", desc: "Close current polygon (or double-click)" },
