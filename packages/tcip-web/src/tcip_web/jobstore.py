@@ -11,9 +11,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tcip_mcp.project_paths import resolve_state
 from tcip_mcp.utils.atomic_io import atomic_write_json, read_json
 
-_STATE_DIR = Path(".tcip") / "state"
+
+def _state_path(name: str) -> Path:
+    # Resolved at use time against the pinned platform root — a bare CWD-relative path would
+    # scatter job records by launch dir (and let tests pollute the repo's real .tcip/).
+    return resolve_state(Path(".tcip") / "state" / f"{name}.json")
+
+
 MAX_JOBS = 100
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})
 
@@ -21,7 +28,7 @@ TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"
 def persist(name: str, summaries: list[dict]) -> None:
     """Atomically write job summaries to ``.tcip/state/<name>.json`` (best-effort)."""
     try:
-        atomic_write_json(_STATE_DIR / f"{name}.json", summaries)
+        atomic_write_json(_state_path(name), summaries)
     except Exception:  # pragma: no cover - persistence is best-effort
         pass
 
@@ -32,7 +39,7 @@ def load(name: str) -> list[dict]:
     Returns ``[]`` when the file is missing/unparseable or doesn't hold a list — a
     restart with no prior state (or a corrupt file) starts clean rather than raising.
     """
-    data = read_json(_STATE_DIR / f"{name}.json", default=[])
+    data = read_json(_state_path(name), default=[])
     return data if isinstance(data, list) else []
 
 
