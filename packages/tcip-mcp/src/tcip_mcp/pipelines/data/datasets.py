@@ -301,7 +301,7 @@ class TiledDetectionDataset(BaseDataset):
         self._index: list[dict] = []
 
         # Pass 1: read every image's upright dims + full-image-px boxes, and accumulate GT box sizes
-        # so the seam-sliver cutoff is DERIVED from this dataset's class-average object size, not a
+        # so the seam-sliver cutoff is derived from this dataset's class-average object size, not a
         # fixed fraction (Q5 / derive-don't-pin). skip_empty defaults False: empty tiles are valid
         # negatives (the invariant the old skip_empty=True default violated).
         stems_data: list[tuple[str, np.ndarray, np.ndarray, int, int]] = []
