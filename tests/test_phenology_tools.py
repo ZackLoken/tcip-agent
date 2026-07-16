@@ -253,7 +253,7 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
 
 
 def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> None:
-    # Predictions carry only class 0 — no elongation class. The tool must NOT write a
+    # Predictions carry only class 0 — no elongation class. The tool must not write a
     # CSV and must flag the measurement as invalid.
     d1 = tmp_path / "2026-02-11"
     _write_preds(d1, "P1_a", ["0 0.9 0.5 0.5 0.1 0.1"])
