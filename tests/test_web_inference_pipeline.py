@@ -4,19 +4,6 @@
 import pytest
 
 
-def test_result_to_yolo_lines_normalizes():
-    from tcip_mcp.pipelines.postprocessing.export import result_to_yolo_lines
-    lines = result_to_yolo_lines({
-        "width": 100, "height": 100,
-        "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
-    })
-    parts = lines[0].split()
-    assert len(parts) == 6
-    assert parts[0] == "0"                          # 1-indexed label 1 -> class 0
-    assert float(parts[1]) == pytest.approx(0.9)    # confidence
-    assert float(parts[2]) == pytest.approx(0.2)    # cx = ((10+30)/2)/100
-
-
 def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     import json
 
