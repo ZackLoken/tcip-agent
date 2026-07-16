@@ -10,6 +10,7 @@ import Konva from "konva";
 
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { useStore } from "@/store";
+import type { ViewState } from "@/store/types";
 
 export interface CanvasStageProps {
   imageUrl: string | null;
@@ -35,7 +36,7 @@ export interface CanvasStageProps {
 export function CanvasStage(props: CanvasStageProps) {
   const wrapper = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
-  // Start at 0 so the one-shot fit waits for a REAL measurement (below) instead of fitting
+  // Start at 0 so the one-shot fit waits for a real measurement (below) instead of fitting
   // to a placeholder size — a stale-dims fit left the image mis-scaled/off-screen on first open.
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const view = useStore((s) => s.gui.view);
@@ -88,7 +89,7 @@ export function CanvasStage(props: CanvasStageProps) {
     };
   }, [props.imageUrl]);
 
-  // Fit the image to the canvas ONCE per image — not on every container resize. Refitting
+  // Fit the image to the canvas once per image — not on every container resize. Refitting
   // on resize reset the user's zoom/pan, and when a reflow briefly reported a near-zero
   // height (e.g. the Review filter shelf expanding) it collapsed the image to sub-pixel
   // scale so it appeared to vanish. The key omits dims so a later resize can't re-fit;
@@ -116,9 +117,39 @@ export function CanvasStage(props: CanvasStageProps) {
     return () => onStageRef?.(null);
   }, [onStageRef]);
 
-  // Handlers read the live store view (not the render-closure `view`): trackpads emit
-  // event bursts faster than the 20MP canvas re-renders, and stale reads drop deltas.
-  const liveView = () => useStore.getState().gui.view;
+  // Pan/zoom writes coalesce through one requestAnimationFrame per frame (mirrors
+  // AnnotateTab's onMove): native wheel/mousemove bursts fire faster than 60/s, and an
+  // un-batched setView re-rendered both tabs per event. The pending view holds the
+  // accumulated target so a burst reads its own in-flight math, not the stale store —
+  // keeping the zoom-about-pointer / pan deltas exact; only the commit is deferred.
+  const pendingViewRef = useRef<ViewState | null>(null);
+  const pendingBaseRef = useRef<ViewState | null>(null);
+  const viewRafRef = useRef<number | null>(null);
+  const scheduleView = (v: ViewState) => {
+    if (pendingViewRef.current == null) pendingBaseRef.current = useStore.getState().gui.view;
+    pendingViewRef.current = v;
+    if (viewRafRef.current != null) return;
+    viewRafRef.current = requestAnimationFrame(() => {
+      viewRafRef.current = null;
+      const pending = pendingViewRef.current;
+      const base = pendingBaseRef.current;
+      pendingViewRef.current = null;
+      pendingBaseRef.current = null;
+      // An external setView (auto-fit, zoom-to-detection) landed mid-burst: it wins — the
+      // queued math was computed against the pre-write view and would silently clobber it.
+      if (pending && base === useStore.getState().gui.view) setView(pending);
+    });
+  };
+  useEffect(() => {
+    return () => {
+      if (viewRafRef.current != null) cancelAnimationFrame(viewRafRef.current);
+    };
+  }, []);
+
+  // Handlers read the live view — the pending in-flight target if a batched write is
+  // queued, else the store. A stale read (trackpads burst faster than the canvas
+  // re-renders) would drop accumulated deltas mid-burst.
+  const liveView = () => pendingViewRef.current ?? useStore.getState().gui.view;
 
   const toPixel = (sx: number, sy: number): [number, number] => {
     const v = liveView();
@@ -137,10 +168,10 @@ export function CanvasStage(props: CanvasStageProps) {
     if (!e.evt.ctrlKey) {
       if (e.evt.shiftKey) {
         // Shift+scroll: horizontal pan. Chromium pre-swaps the delta into deltaX.
-        setView({ ...v, offset_x: v.offset_x - (dx || dy) });
+        scheduleView({ ...v, offset_x: v.offset_x - (dx || dy) });
       } else {
         // Plain scroll pans both axes — two-finger trackpad panning in any direction.
-        setView({ ...v, offset_x: v.offset_x - dx, offset_y: v.offset_y - dy });
+        scheduleView({ ...v, offset_x: v.offset_x - dx, offset_y: v.offset_y - dy });
       }
       return;
     }
@@ -158,7 +189,7 @@ export function CanvasStage(props: CanvasStageProps) {
     const zoomGain = Math.abs(dy) < 40 ? 0.005 : 0.002;
     const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * Math.exp(-dy * zoomGain)));
     if (newScale === v.scale) return;
-    setView({
+    scheduleView({
       scale: newScale,
       offset_x: pointer.x - ix * newScale,
       offset_y: pointer.y - iy * newScale,
@@ -230,7 +261,7 @@ export function CanvasStage(props: CanvasStageProps) {
         panning.current = { ...panning.current, x: e.evt.clientX, y: e.evt.clientY };
         if (dx || dy) panMoved.current = true;
         const v = liveView();
-        setView({ ...v, offset_x: v.offset_x + dx, offset_y: v.offset_y + dy });
+        scheduleView({ ...v, offset_x: v.offset_x + dx, offset_y: v.offset_y + dy });
         return;
       }
     }
