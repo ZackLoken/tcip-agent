@@ -147,7 +147,7 @@ def run_inference(
 
 @mcp.tool()
 @audited
-def export_predictions_yolo(
+def export_predictions(
     checkpoint_path: str,
     images_dir: str,
     output_dir: str,
@@ -221,7 +221,7 @@ def export_results_csv(
     """Run inference and export a CSV summary of detection counts per image.
 
     Routes through ``run_inference`` so the per-image counts resolve the same firewalled
-    operating point (conf/NMS/tiling/max_dets) as ``run_inference``/``export_predictions_yolo`` —
+    operating point (conf/NMS/tiling/max_dets) as ``run_inference``/``export_predictions`` —
     the CSV is a count-bearing deliverable (the count is the phenotype for count traits), so it
     must not be produced at a different, untiled, truncating operating point. Earlier this door
     hardcoded ``score_threshold=0.5`` and passed no tiling/max_dets, under-reporting dense
