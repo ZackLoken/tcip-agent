@@ -1,15 +1,15 @@
-"""Materialize a curated YOLO detection dataset from human review verdicts (W5).
+"""Materialize a curated detection dataset from human review verdicts (W5).
 
-Pure / torch-free. Turns ``review_stats.json`` verdicts back into training data:
-  - accepted / edited GT boxes  -> positive YOLO label files
-  - rejected-only images        -> empty-label hard-negative backgrounds
+Torch-free. Turns ``review_stats.json`` verdicts back into training data:
+  - accepted / edited GT boxes  -> positive per-image JSON labels (the canonical format)
+  - rejected-only images        -> confirmed-negative JSON (``{"objects": []}``) backgrounds
 plus a ``curated_manifest.json`` for provenance. The output layout (``images/`` +
 ``labels/detect/``) matches ``data_tools._scan_dataset`` so the loop chains straight
 into ``split_dataset`` / ``launch_training`` with no glue.
 
-Because the verdict log stores normalized YOLO center-form boxes
-(``[cx, cy, w, h]``), positives are reconstructed directly — no inference re-run and
-no image dimensions needed.
+The verdict log stores normalized YOLO center-form boxes (``[cx, cy, w, h]``); positives are
+denormalized to pixel coordinates using the copied image's dimensions (the canonical JSON is
+pixel-space) — no inference re-run.
 """
 
 from __future__ import annotations
@@ -20,8 +20,9 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tcip_annotation.label_io import write_detect_labels
+from tcip_annotation.json_io import write_detect
 from tcip_annotation.state import BBox
+from tcip_annotation.utils import get_image_dimensions
 
 _POSITIVE_ACTIONS = {"accepted", "edited"}
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")
@@ -67,12 +68,14 @@ def _find_source_image(source_images_dir: str, img_name: str) -> Path | None:
     return None
 
 
-def _write_positive_label(path: Path, positives: list[tuple]) -> None:
-    # Unit scale: write_detect_labels divides by img_w=img_h=1, so the normalized
-    # [cx,cy,w,h] round-trips through its atomic write + 6-decimal formatter.
-    boxes = [BBox(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, cid)
-             for (cid, cx, cy, w, h) in positives]
-    write_detect_labels(str(path), boxes, img_w=1, img_h=1)
+def _write_positive_label(path: Path, positives: list[tuple], img_w: int, img_h: int) -> None:
+    # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the canonical per-image JSON.
+    boxes = [
+        BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
+             (cx + w / 2) * img_w, (cy + h / 2) * img_h, cid)
+        for (cid, cx, cy, w, h) in positives
+    ]
+    write_detect(str(path), boxes, img_w, img_h, keep_empty=True)
 
 
 def materialize_dataset(
@@ -111,15 +114,16 @@ def materialize_dataset(
         dst_img = images_out / src.name
         if not dst_img.exists():
             place(str(src), str(dst_img))
-        label_path = labels_out / f"{src.stem}.txt"
+        label_path = labels_out / f"{src.stem}.json"
+        img_w, img_h = get_image_dimensions(str(src))
 
         if status == "positive":
-            _write_positive_label(label_path, info["positives"])
+            _write_positive_label(label_path, info["positives"], img_w, img_h)
             counts["positive"] += 1
             counts["total_boxes"] += len(info["positives"])
             class_ids.update(cid for (cid, *_rest) in info["positives"])
-        else:  # hard_negative -> empty label (write 0 bytes directly; the writer deletes empties)
-            label_path.write_text("")
+        else:  # hard_negative -> confirmed-negative JSON ({"objects": []})
+            write_detect(str(label_path), [], img_w, img_h, keep_empty=True)
             counts["hard_negative"] += 1
 
         manifest_images.append({
