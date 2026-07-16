@@ -23,13 +23,21 @@ The agent can visually inspect images using `view_image` after rendering annotat
 | `visualize_comparison` | Overlay GT (green) vs predictions (red) with match stats |
 | `visualize_worst_predictions` | Grid of top-K failure cases |
 | `sam_auto_label` | SAM candidate masks rendered with numbered overlay |
-| `accept_candidates` | Save classified candidates, render final result |
+| `accept_candidates` | Stage classified SAM candidates as predictions (created_by="sam") for human review |
 | `visualize_grid_overlay` | Labeled grid overlay for spatial referencing |
+| `visualize_canvas` | The human's live GUI canvas: their image, viewport, and unsaved shapes in the GUI's own symbology (+ classes schema, TP/FP/FN legend on Review) |
 
 `visualize` is one tool with a `source` of `annotations` / `predictions` / `dataset`
 (it replaced the former `visualize_annotations` / `visualize_predictions` /
 `visualize_dataset_sample`). All tools save renders to `.tcip/artifacts/viz/` and
 return the file path.
+
+`visualize_canvas` is the live view: the GUI continuously pushes its canvas state
+(hybrid — tiny heartbeats on pan/zoom, full display-resolved geometry on shape changes,
+including unsaved edits and the in-progress drawing). The tool pings the GUI for fresh
+state (`refresh=True`), renders the visible region (`crop_to_viewport`) or the full frame,
+and returns the classes schema, review legend, per-tag / per-creator shape counts, and the
+state's age. Use it to comment on work-in-progress before the human saves.
 
 ## Workflows
 
