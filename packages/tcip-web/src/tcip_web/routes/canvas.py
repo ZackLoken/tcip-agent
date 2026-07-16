@@ -12,19 +12,26 @@ There is no read-modify-write merge (so no lock and no interleaving that can res
 geometry): each file is written atomically, and the reader (``visualize_canvas``) treats the
 geometry as valid only when its ``(image_path, tab)`` identity matches the meta document —
 a heartbeat for a different image/tab implicitly invalidates stale shapes.
+
+Both writes skip ``fsync``: this is ephemeral live-view state re-pushed every heartbeat (as
+often as every debounce cycle), not durable review/annotation history — a crash losing the
+last push costs nothing, the next push repaints it.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_mcp.utils.atomic_io import atomic_write_json
+from tcip_web.paths import assert_path_allowed
 
 router = APIRouter(prefix="/api/canvas", tags=["canvas"])
 
@@ -57,8 +64,51 @@ def shapes_path(project_root: str) -> Path:
     return Path(project_root) / ".tcip" / "state" / "canvas_shapes.json"
 
 
+def _guard_project_root(project_root: str) -> None:
+    """403 if a client-supplied project_root escapes the configured image roots.
+
+    This route writes files under project_root, so an exposed deployment
+    (``TCIP_IMAGE_ROOTS`` set) must confine it, like review.py's ``_guard_path``.
+    """
+    try:
+        assert_path_allowed(project_root)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+def _write_json_no_fsync(path: Path, obj: dict) -> None:
+    """Atomic replace (temp file + ``os.replace``) without ``fsync`` — see module docstring."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(obj, indent=2, default=str)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+        _replace_with_retry(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _replace_with_retry(src: str, dst: Path, *, attempts: int = 5, delay: float = 0.05) -> None:
+    """``os.replace`` with a short retry — a Windows virus scanner / indexer can momentarily
+    hold the destination. Mirrors ``tcip_mcp.utils.atomic_io._replace_with_retry``."""
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 @router.post("/state")
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
+    _guard_project_root(payload.project_root)
     now = time.time()
     mp = meta_path(payload.project_root)
     mp.parent.mkdir(parents=True, exist_ok=True)
@@ -66,14 +116,14 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
     if payload.shapes is not None:
         # Geometry first, meta second: a reader pairing the new meta with the old geometry
         # sees an identity mismatch (stale), never a false match.
-        atomic_write_json(shapes_path(payload.project_root), {
+        _write_json_no_fsync(shapes_path(payload.project_root), {
             "image_path": payload.image_path,
             "tab": payload.tab,
             "shapes": payload.shapes,
             "received_at": now,
         })
 
-    atomic_write_json(mp, {
+    _write_json_no_fsync(mp, {
         "schema_version": payload.schema_version,
         "received_at": now,
         "received_at_iso": datetime.now(timezone.utc).isoformat(),
