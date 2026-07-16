@@ -542,21 +542,23 @@ def accept_candidates(
     image_path: str,
     assignments: list[dict],
 ) -> dict:
-    """Accept SAM candidates with class assignments and save as ground-truth annotations.
+    """Assign classes to SAM candidates and stage them as SAM predictions for review.
 
-    After reviewing sam_auto_label output, the agent calls this tool
-    with a mapping from candidate IDs to class IDs. Rejected candidates
-    are simply omitted from the assignments list. Ground truth is written
-    as per-image COCO/JSON (the canonical on-disk label format).
+    After reviewing sam_auto_label output, the agent calls this tool with a mapping from
+    candidate IDs to class IDs. Rejected candidates are simply omitted from the assignments
+    list. The masks are written to the PREDICTIONS tree (``predictions/sam/<date>/<task>``) as
+    per-image COCO/JSON with ``created_by="sam"`` and ``score`` = SAM's mask-quality
+    (predicted_iou) — they are model output, so a human accepts them on the Review canvas before
+    they become ground truth. This never writes GT.
 
     Args:
         image_path: Absolute path to the image (same as sam_auto_label).
         assignments: List of dicts, each with 'candidate_id' (int) and
-            'class_id' (int). Only listed candidates are saved.
+            'class_id' (int). Only listed candidates are staged.
     """
     import json
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox, Polygon
+    from tcip_annotation.state import PredBBox, PredPolygon
 
     img = Path(image_path)
     if not img.is_file():
@@ -574,9 +576,9 @@ def accept_candidates(
 
     w, h = get_image_dimensions(image_path)
 
-    # Build annotation objects from accepted candidates
-    boxes: list[BBox] = []
-    polygons: list[Polygon] = []
+    # Build SAM PREDICTIONS from accepted candidates (created_by="sam", score = mask-quality).
+    boxes: list[PredBBox] = []
+    polygons: list[PredPolygon] = []
 
     for assign in assignments:
         cid = assign["candidate_id"]
@@ -585,30 +587,35 @@ def accept_candidates(
         if cand is None:
             continue
 
+        score = float(cand.get("predicted_iou", 0.0))  # SAM's mask-quality head, in [0, 1]
         poly_pts = cand["polygon"]
         if len(poly_pts) >= 3:
-            polygons.append(Polygon(
-                points=[(float(x), float(y)) for x, y in poly_pts],
-                class_id=class_id,
+            polygons.append(PredPolygon(
+                [(float(x), float(y)) for x, y in poly_pts], class_id,
+                confidence=score, created_by="sam",
             ))
 
-        # Also save as bounding box (from polygon extent)
+        # Also stage a bounding box (from polygon extent)
         xs = [p[0] for p in poly_pts]
         ys = [p[1] for p in poly_pts]
-        boxes.append(BBox(
-            x1=min(xs), y1=min(ys), x2=max(xs), y2=max(ys),
-            class_id=class_id,
+        boxes.append(PredBBox(
+            min(xs), min(ys), max(xs), max(ys), class_id,
+            confidence=score, created_by="sam",
         ))
 
-    # Write GT as per-image COCO/JSON (canonical layout, see tcip_mcp.dataset_layout).
-    from tcip_mcp.dataset_layout import annotation_path_for_image
+    # Stage into the PREDICTIONS tree (predictions/sam/<date>/<task>) — model output for a human to
+    # accept on the Review canvas, never written straight to ground truth.
+    from tcip_mcp.dataset_layout import parse_image_path, prediction_dir
 
+    root, date, _stem = parse_image_path(str(img))
     if boxes:
-        det_path = annotation_path_for_image(str(img), "detect", "json")
-        json_io.write_detect(det_path, boxes, w, h)
+        det_dir = Path(prediction_dir(root, "sam", date, "detect"))
+        det_dir.mkdir(parents=True, exist_ok=True)
+        json_io.write_detect(str(det_dir / f"{img.stem}.json"), boxes, w, h)
     if polygons:
-        seg_path = annotation_path_for_image(str(img), "segment", "json")
-        json_io.write_segment(seg_path, polygons, w, h)
+        seg_dir = Path(prediction_dir(root, "sam", date, "segment"))
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        json_io.write_segment(str(seg_dir / f"{img.stem}.json"), polygons, w, h)
 
     # Render final result for QA
     from tcip_annotation.viz import render_detections
@@ -620,8 +627,9 @@ def accept_candidates(
 
     return {
         "image_path": out,
-        "summary": f"Saved {len(boxes)} detections and {len(polygons)} segmentations "
-                   f"from {len(assignments)} accepted candidates as JSON ground truth.",
+        "summary": f"Staged {len(boxes)} detections and {len(polygons)} segmentations "
+                   f"from {len(assignments)} SAM candidates as predictions (created_by='sam') "
+                   f"for review — not ground truth.",
         "detection_count": len(boxes),
         "segmentation_count": len(polygons),
     }
