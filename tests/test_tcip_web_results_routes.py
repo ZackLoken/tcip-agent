@@ -93,7 +93,7 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
     preds_211.mkdir()
     preds_324.mkdir()
     # Predictions from the 2-class elongation classifier: class 0 = non-elongated,
-    # class 1 = elongated. Elongation is a CLASS, never a bbox-height proxy.
+    # class 1 = elongated. Elongation is a class, never a bbox-height proxy.
     # PLANT_A on 2-11 → 4 detections, none elongated (class 0)
     _write_preds(preds_211 / "IMG_A.json", [0, 0, 0, 0])
     # PLANT_B on 2-11 → 2 detections, both elongated (class 1)
@@ -127,7 +127,7 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
 
 
 def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp_path: Path) -> None:
-    # Single-class detector output (no elongation classification) must NOT be passed off as
+    # Single-class detector output (no elongation classification) must not be passed off as
     # a bloom measurement — the endpoint reports elongation_classified=False.
     mapping_path = tmp_path / "m.json"
     mapping_path.write_text(
@@ -234,6 +234,35 @@ def test_onset_dates_ignores_undated_bucket(client: TestClient) -> None:
             assert onset[key].startswith("2026-")
 
 
+def test_onset_dates_rejects_row_missing_required_field(client: TestClient) -> None:
+    # A malformed row (missing plant_id) must be a structured 422, not an unhandled
+    # KeyError/500 — onset_dates dereferences plant_id/date/ratio directly.
+    curves = [{"accession": "A", "date": "2026-02-11", "ratio": 0.0}]
+    resp = client.post("/api/results/onset_dates", json={"curves": curves})
+    assert resp.status_code == 422
+
+
+def test_registered_models_confines_project_path_to_allowed_roots(
+    client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    resp = client.get("/api/results/models/registered", params={"project_path": str(outside)})
+    assert resp.status_code == 403
+
+
+def test_registered_models_unconfined_when_no_image_roots(
+    client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
+    resp = client.get("/api/results/models/registered", params={"project_path": str(tmp_path)})
+    assert resp.status_code == 200
+    assert resp.json()["models"] == []
+
+
 def test_export_csv(client: TestClient) -> None:
     # A phenology delivery (milestone columns) must carry the validation stamp to be exported.
     stamp = {"elongation_classifier_validated": "validated_held_out",
@@ -257,7 +286,7 @@ def test_export_csv(client: TestClient) -> None:
 
 
 def test_export_csv_refuses_unvalidated_phenology(client: TestClient) -> None:
-    # Milestone rows without the held-out-validated stamp must NOT ship (the second-door hole).
+    # Milestone rows without the held-out-validated stamp must not ship (the second-door hole).
     rows = [{"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15"}]
     resp = client.post("/api/results/export_csv", json={"rows": rows, "filename": "x.csv"})
     assert resp.status_code == 400
