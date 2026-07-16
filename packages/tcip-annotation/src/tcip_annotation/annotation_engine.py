@@ -242,7 +242,7 @@ class AnnotationEngine:
         """Save the current boxes / polygons to YOLO label files.
 
         Either or both paths may be omitted; omitted tasks are skipped. The
-        engine does NOT infer paths from the state — the caller (web backend
+        engine does not infer paths from the state — the caller (web backend
         or CLI) is responsible for resolving them.
 
         Returns ``True`` if every requested write succeeded. Invalid image
