@@ -28,18 +28,13 @@ proposals for the owner to approve, then **prune** the graduated entry — add a
 - **L-SKILL-1** — `catkin_elongation_date` = the 95% majority crossing → `phenology.plant_milestones`
   + phenology skill (provisional, pending breeder confirmation)
 - **L-SKILL-2** — trait-fidelity guardrail made permanent CI → `tests/test_skill_trait_fidelity.py`
+- **L-SKILL-3-residual** — Patterns C/E/F out-of-2D-scope notes + `model_spec` de-dup (canonical
+  example now lives in `pipeline-design`, `training` references it) → both applied to
+  `pipeline-design/SKILL.md` and `training/SKILL.md`
 
 ---
 
 ## Open — undistilled friction (act, then graduate + prune)
-
-### L-SKILL-3-residual — deferred non-core skill edits (2026-07-14)
-Two non-core skill body edits were noted on the skills-rebuild pass but not applied:
-1. `pipeline-design` Patterns C/E need explicit **out-of-2D-scope** notes (they imply capabilities
-   beyond the current 2D-only scope).
-2. `model_spec` guidance is **duplicated** between `pipeline-design` and `training` — de-dup to one home.
-
-Low priority; apply or consciously discard on the next skills pass.
 
 ### self-improve-commit-model — breeders shouldn't commit to the repo (2026-07-15)
 The journal reaches every machine by being **git-committed**, which assumes commit access — fine for
