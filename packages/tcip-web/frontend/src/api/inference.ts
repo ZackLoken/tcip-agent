@@ -163,7 +163,7 @@ export const resultsApi = {
       rows: PerPlantRow[];
       n_plants: number;
       classes_seen: number[];
-      // False when the predictions carry no elongation class — the ratios are then NOT a
+      // False when the predictions carry no elongation class — the ratios are then not a
       // valid bloom measurement (run + validate the classifier first).
       elongation_classified: boolean;
     }>("/api/results/per_plant_curves", body),
