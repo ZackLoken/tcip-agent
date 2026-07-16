@@ -103,9 +103,11 @@ that silently corrupts results and compounds across sessions. So:
 
 You can see images: call `visualize` (with `source="annotations"|"predictions"|"dataset"`)
 or a specialized renderer (`visualize_comparison`, `visualize_worst_predictions`,
-`visualize_grid_overlay`, `sam_auto_label`) → it writes to `.tcip/artifacts/viz/`
-and returns `image_path` → call `view_image` on it → describe what you see, then
-recommend. See the `visual-analysis` skill.
+`visualize_grid_overlay`, `visualize_canvas`, `sam_auto_label`) → it writes to
+`.tcip/artifacts/viz/` and returns `image_path` → call `view_image` on it → describe what
+you see, then recommend. `visualize_canvas` shows the human's live GUI canvas — their
+image, viewport, and unsaved shapes with the GUI's own symbology. See the
+`visual-analysis` skill.
 
 ## Commands
 
