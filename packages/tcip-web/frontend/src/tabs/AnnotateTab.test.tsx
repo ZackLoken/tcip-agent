@@ -128,7 +128,7 @@ describe("AnnotateTab save/load race", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    // Dirty img1, then navigate. flushLeaving() fires the save WITHOUT awaiting
+    // Dirty img1, then navigate. flushLeaving() fires the save without awaiting
     // it; hold its response so the img2 load resolves first (slow label write vs
     // cached read) — the exact interleaving that used to corrupt cross-image GT.
     act(addBox);
@@ -157,7 +157,7 @@ describe("AnnotateTab save/load race", () => {
     // ...but the per-image status for the image actually saved is still recorded.
     expect(classesApi.setImageStatus).toHaveBeenCalledWith("C:/proj", "img1.jpg", "partial");
 
-    // ...and the next save must target img2 with img2's loaded mtimes — NOT
+    // ...and the next save must target img2 with img2's loaded mtimes — not
     // img1's file with the stale save's echoed mtimes.
     pressSave();
     await flush();
