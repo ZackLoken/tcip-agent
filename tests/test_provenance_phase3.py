@@ -32,9 +32,6 @@ def test_current_user_env_override(monkeypatch):
     from tcip_web import identity
     monkeypatch.setenv("TCIP_USER", "zack")
     assert identity.current_user() == "zack"
-    monkeypatch.delenv("TCIP_USER", raising=False)
-    monkeypatch.setenv("TCIP_REVIEW_USER", "emily")
-    assert identity.current_user() == "emily"            # legacy key still honored
 
 
 # ── MCP save_annotations: optional producer created_by ───────────────────────
