@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
+import { applyReviewFocus } from "@/lib/reviewFocus";
 import { useStore } from "@/store";
 import type { Detection, MatchesResponse } from "@/store/types";
 import { ReviewTab } from "@/tabs/ReviewTab";
@@ -274,6 +275,30 @@ describe("ReviewTab matches-recompute effect", () => {
     });
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(2));
     expect(matchesSpy.mock.calls[1][0].pred_detect_path).toBe(`${PRED_DIR_B}/img1.json`);
+  });
+
+  it("re-fetches when an agent review_focus re-targets the already-open image with identical paths", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
+
+    // Same dataset identity + same image index => api.dataset.select is not called and every
+    // label/prediction path is unchanged (the field case: stage_proposals overwrote the file
+    // in place). Without the refetch nonce the recompute effect's identical-path skip leaves
+    // stale cached matches on the canvas — the focus must force a refetch anyway.
+    const selectSpy = vi.spyOn(api.dataset, "select").mockResolvedValue({} as never);
+    vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok", current_image_index: 0 });
+
+    await act(async () => {
+      await applyReviewFocus({
+        dataset_root: "C:/data",
+        trait: "annotations",
+        date: "2026-01-01",
+        image_index: 0,
+      });
+    });
+
+    expect(selectSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(2));
   });
 
   it("does not re-fetch when a WS snapshot rebuilds the dataset object with identical paths", async () => {
