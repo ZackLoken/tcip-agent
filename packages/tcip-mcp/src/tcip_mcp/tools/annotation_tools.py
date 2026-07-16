@@ -137,6 +137,7 @@ def save_annotations(
     date: str | None = None,
     detect_path: str | None = None,
     segment_path: str | None = None,
+    created_by: str | None = None,
 ) -> dict:
     """Write annotation label files for an image into the canonical dataset layout.
 
@@ -155,6 +156,9 @@ def save_annotations(
         date: Capture date; derived from the image path when omitted.
         detect_path: Explicit detect label path (overrides the canonical location).
         segment_path: Explicit segment label path (overrides the canonical location).
+        created_by: Producer to stamp on each written shape (e.g. "claude", "model:<run>"). No
+            human is present at this tool, so pass the real source; omit to leave provenance unset
+            rather than fabricate it. A per-shape ``created_by`` in a box/polygon dict overrides it.
     """
     img = Path(image_path)
     if not img.is_file():
@@ -174,10 +178,20 @@ def save_annotations(
     w, h = get_image_dimensions(image_path)
     stem = img.stem
 
+    from datetime import datetime, timezone
+    _now = datetime.now(timezone.utc).isoformat()
+
+    def _prov(cb):  # created_at accompanies created_by; both stay unset when there's no producer
+        return (cb, _now) if cb else (None, None)
+
     written: list[str] = []
 
     if boxes is not None:
-        typed_boxes = [BBox(x1=b["x1"], y1=b["y1"], x2=b["x2"], y2=b["y2"], class_id=b["class_id"]) for b in boxes]
+        typed_boxes = []
+        for b in boxes:
+            cb, ca = _prov(b.get("created_by", created_by))
+            typed_boxes.append(BBox(x1=b["x1"], y1=b["y1"], x2=b["x2"], y2=b["y2"],
+                                    class_id=b["class_id"], created_by=cb, created_at=ca))
         out_path = (
             Path(detect_path)
             if detect_path
@@ -188,10 +202,11 @@ def save_annotations(
         written.append(str(out_path))
 
     if polygons is not None:
-        typed_polys = [
-            Polygon(points=[(pt[0], pt[1]) for pt in p["points"]], class_id=p["class_id"])
-            for p in polygons
-        ]
+        typed_polys = []
+        for p in polygons:
+            cb, ca = _prov(p.get("created_by", created_by))
+            typed_polys.append(Polygon(points=[(pt[0], pt[1]) for pt in p["points"]],
+                                       class_id=p["class_id"], created_by=cb, created_at=ca))
         out_path = (
             Path(segment_path)
             if segment_path
@@ -850,8 +865,9 @@ def stage_proposals(
 
     Args:
         dataset_root: Dataset root holding ``predictions/``.
-        model_name: Predictions bucket to stage under, one per source (e.g. "sam", "claude",
-            "groundingdino", "agent_proposals").
+        model_name: Predictions bucket to stage under — the real producer, one per source (e.g.
+            "sam", "claude", "groundingdino", "model:<run>"). It is stamped as each object's
+            created_by, so name the actual origin rather than a generic placeholder.
         date: Capture-date bucket (e.g. "2026-02-11").
         stem: Image stem (filename without extension).
         boxes: ``[{class_id, conf, cx, cy, w, h}]`` with cx/cy/w/h normalized to [0, 1].
@@ -927,13 +943,18 @@ def stage_proposals(
         return {"error": f"no image found for stem {stem!r} under {image_dir(dataset_root, date)}"}
     img_w, img_h = get_image_dimensions(str(img_file))
 
+    # Stamp the real producer (model_name) as created_by + a stage-time created_at, so a staged
+    # prediction's origin travels into GT natively when a human accepts it on the Review canvas.
+    from datetime import datetime, timezone
+    created_at = datetime.now(timezone.utc).isoformat()
+
     detect_path = None
     if norm_boxes is not None:
         pred_boxes = [
             PredBBox(
                 (cx - w / 2) * img_w, (cy - h / 2) * img_h,
                 (cx + w / 2) * img_w, (cy + h / 2) * img_h,
-                cls, confidence=conf,
+                cls, confidence=conf, created_by=model_name, created_at=created_at,
             )
             for (cls, conf, cx, cy, w, h) in norm_boxes
         ]
@@ -944,7 +965,8 @@ def stage_proposals(
     segment_path = None
     if norm_polys is not None:
         pred_polys = [
-            PredPolygon([(x * img_w, y * img_h) for x, y in pts], cls, confidence=conf)
+            PredPolygon([(x * img_w, y * img_h) for x, y in pts], cls,
+                        confidence=conf, created_by=model_name, created_at=created_at)
             for (cls, conf, pts) in norm_polys
         ]
         out = Path(prediction_dir(dataset_root, model_name, date, "segment")) / f"{stem}.json"
