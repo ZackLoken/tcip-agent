@@ -24,7 +24,8 @@ def test_fence_settings_valid_json_denies_internals_allows_toolkit():
     deny = set(data["permissions"]["deny"])
     allow = set(data["permissions"]["allow"])
     # Platform internals are denied across the write tools.
-    for rule in ("Edit(packages/**)", "Write(packages/**)", "Edit(tests/**)", "Edit(.github/**)"):
+    # Edit(X) covers Write/MultiEdit/NotebookEdit; standalone Write rules are deprecated no-ops.
+    for rule in ("Edit(packages/**)", "Edit(tests/**)", "Edit(.github/**)", "Edit(CLAUDE.md)"):
         assert rule in deny
     # Governance files are denied (proposals only, human applies).
     assert "Edit(CLAUDE.md)" in deny
@@ -58,7 +59,7 @@ def test_bash_and_powershell_guards_protect_the_same_roots():
     for path in protected:
         assert bg._PROTECTED.search(path), f"bash guard misses {path}"
         assert pg._PROTECTED.search(path), f"powershell guard misses {path}"
-    # A breeder's workspace path is NOT platform-protected in either guard.
+    # A breeder's workspace path is not platform-protected in either guard.
     workspace = "/c/Users/zack/tcip-projects/hazelnut/annotations/catkin/2026-02-11/detect/a.txt"
     assert not bg._PROTECTED.search(workspace)
     assert not pg._PROTECTED.search(workspace)
