@@ -89,8 +89,8 @@ sibling tiles of one source image in the same split) when tiling is involved.
 
 ## 6. Recommend a model, train, infer
 
-- `recommend_model_spec` for a starting point (compose from `backbone → neck → heads →
-  loss`; the registry is a library, not a constraint — see `.github/skills/training`).
+- `recommend_model` for a starting point (compose from `backbone → neck → heads →
+  loss`; the registry is a library, not a constraint — see `.github/skills/pipeline-design`).
 - `launch_training` (immutable experiment per run) → watch metrics.
 - `run_inference` to produce predictions for the review loop.
 
@@ -114,7 +114,8 @@ frames, so it lags a beat — treat it as "roughly where they are," not a frame-
 active marker *and* repins the platform-state root to `<workspace>/<project>`, so from then on
 the `@audited` log, the experiment store, and the model registry all live under that one
 project's `.tcip/` alongside its data — self-contained and portable (`export_project` bundles
-everything). After adoption, `get_project_status`, `get_best_model`, `list_registered_models`,
+everything; `import_project` restores that ZIP into a destination dir, round-tripping back to a
+`get_project_status`-visible project). After adoption, `get_project_status`, `get_best_model`, `list_registered_models`,
 and `register_model_from_experiment` all default (`project_path=""`) to that project, and a
 training run auto-registers there — so the model you trained is the one you retrieve. Pass an
 explicit `project_path` only to reach a *different* project's registry. The repin is a
