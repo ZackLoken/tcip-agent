@@ -124,8 +124,8 @@ def compute_phenology(
         mapping_path: Path to a persisted plant-mapping JSON (``{date: [assignment, ...]}``
             with ``stem`` / ``plot_name`` / ``accession_name`` per assignment) — produced by
             the web plant-mapping step or ``build_plant_mapping``.
-        predictions_by_date: ``{date: predictions_dir}`` — each dir holds YOLO ``.txt``
-            prediction files (one per image ``stem``) from the elongation classifier.
+        predictions_by_date: ``{date: predictions_dir}`` — each dir holds per-image COCO/JSON
+            prediction files (``<stem>.json``) from the elongation classifier.
         output_csv_path: Where to write the delivered per-plant ``catkin_phenology.csv``.
         elongated_class_id: Class id the classifier assigns to "elongated" (default 1).
         classifier_validated: The elongation classifier's ``validated_vs_gt`` state; a CSV
