@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -144,11 +145,60 @@ def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path:
     )
     assert resp.json()["statuses"] == {
         "IMG_A.JPG": "partial",  # has objects, not completed
-        "IMG_B.JPG": "unannotated",  # empty file alone is NOT a negative — needs review
+        "IMG_B.JPG": "unannotated",  # empty file alone is not a negative — needs review
         "IMG_C.JPG": "unannotated",  # no file
         "IMG_D.JPG": "negative",  # completed + empty → confirmed negative (intentional)
         "IMG_E.JPG": "complete",  # completed + has objects
     }
+
+
+def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tmp_path: Path) -> None:
+    # The per-file label-JSON memo is keyed on mtime_ns — a write after a prior derive() call
+    # must not serve the stale (pre-write) parse of the same path.
+    det = tmp_path / "detect"
+    det.mkdir()
+    label = det / "IMG_A.json"
+    json_io.write_detect(str(label), [], 100, 100, keep_empty=True)
+    os.utime(label, (1_000_000, 1_000_000))
+
+    req = {
+        "project_root": str(tmp_path),
+        "annotations_detect_dir": str(det),
+        "annotations_segment_dir": None,
+        "image_list": ["IMG_A.JPG"],
+        "complete_override": [],
+    }
+    first = client.post("/api/classes/image_status/derive", json=req).json()
+    assert first["statuses"]["IMG_A.JPG"] == "unannotated"
+
+    json_io.write_detect(str(label), [BBox(50.0, 50.0, 60.0, 60.0, 0)], 100, 100)
+    os.utime(label, (2_000_000, 2_000_000))  # force a distinct mtime_ns from the first write
+
+    second = client.post("/api/classes/image_status/derive", json=req).json()
+    assert second["statuses"]["IMG_A.JPG"] == "partial"
+
+
+def test_load_derived_registry_cache_invalidates_on_label_write(
+    client: TestClient, tmp_path: Path
+) -> None:
+    # Same memo, exercised through load_classes' label-derived registry path.
+    det = tmp_path / "annotations" / "catkin" / "d" / "detect"
+    det.mkdir(parents=True)
+    label = det / "IMG_A.json"
+    json_io.write_detect(str(label), [BBox(50.0, 50.0, 60.0, 60.0, 0)], 100, 100)
+    os.utime(label, (1_000_000, 1_000_000))
+
+    params = {"project_root": str(tmp_path), "trait": "catkin", "annotations_detect_dir": str(det)}
+    first = client.get("/api/classes/load", params=params).json()
+    assert [c["id"] for c in first["classes"]] == [0]
+
+    json_io.write_detect(
+        str(label), [BBox(50.0, 50.0, 60.0, 60.0, 0), BBox(20.0, 20.0, 30.0, 30.0, 2)], 100, 100
+    )
+    os.utime(label, (2_000_000, 2_000_000))
+
+    second = client.get("/api/classes/load", params=params).json()
+    assert [c["id"] for c in second["classes"]] == [0, 2]
 
 
 def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
