@@ -1,7 +1,7 @@
 """End-to-end integration test: agent pipeline through MCP tools.
 
 Verifies the full workflow using the MCP tool layer:
-  init_project → create_session → load_dataset → validate_data_quality →
+  init_project → load_dataset → validate_data_quality →
   load_annotations → save_annotations → evaluate_detections →
   evaluate_dataset → split_dataset → export_project
 
@@ -18,8 +18,6 @@ from PIL import Image
 
 from tcip_mcp.tools.project_tools import (
     init_project,
-    create_session,
-    append_session_event,
     get_project_status,
     export_project,
 )
@@ -33,7 +31,6 @@ from tcip_mcp.tools.annotation_tools import (
     save_annotations,
     evaluate_detections,
     evaluate_dataset,
-    run_matching,
 )
 
 
@@ -95,18 +92,10 @@ class TestE2EPipeline:
         # ── Step 1: Init project ─────────────────────────────────────
         init_project(root)
         assert (project_dir / ".tcip").is_dir()
-        assert (project_dir / ".tcip" / "sessions").is_dir()
         assert (project_dir / ".tcip" / "config.toml").is_file()
 
         status = get_project_status(root)
         assert status["initialized"] is True
-
-        # ── Step 2: Create session ───────────────────────────────────
-        session = create_session(root, description="E2E test run")
-        sid = session["session_id"]
-        assert sid
-        session_file = project_dir / ".tcip" / "sessions" / f"{sid}.jsonl"
-        assert session_file.is_file()
 
         # ── Step 3: Load dataset ─────────────────────────────────────
         ds = load_dataset(root)
@@ -116,19 +105,11 @@ class TestE2EPipeline:
         assert ds["paired_images"] == 5
         assert ds["unlabelled_images"] == 0
 
-        append_session_event(root, sid, "tool_call", {
-            "tool": "load_dataset", "image_count": ds["image_count"],
-        })
-
         # ── Step 4: Validate data quality ────────────────────────────
         quality = validate_data_quality(root)
         assert quality["total_images"] == 5
         assert quality["is_valid"] is True
         assert 0 in quality["class_ids"]
-
-        append_session_event(root, sid, "tool_call", {
-            "tool": "validate_data_quality", "valid": quality["is_valid"],
-        })
 
         # ── Step 5: Load annotations for one image ───────────────────
         img_path = str(project_dir / "images" / "2-11-26" / "img_000.jpg")
@@ -154,10 +135,6 @@ class TestE2EPipeline:
         boxes, _ = json_io.read_detect(str(label_path))
         assert len(boxes) == 3  # we wrote 3 boxes
 
-        append_session_event(root, sid, "tool_call", {
-            "tool": "save_annotations", "image": "img_000.jpg",
-        })
-
         # ── Step 7: Evaluate single image detections ─────────────────
         eval_result = evaluate_detections(img_path, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in eval_result
@@ -167,12 +144,12 @@ class TestE2EPipeline:
         assert "f1" in eval_result
         assert isinstance(eval_result["precision"], float)
 
-        # ── Step 8: Run detailed matching ────────────────────────────
-        match_result = run_matching(img_path, iou_threshold=0.5, conf_threshold=0.25)
+        # ── Step 8: Detailed per-detection breakdown (evaluate_detections detail=True) ─
+        match_result = evaluate_detections(img_path, iou_threshold=0.5, conf_threshold=0.25, detail=True)
         assert "error" not in match_result
-        assert "tp_count" in match_result
-        assert "fp_count" in match_result
-        assert "fn_count" in match_result
+        assert "detections" in match_result
+        assert "img_w" in match_result
+        assert "img_h" in match_result
 
         # ── Step 9: Evaluate full dataset ────────────────────────────
         dataset_eval = evaluate_dataset(root, iou_threshold=0.5, conf_threshold=0.25)
@@ -181,11 +158,6 @@ class TestE2EPipeline:
         assert "precision" in dataset_eval
         assert "recall" in dataset_eval
         assert "f1" in dataset_eval
-
-        append_session_event(root, sid, "tool_call", {
-            "tool": "evaluate_dataset",
-            "f1": dataset_eval["f1"],
-        })
 
         # ── Step 10: Split dataset ───────────────────────────────────
         split_dir = tmp_path / "splits"
@@ -200,31 +172,12 @@ class TestE2EPipeline:
         assert isinstance(train_data, list)
         assert len(train_data) > 0
 
-        append_session_event(root, sid, "tool_call", {
-            "tool": "split_dataset", "splits": split_result["splits"],
-        })
-
         # ── Step 11: Export project as ZIP ───────────────────────────
         zip_path = str(tmp_path / "export.zip")
         export_result = export_project(root, zip_path)
         assert "error" not in export_result
         assert Path(zip_path).is_file()
         assert Path(zip_path).stat().st_size > 0
-
-        append_session_event(root, sid, "result", {
-            "pipeline": "complete", "export": zip_path,
-        })
-
-        # ── Verify session log has all events ────────────────────────
-        events = session_file.read_text().strip().splitlines()
-        # session_start + 5 tool_call + 1 result = 7 total
-        assert len(events) == 7
-
-        # Verify each event line is valid JSON with required fields
-        for line in events:
-            evt = json.loads(line)
-            assert "type" in evt
-            assert "timestamp" in evt
 
 
 class TestE2EPipelineEdgeCases:
