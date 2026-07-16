@@ -12,6 +12,7 @@ from pathlib import Path
 from tcip_annotation.utils import get_image_dimensions
 from tcip_annotation.viz import (
     render_candidates,
+    render_canvas_state,
     render_comparison,
     render_confusion_examples,
     render_detections,
@@ -632,6 +633,129 @@ def accept_candidates(
                    f"for review — not ground truth.",
         "detection_count": len(boxes),
         "segmentation_count": len(polygons),
+    }
+
+
+@mcp.tool()
+@audited
+def visualize_canvas(
+    refresh: bool = True,
+    crop_to_viewport: bool = True,
+    max_edge: int = 1600,
+) -> dict:
+    """Render exactly what the human's GUI canvas shows right now — image, shapes, viewport.
+
+    The GUI continuously pushes its canvas state (image, viewport, classes, and the
+    display-resolved shapes with the exact colors/tags it renders — including unsaved edits and
+    an in-progress drawing) to ``.tcip/state/canvas_live.json``. This tool renders that state
+    over the full-resolution image and returns the artifact path for ``view_image``, plus the
+    classes schema, review legend, per-tag/per-creator counts, and the state's age.
+
+    Args:
+        refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting
+            briefly for it to land. Falls back to the last pushed state if no GUI responds.
+        crop_to_viewport: Render only the region the human currently sees (their zoom/pan).
+            Pass False for the full frame with the same overlays.
+        max_edge: Downscale the rendered output to at most this edge (px).
+    """
+    import json
+    import time as _time
+
+    from tcip_mcp.project_paths import resolve_state
+
+    meta_file = resolve_state(Path(".tcip") / "state" / "canvas_live.json")
+    shapes_file = resolve_state(Path(".tcip") / "state" / "canvas_shapes.json")
+
+    def _read(path: Path) -> dict | None:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    prev = _read(meta_file)
+    prev_ts = (prev or {}).get("received_at", 0)
+    refreshed = False
+    ping_delivered = False
+    if refresh:
+        from tcip_mcp.web_client import post_panel_event
+
+        res = post_panel_event("app", "canvas_state_request", {})
+        ping_delivered = bool(res.get("delivered"))
+        if ping_delivered:
+            for _ in range(12):  # ~2.4s for the GUI's flush to land
+                _time.sleep(0.2)
+                cur = _read(meta_file)
+                if cur and cur.get("received_at", 0) > prev_ts:
+                    refreshed = True
+                    break
+
+    state = _read(meta_file)
+    if state is None:
+        return {"error": "No live canvas state found — is the GUI open with a project loaded? "
+                         "The frontend pushes it to <project>/.tcip/state/canvas_live.json "
+                         f"(looked at {meta_file}; if the GUI has a different project open, "
+                         "set_active_project to it first)."}
+
+    src_image = state.get("image_path") or ""
+    if not Path(src_image).is_file():
+        return {"error": f"Canvas state references a missing image: {src_image}"}
+
+    # Geometry is valid only when its identity matches the meta document — a heartbeat for a
+    # different image/tab means the stored shapes are stale and must not render.
+    sdoc = _read(shapes_file) or {}
+    shapes_valid = (
+        sdoc.get("image_path") == state.get("image_path") and sdoc.get("tab") == state.get("tab")
+    )
+    shapes = (sdoc.get("shapes") or []) if shapes_valid else []
+    out = render_canvas_state(
+        src_image, shapes, viewport=state.get("viewport"),
+        crop_to_viewport=crop_to_viewport, max_edge=max_edge,
+    )
+
+    now = _time.time()
+    tag_counts: dict[str, int] = {}
+    creator_counts: dict[str, int] = {}
+    for s in shapes:
+        if isinstance(s, dict):
+            tag_counts[str(s.get("tag") or "untagged")] = tag_counts.get(str(s.get("tag") or "untagged"), 0) + 1
+            cb = s.get("created_by")
+            if cb:
+                creator_counts[str(cb)] = creator_counts.get(str(cb), 0) + 1
+
+    age = round(max(0.0, now - float(state.get("received_at") or now)), 1)
+    live = refreshed or age < 5.0
+    summary = (
+        f"Rendered the live {state.get('tab')} canvas for {state.get('image')} ({len(shapes)} shapes)."
+        if live else
+        f"Rendered the LAST KNOWN {state.get('tab')} canvas for {state.get('image')} "
+        f"({len(shapes)} shapes, {age}s old — the GUI did not answer the refresh ping; it may be "
+        "closed, on another tab, or on a different project)."
+    ) + " Call view_image on image_path to see it."
+    return {
+        "image_path": out,
+        "source_image": src_image,
+        "image": state.get("image"),
+        "tab": state.get("tab"),
+        "mode": state.get("mode"),
+        "user": state.get("user"),
+        "dirty": state.get("dirty"),
+        "project_root": state.get("project_root"),
+        "viewport": state.get("viewport"),
+        "cropped_to_viewport": bool(crop_to_viewport and state.get("viewport")),
+        "classes": state.get("classes") or [],
+        "legend": state.get("legend"),
+        "counts": state.get("counts"),
+        "shape_counts_by_tag": tag_counts,
+        "shape_counts_by_creator": creator_counts,
+        "state_age_seconds": age,
+        "shapes_age_seconds": (round(max(0.0, now - float(sdoc.get("received_at") or 0)), 1)
+                               if shapes_valid and sdoc.get("received_at") else None),
+        # True when no valid geometry exists for this image/tab yet (heartbeat-only or stale).
+        "shapes_missing": not shapes_valid,
+        # Did a fresh push land after our ping? False + delivered ping = GUI not listening here.
+        "refreshed": refreshed,
+        "refresh_ping_delivered": ping_delivered,
+        "summary": summary,
     }
 
 
