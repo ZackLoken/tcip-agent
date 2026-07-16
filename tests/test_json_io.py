@@ -380,7 +380,7 @@ def test_null_or_bad_score_reads_as_zero(tmp_path: Path) -> None:
     path = tmp_path / "a.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     (pb,), _ = read_detect_pred(path)
-    assert pb.confidence == 0.0  # null score -> 0.0, object NOT dropped
+    assert pb.confidence == 0.0  # null score -> 0.0, object not dropped
     (pp,), _ = read_segment_pred(path)
     assert pp.confidence == 0.0  # non-numeric score -> 0.0, no raise
 
