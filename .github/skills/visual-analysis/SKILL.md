@@ -20,7 +20,7 @@ The agent can visually inspect images using `view_image` after rendering annotat
 | `visualize(source="annotations", path=<image>)` | Render GT labels on a single image |
 | `visualize(source="predictions", path=<image>)` | Render model predictions on a single image |
 | `visualize(source="dataset", path=<folder>, n=16)` | Random grid of annotated dataset samples |
-| `visualize_comparison` | Overlay GT (green) vs predictions (red) with match stats |
+| `visualize(source="comparison", path=<image>)` | Overlay GT (green) vs predictions (red) with match stats |
 | `visualize_worst_predictions` | Grid of top-K failure cases |
 | `sam_auto_label` | SAM candidate masks rendered with numbered overlay |
 | `accept_candidates` | Stage classified SAM candidates as predictions (created_by="sam") for human review |
@@ -58,7 +58,7 @@ Goal: Assess model quality after inference.
 1. `run_inference` or verify predictions exist
 2. `visualize_worst_predictions(predictions_dir, labels_dir, top_k=10)`
 3. `view_image` on grid → categorize failure types
-4. For specific failures: `visualize_comparison(image_path)` → `view_image`
+4. For specific failures: `visualize(source="comparison", path=image_path)` → `view_image`
 5. Categorize: false positives, false negatives, localization errors, class confusion
 6. Recommend corrective actions
 
@@ -69,14 +69,15 @@ Goal: Diagnose training issues from worst-case analysis.
 1. `check_training_status` → verify training completed, review loss curves
 2. `get_worst_predictions` → identify failure cases
 3. `visualize_worst_predictions` → render failures → `view_image`
-4. Cross-reference visual findings with per-class metrics from `evaluate_dataset`
+4. Cross-reference visual findings with `evaluate_dataset`'s per-image TP/FP/FN breakdown
+   (no per-class breakdown for detection today — see the `evaluation` skill)
 5. Recommend: more data, augmentation changes, architecture changes, longer training
 
 ### GT vs Prediction Comparison
 
 Goal: Detailed per-image quality assessment.
 
-1. `visualize_comparison(image_path, iou_threshold=0.5)` → `view_image`
+1. `visualize(source="comparison", path=image_path, iou_threshold=0.5)` → `view_image`
 2. Assess: IoU quality, missed detections, false positives, localization drift
 3. Check multiple images to identify systematic patterns
 
@@ -103,12 +104,9 @@ When inspecting rendered annotations/predictions, evaluate:
 
 ## Vision-Guided Auto-Labeling
 
-Goal: Autonomously label images using SAM geometry + agent classification.
-
-1. `sam_auto_label(image_path)` → numbered candidate overlay
-2. `view_image` → agent identifies objects, assigns class per candidate
-3. `accept_candidates(image_path, [{candidate_id: 0, class_id: 1}, ...])` → saves
-4. `view_image` on result → QA pass
-5. If objects were missed: `visualize_grid_overlay(image_path)` → `view_image`
-6. Identify missed regions by grid cell → `sam_predict(grid_cells=["C4"])` → save
-7. Repeat until coverage is satisfactory
+Full workflow, tool/role table, and the corrective (grid-cell) loop live in
+`.github/skills/annotation` (it owns the format/write semantics — `accept_candidates`
+stages to predictions, never GT directly). The visual-QA-specific angle here: after each
+`accept_candidates` or `sam_predict` call, `view_image` the staged result before moving on
+— catching a wrong class or a sloppy mask before it reaches human review is cheaper than
+catching it after.
