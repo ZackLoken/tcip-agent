@@ -29,7 +29,7 @@ def list_components() -> dict:
         import tcip_mcp.pipelines.components.temporal  # noqa: F401
     except ImportError:
         pass
-    # backbones_3d (PointNet++) is intentionally NOT imported for registration —
+    # backbones_3d (PointNet++) is intentionally not imported for registration —
     # it is deferred (no point-cloud data path yet). See backbones_3d.py.
     try:
         import tcip_mcp.pipelines.training.optimizer_factory  # noqa: F401
