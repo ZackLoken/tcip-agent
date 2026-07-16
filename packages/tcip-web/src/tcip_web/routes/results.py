@@ -114,7 +114,7 @@ class PerPlantCurvesPayload(BaseModel):
     project_root: str
     mapping_path: str  # .tcip/state/plant_mapping.json or equivalent
     # map date → predictions directory (YOLO detect txt files) for that date. Predictions
-    # MUST come from the validated 2-class elongation classifier (class
+    # must come from the validated 2-class elongation classifier (class
     # ``elongated_class_id`` = elongated); raw single-class detections carry no elongation
     # signal and cannot yield a bloom ratio.
     predictions_by_date: dict[str, str]
@@ -122,13 +122,14 @@ class PerPlantCurvesPayload(BaseModel):
 
 
 class PerPlantCurveRow(BaseModel):
+    # Required = what onset_dates dereferences (malformed -> 422, not a KeyError/500); rest stay optional.
     plant_id: str
-    accession: Optional[str]
     date: str
-    n_images: int
-    n_total: int
-    n_elongated: int
     ratio: float
+    accession: Optional[str] = None
+    n_images: int = 0
+    n_total: int = 0
+    n_elongated: int = 0
 
 
 @router.post("/per_plant_curves")
@@ -138,7 +139,7 @@ def per_plant_curves(payload: PerPlantCurvesPayload) -> dict:
     Bloom, per the trait definition, is the fraction of a plant's detected catkins that are
     elongated — "elongated" being an expert-defined morphological stage emitted by a
     *validated* classifier, never a geometric proxy. If the predictions carry no elongation
-    class, ``elongation_classified`` is false and the ratios are NOT a valid bloom
+    class, ``elongation_classified`` is false and the ratios are not a valid bloom
     measurement (run + validate the classifier first — see the ``phenology`` skill).
     """
     _guard(payload.mapping_path, *payload.predictions_by_date.values())
@@ -198,7 +199,7 @@ def per_plant_curves(payload: PerPlantCurvesPayload) -> dict:
 
 
 class OnsetDatesPayload(BaseModel):
-    curves: list[dict]  # output of per_plant_curves
+    curves: list[PerPlantCurveRow]  # output of per_plant_curves
 
 
 @router.post("/onset_dates")
@@ -210,18 +211,18 @@ def onset_dates(payload: OnsetDatesPayload) -> dict:
     the dates the elongated fraction crosses those levels; ``catkin_elongation_date`` is the
     date most catkins have elongated (``crops.yml``) — the 95% majority crossing.
     """
-    plants: dict[str, list[dict]] = {}
+    plants: dict[str, list[PerPlantCurveRow]] = {}
     for row in payload.curves:
-        plants.setdefault(row["plant_id"], []).append(row)
+        plants.setdefault(row.plant_id, []).append(row)
 
     out: list[dict] = []
     for plant_id, rows in plants.items():
-        ordered = sorted(rows, key=lambda r: phenology.date_key(r["date"]))
-        series = [(r["date"], float(r["ratio"])) for r in ordered]
+        ordered = sorted(rows, key=lambda r: phenology.date_key(r.date))
+        series = [(r.date, float(r.ratio)) for r in ordered]
         out.append(
             {
                 "plant_id": plant_id,
-                "accession": rows[0].get("accession"),
+                "accession": rows[0].accession,
                 "n_datapoints": len(rows),
                 **phenology.plant_milestones(series),
             }
@@ -280,6 +281,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
 
 @router.get("/models/registered")
 def registered_models(project_path: str, tag: Optional[str] = None) -> dict:
+    _guard(project_path)
     from tcip_mcp.tools.model_tools import list_registered_models
 
     return list_registered_models(project_path, tag)
