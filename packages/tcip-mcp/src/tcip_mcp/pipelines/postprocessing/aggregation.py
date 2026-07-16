@@ -6,7 +6,7 @@ Aggregation strategies (per-plant summary of a per-image value):
   - mean:     Arithmetic mean (continuous traits)
   - sum:      Sum of values (area traits)
 
-Bloom PHENOLOGY (05/50/95-per-date) is intentionally NOT here — it is the elongated-
+Bloom phenology (05/50/95-per-date) is intentionally not here — it is the elongated-
 fraction crossing, implemented once in ``postprocessing/phenology.py``.
 
 Usage:
@@ -159,8 +159,8 @@ def _agg_sum(items: list[dict], value_key: str) -> dict:
     return {"value": sum(values)}
 
 
-# NOTE: catkin bloom phenology (05/50/95-per-date milestones) is NOT an aggregation
-# strategy here. It is the elongated-FRACTION crossing, and its single canonical
+# note: catkin bloom phenology (05/50/95-per-date milestones) is not an aggregation
+# strategy here. It is the elongated-fraction crossing, and its single canonical
 # implementation lives in ``postprocessing/phenology.py`` (used by the web Results route
 # and the ``compute_phenology`` MCP tool). A prior "sigmoid" strategy computed those
 # milestones from raw count normalized to the season peak — a different, wrong definition
