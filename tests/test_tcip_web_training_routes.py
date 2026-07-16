@@ -82,6 +82,51 @@ def test_metrics_route_reads_jsonl(client: TestClient, tmp_path: Path) -> None:
     assert body["metrics"] == rows
 
 
+def test_read_metrics_after_resumes_from_byte_offset(tmp_path: Path) -> None:
+    # The websocket poll must remember a byte offset and seek there, not re-parse the file
+    # from the start every tick — a resumed read only returns rows written since that offset.
+    from tcip_web.routes.training import _read_metrics_after
+
+    path = tmp_path / "metrics.jsonl"
+    path.write_text(json.dumps({"epoch": 1}) + "\n", encoding="utf-8")
+
+    rows, offset = _read_metrics_after(path, 0)
+    assert rows == [{"epoch": 1}]
+    assert offset == path.stat().st_size
+
+    # Nothing new yet: re-polling from the remembered offset yields no rows.
+    rows2, offset2 = _read_metrics_after(path, offset)
+    assert rows2 == []
+    assert offset2 == offset
+
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"epoch": 2}) + "\n")
+
+    rows3, offset3 = _read_metrics_after(path, offset2)
+    assert rows3 == [{"epoch": 2}]
+    assert offset3 == path.stat().st_size
+
+
+def test_read_metrics_after_defers_partial_trailing_line(tmp_path: Path) -> None:
+    # A writer's line lands on disk before its trailing newline flushes; a seek-based reader
+    # must not consume that partial line, or it would permanently skip the completed row.
+    from tcip_web.routes.training import _read_metrics_after
+
+    path = tmp_path / "metrics.jsonl"
+    path.write_bytes(json.dumps({"epoch": 1}).encode("utf-8") + b"\n" + b'{"epoch": 2')
+
+    rows, offset = _read_metrics_after(path, 0)
+    assert rows == [{"epoch": 1}]
+    assert offset < path.stat().st_size  # the partial line was not consumed
+
+    with path.open("ab") as f:
+        f.write(b', "loss": 0.1}\n')
+
+    rows2, offset2 = _read_metrics_after(path, offset)
+    assert rows2 == [{"epoch": 2, "loss": 0.1}]
+    assert offset2 == path.stat().st_size
+
+
 def test_compare_route_handles_empty_ids(client: TestClient) -> None:
     resp = client.post("/api/training/compare", json={"experiment_ids": []})
     assert resp.status_code == 200
@@ -97,7 +142,7 @@ def test_cancel_unknown_run_returns_404(client: TestClient) -> None:
 def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
     # No live runs (post-restart): the list is rebuilt from .tcip/experiments/. A genuine
     # training experiment left 'running' by a crash resurfaces as 'interrupted'; a
-    # review-feedback experiment (no model_spec) is NOT a training run and is excluded.
+    # review-feedback experiment (no model_spec) is not a training run and is excluded.
     monkeypatch.chdir(tmp_path)
     import json as _json
 
