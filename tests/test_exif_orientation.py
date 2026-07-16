@@ -29,17 +29,15 @@ UP_W, UP_H = 80, 120  # upright is portrait (taller than wide) — like a rotate
 MARKER = (20, 30, 55, 60)  # red rectangle in upright pixel coords (x1, y1, x2, y2)
 
 
-def _norm_box(marker: tuple[int, int, int, int], w: int, h: int) -> tuple[float, float, float, float]:
-    x1, y1, x2, y2 = marker
-    return ((x1 + x2) / 2 / w, (y1 + y2) / 2 / h, (x2 - x1) / w, (y2 - y1) / h)
-
-
 def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, Path, tuple[int, int, int, int]]:
-    """Write ``images/m.jpg`` (Orientation 6) + ``labels/m.txt`` (upright-normalized YOLO).
+    """Write ``images/m.jpg`` (Orientation 6) + ``labels/m.json`` (upright-frame pixel box).
 
     The on-disk pixels are the upright image rotated 90° so that auto-orient's rotate(270)
     restores the upright frame — mirroring a real orientation-6 capture.
     """
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
+
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     images_dir.mkdir()
@@ -52,8 +50,8 @@ def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, Path, tuple[int, int, i
     exif[274] = 6  # Orientation
     raw.save(images_dir / "m.jpg", format="JPEG", exif=exif, quality=95)
 
-    cx, cy, bw, bh = _norm_box(MARKER, UP_W, UP_H)
-    (labels_dir / "m.txt").write_text(f"0 {cx} {cy} {bw} {bh}\n")
+    x1, y1, x2, y2 = MARKER  # already pixel xyxy in the upright frame
+    json_io.write_detect(str(labels_dir / "m.json"), [BBox(x1, y1, x2, y2, 0)], UP_W, UP_H, keep_empty=True)
     return images_dir, labels_dir, MARKER
 
 
