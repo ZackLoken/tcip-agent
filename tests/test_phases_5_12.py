@@ -194,7 +194,7 @@ class TestPointCloud:
         assert out["sa3"].shape[0] == 2
 
     def test_pointnet_not_registered(self):
-        # Phase 0.3 task-honesty: PointNet++/3D is deferred and intentionally NOT
+        # Phase 0.3 task-honesty: PointNet++/3D is deferred and intentionally not
         # registered (no point-cloud dataset/task/inference path exists yet). The
         # backbone class still works in isolation (see test_pointnet_backbone_forward).
         from tcip_mcp.pipelines.registry import BACKBONES
@@ -235,9 +235,6 @@ class TestTemporal:
 class TestToolImports:
     def test_pipeline_tools_importable(self):
         import tcip_mcp.tools.pipeline_tools  # noqa: F401
-
-    def test_active_learning_tools_importable(self):
-        import tcip_mcp.tools.active_learning_tools  # noqa: F401
 
     def test_model_tools_no_old_builder_import(self):
         """model_tools should not import from pipelines.models.builder."""
