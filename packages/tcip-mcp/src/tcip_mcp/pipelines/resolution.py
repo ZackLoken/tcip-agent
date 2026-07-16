@@ -103,7 +103,7 @@ class ResolvedParam:
     def unvalidated_value(self, *, acknowledge_unvalidated: bool) -> Any:
         """Escape hatch: read the raw value while explicitly acknowledging it is unvalidated.
 
-        The caller MUST pass ``acknowledge_unvalidated=True`` and is responsible for stamping the
+        The caller must pass ``acknowledge_unvalidated=True`` and is responsible for stamping the
         resulting output ``validated=false`` (carrying ``self.sweep``) so the uncertainty travels on.
         """
         if not acknowledge_unvalidated:
@@ -198,7 +198,7 @@ class ResolvedBundle:
 
 def raw_operating_point(
     *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
-    max_dets: int,
+    max_dets: int, tile_size_source: str = "default",
 ) -> ResolvedBundle:
     """The operating point for RAW (uncalibrated) inference — the one both doors resolve through.
 
@@ -206,14 +206,26 @@ def raw_operating_point(
     stamped ``validated_vs_gt=false``: reading it requires ``unvalidated_value(...)`` and the caller
     must stamp its output ``validated=false``. This is what stops the MCP tool and the web job giving
     a different count (the phenotype) for the same model + images by entry point.
+
+    ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
+    geometry, ``explicit`` (caller override), or a ``default`` fallback (CV2) — so a 224-train /
+    640-infer scale mismatch is visible in the provenance rather than silent.
     """
+    if tiled and tile_size_source == "derived":
+        tile_param = derived("tile_size", tile_size, derivation_class="deterministic",
+                             derived_from="persisted training tile geometry")
+    elif tiled and tile_size_source == "explicit":
+        tile_param = ResolvedParam("tile_size", tile_size, source="explicit",
+                                   derivation_class="deterministic", derived_from="caller override")
+    else:
+        tile_param = default("tile_size", tile_size if tiled else None)
     return ResolvedBundle(trait="", dataset_hash=None, params={
         "conf": ResolvedParam("conf", conf, source="default", derivation_class="calibration",
                               validated_vs_gt=VALIDATED_FALSE),
         "cross_tile_nms": default("cross_tile_nms", cross_tile_nms if tiled else None,
                                   derivation_class="distribution"),
         "tiled": default("tiled", tiled),
-        "tile_size": default("tile_size", tile_size if tiled else None),
+        "tile_size": tile_param,
         "max_dets": default("max_dets", max_dets, derivation_class="distribution"),
     })
 
@@ -230,20 +242,15 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     """
     labels_dir = Path(labels_dir)
     if stems is None:
-        # Canonical labels are per-image JSON; keep a .txt fallback for any un-migrated dir. Reading
-        # only *.txt would find nothing on a JSON dataset and hash every label as empty — so two
-        # different datasets would hash equal and a stale calibration would read as valid.
-        stems = sorted(
-            {p.stem for p in labels_dir.glob("*.json")} | {p.stem for p in labels_dir.glob("*.txt")}
-        )
+        # Canonical labels are per-image JSON.
+        stems = sorted(p.stem for p in labels_dir.glob("*.json"))
     else:
         stems = sorted(stems)
     h = hashlib.sha256()
     for stem in stems:
         h.update(stem.encode("utf-8"))
         h.update(b"\0")
-        jp = labels_dir / f"{stem}.json"
-        lp = jp if jp.is_file() else labels_dir / f"{stem}.txt"
+        lp = labels_dir / f"{stem}.json"
         h.update(lp.read_bytes() if lp.is_file() else b"")
         h.update(b"\0")
     return h.hexdigest()[:16]
