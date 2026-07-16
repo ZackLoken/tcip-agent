@@ -139,6 +139,20 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
         transforms = build_augmentation(aug_config)
 
     train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
+
+    # CV2: persist the EFFECTIVE tiling geometry (the 224/0.2 defaults used when the tiling dict
+    # omitted them, not just caller-pinned values) into config["data"]["tiling"], so every checkpoint
+    # + the experiment config carry the true tile scale and inference can derive it. data_cfg is the
+    # same object as config["data"], so this lands in the snapshot recorded below.
+    tiling_cfg = data_cfg.get("tiling")
+    if tiling_cfg and tiling_cfg.get("enabled", True):
+        eff_tile = getattr(train_ds, "tile_size", None)
+        eff_overlap = getattr(train_ds, "overlap", None)
+        if eff_tile is not None:
+            tiling_cfg["tile_size"] = int(eff_tile)
+        if eff_overlap is not None:
+            tiling_cfg["overlap"] = float(eff_overlap)
+
     sampler = build_sampler(train_config.sampler, train_ds)
     train_loader = DataLoader(
         train_ds, batch_size=train_config.batch_size,
@@ -675,7 +689,20 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
 
     # 2. Auto group-aware train/val split.
     try:
-        full_ds = build_dataset(task, **src, transforms=transforms)
+        # Backend#3: assemble the dataset-level COCO ONCE (JSON detection labels) and thread it into
+        # the full + train + val builds below, instead of re-assembling the same COCO three times.
+        # Annotations are matched by image file name, so the full COCO is correct for any stem subset.
+        build_src = dict(src)
+        if task in ("detection", "instance_seg") and not (
+            data_cfg.get("label_format") or data_cfg.get("coco_json")
+        ):
+            from tcip_mcp.pipelines.data.datasets import assemble_coco, dir_label_format
+            _labels, _images = src.get("labels_dir", ""), src.get("images_dir", "")
+            if _labels and _images and dir_label_format(_labels) == "json":
+                build_src["coco_data"] = assemble_coco(_labels, _images)
+                build_src["label_format"] = "coco"
+
+        full_ds = build_dataset(task, **build_src, transforms=transforms)
         stems = list(getattr(full_ds, "stems", None) or getattr(full_ds, "_stems", []))
         if len(stems) < 2:
             return full_ds, None
@@ -709,8 +736,8 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                 task, images_dir=src["images_dir"], transforms=None,
                 stems=val_stems, labels=[stem_to_label[s] for s in val_stems])
         else:
-            train_ds = build_dataset(task, **src, transforms=transforms, stems=train_stems, tiling=tiling)
-            val_ds = build_dataset(task, **src, transforms=None, stems=val_stems, tiling=tiling)
+            train_ds = build_dataset(task, **build_src, transforms=transforms, stems=train_stems, tiling=tiling)
+            val_ds = build_dataset(task, **build_src, transforms=None, stems=val_stems, tiling=tiling)
         logger.info("Auto train/val split for %s: %d train / %d val stems.",
                     task, len(train_stems), len(val_stems))
         return train_ds, val_ds
@@ -748,21 +775,21 @@ def get_training_metrics_path(run_id: str) -> dict:
 def get_worst_predictions(
     predictions_dir: str,
     labels_dir: str,
-    n: int = 8,
+    top_k: int = 8,
 ) -> dict:
-    """Return the N images ranked worst by a count-mismatch + low-confidence triage heuristic.
+    """Return the ``top_k`` images ranked worst by a count-mismatch + low-confidence triage heuristic.
 
     This is a cheap triage signal, not a quality metric: it does no IoU matching and computes
     no loss. The score is ``2·|n_gt−n_pred as a shortfall| + |surplus| + (1−avg_conf)`` — purely
     the difference in box *counts* plus mean confidence, so an image with the right count but
     every box mislocated scores as good. Use it to surface likely-bad frames for a human to look
-    at; for true TP/FP/FN ranking use ``run_matching`` / ``evaluate_detections`` (IoU-matched).
+    at; for true TP/FP/FN ranking use ``evaluate_detections`` (``detail=True``, IoU-matched).
 
     Args:
         predictions_dir: Directory with per-image JSON prediction files
             (``<stem>.json``) written by run_inference / the review engine.
         labels_dir: Directory with per-image JSON ground-truth label files.
-        n: Number of worst images to return.
+        top_k: Number of worst images to return.
     """
     pred_path = Path(predictions_dir)
     gt_path = Path(labels_dir)
@@ -805,7 +832,7 @@ def get_worst_predictions(
                 scores.append((gt_file.stem, len(gt_boxes) * 3.0))
 
     scores.sort(key=lambda x: x[1], reverse=True)
-    worst = scores[:n]
+    worst = scores[:top_k]
 
     return {
         "worst_images": [{"stem": s, "error_score": round(sc, 3)} for s, sc in worst],
@@ -824,12 +851,22 @@ def evaluate_model(
     iou_threshold: float = 0.5,
     iou_type: str | None = None,
     max_dets: int = 100,
+    tiling: dict | None = None,
+    use_tiled_inference: bool = False,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
     Computes the same per-task metrics as validation — detection/instance_seg get
     pycocotools mAP + precision/recall/F1; classification/ordinal/regression get the
     in-house scalar metrics — and writes ``test_results.json`` beside the checkpoint.
+
+    Two detection eval regimes (CV1):
+      * default (single full-res forward pass) or ``tiling`` set -> tile-level DIAGNOSTIC that
+        matches the training-run val mAP. When ``run_id_or_ckpt`` is a run id and ``tiling`` is
+        left None, the run's own training tiling is reused so held-out eval matches that regime;
+        an explicit checkpoint PATH stays untiled unless ``tiling`` is passed.
+      * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric (tiled inference
+        reconstructed to full frame, matched to full-frame GT). Report THIS to gate a delivery.
 
     Args:
         run_id_or_ckpt: A training run id (uses its ``model_best.pt``) or a checkpoint path.
@@ -841,15 +878,22 @@ def evaluate_model(
         iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task — 'segm' for
             instance_seg, 'bbox' otherwise — so a mask model isn't silently scored as boxes.
         max_dets: COCOeval max detections per image.
+        tiling: Optional detection tiling dict ({enabled, tile_size, overlap, ...}) for a
+            tile-level eval. None + a run id reuses the run's training tiling; None + a
+            checkpoint path stays untiled.
+        use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
     """
     import torch
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.training.generic_trainer import get_run, task_collate
-    from tcip_mcp.pipelines.training.evaluation import run_test_evaluation
+    from tcip_mcp.pipelines.training.evaluation import (
+        run_full_frame_evaluation, run_test_evaluation,
+    )
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     ckpt = run_id_or_ckpt
+    run = None
     if not Path(ckpt).is_file():
         run = get_run(run_id_or_ckpt)
         if run is None:
@@ -858,13 +902,31 @@ def evaluate_model(
     if not Path(ckpt).is_file():
         return {"error": f"Checkpoint not found: {ckpt}"}
 
+    run_tiling = (run.config.get("data", {}) or {}).get("tiling") if run is not None else None
+
+    # Delivery-grade full-frame path (tiled inference + full-frame GT matching).
+    if use_tiled_inference and task == "detection":
+        tcfg = tiling or run_tiling or {}
+        return run_full_frame_evaluation(
+            ckpt, images_dir, labels_dir, str(Path(ckpt).parent),
+            conf_threshold=conf_threshold, iou_threshold=iou_threshold,
+            tile_size=int(tcfg.get("tile_size", 640)), overlap=float(tcfg.get("overlap", 0.2)),
+            max_dets=max_dets if max_dets > 100 else 1000,
+        )
+
+    # Tile-level diagnostic (or untiled). Only detection tiles; a run id reuses its training tiling.
+    if tiling is None and run is not None:
+        tiling = run_tiling
+    if task != "detection":
+        tiling = None
+
     ds_kwargs = {"images_dir": images_dir}
     if task in ("detection", "instance_seg"):
         ds_kwargs["labels_dir"] = labels_dir
     elif task == "semantic_seg":
         ds_kwargs["masks_dir"] = labels_dir
     try:
-        dataset = build_dataset(task, **ds_kwargs)
+        dataset = build_dataset(task, **ds_kwargs, tiling=tiling)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}
 
@@ -873,5 +935,5 @@ def evaluate_model(
     return run_test_evaluation(
         ckpt, loader, device, task, str(Path(ckpt).parent),
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
-        iou_type=iou_type, max_dets=max_dets,
+        iou_type=iou_type, max_dets=max_dets, tiling=tiling,
     )
