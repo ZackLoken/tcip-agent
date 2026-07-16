@@ -15,6 +15,7 @@ Convention — the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +23,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_mcp.dataset_layout import (
+    TASKS,
     annotation_dir,
     models_with_predictions,
     prediction_dir,
@@ -58,24 +60,72 @@ def _list_children(p: Path) -> list[str]:
     return sorted(e.name for e in p.iterdir() if e.is_dir() and not e.name.startswith("."))
 
 
+# ── /tree cache ────────────────────────────────────────────────────────────
+# traits_with_labels/models_with_predictions each re-list annotations/ or predictions/ and
+# walk every (trait|model, task) leaf dir per date, so a naive /tree is an iterdir storm on a
+# dataset with many dates. Cache the built tree per dataset_root, keyed by a signature of every
+# directory the computation reads (stat-only, no listing) — a write inside any of those leaf
+# dirs bumps its own mtime_ns and invalidates the entry. Bounded to a handful of recent roots.
+_TREE_CACHE_MAX = 64
+_tree_cache: "OrderedDict[str, tuple[tuple, DatasetTree]]" = OrderedDict()
+
+
+def _dir_mtime_ns(p: Path) -> int:
+    try:
+        return p.stat().st_mtime_ns
+    except OSError:
+        return -1
+
+
+def _tree_signature(root: Path, dates: list[str], traits: list[str], models: list[str]) -> tuple:
+    sig = [
+        _dir_mtime_ns(root / "images"),
+        _dir_mtime_ns(root / "annotations"),
+        _dir_mtime_ns(root / "models"),
+        _dir_mtime_ns(root / "predictions"),
+    ]
+    for d in dates:
+        for trait in traits:
+            sig.extend(_dir_mtime_ns(annotation_dir(root, trait, d, task)) for task in TASKS)
+        for model in models:
+            sig.extend(_dir_mtime_ns(prediction_dir(root, model, d, task)) for task in TASKS)
+    return tuple(sig)
+
+
 @router.get("/tree")
 def get_dataset_tree(dataset_root: str) -> DatasetTree:
     """Return the high-level tree (dates, annotation types, models) for a dataset."""
     root = Path(dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
+
     dates = _list_children(root / "images")
-    return DatasetTree(
+    annotation_types = _list_children(root / "annotations")
+    model_names = sorted(
+        set(_list_children(root / "models")) | set(_list_children(root / "predictions"))
+    )
+
+    key = str(root)
+    signature = _tree_signature(root, dates, annotation_types, model_names)
+    cached = _tree_cache.get(key)
+    if cached is not None and cached[0] == signature:
+        _tree_cache.move_to_end(key)
+        return cached[1]
+
+    tree = DatasetTree(
         dataset_root=str(root),
         dates_with_images=dates,
-        annotation_types=_list_children(root / "annotations"),
+        annotation_types=annotation_types,
         # A model is selectable if it has a checkpoint dir and/or a predictions dir.
-        model_names=sorted(
-            set(_list_children(root / "models")) | set(_list_children(root / "predictions"))
-        ),
+        model_names=model_names,
         traits_by_date={d: traits_with_labels(root, d) for d in dates},
         models_by_date={d: models_with_predictions(root, d) for d in dates},
     )
+    _tree_cache[key] = (signature, tree)
+    _tree_cache.move_to_end(key)
+    if len(_tree_cache) > _TREE_CACHE_MAX:
+        _tree_cache.popitem(last=False)
+    return tree
 
 
 @router.get("/images")
