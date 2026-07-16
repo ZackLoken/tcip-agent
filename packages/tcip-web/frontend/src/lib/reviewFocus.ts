@@ -61,7 +61,7 @@ export async function applyReviewFocus(d: ReviewFocusData): Promise<void> {
   if (typeof d.iou_threshold === "number") review.iou_threshold = d.iou_threshold;
   if (typeof d.conf_threshold === "number") review.conf_threshold = d.conf_threshold;
   useStore.getState().patchGui({ review });
-  // The detection index goes through a one-shot the reload effect honors ONCE — writing
+  // The detection index goes through a one-shot the reload effect honors once — writing
   // gui.review.detection_idx directly would be clobbered by the reload's "jump to first
   // unreviewed" when the frame/filters change (which this focus always causes).
   if (typeof d.detection_idx === "number") useStore.getState().setReviewFocusIdx(d.detection_idx);
