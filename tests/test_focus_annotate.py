@@ -74,7 +74,7 @@ def test_focus_annotate_resolves_active_class_from_the_frame(tmp_path: Path) -> 
 
 def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(tmp_path: Path) -> None:
     # IMG_0002 has polygons, IMG_0007 has only boxes. Asking for index 7 with mode=None must
-    # infer 'box' from frame 7 — NOT 'polygon' from the first annotated frame.
+    # infer 'box' from frame 7 — not 'polygon' from the first annotated frame.
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(8)]
@@ -89,7 +89,7 @@ def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(tmp_
 
 
 def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(tmp_path: Path) -> None:
-    # A directory named like an image must NOT shift the index (the frontend's image_list uses
+    # A directory named like an image must not shift the index (the frontend's image_list uses
     # is_file()); the tool must match that so it doesn't land one frame off.
     root = tmp_path / "proj"
     date = "2026-03-02"
