@@ -13,12 +13,15 @@ adaptations:
     AppState. This makes the engine safe to reuse across images and
     concurrent sessions.
 
-The only state the engine holds between calls is the persisted review log
-(``review_stats.json``) and a small spatial-hash cache for fast lookups.
+The only state the engine holds between calls is the persisted review log — one JSON
+shard per image under ``<state_dir>/review/`` (a verdict rewrites only its own image's
+shard, not the whole cross-image log) — and a small spatial-hash cache for fast lookups.
+A legacy single ``review_stats.json`` (pre-sharding) is migrated to shards on first load.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -76,7 +79,8 @@ class ReviewContext:
 
 # ── Constants ─────────────────────────────────────────────────────────────
 
-REVIEW_STATE_FILENAME = "review_stats.json"
+REVIEW_STATE_FILENAME = "review_stats.json"  # legacy single-file layout; migrated on load
+REVIEW_SHARD_DIRNAME = "review"
 _LOOKUP_QUANT = 500
 _LOOKUP_TOLERANCE = 0.002
 
@@ -90,7 +94,8 @@ class ReviewEngine:
     Parameters
     ----------
     state_dir : Path | str
-        Directory where ``review_stats.json`` lives. Created if missing.
+        Directory holding the ``review/`` shard directory (one JSON file per
+        reviewed image). Created if missing.
     class_names : dict[int, str], optional
         Class ID → human name mapping. Embedded in recorded entries for audit.
     current_user : str, optional
@@ -116,48 +121,103 @@ class ReviewEngine:
 
     @property
     def review_state_path(self) -> Path:
+        """Legacy single-file location, kept only to detect/migrate a pre-sharding state."""
         return self.state_dir / REVIEW_STATE_FILENAME
 
+    @property
+    def shard_dir(self) -> Path:
+        return self.state_dir / REVIEW_SHARD_DIRNAME
+
+    def _shard_path(self, img_name: str) -> Path:
+        safe = img_name.replace("\\", "_").replace("/", "_")
+        if safe != img_name:
+            # Sanitizing separators can collide distinct keys ('a/b.jpg' vs 'a_b.jpg'); a short stable
+            # hash of the true key keeps their shard files distinct. The key itself lives in the payload.
+            safe = f"{safe}.{hashlib.sha1(img_name.encode('utf-8')).hexdigest()[:8]}"
+        return self.shard_dir / f"{safe}.json"
+
     def load_review_state(self) -> None:
-        path = self.review_state_path
-        if path.exists():
-            try:
-                self._review_state = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                logger.exception("Could not load review state from %s", path)
-                self._review_state = {}
+        shards = sorted(self.shard_dir.glob("*.json")) if self.shard_dir.is_dir() else []
+        if shards:
+            self._review_state = {"image": self._read_shards(shards)}
+        elif self.review_state_path.exists():
+            self._review_state = self._read_legacy_file()
+            self.save_review_state()  # one-time migration: split into shards...
+            self._delete_legacy_file()  # ...then remove the old single file
         else:
             self._review_state = {}
         self._invalidate_reviewed_lookup()
 
-    def save_review_state(self) -> None:
-        """Persist review state atomically (temp file + ``os.replace``).
+    def _read_shards(self, shards: list[Path]) -> dict:
+        per_image: dict = {}
+        for shard in shards:
+            try:
+                payload = json.loads(shard.read_text(encoding="utf-8"))
+            except Exception:
+                logger.exception("Could not load review shard %s", shard)
+                continue
+            # The true image key is stored inside the payload, so a sanitized/hash-suffixed filename
+            # never mutates or merges keys on reload.
+            img_name, state = payload.get("img_name"), payload.get("state")
+            if img_name is None or state is None:
+                img_name, state = shard.name[: -len(".json")], payload
+            per_image[img_name] = state
+        return per_image
 
-        A plain ``write_text`` can leave a half-written / truncated file if the
-        process dies mid-write, and ``load_review_state`` silently resets to ``{}``
-        on a parse error — which would discard the *entire* review history. The
-        atomic swap (same pattern as :mod:`tcip_annotation.label_io`) means a reader
-        always sees either the old or the new complete file, never a torn one.
-        """
+    def _read_legacy_file(self) -> dict:
         path = self.review_state_path
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            data = json.dumps(self._review_state, indent=2, ensure_ascii=False)
-            fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(data)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp, path)
-            finally:
-                if os.path.exists(tmp):
-                    try:
-                        os.remove(tmp)
-                    except OSError:
-                        pass
+            return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
-            logger.exception("Could not save review state to %s", path)
+            logger.exception("Could not load review state from %s", path)
+            return {}
+
+    def _delete_legacy_file(self) -> None:
+        try:
+            self.review_state_path.unlink()
+        except OSError:
+            logger.exception("Could not remove legacy review state file %s", self.review_state_path)
+
+    def _atomic_write_json(self, path: Path, obj: dict) -> None:
+        """Serialize ``obj`` compactly and swap it into ``path`` atomically (temp file +
+        ``os.replace``, fsync'd). A plain ``write_text`` can leave a half-written /
+        truncated file if the process dies mid-write; the atomic swap means a reader
+        always sees either the old or the new complete file, never a torn one.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+    def _save_image(self, img_name: str) -> None:
+        """Persist only ``img_name``'s shard — O(detections on that image), not O(all-reviewed)."""
+        img_data = self._review_state.get("image", {}).get(img_name)
+        if img_data is None:
+            return
+        try:
+            # Store the true key alongside the state so reload reconstructs it from the payload, not
+            # the (possibly sanitized) filename.
+            self._atomic_write_json(self._shard_path(img_name), {"img_name": img_name, "state": img_data})
+        except Exception:
+            logger.exception("Could not save review shard for %s", img_name)
+
+    def save_review_state(self) -> None:
+        """Flush every image's shard. The per-verdict callers use :meth:`_save_image`
+        instead, to touch only the image that changed; this is for migration / tests
+        that want the whole in-memory state written out."""
+        for img_name in list(self._review_state.get("image", {})):
+            self._save_image(img_name)
 
     @property
     def raw_state(self) -> dict:
@@ -172,7 +232,7 @@ class ReviewEngine:
             img_name, {"img_status": "completed", "detections": []}
         )
         img_data["img_status"] = "completed"
-        self.save_review_state()
+        self._save_image(img_name)
 
     def unmark_image_reviewed(self, img_name: str) -> None:
         """Reverse a manual mark: back to started (verdicts kept) or not_started."""
@@ -181,7 +241,7 @@ class ReviewEngine:
         if not img_data:
             return
         img_data["img_status"] = "started" if img_data.get("detections") else "not_started"
-        self.save_review_state()
+        self._save_image(img_name)
 
     def is_image_reviewed(self, img_name: str) -> bool:
         per_image = self._review_state.get("image", {})
@@ -478,7 +538,7 @@ class ReviewEngine:
         if img_data.get("img_status") == "not_started":
             img_data["img_status"] = "started"
 
-        self.save_review_state()
+        self._save_image(ctx.img_name)
 
     def check_image_review_complete(self, img_name: str, matches: dict) -> bool:
         """If every detection on the image has been reviewed, mark it complete.
@@ -501,7 +561,7 @@ class ReviewEngine:
         reviewed_count = len(img_data.get("detections", []))
         if reviewed_count >= total:
             img_data["img_status"] = "completed"
-            self.save_review_state()
+            self._save_image(img_name)
             return True
         return False
 
@@ -522,7 +582,8 @@ class ReviewEngine:
                 continue
             backup_dir = d / ".original"
             for src in d.iterdir():
-                if not (src.is_file() and src.suffix == ".txt"):
+                # .json is the canonical label format; .txt covers not-yet-migrated imports.
+                if not (src.is_file() and src.suffix in (".json", ".txt")):
                     continue
                 dst = backup_dir / src.name
                 if dst.exists():
@@ -553,18 +614,22 @@ class ReviewEngine:
                 "Per-image COCO save is unsupported (COCO is one shared file); writing YOLO "
                 "labels for %s instead. Use a batch COCO export to round-trip.", ctx.img_name)
 
+        # keep_empty: an emptied GT is a confirmed negative (objects: []), never a deleted file —
+        # matching the /action and annotate save paths (the negative invariant).
         ok = True
         if detect_path is not None:
             try:
                 os.makedirs(os.path.dirname(detect_path) or ".", exist_ok=True)
-                write_detect_labels(detect_path, ctx.gt_boxes, ctx.img_width, ctx.img_height)
+                write_detect_labels(detect_path, ctx.gt_boxes, ctx.img_width, ctx.img_height,
+                                    keep_empty=True)
             except OSError:
                 logger.exception("Could not save detect labels to %s", detect_path)
                 ok = False
         if segment_path is not None:
             try:
                 os.makedirs(os.path.dirname(segment_path) or ".", exist_ok=True)
-                write_segment_labels(segment_path, ctx.gt_polygons, ctx.img_width, ctx.img_height)
+                write_segment_labels(segment_path, ctx.gt_polygons, ctx.img_width, ctx.img_height,
+                                     keep_empty=True)
             except OSError:
                 logger.exception("Could not save segment labels to %s", segment_path)
                 ok = False
