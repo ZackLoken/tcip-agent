@@ -112,7 +112,7 @@ def ingest_images(
     (``images/<YYYY-MM-DD>/<stem><ext>``) under a workspace project. Copies by
     default — originals are left byte-identical; pass ``copy=False`` to move.
     Refuses to overwrite an existing image (records the collision and skips it).
-    Does NOT annotate, split, choose a task, or write ``classes.json``.
+    Does not annotate, split, choose a task, or write ``classes.json``.
 
     Args:
         source: Folder (or glob) of raw images, anywhere on disk.
@@ -153,7 +153,7 @@ def ingest_images(
     moved = 0
     skipped_collisions: list[dict] = []
     errors: list[dict] = []
-    # Collisions are keyed by STEM within a bucket (case-insensitively): labels and
+    # Collisions are keyed by stem within a bucket (case-insensitively): labels and
     # predictions pair to an image by stem alone (see dataset_layout), so two sources with
     # the same stem but different extensions would otherwise silently share one label file.
     placed: set[tuple[str, str]] = set()
