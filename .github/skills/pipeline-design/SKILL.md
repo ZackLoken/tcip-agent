@@ -41,6 +41,11 @@ Failure modes: training label scarcity; strong lighting/weather covariates.
 
 ### Pattern C: Point-cloud tree segmentation → tree-level geometric measurement
 
+> **Out of current build scope.** 3D point clouds (LiDAR / SfM) are not built — see CLAUDE.md's
+> Scope section and README's Roadmap. A `pointnet++` backbone exists but is intentionally
+> unregistered; there is no point-cloud dataset/loader or task type. This pattern describes
+> future capability, not something you can compose today.
+
 ```
 LiDAR or SfM point cloud → ground filter → CHM → watershed tree seg → per-tree geometry → CSV
 ```
@@ -61,6 +66,10 @@ Failure modes: irregular sampling intervals; missing time points; wind/lighting 
 
 ### Pattern E: Non-spatial spectral
 
+> **Out of current build scope.** The dataset layer reads 2D imagery (RGB + N-channel
+> rasters) — a bare non-imagery spectral reading has no dataset/loader today. This pattern
+> describes future capability, not something you can compose today.
+
 ```
 spectral reading (NIR, hyperspectral) → preprocessor → regression/classification → per-sample value → CSV
 ```
@@ -70,6 +79,10 @@ Good for: kernel oil percentage, moisture, sugar content, disease screening from
 Failure modes: instrument drift; sample preparation variability; calibration transfer across instruments.
 
 ### Pattern F: Relational / contextual
+
+> **Out of current build scope.** README's Roadmap lists relational pipeline patterns beyond
+> per-image traits as not built yet; there is no contextual-ranking task type today. This
+> pattern describes future capability, not something you can compose today.
 
 ```
 plot-level imagery → per-plant detection → contextual ranking within plot/block/day → rank-based phenotype → CSV
@@ -88,19 +101,28 @@ model_spec = {
     "backbone": {"name": "resnet50", "pretrained": True},
     "neck": {"name": "fpn"},
     "heads": [
-        {"name": "detection_head", "task": "detection", "num_classes": 3}
+        {"name": "anchor_detection", "task": "detection", "num_classes": 3}
     ],
-    "loss": {"name": "focal_loss"}
+    "loss": {"name": "focal"}
 }
 ```
 
-The registry is a **library**, not a constraint. Available components:
-- **Backbones**: resnet18/34/50/101, mobilenet_v3, efficientnet, vit, swin
-- **Necks**: FPN, PAN, BiFPN
-- **Heads**: detection, classification, segmentation, regression, ordinal
-- **Losses**: focal, cross_entropy, smooth_l1, dice, coral
+The registry is a **library**, not a constraint. Component names drift as the registry grows —
+call `list_components` for the live list rather than trusting a hand-maintained table. As of
+this writing:
+- **Backbones**: resnet18/34/50/101, efficientnet_b0-b4, mobilenetv2_100,
+  mobilenetv3_small_100/large_100, convnext_tiny/small, vit_small/base_patch16_224 (+
+  tv_resnet50/101 torchvision fallbacks)
+- **Necks**: fpn, pan, identity, gap
+- **Heads**: classification, ordinal, regression, anchor_detection, anchor_free_detection,
+  semantic_seg, temporal_lstm, temporal_transformer
+- **Losses**: cross_entropy, weighted_ce, focal, smooth_l1, huber, bce, dice, giou, corn, coral
 
 You can also ignore the registry entirely and write a model from scratch. No architecture is forced.
+
+This is the one canonical `model_spec` example — `training/SKILL.md` references it rather than
+repeating it (a prior duplicate there had drifted to the same non-existent `detection_head` /
+`focal_loss` names).
 
 ## Multi-phase pipelines
 
