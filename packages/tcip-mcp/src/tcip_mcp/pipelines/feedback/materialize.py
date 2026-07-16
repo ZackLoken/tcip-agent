@@ -131,6 +131,15 @@ def materialize_dataset(
             "rejected_count": info["rejected_count"], "label": str(label_path),
         })
 
+    # Hard negatives here come from explicit human rejection verdicts, so mark them in the
+    # output's own status store — training only trusts human-confirmed negatives, never bare
+    # empty files (someone may have emptied a label mid-work).
+    negatives = {e["image"]: "negative" for e in manifest_images if e["status"] == "hard_negative"}
+    if negatives:
+        status_file = out / ".tcip" / "state" / "image_status.json"
+        status_file.parent.mkdir(parents=True, exist_ok=True)
+        status_file.write_text(json.dumps(negatives, indent=2))
+
     manifest = {
         "created": datetime.now(timezone.utc).isoformat(),
         "review_state": review_state_path,
