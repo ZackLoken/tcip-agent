@@ -256,24 +256,30 @@ def to_coco_dataset(
     entries: list[tuple[str, str]],
     *,
     categories: list[dict] | None = None,
+    confirmed_negative_names: set[str] | None = None,
 ) -> dict:
     """Concatenate per-image JSON label files into one COCO dataset dict.
 
     ``entries``: ``[(label_json_path, image_file_name), ...]``. A **missing** label file is
-    *unannotated* and is **skipped entirely** (so an unlabeled image never becomes a training
-    negative); a **present** file — including a confirmed negative (empty objects) — yields an
-    ``images`` record. Every object becomes an ``annotations`` record with ``bbox`` (xywh) + ``area``
-    + (for polygons) ``segmentation``, plus ``score``/provenance as COCO-extension keys. All geometry
-    is float-coerced, so the result parses cleanly with ``format_io.parse_coco_detect`` /
+    *unannotated* and is **skipped entirely**. An **empty** label file (``objects: []``) is a
+    training negative only when its ``file_name`` is in ``confirmed_negative_names`` — a human
+    marked the image complete-with-nothing; an empty file alone never is (it may just be
+    emptied mid-work), so unconfirmed empties are skipped like unannotated images. Every object
+    becomes an ``annotations`` record with ``bbox`` (xywh) + ``area`` + (for polygons)
+    ``segmentation``, plus ``score``/provenance as COCO-extension keys. All geometry is
+    float-coerced, so the result parses cleanly with ``format_io.parse_coco_detect`` /
     ``parse_coco_segment``.
     """
     coco: dict = {"images": [], "annotations": [], "categories": categories or []}
+    negatives = confirmed_negative_names or set()
     ann_id = 1
     img_id = 0
     for label_path, file_name in entries:
         if not os.path.exists(str(label_path)):
             continue  # unannotated — not part of the training set
         data = _load(str(label_path)) or {}
+        if not _objects(data) and file_name not in negatives:
+            continue  # empty but not human-confirmed negative — treat as unannotated
         img_id += 1
         coco["images"].append({
             "id": img_id, "file_name": file_name,
