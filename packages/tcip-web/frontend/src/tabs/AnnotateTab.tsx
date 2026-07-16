@@ -24,6 +24,7 @@ import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@
 const SNAP_RADIUS_CANVAS = 15;
 const VERTEX_HANDLE_RADIUS = 4;
 const EDGE_INSERT_THRESHOLD = 6;
+const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Stream (freehand) mode
 const MIN_BOX_SIDE = 3;
 
 function currentImagePath(dataset: DatasetSelection): string | null {
@@ -233,11 +234,18 @@ export function AnnotateTab() {
   const nav = useImageNav();
   usePrefetchAdjacentImages();
 
-  // A box selection belongs to one image; leaving it drops the selection + any drag.
+  // A box selection belongs to one image; leaving it drops the selection + any drag (and ends a
+  // live freehand stream so it can't bleed vertices onto the next image).
   useEffect(() => {
     setSelectedBoxIdx(null);
     boxDragRef.current = null;
+    streamingRef.current = false;
   }, [currentImageName]);
+
+  // Leaving Stream mode ends any live stream (the in-progress polygon is left for the user).
+  useEffect(() => {
+    if (!annotateUi.stream) streamingRef.current = false;
+  }, [annotateUi.stream]);
 
   // ── Label load + save ───────────────────────────────────────────────
 
@@ -605,12 +613,18 @@ export function AnnotateTab() {
   // Set when a press starts a vertex drag / edge insert, so the trailing click of the
   // drag release can't place a vertex or deselect (one gesture, one meaning).
   const didDragRef = useRef(false);
+  // True between the start/stop clicks of a freehand (Stream mode) polygon.
+  const streamingRef = useRef(false);
   // Throttle the "detect is derived" notice to once per image, not once per click.
   const derivedNoticeRef = useRef<string | null>(null);
 
   const onDown = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     if (isLocked) return;
     if (ev.evt.button !== 0) return; // right-button drags must not fabricate boxes
+    // A fresh press starts a new gesture: clear the drag flag first. A completed vertex drag
+    // fires no trailing click, so without this the stale flag would swallow the next click
+    // (e.g. an outside click meant to deselect), forcing a second click.
+    didDragRef.current = false;
     if (mode === "box") {
       // Detect boxes are derived from polygons when any exist, so a drawn box would be
       // discarded on save — point the annotator at polygon mode instead of losing it.
@@ -731,6 +745,25 @@ export function AnnotateTab() {
       return;
     }
 
+    // Streaming (freehand): between the two clicks, drop a vertex each time the pointer has
+    // moved far enough — no button held.
+    if (streamingRef.current && annotateUi.stream && mode === "polygon") {
+      const pts = canvas.currentPolygon;
+      const last = pts[pts.length - 1];
+      const minD = STREAM_MIN_DIST_CANVAS / (view.scale || 1);
+      if (!last || Math.hypot(ix - last[0], iy - last[1]) >= minD) {
+        const [sx, sy] = snapImagePoint(ix, iy);
+        setCurrentPolygon([
+          ...pts,
+          [
+            Math.max(0, Math.min(canvas.imgWidth || sx, sx)),
+            Math.max(0, Math.min(canvas.imgHeight || sy, sy)),
+          ],
+        ]);
+      }
+      return;
+    }
+
     // Resizing / moving a selected box
     const bDrag = boxDragRef.current;
     if (bDrag && mode === "box") {
@@ -823,6 +856,24 @@ export function AnnotateTab() {
       return;
     }
 
+    // Stream (freehand): click to start, click again to stop + commit. Between the two clicks the
+    // vertices follow the cursor (see processMove) — the button is never held down. Right-click
+    // (onContextMenu) cancels a live stream.
+    if (annotateUi.stream) {
+      if (streamingRef.current) {
+        streamingRef.current = false;
+        if (canvas.currentPolygon.length >= 3) commitPolygonAndTrack();
+        else setCurrentPolygon([]);
+      } else {
+        if (canvas.selectedPolygonIdx !== null) selectPolygon(null);
+        pushUndo();
+        const [sx, sy] = snapImagePoint(ix, iy);
+        setCurrentPolygon([[sx, sy]]);
+        streamingRef.current = true;
+      }
+      return;
+    }
+
     // Placing vertices into a new polygon
     if (canvas.currentPolygon.length > 0) {
       const [sx, sy] = snapImagePoint(ix, iy);
@@ -858,8 +909,9 @@ export function AnnotateTab() {
   const onContextMenu = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     ev.evt.preventDefault();
     if (isLocked) return;
-    // Right-click cancels in-progress polygon first
-    if (mode === "polygon" && canvas.currentPolygon.length > 0) {
+    // Right-click cancels an in-progress / streaming polygon first
+    if (mode === "polygon" && (canvas.currentPolygon.length > 0 || streamingRef.current)) {
+      streamingRef.current = false;
       setCurrentPolygon([]);
       return;
     }
@@ -1263,15 +1315,15 @@ function SnapIndicator({
     }
   }
   if (!best) return null;
-  const r = 12 / scale;
+  const r = 7 / scale; // ring the snap target just outside the vertex handle (~vertex-sized, not 2×)
   return (
     <Circle
       x={best[0]}
       y={best[1]}
       radius={r}
       stroke="#FFE7B1"
-      strokeWidth={2 / scale}
-      dash={[3 / scale, 3 / scale]}
+      strokeWidth={1.5 / scale}
+      dash={[2.5 / scale, 2.5 / scale]}
     />
   );
 }
