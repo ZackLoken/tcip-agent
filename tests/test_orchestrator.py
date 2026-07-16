@@ -20,6 +20,7 @@ from tcip_mcp.pipelines.orchestrator import (
     PhaseResult,
     PipelineOrchestrator,
 )
+from tests._orchestrator_helpers import build_stub_trainer
 
 MODEL_SPEC = {
     "backbone": "resnet18",
@@ -52,46 +53,11 @@ def det_data(tmp_path: Path) -> dict:
     return {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "stems": stems}
 
 
-class FakeRun:
-    def __init__(self, run_id: str, output_dir: str) -> None:
-        self.run_id = run_id
-        self.output_dir = output_dir
-        self.status = "completed"
-        self.metrics_history = [{"train_loss": 0.25}]
-        self.error = ""
-
-
 @pytest.fixture
 def stub_trainer(monkeypatch, tmp_path: Path) -> dict:
     """Stub create_run/train so training phases exercise dataset building and
     tracking wiring without real training. Keeps .tcip writes inside tmp_path."""
-    import tcip_mcp.pipelines.training.generic_trainer as gt
-
-    captured: dict = {}
-
-    def fake_create_run(config, output_dir, origin="training"):
-        captured["config"] = config
-        run = FakeRun("run_orch_test", output_dir)
-        captured["run"] = run
-        return run
-
-    def fake_train(run, train_loader, val_loader=None, task="detection",
-                   epoch_callback=None, resume_from=""):
-        captured["train_len"] = len(train_loader.dataset)
-        captured["val_len"] = len(val_loader.dataset) if val_loader is not None else None
-        captured["task"] = task
-        out = Path(run.output_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "model_best.pt").write_bytes(b"fake checkpoint")
-        if epoch_callback is not None:
-            epoch_callback(0, {"train_loss": 0.25})
-        return run
-
-    monkeypatch.setattr(gt, "create_run", fake_create_run)
-    monkeypatch.setattr(gt, "train", fake_train)
-    # Experiment tracking + model registry write to cwd's .tcip — sandbox them.
-    monkeypatch.chdir(tmp_path)
-    return captured
+    return build_stub_trainer(monkeypatch, tmp_path, "run_orch_test")
 
 
 def _stub_runner(record: list | None = None, status: str = "completed",
