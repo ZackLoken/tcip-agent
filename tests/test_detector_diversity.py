@@ -116,6 +116,8 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     from torch.utils.data import DataLoader
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -123,7 +125,13 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
         save_image(torch.rand(3, 64, 64), str(images_dir / f"img{i}.png"))
-        (labels_dir / f"img{i}.txt").write_text("0 0.5 0.5 0.4 0.4\n")
+        json_io.write_detect(
+            str(labels_dir / f"img{i}.json"),
+            [BBox(19.2, 19.2, 44.8, 44.8, 0)],
+            64,
+            64,
+            keep_empty=True,
+        )
 
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
