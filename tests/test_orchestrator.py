@@ -33,8 +33,10 @@ MODEL_SPEC = {
 
 @pytest.fixture
 def det_data(tmp_path: Path) -> dict:
-    """Tiny YOLO detection dataset (4 images, 1 box each)."""
+    """Tiny detection dataset (4 images, 1 box each)."""
     from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -43,7 +45,10 @@ def det_data(tmp_path: Path) -> dict:
     stems = [f"img_{i}" for i in range(4)]
     for stem in stems:
         Image.new("RGB", (32, 32), color=(100, 100, 100)).save(images_dir / f"{stem}.jpg")
-        (labels_dir / f"{stem}.txt").write_text("0 0.5 0.5 0.2 0.2\n")
+        json_io.write_detect(
+            str(labels_dir / f"{stem}.json"),
+            [BBox(12.8, 12.8, 19.2, 19.2, 0)], 32, 32, keep_empty=True,
+        )
     return {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "stems": stems}
 
 
