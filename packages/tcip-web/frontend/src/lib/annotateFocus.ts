@@ -47,7 +47,7 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
     void api.dataset.nav(d.image_index).catch(() => {});
   }
   if (d.mode) store.setMode(d.mode);
-  // The canvas renders ONLY shapes of the active class, so set it to the class present on the
+  // The canvas renders only shapes of the active class, so set it to the class present on the
   // focused frame — otherwise a frame labelled with a non-zero class shows a blank canvas even
   // in the right mode (activeClass defaults to 0).
   if (typeof d.active_class === "number") store.setActiveClass(d.active_class);
