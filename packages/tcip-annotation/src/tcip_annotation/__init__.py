@@ -1,4 +1,4 @@
-"""Headless annotation library — YOLO, COCO, PASCAL VOC, and LabelMe format support."""
+"""Headless annotation library — canonical per-image COCO/JSON, plus YOLO, COCO, PASCAL VOC, and LabelMe I/O."""
 
 from tcip_annotation.state import (
     AnnotationState,
@@ -49,7 +49,7 @@ __all__ = [
     "PredBBox",
     "PredPolygon",
     "boxes_from_polygons",
-    # YOLO — the platform's native on-disk label format (primary read/write path)
+    # Canonical per-image COCO/JSON — the platform's native on-disk label format (primary read/write path)
     "parse_detect_labels",
     "parse_segment_labels",
     "parse_detect_predictions",
