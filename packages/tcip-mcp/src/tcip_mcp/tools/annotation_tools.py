@@ -36,12 +36,13 @@ from tcip_mcp.audit import audited
 def load_annotations(image_path: str, fmt: str | None = None) -> dict:
     """Load labels and predictions for a single image.
 
-    Supports YOLO (.txt), PASCAL VOC (.xml), COCO (.json), and LabelMe (.json).
-    Format is auto-detected from file extension unless fmt is specified.
+    Supports the canonical per-image COCO/JSON (.json), plus YOLO (.txt), PASCAL VOC (.xml),
+    COCO (.json), and LabelMe (.json). Format is auto-detected from file extension and content
+    unless fmt is specified.
 
     Args:
         image_path: Absolute path to the image file.
-        fmt: Force annotation format ('yolo', 'voc', 'coco', 'labelme'). Auto-detects if omitted.
+        fmt: Force annotation format ('json', 'yolo', 'voc', 'coco', 'labelme'). Auto-detects if omitted.
     """
     img = Path(image_path)
     if not img.is_file():
@@ -97,7 +98,7 @@ def load_annotations(image_path: str, fmt: str | None = None) -> dict:
                 "defaulted to YOLO. If this is wrong, re-call with fmt='coco', 'voc', or 'labelme'."
             )
 
-    # Look for predictions (YOLO format — predictions are always YOLO)
+    # Look for predictions (per-image COCO/JSON, parsed by json_io)
     pred_det = find_prediction(image_path, "detect")
     if pred_det is not None:
         pred_boxes, class_ids = parse_detect_predictions(str(pred_det), w, h)
@@ -144,14 +145,14 @@ def save_annotations(
     Labels go to ``<dataset_root>/annotations/<trait>/<date>/<task>/<stem>.<ext>``
     (see :mod:`tcip_mcp.dataset_layout`); ``date`` is derived from the image path
     (``images/<date>/<stem>``) when not given. Pass ``detect_path`` / ``segment_path``
-    to write to an explicit location instead. Supports YOLO (.txt), PASCAL VOC (.xml),
-    and LabelMe (.json).
+    to write to an explicit location instead. Supports the canonical per-image COCO/JSON
+    (.json), plus YOLO (.txt), PASCAL VOC (.xml), and LabelMe (.json).
 
     Args:
         image_path: Absolute path to the image file.
         boxes: List of dicts with x1, y1, x2, y2, class_id (pixel coords).
         polygons: List of dicts with points and class_id (pixel coords).
-        fmt: Output format — 'yolo' (default), 'voc', 'labelme', 'coco'.
+        fmt: Output format — 'json' (canonical per-image, default), 'yolo', 'voc', 'labelme', 'coco'.
         trait: Annotation campaign (e.g. 'catkin') — the layout's ``<trait>`` segment.
         date: Capture date; derived from the image path when omitted.
         detect_path: Explicit detect label path (overrides the canonical location).
@@ -198,7 +199,8 @@ def save_annotations(
             else annotation_path_for_image(image_path, "detect", fmt, trait=trait, date=date)
         )
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        format_save(str(out_path), typed_boxes, w, h, task="detect", fmt=fmt, file_name=img.name)
+        format_save(str(out_path), typed_boxes, w, h, task="detect", fmt=fmt, file_name=img.name,
+                    keep_empty=True)
         written.append(str(out_path))
 
     if polygons is not None:
@@ -213,7 +215,8 @@ def save_annotations(
             else annotation_path_for_image(image_path, "segment", fmt, trait=trait, date=date)
         )
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        format_save(str(out_path), typed_polys, w, h, task="segment", fmt=fmt, file_name=img.name)
+        format_save(str(out_path), typed_polys, w, h, task="segment", fmt=fmt, file_name=img.name,
+                    keep_empty=True)
         written.append(str(out_path))
 
     # Best-effort: notify a running GUI that the agent touched this image's labels,
@@ -273,12 +276,60 @@ def _load_image_annotations(image_path: str):
     return iou_type, record, (gt_boxes, gt_polys, pred_boxes, pred_polys), w, h
 
 
+def _detection_breakdown(matches, gt_boxes, gt_polys, pred_boxes, pred_polys) -> list[dict]:
+    """Per-detection TP/FP/FN records (box/polygon coords + IoU + confidence) from a match result."""
+    detections: list[dict] = []
+    for m in matches["tp"]:
+        d = {
+            "tag": "tp", "class_id": m["class_id"],
+            "iou": m["iou"], "confidence": m["conf"],
+            "gt_type": m["gt_type"], "gt_idx": m["gt_idx"],
+            "pred_type": m["pred_type"], "pred_idx": m["pred_idx"],
+        }
+        if m["pred_type"] == "box":
+            b = pred_boxes[m["pred_idx"]]
+            d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
+        else:
+            p = pred_polys[m["pred_idx"]]
+            d["polygon"] = [[pt[0], pt[1]] for pt in p.points]
+        detections.append(d)
+
+    for m in matches["fp"]:
+        d = {
+            "tag": "fp", "class_id": m["class_id"],
+            "confidence": m["conf"],
+            "pred_type": m["pred_type"], "pred_idx": m["pred_idx"],
+        }
+        if m["pred_type"] == "box":
+            b = pred_boxes[m["pred_idx"]]
+            d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
+        else:
+            p = pred_polys[m["pred_idx"]]
+            d["polygon"] = [[pt[0], pt[1]] for pt in p.points]
+        detections.append(d)
+
+    for m in matches["fn"]:
+        d = {
+            "tag": "fn", "class_id": m["class_id"], "confidence": 0,
+            "gt_type": m["gt_type"], "gt_idx": m["gt_idx"],
+        }
+        if m["gt_type"] == "box":
+            b = gt_boxes[m["gt_idx"]]
+            d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
+        else:
+            p = gt_polys[m["gt_idx"]]
+            d["polygon"] = [[pt[0], pt[1]] for pt in p.points]
+        detections.append(d)
+    return detections
+
+
 @mcp.tool()
 @audited
 def evaluate_detections(
     image_path: str,
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
+    detail: bool = False,
 ) -> dict:
     """Match predictions against ground truth for a single image (COCOeval).
 
@@ -291,11 +342,14 @@ def evaluate_detections(
         conf_threshold: Minimum confidence to consider a prediction. Defaults to the shared
             ``DEFAULT_CONF`` so the reported P/R/F1 operating point matches evaluate_model /
             inference (they used to diverge — 0.25 here vs 0.5 there).
+        detail: Also return a per-detection ``detections`` breakdown (each TP/FP/FN with its
+            box/polygon coordinates, class id, IoU, and confidence) plus ``img_w`` / ``img_h`` —
+            the low-level match data for annotation review / feeding the review panel.
     """
     loaded = _load_image_annotations(image_path)
     if loaded is None:
         return {"error": f"Image not found: {image_path}"}
-    iou_type, record, (gt_boxes, gt_polys, pred_boxes, pred_polys), _w, _h = loaded
+    iou_type, record, (gt_boxes, gt_polys, pred_boxes, pred_polys), w, h = loaded
 
     from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics
     m = coco_detection_metrics([record], iou_type=iou_type,
@@ -304,7 +358,7 @@ def evaluate_detections(
         gt_boxes, gt_polys, pred_boxes, pred_polys,
         iou_threshold=iou_threshold, conf_threshold=conf_threshold,
     )
-    return {
+    out = {
         "image": image_path,
         "tp": m["tp"],
         "fp": m["fp"],
@@ -318,6 +372,11 @@ def evaluate_detections(
         "conf_threshold": conf_threshold,
         "matches": matches,
     }
+    if detail:
+        out["img_w"] = w
+        out["img_h"] = h
+        out["detections"] = _detection_breakdown(matches, gt_boxes, gt_polys, pred_boxes, pred_polys)
+    return out
 
 
 @mcp.tool()
@@ -480,115 +539,6 @@ def sam_predict(
 
 @mcp.tool()
 @audited
-def run_matching(
-    image_path: str,
-    iou_threshold: float = 0.5,
-    conf_threshold: float = 0.25,
-) -> dict:
-    """Run GT-vs-prediction matching for a single image.
-
-    Returns detailed match data including per-detection TP/FP/FN classification
-    with bounding box coordinates, class IDs, IoU values, and confidence scores.
-
-    This is the low-level matching tool — use for annotation review,
-    quality assessment, or feeding match data to the review panel.
-
-    Args:
-        image_path: Absolute path to the image file.
-        iou_threshold: IoU threshold for matching (default 0.5).
-        conf_threshold: Confidence threshold for filtering predictions (default 0.25).
-    """
-    from tcip_annotation import (
-        parse_detect_labels,
-        parse_detect_predictions,
-        parse_segment_labels,
-        parse_segment_predictions,
-        compute_matches,
-    )
-
-    img = Path(image_path)
-    if not img.is_file():
-        return {"error": f"Image not found: {image_path}"}
-
-    # Get image dimensions
-    img_w, img_h = get_image_dimensions(image_path)
-
-    gt_det = find_gt_label(image_path, "detect")
-    gt_seg = find_gt_label(image_path, "segment")
-    pred_det = find_prediction(image_path, "detect")
-    pred_seg = find_prediction(image_path, "segment")
-
-    gt_boxes, _ = parse_detect_labels(str(gt_det), img_w, img_h) if gt_det else ([], set())
-    gt_polys, _ = parse_segment_labels(str(gt_seg), img_w, img_h) if gt_seg else ([], set())
-    pred_boxes, _ = (
-        parse_detect_predictions(str(pred_det), img_w, img_h) if pred_det else ([], set())
-    )
-    pred_polys, _ = (
-        parse_segment_predictions(str(pred_seg), img_w, img_h) if pred_seg else ([], set())
-    )
-
-    matches = compute_matches(gt_boxes, gt_polys, pred_boxes, pred_polys,
-                              iou_threshold, conf_threshold)
-
-    # Build detailed per-detection records with coordinates
-    detections = []
-    for m in matches["tp"]:
-        d = {
-            "tag": "tp", "class_id": m["class_id"],
-            "iou": m["iou"], "confidence": m["conf"],
-            "gt_type": m["gt_type"], "gt_idx": m["gt_idx"],
-            "pred_type": m["pred_type"], "pred_idx": m["pred_idx"],
-        }
-        if m["pred_type"] == "box":
-            b = pred_boxes[m["pred_idx"]]
-            d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
-        else:
-            p = pred_polys[m["pred_idx"]]
-            d["polygon"] = [[pt[0], pt[1]] for pt in p.points]
-        detections.append(d)
-
-    for m in matches["fp"]:
-        d = {
-            "tag": "fp", "class_id": m["class_id"],
-            "confidence": m["conf"],
-            "pred_type": m["pred_type"], "pred_idx": m["pred_idx"],
-        }
-        if m["pred_type"] == "box":
-            b = pred_boxes[m["pred_idx"]]
-            d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
-        else:
-            p = pred_polys[m["pred_idx"]]
-            d["polygon"] = [[pt[0], pt[1]] for pt in p.points]
-        detections.append(d)
-
-    for m in matches["fn"]:
-        d = {
-            "tag": "fn", "class_id": m["class_id"], "confidence": 0,
-            "gt_type": m["gt_type"], "gt_idx": m["gt_idx"],
-        }
-        if m["gt_type"] == "box":
-            b = gt_boxes[m["gt_idx"]]
-            d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
-        else:
-            p = gt_polys[m["gt_idx"]]
-            d["polygon"] = [[pt[0], pt[1]] for pt in p.points]
-        detections.append(d)
-
-    return {
-        "image": str(img),
-        "img_w": img_w,
-        "img_h": img_h,
-        "tp_count": len(matches["tp"]),
-        "fp_count": len(matches["fp"]),
-        "fn_count": len(matches["fn"]),
-        "iou_threshold": iou_threshold,
-        "conf_threshold": conf_threshold,
-        "detections": detections,
-    }
-
-
-@mcp.tool()
-@audited
 def push_panel_data(
     panel: str,
     event_type: str,
@@ -663,7 +613,7 @@ def focus_annotate(
     idir = Path(image_dir(dataset_root, date))
     if not idir.is_dir():
         return {"error": f"no images for date {date} under {dataset_root}"}
-    # Match the /api/dataset/select listing EXACTLY (p.is_file() + same ext set + sorted), so
+    # Match the /api/dataset/select listing exactly (p.is_file() + same ext set + sorted), so
     # the resolved index lines up with the frontend's image_list, not one frame off.
     images = sorted(p.name for p in idir.iterdir() if p.is_file() and p.suffix.lower() in img_exts)
     if not images:
@@ -673,7 +623,7 @@ def focus_annotate(
     det_dir = Path(annotation_dir(dataset_root, trait, date, "detect"))
 
     def _label_task(stem: str) -> str | None:
-        # "segment"/"detect" if a label with OBJECTS exists (something to show), else None. A
+        # "segment"/"detect" if a label with objects exists (something to show), else None. A
         # confirmed negative (a present {"objects": []}) has size > 0 but nothing to show — read it.
         for task, d in (("segment", seg_dir), ("detect", det_dir)):
             f = d / f"{stem}.json"
@@ -702,7 +652,7 @@ def focus_annotate(
         image_index = first_idx if first_idx is not None else 0
     image_index = max(0, min(image_index, len(images) - 1))
 
-    # Mode + active class come from the frame ACTUALLY shown (images[image_index]) — not the
+    # Mode + active class come from the frame actually shown (images[image_index]) — not the
     # first-annotated frame — so an explicit image_index gets a consistent mode/class. The
     # canvas only renders shapes of the active class, so setting it is what keeps it non-blank.
     resolved_stem = Path(images[image_index]).stem
@@ -751,7 +701,7 @@ def focus_review(
     detection_idx: int = 0,
     filter_type: str = "all",
     iou_threshold: float = 0.5,
-    conf_threshold: float = 0.25,
+    conf_threshold: float = DEFAULT_CONF,
 ) -> dict:
     """Drive the live Review tab to a model's predictions on a frame, so the human sees exactly
     what the agent flagged (a false positive, a missed catkin) without hunting for it.
@@ -982,7 +932,7 @@ def stage_proposals(
         "model_name": model_name,
         "date": date,
         "stem": stem,
-        "note": ("staged to predictions/ for canvas review — NOT committed as ground truth; the "
+        "note": ("staged to predictions/ for canvas review — not committed as ground truth; the "
                  "human accepts on the Review tab before it becomes GT (focus_review to send them)"),
     }
 
@@ -992,8 +942,9 @@ def stage_proposals(
 def write_class_map(labels_dir: str, class_names: str = "", output_path: str = "") -> dict:
     """Persist the class map (id -> name/color) derived from a label set to ``classes.json``.
 
-    Enumerates the class ids actually present in ``<labels_dir>/*.txt`` (YOLO ``cls ...`` per line)
-    and writes the canonical ``<project>/.tcip/state/classes.json`` the GUI and pipeline read — so
+    Enumerates the class ids actually present in ``<labels_dir>/*.json`` (per-image COCO/JSON,
+    each object's ``category_id``) and writes the canonical ``<project>/.tcip/state/classes.json``
+    the GUI and pipeline read — so
     class identity and ``num_classes`` have one durable, audited source (derived from the labels in
     hand) instead of a pinned integer. ``class_names`` is an optional comma-separated list indexed by
     class id; unnamed ids fall back to ``class_<id>``.
