@@ -12,7 +12,7 @@ ambiguity with a hybrid:
 Fallback: when sequence anchoring fails (missing timestamps, unordered
 capture), fall back to nearest-neighbour GPS with a configurable tolerance.
 Each assignment records its match ``source`` and the GPS ``distance_m`` to the
-matched plant — honest, interpretable signals. It deliberately does NOT emit a
+matched plant — honest, interpretable signals. It deliberately does not emit a
 0–1 "confidence": a linear ``1 − d/tol`` score read as a probability was
 fabricated (uncalibrated against any hand-checked assignment) and has been
 removed; use ``distance_m`` + ``source`` to judge a match (see the CLAUDE.md
