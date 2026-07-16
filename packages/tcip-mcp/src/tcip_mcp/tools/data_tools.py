@@ -189,6 +189,14 @@ def validate_data_quality(folder_path: str) -> dict:
                             {"level": "error", "file": label_path, "line": line_no,
                              "message": "Non-numeric field"}
                         )
+    elif fmt == "json":  # canonical per-image COCO/JSON (tcip_annotation.json_io)
+        from tcip_annotation import json_io
+        for label_path in scan["labels_detect"]:
+            try:
+                boxes, cids = json_io.read_detect(label_path)
+                class_ids.update(cids)
+            except Exception as e:
+                issues.append({"level": "error", "file": label_path, "message": f"JSON parse error: {e}"})
     elif fmt == "voc":
         from tcip_annotation.format_io import parse_voc_detect
         for label_path in scan["labels_detect"]:
@@ -385,7 +393,7 @@ def make_splits(
 
     from tcip_mcp.pipelines.data.splits import (
         group_balanced_split,
-        count_lines,
+        count_label_lines,
         GROUP_KEY_FNS,
         default_group_key,
     )
@@ -404,7 +412,11 @@ def make_splits(
 
     annotation_counts = None
     if stratified:
-        annotation_counts = {s: count_lines(label_map[s]) for s in stems}
+        # count_label_lines is JSON-aware; raw count_lines would count pretty-printed JSON
+        # lines as annotations (a {objects: []} negative reads as ~5 foreground objects).
+        annotation_counts = {
+            s: count_label_lines(Path(label_map[s]).parent, s) for s in stems
+        }
 
     group_key_fn = GROUP_KEY_FNS.get(group_by, default_group_key)
     parts = group_balanced_split(
