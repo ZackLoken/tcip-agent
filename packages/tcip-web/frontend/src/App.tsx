@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Suspense, lazy, useEffect, useRef } from "react";
 
 import { classesApi } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
@@ -16,12 +16,28 @@ import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
 import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
-import { InferenceTab } from "@/tabs/InferenceTab";
 import { MetaTab } from "@/tabs/MetaTab";
-import { ResultsTab } from "@/tabs/ResultsTab";
 import { ReviewTab } from "@/tabs/ReviewTab";
-import { TrainingTab } from "@/tabs/TrainingTab";
-import { TuningTab } from "@/tabs/TuningTab";
+
+// Code-split the recharts-heavy tabs (recharts + its d3 deps are ~5MB unpacked and used only
+// here) so the Annotate/Review workflow — the primary use — paints without them. App mounts
+// exactly one tab at a time, so deferring these chunks costs no UX.
+const InferenceTab = lazy(() =>
+  import("@/tabs/InferenceTab").then((m) => ({ default: m.InferenceTab })),
+);
+const ResultsTab = lazy(() => import("@/tabs/ResultsTab").then((m) => ({ default: m.ResultsTab })));
+const TrainingTab = lazy(() =>
+  import("@/tabs/TrainingTab").then((m) => ({ default: m.TrainingTab })),
+);
+const TuningTab = lazy(() => import("@/tabs/TuningTab").then((m) => ({ default: m.TuningTab })));
+
+function TabFallback() {
+  return (
+    <div className="flex-1 flex items-center justify-center bg-tcip-canvas text-xs text-tcip-muted">
+      Loading…
+    </div>
+  );
+}
 
 function App() {
   const activeTab = useStore((s) => s.gui.active_tab);
@@ -229,13 +245,15 @@ function App() {
       <div className="flex-1 flex min-h-0">
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           <ErrorBoundary resetKey={activeTab}>
-            {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <ProjectPicker />)}
-            {activeTab === "review" && (datasetReady ? <ReviewTab /> : <ProjectPicker />)}
-            {activeTab === "results" && (datasetReady ? <ResultsTab /> : <ProjectPicker />)}
-            {activeTab === "training" && <TrainingTab />}
-            {activeTab === "tuning" && <TuningTab />}
-            {activeTab === "inference" && <InferenceTab />}
-            {activeTab === "meta" && <MetaTab />}
+            <Suspense fallback={<TabFallback />}>
+              {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <ProjectPicker />)}
+              {activeTab === "review" && (datasetReady ? <ReviewTab /> : <ProjectPicker />)}
+              {activeTab === "results" && (datasetReady ? <ResultsTab /> : <ProjectPicker />)}
+              {activeTab === "training" && <TrainingTab />}
+              {activeTab === "tuning" && <TuningTab />}
+              {activeTab === "inference" && <InferenceTab />}
+              {activeTab === "meta" && <MetaTab />}
+            </Suspense>
           </ErrorBoundary>
         </div>
         <TerminalRail />
