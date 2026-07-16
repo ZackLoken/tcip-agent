@@ -32,7 +32,7 @@ from typing import Callable, Sequence
 
 # A tiled stem looks like ``<source>_<x>_<y>`` (two trailing integer fields).
 # Strip that suffix so all tiles of one source share a group key. A stem with a
-# single trailing ``_<int>`` (e.g. ``img_001``) does NOT match and falls back to
+# single trailing ``_<int>`` (e.g. ``img_001``) does not match and falls back to
 # the full stem.
 _TILE_GROUP_RE = re.compile(r"^(.*)_\d+_\d+$")
 
@@ -158,7 +158,7 @@ def group_balanced_split(
     rng.shuffle(fg_groups)
 
     # Minimum-foreground guarantee (fraction-gated): train always; val if >=2 fg
-    # groups exist; test if >=3. Met first with the SMALLEST foreground groups so
+    # groups exist; test if >=3. Met first with the smallest foreground groups so
     # the dense ones remain for the balancing pass.
     n_fg = len(fg_groups)
     min_fg: dict[str, int] = {}
