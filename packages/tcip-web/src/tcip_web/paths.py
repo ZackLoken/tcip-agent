@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 def is_loopback_host(host: str) -> bool:
     """True if ``host`` binds only the local machine (127.0.0.0/8, ::1, localhost).
 
-    ``0.0.0.0`` / ``::`` mean "all interfaces" and are therefore NOT loopback — binding
+    ``0.0.0.0`` / ``::`` mean "all interfaces" and are therefore not loopback — binding
     them exposes the server to the network.
     """
     h = (host or "").strip().lower()
@@ -80,6 +80,20 @@ def assert_path_allowed(path: str | Path) -> Path:
         except ValueError:
             continue
     raise ValueError(f"path {resolved} is outside the allowed image roots")
+
+
+def assert_project_root_allowed(project_root: str | Path) -> Path:
+    """Confine a client-supplied ``project_root`` to the allowed roots.
+
+    A route that derives a ``.tcip/state``, ``.tcip/reports``, or ``.tcip/audit.jsonl``
+    path from a request's ``project_root`` should call this before touching disk, so the
+    same ``TCIP_IMAGE_ROOTS`` lockdown that confines image reads also confines these
+    project-scoped state readers/writers. Thin wrapper over :func:`assert_path_allowed`
+    kept as its own name so call sites read as "guarding a project root" and share one
+    place to diverge the policy later if needed. Raises :class:`ValueError`; callers
+    convert to ``HTTPException(403)`` as elsewhere in this codebase.
+    """
+    return assert_path_allowed(project_root)
 
 
 def safe_join(root: Path | str, *parts: str) -> Path:
