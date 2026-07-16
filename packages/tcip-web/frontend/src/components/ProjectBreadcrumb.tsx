@@ -130,7 +130,7 @@ export function ProjectBreadcrumb() {
             ? `Annotator: ${user} — set on the workspace page; stamped as the author of your labels`
             : "No annotator set — open the workspace page to set who you are"
         }
-        className={`font-mono ${user ? "text-tcip-fg" : "text-tcip-warn"}`}
+        className="font-mono"
       >
         {user || "no annotator"}
       </span>
