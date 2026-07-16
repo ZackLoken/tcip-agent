@@ -108,7 +108,7 @@ export function TerminalRail() {
       .status()
       .then(setStatus)
       .catch(() =>
-        // Backend unreachable is NOT "claude missing" — say so, and keep Retry viable.
+        // Backend unreachable is not "claude missing" — say so, and keep Retry viable.
         setStatus({
           available: false,
           reason: "Couldn't reach the TCIP backend. Is it running? Retry once it's up.",
