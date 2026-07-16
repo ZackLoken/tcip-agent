@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from tcip_mcp.pipelines.derivations import (
+    derive_cross_tile_nms,
     gt_aspect_ratios,
     num_classes_from_distribution,
     probe_channels,
@@ -33,6 +35,32 @@ def test_gt_aspect_ratios_covers_elongated():
     boxes = [(10.0, 40.0)] * 20
     ratios = gt_aspect_ratios(boxes)
     assert max(ratios) >= 3.0
+
+
+def test_derive_cross_tile_nms_dense_cluster_exceeds_sparse():
+    # Dense boxes (20px, offset 4px -> neighbor IoU ~0.667) push the threshold up so genuinely-
+    # overlapping dense objects aren't merged; sparse boxes (offset 16px -> IoU ~0.111) sit lower.
+    dense = [[(0, 0, 20, 20), (4, 0, 20, 20), (8, 0, 20, 20), (12, 0, 20, 20)]]
+    sparse = [[(0, 0, 20, 20), (16, 0, 20, 20), (32, 0, 20, 20)]]
+    t_dense = derive_cross_tile_nms(dense)
+    t_sparse = derive_cross_tile_nms(sparse)
+    assert t_dense is not None and t_sparse is not None
+    assert t_dense > t_sparse
+    assert 0.2 <= t_sparse <= 0.8 and 0.2 <= t_dense <= 0.8
+    assert t_dense == pytest.approx(0.6667 + 0.05, abs=1e-2)  # p99 of the neighbor-IoU tail + margin
+
+
+def test_derive_cross_tile_nms_no_overlap_returns_none():
+    # No genuine neighbor overlap anywhere -> underivable -> caller must fall back to an honest default.
+    boxes = [[(0, 0, 20, 20), (100, 100, 20, 20)], [(0, 0, 20, 20)]]
+    assert derive_cross_tile_nms(boxes) is None
+    assert derive_cross_tile_nms([]) is None
+
+
+def test_derive_cross_tile_nms_clamped_to_upper_bound():
+    # Near-duplicate boxes (IoU ~0.90) would exceed the range; the result is clamped to the ceiling.
+    boxes = [[(0, 0, 20, 20), (1, 0, 20, 20)]]
+    assert derive_cross_tile_nms(boxes) == pytest.approx(0.8)
 
 
 def test_resolve_spec_derivations_fills_when_absent(tmp_path):
