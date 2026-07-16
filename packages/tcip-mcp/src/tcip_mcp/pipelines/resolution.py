@@ -230,14 +230,20 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     """
     labels_dir = Path(labels_dir)
     if stems is None:
-        stems = sorted(p.stem for p in labels_dir.glob("*.txt"))
+        # Canonical labels are per-image JSON; keep a .txt fallback for any un-migrated dir. Reading
+        # only *.txt would find nothing on a JSON dataset and hash every label as empty — so two
+        # different datasets would hash equal and a stale calibration would read as valid.
+        stems = sorted(
+            {p.stem for p in labels_dir.glob("*.json")} | {p.stem for p in labels_dir.glob("*.txt")}
+        )
     else:
         stems = sorted(stems)
     h = hashlib.sha256()
     for stem in stems:
         h.update(stem.encode("utf-8"))
         h.update(b"\0")
-        lp = labels_dir / f"{stem}.txt"
+        jp = labels_dir / f"{stem}.json"
+        lp = jp if jp.is_file() else labels_dir / f"{stem}.txt"
         h.update(lp.read_bytes() if lp.is_file() else b"")
         h.update(b"\0")
     return h.hexdigest()[:16]
