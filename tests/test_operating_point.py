@@ -65,7 +65,7 @@ def test_count_unbiased_differs_from_f1_max():
 
 
 def test_center_match_respects_tolerance():
-    # a correct detection just outside tolerance must NOT count as a hit
+    # a correct detection just outside tolerance must not count as a hit
     recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
              "dt": [_ann(100 + 100, 100, score=0.9)]}]  # 100px off, tolerance ~10
     sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
@@ -101,6 +101,20 @@ def test_set_detector_operating_point_one_stage():
     m = _one_stage()
     set_detector_operating_point(m, score_thresh=0.4, nms_thresh=0.35)
     assert m.detector.score_thresh == 0.4 and m.detector.nms_thresh == 0.35
+
+
+def test_max_dets_from_density_scales_above_floor():
+    # 1.5x the p99 GT-per-image count exceeds the 100 floor, so max_dets scales with
+    # density instead of pinning to the floor (a dense scene must not be truncated).
+    from tcip_mcp.pipelines.operating_point import _max_dets_from_density
+    records = [{"gt": [_ann(0, 0)] * 80} for _ in range(20)]
+    assert _max_dets_from_density(records) == 120  # ceil(1.5 * 80)
+
+
+def test_max_dets_from_density_floors_sparse_scenes():
+    from tcip_mcp.pipelines.operating_point import _max_dets_from_density
+    records = [{"gt": [_ann(0, 0)] * 2} for _ in range(20)]
+    assert _max_dets_from_density(records) == 100  # floor, not ceil(1.5 * 2)
 
 
 def test_resolve_operating_point_validated_with_holdout():
