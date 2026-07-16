@@ -376,6 +376,7 @@ export function ReviewTab() {
         filter_type: filters.filter_type,
         filter_class: filters.filter_class,
         status_filter: filters.status_filter,
+        user: useStore.getState().user,
       });
       setImageStatus(res.image_status);
       markDetReviewed(detectionIdx, action);
@@ -405,7 +406,7 @@ export function ReviewTab() {
     if (!dirs.length) return true;
     // backup_original_labels captures every original file in the dir in one pass, so it only needs
     // running once per label-dir set — skip the (whole-dir-scanning) call once it's done this session.
-    const key = `${dataset.project_root} ${dirs.join(" ")}`;
+    const key = `${dataset.project_root}/${dirs.join("/")}`;
     if (backedUpKeys.current.has(key)) return true;
     try {
       await api.review.backupLabels(dataset.project_root, dirs);
