@@ -95,6 +95,8 @@ interface ReviewTabState {
   // effect consumes it once (else it always jumps to first-unreviewed, dropping the agent's
   // "look at detection N" request).
   focusDetectionIdx: number | null;
+  // Bumped by a review_focus command to force a matches refetch when image + paths are unchanged.
+  refetchNonce: number;
 }
 
 interface ClassesState {
@@ -272,6 +274,8 @@ export interface AppState {
   setReviewLoading: (loading: boolean) => void;
   setReviewDetectionIdx: (idx: number) => void;
   setReviewFocusIdx: (idx: number | null) => void;
+  /** Force a matches refetch even when image/paths are unchanged (re-focus on the open image). */
+  bumpReviewRefetch: () => void;
   markDetectionReviewed: (idx: number, action: string) => void;
 }
 
@@ -288,7 +292,7 @@ export const useStore = create<AppState>()((set, get) => ({
   wsStatus: "disconnected",
   wsVersion: 0,
   canvas: EMPTY_CANVAS,
-  review: { matches: null, loading: false, focusDetectionIdx: null },
+  review: { matches: null, loading: false, focusDetectionIdx: null, refetchNonce: 0 },
   classes: { list: [], loaded: false },
   imageStatus: { byImage: {}, activeFilter: "all" },
   annotateUi: {
@@ -714,6 +718,8 @@ export const useStore = create<AppState>()((set, get) => ({
       gui: { ...s.gui, review: { ...s.gui.review, detection_idx: idx } },
     })),
   setReviewFocusIdx: (idx) => set((s) => ({ review: { ...s.review, focusDetectionIdx: idx } })),
+  bumpReviewRefetch: () =>
+    set((s) => ({ review: { ...s.review, refetchNonce: s.review.refetchNonce + 1 } })),
 
   markDetectionReviewed: (idx, action) =>
     set((s) => {
