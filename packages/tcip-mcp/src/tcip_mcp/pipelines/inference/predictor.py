@@ -31,7 +31,7 @@ class Predictor(Protocol):
     Detection result dict:
     ``{image, width, height, boxes[[x1,y1,x2,y2] px], scores[], labels[], count}`` (tiled adds
     ``tiles``). Labels are **1-indexed foreground** (background = 0) — the torchvision
-    convention the rest of the pipeline (``result_to_yolo_lines``, Review, CSV) already
+    convention the rest of the pipeline (JSON prediction export, Review, CSV) already
     assumes; a kind that is natively 0-indexed (ultralytics) shifts to it at its own boundary,
     so downstream code never has to know which kind produced a result.
     """
