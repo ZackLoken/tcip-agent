@@ -419,12 +419,13 @@ def _mixed_entries(tmp_path: Path) -> list[tuple[str, str]]:
 
 def test_to_coco_dataset_assembles_mixed_entries(tmp_path: Path) -> None:
     cats = [{"id": 0, "name": "catkin"}, {"id": 1, "name": "leaf"}]
-    coco = to_coco_dataset(_mixed_entries(tmp_path), categories=cats)
+    coco = to_coco_dataset(_mixed_entries(tmp_path), categories=cats,
+                           confirmed_negative_names={"IMG_0003.JPG"})
 
     assert coco["categories"] == cats
-    # Present files yield an images record — INCLUDING the confirmed negative (IMG_0003, zero
-    # annotations). The MISSING (unannotated) IMG_0004 is skipped entirely, so it can never become
-    # a training negative.
+    # Present files yield an images record — including IMG_0003's empty file because a human
+    # CONFIRMED it negative (an empty file alone never trains as a negative). The missing
+    # (unannotated) IMG_0004 is skipped entirely.
     assert [i["file_name"] for i in coco["images"]] == [
         "IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG"]
     assert [i["id"] for i in coco["images"]] == [1, 2, 3]
