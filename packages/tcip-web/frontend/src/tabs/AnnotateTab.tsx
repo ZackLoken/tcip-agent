@@ -266,6 +266,7 @@ export function AnnotateTab() {
         polygons: c.polygons,
         project_root: projectRoot,
         base_mtimes: paths.mtimes,
+        user: useStore.getState().user,
       });
     } catch {
       // Identity check: a stale failure for a since-left image must not raise a
