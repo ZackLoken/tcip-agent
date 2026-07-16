@@ -17,7 +17,7 @@ from tcip_mcp.pipelines.data.splits import (
 def test_default_group_key_strips_tile_offset():
     assert default_group_key("canopyA_128_256") == "canopyA"
     assert default_group_key("plainname") == "plainname"
-    # A single trailing "_<int>" field does NOT match the two-field tile pattern.
+    # A single trailing "_<int>" field does not match the two-field tile pattern.
     assert default_group_key("img_001") == "img_001"
     assert GROUP_KEY_FNS["stem"]("a_1_2") == "a_1_2"
 
