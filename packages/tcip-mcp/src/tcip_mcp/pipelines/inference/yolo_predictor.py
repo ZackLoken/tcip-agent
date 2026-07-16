@@ -1,14 +1,14 @@
 """First-class predictor for a pretrained ultralytics YOLO checkpoint.
 
 Matches :class:`GenericPredictor`'s public surface (``predict`` / ``predict_batch`` /
-``predict_tiled`` + the identical result dict) so every inference call site and
-``result_to_yolo_lines`` work unchanged regardless of model kind. Tiled inference goes
+``predict_tiled`` + the identical result dict) so every inference call site works
+unchanged regardless of model kind. Tiled inference goes
 through SAHI (native ultralytics support, cross-tile NMS/NMM merge, EXIF-upright), which is
 also how the baseline was run offline — this makes that governed rather than a hand-script.
 
 Two boundary conversions keep the rest of the pipeline kind-agnostic:
   * **Labels** — ultralytics is 0-indexed; the shared result dict is 1-indexed foreground
-    (background = 0, the torchvision convention ``result_to_yolo_lines`` assumes). We add 1.
+    (background = 0, the torchvision convention the pipeline assumes). We add 1.
   * **Coordinates** — boxes come back as pixel xyxy in the EXIF-upright frame (we hand SAHI
     the already-oriented array + normalize by upright dims), so YOLO predictions land in the
     same frame the GT labels are authored in.
