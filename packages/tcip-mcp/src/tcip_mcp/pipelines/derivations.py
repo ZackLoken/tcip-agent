@@ -12,6 +12,7 @@ Heavy deps (PIL/numpy/tifffile) are imported lazily so this stays cheap to impor
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from tcip_mcp.pipelines.resolution import ResolvedParam, derived
@@ -69,6 +70,51 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
     return [r for r in out if r > 0]
 
 
+def _neighbor_max_ious(boxes: Sequence[Sequence[float]]) -> list[float]:
+    """Each box's max IoU with any OTHER box in the same image (xywh px); fewer than 2 boxes -> []."""
+    import numpy as np
+    if len(boxes) < 2:
+        return []
+    b = np.asarray(boxes, dtype=float)
+    x1, y1, w, h = b[:, 0], b[:, 1], b[:, 2], b[:, 3]
+    x2, y2 = x1 + w, y1 + h
+    area = w * h
+    ix1 = np.maximum(x1[:, None], x1[None, :])
+    iy1 = np.maximum(y1[:, None], y1[None, :])
+    ix2 = np.minimum(x2[:, None], x2[None, :])
+    iy2 = np.minimum(y2[:, None], y2[None, :])
+    inter = np.clip(ix2 - ix1, 0.0, None) * np.clip(iy2 - iy1, 0.0, None)
+    union = area[:, None] + area[None, :] - inter
+    iou = np.where(union > 0, inter / union, 0.0)
+    np.fill_diagonal(iou, 0.0)  # exclude a box's self-IoU (1.0)
+    return iou.max(axis=1).tolist()
+
+
+def derive_cross_tile_nms(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
+                          percentile: float = 99.0, margin: float = 0.05,
+                          clamp: tuple[float, float] = (0.2, 0.8)) -> float | None:
+    """Cross-tile NMS IoU threshold from the GT neighbor-overlap distribution — or None if underivable.
+
+    Cross-tile NMS drops one of two boxes when their IoU exceeds this threshold; its job is to suppress
+    duplicate detections of the same object split across a tile seam without merging two genuinely
+    distinct objects that happen to overlap. So the threshold is set just above how much *real*
+    neighboring GT objects overlap: per image take each GT box's max IoU with any other box, pool the
+    nonzero tail across images, and use a high percentile (dense clusters overlap more, pushing the
+    threshold up) plus a small margin, clamped to a sane range. No genuine overlaps anywhere -> return
+    None (underivable; the caller stamps an honest default, never a derivation label on that number).
+
+    ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image.
+    """
+    import numpy as np
+    tail: list[float] = []
+    for boxes in gt_boxes_per_image:
+        tail.extend(v for v in _neighbor_max_ious(boxes) if v > 0.0)
+    if not tail:
+        return None
+    lo, hi = clamp
+    return float(min(max(float(np.percentile(tail, percentile)) + margin, lo), hi))
+
+
 def resolve_spec_derivations(model_spec: dict, *, sample_image: str | Path | None,
                              class_distribution: dict[int, int] | None) -> dict[str, ResolvedParam]:
     """Fill data-derived spec params the agent did not pin; return their ResolvedParams (provenance).
@@ -104,3 +150,21 @@ def resolve_spec_derivations(model_spec: dict, *, sample_image: str | Path | Non
                 provenance["num_classes"] = derived("num_classes", nc, derivation_class="deterministic",
                                                     derived_from="max class id + 1 in the label set")
     return provenance
+
+
+# Every ``derived_from`` label ever stamped by ``resolution.derived()`` must appear here, mapped
+# to the callable that actually computes it — or to an explicit non-derivation marker
+# ("caller-input" / "placeholder") when the constructor is reused for a non-derived value.
+# tests/test_provenance_honesty.py enforces this, so a data-sounding label can never again be
+# stamped without an implementation behind it (the cross_tile_nms costume bug).
+DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
+    "probed bands of": "tcip_mcp.pipelines.derivations.probe_channels",  # f-string prefix
+    "max class id + 1 in the label set": "tcip_mcp.pipelines.derivations.num_classes_from_distribution",
+    "count-unbiased center-match sweep": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
+    "GT neighbor-IoU distribution (p99 + margin)": "tcip_mcp.pipelines.derivations.derive_cross_tile_nms",
+    "~1.5x p99 GT objects/image": "tcip_mcp.pipelines.operating_point._max_dets_from_density",
+    "model imgsz / persisted training geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
+    "persisted training tile geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
+    "caller override": "caller-input",
+    "no GT for this dataset; unvalidated placeholder": "placeholder",
+}
