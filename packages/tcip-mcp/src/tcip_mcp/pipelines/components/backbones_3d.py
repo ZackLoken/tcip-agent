@@ -2,7 +2,7 @@
 
 PointNet++ set abstraction layers for tree structure analysis.
 
-EXPERIMENTAL — component only, not usable end-to-end, and **intentionally NOT
+Experimental — component only, not usable end-to-end, and **intentionally not
 registered** into the BACKBONES registry (``tcip_mcp.tools.pipeline_tools`` skips
 importing this module on purpose). There is no point-cloud dataset/loader in
 ``pipelines.data`` and ``build_dataset`` has no point-cloud task type, so this
@@ -129,7 +129,7 @@ def _build_pointnetpp(in_channels: int = 0, **kwargs):
     return PointNetPPBackbone(in_channels=in_channels)
 
 
-# DEFERRED (Phase 0.3 task-honesty): PointNet++/3D is intentionally NOT registered.
+# deferred (Phase 0.3 task-honesty): PointNet++/3D is intentionally not registered.
 # There is no point-cloud dataset, `point_cloud` task in build_dataset, or inference
 # path yet, so registering it would advertise an unusable backbone. The class and
 # builder above are retained for the future 3D epic — re-enable this registration
