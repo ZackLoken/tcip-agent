@@ -6,7 +6,7 @@ import csv
 from pathlib import Path
 
 
-def write_predictions_json(json_path: str | Path, result: dict) -> None:
+def write_predictions_json(json_path: str | Path, result: dict, created_by: str | None = None) -> None:
     """Write a ``GenericPredictor`` detection result as a per-image COCO/JSON prediction file.
 
     ``result`` carries pixel-xyxy ``boxes``, 1-indexed ``labels`` (background=0), ``scores``, and
@@ -15,18 +15,24 @@ def write_predictions_json(json_path: str | Path, result: dict) -> None:
     ``confidence`` from the score) and is written via ``json_io.write_detect``. ``keep_empty=True``
     so a processed image with zero detections still yields a ``{"objects": []}`` confirmed-negative
     file — preserving the behavior of the YOLO text writer that emitted an empty ``<stem>.txt``.
+    ``created_by`` stamps the producing model on every prediction (``model:<name>``), so the
+    origin travels into GT when a human accepts it — omit only when the producer is unknown.
     """
+    from datetime import datetime, timezone
+
     from tcip_annotation import json_io
     from tcip_annotation.state import PredBBox
 
     w = result.get("width") or 0
     h = result.get("height") or 0
+    created_at = datetime.now(timezone.utc).isoformat() if created_by else None
     preds: list[PredBBox] = []
     for box, score, label in zip(
         result.get("boxes", []), result.get("scores", []), result.get("labels", [])
     ):
         x1, y1, x2, y2 = box
-        preds.append(PredBBox(x1, y1, x2, y2, max(int(label) - 1, 0), confidence=float(score)))
+        preds.append(PredBBox(x1, y1, x2, y2, max(int(label) - 1, 0), confidence=float(score),
+                              created_by=created_by, created_at=created_at))
     json_io.write_detect(str(json_path), preds, int(w), int(h), keep_empty=True)
 
 
