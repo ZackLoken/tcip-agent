@@ -623,7 +623,9 @@ def save_gt(payload: SaveGtPayload) -> dict:
                 class_id=int(b.get("class_id", 0)),
                 created_by=b.get("created_by") or author,
                 created_at=b.get("created_at") or now_iso,
-                accepted_by=b.get("accepted_by"), accepted_at=b.get("accepted_at"),
+                # accepted_* only on round-tripped shapes — a new shape must not mint sign-off.
+                accepted_by=b.get("accepted_by") if b.get("created_by") else None,
+                accepted_at=b.get("accepted_at") if b.get("created_by") else None,
             )
             for b in payload.boxes
         ],
@@ -633,7 +635,8 @@ def save_gt(payload: SaveGtPayload) -> dict:
                 class_id=int(p.get("class_id", 0)),
                 created_by=p.get("created_by") or author,
                 created_at=p.get("created_at") or now_iso,
-                accepted_by=p.get("accepted_by"), accepted_at=p.get("accepted_at"),
+                accepted_by=p.get("accepted_by") if p.get("created_by") else None,
+                accepted_at=p.get("accepted_at") if p.get("created_by") else None,
             )
             for p in payload.polygons
         ],
