@@ -62,3 +62,27 @@ def test_retrospectives_surfaces_written_retro(client: TestClient, tmp_path: Pat
     retro = data["retrospectives"][0]
     assert retro["project_id"] == "elderberry-cluster"
     assert "count fruit clusters" in retro["content"]
+
+
+def test_reports_confines_project_root_to_allowed_roots(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    resp = client.get("/api/meta/reports", params={"project_root": str(outside)})
+    assert resp.status_code == 403
+
+
+def test_retrospectives_confines_project_root_to_allowed_roots(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    resp = client.get("/api/meta/retrospectives", params={"project_root": str(outside)})
+    assert resp.status_code == 403
