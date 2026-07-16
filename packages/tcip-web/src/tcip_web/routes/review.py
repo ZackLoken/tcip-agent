@@ -2,7 +2,8 @@
 
 Uses the shared :class:`tcip_annotation.ReviewEngine`; one engine instance
 lives in memory per project (keyed by project_root). Review state is
-persisted via the engine to ``<project_root>/.tcip/state/review_stats.json``.
+persisted via the engine to per-image shards under
+``<project_root>/.tcip/state/review/``.
 """
 
 from __future__ import annotations
@@ -50,6 +51,12 @@ router = APIRouter(prefix="/api/review", tags=["review"])
 
 _engines: dict[str, ReviewEngine] = {}
 
+# classes.json memo, keyed by (path, mtime_ns): _get_engine re-reads it on every /matches and
+# /action call, so an unwritten map shouldn't be re-parsed each request; a save bumps mtime_ns
+# and invalidates just that entry. Bounded — one entry per distinct project.
+_CLASS_NAMES_CACHE_MAX = 256
+_class_names_cache: dict[str, tuple[int, dict[int, str]]] = {}
+
 
 def _load_class_names(project_root: str) -> dict[int, str]:
     """Read id→name from ``<project_root>/.tcip/state/classes.json``.
@@ -57,7 +64,17 @@ def _load_class_names(project_root: str) -> dict[int, str]:
     Without this the engine records ``class_{id}`` placeholders; loading the real
     names makes review_stats human-auditable (and refreshes when classes are added).
     """
-    data = read_json(Path(project_root) / ".tcip" / "state" / "classes.json", default={})
+    path = Path(project_root) / ".tcip" / "state" / "classes.json"
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = -1
+    key = str(path)
+    cached = _class_names_cache.get(key)
+    if cached is not None and cached[0] == mtime_ns:
+        return cached[1]
+
+    data = read_json(path, default={})
     names: dict[int, str] = {}
     if isinstance(data, dict):
         for k, v in data.items():
@@ -68,6 +85,9 @@ def _load_class_names(project_root: str) -> dict[int, str]:
             name = v.get("name") if isinstance(v, dict) else None
             if name:
                 names[cid] = name
+    if len(_class_names_cache) >= _CLASS_NAMES_CACHE_MAX:
+        _class_names_cache.pop(next(iter(_class_names_cache)))
+    _class_names_cache[key] = (mtime_ns, names)
     return names
 
 
