@@ -57,9 +57,33 @@ def _restore_platform_root_env():
         os.environ["TCIP_PROJECT_ROOT"] = saved
 
 
+@pytest.fixture(autouse=True)
+def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Pin every test's platform-state root to its own unique ``tmp_path``.
+
+    Without this, any unpinned write (audit, experiments, jobstore, the vision candidates
+    cache) resolves relative to the process CWD and lands in the repo's real ``.tcip/`` —
+    shared across tests and, under xdist, across worker processes. Uses monkeypatch so it
+    auto-restores; a test that manages the var itself (setenv/delenv in its body) overrides
+    this and is unaffected.
+    """
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+
+
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    """Create a minimal YOLO-format dataset in the canonical layout for testing."""
+    """Create a minimal dataset in the canonical layout, with per-image JSON labels/predictions.
+
+    Per-image JSON (``tcip_annotation.json_io``) is the canonical on-disk label format — not
+    YOLO ``.txt``; see ``json_io``'s module docstring. Geometry mirrors the format's old YOLO
+    normalized values (0.5,0.5,0.1,0.1 and 0.3,0.3,0.05,0.05 on a 640x480 image) so existing
+    count/geometry expectations hold.
+    """
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox, PredBBox
+
     date = "2-11-26"
     images_dir = tmp_path / "images" / date
     images_dir.mkdir(parents=True)
@@ -68,25 +92,22 @@ def data_dir(tmp_path: Path) -> Path:
     preds_dir = tmp_path / "predictions" / "live" / date / "detect"
     preds_dir.mkdir(parents=True)
 
-    # Create 3 tiny test images (1x1 white pixel PNG)
     for name in ("img_001", "img_002", "img_003"):
-        from PIL import Image
-
         img = Image.new("RGB", (640, 480), color=(128, 128, 128))
         img.save(images_dir / f"{name}.jpg")
 
-        # Labels: 2 boxes per image
-        label_lines = [
-            "0 0.5 0.5 0.1 0.1",
-            "0 0.3 0.3 0.05 0.05",
-        ]
-        (labels_dir / f"{name}.txt").write_text("\n".join(label_lines) + "\n")
-
-        # Predictions: 1 correct, 1 wrong location
-        pred_lines = [
-            "0 0.9 0.5 0.5 0.1 0.1",  # matches first GT box
-            "0 0.7 0.8 0.8 0.05 0.05",  # FP
-        ]
-        (preds_dir / f"{name}.txt").write_text("\n".join(pred_lines) + "\n")
+        # GT: 2 boxes per image (pixel xyxy).
+        json_io.write_detect(
+            labels_dir / f"{name}.json",
+            [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)],
+            640, 480,
+        )
+        # Predictions: 1 matching (TP) + 1 elsewhere (FP), confidence in the JSON score.
+        json_io.write_detect(
+            preds_dir / f"{name}.json",
+            [PredBBox(288, 216, 352, 264, 0, confidence=0.9),
+             PredBBox(496, 372, 528, 396, 0, confidence=0.7)],
+            640, 480,
+        )
 
     return tmp_path
