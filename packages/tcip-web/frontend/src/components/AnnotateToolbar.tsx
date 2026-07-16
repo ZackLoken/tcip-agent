@@ -454,7 +454,7 @@ export function AnnotateToolbar({
               pressed={annotateUi.stream}
               onClick={() => setStream(!annotateUi.stream)}
               disabled={mode !== "polygon"}
-              title="Stream vertices while dragging (v)"
+              title="Freehand: click to start laying vertices, click to pause, double-click to close (v)"
             />
             <Etool
               label="Show labels"
