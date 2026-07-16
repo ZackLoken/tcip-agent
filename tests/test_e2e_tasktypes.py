@@ -37,6 +37,8 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     task_collate,
     train,
 )
+from tcip_annotation import json_io  # noqa: E402
+from tcip_annotation.state import BBox, Polygon  # noqa: E402
 
 IMG = 64
 
@@ -113,7 +115,13 @@ def test_detection_e2e(tmp_path: Path):
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         # one centered box covering the middle of the image
-        (labels_dir / f"img{i}.txt").write_text("0 0.5 0.5 0.4 0.4\n")
+        json_io.write_detect(
+            str(labels_dir / f"img{i}.json"),
+            [BBox(19.2, 19.2, 44.8, 44.8, 0)],
+            IMG,
+            IMG,
+            keep_empty=True,
+        )
 
     dataset = build_dataset(
         "detection", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1
@@ -133,9 +141,13 @@ def test_instance_seg_e2e(tmp_path: Path):
     labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
-        # a square polygon (>= 3 vertices -> >= 7 fields)
-        (labels_dir / f"img{i}.txt").write_text(
-            "0 0.3 0.3 0.7 0.3 0.7 0.7 0.3 0.7\n"
+        # a square polygon (>= 3 vertices)
+        json_io.write_segment(
+            str(labels_dir / f"img{i}.json"),
+            [Polygon([(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)], 0)],
+            IMG,
+            IMG,
+            keep_empty=True,
         )
 
     dataset = build_dataset(
