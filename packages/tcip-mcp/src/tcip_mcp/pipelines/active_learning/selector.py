@@ -45,7 +45,7 @@ def _confidence_values(pred: dict) -> list[float]:
     Classification/ordinal heads emit per-image confidences under
     ``head{i}_confidences`` (via ComposedModel -> ``_format_other``); matching
     the suffix covers multi-head specs. ``*_probabilities`` is deliberately
-    NOT matched — SemanticSegHead emits it as a 4-D nested list.
+    not matched — SemanticSegHead emits it as a 4-D nested list.
     """
     values: list[float] = []
     for key, val in pred.items():
