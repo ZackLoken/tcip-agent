@@ -101,9 +101,10 @@ The agent must **never write ground truth the human hasn't seen**. Stage proposa
 *predictions* tree and drive the human to review them:
 
 - **`stage_proposals(dataset_root, model_name, date, stem, boxes)`** writes agent-proposed
-  detections to `predictions/<model>/<date>/detect/<stem>.txt` (normalized `cx cy w h`) — the
+  detections to `predictions/<model>/<date>/detect/<stem>.json` (per-image COCO/JSON) — the
   predictions tree, **not** `annotations/`. They render on the Review canvas as predictions for
-  the human to accept/reject/edit. Use a distinct model bucket like `agent_proposals`.
+  the human to accept/reject/edit. `model_name` is stamped as each object's `created_by`, so name
+  the real producer (`sam`, `claude`, `groundingdino`, `model:<run>`) — not a generic placeholder.
 - **`focus_review(project_root, dataset_root, trait, date, model_name, image_index, detection_idx,
   filter_type, iou, conf)`** drives the live Review tab straight to a model's predictions on a
   frame/detection, so the human sees exactly what you flagged (a false positive, a missed catkin)
