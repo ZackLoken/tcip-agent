@@ -1,6 +1,6 @@
 """Annotation label CRUD routes for the Annotate tab.
 
-Reads / writes YOLO-format label files using the shared
+Reads / writes the canonical per-image label files using the shared
 :mod:`tcip_annotation` engine. Paths are supplied by the caller so the
 backend doesn't have to guess a dataset layout.
 """
@@ -156,7 +156,7 @@ def load_labels(
     detect_path: Optional[str] = None,
     segment_path: Optional[str] = None,
 ) -> dict:
-    """Read existing YOLO labels for an image and return them in pixel coords."""
+    """Read existing labels for an image and return them in pixel coords."""
     w, h = _image_dims(image_path)
     _guard_label_path(detect_path)
     _guard_label_path(segment_path)
@@ -199,7 +199,7 @@ def load_labels(
 
 @router.post("/labels")
 def save_labels(payload: SavePayload) -> dict:
-    """Write YOLO labels for an image. Either detect_path or segment_path may be omitted.
+    """Write labels for an image. Either detect_path or segment_path may be omitted.
 
     Empty box/polygon lists are written as 0-byte files (``keep_empty=True``) rather than
     deleted: an annotator who clears all annotations is recording a *confirmed negative*,
