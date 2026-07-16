@@ -35,11 +35,11 @@ class TraitSpec:
     count_objective: str = COUNT_UNBIASED
     # What "a hit" means when validating counts. For small objects, center-match (IoU is noise).
     localization: str = CENTER_MATCH
-    # How the localization tolerance is DERIVED (semantic names the recipe; the value is per-dataset).
+    # How the localization tolerance is derived (semantic names the recipe; the value is per-dataset).
     localization_tolerance: str = "half_class_avg_size"
     # The class id that is the phenotype-positive ("elongated"), or None if the trait is single-class.
     positive_class_id: int | None = None
-    # Elongation/positive call is a learned TEXTURE classification — geometric proxies are forbidden.
+    # Elongation/positive call is a learned texture classification — geometric proxies are forbidden.
     positive_is_texture: bool = False
     # Milestone crossing fractions and the quantity they cross.
     milestone_fractions: tuple[float, ...] = ()
@@ -58,7 +58,7 @@ class TraitUnknownError(KeyError):
 
 # --- Registry ---------------------------------------------------------------
 # Hazelnut catkin bloom (Phase 1). Semantics confirmed with the domain expert 2026-07-10:
-#   1. elongated = texture (salt-and-peppery frills/gills), NOT geometry (length:width too variable);
+#   1. elongated = texture (salt-and-peppery frills/gills), not geometry (length:width too variable);
 #      the detector's 2-class output (class 1 = elongated) is a learned texture classification.
 #   2. "a hit" = center within ~half the class's average size (IoU is noise at ~40px).
 #   3. phenotype = count-unbiased on elongated and total counts -> the elongated fraction.
