@@ -249,7 +249,7 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
     write_image("confident", [0.9, 0.9])
     write_image("shaky", [0.1, 0.1])
 
-    out = get_worst_predictions(str(preds), str(gts), n=2)
+    out = get_worst_predictions(str(preds), str(gts), top_k=2)
     by_stem = {w["stem"]: w["error_score"] for w in out["worst_images"]}
     assert by_stem["confident"] == pytest.approx(0.1, abs=1e-3)
     assert by_stem["shaky"] == pytest.approx(0.9, abs=1e-3)
@@ -276,7 +276,7 @@ def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypa
     status_before = (exp_dir / "status.json").read_text()
     metrics_before = (exp_dir / "metrics.jsonl").read_text()
 
-    # Relaunching with the same experiment_id must NOT reuse it.
+    # Relaunching with the same experiment_id must not reuse it.
     eid = _ensure_experiment("exp1", {"a": 2}, "imgs_v2", resume_from="", run_id="run_9_0")
     assert eid == "exp1_run_9_0"
     assert (exp_dir / "status.json").read_text() == status_before      # untouched
