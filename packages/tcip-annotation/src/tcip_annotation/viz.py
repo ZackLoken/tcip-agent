@@ -521,3 +521,146 @@ def render_grid_overlay(
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path)
     return output_path
+
+
+# ── Live GUI canvas render (display-resolved shapes from the canvas-state push) ──
+
+
+def _hex_rgb(color: str, fallback: tuple[int, int, int] = (255, 255, 255)) -> tuple[int, int, int]:
+    """``#RRGGBB`` (or ``#RGB``) → RGB tuple; anything unparsable falls back to white."""
+    c = (color or "").lstrip("#")
+    try:
+        if len(c) == 3:
+            return tuple(int(ch * 2, 16) for ch in c)  # type: ignore[return-value]
+        if len(c) >= 6:
+            return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    except ValueError:
+        pass
+    return fallback
+
+
+def _dashed_segment(draw, p1, p2, fill, width: int, dash: float, gap: float) -> None:
+    """Draw p1→p2 as dashes (PIL has no native dashed lines)."""
+    x1, y1 = p1
+    x2, y2 = p2
+    length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+    if length < 1e-6:
+        return
+    ux, uy = (x2 - x1) / length, (y2 - y1) / length
+    pos = 0.0
+    while pos < length:
+        end = min(pos + dash, length)
+        draw.line([(x1 + ux * pos, y1 + uy * pos), (x1 + ux * end, y1 + uy * end)],
+                  fill=fill, width=width)
+        pos = end + gap
+
+
+def _draw_path(draw, pts, color, width: int, dashed: bool, closed: bool) -> None:
+    seg_pts = list(pts) + ([pts[0]] if closed and len(pts) > 2 else [])
+    if dashed:
+        for a, b in zip(seg_pts, seg_pts[1:]):
+            _dashed_segment(draw, a, b, color, width, dash=8.0, gap=4.0)
+    elif len(seg_pts) > 1:
+        draw.line(seg_pts, fill=color, width=width, joint="curve")
+
+
+def render_canvas_state(
+    image_path: str,
+    shapes: list[dict],
+    viewport: dict | None = None,
+    crop_to_viewport: bool = True,
+    max_edge: int = 1600,
+    output_path: str | None = None,
+) -> str:
+    """Render the live GUI canvas: display-resolved shapes over the (EXIF-upright) image.
+
+    ``shapes`` come from the canvas-state push, each already carrying the exact symbology the
+    GUI rendered: ``{kind: box|polygon|polyline, xyxy|points (pixel), color '#hex', fill?,
+    dashed?, label?}`` — so this draws what the annotator sees rather than re-deriving colors.
+    With ``crop_to_viewport`` and a ``viewport`` (``{x, y, w, h}`` image coords), the output is
+    exactly the visible region (full native resolution, downscaled only past ``max_edge``).
+    """
+    if output_path is None:
+        output_path = _default_output("canvas", suffix=".jpg")
+
+    img = Image.open(image_path)
+    img = auto_orient_image(img).convert("RGB")
+    full_w, full_h = img.size
+
+    # Crop to the viewport (clamped); shape coords shift by the crop origin.
+    ox, oy = 0.0, 0.0
+    if crop_to_viewport and viewport:
+        vx = max(0.0, min(float(viewport.get("x", 0)), full_w - 1))
+        vy = max(0.0, min(float(viewport.get("y", 0)), full_h - 1))
+        vw = max(8.0, min(float(viewport.get("w", full_w)), full_w - vx))
+        vh = max(8.0, min(float(viewport.get("h", full_h)), full_h - vy))
+        img = img.crop((int(vx), int(vy), int(vx + vw), int(vy + vh)))
+        ox, oy = float(int(vx)), float(int(vy))
+
+    w, h = img.size
+    k = 1.0
+    if max(w, h) > max_edge:
+        k = max_edge / max(w, h)
+        img = img.resize((max(1, int(w * k)), max(1, int(h * k))), Image.LANCZOS)
+
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    out_w = img.size[0]
+    lw = max(1, round(out_w / 700))
+    font = _try_font(max(11, out_w // 90))
+    dot_r = max(2.0, out_w / 450)
+
+    def tx(p) -> tuple[float, float]:
+        return ((float(p[0]) - ox) * k, (float(p[1]) - oy) * k)
+
+    # Two passes over one overlay: all fills first, then all outlines/vertices. ImageDraw
+    # REPLACES pixels (it does not composite), so a later shape's translucent fill would
+    # otherwise punch its silhouette out of earlier shapes' opaque outlines.
+    parsed: list[tuple[dict, list[tuple[float, float]], tuple[int, int, int], bool]] = []
+    labels: list[tuple[tuple[float, float], str, tuple[int, int, int]]] = []
+    for s in shapes:
+        if not isinstance(s, dict):
+            continue
+        color = _hex_rgb(str(s.get("color", "")))
+        kind = s.get("kind")
+        try:
+            if kind == "box" and s.get("xyxy"):
+                x1, y1 = tx(s["xyxy"][:2])
+                x2, y2 = tx(s["xyxy"][2:4])
+                pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+                closed = True
+            elif kind in ("polygon", "polyline") and s.get("points"):
+                pts = [tx(p) for p in s["points"]]
+                if len(pts) < 2:
+                    continue
+                closed = kind == "polygon"
+            else:
+                continue
+        except (TypeError, ValueError, IndexError):
+            continue  # a malformed shape must never sink the whole render
+        parsed.append((s, pts, color, closed))
+        label = s.get("label")
+        if label:
+            labels.append((pts[0], str(label), color))
+
+    for s, pts, color, closed in parsed:  # pass 1: fills
+        if s.get("fill") and closed and len(pts) >= 3:
+            draw.polygon(pts, fill=color + (38,))
+    for s, pts, color, closed in parsed:  # pass 2: outlines + vertices
+        _draw_path(draw, pts, color + (255,), lw, bool(s.get("dashed")), closed=closed)
+        if s.get("kind") == "polyline":  # in-progress drawing: show the laid vertices
+            for px, py in pts:
+                draw.ellipse([px - dot_r, py - dot_r, px + dot_r, py + dot_r],
+                             fill=color + (255,))
+
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    draw2 = ImageDraw.Draw(img)
+    for (ax, ay), text, color in labels:  # halo text, drawn after compositing so it stays crisp
+        x, y = ax + 2, max(0.0, ay - (out_w // 90) - 4)
+        for dx, dy in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
+            draw2.text((x + dx, y + dy), text, fill=(0, 0, 0), font=font)
+        draw2.text((x, y), text, fill=color, font=font)
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path, quality=88)
+    return output_path
