@@ -22,6 +22,7 @@ from tcip_annotation.viz import (
 )
 
 from tcip_mcp.audit import audited
+from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import mcp
 
 
@@ -32,25 +33,32 @@ def visualize(
     path: str,
     task: str = "detect",
     class_names: str = "",
-    conf_threshold: float = 0.0,
+    conf_threshold: float = DEFAULT_CONF,
+    iou_threshold: float = 0.5,
     n: int = 16,
 ) -> dict:
-    """Render annotations, predictions, or a dataset-sample grid for view_image.
+    """Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
-    One entry point for the three common renders (replaces the former
-    visualize_annotations / visualize_predictions / visualize_dataset_sample).
-    Saves to .tcip/artifacts/viz/ and returns ``image_path`` for view_image.
+    One entry point for the common renders (replaces the former visualize_annotations /
+    visualize_predictions / visualize_comparison / visualize_dataset_sample). Saves to
+    .tcip/artifacts/viz/ and returns ``image_path`` for view_image.
 
     Args:
         source: What to render —
             'annotations' = ground-truth labels on a single image (path = image file);
             'predictions' = model predictions on a single image (path = image file);
+            'comparison'  = GT (green) vs predictions (red) with TP/FP/FN match stats
+            (path = image file);
             'dataset'     = grid of n random annotated samples (path = dataset folder
             containing images/ and labels/).
-        path: Image file (annotations/predictions) or dataset folder (dataset).
+        path: Image file (annotations/predictions/comparison) or dataset folder (dataset).
         task: 'detect' or 'segment'.
         class_names: Comma-separated class names (e.g. "catkin,nut,bud").
-        conf_threshold: Minimum confidence to display (source='predictions' only).
+        conf_threshold: Minimum confidence — filters displayed predictions (source='predictions')
+            and the predictions matched against GT (source='comparison'). Defaults to the shared
+            ``DEFAULT_CONF`` so the comparison operating point matches inference/evaluate (it used to
+            silently match at compute_matches' own 0.25 default).
+        iou_threshold: IoU threshold for a positive match (source='comparison' only).
         n: Number of samples in the grid (source='dataset' only).
     """
     if source == "annotations":
@@ -59,11 +67,16 @@ def visualize(
         return _viz_predictions(
             path, task=task, class_names=class_names, conf_threshold=conf_threshold
         )
+    if source == "comparison":
+        return _viz_comparison(
+            path, task=task, iou_threshold=iou_threshold, class_names=class_names,
+            conf_threshold=conf_threshold,
+        )
     if source == "dataset":
         return _viz_dataset_sample(path, n=n, task=task, class_names=class_names)
     return {
         "error": f"Unknown source '{source}'. "
-        "Use 'annotations', 'predictions', or 'dataset'."
+        "Use 'annotations', 'predictions', 'comparison', or 'dataset'."
     }
 
 
@@ -184,23 +197,16 @@ def _viz_predictions(
     }
 
 
-@mcp.tool()
-@audited
-def visualize_comparison(
+def _viz_comparison(
     image_path: str,
     task: str = "detect",
     iou_threshold: float = 0.5,
     class_names: str = "",
+    conf_threshold: float = DEFAULT_CONF,
 ) -> dict:
-    """Render GT vs prediction comparison with match indicators.
+    """Render GT vs prediction comparison with match indicators. See ``visualize``.
 
     Green = ground truth, Red = predictions, Yellow lines = matched pairs.
-
-    Args:
-        image_path: Absolute path to the image file.
-        task: 'detect' or 'segment'.
-        iou_threshold: IoU threshold for matching.
-        class_names: Comma-separated class names.
     """
     from tcip_annotation import parse_detect_predictions
     from tcip_annotation.format_io import (
@@ -246,9 +252,10 @@ def visualize_comparison(
              "class_id": b.class_id, "confidence": b.confidence}
             for b in pred_boxes_raw
         ]
-        # Compute matches
+        # Match at the caller's conf operating point (not compute_matches' silent 0.25 default).
         match_result = compute_matches(
-            gt_boxes_raw, [], pred_boxes_raw, [], iou_threshold=iou_threshold,
+            gt_boxes_raw, [], pred_boxes_raw, [],
+            iou_threshold=iou_threshold, conf_threshold=conf_threshold,
         )
         tp = match_result.get("tp", 0)
         fp = match_result.get("fp", 0)
@@ -305,7 +312,7 @@ def visualize_worst_predictions(
         else:
             return {"error": "images_dir not specified and could not be auto-detected"}
 
-    worst = get_worst_predictions(predictions_dir, labels_dir, n=top_k)
+    worst = get_worst_predictions(predictions_dir, labels_dir, top_k=top_k)
     if "error" in worst:
         return worst
 
@@ -547,7 +554,7 @@ def accept_candidates(
 
     After reviewing sam_auto_label output, the agent calls this tool with a mapping from
     candidate IDs to class IDs. Rejected candidates are simply omitted from the assignments
-    list. The masks are written to the PREDICTIONS tree (``predictions/sam/<date>/<task>``) as
+    list. The masks are written to the predictions tree (``predictions/sam/<date>/<task>``) as
     per-image COCO/JSON with ``created_by="sam"`` and ``score`` = SAM's mask-quality
     (predicted_iou) — they are model output, so a human accepts them on the Review canvas before
     they become ground truth. This never writes GT.
@@ -577,7 +584,9 @@ def accept_candidates(
 
     w, h = get_image_dimensions(image_path)
 
-    # Build SAM PREDICTIONS from accepted candidates (created_by="sam", score = mask-quality).
+    # Build SAM predictions from accepted candidates (created_by="sam", score = mask-quality).
+    from datetime import datetime, timezone
+    staged_at = datetime.now(timezone.utc).isoformat()
     boxes: list[PredBBox] = []
     polygons: list[PredPolygon] = []
 
@@ -593,7 +602,7 @@ def accept_candidates(
         if len(poly_pts) >= 3:
             polygons.append(PredPolygon(
                 [(float(x), float(y)) for x, y in poly_pts], class_id,
-                confidence=score, created_by="sam",
+                confidence=score, created_by="sam", created_at=staged_at,
             ))
 
         # Also stage a bounding box (from polygon extent)
@@ -601,10 +610,10 @@ def accept_candidates(
         ys = [p[1] for p in poly_pts]
         boxes.append(PredBBox(
             min(xs), min(ys), max(xs), max(ys), class_id,
-            confidence=score, created_by="sam",
+            confidence=score, created_by="sam", created_at=staged_at,
         ))
 
-    # Stage into the PREDICTIONS tree (predictions/sam/<date>/<task>) — model output for a human to
+    # Stage into the predictions tree (predictions/sam/<date>/<task>) — model output for a human to
     # accept on the Review canvas, never written straight to ground truth.
     from tcip_mcp.dataset_layout import parse_image_path, prediction_dir
 
