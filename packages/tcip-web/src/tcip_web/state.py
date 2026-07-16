@@ -184,7 +184,7 @@ class StateStore:
             logger.exception("Failed to persist GUI state")
 
     def _flush_sync(self) -> None:
-        # Resolve the destination at flush time, NOT schedule time: if project_root
+        # Resolve the destination at flush time, not schedule time: if project_root
         # changed during the debounce window, the new project's snapshot must not be
         # written into the previous project's gui.json.
         state_dir = self._state.state_dir()
