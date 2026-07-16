@@ -37,48 +37,37 @@ def _find_image(images_dir: Path, stem: str) -> Path:
     raise FileNotFoundError(f"No image for stem: {stem}")
 
 
-def _read_det_boxes_px(label_path, w: int, h: int) -> tuple[list[list[float]], list[int]]:
-    """YOLO ``cls cx cy w h`` -> pixel xyxy boxes + 1-indexed labels (cid+1, background 0)."""
-    boxes: list[list[float]] = []
-    labels: list[int] = []
-    lp = Path(label_path)
-    if lp.is_file():
-        for line in lp.read_text().splitlines():
-            parts = line.strip().split()
-            if len(parts) < 5:
-                continue
-            cid = int(parts[0])
-            cx, cy, bw, bh = (float(v) for v in parts[1:5])
-            boxes.append([(cx - bw / 2) * w, (cy - bh / 2) * h, (cx + bw / 2) * w, (cy + bh / 2) * h])
-            labels.append(cid + 1)  # 0-indexed -> 1-indexed (background = 0)
-    return boxes, labels
-
-
 def _read_det_boxes_format(stem, labels_dir, fmt, coco, w, h, file_name):
-    """Pixel-xyxy boxes + 1-indexed labels for ``stem`` in any supported detection format.
+    """Pixel-xyxy boxes + 1-indexed labels for ``stem``.
 
-    YOLO needs the image (w, h) to denormalize; COCO/VOC/LabelMe are already pixel-space
-    (parsed via tcip_annotation.format_io into pixel-xyxy BBox objects).
+    The canonical on-disk format is per-image ``json`` (json_io); ``coco`` is the assembled
+    dataset view of that JSON used for training; ``voc`` / ``labelme`` are external formats parsed
+    via tcip_annotation.format_io (all pixel-space). YOLO is not a dataset read format — it is
+    import-only, converted to JSON at ingest.
     """
-    fmt = (fmt or "yolo").lower()
-    if fmt == "yolo":
-        return _read_det_boxes_px(labels_dir / f"{stem}.txt", w, h)
-
-    from tcip_annotation import format_io
-    bboxes = []
-    if fmt == "voc":
-        p = labels_dir / f"{stem}.xml"
-        if p.is_file():
-            bboxes = format_io.parse_voc_detect(str(p))[0]
-    elif fmt == "labelme":
-        p = labels_dir / f"{stem}.json"
-        if p.is_file():
-            bboxes = format_io.parse_labelme_detect(str(p))[0]
-    elif fmt == "coco":
-        if coco is not None:
-            bboxes = format_io.parse_coco_detect(coco, file_name=file_name)[0]
+    fmt = (fmt or "json").lower()
+    if fmt == "json":
+        from tcip_annotation import json_io
+        bboxes = json_io.read_detect(str(labels_dir / f"{stem}.json"))[0]
     else:
-        raise ValueError(f"Unknown detection label_format {fmt!r} (use yolo/coco/voc/labelme)")
+        from tcip_annotation import format_io
+        bboxes = []
+        if fmt == "voc":
+            p = labels_dir / f"{stem}.xml"
+            if p.is_file():
+                bboxes = format_io.parse_voc_detect(str(p))[0]
+        elif fmt == "labelme":
+            p = labels_dir / f"{stem}.json"
+            if p.is_file():
+                bboxes = format_io.parse_labelme_detect(str(p))[0]
+        elif fmt == "coco":
+            if coco is not None:
+                bboxes = format_io.parse_coco_detect(coco, file_name=file_name)[0]
+        else:
+            raise ValueError(
+                f"Unknown detection label_format {fmt!r} (use json/coco/voc/labelme); "
+                "YOLO .txt is import-only — convert it to JSON first "
+                "(scripts/migrate_labels_to_json.py)")
     boxes = [[b.x1, b.y1, b.x2, b.y2] for b in bboxes]
     labels = [b.class_id + 1 for b in bboxes]  # 0-indexed cid -> 1-indexed (background 0)
     return boxes, labels
@@ -195,10 +184,13 @@ class BaseImageDataset(BaseDataset):
 class DetectionDataset(BaseImageDataset):
     """Object detection. ``label_format`` selects the on-disk label format:
 
-    - ``yolo`` (default): ``cls cx cy w h`` (normalized) in ``<labels_dir>/<stem>.txt``
-    - ``voc``: one PASCAL VOC ``<stem>.xml`` per image in ``labels_dir``
-    - ``labelme``: one LabelMe ``<stem>.json`` per image in ``labels_dir``
-    - ``coco``: a single COCO JSON at ``coco_json`` (annotations matched by file name)
+    - ``json`` (default): canonical per-image ``<labels_dir>/<stem>.json`` (json_io schema)
+    - ``coco``: a single COCO JSON at ``coco_json`` — the assembled dataset view of the per-image
+      JSON, used for training (annotations matched by file name)
+    - ``voc``: one PASCAL VOC ``<stem>.xml`` per image (external import format)
+    - ``labelme``: one LabelMe ``<stem>.json`` per image (external import format)
+
+    YOLO ``.txt`` is not a read format — import it to JSON first (migrate_labels_to_json).
     """
 
     task_type = "detection"
@@ -210,7 +202,7 @@ class DetectionDataset(BaseImageDataset):
         stems: list[str] | None = None,
         transforms: Any = None,
         num_classes: int = 1,
-        label_format: str = "yolo",
+        label_format: str = "json",
         coco_json: str | None = None,
         coco_data: dict | None = None,
     ) -> None:
@@ -218,7 +210,7 @@ class DetectionDataset(BaseImageDataset):
         self.labels_dir = Path(labels_dir)
         self.transforms = transforms
         self._num_classes = num_classes
-        self.label_format = (label_format or "yolo").lower()
+        self.label_format = (label_format or "json").lower()
         self._coco = None
         if coco_data is not None:  # in-memory COCO assembled from per-image JSON (train/eval)
             self._coco = coco_data
@@ -246,18 +238,10 @@ class DetectionDataset(BaseImageDataset):
     @property
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
-        if self.label_format == "yolo":
-            for stem in self.stems:
-                lp = self.labels_dir / f"{stem}.txt"
-                if lp.is_file():
-                    for line in lp.read_text().splitlines():
-                        parts = line.strip().split()
-                        if len(parts) >= 5:
-                            counts[int(parts[0])] += 1
-        elif self.label_format == "coco" and self._coco:
+        if self.label_format == "coco" and self._coco:
             for ann in self._coco.get("annotations", []):
                 counts[ann.get("category_id", 0)] += 1
-        else:  # voc / labelme: parse each image's annotation
+        else:  # json / voc / labelme: parse each image's annotation
             for stem in self.stems:
                 _, labels = _read_det_boxes_format(stem, self.labels_dir, self.label_format, None, 0, 0, "")
                 for lab in labels:
@@ -325,8 +309,8 @@ class TiledDetectionDataset(BaseDataset):
         for stem in base.stems:
             img_path = _find_image(base.images_dir, stem)
             w, h = get_image_dimensions(str(img_path))  # EXIF-oriented, shares the label frame
-            # Format-aware read: a COCO/VOC/LabelMe base has no <stem>.txt, so YOLO-only reading would
-            # yield zero boxes and (with skip_empty False) train on pure background.
+            # Format-aware read: json (canonical) / coco (assembled) / voc / labelme all go through
+            # the shared reader; only coco needs the image file name to match its annotations.
             file_name = img_path.name if base.label_format == "coco" else ""
             full_boxes, full_labels = _read_det_boxes_format(
                 stem, base.labels_dir, base.label_format, base._coco, w, h, file_name)
@@ -401,8 +385,8 @@ class TiledDetectionDataset(BaseDataset):
 # ====================================================================
 
 class InstanceSegDataset(BaseImageDataset):
-    """Instance masks from per-image polygons: YOLO-polygon ``<stem>.txt`` (``cls x1 y1 x2 y2 ...``
-    normalized), or a COCO dict / assembled per-image JSON (``label_format='coco'`` / ``coco_data``)."""
+    """Instance masks from per-image polygons: canonical per-image JSON ``<stem>.json`` (default),
+    or a COCO dict / assembled per-image JSON (``label_format='coco'`` / ``coco_data``)."""
 
     task_type = "instance_seg"
 
@@ -413,7 +397,7 @@ class InstanceSegDataset(BaseImageDataset):
         stems: list[str] | None = None,
         transforms: Any = None,
         num_classes: int = 1,
-        label_format: str = "yolo",
+        label_format: str = "json",
         coco_json: str | None = None,
         coco_data: dict | None = None,
     ) -> None:
@@ -421,7 +405,7 @@ class InstanceSegDataset(BaseImageDataset):
         self.labels_dir = Path(labels_dir)
         self.transforms = transforms
         self._num_classes = num_classes
-        self.label_format = (label_format or "yolo").lower()
+        self.label_format = (label_format or "json").lower()
         self._coco = None
         if coco_data is not None:
             self._coco = coco_data
@@ -436,26 +420,16 @@ class InstanceSegDataset(BaseImageDataset):
         )
 
     def _read_polys(self, stem: str, w: int, h: int) -> list[tuple[list[tuple[float, float]], int]]:
-        """(pixel polygon points, 1-indexed label) per instance — from the COCO dict or a
-        YOLO-polygon ``<stem>.txt``. COCO/assembled-JSON polygons are already pixel-space; YOLO
-        coords are normalized and denormalized by (w, h)."""
+        """(pixel polygon points, 1-indexed label) per instance — from the COCO dict or the
+        canonical per-image ``<stem>.json``. Both are already pixel-space."""
         if self.label_format == "coco":
             from tcip_annotation import format_io
             file_name = _find_image(self.images_dir, stem).name
             polys, _ = format_io.parse_coco_segment(self._coco, file_name=file_name)
-            return [(list(p.points), p.class_id + 1) for p in polys]
-        out: list[tuple[list[tuple[float, float]], int]] = []
-        lp = self.labels_dir / f"{stem}.txt"
-        if lp.is_file():
-            for line in lp.read_text().splitlines():
-                parts = line.strip().split()
-                if len(parts) < 7:
-                    continue
-                cid = int(parts[0])
-                coords = [float(v) for v in parts[1:]]
-                pts = [(coords[i] * w, coords[i + 1] * h) for i in range(0, len(coords) - 1, 2)]
-                out.append((pts, cid + 1))
-        return out
+        else:
+            from tcip_annotation import json_io
+            polys = json_io.read_segment(str(self.labels_dir / f"{stem}.json"))[0]
+        return [(list(p.points), p.class_id + 1) for p in polys]
 
     @property
     def num_classes(self) -> int:
@@ -723,16 +697,23 @@ _DATASET_MAP = {
 
 
 def _autoresolve_json_labels(kwargs: dict) -> None:
-    """Route a per-image-JSON label dir onto the COCO path so training/eval reads it (non-YOLO
-    training). No-op when the caller pinned a format or already supplied COCO data, or when the
-    dir isn't the canonical JSON schema (legacy YOLO ``.txt`` trains through its own path)."""
+    """Route a canonical per-image-JSON label dir onto the assembled-COCO path for training/eval.
+    No-op when the caller pinned a format or already supplied COCO data. A legacy YOLO ``.txt`` dir
+    is rejected loudly (it is import-only) so it can never be read as all-empty negatives."""
     if kwargs.get("coco_data") is not None or kwargs.get("coco_json") or kwargs.get("label_format"):
         return
     labels_dir = kwargs.get("labels_dir", "")
     images_dir = kwargs.get("images_dir", "")
-    if labels_dir and images_dir and dir_label_format(labels_dir) == "json":
+    if not labels_dir:
+        return
+    fmt = dir_label_format(labels_dir)
+    if fmt == "json" and images_dir:
         kwargs["coco_data"] = assemble_coco(labels_dir, images_dir, stems=kwargs.get("stems"))
         kwargs["label_format"] = "coco"
+    elif fmt == "yolo":
+        raise ValueError(
+            f"{labels_dir} holds legacy YOLO .txt labels — convert them to canonical per-image "
+            "JSON first (scripts/migrate_labels_to_json.py). YOLO is import-only.")
 
 
 def build_dataset(task: str, **kwargs) -> BaseDataset:
