@@ -1046,3 +1046,70 @@ def test_review_edit_stamps_created_by(client, dataset_root, tmp_path) -> None:
     assert resp.status_code == 200
     obj = json.loads(det_gt.read_text())["objects"][0]
     assert obj["created_by"] == "user:zack"
+
+
+# ── Provenance round-trip fidelity (load → edit → save keeps the original creator) ──
+
+
+def test_annotate_load_returns_provenance(client, dataset_root, tmp_path) -> None:
+    from tcip_annotation.json_io import write_detect
+    from tcip_annotation.state import BBox
+
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det = tmp_path / "det.json"
+    write_detect(str(det), [BBox(10, 10, 40, 40, 0, created_by="derived:user:zack",
+                                 created_at="2026-02-11T00:00:00+00:00",
+                                 accepted_by="user:zack")], 100, 80)
+    resp = client.get(
+        "/api/annotate/labels",
+        params={"image_path": str(img_path), "detect_path": str(det)},
+    )
+    assert resp.status_code == 200
+    b = resp.json()["boxes"][0]
+    assert b["created_by"] == "derived:user:zack"
+    assert b["created_at"] == "2026-02-11T00:00:00+00:00"
+    assert b["accepted_by"] == "user:zack"
+
+
+def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_path) -> None:
+    """A re-save must not wholesale re-stamp loaded shapes to the current annotator — the
+    original creator survives (keep-original-creator policy); only NEW shapes get stamped."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "detect_path": str(det_path),
+        "boxes": [
+            {"x1": 10, "y1": 10, "x2": 40, "y2": 40, "class_id": 0,
+             "created_by": "derived:user:zack", "created_at": "2026-02-11T00:00:00+00:00",
+             "accepted_by": "user:zack"},
+            {"x1": 50, "y1": 50, "x2": 70, "y2": 70, "class_id": 0},
+        ],
+        "polygons": [],
+        "user": "emily",
+    })
+    assert resp.status_code == 200
+    objs = json.loads(det_path.read_text())["objects"]
+    assert objs[0]["created_by"] == "derived:user:zack"          # original creator kept
+    assert objs[0]["created_at"] == "2026-02-11T00:00:00+00:00"  # original timestamp kept
+    assert objs[0]["accepted_by"] == "user:zack"                 # acceptance carried
+    assert objs[1]["created_by"] == "user:emily"                 # only the new shape is Emily's
+
+
+def test_annotate_derived_boxes_inherit_polygon_provenance(client, dataset_root, tmp_path) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
+    seg_path = tmp_path / "segment" / "IMG_0000.json"
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "detect_path": str(det_path), "segment_path": str(seg_path),
+        "boxes": [],
+        "polygons": [
+            {"points": [[10, 10], [30, 10], [30, 30]], "class_id": 0,
+             "created_by": "user:emily", "created_at": "2026-03-02T00:00:00+00:00"},
+            {"points": [[50, 50], [70, 50], [70, 70]], "class_id": 0},
+        ],
+        "user": "zack",
+    })
+    assert resp.status_code == 200
+    det_objs = json.loads(det_path.read_text())["objects"]
+    assert det_objs[0]["created_by"] == "user:emily"   # derived box keeps its polygon's author
+    assert det_objs[1]["created_by"] == "user:zack"    # new polygon -> stamped -> box inherits
