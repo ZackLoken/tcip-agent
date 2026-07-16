@@ -70,7 +70,7 @@ describe("applyReviewFocus", () => {
     expect(useStore.getState().review.focusDetectionIdx).toBe(3);
   });
 
-  it("does NOT re-select when identity AND model already match, but still applies filters", async () => {
+  it("does not re-select when identity and model already match, but still applies filters", async () => {
     seedDataset({
       dataset_root: "/ws/proj",
       annotation_type: "catkin",
