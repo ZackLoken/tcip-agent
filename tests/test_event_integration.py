@@ -7,7 +7,6 @@ subscribed WebSocket clients.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -114,25 +113,22 @@ class TestPostPanelEventRoute:
 class TestPushPanelDataTool:
     """Verify the MCP tool posts via HTTP and aliases legacy panel names."""
 
-    def test_no_subscribers_when_backend_down(self, tmp_path: Path) -> None:
+    def test_no_subscribers_when_backend_down(self, tmp_path: Path, monkeypatch) -> None:
         """Backend not running → graceful 'no_subscribers' status."""
         from tcip_mcp.tools.annotation_tools import push_panel_data
 
         # Point port discovery at an unused port in an isolated project root
-        os.environ["TCIP_WEB_PORT"] = "59999"  # very unlikely to be bound
-        try:
-            result = push_panel_data(
-                panel="training",
-                event_type="metrics_update",
-                data={"epoch": 1},
-            )
-            # Either the connection was refused (no_subscribers) or a URL error;
-            # both are acceptable. Tool must not raise.
-            assert "status" in result or "error" in result
-            # Panel name preserved in result
-            assert result.get("panel") == "training"
-        finally:
-            os.environ.pop("TCIP_WEB_PORT", None)
+        monkeypatch.setenv("TCIP_WEB_PORT", "59999")  # very unlikely to be bound
+        result = push_panel_data(
+            panel="training",
+            event_type="metrics_update",
+            data={"epoch": 1},
+        )
+        # Either the connection was refused (no_subscribers) or a URL error;
+        # both are acceptable. Tool must not raise.
+        assert "status" in result or "error" in result
+        # Panel name preserved in result
+        assert result.get("panel") == "training"
 
     def test_invalid_panel_rejected(self) -> None:
         """Unknown panel names return an error before any HTTP call."""
@@ -145,38 +141,32 @@ class TestPushPanelDataTool:
 class TestPortDiscovery:
     """Port + host discovery honor env vars and port-file snapshots."""
 
-    def test_env_port_wins(self) -> None:
+    def test_env_port_wins(self, monkeypatch) -> None:
         from tcip_mcp.web_client import resolve_web_port
 
-        os.environ["TCIP_WEB_PORT"] = "12345"
-        try:
-            assert resolve_web_port() == 12345
-        finally:
-            os.environ.pop("TCIP_WEB_PORT", None)
+        monkeypatch.setenv("TCIP_WEB_PORT", "12345")
+        assert resolve_web_port() == 12345
 
-    def test_port_file_used_when_env_absent(self, tmp_path: Path) -> None:
+    def test_port_file_used_when_env_absent(self, tmp_path: Path, monkeypatch) -> None:
         from tcip_mcp.web_client import resolve_web_port
 
         port_file = tmp_path / ".tcip" / "state" / "web_port.txt"
         port_file.parent.mkdir(parents=True)
         port_file.write_text("34567")
-        os.environ.pop("TCIP_WEB_PORT", None)
+        monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
         assert resolve_web_port(project_root=tmp_path) == 34567
 
-    def test_default_when_neither_available(self, tmp_path: Path) -> None:
+    def test_default_when_neither_available(self, tmp_path: Path, monkeypatch) -> None:
         from tcip_mcp.web_client import DEFAULT_PORT, resolve_web_port
 
-        os.environ.pop("TCIP_WEB_PORT", None)
+        monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
         assert resolve_web_port(project_root=tmp_path) == DEFAULT_PORT
 
-    def test_host_env_override(self) -> None:
+    def test_host_env_override(self, monkeypatch) -> None:
         from tcip_mcp.web_client import resolve_web_host
 
-        os.environ["TCIP_WEB_HOST"] = "10.0.0.1"
-        try:
-            assert resolve_web_host() == "10.0.0.1"
-        finally:
-            os.environ.pop("TCIP_WEB_HOST", None)
+        monkeypatch.setenv("TCIP_WEB_HOST", "10.0.0.1")
+        assert resolve_web_host() == "10.0.0.1"
 
 
 # ── Tool output schemas (unchanged from pre-HTTP migration) ─────────────
@@ -217,3 +207,43 @@ class TestHpoToolOutputSchema:
 
         assert hasattr(training_tools, "run_hpo")
         assert callable(training_tools.run_hpo)
+
+
+# ── Phase-0 audit fixes: port fallback chain + pytest hermeticity ──────────
+
+
+def test_resolve_web_port_falls_back_to_repo_root(tmp_path, monkeypatch):
+    """After set_active_project repins the platform root to a project, the port file still
+    lives under the backend's startup (repo) root — the lookup must find it there instead of
+    silently degrading to the default port."""
+    from tcip_mcp import web_client
+
+    project = tmp_path / "adopted_project"          # pinned root: no port file here
+    project.mkdir()
+    repo = tmp_path / "repo"                        # backend's startup root: has the file
+    (repo / ".tcip" / "state").mkdir(parents=True)
+    (repo / ".tcip" / "state" / "web_port.txt").write_text("23456")
+
+    monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.setattr(web_client, "_repo_root", lambda: repo)
+    assert web_client.resolve_web_port() == 23456
+
+
+def test_post_panel_event_suppressed_under_pytest(monkeypatch):
+    """Test runs must never steer a live GUI (PYTEST_CURRENT_TEST is set by pytest itself)."""
+    from tcip_mcp.web_client import post_panel_event
+
+    monkeypatch.delenv("TCIP_ALLOW_PANEL_EVENTS", raising=False)
+    res = post_panel_event("annotate", "focus", {"stem": "IMG_X"})
+    assert res == {"status": "suppressed_under_pytest", "delivered": False, "url": ""}
+
+
+def test_post_panel_event_opt_in_bypasses_suppression(monkeypatch):
+    from tcip_mcp.web_client import post_panel_event
+
+    monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
+    monkeypatch.setenv("TCIP_WEB_PORT", "1")        # nothing listens on port 1
+    res = post_panel_event("annotate", "focus", {})
+    assert res["delivered"] is False
+    assert res["status"] != "suppressed_under_pytest"   # it really attempted the send
