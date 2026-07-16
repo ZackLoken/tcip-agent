@@ -5,7 +5,7 @@
  * cross-session position), while in-session switches resume where you were. Position + review
  * filters live in one blob; Review's GT/Pred visibility (ReviewTab-local) is under its own key.
  *
- * Zoom/pan is deliberately NOT persisted here: both tabs actively drive the view (Annotate
+ * Zoom/pan is deliberately not persisted here: both tabs actively drive the view (Annotate
  * auto-fits each image, Review auto-zooms to each detection), so a restored view would be
  * immediately overridden — restoring it would fight the tab, not help.
  */
