@@ -36,7 +36,9 @@ class TestDatasets:
         assert ds.task_type == "classification"
 
     def test_build_dataset_detection(self, tmp_path):
-        """Detection dataset from YOLO labels."""
+        """Detection dataset from per-image JSON labels."""
+        from tcip_annotation import json_io
+        from tcip_annotation.state import BBox
         from tcip_mcp.pipelines.data.datasets import build_dataset
         imgs = tmp_path / "images"
         lbls = tmp_path / "labels"
@@ -46,7 +48,9 @@ class TestDatasets:
         img = torch.randint(0, 255, (3, 64, 64), dtype=torch.uint8)
         from torchvision.utils import save_image
         save_image(img.float() / 255.0, str(imgs / "test.png"))
-        (lbls / "test.txt").write_text("0 0.5 0.5 0.2 0.3\n1 0.3 0.3 0.1 0.1\n")
+        json_io.write_detect(str(lbls / "test.json"),
+                             [BBox(25.6, 22.4, 38.4, 41.6, 0), BBox(16.0, 16.0, 22.4, 22.4, 1)],
+                             64, 64, keep_empty=True)
 
         ds = build_dataset("detection", images_dir=str(imgs), labels_dir=str(lbls))
         assert ds.task_type == "detection"
