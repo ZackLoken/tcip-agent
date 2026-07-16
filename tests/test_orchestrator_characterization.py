@@ -26,6 +26,7 @@ from tcip_mcp.pipelines.orchestrator import (
     register_phase_runner,
     validate_pipeline,
 )
+from tests._orchestrator_helpers import build_stub_trainer
 
 MODEL_SPEC = {
     "backbone": "resnet18",
@@ -57,47 +58,13 @@ def det_data(tmp_path: Path) -> dict:
     return {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "stems": stems}
 
 
-class FakeRun:
-    def __init__(self, run_id: str, output_dir: str, status: str = "completed",
-                 error: str = "") -> None:
-        self.run_id = run_id
-        self.output_dir = output_dir
-        self.status = status
-        self.metrics_history = [{"train_loss": 0.25}]
-        self.error = error
-
-
 @pytest.fixture
 def stub_trainer(monkeypatch, tmp_path: Path) -> dict:
     """Stub create_run/train so training phases run without real training.
 
     ``captured["run_status"]`` / ``captured["run_error"]`` control the outcome
     the fake run reports. Keeps .tcip writes inside tmp_path."""
-    import tcip_mcp.pipelines.training.generic_trainer as gt
-
-    captured: dict = {"run_status": "completed", "run_error": ""}
-
-    def fake_create_run(config, output_dir, origin="training"):
-        captured["config"] = config
-        run = FakeRun("run_char_test", output_dir,
-                      status=captured["run_status"], error=captured["run_error"])
-        captured["run"] = run
-        return run
-
-    def fake_train(run, train_loader, val_loader=None, task="detection",
-                   epoch_callback=None, resume_from=""):
-        captured["train_len"] = len(train_loader.dataset)
-        out = Path(run.output_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "model_best.pt").write_bytes(b"fake checkpoint")
-        if epoch_callback is not None:
-            epoch_callback(0, {"train_loss": 0.25})
-        return run
-
-    monkeypatch.setattr(gt, "create_run", fake_create_run)
-    monkeypatch.setattr(gt, "train", fake_train)
-    monkeypatch.chdir(tmp_path)
-    return captured
+    return build_stub_trainer(monkeypatch, tmp_path, "run_char_test")
 
 
 @pytest.fixture
