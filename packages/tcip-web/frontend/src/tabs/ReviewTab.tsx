@@ -114,6 +114,9 @@ export function ReviewTab() {
   const filters = useStore((s) => s.gui.review);
   const setView = useStore((s) => s.setView);
   const matches = useStore((s) => s.review.matches);
+  // A review_focus command bumps this to force a matches refetch even when image + paths are
+  // unchanged (the recompute effect otherwise skips identical-path rebuilds).
+  const refetchNonce = useStore((s) => s.review.refetchNonce);
   const setMatches = useStore((s) => s.setMatches);
   const setLoading = useStore((s) => s.setReviewLoading);
   const setDetectionIdx = useStore((s) => s.setReviewDetectionIdx);
@@ -350,6 +353,7 @@ export function ReviewTab() {
     filters.filter_type,
     filters.filter_class,
     filters.status_filter,
+    refetchNonce,
   ]);
 
   function stepImage(delta: number) {
