@@ -23,10 +23,10 @@ def test_recommend_falls_back_to_torchvision_without_timm(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# export_predictions_yolo writes per-image COCO/JSON prediction files
+# export_predictions writes per-image COCO/JSON prediction files
 # --------------------------------------------------------------------------
 
-def test_export_predictions_yolo_writes_json(tmp_path, monkeypatch):
+def test_export_predictions_writes_json(tmp_path, monkeypatch):
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")  # only existence is checked
     images_dir = tmp_path / "images"
@@ -44,11 +44,11 @@ def test_export_predictions_yolo_writes_json(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
-    from tcip_mcp.tools.inference_tools import export_predictions_yolo
+    from tcip_mcp.tools.inference_tools import export_predictions
 
     out = tmp_path / "out"
-    export_predictions_yolo(str(ckpt), str(images_dir), str(out))
-    # export_predictions_yolo now writes per-image COCO/JSON, not YOLO text lines.
+    export_predictions(str(ckpt), str(images_dir), str(out))
+    # export_predictions writes per-image COCO/JSON, not YOLO text lines.
     data = json.loads((out / "img.json").read_text())
     assert data["image"] == "img"
     assert (data["width"], data["height"]) == (100, 100)
