@@ -13,11 +13,10 @@ import os
 
 
 def current_user() -> str:
-    """Backend fallback identity (bare name): ``TCIP_USER`` / ``TCIP_REVIEW_USER`` env, else OS login."""
-    for key in ("TCIP_USER", "TCIP_REVIEW_USER"):
-        val = os.environ.get(key, "").strip()
-        if val:
-            return val
+    """Backend fallback identity (bare name): ``TCIP_USER`` env, else OS login."""
+    val = os.environ.get("TCIP_USER", "").strip()
+    if val:
+        return val
     try:
         import getpass
 
