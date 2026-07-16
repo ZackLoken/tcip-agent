@@ -24,6 +24,21 @@ def test_assert_path_allowed_permissive_then_restricted(tmp_path, monkeypatch):
     assert assert_path_allowed(str(target)) == target.resolve()        # inside -> allowed
 
 
+def test_assert_project_root_allowed_matches_assert_path_allowed(tmp_path, monkeypatch):
+    from tcip_web.paths import assert_path_allowed, assert_project_root_allowed
+    target = tmp_path / "proj"
+    target.mkdir()
+
+    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
+    assert assert_project_root_allowed(str(target)) == target.resolve()
+
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path / "other"))
+    with pytest.raises(ValueError):
+        assert_project_root_allowed(str(target))
+    with pytest.raises(ValueError):
+        assert_path_allowed(str(target))  # same policy as the generic guard
+
+
 def test_training_metrics_rejects_run_id_traversal(tmp_path):
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
