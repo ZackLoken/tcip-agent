@@ -159,12 +159,11 @@ The sensing exists to produce trustworthy per-plant phenotypes that breeders sel
 
 - **A geometric surrogate is not a morphological measurement.** Bounding-box height, area,
   or aspect ratio is scale-, zoom-, and pose-dependent and does not measure a biological
-  stage (the removed catkin bbox-height "elongation" error). A visible stage is a *validated
-  classification*, not a pixel geometry.
+  stage. A visible stage is a *validated classification*, not a pixel geometry.
 - **A vegetation index is a proxy, not the trait.** Validate NDVI/red-edge against expert
   ground truth; never deliver the index as the biological quantity.
 - **Chemistry is not in RGB pixels.** Any RGB-derived oil/protein/moisture/tannin number is
-  fabricated — it needs NIRS with a crop/state-specific calibration.
+  fabricated — it needs NIRS/hyperspectral with a crop/state-specific calibration.
 - **Resolution gates feasibility.** If standoff/GSD cannot resolve a structure at ~2–3×
   smaller than its size, no model recovers it — report not observable.
 - **Aerial 3D is top-of-canopy.** Do not report internal-structure metrics from a DSM/SfM
