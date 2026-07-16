@@ -11,6 +11,7 @@ import { Toasts } from "@/components/Toasts";
 import { TopBar } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
 import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
+import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
 import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
@@ -87,6 +88,13 @@ function App() {
             .getState()
             .pushToast("Agent tried to focus the Annotate tab, but it couldn't be applied.");
         });
+        return;
+      }
+
+      // Agent → GUI "push your canvas now": visualize_canvas pings before rendering so it
+      // sees the freshest state; the mounted tab answers with an immediate full push.
+      if (ev.event_type === "canvas_state_request") {
+        notifyCanvasStateRequest();
         return;
       }
 
