@@ -956,3 +956,93 @@ def test_fs_list_confined_by_image_roots(
     assert client.get("/api/fs/list", params={"path": str(allowed)}).status_code == 200
     # Browsing outside the configured root is refused.
     assert client.get("/api/fs/list", params={"path": str(outside)}).status_code == 403
+
+
+# ── Phase 3: native provenance (created_by / accepted_by) ─────────────────
+
+
+def test_annotate_save_stamps_created_by(client, dataset_root, tmp_path) -> None:
+    """A human-drawn box is stamped created_by=user:<gui-user> + created_at."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "detect_path": str(det_path),
+        "boxes": [{"x1": 50, "y1": 40, "x2": 70, "y2": 60, "class_id": 0}], "polygons": [],
+        "user": "zack",
+    })
+    assert resp.status_code == 200
+    obj = json.loads(det_path.read_text())["objects"][0]
+    assert obj["created_by"] == "user:zack"
+    assert obj["created_at"]
+
+
+def test_annotate_derived_box_inherits_author(client, dataset_root, tmp_path) -> None:
+    """Detect boxes derived from a drawn polygon inherit the polygon's author (not None)."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
+    seg_path = tmp_path / "segment" / "IMG_0000.json"
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "detect_path": str(det_path), "segment_path": str(seg_path),
+        "boxes": [], "polygons": [{"points": [[10, 10], [30, 10], [30, 30]], "class_id": 0}],
+        "user": "emily",
+    })
+    assert resp.status_code == 200
+    assert json.loads(det_path.read_text())["objects"][0]["created_by"] == "user:emily"  # derived
+    assert json.loads(seg_path.read_text())["objects"][0]["created_by"] == "user:emily"
+
+
+def test_annotate_save_falls_back_to_os_user(client, dataset_root, tmp_path) -> None:
+    """Omitting user still stamps a user:<...> author (backend OS/env fallback), never bare/None."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_path = tmp_path / "detect" / "IMG_0000.json"
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "detect_path": str(det_path),
+        "boxes": [{"x1": 50, "y1": 40, "x2": 70, "y2": 60, "class_id": 0}], "polygons": [],
+    })
+    assert resp.status_code == 200
+    obj = json.loads(det_path.read_text())["objects"][0]
+    assert obj["created_by"].startswith("user:")
+
+
+def test_review_accept_fp_carries_created_by_and_stamps_accepted_by(client, dataset_root, tmp_path) -> None:
+    """Accepting an FP prediction into GT carries the prediction's created_by and stamps
+    accepted_by=reviewer — the origin travels, and the acceptance is recorded."""
+    from tcip_annotation.json_io import write_detect
+    from tcip_annotation.state import PredBBox
+
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_gt = tmp_path / "gt_detect.json"
+    _write_gt_detect(det_gt, [], keep_empty=True)  # confirmed negative → the pred shows as FP
+    pred_det = tmp_path / "pred_detect.json"
+    write_detect(str(pred_det), [PredBBox(
+        40, 32, 60, 48, 0, confidence=0.9, created_by="sam", created_at="2026-01-01T00:00:00+00:00")],
+        100, 80)
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(
+        client, img_path, det_gt, project_root,
+        pred_detect_path=str(pred_det), det_type="fp", action="accepted", user="zack",
+    )
+    assert resp.status_code == 200
+    obj = json.loads(det_gt.read_text())["objects"][0]
+    assert obj["created_by"] == "sam"          # prediction origin carried into GT
+    assert obj["accepted_by"] == "user:zack"   # reviewer stamped
+    assert obj["accepted_at"]
+
+
+def test_review_edit_stamps_created_by(client, dataset_root, tmp_path) -> None:
+    """A reviewer-drawn edit authors GT with created_by=user:<reviewer>."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    det_gt = tmp_path / "gt_detect.json"
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(
+        client, img_path, det_gt, project_root,
+        det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0], user="zack",
+    )
+    assert resp.status_code == 200
+    obj = json.loads(det_gt.read_text())["objects"][0]
+    assert obj["created_by"] == "user:zack"
