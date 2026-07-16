@@ -84,13 +84,17 @@ def test_global_nms_collapses_duplicates():
 
 def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128):
     from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         Image.new("RGB", (size, size), (120, 120, 120)).save(images_dir / f"img{i}.jpg")
-        (labels_dir / f"img{i}.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+        # YOLO "0 0.5 0.5 0.1 0.1" (normalized) -> pixel xyxy in a size×size image
+        box = BBox(0.45 * size, 0.45 * size, 0.55 * size, 0.55 * size, 0)
+        json_io.write_detect(str(labels_dir / f"img{i}.json"), [box], size, size, keep_empty=True)
     return images_dir, labels_dir
 
 
@@ -112,6 +116,8 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
 def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
     pytest.importorskip("torch")
     from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images_dir = tmp_path / "images"
@@ -119,7 +125,8 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
     images_dir.mkdir()
     labels_dir.mkdir()
     Image.new("RGB", (256, 256), (120, 120, 120)).save(images_dir / "a.jpg")
-    (labels_dir / "a.txt").write_text("0 0.1 0.1 0.1 0.1\n")  # 25.6px box in the top-left corner
+    # YOLO "0 0.1 0.1 0.1 0.1" in a 256×256 image -> a 25.6px box in the top-left corner
+    json_io.write_detect(str(labels_dir / "a.json"), [BBox(12.8, 12.8, 38.4, 38.4, 0)], 256, 256, keep_empty=True)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
                        num_classes=1, tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     # Sliver cutoff is DERIVED from the class-average box size, not pinned.
