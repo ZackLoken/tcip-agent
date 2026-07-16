@@ -43,11 +43,22 @@ class BoxPayload(BaseModel):
     x2: float
     y2: float
     class_id: int = 0
+    # Provenance round-trips through the client: a loaded shape carries its original
+    # created_by back on save (keep-original-creator policy), so a re-save never
+    # wholesale re-stamps existing labels to the current annotator. New shapes omit it.
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+    accepted_by: Optional[str] = None
+    accepted_at: Optional[str] = None
 
 
 class PolygonPayload(BaseModel):
     points: list[list[float]]
     class_id: int = 0
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+    accepted_by: Optional[str] = None
+    accepted_at: Optional[str] = None
 
 
 class SavePayload(BaseModel):
@@ -158,6 +169,8 @@ def load_labels(
             boxes.append({
                 "x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
                 "class_id": b.class_id,
+                "created_by": b.created_by, "created_at": b.created_at,
+                "accepted_by": b.accepted_by, "accepted_at": b.accepted_at,
             })
 
     if segment_path:
@@ -166,6 +179,8 @@ def load_labels(
             polygons.append({
                 "points": [list(p) for p in poly.points],
                 "class_id": poly.class_id,
+                "created_by": poly.created_by, "created_at": poly.created_at,
+                "accepted_by": poly.accepted_by, "accepted_at": poly.accepted_at,
             })
 
     return {
@@ -208,27 +223,46 @@ def save_labels(payload: SavePayload) -> dict:
                 409, {"error": "label file changed since it was loaded", "conflicts": conflicts}
             )
 
-    # Human-authored GT: stamp created_by = "user:<current>" + created_at natively (json_io persists it).
-    created_by = user_id(resolve_user(payload.user))
-    created_at = datetime.now(timezone.utc).isoformat()
+    # Human-authored GT: a round-tripped shape keeps its original created_by (the creator
+    # stays the creator through edits); only shapes with no provenance — new ones — are
+    # stamped to the current annotator. json_io persists all four fields natively.
+    author = user_id(resolve_user(payload.user))
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    def _prov(shape) -> dict:
+        # accepted_* only ride along on round-tripped shapes (created_by present) — a NEW shape
+        # claiming acceptance would mint review sign-off that never happened.
+        round_tripped = bool(shape.created_by)
+        return {
+            "created_by": shape.created_by or author,
+            "created_at": shape.created_at if round_tripped else now_iso,
+            "accepted_by": shape.accepted_by if round_tripped else None,
+            "accepted_at": shape.accepted_at if round_tripped else None,
+        }
+
     boxes = [
-        BBox(b.x1, b.y1, b.x2, b.y2, class_id=b.class_id, created_by=created_by, created_at=created_at)
+        BBox(b.x1, b.y1, b.x2, b.y2, class_id=b.class_id, **_prov(b))
         for b in payload.boxes
     ]
     polygons = [
-        Polygon(points=[tuple(pt) for pt in p.points], class_id=p.class_id,
-                created_by=created_by, created_at=created_at)
+        Polygon(points=[tuple(pt) for pt in p.points], class_id=p.class_id, **_prov(p))
         for p in payload.polygons
     ]
 
     # Detect is a derived view of segment: when polygons exist, the detect boxes are
     # their bounding boxes, so editing a polygon can't leave a stale box twin behind
     # (the two label files stay in lockstep). With no polygons, drawn boxes stand.
+    # Each derived box inherits its source polygon's provenance (derived geometry keeps
+    # the polygon's author — the valley-farm derived:user:* convention).
     detect_derived = bool(polygons) and payload.detect_path is not None
-    detect_boxes = boxes_from_polygons(polygons) if polygons else boxes
-    if polygons:  # boxes_from_polygons drops kw-only provenance -> carry the author from the polygons
-        for db in detect_boxes:
-            db.created_by, db.created_at = created_by, created_at
+    if polygons:
+        detect_boxes = boxes_from_polygons(polygons)
+        with_points = [p for p in polygons if p.points]  # boxes_from_polygons skips empty ones
+        for db, src in zip(detect_boxes, with_points):
+            db.created_by, db.created_at = src.created_by, src.created_at
+            db.accepted_by, db.accepted_at = src.accepted_by, src.accepted_at
+    else:
+        detect_boxes = boxes
 
     ok = True
     if payload.detect_path:
