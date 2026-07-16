@@ -155,13 +155,14 @@ def _run_inference_phase(phase: dict, context: dict[str, Any], work_dir: Path) -
         img_paths = sorted(Path(images_dir).glob("*"))
         img_paths = [p for p in img_paths if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".tif"}]
 
+        producer = f"model:{Path(ckpt).stem}"
         results_list = []
         for ip in img_paths:
             pred = predictor.predict(str(ip))
             results_list.append(pred)
             # Save predictions as the canonical per-image COCO/JSON that
             # parse_detect_predictions / the Review tab consume.
-            write_predictions_json(preds_dir / f"{ip.stem}.json", pred)
+            write_predictions_json(preds_dir / f"{ip.stem}.json", pred, created_by=producer)
 
         result.status = "completed"
         result.artifacts = {"predictions_dir": str(preds_dir), "images_dir": images_dir, "count": len(results_list)}
