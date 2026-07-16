@@ -47,6 +47,46 @@ def polygon_iou(geom1: ShapelyPolygon, area1: float, geom2: ShapelyPolygon, area
         return 0.0
 
 
+# Row-block budget for the vectorized IoU matrix: chunk the GT axis so the transient
+# (rows x preds) float64 arrays stay bounded on very large classes, while still emitting
+# pairs in row-major (gt asc, pred asc) order.
+_IOU_MATRIX_BUDGET = 25_000_000
+
+
+def _append_box_iou_pairs(np, gt_arr, pred_arr, gis, pis, iou_threshold, pairs) -> None:
+    """Vectorized box IoU → append ``(iou, gt_idx, pred_idx)`` in row-major order.
+
+    Numeric ops mirror ``box_iou`` (same float64 operation order) so values and the
+    ``>= iou_threshold`` boundary are bitwise-identical to the scalar path.
+    """
+    m = gt_arr.shape[0]
+    k = pred_arr.shape[0]
+    if m == 0 or k == 0:
+        return
+    px1 = pred_arr[:, 0]
+    py1 = pred_arr[:, 1]
+    px2 = pred_arr[:, 2]
+    py2 = pred_arr[:, 3]
+    areas_pred = (px2 - px1) * (py2 - py1)
+    chunk = max(1, _IOU_MATRIX_BUDGET // k)
+    for r0 in range(0, m, chunk):
+        g = gt_arr[r0 : r0 + chunk]
+        gx1 = g[:, 0][:, None]
+        gy1 = g[:, 1][:, None]
+        gx2 = g[:, 2][:, None]
+        gy2 = g[:, 3][:, None]
+        iw = np.maximum(0.0, np.minimum(gx2, px2[None, :]) - np.maximum(gx1, px1[None, :]))
+        ih = np.maximum(0.0, np.minimum(gy2, py2[None, :]) - np.maximum(gy1, py1[None, :]))
+        inter = iw * ih
+        areas_g = ((g[:, 2] - g[:, 0]) * (g[:, 3] - g[:, 1]))[:, None]
+        union = areas_g + areas_pred[None, :] - inter
+        iou = np.zeros_like(union)
+        np.divide(inter, union, out=iou, where=union > 0)
+        rows, cols = np.nonzero(iou >= iou_threshold)
+        for rr, cc in zip(rows.tolist(), cols.tolist()):
+            pairs.append((float(iou[rr, cc]), gis[r0 + rr], pis[cc]))
+
+
 def _bbox_of(item_type: str, data) -> tuple[float, float, float, float]:
     """Get axis-aligned bounding box for a box or polygon."""
     if item_type == "box":
@@ -126,13 +166,32 @@ def compute_matches(
             pred_geom_cache[pi] = _to_shapely(pred_items[pi][0], pred_items[pi][4])
         return pred_geom_cache[pi]
 
-    # Compute all same-class IoU pairs
+    # Compute all same-class IoU pairs. Pure-box classes (the common detection case)
+    # use a vectorized numpy IoU matrix; any class involving a polygon falls back to
+    # the exact per-pair loop so emit order and IoU values stay byte-identical.
+    import numpy as np
+
     pairs: list[tuple[float, int, int]] = []
     for cid in gt_by_class:
         if cid not in pred_by_class:
             continue
-        for gi in gt_by_class[cid]:
-            for pi in pred_by_class[cid]:
+        gis = gt_by_class[cid]
+        pis = pred_by_class[cid]
+        if all(gt_items[gi][0] == "box" for gi in gis) and all(
+            pred_items[pi][0] == "box" for pi in pis
+        ):
+            gt_arr = np.array(
+                [(d.x1, d.y1, d.x2, d.y2) for d in (gt_items[gi][3] for gi in gis)],
+                dtype=np.float64,
+            )
+            pred_arr = np.array(
+                [(d.x1, d.y1, d.x2, d.y2) for d in (pred_items[pi][4] for pi in pis)],
+                dtype=np.float64,
+            )
+            _append_box_iou_pairs(np, gt_arr, pred_arr, gis, pis, iou_threshold, pairs)
+            continue
+        for gi in gis:
+            for pi in pis:
                 gt_type, _, _, gt_data = gt_items[gi]
                 p_type, _, _, _, p_data = pred_items[pi]
                 if gt_type == "box" and p_type == "box":
