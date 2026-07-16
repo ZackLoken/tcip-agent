@@ -68,12 +68,12 @@ def test_materialize_writes_labels_manifest_and_empty_negatives(tmp_path):
     r = materialize_dataset(state, str(src), str(out))
     assert (r["positive"], r["hard_negative"], r["total_boxes"]) == (1, 1, 1)
 
-    label_a = out / "labels" / "detect" / "imgA.txt"
-    parts = label_a.read_text().split()
-    assert parts[0] == "0" and len(parts) == 5
+    from tcip_annotation import json_io
+    boxes_a, _ = json_io.read_detect(str(out / "labels" / "detect" / "imgA.json"))
+    assert len(boxes_a) == 1 and boxes_a[0].class_id == 0
 
-    label_b = out / "labels" / "detect" / "imgB.txt"
-    assert label_b.is_file() and label_b.stat().st_size == 0  # empty hard-negative label
+    label_b = out / "labels" / "detect" / "imgB.json"
+    assert label_b.is_file() and json.loads(label_b.read_text())["objects"] == []  # empty hard-negative label
 
     assert (out / "images" / "imgA.png").is_file()
     man = json.loads((out / "curated_manifest.json").read_text())
