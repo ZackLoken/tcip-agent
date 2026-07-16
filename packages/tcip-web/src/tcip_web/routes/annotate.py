@@ -24,6 +24,7 @@ from tcip_annotation import (
     write_segment_labels,
 )
 from tcip_annotation.utils import get_image_dimensions
+from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import PredictionReference, store
 
@@ -62,6 +63,9 @@ class SavePayload(BaseModel):
     # a concurrent agent or second browser tab — so its edits aren't clobbered.
     # Omit to skip the check (backward compatible for non-GUI callers).
     base_mtimes: Optional[dict[str, Optional[str]]] = None
+    # GUI-set annotator identity (bare name, e.g. "zack"); stamped as created_by ("user:<name>").
+    # Omitted by non-GUI callers -> backend falls back to the OS/env user.
+    user: Optional[str] = None
 
 
 def _image_dims(path: str) -> tuple[int, int]:
@@ -204,12 +208,16 @@ def save_labels(payload: SavePayload) -> dict:
                 409, {"error": "label file changed since it was loaded", "conflicts": conflicts}
             )
 
+    # Human-authored GT: stamp created_by = "user:<current>" + created_at natively (json_io persists it).
+    created_by = user_id(resolve_user(payload.user))
+    created_at = datetime.now(timezone.utc).isoformat()
     boxes = [
-        BBox(b.x1, b.y1, b.x2, b.y2, class_id=b.class_id)
+        BBox(b.x1, b.y1, b.x2, b.y2, class_id=b.class_id, created_by=created_by, created_at=created_at)
         for b in payload.boxes
     ]
     polygons = [
-        Polygon(points=[tuple(pt) for pt in p.points], class_id=p.class_id)
+        Polygon(points=[tuple(pt) for pt in p.points], class_id=p.class_id,
+                created_by=created_by, created_at=created_at)
         for p in payload.polygons
     ]
 
@@ -218,6 +226,9 @@ def save_labels(payload: SavePayload) -> dict:
     # (the two label files stay in lockstep). With no polygons, drawn boxes stand.
     detect_derived = bool(polygons) and payload.detect_path is not None
     detect_boxes = boxes_from_polygons(polygons) if polygons else boxes
+    if polygons:  # boxes_from_polygons drops kw-only provenance -> carry the author from the polygons
+        for db in detect_boxes:
+            db.created_by, db.created_at = created_by, created_at
 
     ok = True
     if payload.detect_path:
