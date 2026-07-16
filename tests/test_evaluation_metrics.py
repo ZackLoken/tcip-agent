@@ -227,12 +227,15 @@ def _cfg(spec) -> dict:
 
 
 def test_validate_detection_returns_metrics_and_objective(tmp_path):
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
-        (labels_dir / f"img{i}.txt").write_text("0 0.5 0.5 0.4 0.4\n")
+        json_io.write_detect(str(labels_dir / f"img{i}.json"),
+                             [BBox(19.2, 19.2, 44.8, 44.8, 0)], IMG, IMG, keep_empty=True)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
