@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
@@ -31,6 +32,36 @@ from tcip_mcp.workspace import is_valid_name
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
+
+
+# ── Label-JSON memo (mtime-keyed, bounded) ────────────────────────────────
+# derive_image_status and the label-derived class registry (_derive_from_labels) both
+# re-parse label JSONs on every call — a dataset-selection change or a /load with no saved
+# map re-scans the same files repeatedly. Memoize per (path, mtime_ns) so an unchanged file
+# is parsed once; a write bumps mtime_ns and the next read re-parses it.
+_LABEL_JSON_CACHE_MAX = 4096
+_label_json_cache: "OrderedDict[str, tuple[int, object]]" = OrderedDict()
+
+
+def _cached_label_json(path: Path) -> object:
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        return None
+    key = str(path)
+    cached = _label_json_cache.get(key)
+    if cached is not None and cached[0] == mtime_ns:
+        _label_json_cache.move_to_end(key)
+        return cached[1]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    _label_json_cache[key] = (mtime_ns, data)
+    _label_json_cache.move_to_end(key)
+    if len(_label_json_cache) > _LABEL_JSON_CACHE_MAX:
+        _label_json_cache.popitem(last=False)
+    return data
 
 
 # High-contrast default palette (same as yolo-annotator's DEFAULT_CLASS_COLORS)
@@ -83,10 +114,7 @@ def _read_registry(path: Path) -> ClassRegistry:
 def _class_ids_in_dir(d: Path) -> set[int]:
     ids: set[int] = set()
     for jf in d.glob("*.json"):
-        try:
-            data = json.loads(jf.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
+        data = _cached_label_json(jf)
         if not isinstance(data, dict):
             continue
         for o in data.get("objects") or []:
@@ -259,16 +287,9 @@ def derive_image_status(payload: DerivePayload) -> dict:
         for label_dir in (det, seg):
             if not label_dir:
                 continue
-            jf = label_dir / f"{stem}.json"
-            if not jf.exists():
-                continue
-            try:
-                data = json.loads(jf.read_text(encoding="utf-8"))
-                if isinstance(data, dict) and data.get("objects"):
-                    has_any = True
-            except Exception:
-                pass
-            if has_any:
+            data = _cached_label_json(label_dir / f"{stem}.json")
+            if isinstance(data, dict) and data.get("objects"):
+                has_any = True
                 break
         if name in complete_set:
             statuses[name] = "complete" if has_any else "negative"
