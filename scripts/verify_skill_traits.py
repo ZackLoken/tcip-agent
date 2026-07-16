@@ -46,7 +46,7 @@ def load_vocab(path: Path | None = None) -> tuple[set[str], dict[str, set[str]]]
     return allnames, by_crop
 
 
-# Snake_case tokens a skill legitimately backticks that are NOT traits (tool names, dataset
+# Snake_case tokens a skill legitimately backticks that are not traits (tool names, dataset
 # fields, config keys, module paths). A new legitimate platform token that trips the check
 # gets added here — the friction is intentional, it forces a human to confirm it isn't a
 # fabricated trait.
