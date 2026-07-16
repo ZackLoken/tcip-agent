@@ -189,26 +189,30 @@ def compare_runs_route(payload: ExperimentComparePayload) -> dict:
 # ── WebSocket live metrics ──────────────────────────────────────────────
 
 
-def _read_metrics_after(path: Path, after_line: int) -> tuple[list[dict], int]:
-    """Read lines of a metrics.jsonl after a given line index."""
+def _read_metrics_after(path: Path, offset: int) -> tuple[list[dict], int]:
+    """Read metrics.jsonl rows written since byte ``offset``, seeking there instead of
+    re-parsing from the start every poll tick. Returns the byte offset to resume from next
+    time; a trailing incomplete line (a write still in flight) is left unread and replayed
+    once it's complete."""
     if not path.exists():
-        return [], after_line
+        return [], offset
     rows: list[dict] = []
-    count = 0
-    with path.open("r", encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            if i < after_line:
-                count = i + 1
-                continue
-            line = line.strip()
-            count = i + 1
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except Exception:
-                continue
-    return rows, count
+    with path.open("rb") as f:
+        f.seek(offset)
+        chunk = f.read()
+    new_offset = offset
+    for raw_line in chunk.splitlines(keepends=True):
+        if not raw_line.endswith(b"\n"):
+            break
+        new_offset += len(raw_line)
+        line = raw_line.decode("utf-8").strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
+    return rows, new_offset
 
 
 async def _stream_metrics(
