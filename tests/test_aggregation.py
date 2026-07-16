@@ -3,7 +3,7 @@
 Covers the plant_id extraction fallback (the source of a delivery-CSV
 fragmentation bug), the explicit plant_id_key / plant_id_fn override paths, and the
 aggregation strategies (count / mean / mode / sum). Bloom phenology milestones are
-NOT here — they are the elongated-fraction crossing, tested in test_phenology.py.
+not here — they are the elongated-fraction crossing, tested in test_phenology.py.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def test_extract_plant_id_matches_documented_behavior(stem, expected):
 
 def test_extract_plant_id_two_tokens():
     # 'PLANT_001' → rsplit('_', 2) yields ['PLANT', '001']; strips to 'PLANT'.
-    # Documents that a bare id with a numeric suffix is NOT preserved by the
+    # Documents that a bare id with a numeric suffix is not preserved by the
     # fallback — callers with such names must pass plant_id_fn / plant_id key.
     assert _extract_plant_id("PLANT_001") == "PLANT"
 
