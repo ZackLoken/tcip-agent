@@ -55,7 +55,7 @@ when it is false, the milestones are **not** a measurement — do not deliver th
 
 ```
 per date:  images ─► detect catkins ─► classify each elongated vs not (validated 2-class)
-                  ─► write YOLO preds (class id = elongation class)
+                  ─► write per-image JSON preds (class id = elongation class)
 across dates: plant mapping (image → plant_id) ─► per (plant, date) elongated fraction
                   ─► crossings at 5/50/95% (elongation_date = the 95% crossing) ─► per-plant CSV
                   ─► carry genotype/accession through to the deliverable
@@ -85,7 +85,7 @@ milestone date mean the same thing on both surfaces. If you change a definition,
 there — never fork a second copy. So the agent composes tools end to end:
 `build_plant_mapping` → `run_inference(tile=True)` → (elongation classifier) → `compute_phenology`.
 
-**Don't confuse `run_matching`** (IoU GT-vs-prediction *eval* matching) with plant-GPS
+**Don't confuse `evaluate_detections`** (IoU GT-vs-prediction *eval* matching) with plant-GPS
 mapping — they are unrelated.
 
 ## Plant mapping — why the sequence-anchored matcher
