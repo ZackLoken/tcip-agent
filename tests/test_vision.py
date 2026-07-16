@@ -506,17 +506,25 @@ class TestAcceptCandidatesTool:
         assert result["segmentation_count"] == 2
         assert Path(result["image_path"]).is_file()
 
-        # Verify GT was written as per-image COCO/JSON
+        # Masks are staged as SAM predictions (predictions/sam), not written as GT.
         from tcip_annotation import json_io
 
-        det_file = viz_dataset / "annotations" / "default" / "detect" / "img_001.json"
+        det_file = viz_dataset / "predictions" / "sam" / "detect" / "img_001.json"
         assert det_file.is_file()
-        seg_file = viz_dataset / "annotations" / "default" / "segment" / "img_001.json"
+        seg_file = viz_dataset / "predictions" / "sam" / "segment" / "img_001.json"
         assert seg_file.is_file()
-        det_boxes, _ = json_io.read_detect(det_file)
+        det_boxes, _ = json_io.read_detect_pred(det_file)
         assert len(det_boxes) == 2
-        seg_polys, _ = json_io.read_segment(seg_file)
+        seg_polys, _ = json_io.read_segment_pred(seg_file)
         assert len(seg_polys) == 2
+
+        # Each staged object is SAM output: created_by="sam" and a numeric score.
+        det_objs = json.loads(det_file.read_text(encoding="utf-8"))["objects"]
+        assert det_objs and all(o["created_by"] == "sam" for o in det_objs)
+        assert all(isinstance(o["score"], float) for o in det_objs)
+        seg_objs = json.loads(seg_file.read_text(encoding="utf-8"))["objects"]
+        assert seg_objs and all(o["created_by"] == "sam" for o in seg_objs)
+        assert all(isinstance(o["score"], float) for o in seg_objs)
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -806,7 +814,7 @@ class TestFullPipelineIntegration:
         )
 
     def test_accept_writes_json_detect(self, pipeline_dataset: Path):
-        """Verify JSON detection GT: pixel bbox, class ids preserved."""
+        """SAM detections are staged as predictions: pixel bbox, class ids, and score preserved."""
         from tcip_annotation import json_io
         from tcip_mcp.tools.vision_tools import accept_candidates
 
@@ -823,18 +831,21 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["detection_count"] == 2
 
-        det_file = pipeline_dataset / "annotations" / "default" / "detect" / "sample.json"
+        det_file = pipeline_dataset / "predictions" / "sam" / "detect" / "sample.json"
         assert det_file.is_file()
-        boxes, class_ids = json_io.read_detect(det_file)
+        boxes, class_ids = json_io.read_detect_pred(det_file)
         assert len(boxes) == 2
         assert class_ids == {0, 1}
-        # Pixel coords within the 640x480 image, GT carries no score.
+        # Pixel coords within the 640x480 image; staged as SAM predictions (created_by="sam").
         for b in boxes:
             assert 0.0 <= b.x1 < b.x2 <= 640.0
             assert 0.0 <= b.y1 < b.y2 <= 480.0
+            assert b.created_by == "sam"
+        det_objs = json.loads(det_file.read_text(encoding="utf-8"))["objects"]
+        assert all(isinstance(o["score"], float) for o in det_objs)
 
     def test_accept_writes_json_segment(self, pipeline_dataset: Path):
-        """Verify JSON segmentation GT: pixel polygon vertices, class id preserved."""
+        """SAM segmentations are staged as predictions: pixel polygon vertices, class id, score."""
         from tcip_annotation import json_io
         from tcip_mcp.tools.vision_tools import accept_candidates
 
@@ -848,9 +859,9 @@ class TestFullPipelineIntegration:
         assert "error" not in result
         assert result["segmentation_count"] == 1
 
-        seg_file = pipeline_dataset / "annotations" / "default" / "segment" / "sample.json"
+        seg_file = pipeline_dataset / "predictions" / "sam" / "segment" / "sample.json"
         assert seg_file.is_file()
-        polys, class_ids = json_io.read_segment(seg_file)
+        polys, class_ids = json_io.read_segment_pred(seg_file)
         assert len(polys) == 1
         assert class_ids == {2}
         pts = polys[0].points
@@ -858,9 +869,12 @@ class TestFullPipelineIntegration:
         for x, y in pts:
             assert 0.0 <= x <= 640.0
             assert 0.0 <= y <= 480.0
+        seg_objs = json.loads(seg_file.read_text(encoding="utf-8"))["objects"]
+        assert seg_objs and all(o["created_by"] == "sam" for o in seg_objs)
+        assert all(isinstance(o["score"], float) for o in seg_objs)
 
     def test_detect_and_segment_consistent(self, pipeline_dataset: Path):
-        """Detection and segmentation labels cover the same objects."""
+        """Detection and segmentation predictions cover the same objects."""
         from tcip_annotation import json_io
         from tcip_mcp.tools.vision_tools import accept_candidates
 
@@ -877,10 +891,10 @@ class TestFullPipelineIntegration:
         assert result["detection_count"] == 2
         assert result["segmentation_count"] == 2
 
-        det_file = pipeline_dataset / "annotations" / "default" / "detect" / "sample.json"
+        det_file = pipeline_dataset / "predictions" / "sam" / "detect" / "sample.json"
         _, det_class_ids = json_io.read_detect(det_file)
 
-        seg_file = pipeline_dataset / "annotations" / "default" / "segment" / "sample.json"
+        seg_file = pipeline_dataset / "predictions" / "sam" / "segment" / "sample.json"
         _, seg_class_ids = json_io.read_segment(seg_file)
 
         # Same class IDs in both
@@ -1032,8 +1046,8 @@ class TestGridCellToSamPrompt:
         assert "error" in result
 
 
-class TestJsonGroundTruthOutput:
-    """accept_candidates writes ground truth as per-image COCO/JSON (the canonical format)."""
+class TestSamPredictionStaging:
+    """accept_candidates stages SAM masks as predictions (predictions/sam), not ground truth."""
 
     @pytest.fixture
     def format_dataset(self, tmp_path: Path) -> Path:
@@ -1064,18 +1078,18 @@ class TestJsonGroundTruthOutput:
         assert result["detection_count"] == 1
         assert result["segmentation_count"] == 1
 
-        det = format_dataset / "annotations" / "default" / "detect" / "fmt_test.json"
+        det = format_dataset / "predictions" / "sam" / "detect" / "fmt_test.json"
         assert det.is_file()
-        boxes, class_ids = json_io.read_detect(det)
+        boxes, class_ids = json_io.read_detect_pred(det)
         assert len(boxes) == 1 and class_ids == {0}
 
-        seg = format_dataset / "annotations" / "default" / "segment" / "fmt_test.json"
+        seg = format_dataset / "predictions" / "sam" / "segment" / "fmt_test.json"
         assert seg.is_file()
-        polys, _ = json_io.read_segment(seg)
+        polys, _ = json_io.read_segment_pred(seg)
         assert len(polys) == 1
 
-    def test_gt_carries_no_prediction_score(self, format_dataset: Path):
-        """Accepted GT is a BBox/Polygon, not a prediction — no ``score`` key on disk."""
+    def test_prediction_carries_sam_score(self, format_dataset: Path):
+        """Staged SAM output is a prediction — each object has created_by="sam" and a ``score``."""
         self._cache("fmt_test")
         from tcip_mcp.tools.vision_tools import accept_candidates
 
@@ -1083,7 +1097,9 @@ class TestJsonGroundTruthOutput:
             image_path=str(format_dataset / "images" / "fmt_test.jpg"),
             assignments=[{"candidate_id": 0, "class_id": 0}],
         )
-        det = format_dataset / "annotations" / "default" / "detect" / "fmt_test.json"
+        det = format_dataset / "predictions" / "sam" / "detect" / "fmt_test.json"
         data = json.loads(det.read_text(encoding="utf-8"))
-        assert data["objects"] and all("score" not in o for o in data["objects"])
+        assert data["objects"]
+        assert all(o["created_by"] == "sam" for o in data["objects"])
+        assert all(isinstance(o["score"], float) for o in data["objects"])
 
