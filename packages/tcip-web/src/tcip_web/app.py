@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -76,6 +77,10 @@ _EXPOSED = not is_loopback_host(_BIND_HOST)
 # ``testserver`` is Starlette's TestClient default Host; a real deployment never sees it.
 _TRUSTED_HOSTS = ["*"] if _EXPOSED else ["localhost", "127.0.0.1", "testserver"]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=_TRUSTED_HOSTS)
+
+# Compress JSON/text responses above ~1KB. The /api/review/matches payload scales with
+# polygon count (dense images ship high-hundreds-of-KB to multi-MB uncompressed JSON).
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ── Tab routes ──
 from tcip_web.routes import register_all as _register_routes  # noqa: E402  (needs `app`)
