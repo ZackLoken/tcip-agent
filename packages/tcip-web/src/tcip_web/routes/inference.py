@@ -231,6 +231,9 @@ class LaunchInferencePayload(BaseModel):
     overlap: float = 0.2
     max_dets: int = DEFAULT_MAX_DETS
     postprocess: str = "nms"
+    # Write into output_dir even if it exists. Refused if the bucket has review verdicts; the
+    # default (False) auto-redirects to a fresh bucket so a re-run never orphans recorded verdicts.
+    overwrite: bool = False
 
 
 @router.post("/launch")
@@ -248,11 +251,25 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     if not Path(payload.images_dir).is_dir():
         raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
 
+    # Prediction-bucket immutability: never silently overwrite a bucket with review verdicts.
+    from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_writable_bucket
+    from tcip_mcp.project_paths import resolve_state
+
+    out_path = Path(payload.output_dir)
+    parent, base_name = out_path.parent, out_path.name
+    review_state_dir = resolve_state(Path(".tcip") / "state")
+    try:
+        resolution = resolve_writable_bucket(
+            review_state_dir, base_name, lambda n: [parent / n], overwrite=payload.overwrite)
+    except BucketHasVerdicts as exc:
+        raise HTTPException(409, str(exc)) from exc
+    resolved_output_dir = str(parent / resolution.name)
+
     job = InferenceJob(
         job_id=f"inf-{uuid.uuid4().hex[:8]}",
         checkpoint_path=payload.checkpoint_path,
         images_dir=payload.images_dir,
-        output_dir=payload.output_dir,
+        output_dir=resolved_output_dir,
         sahi=payload.sahi,
         conf=payload.conf,
         iou=payload.iou,
@@ -267,7 +284,9 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     job.thread = t
     t.start()
 
-    return {"status": "launched", "job_id": job.job_id}
+    return {"status": "launched", "job_id": job.job_id, "output_dir": resolved_output_dir,
+            "bucket_redirected": resolution.redirected,
+            "requested_output_dir": payload.output_dir if resolution.redirected else None}
 
 
 @router.get("/jobs")
