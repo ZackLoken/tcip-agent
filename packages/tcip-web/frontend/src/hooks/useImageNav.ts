@@ -9,7 +9,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { api } from "@/api/client";
-import type { ImageStatus } from "@/api/classes";
 import { useStore } from "@/store";
 
 // Debounce the backend nav sync: rapid arrow-key traversal patches local state on every
@@ -24,15 +23,20 @@ function syncNavIndex(index: number): void {
   }, 400);
 }
 
-/** Indices of images that match the active status filter (all indices when "all"). */
+/** Indices of images that match the active status filter (all indices when "all"), further
+ *  narrowed by `isNavigable` when supplied (the Review tab skips images with zero detections). */
 export function computeFilteredIndices(
   imageList: string[],
-  byImage: Record<string, ImageStatus>,
-  activeFilter: "all" | ImageStatus,
+  byImage: Record<string, string>,
+  activeFilter: string,
+  isNavigable?: (name: string) => boolean,
 ): number[] {
-  if (activeFilter === "all") return imageList.map((_, i) => i);
   return imageList
-    .map((name, i) => (byImage[name] === activeFilter ? i : -1))
+    .map((name, i) => {
+      if (isNavigable && !isNavigable(name)) return -1;
+      if (activeFilter !== "all" && byImage[name] !== activeFilter) return -1;
+      return i;
+    })
     .filter((i) => i >= 0);
 }
 
@@ -65,16 +69,29 @@ export function jumpTarget(indices: number[], oneBased: number): number | null {
   return indices[clamped];
 }
 
-export function useImageNav() {
+/** Per-tab overrides. The Annotate tab (default) filters by annotation status from the store;
+ *  the Review tab passes its own image-level review-status map + filter and an `isNavigable`
+ *  predicate that skips images with nothing to review. */
+export interface ImageNavOptions {
+  byImage?: Record<string, string>;
+  activeFilter?: string;
+  isNavigable?: (name: string) => boolean;
+}
+
+export function useImageNav(options?: ImageNavOptions) {
   const imageList = useStore((s) => s.gui.dataset.image_list);
   const currentIndex = useStore((s) => s.gui.dataset.current_image_index);
-  const byImage = useStore((s) => s.imageStatus.byImage);
-  const activeFilter = useStore((s) => s.imageStatus.activeFilter);
+  const storeByImage = useStore((s) => s.imageStatus.byImage);
+  const storeFilter = useStore((s) => s.imageStatus.activeFilter);
   const patchGui = useStore((s) => s.patchGui);
 
+  const byImage = options?.byImage ?? storeByImage;
+  const activeFilter: string = options?.activeFilter ?? storeFilter;
+  const isNavigable = options?.isNavigable;
+
   const filteredIndices = useMemo(
-    () => computeFilteredIndices(imageList, byImage, activeFilter),
-    [imageList, byImage, activeFilter],
+    () => computeFilteredIndices(imageList, byImage, activeFilter, isNavigable),
+    [imageList, byImage, activeFilter, isNavigable],
   );
 
   const goTo = useCallback(
