@@ -63,7 +63,6 @@ class ReviewFilters(BaseModel):
     conf_threshold: float = 0.25
     filter_type: str = "all"      # all|tp|fp|fn
     filter_class: str | int = "all"
-    status_filter: str = "all"    # all|reviewed|not_reviewed
     detection_idx: int = 0
 
 
