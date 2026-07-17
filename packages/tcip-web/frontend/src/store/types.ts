@@ -39,9 +39,14 @@ export interface ReviewFilters {
   conf_threshold: number;
   filter_type: "all" | "tp" | "fp" | "fn";
   filter_class: string | number;
-  status_filter: "all" | "reviewed" | "not_reviewed";
   detection_idx: number;
 }
+
+/** Per-image review completion status (from ReviewEngine.get_image_review_status). */
+export type ReviewImageStatus = "not_started" | "started" | "completed";
+
+/** Image-level Reviewed/Unreviewed navigation filter (drives which images the Review tab walks). */
+export type ReviewStatusFilter = "all" | "reviewed" | "unreviewed";
 
 export interface GuiState {
   active_tab: TabName;
