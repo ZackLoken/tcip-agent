@@ -13,8 +13,21 @@ import { ReviewTab } from "@/tabs/ReviewTab";
 // divs and CanvasStage as a passthrough.
 vi.mock("konva", () => ({ default: {} }));
 vi.mock("react-konva", () => ({
-  Rect: () => <div data-testid="k-rect" />,
-  Line: () => <div data-testid="k-line" />,
+  // Expose stroke + dashed so symbology (dashed = under review) is assertable.
+  Rect: (props: { stroke?: string; dash?: number[] }) => (
+    <div
+      data-testid="k-rect"
+      data-stroke={props.stroke}
+      data-dashed={props.dash ? "true" : "false"}
+    />
+  ),
+  Line: (props: { stroke?: string; dash?: number[] }) => (
+    <div
+      data-testid="k-line"
+      data-stroke={props.stroke}
+      data-dashed={props.dash ? "true" : "false"}
+    />
+  ),
   Circle: () => <div data-testid="k-circle" />,
   Text: (props: { text?: string }) => <div data-testid="k-text" data-text={props.text} />,
 }));
@@ -23,10 +36,6 @@ vi.mock("@/components/Canvas/CanvasStage", () => ({
     <div data-testid="canvas-stage">{props.children}</div>
   ),
 }));
-vi.mock("@/components/ReviewToolsDrawer", () => ({
-  ReviewToolsDrawer: () => <div data-testid="tools-drawer" />,
-}));
-
 const initialStoreState = useStore.getState();
 
 const PRED_DIR_A = "C:/data/predictions/model_a/detect/2026-01-01";
@@ -91,11 +100,16 @@ const prevBtn = () => screen.getByTitle("Previous detection (←)");
 const nextBtn = () => screen.getByTitle("Next detection (→)");
 
 let matchesSpy: MockInstance<typeof api.review.matches>;
+let statusesSpy: MockInstance<typeof api.review.imageStatuses>;
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   setupDataset();
   matchesSpy = vi.spyOn(api.review, "matches").mockResolvedValue(matchesRes([]));
+  // Both dataset images have something to review by default (stems of img1.jpg / img2.jpg).
+  statusesSpy = vi
+    .spyOn(api.review, "imageStatuses")
+    .mockResolvedValue({ statuses: {}, detection_stems: ["img1", "img2"] });
 });
 
 afterEach(() => {
@@ -316,5 +330,91 @@ describe("ReviewTab matches-recompute effect", () => {
       await new Promise((r) => setTimeout(r, 300));
     });
     expect(matchesSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ReviewTab image-level navigation", () => {
+  function setup3Images(currentIndex = 0) {
+    useStore.setState((s) => ({
+      gui: {
+        ...s.gui,
+        dataset: {
+          ...s.gui.dataset,
+          image_list: ["img1.jpg", "img2.jpg", "img3.jpg"],
+          current_image_index: currentIndex,
+        },
+      },
+    }));
+    vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok", current_image_index: 0 });
+  }
+  const nextImage = () => screen.getByLabelText("Next image");
+
+  it("skips images with zero detections during navigation", async () => {
+    setup3Images();
+    // img2 has nothing to review -> nav must jump straight from img1 to img3.
+    statusesSpy.mockResolvedValue({ statuses: {}, detection_stems: ["img1", "img3"] });
+    render(<ReviewTab />);
+    await waitFor(() =>
+      expect(useStore.getState().reviewStatus.hasDetections["img2.jpg"]).toBe(false),
+    );
+
+    act(() => fireEvent.click(nextImage()));
+    expect(useStore.getState().gui.dataset.current_image_index).toBe(2);
+  });
+
+  it("the Reviewed/Unreviewed filter narrows which images navigation walks", async () => {
+    setup3Images();
+    // img1 + img3 reviewed, img2 not; all three have detections.
+    statusesSpy.mockResolvedValue({
+      statuses: { "img1.jpg": "completed", "img3.jpg": "completed" },
+      detection_stems: ["img1", "img2", "img3"],
+    });
+    render(<ReviewTab />);
+    await waitFor(() =>
+      expect(useStore.getState().reviewStatus.byImage["img1.jpg"]).toBe("completed"),
+    );
+
+    act(() => useStore.getState().setReviewStatusFilter("reviewed"));
+    // Under the Reviewed filter, Next from img1 skips the unreviewed img2 and lands on img3.
+    act(() => fireEvent.click(nextImage()));
+    expect(useStore.getState().gui.dataset.current_image_index).toBe(2);
+  });
+});
+
+describe("ReviewTab auto-resume", () => {
+  it("lands on the first unreviewed detection when entering a partially-reviewed image", async () => {
+    matchesSpy.mockResolvedValue(
+      matchesRes([
+        det({ reviewed: true, reviewed_action: "accepted" }),
+        det({ det_type: "fp", pred_type: "box", pred_idx: 0 }),
+        det({ det_type: "fn", pred_type: null, pred_idx: null }),
+      ]),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(useStore.getState().review.matches).not.toBeNull());
+    // Detection 0 is already reviewed -> resume on detection index 1 (the first unreviewed).
+    await waitFor(() => expect(useStore.getState().gui.review.detection_idx).toBe(1));
+    expect(screen.getByText("2 / 3")).toBeInTheDocument();
+  });
+});
+
+describe("ReviewTab symbology", () => {
+  it("draws the focused FN as a dashed under-review box, not a solid one", async () => {
+    matchesSpy.mockResolvedValue({
+      ...matchesRes([
+        det({ det_type: "fn", pred_type: null, pred_idx: null, gt_type: "box", gt_idx: 0 }),
+      ]),
+      gt_boxes: [{ x1: 10, y1: 10, x2: 50, y2: 50, class_id: 0 }],
+    });
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    // The under-review shape is the highlighter-blue (#00BFFF) box; it must be dashed to match
+    // the "Under review" legend entry (a solid blue box matches no legend row).
+    const active = screen
+      .getAllByTestId("k-rect")
+      .find((r) => r.getAttribute("data-stroke") === "#00BFFF");
+    expect(active).toBeDefined();
+    expect(active!.getAttribute("data-dashed")).toBe("true");
   });
 });
