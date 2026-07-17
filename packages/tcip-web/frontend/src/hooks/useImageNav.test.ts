@@ -17,6 +17,15 @@ describe("computeFilteredIndices", () => {
   it("keeps only indices matching the active status", () => {
     expect(computeFilteredIndices(LIST, STATUS, "complete")).toEqual([0, 2]);
   });
+  it("skips images the isNavigable predicate rejects (Review's zero-detection skip)", () => {
+    // "all" filter but c.jpg has nothing to review -> excluded from the walk.
+    const navigable = (name: string) => name !== "c.jpg";
+    expect(computeFilteredIndices(LIST, STATUS, "all", navigable)).toEqual([0, 1, 3]);
+  });
+  it("applies isNavigable and the status filter together", () => {
+    const navigable = (name: string) => name !== "a.jpg"; // drop one complete image
+    expect(computeFilteredIndices(LIST, STATUS, "complete", navigable)).toEqual([2]);
+  });
 });
 
 describe("stepTarget (shared by arrows + Prev/Next)", () => {
