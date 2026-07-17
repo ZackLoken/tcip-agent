@@ -33,7 +33,6 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
       conf_threshold: 0.25,
       filter_type: "all",
       filter_class: "all",
-      status_filter: "all",
       detection_idx: 0,
     },
     pred_reference: null,
