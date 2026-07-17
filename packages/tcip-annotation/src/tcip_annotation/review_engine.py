@@ -27,6 +27,7 @@ import logging
 import os
 import shutil
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -258,6 +259,30 @@ class ReviewEngine:
             return "not_started"
         return img_data.get("img_status", "not_started")
 
+    def verdict_count_for_images(self, names: Iterable[str]) -> int:
+        """Total recorded verdicts (accept/reject/edit detection entries) across ``names``,
+        matched by image stem so a prediction bucket's ``<stem>.json`` files line up with the
+        review log's image-name keys. Backs prediction-bucket immutability: a bucket whose
+        images carry verdicts must not be silently overwritten by a re-run."""
+        wanted = {Path(n).stem for n in names}
+        if not wanted:
+            return 0
+        per_image = self._review_state.get("image", {})
+        total = 0
+        for img_name, data in per_image.items():
+            if Path(img_name).stem in wanted:
+                total += len(data.get("detections", []))
+        return total
+
+    def get_all_image_statuses(self) -> dict[str, str]:
+        """Review status for every image the engine has state for (untouched images are
+        absent — the caller defaults them to ``"not_started"``). Backs the image-level
+        Reviewed/Unreviewed navigation filter, batch-fetched once per dataset."""
+        per_image = self._review_state.get("image", {})
+        return {
+            name: data.get("img_status", "not_started") for name, data in per_image.items()
+        }
+
     # ── Bounding-box helpers ──────────────────────────────────────────────
 
     def _bbox_of_gt(self, ctx: ReviewContext, gt_type: Optional[str], gt_idx: Optional[int]):
@@ -409,20 +434,16 @@ class ReviewEngine:
         *,
         filter_type: str = "all",
         filter_class: int | str = "all",
-        status_filter: str = "all",
     ) -> list[ReviewDetection]:
-        """Produce the filtered, walkable list of detections for the Review UI."""
+        """Produce the filtered, walkable list of detections for the Review UI.
+
+        Review status is never hidden here: within an image every matching detection is
+        walkable regardless of whether it has been reviewed (the Reviewed/Unreviewed filter
+        is image-level navigation, not per-detection visibility). Reviewed/unreviewed state
+        rides on each detection via :meth:`find_reviewed_entry` for the caller to decorate."""
 
         def _class_ok(cid: int) -> bool:
             return filter_class == "all" or cid == filter_class
-
-        def _status_ok(det: ReviewDetection) -> bool:
-            if status_filter == "all":
-                return True
-            entry = self.find_reviewed_entry(det, ctx)
-            if status_filter == "reviewed":
-                return entry is not None
-            return entry is None  # not_reviewed
 
         dets: list[ReviewDetection] = []
 
@@ -444,8 +465,7 @@ class ReviewEngine:
                         ctx, m["gt_type"], m["gt_idx"], m["pred_type"], m["pred_idx"]
                     ),
                 )
-                if _status_ok(det):
-                    dets.append(det)
+                dets.append(det)
 
         if filter_type in ("all", "fp"):
             for m in matches.get("fp", []):
@@ -463,8 +483,7 @@ class ReviewEngine:
                     pred_idx=m["pred_idx"],
                     bbox=self._detection_bbox(ctx, None, None, m["pred_type"], m["pred_idx"]),
                 )
-                if _status_ok(det):
-                    dets.append(det)
+                dets.append(det)
 
         if filter_type in ("all", "fn"):
             for m in matches.get("fn", []):
@@ -482,8 +501,7 @@ class ReviewEngine:
                     pred_idx=None,
                     bbox=self._detection_bbox(ctx, m["gt_type"], m["gt_idx"], None, None),
                 )
-                if _status_ok(det):
-                    dets.append(det)
+                dets.append(det)
 
         return dets
 
