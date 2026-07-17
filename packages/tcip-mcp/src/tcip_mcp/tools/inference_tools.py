@@ -334,6 +334,7 @@ def export_predictions(
     trait: str | None = None,
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
+    overwrite: bool = False,
 ) -> dict:
     """Run inference and save predictions as per-image COCO/JSON files.
 
@@ -341,6 +342,12 @@ def export_predictions(
     operating point (conf/NMS/tiling/max_dets) — earlier it built its own bare predictor and
     so truncated the count at the framework default and shipped labels with no provenance.
     Writes ``<stem>.json`` per image plus an ``operating_point.json`` stamp beside them.
+
+    A prediction bucket (``output_dir``) that already carries review verdicts is immutable: by
+    default the export is redirected to a fresh run-scoped bucket (``<dir>@r2``, ``@r3`` — next
+    free) and the dir actually written is returned as ``output_dir``. Pass ``overwrite=True`` to
+    write in place only when the bucket has zero verdicts; with verdicts present it is refused
+    (error names the count and a suggested dir) so a re-run never orphans recorded verdicts.
 
     Args:
         checkpoint_path: Path to model .pt checkpoint.
@@ -358,7 +365,25 @@ def export_predictions(
         trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``).
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
+        overwrite: Write into ``output_dir`` even if it exists. Refused if the bucket has review
+            verdicts; the default (False) auto-redirects to a fresh bucket instead.
     """
+    from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_writable_bucket
+    from tcip_mcp.project_paths import resolve_state
+
+    # Resolve the writable bucket before the (expensive) inference so a verdict-blocked overwrite
+    # fails fast; verdicts live under the pinned project's ``.tcip/state``.
+    out_path = Path(output_dir)
+    parent, base_name = out_path.parent, out_path.name
+    review_state_dir = resolve_state(Path(".tcip") / "state")
+    try:
+        resolution = resolve_writable_bucket(
+            review_state_dir, base_name, lambda n: [parent / n], overwrite=overwrite)
+    except BucketHasVerdicts as exc:
+        return {"error": str(exc), "verdict_count": exc.count,
+                "suggested_bucket": str(parent / exc.suggested)}
+    out = parent / resolution.name
+
     result = run_inference(
         checkpoint_path=checkpoint_path, images_dir=images_dir, conf_threshold=conf_threshold,
         device=device, tile=tile, tile_size=tile_size, overlap=overlap,
@@ -371,7 +396,6 @@ def export_predictions(
 
     from tcip_mcp.utils.atomic_io import atomic_write_json
 
-    out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     producer = f"model:{Path(checkpoint_path).stem}"
@@ -388,7 +412,9 @@ def export_predictions(
                        "validated": bool(result.get("validated", False)),
                        "shippable_issues": result.get("shippable_issues", [])})
 
-    return {"image_count": len(written), "output_dir": output_dir, "files": written,
+    return {"image_count": len(written), "output_dir": str(out), "files": written,
+            "bucket_redirected": resolution.redirected,
+            "requested_output_dir": output_dir if resolution.redirected else None,
             "operating_point": result.get("operating_point"),
             "validated": bool(result.get("validated", False)),
             "conf_source": result.get("conf_source")}
