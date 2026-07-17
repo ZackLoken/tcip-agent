@@ -13,6 +13,7 @@ import type {
   MatchesResponse,
   PolygonShape,
   PredictionReference,
+  ReviewImageStatus,
 } from "@/store/types";
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -227,7 +228,6 @@ export const api = {
         conf_threshold?: number;
         filter_type?: string;
         filter_class?: string | number;
-        status_filter?: string;
       },
       signal?: AbortSignal,
     ) =>
@@ -263,7 +263,6 @@ export const api = {
       // Active filters, so the fresh matches the server returns are scoped like the current view.
       filter_type?: string;
       filter_class?: string | number;
-      status_filter?: string;
       /** GUI-set reviewer identity; stamped as accepted_by/created_by ("user:<name>") on GT. */
       user?: string | null;
     }) =>
@@ -302,67 +301,21 @@ export const api = {
         body: JSON.stringify({ project_root, label_dirs }),
       }),
 
-    materialize: (body: {
+    // Batch review status + detection presence for a whole (trait, date): drives the image-level
+    // Reviewed/Unreviewed nav filter and lets the tab skip images with nothing to review.
+    imageStatuses: (params: {
       project_root: string;
-      source_images_dir: string;
-      output_dir: string;
-      experiment_id?: string;
-      include_hard_negatives?: boolean;
-      only_completed?: boolean;
-      copy_files?: boolean;
-    }) =>
-      call<MaterializeResult>("/api/review/materialize", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-
-    launchQueue: (body: {
-      project_root: string;
-      checkpoint_path: string;
-      images_dir: string;
-      method?: string;
-      task?: string;
-      budget?: number;
-      skip_reviewed?: boolean;
-    }) =>
-      call<{ status: string; job_id: string }>("/api/review/queue/launch", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-
-    getQueue: (job_id: string) => call<ReviewQueueJob>(`/api/review/queue/${job_id}`),
+      gt_dir?: string | null;
+      pred_dir?: string | null;
+    }) => {
+      const q = new URLSearchParams({ project_root: params.project_root });
+      if (params.gt_dir) q.set("gt_dir", params.gt_dir);
+      if (params.pred_dir) q.set("pred_dir", params.pred_dir);
+      return call<{ statuses: Record<string, ReviewImageStatus>; detection_stems: string[] }>(
+        `/api/review/image_statuses?${q.toString()}`,
+      );
+    },
   },
 };
-
-export interface MaterializeResult {
-  positive: number;
-  hard_negative: number;
-  total_boxes: number;
-  output_dir: string;
-  manifest?: string;
-  experiment_id?: string;
-  [k: string]: unknown;
-}
-
-export interface ReviewQueueEntry {
-  image: string;
-  score: number;
-}
-
-export interface ReviewQueueResult {
-  method: string;
-  task: string;
-  total_candidates: number;
-  reviewed_skipped: number;
-  selected_count: number;
-  queue: ReviewQueueEntry[];
-}
-
-export interface ReviewQueueJob {
-  job_id: string;
-  status: "pending" | "running" | "completed" | "failed";
-  error: string | null;
-  result: ReviewQueueResult | Record<string, never>;
-}
 
 export type { Detection };
