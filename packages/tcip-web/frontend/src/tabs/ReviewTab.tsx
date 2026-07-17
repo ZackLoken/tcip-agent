@@ -1,4 +1,13 @@
-import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Circle, Line, Rect, Text } from "react-konva";
 import type Konva from "konva";
 
@@ -7,7 +16,6 @@ import { classesApi } from "@/api/classes";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
-import { ReviewToolsDrawer } from "@/components/ReviewToolsDrawer";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
@@ -29,7 +37,15 @@ import {
 import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
 import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
-import type { Box, DatasetSelection, Detection, MatchesResponse, PredBox } from "@/store/types";
+import type {
+  Box,
+  DatasetSelection,
+  Detection,
+  MatchesResponse,
+  PredBox,
+  ReviewImageStatus,
+  ReviewStatusFilter,
+} from "@/store/types";
 
 const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashed?: boolean }[] = [
   { key: "tp", label: "Matched (TP)", tag: "TP" },
@@ -123,15 +139,57 @@ export function ReviewTab() {
   const markDetReviewed = useStore((s) => s.markDetectionReviewed);
   const setPredReference = useStore((s) => s.setPredReference);
   const className = useStore((s) => s.className);
-  // Shared annotation status (nav filter, coloring, Complete lock) — synced when a verdict authors GT.
+  // Shared annotation status (coloring, Complete lock) — synced when a verdict authors GT.
   const setStoreImageStatus = useStore((s) => s.setImageStatus);
-  // Shared filtered navigation (same order as the arrow keys + TopBar Prev/Next).
-  const nav = useImageNav();
-  usePrefetchAdjacentImages();
+  // Image-level review status (its own store slice) drives Review navigation: which images are
+  // Reviewed vs Unreviewed, and which have anything to review at all.
+  const reviewStatus = useStore((s) => s.reviewStatus);
+  const setReviewImageStatuses = useStore((s) => s.setReviewImageStatuses);
+  const setReviewImageStatus = useStore((s) => s.setReviewImageStatus);
+  const setReviewStatusFilter = useStore((s) => s.setReviewStatusFilter);
 
   const detectionIdx = filters.detection_idx;
   const { path: imgPath, name: imgName } = currentImagePath(dataset);
   const paths = useMemo(() => labelPaths(dataset, imgName), [dataset, imgName]);
+
+  // The reviewed kind (box vs polygon) and its GT/pred dirs — predictions decide it, falling back
+  // to whichever GT exists. Mirrors reloadMatches' per-image choice at the directory level.
+  const reviewDirs = useMemo(() => {
+    const kind: "box" | "polygon" = dataset.predictions_detect_dir
+      ? "box"
+      : dataset.predictions_segment_dir
+        ? "polygon"
+        : dataset.annotations_detect_dir
+          ? "box"
+          : "polygon";
+    return {
+      gtDir: kind === "box" ? dataset.annotations_detect_dir : dataset.annotations_segment_dir,
+      predDir: kind === "box" ? dataset.predictions_detect_dir : dataset.predictions_segment_dir,
+    };
+  }, [dataset]);
+
+  // Review navigation config: bucket each image into Reviewed/Unreviewed (completed vs not) so the
+  // shared status-filter walk applies, and skip images with nothing to review.
+  const reviewNavByImage = useMemo(() => {
+    const m: Record<string, "reviewed" | "unreviewed"> = {};
+    for (const name of dataset.image_list) {
+      m[name] = reviewStatus.byImage[name] === "completed" ? "reviewed" : "unreviewed";
+    }
+    return m;
+  }, [dataset.image_list, reviewStatus.byImage]);
+  const hasDetections = reviewStatus.hasDetections;
+  const isNavigable = useCallback(
+    (name: string) => hasDetections[name] ?? true, // reviewable until the batch fetch says otherwise
+    [hasDetections],
+  );
+  // Shared filtered navigation, scoped to review status + non-empty images (same traversal
+  // machinery as the arrow keys + TopBar Prev/Next, different filter source).
+  const nav = useImageNav({
+    byImage: reviewNavByImage,
+    activeFilter: reviewStatus.activeFilter,
+    isNavigable,
+  });
+  usePrefetchAdjacentImages();
 
   const [showGT, setShowGT] = useState(true);
   const [showPred, setShowPred] = useState(true);
@@ -151,7 +209,6 @@ export function ReviewTab() {
     setShowPred(v);
     if (visKey) saveDatasetVisibility(visKey, { showGT, showPred: v });
   };
-  const [toolsOpen, setToolsOpen] = useState(false);
   // The filter shelf is collapsed by default and remembers the last state across sessions.
   const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
     try {
@@ -246,6 +303,8 @@ export function ReviewTab() {
     setMatches(res);
     matchesImageRef.current = imgName; // which image these matches belong to (canvas-push guard)
     setImageStatus(res.image_status);
+    if (imgName) setReviewImageStatus(imgName, res.image_status); // keep the nav filter live
+
     const focusIdx = useStore.getState().review.focusDetectionIdx;
     const effectiveHint = indexHint ?? focusIdx ?? undefined;
     if (focusIdx !== null && focusIdx !== undefined) useStore.getState().setReviewFocusIdx(null);
@@ -289,7 +348,6 @@ export function ReviewTab() {
           conf_threshold: filters.conf_threshold,
           filter_type: filters.filter_type,
           filter_class: filters.filter_class,
-          status_filter: filters.status_filter,
         },
         signal,
       );
@@ -352,8 +410,46 @@ export function ReviewTab() {
     filters.conf_threshold,
     filters.filter_type,
     filters.filter_class,
-    filters.status_filter,
     refetchNonce,
+  ]);
+
+  // Batch-fetch image-level review status + detection presence for the whole (trait, date), so nav
+  // can filter Reviewed/Unreviewed and skip images with nothing to review. Re-runs when the dataset
+  // or its reviewed-kind dirs change; live per-image updates ride on verdicts (setReviewImageStatus).
+  useEffect(() => {
+    const projectRoot = dataset.project_root;
+    const imageList = dataset.image_list;
+    if (!projectRoot || imageList.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await api.review.imageStatuses({
+          project_root: projectRoot,
+          gt_dir: reviewDirs.gtDir,
+          pred_dir: reviewDirs.predDir,
+        });
+        if (cancelled) return;
+        const stems = new Set(res.detection_stems);
+        const byImage: Record<string, ReviewImageStatus> = {};
+        const has: Record<string, boolean> = {};
+        for (const name of imageList) {
+          byImage[name] = res.statuses[name] ?? "not_started";
+          has[name] = stems.has(name.replace(/\.[^.]+$/, ""));
+        }
+        setReviewImageStatuses(byImage, has);
+      } catch {
+        /* leave prior statuses; nav stays permissive (every image reviewable) until this resolves */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    dataset.project_root,
+    dataset.image_list,
+    reviewDirs.gtDir,
+    reviewDirs.predDir,
+    setReviewImageStatuses,
   ]);
 
   function stepImage(delta: number) {
@@ -446,10 +542,10 @@ export function ReviewTab() {
         conf_threshold: filters.conf_threshold,
         filter_type: filters.filter_type,
         filter_class: filters.filter_class,
-        status_filter: filters.status_filter,
         user: useStore.getState().user,
       });
       setImageStatus(res.image_status);
+      if (imgName) setReviewImageStatus(imgName, res.image_status);
       markDetReviewed(detectionIdx, action);
       advanceToNextUnreviewed();
       if (res.annotation_status) {
@@ -502,6 +598,7 @@ export function ReviewTab() {
         completed,
       });
       setImageStatus(res.image_status); // local review badge
+      if (imgName) setReviewImageStatus(imgName, res.image_status); // keep the nav filter live
       // The annotation status comes from the server (GT files on disk), never from a
       // matches snapshot that can belong to the previous image mid-navigation.
       setStoreImageStatus(imgName, res.annotation_status);
@@ -669,9 +766,9 @@ export function ReviewTab() {
               {filters.filter_type === "all" ? "All types" : filters.filter_type.toUpperCase()}
             </FilterChip>
             <FilterChip>
-              {filters.status_filter === "all"
-                ? "All status"
-                : filters.status_filter === "reviewed"
+              {reviewStatus.activeFilter === "all"
+                ? "All images"
+                : reviewStatus.activeFilter === "reviewed"
                   ? "Reviewed"
                   : "Unreviewed"}
             </FilterChip>
@@ -750,15 +847,6 @@ export function ReviewTab() {
             />
             Reviewed
           </label>
-
-          <button
-            className="tcip-btn"
-            onClick={() => setToolsOpen(true)}
-            disabled={!!edit}
-            title="Build training set / prioritize review queue"
-          >
-            ⚙&nbsp;&nbsp;Tools
-          </button>
         </div>
 
         {/* Row 2 — the filter controls, collapsed by default and remembered across sessions */}
@@ -812,14 +900,13 @@ export function ReviewTab() {
             </select>
             <select
               className="tcip-select"
-              value={filters.status_filter}
+              value={reviewStatus.activeFilter}
               disabled={!!edit}
-              onChange={(e) =>
-                patchGui({ review: { ...filters, status_filter: e.target.value as never } })
-              }
+              title="Show all images, or only those whose review is complete / incomplete"
+              onChange={(e) => setReviewStatusFilter(e.target.value as ReviewStatusFilter)}
             >
-              <option value="all">All status</option>
-              <option value="not_reviewed">Unreviewed</option>
+              <option value="all">All images</option>
+              <option value="unreviewed">Unreviewed</option>
               <option value="reviewed">Reviewed</option>
             </select>
 
@@ -1015,8 +1102,6 @@ export function ReviewTab() {
           </>
         )}
       </div>
-
-      <ReviewToolsDrawer open={toolsOpen} onClose={() => setToolsOpen(false)} />
 
       {colorEditKey && (
         <ColorPickerModal
@@ -1294,14 +1379,24 @@ const ReviewOverlays = memo(function ReviewOverlays({
           if (showGT && d.gt_type && !(active && suppressFocusedGt)) {
             const activeFn = active && d.det_type === "fn";
             const stroke = activeFn ? ACTIVE_COLOR : outcome;
-            // A faint blue wash on the shape under review reads through even where its dashed
-            // line coincides with the solid GT below it.
+            // The active FN has no prediction, so its GT box IS the thing under review — draw it
+            // dashed blue like every other under-review shape (active FP, the active TP's pred) so
+            // it matches the "Under review" legend entry instead of reading as a solid outcome box.
+            // A faint blue wash reads through even where the dashed line coincides with GT below it.
             const fill = activeFn ? `${ACTIVE_COLOR}26` : d.reviewed ? `${outcome}26` : undefined;
             const b = box(d.gt_type === "box" ? d.gt_idx : null);
             const p = poly(d.gt_type === "polygon" ? d.gt_idx : null);
             if (b)
               nodes.push(
-                <ReviewRect key="gt" box={b} stroke={stroke} lw={lw} weight={weight} fill={fill} />,
+                <ReviewRect
+                  key="gt"
+                  box={b}
+                  stroke={stroke}
+                  lw={lw}
+                  weight={weight}
+                  dashed={activeFn}
+                  fill={fill}
+                />,
               );
             else if (p)
               nodes.push(
@@ -1311,6 +1406,7 @@ const ReviewOverlays = memo(function ReviewOverlays({
                   stroke={stroke}
                   lw={lw}
                   weight={weight}
+                  dashed={activeFn}
                   fill={fill}
                 />,
               );
