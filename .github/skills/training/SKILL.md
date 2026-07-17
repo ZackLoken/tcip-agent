@@ -104,3 +104,5 @@ Use `split_dataset` to create train/val/test splits:
 
 Feeding review-corrected labels back into training? `materialize_review_dataset` (see the
 `annotation` skill) builds the curated dataset from review verdicts before you split/train.
+Curation is your job: before training on review verdicts, materialize a curated set via
+`materialize_review_dataset` if none exists yet.
