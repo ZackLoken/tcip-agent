@@ -259,18 +259,32 @@ def test_record_overrides_existing(engine: ReviewEngine, ctx: ReviewContext) -> 
     assert len(img_data["detections"]) == 1
 
 
-def test_status_filter_isolates_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> None:
+def test_build_detection_list_never_hides_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> None:
+    # Review status is image-level navigation, not per-detection visibility: reviewing a detection
+    # must never drop it from the walkable list (else it can't be re-inspected or un-done).
     matches = compute_matches(
         ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
         iou_threshold=0.5, conf_threshold=0.25,
     )
     dets = engine.build_detection_list(ctx, matches)
+    before = len(dets)
     engine.record_detection_action(dets[0], ctx, action="accepted")
+    after = engine.build_detection_list(ctx, matches)
+    assert len(after) == before  # the accepted detection is still walkable
 
-    reviewed = engine.build_detection_list(ctx, matches, status_filter="reviewed")
-    not_reviewed = engine.build_detection_list(ctx, matches, status_filter="not_reviewed")
-    assert len(reviewed) == 1
-    assert len(not_reviewed) == 2
+
+def test_get_all_image_statuses(engine: ReviewEngine, ctx: ReviewContext) -> None:
+    assert engine.get_all_image_statuses() == {}  # nothing touched yet
+    matches = compute_matches(
+        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
+        iou_threshold=0.5, conf_threshold=0.25,
+    )
+    dets = engine.build_detection_list(ctx, matches)
+    engine.record_detection_action(dets[0], ctx, action="accepted")  # -> "started"
+    engine.mark_image_reviewed("IMG_OTHER.JPG")  # -> "completed"
+    statuses = engine.get_all_image_statuses()
+    assert statuses[ctx.img_name] == "started"
+    assert statuses["IMG_OTHER.JPG"] == "completed"
 
 
 def test_check_image_review_complete(engine: ReviewEngine, ctx: ReviewContext) -> None:
