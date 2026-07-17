@@ -802,6 +802,7 @@ def stage_proposals(
     stem: str,
     boxes: list[dict] | None = None,
     polygons: list[dict] | None = None,
+    overwrite: bool = False,
 ) -> dict:
     """Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<task>/<stem>.json`` for
     canvas review — the "show on canvas before writing ground truth" guardrail.
@@ -813,6 +814,12 @@ def stage_proposals(
     ``segment/`` — pass either or both. This never writes ground truth. Pair with ``focus_review``
     to send the human straight to them.
 
+    A prediction bucket that already carries review verdicts is immutable: by default a stage into
+    it is redirected to a fresh run-scoped bucket (``<model>@r2``, ``@r3`` — next free), and the
+    bucket actually written is returned as ``bucket``. Pass ``overwrite=True`` to write in place
+    only when the bucket has zero verdicts; with verdicts present it is refused (error names the
+    count and a suggested bucket) so a re-run never orphans recorded verdicts.
+
     Args:
         dataset_root: Dataset root holding ``predictions/``.
         model_name: Predictions bucket to stage under — the real producer, one per source (e.g.
@@ -823,11 +830,14 @@ def stage_proposals(
         boxes: ``[{class_id, conf, cx, cy, w, h}]`` with cx/cy/w/h normalized to [0, 1].
         polygons: ``[{class_id, conf, points: [[x, y], ...]}]`` with points normalized to [0, 1]
             (>=3 points each) — SAM's mask-quality score is a natural ``conf``.
+        overwrite: Write in place even into an existing bucket. Refused if the bucket has review
+            verdicts; the default (False) auto-redirects to a fresh bucket instead.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import PredBBox, PredPolygon
 
     from tcip_mcp.dataset_layout import image_dir, prediction_dir
+    from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_writable_bucket
     from tcip_mcp.workspace import is_valid_name
 
     # Confine the path segments so a malformed model/date/stem (an absolute path, a stray ``..``)
@@ -893,6 +903,20 @@ def stage_proposals(
         return {"error": f"no image found for stem {stem!r} under {image_dir(dataset_root, date)}"}
     img_w, img_h = get_image_dimensions(str(img_file))
 
+    # Prediction-bucket immutability: don't overwrite a bucket that has review verdicts. Verdicts
+    # (and the predictions they reference) colocate under the dataset's ``.tcip/state``.
+    review_state_dir = Path(dataset_root) / ".tcip" / "state"
+
+    def _bucket_dirs(name: str) -> list[Path]:
+        return [Path(prediction_dir(dataset_root, name, date, "detect")),
+                Path(prediction_dir(dataset_root, name, date, "segment"))]
+
+    try:
+        resolution = resolve_writable_bucket(review_state_dir, model_name, _bucket_dirs, overwrite=overwrite)
+    except BucketHasVerdicts as exc:
+        return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
+    bucket = resolution.name
+
     # Stamp the real producer (model_name) as created_by + a stage-time created_at, so a staged
     # prediction's origin travels into GT natively when a human accepts it on the Review canvas.
     from datetime import datetime, timezone
@@ -908,7 +932,7 @@ def stage_proposals(
             )
             for (cls, conf, cx, cy, w, h) in norm_boxes
         ]
-        out = Path(prediction_dir(dataset_root, model_name, date, "detect")) / f"{stem}.json"
+        out = Path(prediction_dir(dataset_root, bucket, date, "detect")) / f"{stem}.json"
         json_io.write_detect(out, pred_boxes, img_w, img_h)
         detect_path = str(out)
 
@@ -919,9 +943,15 @@ def stage_proposals(
                         confidence=conf, created_by=model_name, created_at=created_at)
             for (cls, conf, pts) in norm_polys
         ]
-        out = Path(prediction_dir(dataset_root, model_name, date, "segment")) / f"{stem}.json"
+        out = Path(prediction_dir(dataset_root, bucket, date, "segment")) / f"{stem}.json"
         json_io.write_segment(out, pred_polys, img_w, img_h)
         segment_path = str(out)
+
+    note = ("staged to predictions/ for canvas review — not committed as ground truth; the "
+            "human accepts on the Review tab before it becomes GT (focus_review to send them)")
+    if resolution.redirected:
+        note = (f"bucket {model_name!r} has {resolution.verdict_count} review verdict(s) — staged to a "
+                f"fresh bucket {bucket!r} instead so the reviewed predictions stay intact; " + note)
 
     return {
         "staged": len(boxes) + len(polygons),
@@ -930,10 +960,11 @@ def stage_proposals(
         "detect_path": detect_path,
         "segment_path": segment_path,
         "model_name": model_name,
+        "bucket": bucket,
+        "bucket_redirected": resolution.redirected,
         "date": date,
         "stem": stem,
-        "note": ("staged to predictions/ for canvas review — not committed as ground truth; the "
-                 "human accepts on the Review tab before it becomes GT (focus_review to send them)"),
+        "note": note,
     }
 
 
