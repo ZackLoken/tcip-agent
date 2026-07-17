@@ -245,3 +245,76 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
 def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
     res = stage_proposals(str(tmp_path / "proj"), "sam", "2026-02-11", "IMG_0001")
     assert "error" in res and "at least one" in res["error"]
+
+
+# ── Prediction-bucket immutability ──────────────────────────────────────────
+
+
+def _record_verdict(root: Path, img_name: str) -> None:
+    """Record one human verdict against ``img_name`` in the dataset's review state, so the
+    prediction bucket holding its predictions counts as reviewed."""
+    from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
+
+    engine = ReviewEngine(root / ".tcip" / "state")
+    ctx = ReviewContext(
+        img_name=img_name, img_width=640, img_height=480,
+        pred_boxes=[PredBBox(288.0, 216.0, 352.0, 264.0, 0, confidence=0.8)],
+    )
+    det = ReviewDetection(
+        det_type="fp", class_id=0, conf=0.8, iou=None, gt_type=None, gt_idx=None,
+        pred_type="box", pred_idx=0, bbox=(288.0, 216.0, 352.0, 264.0),
+    )
+    engine.record_detection_action(det, ctx, action="accepted")
+
+
+_BOX = [{"class_id": 0, "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+
+
+def test_stage_proposals_redirects_when_bucket_has_verdicts(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001", size=(640, 480))
+
+    first = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
+    assert first["bucket"] == "claude" and first["bucket_redirected"] is False
+
+    _record_verdict(root, "IMG_0001.jpg")  # a human reviews claude's prediction
+
+    # The reviewed bucket is now immutable — a re-stage lands in a fresh @r2 bucket and says so.
+    second = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
+    assert second["bucket"] == "claude@r2"
+    assert second["bucket_redirected"] is True
+    assert second["detect_path"] == str(
+        Path(prediction_dir(root, "claude@r2", date, "detect")) / "IMG_0001.json"
+    )
+    assert "verdict" in second["note"].lower()
+    # The original reviewed bucket's file is untouched.
+    assert (Path(prediction_dir(root, "claude", date, "detect")) / "IMG_0001.json").is_file()
+    assert not (Path(prediction_dir(root, "claude", date, "detect")) / "IMG_0001.json").samefile(
+        Path(prediction_dir(root, "claude@r2", date, "detect")) / "IMG_0001.json"
+    )
+
+
+def test_stage_proposals_overwrite_refused_when_bucket_has_verdicts(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001", size=(640, 480))
+    stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
+    _record_verdict(root, "IMG_0001.jpg")
+
+    res = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX, overwrite=True)
+    assert "error" in res
+    assert res["verdict_count"] == 1
+    assert res["suggested_bucket"] == "claude@r2"
+
+
+def test_stage_proposals_overwrite_in_place_when_no_verdicts(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001", size=(640, 480))
+    stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
+
+    # No verdicts recorded -> overwrite writes in place, no redirect.
+    res = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX, overwrite=True)
+    assert "error" not in res
+    assert res["bucket"] == "claude" and res["bucket_redirected"] is False
