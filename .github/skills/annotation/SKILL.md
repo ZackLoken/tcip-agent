@@ -117,6 +117,10 @@ The agent must **never write ground truth the human hasn't seen**. Stage proposa
   predictions tree, **not** `annotations/`. They render on the Review canvas as predictions for
   the human to accept/reject/edit. `model_name` is stamped as each object's `created_by`, so name
   the real producer (`sam`, `claude`, `groundingdino`, `model:<run>`) — not a generic placeholder.
+  A bucket that already carries review verdicts is immutable: a stage into it is redirected to a
+  fresh `<model>@r2` bucket (the response's `bucket` field is the one actually written), so a
+  re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place, which is
+  still refused when verdicts exist.
 - **`focus_review(project_root, dataset_root, trait, date, model_name, image_index, detection_idx,
   filter_type, iou, conf)`** drives the live Review tab straight to a model's predictions on a
   frame/detection, so the human sees exactly what you flagged (a false positive, a missed catkin)
