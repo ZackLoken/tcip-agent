@@ -12,6 +12,8 @@ import type {
   PolygonShape,
   PredictionReference,
   ReviewFilters,
+  ReviewImageStatus,
+  ReviewStatusFilter,
   TabName,
   ViewState,
 } from "@/store/types";
@@ -21,7 +23,6 @@ const DEFAULT_REVIEW: ReviewFilters = {
   conf_threshold: 0.25,
   filter_type: "all",
   filter_class: "all",
-  status_filter: "all",
   detection_idx: 0,
 };
 
@@ -139,6 +140,18 @@ interface PerImageStatusState {
   activeFilter: "all" | ImageStatus;
 }
 
+interface ReviewImageStatusState {
+  /** Per-image review completion status, batch-fetched from the ReviewEngine on dataset entry
+   *  and kept live as verdicts land (untouched images default to "not_started"). */
+  byImage: Record<string, ReviewImageStatus>;
+  /** Whether each image has anything to review (any GT or prediction of the reviewed kind).
+   *  Images with no entry (before the batch fetch resolves) are treated as reviewable; images
+   *  explicitly false have zero detections and are skipped by Review navigation. */
+  hasDetections: Record<string, boolean>;
+  /** Image-level Reviewed/Unreviewed navigation filter for the Review tab. */
+  activeFilter: ReviewStatusFilter;
+}
+
 export interface AgentActivity {
   /** Increments per event so effects can react to the latest one. */
   seq: number;
@@ -169,6 +182,7 @@ export interface AppState {
   /** Class registry + per-image status + annotate ui. */
   classes: ClassesState;
   imageStatus: PerImageStatusState;
+  reviewStatus: ReviewImageStatusState;
   annotateUi: AnnotateUiState;
   sessionTracking: SessionTrackingState;
 
@@ -227,6 +241,14 @@ export interface AppState {
   setImageStatuses: (byImage: Record<string, ImageStatus>) => void;
   setImageStatus: (image: string, status: ImageStatus) => void;
   setStatusFilter: (filter: "all" | ImageStatus) => void;
+
+  /** Review-status helpers (image-level Reviewed/Unreviewed navigation). */
+  setReviewImageStatuses: (
+    byImage: Record<string, ReviewImageStatus>,
+    hasDetections: Record<string, boolean>,
+  ) => void;
+  setReviewImageStatus: (image: string, status: ReviewImageStatus) => void;
+  setReviewStatusFilter: (filter: ReviewStatusFilter) => void;
 
   /** Annotate UI flags. */
   setVisible: (v: boolean) => void;
@@ -295,6 +317,7 @@ export const useStore = create<AppState>()((set, get) => ({
   review: { matches: null, loading: false, focusDetectionIdx: null, refetchNonce: 0 },
   classes: { list: [], loaded: false },
   imageStatus: { byImage: {}, activeFilter: "all" },
+  reviewStatus: { byImage: {}, hasDetections: {}, activeFilter: "all" },
   annotateUi: {
     visible: true,
     snap: false,
@@ -489,6 +512,18 @@ export const useStore = create<AppState>()((set, get) => ({
     })),
   setStatusFilter: (activeFilter) =>
     set((s) => ({ imageStatus: { ...s.imageStatus, activeFilter } })),
+
+  setReviewImageStatuses: (byImage, hasDetections) =>
+    set((s) => ({ reviewStatus: { ...s.reviewStatus, byImage, hasDetections } })),
+  setReviewImageStatus: (image, status) =>
+    set((s) => ({
+      reviewStatus: {
+        ...s.reviewStatus,
+        byImage: { ...s.reviewStatus.byImage, [image]: status },
+      },
+    })),
+  setReviewStatusFilter: (activeFilter) =>
+    set((s) => ({ reviewStatus: { ...s.reviewStatus, activeFilter } })),
 
   setVisible: (visible) => set((s) => ({ annotateUi: { ...s.annotateUi, visible } })),
   setSnap: (snap) => set((s) => ({ annotateUi: { ...s.annotateUi, snap } })),
