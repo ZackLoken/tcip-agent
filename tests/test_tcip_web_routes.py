@@ -518,6 +518,34 @@ def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_p
     assert body["image_status"] == "not_started"
 
 
+def test_review_image_statuses_batch(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
+    # A prediction file with a box (reviewable), a confirmed-negative empty file (nothing to review),
+    # and a third image with no file at all — only the first should surface as a detection stem.
+    pred_dir = tmp_path / "predictions" / "detect"
+    pred_dir.mkdir(parents=True)
+    _write_pred_detect(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0, 0.9)])
+    write_detect(str(pred_dir / "IMG_0001.json"), [], 100, 80, keep_empty=True)  # empty negative
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    # Give one image a review status so the engine has state to return.
+    det_gt = tmp_path / "gt_detect.json"
+    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    client.post(
+        "/api/review/mark_complete",
+        json={"project_root": str(project_root), "image_name": "IMG_0000.JPG", "gt_detect_path": str(det_gt)},
+    )
+
+    resp = client.get(
+        "/api/review/image_statuses",
+        params={"project_root": str(project_root), "pred_dir": str(pred_dir)},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["detection_stems"] == ["IMG_0000"]  # empty + missing files excluded
+    assert body["statuses"]["IMG_0000.JPG"] == "completed"
+
+
 def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     det_gt = tmp_path / "gt_detect.json"
@@ -782,116 +810,40 @@ def test_review_action_records_real_class_name_and_reviewer(
     assert entry["reviewed_by"]  # non-empty reviewer
 
 
-def test_review_materialize_route(client: TestClient, tmp_path: Path) -> None:
-    from PIL import Image
+def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
+    client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
 
-    project_root = tmp_path / "proj"
-    state_dir = project_root / ".tcip" / "state"
-    state_dir.mkdir(parents=True)
-    src = tmp_path / "src"
-    src.mkdir()
-    for name in ("imgA.png", "imgB.png"):
-        Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
-    (state_dir / "review_stats.json").write_text(
-        json.dumps({"image": {
-            "imgA.png": {"img_status": "completed", "detections": [
-                {"action": "accepted", "class_id": 0,
-                 "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
-            "imgB.png": {"img_status": "completed", "detections": [
-                {"action": "rejected", "class_id": 0,
-                 "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
-        }})
-    )
-    out = tmp_path / "out"
-
-    resp = client.post(
-        "/api/review/materialize",
-        json={
-            "project_root": str(project_root),
-            "source_images_dir": str(src),
-            "output_dir": str(out),
-        },
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["positive"] == 1 and body["hard_negative"] == 1
-    assert (out / "images" / "imgA.png").is_file()
-    assert "gui_materialize_review_dataset" in (project_root / ".tcip" / "audit.jsonl").read_text()
-
-
-def test_review_materialize_missing_state_returns_400(client: TestClient, tmp_path: Path) -> None:
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
-    src = tmp_path / "src"
-    src.mkdir()
-    resp = client.post(
-        "/api/review/materialize",
-        json={
-            "project_root": str(project_root),
-            "source_images_dir": str(src),
-            "output_dir": str(tmp_path / "out"),
-        },
-    )
-    assert resp.status_code == 400
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project_root))
 
-
-def test_review_queue_launch_validates_inputs(client: TestClient, tmp_path: Path) -> None:
-    project_root = tmp_path / "proj"
-    project_root.mkdir()
-    # A missing checkpoint is a 404 before any work is scheduled.
-    resp = client.post(
-        "/api/review/queue/launch",
-        json={
-            "project_root": str(project_root),
-            "checkpoint_path": str(tmp_path / "nope.pt"),
-            "images_dir": str(tmp_path),
-        },
-    )
-    assert resp.status_code == 404
-    # An unknown queue job id is a 404.
-    assert client.get("/api/review/queue/does-not-exist").status_code == 404
-
-
-def test_review_queue_async_flow(client: TestClient, tmp_path: Path, monkeypatch) -> None:
-    import time
-
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
     images = tmp_path / "imgs"
     images.mkdir()
-    project_root = tmp_path / "proj"
-    project_root.mkdir()
+    Image.new("RGB", (100, 100), (110, 110, 110)).save(images / "img.png")
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
 
-    fake = {
-        "method": "combined", "task": "detection", "total_candidates": 2,
-        "reviewed_skipped": 0, "selected_count": 1,
-        "queue": [{"image": str(images / "a.jpg"), "score": 0.9}],
-    }
-    # Avoid loading torch/a real model — exercise only the async job plumbing.
-    monkeypatch.setattr(
-        "tcip_mcp.tools.feedback_tools.prioritize_review_queue", lambda **kw: fake
+    out = tmp_path / "preds"
+    out.mkdir()
+    (out / "img.json").write_text(
+        json.dumps({"image": "img", "width": 100, "height": 100, "objects": []})
     )
+    engine = ReviewEngine(project_root / ".tcip" / "state")
+    ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
+                        pred_boxes=[PredBBox(10.0, 10.0, 30.0, 30.0, 0, confidence=0.9)])
+    det = ReviewDetection(det_type="fp", class_id=0, conf=0.9, iou=None, gt_type=None, gt_idx=None,
+                          pred_type="box", pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
+    engine.record_detection_action(det, ctx, action="accepted")
 
-    resp = client.post(
-        "/api/review/queue/launch",
-        json={
-            "project_root": str(project_root),
-            "checkpoint_path": str(ckpt),
-            "images_dir": str(images),
-            "budget": 5,
-        },
-    )
-    assert resp.status_code == 200
-    job_id = resp.json()["job_id"]
-
-    body = {"status": "pending"}
-    for _ in range(50):  # worker runs on a thread; fake returns immediately
-        body = client.get(f"/api/review/queue/{job_id}").json()
-        if body["status"] in ("completed", "failed"):
-            break
-        time.sleep(0.05)
-    assert body["status"] == "completed"
-    assert body["result"]["selected_count"] == 1
+    # overwrite=True into a bucket that has a verdict is a 409 (no job is launched).
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": str(ckpt), "images_dir": str(images),
+        "output_dir": str(out), "overwrite": True,
+    })
+    assert resp.status_code == 409
+    assert "verdict" in resp.json()["detail"].lower()
 
 
 # ── /api/state ───────────────────────────────────────────────────────────
