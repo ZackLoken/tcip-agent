@@ -8,12 +8,9 @@ persisted via the engine to per-image shards under
 
 from __future__ import annotations
 
-import logging
 import os
 import shutil
-import threading
-import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -41,8 +38,6 @@ from tcip_annotation.utils import get_image_dimensions
 from tcip_mcp.utils.atomic_io import append_jsonl, read_json
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/review", tags=["review"])
 
@@ -221,7 +216,6 @@ class MatchesRequest(BaseModel):
     conf_threshold: float = 0.25
     filter_type: str = "all"
     filter_class: str | int = "all"
-    status_filter: str = "all"
 
 
 class Detection(BaseModel):
@@ -260,13 +254,12 @@ def _matches_response(
     *,
     filter_type: str,
     filter_class: str | int,
-    status_filter: str,
 ) -> MatchesResponse:
     """Build the canvas payload (filtered + review-decorated detections, GT/pred shapes, status)
     from an already-computed match set. Shared by /matches and /action so both surfaces return the
     identical shape — letting a verdict return its fresh matches instead of forcing a second fetch."""
     dets = engine.build_detection_list(
-        ctx, matches, filter_type=filter_type, filter_class=filter_class, status_filter=status_filter
+        ctx, matches, filter_type=filter_type, filter_class=filter_class
     )
     out_dets: list[Detection] = []
     for d in dets:
@@ -341,7 +334,7 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
     )
     return _matches_response(
         ctx, matches, engine, req.image_name,
-        filter_type=req.filter_type, filter_class=req.filter_class, status_filter=req.status_filter,
+        filter_type=req.filter_type, filter_class=req.filter_class,
     )
 
 
@@ -379,7 +372,6 @@ class ActionPayload(BaseModel):
     # what /matches would have returned (the client installs them without a second fetch).
     filter_type: str = "all"
     filter_class: str | int = "all"
-    status_filter: str = "all"
 
 
 def _apply_gt_mutation(
@@ -540,7 +532,6 @@ def record_action(payload: ActionPayload) -> dict:
     fresh = _matches_response(
         work, matches, engine, payload.image_name,
         filter_type=payload.filter_type, filter_class=payload.filter_class,
-        status_filter=payload.status_filter,
     )
     return {
         "status": "ok",
@@ -682,126 +673,54 @@ def get_image_status(project_root: str, image_name: str) -> dict:
     return {"status": engine.get_image_review_status(image_name)}
 
 
-# ── Materialize a training set from review verdicts (synchronous file copy) ──
+class ImageStatusesResponse(BaseModel):
+    # image_name -> "not_started" | "started" | "completed"; images the engine has never
+    # touched are absent (the client defaults them to "not_started").
+    statuses: dict[str, str]
+    # Stems (filename without extension) whose GT or prediction file for the reviewed kind
+    # holds at least one object — i.e. the image has something to review. Images whose stem is
+    # absent contribute no TP/FP/FN, so Review navigation skips them.
+    detection_stems: list[str]
 
 
-class MaterializePayload(BaseModel):
-    project_root: str
-    source_images_dir: str
-    output_dir: str
-    experiment_id: str = ""
-    include_hard_negatives: bool = True
-    only_completed: bool = False
-    copy_files: bool = True
-
-
-@router.post("/materialize")
-def materialize_route(payload: MaterializePayload) -> dict:
-    """Turn recorded review verdicts into a curated YOLO training set (chains into split/train)."""
-    _guard_path(payload.source_images_dir)
-    _guard_path(payload.output_dir)
-    from tcip_mcp.tools.feedback_tools import materialize_review_dataset
-
-    review_state_dir = str(Path(payload.project_root) / ".tcip" / "state")
-    result = materialize_review_dataset(
-        review_state_dir=review_state_dir,
-        source_images_dir=payload.source_images_dir,
-        output_dir=payload.output_dir,
-        experiment_id=payload.experiment_id,
-        include_hard_negatives=payload.include_hard_negatives,
-        only_completed=payload.only_completed,
-        copy_files=payload.copy_files,
-    )
-    if result.get("error"):
-        raise HTTPException(400, result["error"])
-    _audit(payload.project_root, "gui_materialize_review_dataset", {
-        "output_dir": payload.output_dir,
-        "only_completed": payload.only_completed,
-        "positive": result.get("positive"),
-        "hard_negative": result.get("hard_negative"),
-    })
-    return result
-
-
-# ── Review queue: rank unreviewed images (async — loads a model + scores a dir) ──
-
-
-@dataclass
-class QueueJob:
-    job_id: str
-    status: str = "pending"  # pending | running | completed | failed
-    error: Optional[str] = None
-    result: dict = field(default_factory=dict)
-    thread: Optional[threading.Thread] = field(default=None, repr=False)
-
-
-_queue_jobs: dict[str, QueueJob] = {}
-_queue_lock = threading.Lock()
-
-
-class QueuePayload(BaseModel):
-    project_root: str
-    checkpoint_path: str
-    images_dir: str
-    method: str = "combined"  # uncertainty | diversity | combined
-    task: str = "detection"
-    budget: int = 50
-    skip_reviewed: bool = True
-
-
-def _queue_worker(job: QueueJob, payload: QueuePayload) -> None:
+def _has_objects(path: Path) -> bool:
+    """True if ``path`` is a per-image label JSON with a non-empty ``objects`` list. An empty
+    (confirmed-negative) or missing file has nothing to review."""
     try:
-        job.status = "running"
-        from tcip_mcp.tools.feedback_tools import prioritize_review_queue
-
-        review_state_dir = str(Path(payload.project_root) / ".tcip" / "state")
-        res = prioritize_review_queue(
-            checkpoint_path=payload.checkpoint_path,
-            images_dir=payload.images_dir,
-            review_state_dir=review_state_dir,
-            method=payload.method,
-            task=payload.task,
-            budget=payload.budget,
-            skip_reviewed=payload.skip_reviewed,
-        )
-        if res.get("error"):
-            job.status = "failed"
-            job.error = res["error"]
-        else:
-            job.result = res
-            job.status = "completed"
-    except Exception as exc:
-        logger.exception("review queue job %s failed", job.job_id)
-        job.status = "failed"
-        job.error = str(exc)
+        data = read_json(path, default=None)
+    except Exception:
+        return False
+    return isinstance(data, dict) and bool(data.get("objects"))
 
 
-@router.post("/queue/launch")
-def launch_queue(payload: QueuePayload) -> dict:
-    """Kick off active-learning ranking of unreviewed images on a background thread."""
-    _guard_path(payload.images_dir)
-    _guard_path(payload.checkpoint_path)  # fed to build_predictor → torch.load; confine it too
-    if not Path(payload.checkpoint_path).is_file():
-        raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
-    if not Path(payload.images_dir).is_dir():
-        raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
-
-    job = QueueJob(job_id=f"rq-{uuid.uuid4().hex[:8]}")
-    with _queue_lock:
-        from tcip_web import jobstore
-
-        _queue_jobs[job.job_id] = job
-        jobstore.evict_terminal(_queue_jobs)  # bound the registry (results are recomputable)
-    t = threading.Thread(target=_queue_worker, args=(job, payload), daemon=True)
-    job.thread = t
-    t.start()
-    return {"status": "launched", "job_id": job.job_id}
+def _stems_with_objects(*dirs: Optional[str]) -> set[str]:
+    stems: set[str] = set()
+    for d in dirs:
+        if not d:
+            continue
+        p = Path(d)
+        if not p.is_dir():
+            continue
+        for f in p.glob("*.json"):
+            if f.stem not in stems and _has_objects(f):
+                stems.add(f.stem)
+    return stems
 
 
-@router.get("/queue/{job_id}")
-def get_queue(job_id: str) -> dict:
-    with _queue_lock:
-        job = _queue_jobs.get(job_id)
-    if job is None:
-        raise HTTPException(404, f"queue job not found: {job_id}")
-    return {"job_id": job.job_id, "status": job.status, "error": job.error, "result": job.result}
+@router.get("/image_statuses")
+def image_statuses(
+    project_root: str,
+    gt_dir: Optional[str] = None,
+    pred_dir: Optional[str] = None,
+) -> ImageStatusesResponse:
+    """Batch review status + detection presence for a whole (trait, date) — one call the Review
+    tab makes on dataset entry to drive the image-level Reviewed/Unreviewed filter and to skip
+    images with nothing to review. ``gt_dir``/``pred_dir`` are the reviewed-kind label dirs
+    (detect *or* segment, whichever the tab is reviewing)."""
+    for d in (gt_dir, pred_dir):
+        _guard_path(d)
+    engine = _get_engine(project_root)
+    return ImageStatusesResponse(
+        statuses=engine.get_all_image_statuses(),
+        detection_stems=sorted(_stems_with_objects(gt_dir, pred_dir)),
+    )
