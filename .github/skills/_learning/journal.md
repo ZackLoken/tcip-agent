@@ -22,7 +22,7 @@ proposals for the owner to approve, then **prune** the graduated entry — add a
 - **L6 / L7 / Lo2 / Lo3** — CUDA preflight, path portability, `evaluate_model` iou_type default,
   `$TCIP_PROJECT_ROOT` state anchoring → applied in code
 - **Session-2 fence + GUI** (G-A/B/C, terminal copy) → PowerShell + Bash exec/write guards,
-  `focus_annotate` tool, dataset-select advisories
+  `focus` tool, dataset-select advisories
 - **Skills fabrication** — 6 crop + `crop-science` skills rebuilt from `crops.yml` + cited research;
   `verify_skill_traits.py` + `tests/test_skill_trait_fidelity.py` guardrail
 - **L-SKILL-1** — `catkin_elongation_date` = the 95% majority crossing → `phenology.plant_milestones`
