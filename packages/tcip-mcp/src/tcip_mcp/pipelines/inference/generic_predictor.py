@@ -1,6 +1,6 @@
-"""Generic predictor for any ComposedModel checkpoint.
+"""Generic predictor for any bespoke ``model_source`` checkpoint.
 
-Auto-detects task from saved model_spec. Supports single image,
+Auto-detects task from the saved ``model_source``. Supports single image,
 batch, and ONNX export.
 """
 
@@ -13,14 +13,13 @@ from PIL import Image
 
 from tcip_mcp.pipelines.model_build import build_model
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
-from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, KIND_TORCHVISION_COMPOSED
+from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 
 logger = logging.getLogger(__name__)
 
-# Detection task names that format outputs as boxes/scores/labels. Composed detection heads name
-# themselves ``anchor_detection`` / ``anchor_free_detection``; a bespoke model_source declares the
-# task type ``detection`` / ``instance_seg`` — both must route through the detection formatter.
-_DETECTION_TASKS = frozenset({"anchor_detection", "anchor_free_detection", "detection", "instance_seg"})
+# Detection task names that format outputs as boxes/scores/labels. A bespoke model_source declares
+# the task type ``detection`` / ``instance_seg`` — both route through the detection formatter.
+_DETECTION_TASKS = frozenset({"detection", "instance_seg"})
 
 
 def _crop_pad_tile(img, x: int, y: int, tile_size: int, w: int, h: int):
@@ -49,10 +48,10 @@ def _crop_pad_tile(img, x: int, y: int, tile_size: int, w: int, h: int):
 
 
 class GenericPredictor:
-    """Load any ComposedModel checkpoint and run inference.
+    """Load any bespoke ``model_source`` checkpoint and run inference.
 
-    The checkpoint must contain 'model_spec' and 'model_state_dict'.
-    Task type is inferred from model_spec heads.
+    The checkpoint must contain 'model_source' and 'model_state_dict'.
+    Task type is read from the model_source.
     """
 
     def __init__(
@@ -73,11 +72,9 @@ class GenericPredictor:
         # kind) so the weights aren't read from disk twice; fall back to loading it ourselves.
         ckpt = checkpoint if checkpoint is not None else torch.load(
             checkpoint_path, map_location=self.device, weights_only=False)
-        # A composed checkpoint carries model_spec; a bespoke (model_source) one carries the
-        # importable-builder ref instead. build_model dispatches on whichever is present.
-        self.model_spec = ckpt.get("model_spec")
+        # A bespoke checkpoint carries the importable-builder ref; build_model re-imports it.
         self.model_source = ckpt.get("model_source")
-        self.kind = KIND_TCIP_MODULE if self.model_source else KIND_TORCHVISION_COMPOSED
+        self.kind = KIND_TCIP_MODULE
         self.config = ckpt.get("config", {})
 
         # Training tile geometry, so inference can derive the tile scale from the checkpoint instead
@@ -86,7 +83,7 @@ class GenericPredictor:
         self.train_tile_size = _tiling.get("tile_size")
         self.train_overlap = _tiling.get("overlap")
 
-        self.model = build_model(ckpt)  # composed model_spec OR re-imported bespoke builder (no exec)
+        self.model = build_model(ckpt)  # re-imported bespoke builder (no exec)
         self.model.load_state_dict(ckpt["model_state_dict"])
         self.model.to(self.device)
         self.model.eval()
@@ -98,17 +95,10 @@ class GenericPredictor:
         set_detector_operating_point(self.model, score_thresh=score_threshold,
                                      nms_thresh=nms_iou, detections_per_img=max_dets)
 
-        # Infer task + input channels from the model_spec heads/backbone, or — for a bespoke
-        # model_source — from its declared ``task`` / ``in_chans``.
-        if self.model_spec:
-            heads = self.model_spec.get("heads", [])
-            self.task = heads[0]["name"] if heads else "unknown"
-            bb = self.model_spec.get("backbone", {})
-            self.in_chans = bb.get("in_chans", 3) if isinstance(bb, dict) else 3
-        else:
-            src = self.model_source or {}
-            self.task = src.get("task", "unknown")
-            self.in_chans = int(src.get("in_chans", 3))
+        # Task + input channels come from the bespoke model_source's declared ``task`` / ``in_chans``.
+        src = self.model_source or {}
+        self.task = src.get("task", "unknown")
+        self.in_chans = int(src.get("in_chans", 3))
 
     @torch.no_grad()
     def predict(self, image_path: str) -> dict:
@@ -190,7 +180,7 @@ class GenericPredictor:
         stride = compute_stride(tile_size, overlap)
         positions = tile_positions(h, w, tile_size, stride)
 
-        min_size = (self.model_spec or {}).get("heads", [{}])[0].get("min_size")
+        min_size = ((self.model_source or {}).get("builder_kwargs") or {}).get("min_size")
         if min_size and abs(int(min_size) - tile_size) > tile_size:
             logger.warning("predict_tiled: model min_size=%s differs greatly from tile_size=%s "
                            "(tiles will be rescaled).", min_size, tile_size)
