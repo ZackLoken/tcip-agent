@@ -54,7 +54,7 @@ def test_register_model_sources_metrics_from_checkpoint(tmp_path, monkeypatch):
         register_model_from_experiment,
     )
 
-    create_experiment("exp", {"model_spec": {"backbone": {"name": "x"}}}, data_source="imgs")
+    create_experiment("exp", {"model_source": {"builder": "x:y"}}, data_source="imgs")
     log_metrics("exp", 1, {"val_map50": 0.60})
     log_metrics("exp", 2, {"val_map50": 0.40})  # last epoch is WORSE (overfit)
 
