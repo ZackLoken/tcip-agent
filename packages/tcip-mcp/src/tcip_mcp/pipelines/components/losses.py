@@ -1,7 +1,7 @@
-"""Composable loss functions with self-describing metadata.
+"""Loss functions for bespoke models — plain importable classes + a name→class map.
 
-Each loss registers into the global LOSSES registry so the agent can
-query valid losses per task and compose CombinedLoss from multiple terms.
+Bespoke model code imports a loss class directly or calls ``build_loss(name)``; the
+``a+b`` syntax composes a ``CombinedLoss`` from multiple terms.
 """
 
 from __future__ import annotations
@@ -9,8 +9,6 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from tcip_mcp.pipelines.registry import LOSSES
 
 
 class BaseLoss(nn.Module):
@@ -267,12 +265,26 @@ def compute_class_weights(
 
 _WEIGHTABLE_LOSSES = {"cross_entropy", "weighted_ce", "focal"}
 
+# Name → loss class. ``weighted_ce`` is a plain CrossEntropyLoss that expects a ``weight``.
+_LOSS_CLASSES: dict[str, type[BaseLoss]] = {
+    "cross_entropy": CrossEntropyLoss,
+    "weighted_ce": CrossEntropyLoss,
+    "focal": FocalLoss,
+    "smooth_l1": SmoothL1Loss,
+    "huber": HuberLoss,
+    "bce": BCEWithLogitsLoss,
+    "dice": DiceLoss,
+    "giou": GIoULoss,
+    "corn": CORNLoss,
+    "coral": CORALLoss,
+}
+
 
 def build_loss(
     name: str, *, class_distribution: dict[int, int] | None = None,
     num_classes: int | None = None, weight_scheme: str = "balanced", **kwargs,
 ) -> BaseLoss:
-    """Build a loss by registry name, or parse combined like 'bce+dice'.
+    """Build a loss by name, or parse combined like 'bce+dice'.
 
     When ``class_distribution`` is supplied and the loss is weightable
     (``cross_entropy``/``weighted_ce``/``focal``), an inverse-frequency ``weight``
@@ -283,30 +295,8 @@ def build_loss(
         return CombinedLoss(sub_losses)
     if class_distribution is not None and "weight" not in kwargs and name in _WEIGHTABLE_LOSSES:
         kwargs["weight"] = compute_class_weights(class_distribution, num_classes=num_classes, scheme=weight_scheme)
-    return LOSSES.build(name, **kwargs)
-
-
-# ====================================================================
-# Registration
-# ====================================================================
-
-_LOSS_MAP: list[tuple[str, type, dict]] = [
-    ("cross_entropy", CrossEntropyLoss, {"description": "Standard cross-entropy", "valid_tasks": ["classification", "semantic_seg"]}),
-    ("weighted_ce", CrossEntropyLoss, {"description": "Class-weighted cross-entropy for imbalance", "valid_tasks": ["classification", "semantic_seg"], "when_to_use": "Pair with class-balanced sampler / auto class weights"}),
-    ("focal", FocalLoss, {"description": "Focal loss for class imbalance", "valid_tasks": ["detection", "classification"]}),
-    ("smooth_l1", SmoothL1Loss, {"description": "Smooth L1 (box regression / regression)", "valid_tasks": ["detection", "regression"]}),
-    ("huber", HuberLoss, {"description": "Huber loss (outlier-robust regression)", "valid_tasks": ["regression"]}),
-    ("bce", BCEWithLogitsLoss, {"description": "Binary cross-entropy with logits", "valid_tasks": ["instance_seg", "semantic_seg"]}),
-    ("dice", DiceLoss, {"description": "Dice loss for region overlap", "valid_tasks": ["instance_seg", "semantic_seg"]}),
-    ("giou", GIoULoss, {"description": "Generalized IoU loss for box regression", "valid_tasks": ["detection"]}),
-    ("corn", CORNLoss, {"description": "CORN ordinal loss (Shi 2021)", "valid_tasks": ["ordinal"], "when_to_use": "Disease scores, maturity ratings, ordinal scales"}),
-    ("coral", CORALLoss, {"description": "CORAL ordinal loss (Cao 2020)", "valid_tasks": ["ordinal"], "when_to_use": "Alternative to CORN with consistent rank logits"}),
-]
-
-for _name, _cls, _meta in _LOSS_MAP:
-    LOSSES.register_factory(
-        _name,
-        lambda c=_cls, **kw: c(**kw),
-        category=_meta.get("valid_tasks", ["all"])[0],
-        metadata=_meta,
-    )
+    try:
+        cls = _LOSS_CLASSES[name]
+    except KeyError:
+        raise KeyError(f"Unknown loss '{name}'. Available: {sorted(_LOSS_CLASSES)}") from None
+    return cls(**kwargs)
