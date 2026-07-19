@@ -133,15 +133,14 @@ Defer annotation mechanics to the `annotation` skill. Crop-specific difficulties
 
 ## Measurement integrity
 
-Per the CLAUDE.md measurement-integrity invariant, **never invent a geometric or pixel proxy for a
-biological quantity**; the breeder defines each trait, and no result ships until the measurement is
-validated against expert-scored ground truth. Crop-specific traps:
+Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
+against expert-scored ground truth before any result — see the catkin-elongation cautionary tale
+there). Hazelnut-specific traps:
 
-- **`catkin_elongation_date` is the canonical failed proxy.** A prior session defined catkin
-  "elongation" from bounding-box height and shipped fabricated phenology — invalid science, removed.
-  Elongation/anthesis is a breeder-defined *visible morphological state* (loosening + pollen shed)
-  emitted by a validated classifier, never a bbox surrogate. See the `phenology` skill for the
-  elongated-fraction definition and its `elongation_classified` guard.
+- **`catkin_elongation_date` is the canonical failed-proxy trap** (the cautionary tale above).
+  Elongation/anthesis is a breeder-defined *visible morphological state* (loosening + pollen shed),
+  established by a validated call against expert scoring, never a bbox surrogate. See the `phenology`
+  skill for the elongated-fraction definition and its `elongation_classified` guard.
 - **`catkin_*per_*` and `pistillate_*per_*` "% open"** mean the fraction of catkins/flowers at the
   breeder-defined anthesis/receptivity state, not "% detected." No date without an expert-scored
   "open" criterion validated against ground truth.
