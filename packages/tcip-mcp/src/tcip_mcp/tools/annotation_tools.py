@@ -323,9 +323,7 @@ def _detection_breakdown(matches, gt_boxes, gt_polys, pred_boxes, pred_polys) ->
     return detections
 
 
-@mcp.tool()
-@audited
-def evaluate_detections(
+def _evaluate_image(
     image_path: str,
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
@@ -335,16 +333,6 @@ def evaluate_detections(
 
     mAP / TP / FP / FN come from pycocotools; the ``matches`` block is a
     per-box overlay for the GUI review panel (``compute_matches``).
-
-    Args:
-        image_path: Absolute path to the image file.
-        iou_threshold: IoU threshold for a positive match.
-        conf_threshold: Minimum confidence to consider a prediction. Defaults to the shared
-            ``DEFAULT_CONF`` so the reported P/R/F1 operating point matches evaluate_model /
-            inference (they used to diverge — 0.25 here vs 0.5 there).
-        detail: Also return a per-detection ``detections`` breakdown (each TP/FP/FN with its
-            box/polygon coordinates, class id, IoU, and confidence) plus ``img_w`` / ``img_h`` —
-            the low-level match data for annotation review / feeding the review panel.
     """
     loaded = _load_image_annotations(image_path)
     if loaded is None:
@@ -379,21 +367,12 @@ def evaluate_detections(
     return out
 
 
-@mcp.tool()
-@audited
-def evaluate_dataset(
+def _evaluate_folder(
     folder_path: str,
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
 ) -> dict:
-    """Aggregate detection metrics across all images in a dataset.
-
-    Args:
-        folder_path: Path to dataset root.
-        iou_threshold: IoU threshold for a positive match.
-        conf_threshold: Minimum confidence. Defaults to the shared ``DEFAULT_CONF`` so the
-            reported operating point matches evaluate_model / inference.
-    """
+    """Aggregate detection metrics across all images in a dataset."""
     root = Path(folder_path)
     images_dir = root / "images"
     if not images_dir.is_dir():
@@ -448,6 +427,36 @@ def evaluate_dataset(
         "iou_type": dataset_iou_type,
         "per_image": per_image,
     }
+
+
+@mcp.tool()
+@audited
+def evaluate_predictions(
+    path: str,
+    iou_threshold: float = 0.5,
+    conf_threshold: float = DEFAULT_CONF,
+    detail: bool = False,
+) -> dict:
+    """Score on-disk predictions against on-disk ground truth (COCOeval).
+
+    Dispatches on the input: a single image file returns per-box ``matches`` (plus an optional
+    per-detection ``detections`` breakdown with ``img_w`` / ``img_h`` when ``detail=True``) for
+    the GUI review panel; a dataset directory returns aggregate metrics plus ``per_image`` TP/FP/FN.
+    Both regimes share ``coco_detection_metrics``.
+
+    Args:
+        path: Absolute path to an image file (single-image match) or a dataset root (aggregate).
+        iou_threshold: IoU threshold for a positive match.
+        conf_threshold: Minimum confidence to consider a prediction. Defaults to the shared
+            ``DEFAULT_CONF`` so the reported operating point matches evaluate_model / inference.
+        detail: Single-image only — also return the per-detection ``detections`` breakdown.
+    """
+    p = Path(path)
+    if p.is_file():
+        return _evaluate_image(path, iou_threshold, conf_threshold, detail)
+    if p.is_dir():
+        return _evaluate_folder(path, iou_threshold, conf_threshold)
+    return {"error": f"Path not found: {path}"}
 
 
 @mcp.tool()
