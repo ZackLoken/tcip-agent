@@ -20,7 +20,7 @@ from tcip_mcp.pipelines.training.generic_trainer import (
 # ====================================================================
 
 def test_create_run_ids_unique_within_one_second():
-    ids = {create_run({"model_spec": {}}, "out").run_id for _ in range(50)}
+    ids = {create_run({"model_source": {}}, "out").run_id for _ in range(50)}
     assert len(ids) == 50  # len(_RUNS)-suffixed ids would collide here
 
 
@@ -32,7 +32,7 @@ def test_create_run_ids_unique_across_threads():
 
     def make():
         barrier.wait()  # maximize same-instant contention
-        run = create_run({"model_spec": {}}, "out")
+        run = create_run({"model_source": {}}, "out")
         with lock:
             results.append(run.run_id)
 
@@ -54,7 +54,7 @@ def test_create_run_ids_unique_across_threads():
 # ====================================================================
 
 def test_create_run_draws_and_records_seed_when_unset():
-    config = {"model_spec": {}}
+    config = {"model_source": {}}
     run = create_run(config, "out")
     seed = run.config.get("seed")
     assert isinstance(seed, int) and 0 <= seed < 2**31
@@ -65,19 +65,19 @@ def test_create_run_draws_and_records_seed_when_unset():
 
 
 def test_create_run_keeps_explicit_top_level_seed():
-    run = create_run({"model_spec": {}, "seed": 123}, "out")
+    run = create_run({"model_source": {}, "seed": 123}, "out")
     assert run.config["seed"] == 123
 
 
 def test_create_run_keeps_training_section_seed():
-    config = {"model_spec": {}, "training": {"seed": 7}}
+    config = {"model_source": {}, "training": {"seed": 7}}
     run = create_run(config, "out")
     assert "seed" not in run.config  # no competing top-level override drawn
     assert run.config["training"]["seed"] == 7
 
 
 def test_create_run_drawn_seeds_are_independent():
-    seeds = {create_run({"model_spec": {}}, "out").config["seed"] for _ in range(8)}
+    seeds = {create_run({"model_source": {}}, "out").config["seed"] for _ in range(8)}
     assert len(seeds) == 8  # OS entropy per run, not one fixed default
 
 
@@ -89,8 +89,8 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
         captured["deterministic"] = deterministic
 
     monkeypatch.setattr(gt, "set_seed", fake_set_seed)
-    run = create_run({"model_spec": {}}, str(tmp_path / "out"))
-    train(run, train_loader=None, task="classification")  # fails at compose, after seeding
+    run = create_run({"model_source": {}}, str(tmp_path / "out"))
+    train(run, train_loader=None, task="classification")  # fails at build, after seeding
 
     assert captured["seed"] == run.config["seed"]
     assert captured["deterministic"] is False
@@ -105,7 +105,7 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
     blocker.write_text("I am a file, not a directory")
 
     # output_dir nests under an existing *file*, so out_dir.mkdir() raises.
-    run = create_run({"model_spec": {}}, str(blocker / "out"))
+    run = create_run({"model_source": {}}, str(blocker / "out"))
     run = train(run, train_loader=None, task="classification")
 
     assert run.status == "failed"  # not stuck at "running"
