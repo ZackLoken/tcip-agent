@@ -10,9 +10,8 @@ registration are wired, and any checkpoint it saves through ``ctx`` is stamped +
 plus the envelope-owned sinks (``log_metrics`` / ``save_checkpoint`` / ``record_artifact`` /
 ``should_cancel`` / ``tb``) — the seams that keep a hand-rolled loop audited + immutable.
 
-The default (no ``training_source``, ``model_spec``) path is byte-identical to the pre-envelope
-flow: ``ctx.default_train()`` just calls today's ``generic_trainer.train()`` unchanged, and the
-envelope adds only provenance/audit *around* it.
+When no ``training_source`` is set, ``ctx.default_train()`` runs today's
+``generic_trainer.train()``, and the envelope adds only provenance/audit *around* it.
 """
 
 from __future__ import annotations
@@ -75,7 +74,7 @@ class TrainContext:
     # ---- the default trainer: one optional convenience ----
     def default_train(self) -> Any:
         """Run today's strong default policy (progressive unfreeze / differential-LR / AMP+accum /
-        selection+early-stop / checkpoint cadence). Byte-identical to the pre-envelope trainer."""
+        selection+early-stop / checkpoint cadence)."""
         from tcip_mcp.pipelines.training.generic_trainer import train
 
         return train(self.run, self.train_loader, self.val_loader, self.task,
@@ -107,11 +106,6 @@ class TrainContext:
         from tcip_mcp.tools.training_tools import _auto_train_val
 
         return _auto_train_val(task or self.task, data_cfg or self.config.get("data", {}), transforms)
-
-    def resolve_spec_derivations(self, *args: Any, **kwargs: Any) -> Any:
-        from tcip_mcp.pipelines.derivations import resolve_spec_derivations
-
-        return resolve_spec_derivations(*args, **kwargs)
 
     def compute_class_weights(self, *args: Any, **kwargs: Any) -> Any:
         from tcip_mcp.pipelines.components.losses import compute_class_weights
@@ -188,8 +182,8 @@ class TrainContext:
             self.tb.flush()
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
-        """Stamped, atomic checkpoint save. Stamps ``kind`` + ``model_spec``/``model_source`` +
-        ``config`` so a hand-rolled loop can't emit an unstamped, un-routable ``.pt``."""
+        """Stamped, atomic checkpoint save. Stamps ``kind`` + ``model_source`` + ``config`` so a
+        hand-rolled loop can't emit an unstamped, un-routable ``.pt``."""
         from tcip_mcp.pipelines.model_build import stamp_model_ref
         from tcip_mcp.pipelines.training.generic_trainer import _atomic_torch_save
 
@@ -238,10 +232,10 @@ def _snapshot_run_provenance(ctx: TrainContext) -> None:
     try:
         from tcip_mcp.experiments import experiments_dir
         from tcip_mcp.pipelines.model_build import capture_env, snapshot_model_source
-        from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, KIND_TORCHVISION_COMPOSED
+        from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
         from tcip_mcp.utils.atomic_io import atomic_write_json
 
-        kind = KIND_TCIP_MODULE if ctx.config.get("model_source") else KIND_TORCHVISION_COMPOSED
+        kind = KIND_TCIP_MODULE
         env = {"env": capture_env(), "seed": ctx.seed, "model_kind": kind,
                "run_id": ctx.run.run_id}
         exp_dir = experiments_dir() / ctx.experiment_id
@@ -284,7 +278,7 @@ def run_training_envelope(ctx: TrainContext) -> None:
                 # (it returned without cancelling or raising).
                 run.status = "cancelled" if run.cancel_event.is_set() else "completed"
         else:
-            ctx.default_train()  # today's trainer — byte-identical
+            ctx.default_train()  # today's trainer
     except Exception as exc:  # noqa: BLE001
         if run.status not in ("failed", "cancelled"):
             run.status = "failed"
