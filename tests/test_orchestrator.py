@@ -22,9 +22,10 @@ from tcip_mcp.pipelines.orchestrator import (
 )
 from tests._orchestrator_helpers import build_stub_trainer
 
-MODEL_SPEC = {
-    "backbone": "resnet18",
-    "heads": [{"name": "detection", "task": "detection", "num_classes": 2}],
+MODEL_SOURCE = {
+    "builder": "tests.bespoke_models:build_bespoke_detection",
+    "builder_kwargs": {"num_classes": 2},
+    "task": "detection",
 }
 
 
@@ -85,7 +86,7 @@ class TestTrainingPhaseSplitStems:
         result = orch.run_phase({
             "name": "train_det",
             "task": "detection",
-            "model_spec": MODEL_SPEC,
+            "model_source": MODEL_SOURCE,
             "dataset": {
                 "images_dir": det_data["images_dir"],
                 "labels_dir": det_data["labels_dir"],
@@ -102,7 +103,7 @@ class TestTrainingPhaseSplitStems:
         result = orch.run_phase({
             "name": "train_det",
             "task": "detection",
-            "model_spec": MODEL_SPEC,
+            "model_source": MODEL_SOURCE,
             "dataset": {
                 "images_dir": det_data["images_dir"],
                 "labels_dir": det_data["labels_dir"],
@@ -123,7 +124,7 @@ class TestTrainingPhaseTracking:
         result = orch.run_phase({
             "name": "train_det",
             "task": "detection",
-            "model_spec": MODEL_SPEC,
+            "model_source": MODEL_SOURCE,
             "seed": 1234,
             "deterministic": True,
             "batch_size": 2,
@@ -144,7 +145,7 @@ class TestTrainingPhaseTracking:
         result = orch.run_phase({
             "name": "train_det",
             "task": "detection",
-            "model_spec": MODEL_SPEC,
+            "model_source": MODEL_SOURCE,
             "training": {"seed": 7},
             "dataset": {
                 "images_dir": det_data["images_dir"],
@@ -159,7 +160,7 @@ class TestTrainingPhaseTracking:
         result = orch.run_phase({
             "name": "train_det",
             "task": "detection",
-            "model_spec": MODEL_SPEC,
+            "model_source": MODEL_SOURCE,
             "dataset": {
                 "images_dir": det_data["images_dir"],
                 "labels_dir": det_data["labels_dir"],
@@ -194,7 +195,7 @@ class TestTrainingPhaseTracking:
         result = orch.run_phase({
             "name": "train_det",
             "task": "detection",
-            "model_spec": MODEL_SPEC,
+            "model_source": MODEL_SOURCE,
             "dataset": {
                 "images_dir": det_data["images_dir"],
                 "labels_dir": det_data["labels_dir"],
@@ -460,7 +461,7 @@ class TestRetry:
     def test_is_transient_heuristic(self):
         assert PipelineOrchestrator._is_transient("CUDA out of memory")
         assert PipelineOrchestrator._is_transient("ConnectionError: reset")
-        assert not PipelineOrchestrator._is_transient("KeyError: 'model_spec'")
+        assert not PipelineOrchestrator._is_transient("KeyError: 'model_source'")
 
 
 # ====================================================================
