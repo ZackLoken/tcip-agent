@@ -187,3 +187,126 @@ def train_bespoke(ctx) -> None:
     # Guarantee a final checkpoint exists even if val never improved.
     ctx.save_checkpoint(
         {"model_state_dict": model.state_dict(), "metrics": {"epoch": epochs}}, "model_final")
+
+
+# ---------------------------------------------------------------------------
+# Sibling builders — agent-authored modules that wire the kept nn.Module blocks
+# for the non-detector tasks. Same forward contract the trainer/eval expect:
+# a loss dict in train mode (``head{i}_{k}``), decoded predictions in eval mode.
+# ---------------------------------------------------------------------------
+
+from tcip_mcp.pipelines.components.backbones import _build_timm_backbone
+from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter, build_detector
+from tcip_mcp.pipelines.components.heads import (
+    ClassificationHead,
+    OrdinalHead,
+    RegressionHead,
+    SemanticSegHead,
+)
+from tcip_mcp.pipelines.components.necks import FPN, GlobalAvgPoolNeck
+
+
+def _resnet18(in_chans: int = 3):
+    return _build_timm_backbone("resnet18", pretrained=False, in_chans=in_chans)
+
+
+class BespokeComposed(nn.Module):
+    """Backbone + neck + task head — the sibling of the removed ``ComposedModel``."""
+
+    def __init__(self, backbone: nn.Module, neck: nn.Module, head: nn.Module) -> None:
+        super().__init__()
+        self.backbone = backbone
+        self.neck = neck
+        self.heads = nn.ModuleList([head])
+
+    def forward(self, images, targets=None):
+        feats = self.neck(self.backbone(images))
+        out: dict[str, torch.Tensor] = {}
+        if self.training and targets is not None:
+            for i, head in enumerate(self.heads):
+                o = head(feats, targets)
+                for k, v in head.compute_loss(o, targets).items():
+                    out[f"head{i}_{k}"] = v
+        else:
+            for i, head in enumerate(self.heads):
+                for k, v in head.decode(head(feats)).items():
+                    out[f"head{i}_{k}"] = v
+        return out
+
+    def freeze_backbone(self, to_stage: int) -> None:
+        if hasattr(self.backbone, "freeze_to"):
+            self.backbone.freeze_to(to_stage)
+
+    def get_param_groups(self, backbone_lr: float = 1e-4, head_lr: float = 1e-3) -> list[dict]:
+        head_params = [p for h in self.heads for p in h.parameters()]
+        return [
+            {"params": [p for p in self.backbone.parameters() if p.requires_grad], "lr": backbone_lr},
+            {"params": [p for p in self.neck.parameters() if p.requires_grad], "lr": head_lr},
+            {"params": [p for p in head_params if p.requires_grad], "lr": head_lr},
+        ]
+
+
+class BespokeDetection(nn.Module):
+    """Real backbone + FPN fed into a torchvision detector via ``BackboneNeckAdapter`` —
+    the detection / instance-seg sibling of the removed ``DetectionModel``."""
+
+    def __init__(self, num_classes: int, *, in_chans: int = 3, detector: str = "faster_rcnn",
+                 min_size: int = 800, max_size: int = 1333, **det_kwargs) -> None:
+        super().__init__()
+        self.backbone = _resnet18(in_chans)
+        self.neck = FPN(self.backbone.out_channels, out_channels=256)
+        adapter = BackboneNeckAdapter(self.backbone, self.neck)
+        with torch.no_grad():
+            names = list(adapter(torch.zeros(1, in_chans, 64, 64)).keys())
+        self.detector = build_detector(
+            detector, adapter, num_classes,
+            featmap_names=names, num_levels=len(names),
+            min_size=min_size, max_size=max_size, **det_kwargs,
+        )
+
+    def forward(self, images, targets=None):
+        if isinstance(images, torch.Tensor):
+            images = [images[i] for i in range(images.shape[0])]
+        if self.training and targets is not None:
+            return self.detector(images, targets)
+        return self.detector(images)
+
+    def freeze_backbone(self, to_stage: int) -> None:
+        if hasattr(self.backbone, "freeze_to"):
+            self.backbone.freeze_to(to_stage)
+
+
+def build_bespoke_classifier(*, num_classes: int, in_chans: int = 3, dropout: float = 0.0):
+    bb = _resnet18(in_chans)
+    neck = GlobalAvgPoolNeck(bb.out_channels)
+    return BespokeComposed(bb, neck, ClassificationHead(neck.out_channels, num_classes, dropout=dropout))
+
+
+def build_bespoke_ordinal(*, num_ranks: int, in_chans: int = 3):
+    bb = _resnet18(in_chans)
+    neck = GlobalAvgPoolNeck(bb.out_channels)
+    return BespokeComposed(bb, neck, OrdinalHead(neck.out_channels, num_ranks))
+
+
+def build_bespoke_regressor(*, in_chans: int = 3):
+    bb = _resnet18(in_chans)
+    neck = GlobalAvgPoolNeck(bb.out_channels)
+    return BespokeComposed(bb, neck, RegressionHead(neck.out_channels))
+
+
+def build_bespoke_semantic_seg(*, num_classes: int, in_chans: int = 3):
+    bb = _resnet18(in_chans)
+    neck = FPN(bb.out_channels, out_channels=256)
+    return BespokeComposed(bb, neck, SemanticSegHead(256, num_classes))
+
+
+def build_bespoke_instance_seg(*, num_classes: int = 1, in_chans: int = 3,
+                               min_size: int = 800, max_size: int = 1333):
+    return BespokeDetection(num_classes, in_chans=in_chans, detector="mask_rcnn",
+                            min_size=min_size, max_size=max_size)
+
+
+def build_bespoke_detection(*, num_classes: int = 1, in_chans: int = 3, detector: str = "faster_rcnn",
+                            min_size: int = 800, max_size: int = 1333):
+    return BespokeDetection(num_classes, in_chans=in_chans, detector=detector,
+                            min_size=min_size, max_size=max_size)
