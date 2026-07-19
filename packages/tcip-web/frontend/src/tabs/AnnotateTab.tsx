@@ -250,7 +250,7 @@ export function AnnotateTab() {
     streamingRef.current = false;
   }, [currentImageName]);
 
-  // ── Live canvas push (agent visibility: visualize_canvas) ──────────────
+  // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // The ref always holds the freshest closure so the debounced pusher never reads stale state.
   const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
   buildCanvasBodyRef.current = () => {
