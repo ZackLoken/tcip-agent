@@ -70,6 +70,27 @@ def test_every_decorated_tool_registers():
     assert not missing and not extra, f"missing from registry={missing}, unexpected={extra}"
 
 
+def test_consolidated_tools_present_and_removed_absent():
+    """Phase-6 consolidation: the merged tools register and the removed ones do not.
+
+    An explicit presence/absence check (not a hard-coded count) so the eval-on-disk /
+    splits merges and the machine-plumbing de-registrations stay put.
+    """
+    if importlib.util.find_spec("torch") is None:
+        pytest.skip("torch not installed: torch-dependent tool modules won't register")
+
+    from tcip_mcp.server import list_registered_tools
+
+    registered = set(list_registered_tools())
+    for present in ("evaluate_predictions", "make_splits"):
+        assert present in registered, f"{present} should be registered"
+    removed = {
+        "evaluate_detections", "evaluate_dataset", "split_dataset",
+        "log_metrics", "record_artifact", "get_training_metrics_path",
+    }
+    assert not (removed & registered), f"removed tools still registered: {removed & registered}"
+
+
 def test_docs_do_not_hardcode_tool_count():
     """Docs must point at scripts/list_tools.py, not cite a literal count.
 
