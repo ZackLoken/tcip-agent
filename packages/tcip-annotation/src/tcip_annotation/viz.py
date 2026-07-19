@@ -221,7 +221,7 @@ def render_comparison(
         image_path: Path to the source image.
         gt_boxes: Ground truth boxes (x1, y1, x2, y2, class_id).
         pred_boxes: Prediction boxes (x1, y1, x2, y2, class_id, confidence).
-        matches: Matched pairs from compute_matches (evaluate_detections detail=True).
+        matches: Matched pairs from compute_matches (evaluate_predictions detail=True).
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
     """
