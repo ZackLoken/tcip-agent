@@ -39,7 +39,6 @@ export function ProjectPicker() {
   const user = useStore((s) => s.user);
   const setUser = useStore((s) => s.setUser);
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
-  const [workspace, setWorkspace] = useState<string>("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [date, setDate] = useState("");
@@ -104,7 +103,6 @@ export function ProjectPicker() {
       .then((res) => {
         if (cancelled) return;
         setProjects(res.projects);
-        setWorkspace(res.workspace);
         // Auto-open the active project on first app load.
         if (!autoOpenAttempted) {
           autoOpenAttempted = true;
@@ -142,15 +140,6 @@ export function ProjectPicker() {
         <div className="animate-tcip-rise">
           <span className="tcip-eyebrow">Field station</span>
           <h1 className="text-xl font-semibold text-tcip-fg mt-2">Open a project</h1>
-          <p className="text-[12px] text-tcip-muted mt-1">
-            Each project is a season of captures the agent structured for you.
-            {workspace && (
-              <>
-                {" "}
-                Workspace <span className="font-mono">{workspace}</span>.
-              </>
-            )}
-          </p>
         </div>
 
         <label className="flex flex-col gap-1 animate-tcip-rise">
@@ -164,11 +153,6 @@ export function ProjectPicker() {
             spellCheck={false}
             autoComplete="off"
           />
-          <span className="text-[11px] text-tcip-muted">
-            Stamped as the author (<span className="font-mono">created_by</span>) of every label you
-            draw or accept — so your work and Emily&apos;s stay distinguishable. Shown in the status
-            bar.
-          </span>
         </label>
 
         {loadError && (
