@@ -108,29 +108,29 @@ def labelme_dataset(tmp_path: Path) -> Path:
 
 
 class TestLoadDatasetMultiFormat:
-    """Test load_dataset across annotation formats."""
+    """Test scan_dataset across annotation formats."""
 
     def test_load_yolo_dataset(self, yolo_dataset: Path):
-        from tcip_mcp.tools.data_tools import load_dataset
+        from tcip_mcp.tools.data_tools import scan_dataset
 
-        result = load_dataset(str(yolo_dataset))
+        result = scan_dataset(str(yolo_dataset))
         assert result["image_count"] == 3
         assert result["labels_detect_count"] == 3
         assert result["format"] == "yolo"
         assert result["paired_images"] == 3
 
     def test_load_voc_dataset(self, voc_dataset: Path):
-        from tcip_mcp.tools.data_tools import load_dataset
+        from tcip_mcp.tools.data_tools import scan_dataset
 
-        result = load_dataset(str(voc_dataset))
+        result = scan_dataset(str(voc_dataset))
         assert result["image_count"] == 2
         assert result["labels_detect_count"] == 2
         assert result["format"] == "voc"
 
     def test_load_labelme_dataset(self, labelme_dataset: Path):
-        from tcip_mcp.tools.data_tools import load_dataset
+        from tcip_mcp.tools.data_tools import scan_dataset
 
-        result = load_dataset(str(labelme_dataset))
+        result = scan_dataset(str(labelme_dataset))
         assert result["image_count"] == 2
         assert result["labels_detect_count"] == 2
         assert result["format"] == "labelme"
@@ -168,39 +168,39 @@ class TestValidateDataQualityMultiFormat:
 
 
 class TestLoadAnnotationsMultiFormat:
-    """Test load_annotations across formats."""
+    """Test read_annotations across formats."""
 
     def test_load_yolo_annotations(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import load_annotations
+        from tcip_mcp.tools.annotation_tools import read_annotations
 
         img = str(yolo_dataset / "images" / "img_001.jpg")
-        result = load_annotations(img)
+        result = read_annotations(img)
         assert "detect_labels" in result
         assert result["detect_labels"]["count"] == 2
         assert result["detect_labels"]["format"] == "yolo"
 
     def test_load_voc_annotations(self, voc_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import load_annotations
+        from tcip_mcp.tools.annotation_tools import read_annotations
 
         img = str(voc_dataset / "images" / "img_001.jpg")
-        result = load_annotations(img)
+        result = read_annotations(img)
         assert "detect_labels" in result
         assert result["detect_labels"]["count"] == 2
         assert result["detect_labels"]["format"] == "voc"
 
     def test_load_labelme_annotations(self, labelme_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import load_annotations
+        from tcip_mcp.tools.annotation_tools import read_annotations
 
         img = str(labelme_dataset / "images" / "img_001.jpg")
-        result = load_annotations(img)
+        result = read_annotations(img)
         assert "detect_labels" in result
         assert result["detect_labels"]["count"] == 2
         assert result["detect_labels"]["format"] == "labelme"
 
     def test_load_missing_image(self):
-        from tcip_mcp.tools.annotation_tools import load_annotations
+        from tcip_mcp.tools.annotation_tools import read_annotations
 
-        result = load_annotations("/nonexistent/image.jpg")
+        result = read_annotations("/nonexistent/image.jpg")
         assert "error" in result
 
 
@@ -247,7 +247,7 @@ class TestSaveAnnotationsMultiFormat:
 
     def test_save_roundtrip_voc(self, yolo_dataset: Path):
         """Save as VOC, then load back and verify."""
-        from tcip_mcp.tools.annotation_tools import save_annotations, load_annotations
+        from tcip_mcp.tools.annotation_tools import save_annotations, read_annotations
 
         img_path = str(yolo_dataset / "images" / "img_001.jpg")
         boxes = [
@@ -257,7 +257,7 @@ class TestSaveAnnotationsMultiFormat:
         save_result = save_annotations(img_path, boxes=boxes, fmt="voc")
         assert save_result["count"] == 1
 
-        load_result = load_annotations(img_path, fmt="voc")
+        load_result = read_annotations(img_path, fmt="voc")
         assert load_result["detect_labels"]["count"] == 2
 
 
@@ -265,13 +265,13 @@ class TestSaveAnnotationsMultiFormat:
 
 
 class TestEvaluatePredictions:
-    """Test evaluate_predictions with actual file I/O."""
+    """Test score_predictions with actual file I/O."""
 
     def test_evaluate_single_image(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import evaluate_predictions
+        from tcip_mcp.tools.annotation_tools import score_predictions
 
         img = str(yolo_dataset / "images" / "img_001.jpg")
-        result = evaluate_predictions(img, iou_threshold=0.5, conf_threshold=0.25)
+        result = score_predictions(img, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in result
         assert result["tp"] >= 0
         assert result["fp"] >= 0
@@ -280,9 +280,9 @@ class TestEvaluatePredictions:
         assert 0.0 <= result["recall"] <= 1.0
 
     def test_evaluate_folder(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import evaluate_predictions
+        from tcip_mcp.tools.annotation_tools import score_predictions
 
-        result = evaluate_predictions(str(yolo_dataset), iou_threshold=0.5)
+        result = score_predictions(str(yolo_dataset), iou_threshold=0.5)
         assert result["image_count"] == 3
         assert "precision" in result
         assert "recall" in result
@@ -292,13 +292,13 @@ class TestEvaluatePredictions:
 
 
 class TestEvaluatePredictionsDetail:
-    """Test evaluate_predictions(detail=True) per-detection breakdown with actual file I/O."""
+    """Test score_predictions(detail=True) per-detection breakdown with actual file I/O."""
 
     def test_detail_breakdown(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import evaluate_predictions
+        from tcip_mcp.tools.annotation_tools import score_predictions
 
         img = str(yolo_dataset / "images" / "img_001.jpg")
-        result = evaluate_predictions(img, iou_threshold=0.5, detail=True)
+        result = score_predictions(img, iou_threshold=0.5, detail=True)
         assert "error" not in result
         assert "detections" in result
 
