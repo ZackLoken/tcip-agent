@@ -148,7 +148,7 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    // Persist the current image position so the agent (get_active_context) sees the last
+    // Persist the current image position so the agent (view_gui_state) sees the last
     // image the human looked at. Debounced by the caller; fire-and-forget on the FE side.
     nav: (current_image_index: number) =>
       call<{ status: string; current_image_index: number }>("/api/dataset/nav", {
