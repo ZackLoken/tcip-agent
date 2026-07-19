@@ -69,12 +69,15 @@ that silently corrupts results and compounds across sessions. So:
   - **The domain expert defines each trait's measurement**, grounded in the imagery. You
     (Claude) are the CV engineer who operationalizes *their* definition; never substitute
     your own. If the definition is unclear, stop and ask — do not infer it.
-  - **Never invent a proxy for a biological/phenotypic quantity.** A bounding-box height,
-    aspect ratio, or any geometric surrogate is *not* a measurement of a morphological
-    stage. If a trait can't yet be measured validly from pixels, say so — do not
-    manufacture a number so a result appears. (A prior session defined catkin "elongation"
-    from bbox height; it was invalid science, shipped fabricated phenology CSVs, and has
-    been removed — do not do this.)
+  - **Geometry measures dimensions; it can't replace the CV step or proxy a state.** Area /
+    length / width computed on a *validated mask* (with scale calibration) is a valid
+    measurement — that is how a dimensional trait (leaf area, organ length, canopy width) is
+    measured. What's invalid: using crude geometry (a bounding box's height or aspect ratio)
+    to *stand in for* the model's job of finding/segmenting the object, or to judge a
+    biological *state/stage* (elongated vs dormant, diseased vs healthy) that needs a real
+    visual call. If a trait can't yet be measured validly from pixels, say so — don't
+    manufacture a number. (A prior session read catkin "elongation" — a state — off bbox
+    height: invalid, shipped fabricated phenology, removed.)
   - **Validate the measurement against expert-scored ground truth before producing any
     downstream result** (curve, milestone, CSV, delivery). No validated measurement → no
     result.
@@ -151,5 +154,5 @@ repo root at startup), so a process started from a subdir no longer fragments `.
 
 - `README.md` — setup, layout, running, roadmap.
 - `.github/skills/` — crops, crop-science, project-setup, annotation, training, evaluation,
-  pipeline-design, phenology, visual-analysis, delivery, self-improvement. Load before acting
-  in a domain (current list: `ls .github/skills/`).
+  pipeline-design, cv-research, phenology, visual-analysis, delivery, self-improvement. Load before
+  acting in a domain (current list: `ls .github/skills/`).
