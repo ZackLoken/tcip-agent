@@ -37,6 +37,64 @@ def test_fence_settings_valid_json_denies_internals_allows_toolkit():
     assert "agent_powershell_guard.py" in hooks["PowerShell"]
 
 
+# the exact platform-internal deny set — pinned so the web-research grant can't widen the fence.
+_EXPECTED_DENY = {
+    "Edit(packages/**)",
+    "Edit(tests/**)",
+    "Edit(.github/**)",
+    "Edit(scripts/**)",
+    "Edit(.claude/**)",
+    "Edit(CLAUDE.md)",
+    "Edit(.mcp.json)",
+    "Edit(pyproject.toml)",
+    "Edit(package.json)",
+    "Edit(tsconfig.json)",
+    "Edit(.gitignore)",
+    "Edit(README.md)",
+    "Bash(rm:*)",
+    "Bash(rmdir:*)",
+    "Bash(git push:*)",
+    "Bash(git commit:*)",
+    "Bash(git reset:*)",
+    "Bash(git checkout:*)",
+    "Bash(git clean:*)",
+}
+
+# academic hosts WebFetch is scoped to (cv-research grant) — no open web.
+_ACADEMIC_WEBFETCH = {
+    "WebFetch(domain:arxiv.org)",
+    "WebFetch(domain:www.arxiv.org)",
+    "WebFetch(domain:semanticscholar.org)",
+    "WebFetch(domain:www.semanticscholar.org)",
+    "WebFetch(domain:openreview.net)",
+    "WebFetch(domain:paperswithcode.com)",
+    "WebFetch(domain:aclanthology.org)",
+    "WebFetch(domain:biorxiv.org)",
+    "WebFetch(domain:proceedings.mlr.press)",
+    "WebFetch(domain:openaccess.thecvf.com)",
+}
+
+
+def test_fence_grants_academic_scoped_web_research_only():
+    # The cv-research capability adds WebSearch + WebFetch, but WebFetch is scoped per-domain to
+    # academic sources — never a blanket WebFetch(*) / open web.
+    data = json.loads(FENCE.read_text(encoding="utf-8"))
+    allow = set(data["permissions"]["allow"])
+    assert "WebSearch" in allow
+    assert _ACADEMIC_WEBFETCH <= allow, _ACADEMIC_WEBFETCH - allow
+    # Every WebFetch grant is domain-scoped to an academic host; no blanket web access leaks in.
+    webfetch = {r for r in allow if r.startswith("WebFetch")}
+    assert webfetch == _ACADEMIC_WEBFETCH
+    assert "WebFetch(*)" not in allow
+    assert "WebFetch" not in allow  # bare (unscoped) WebFetch is not granted
+
+
+def test_fence_web_research_grant_leaves_platform_deny_unchanged():
+    # Adding web research must not touch the platform-internal deny fence.
+    data = json.loads(FENCE.read_text(encoding="utf-8"))
+    assert set(data["permissions"]["deny"]) == _EXPECTED_DENY
+
+
 def test_fence_settings_wires_sessionstart_only_no_stop():
     # The fast session-start ritual injection is wired; the blocking Stop hook was reverted
     # (Anthropic guidance: Stop-block to force an action traps the user) and must stay absent.
