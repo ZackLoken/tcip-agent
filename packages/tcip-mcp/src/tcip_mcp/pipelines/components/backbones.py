@@ -13,8 +13,6 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from tcip_mcp.pipelines.registry import BACKBONES
-
 logger = logging.getLogger(__name__)
 
 try:
@@ -205,7 +203,7 @@ def _freeze_sequential_fraction(
 
 
 # ---------------------------------------------------------------------------
-# Registration
+# Reference catalog — dataset-size / task hints for the agent choosing a timm backbone.
 # ---------------------------------------------------------------------------
 
 _TIMM_BACKBONES: dict[str, dict] = {
@@ -226,34 +224,3 @@ _TIMM_BACKBONES: dict[str, dict] = {
     "vit_small_patch16_224": {"category": "vit", "params_M": 22.1, "dataset_size": ">2000", "tasks": "classification,regression,ordinal"},
     "vit_base_patch16_224": {"category": "vit", "params_M": 86.6, "dataset_size": ">5000", "tasks": "classification,regression,ordinal"},
 }
-
-for _name, _info in _TIMM_BACKBONES.items():
-    meta = {
-        "description": f"{_name} backbone via timm",
-        "params_M": _info["params_M"],
-        "dataset_size_hint": _info["dataset_size"],
-        "valid_tasks": _info["tasks"].split(","),
-        "requires": "timm",
-        "supported_channels": "any",  # timm threads in_chans into the stem conv
-    }
-    BACKBONES.register_factory(
-        _name,
-        lambda n=_name, **kw: _build_timm_backbone(n, **kw),
-        category=_info["category"],
-        metadata=meta,
-    )
-
-# Torchvision fallbacks (no timm needed)
-for _tv_name in ("resnet50", "resnet101"):
-    _fb_name = f"tv_{_tv_name}"
-    BACKBONES.register_factory(
-        _fb_name,
-        lambda v=_tv_name, **kw: _build_tv_resnet(v, **kw),
-        category="cnn_torchvision",
-        metadata={
-            "description": f"{_tv_name} via torchvision (no timm required)",
-            "valid_tasks": ["all"],
-            "requires": "torchvision",
-            "supported_channels": "any",  # stem conv adapted to in_chans
-        },
-    )
