@@ -70,7 +70,6 @@ config = {
 | `check_training_status` | Check run progress, metrics, and TensorBoard URL |
 | `list_training_runs` | List all runs in session |
 | `run_hpo` | HPO via random search or Optuna with TensorBoard logging |
-| `get_training_metrics_path` | Get path to live metrics JSONL |
 | `get_worst_predictions` | Find images with worst prediction quality |
 | `create_experiment` | Track training run with full lineage |
 
@@ -96,10 +95,11 @@ run_hpo(base_config=config, n_trials=20, output_dir="runs/hpo_1")
 
 ## Dataset Splits
 
-Use `split_dataset` to create train/val/test splits:
+Use `make_splits` to create train/val/test splits:
 - Default: 70/20/10, leakage-free (sibling tiles of one source image stay in the same split)
-- `stratified=True` (opt-in, default `False`) balances splits by each source's foreground
-  annotation count — not per-class distribution
+- `stratify_foreground=True` (default) balances splits by each source's foreground annotation
+  count — not per-class distribution
+- `materialize=True` also lays out a YOLO `{train,val,test}/{images,labels}/` tree
 - Reproducible with random seed
 
 Feeding review-corrected labels back into training? `materialize_review_dataset` (see the
