@@ -9,24 +9,18 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
-import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
-import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
-import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
-from tcip_mcp.pipelines.composer import compose_model  # noqa: E402
+from tcip_mcp.pipelines.model_build import build_model  # noqa: E402
 
 TILE = 64
 
 
 def _detection_checkpoint(tmp_path: Path) -> str:
-    spec = {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "fpn", "out_channels": 256},
-        "heads": [{"name": "anchor_detection", "num_classes": 1, "min_size": TILE, "max_size": TILE * 2}],
-    }
-    model = compose_model(spec)
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                    "builder_kwargs": {"num_classes": 1, "min_size": TILE, "max_size": TILE * 2},
+                    "task": "detection"}
+    model = build_model({"model_source": model_source})
     ckpt = tmp_path / "model_best.pt"
-    torch.save({"model_spec": spec, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
     return str(ckpt)
 
 
