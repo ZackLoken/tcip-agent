@@ -82,10 +82,12 @@ There must be something to train on. Two paths (see `.github/skills/annotation`)
 Never train or evaluate on an unconfirmed format: if `load_annotations` returns
 `format_confident: false`, stop and confirm.
 
-## 5. Split — `split_dataset` / `make_splits`
+## 5. Split — `make_splits`
 
-Create leakage-free train/val/test splits. Prefer `make_splits` (group-aware, keeps
-sibling tiles of one source image in the same split) when tiling is involved.
+Create leakage-free train/val/test splits with `make_splits` (group-aware, keeps sibling
+tiles of one source image in the same split). Non-destructive by default (writes stem
+manifests + stats); pass `materialize=True` to also lay out a YOLO
+`{train,val,test}/{images,labels}/` tree.
 
 ## 6. Recommend a model, train, infer
 
