@@ -20,11 +20,6 @@ pytest.importorskip("torchvision")
 from torch import nn  # noqa: E402
 from torch.utils.data import DataLoader  # noqa: E402
 
-import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
-import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
-import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
-import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
-from tcip_mcp.pipelines.composer import compose_model  # noqa: E402
 from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     create_run, task_collate, train,
@@ -86,9 +81,9 @@ def test_freeze_to_is_per_stage_for_tv_backbones():
     any freeze_to >= 1, so intermediate schedule stages silently trained
     heads-only.
     """
-    from tcip_mcp.pipelines.registry import BACKBONES
+    from tcip_mcp.pipelines.components.backbones import _build_tv_resnet
 
-    bb = BACKBONES.build("tv_resnet50", pretrained=False)
+    bb = _build_tv_resnet("resnet50", pretrained=False)
     counts = []
     for stage in range(bb.num_stages + 1):  # 0 .. 4
         bb.freeze_to(stage)
@@ -126,21 +121,18 @@ def _classification_loader(tmp_path: Path, n: int = 6, batch_size: int = 2) -> D
     return DataLoader(ds, batch_size=batch_size, collate_fn=task_collate("classification"))
 
 
-def _cls_spec() -> dict:
+def _model_source() -> dict:
     # resnet18 (not tv_resnet50): these integration tests exercise backbone-agnostic
     # LR-schedule / freeze / warmup logic — the smaller backbone routes through the identical
     # BackboneWrapper.freeze_to path and cuts per-test model-construction cost. The tv_* freeze
-    # branch stays covered by test_freeze_to_is_per_stage_for_tv_backbones (kept on tv_resnet50).
-    return {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "gap"},
-        "heads": [{"name": "classification", "num_classes": 2}],
-    }
+    # branch stays covered by test_freeze_to_is_per_stage_for_tv_backbones (kept on resnet50).
+    return {"builder": "tests.bespoke_models:build_bespoke_classifier",
+            "builder_kwargs": {"num_classes": 2}, "task": "classification"}
 
 
 def _cfg(stages, **extra) -> dict:
     cfg = {
-        "model_spec": _cls_spec(),
+        "model_source": _model_source(),
         "device": "cpu",
         "stages": stages,
         "mixed_precision": False,
@@ -158,8 +150,6 @@ def _cfg(stages, **extra) -> dict:
 
 def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
     loader = _classification_loader(tmp_path)
-    spec = _cls_spec()
-    compose_model(spec)
     # Stage 0 fully unfreezes; stage 1 re-freezes the backbone -> guard must fire.
     cfg = _cfg([{"freeze_to": 0, "epochs": 1}, {"freeze_to": -1, "epochs": 1}])
     run = create_run(cfg, str(tmp_path / "out"))
@@ -170,8 +160,6 @@ def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
 
 def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
     loader = _classification_loader(tmp_path)
-    spec = _cls_spec()
-    compose_model(spec)
     cfg = _cfg(
         [{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 2}],
         stage_warmup_epochs=2,
@@ -189,8 +177,6 @@ def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
 
 
 def test_lr_scaling_applied(tmp_path: Path):
-    spec = _cls_spec()
-    compose_model(spec)
     stages = [{"freeze_to": -1, "epochs": 1, "gradient_accumulation_steps": 2}]
 
     # batch_size 2 * accum 2 -> eff_batch 4. ref 4 -> mult 1.0.
@@ -210,8 +196,6 @@ def test_lr_scaling_applied(tmp_path: Path):
 
 def test_two_stage_handoff_smoke(tmp_path: Path):
     loader = _classification_loader(tmp_path)
-    spec = _cls_spec()
-    compose_model(spec)
     cfg = _cfg([{"freeze_to": -1, "epochs": 1}, {"freeze_to": 0, "epochs": 1}])
     run = create_run(cfg, str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="classification")
