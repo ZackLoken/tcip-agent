@@ -124,6 +124,53 @@ This is the one canonical `model_spec` example — `training/SKILL.md` reference
 repeating it (a prior duplicate there had drifted to the same non-existent `detection_head` /
 `focal_loss` names).
 
+## You own the model AND the training loop
+
+The platform is a **toolkit you compose, not a mold you fill**. You are the CV scientist: for a
+trait the registry doesn't already serve well, write a bespoke `nn.Module` — from scratch or by
+modifying primitives — and, when the technique is novel, a custom training loop. Nothing forces a
+model to imitate the composed detectors or the default trainer.
+
+**Tailor the architecture to the data in hand** (CLAUDE.md: derive, don't pin):
+
+- **Anchors from the GT box shapes**, not a fixed `(0.5, 1, 2)`. Feed the dataset's GT `(w, h)`
+  through `pipelines.derivations.gt_aspect_ratios` and set anchor *sizes* from the GT object-size
+  distribution, so anchors cover the objects that actually occur (e.g. elongated organs a default
+  ratio can't match).
+- **Strides / feature levels to the object scale** — add a finer pyramid level for tiny objects,
+  drop levels you don't need.
+- **Normalization to the batch size** — with the tiny batches large detectors force, BatchNorm
+  statistics are unreliable; prefer `GroupNorm` (or another batch-independent norm).
+- **Activations / layers where the data warrants** it — this is engineering judgment, not a menu.
+
+**Two seams make bespoke work first-class, and the platform guarantees integrity around it:**
+
+- `pipelines.model_build.build_model(config)` builds from either a `model_spec` (registry-composed)
+  or a `model_source` — an *importable* builder you wrote (`{"builder": "my_module:build_net",
+  "builder_kwargs": {...}, "source_files": [...], "task": "detection", "in_chans": 3}`). It is
+  imported, never `exec`'d, so the run is reproducible from source. `pipelines.model_contract`
+  states the *only* model-side contract — the measurement boundary: your model must train (finite
+  gradient loss) and emit inference output the library scorers consume. `check_model_contract` and
+  `overfit_check` are the cheap pre-flight proofs it learns.
+- `training_source` points the envelope at your custom `train(ctx)`. The `TrainContext` (`ctx`,
+  `pipelines.training.envelope`) hands you the craft library — prebuilt leakage-free loaders,
+  `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed` — plus the
+  envelope-owned sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`,
+  `ctx.should_cancel`. Route your loop's metrics and checkpoints through those sinks and the run
+  stays audited, immutably versioned, and provenance-snapshotted no matter what your loop does.
+  `ctx.default_train()` is **one convenience**, not a requirement — call it, extend it, or replace
+  it entirely.
+
+When the registry and your own primitives both plateau on a trait, the next move is to research the
+literature for a technique that fits — see the `cv-research` skill for the research→implement→validate
+loop (and the rule that a new method must beat the baseline on the *measured phenotype* before you
+trust it).
+
+**Dimensional traits — mask geometry is a supported measurement.** For area / length / width of a
+segmented organ, `pipelines.measurement.mask_geometry` (also `ctx.mask_geometry`) computes those on
+a *validated* mask in pixels, and in mm when given a scale — geometry on a validated mask is a valid
+measurement, subject to the same validate-before-you-trust rule as any other.
+
 ## Multi-phase pipelines
 
 When a pattern requires chaining phases (Pattern A, C, D), use a pipeline spec:
