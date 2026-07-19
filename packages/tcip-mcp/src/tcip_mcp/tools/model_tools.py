@@ -16,23 +16,36 @@ def _registry_root(project_path: str) -> str:
 @mcp.tool()
 @audited
 def register_model(
-    name: str,
-    checkpoint_path: str,
-    config: dict,
+    name: str = "",
+    checkpoint_path: str = "",
+    config: dict | None = None,
     project_path: str = "",
     metrics: dict | None = None,
     tags: list[str] | None = None,
+    experiment_id: str = "",
 ) -> dict:
     """Register a trained model in the project model registry.
 
+    Two modes:
+      - Explicit: pass ``config`` (and optionally ``metrics``/``tags``) directly.
+      - From experiment: pass ``experiment_id`` to pull that experiment's config + the
+        checkpoint's own metrics, register with an ``experiment:<id>`` back-reference, and
+        record the checkpoint in the experiment's lineage. ``name`` then defaults to the
+        experiment id. (Training already does this on completion; use it for manual /
+        re-registration.)
+
     Args:
-        name: Model name (e.g. 'hazelnut_catkin_v1').
+        name: Model name (e.g. 'hazelnut_catkin_v1'); defaults to the experiment id in experiment mode.
         checkpoint_path: Path to the .pt checkpoint.
-        config: Training configuration used.
+        config: Training configuration used (explicit mode; ignored when ``experiment_id`` is set).
         project_path: Project root directory. Empty defaults to the platform state root.
-        metrics: Evaluation metrics.
-        tags: Tags for filtering.
+        metrics: Evaluation metrics (explicit mode).
+        tags: Tags for filtering (explicit mode).
+        experiment_id: Register from this experiment instead of an explicit config.
     """
+    if experiment_id:
+        from tcip_mcp.experiments import register_model_from_experiment as _reg
+        return _reg(experiment_id, checkpoint_path, project_path=project_path, name=name or None)
     # Record the model kind so the GUI + agent know how to run it (e.g. a pretrained YOLO
     # baseline registers as ``ultralytics``); best-effort — a checkpoint that can't be sniffed
     # still registers, and build_predictor re-sniffs at inference time.
@@ -43,7 +56,7 @@ def register_model(
     except Exception:
         kind = None
     registry = ModelRegistry(_registry_root(project_path))
-    return registry.register_model(name, checkpoint_path, config, metrics, tags, kind=kind)
+    return registry.register_model(name, checkpoint_path, config or {}, metrics, tags, kind=kind)
 
 
 @mcp.tool()
@@ -62,7 +75,7 @@ def list_registered_models(project_path: str = "", tag: str | None = None) -> di
 
 @mcp.tool()
 @audited
-def get_best_model(project_path: str = "", metric: str = "val_map50") -> dict:
+def select_best_model(project_path: str = "", metric: str = "val_map50") -> dict:
     """Get the best registered model by a metric.
 
     Args:
@@ -82,28 +95,3 @@ def get_best_model(project_path: str = "", metric: str = "val_map50") -> dict:
             "n_models": len(models),
         }
     return best
-
-
-@mcp.tool()
-@audited
-def register_model_from_experiment(
-    experiment_id: str,
-    checkpoint_path: str,
-    project_path: str = "",
-    name: str | None = None,
-) -> dict:
-    """Register a completed experiment's model into the project registry.
-
-    Pulls the experiment's config + final metrics, registers the checkpoint with an
-    ``experiment:<id>`` back-reference, and records it in the experiment's lineage.
-    (Training already does this automatically on completion; use this for manual /
-    re-registration.)
-
-    Args:
-        experiment_id: The experiment to register from.
-        checkpoint_path: Path to the model checkpoint (e.g. model_best.pt).
-        project_path: Project root (registry at ``<path>/.tcip/models``); empty defaults to the platform state root.
-        name: Registry name (defaults to the experiment id).
-    """
-    from tcip_mcp.experiments import register_model_from_experiment as _reg
-    return _reg(experiment_id, checkpoint_path, project_path=project_path, name=name)
