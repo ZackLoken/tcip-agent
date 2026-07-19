@@ -1,12 +1,14 @@
-"""Minimal end-to-end smoke tests for each composable task type.
+"""Minimal end-to-end smoke tests for each task type via bespoke ``model_source`` builders.
 
 The existing ``test_full_pipeline.py`` covers classification (synthetic) and
 detection (gated on real sample data). This file locks the
-compose -> build_dataset -> train contract for the task types that were
+build_model -> build_dataset -> train contract for the task types that were
 otherwise untested, on tiny synthetic data, CPU, one epoch. The assertion is
 deliberately weak: the pipeline runs to completion and produces finite losses
 and a checkpoint. That is enough to catch the regressions this repo is prone to
 (e.g. a dataset/head/collate shape mismatch).
+
+Each smoke drives one of the sibling bespoke builders in ``tests.bespoke_models``.
 
 Kept tiny (a handful of 64x64 images, 1 epoch) to stay well under the CI
 per-test timeout.
@@ -24,13 +26,6 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 from torch.utils.data import DataLoader
 
-# Trigger component registration (side-effect imports).
-import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
-import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
-import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
-import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
-
-from tcip_mcp.pipelines.composer import compose_model  # noqa: E402
 from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     create_run,
@@ -56,9 +51,13 @@ def _save_png(path: Path, bright: bool = False) -> None:
     save_image(img, str(path))
 
 
-def _train_config(spec: dict) -> dict:
+def _model_source(builder: str, **kwargs) -> dict:
+    return {"builder": f"tests.bespoke_models:{builder}", "builder_kwargs": kwargs}
+
+
+def _train_config(model_source: dict) -> dict:
     return {
-        "model_spec": spec,
+        "model_source": model_source,
         "device": "cpu",
         "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False,
@@ -77,31 +76,6 @@ def _assert_trained(run, output_dir: Path) -> None:
     train_loss = run.metrics_history[-1]["train_loss"]
     assert math.isfinite(train_loss), f"non-finite train_loss: {train_loss}"
     assert (output_dir / "model_best.pt").is_file()
-
-
-def _detection_backbone_spec(head_name: str, num_classes: int, detector: str | None = None) -> dict:
-    # Small input sizes keep the torchvision detector fast on CPU.
-    head = {
-        "name": head_name,
-        "num_classes": num_classes,
-        "min_size": IMG,
-        "max_size": IMG * 2,
-    }
-    if detector:
-        head["detector"] = detector
-    return {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "fpn", "out_channels": 256},
-        "heads": [head],
-    }
-
-
-def _gap_spec(head: dict) -> dict:
-    return {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "gap"},
-        "heads": [head],
-    }
 
 
 # --------------------------------------------------------------------------
@@ -128,9 +102,9 @@ def test_detection_e2e(tmp_path: Path):
     )
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
-    spec = _detection_backbone_spec("anchor_detection", num_classes=1)
-    compose_model(spec)  # must compose without error
-    run = create_run(_train_config(spec), str(tmp_path / "out"))
+    model_source = _model_source("build_bespoke_detection", num_classes=1,
+                                 min_size=IMG, max_size=IMG * 2)
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="detection")
     _assert_trained(run, tmp_path / "out")
 
@@ -158,9 +132,9 @@ def test_instance_seg_e2e(tmp_path: Path):
     assert dataset[0][1]["masks"].shape[0] > 0
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("instance_seg"))
 
-    spec = _detection_backbone_spec("anchor_detection", num_classes=1, detector="mask_rcnn")
-    compose_model(spec)
-    run = create_run(_train_config(spec), str(tmp_path / "out"))
+    model_source = _model_source("build_bespoke_instance_seg", num_classes=1,
+                                 min_size=IMG, max_size=IMG * 2)
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="instance_seg")
     _assert_trained(run, tmp_path / "out")
 
@@ -187,13 +161,8 @@ def test_semantic_seg_e2e(tmp_path: Path):
     )
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
 
-    spec = {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "fpn", "out_channels": 256},
-        "heads": [{"name": "semantic_seg", "num_classes": 2}],
-    }
-    compose_model(spec)
-    run = create_run(_train_config(spec), str(tmp_path / "out"))
+    model_source = _model_source("build_bespoke_semantic_seg", num_classes=2)
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="semantic_seg")
     _assert_trained(run, tmp_path / "out")
 
@@ -219,9 +188,8 @@ def test_ordinal_e2e(tmp_path: Path):
     )
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
 
-    spec = _gap_spec({"name": "ordinal", "num_ranks": 3})
-    compose_model(spec)
-    run = create_run(_train_config(spec), str(tmp_path / "out"))
+    model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="ordinal")
     _assert_trained(run, tmp_path / "out")
 
@@ -240,8 +208,7 @@ def test_regression_e2e(tmp_path: Path):
     )
     loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
 
-    spec = _gap_spec({"name": "regression"})
-    compose_model(spec)
-    run = create_run(_train_config(spec), str(tmp_path / "out"))
+    model_source = _model_source("build_bespoke_regressor")
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="regression")
     _assert_trained(run, tmp_path / "out")
