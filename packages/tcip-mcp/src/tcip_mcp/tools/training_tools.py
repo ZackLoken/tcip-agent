@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 def validate_config(config: dict) -> dict:
     """Validate a training configuration before launching.
 
-    Config structure (new composable format):
-        model_spec: {backbone, neck, heads: [{name, task, ...}], loss}
+    Config structure:
+        model_source: {builder, builder_kwargs, task, in_chans}
         data: {images_dir, labels_dir, task}
         training: {batch_size, device, stages, mixed_precision, ...}
 
@@ -30,13 +30,21 @@ def validate_config(config: dict) -> dict:
     """
     from tcip_mcp.pipelines.schemas import validate_train_config_schema
 
-    # Pydantic schema: type/structure + (via ModelSpecSchema) registry/channel-compat.
+    # Pydantic schema: type/structure of data/training.
     issues: list[str] = list(validate_train_config_schema(config))
 
-    # Model spec presence (keep the exact alias callers/tests rely on).
-    model_spec = config.get("model_spec") or config.get("model")
-    if not model_spec:
-        issues.append("Missing 'model_spec' section")
+    # model_source presence + builder importability (the one build path).
+    model_source = config.get("model_source")
+    if not model_source:
+        issues.append("Missing 'model_source' section")
+    elif not isinstance(model_source, dict) or not model_source.get("builder"):
+        issues.append("model_source must be a dict with a 'builder' (module:function)")
+    else:
+        from tcip_mcp.pipelines.model_build import _import_dotted
+        try:
+            _import_dotted(model_source["builder"])
+        except Exception as exc:
+            issues.append(f"model_source.builder not importable: {exc}")
 
     # Data config validation
     data_cfg = config.get("data")
@@ -72,13 +80,13 @@ def validate_config(config: dict) -> dict:
 @mcp.tool()
 @audited
 def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dict:
-    """Launch a training run asynchronously using the composable model system.
+    """Launch a training run asynchronously from a bespoke ``model_source`` builder.
 
     The run will proceed in a background thread. Use check_training_status
     to monitor progress.
 
     Args:
-        config: Full training configuration dict with model_spec, data, training sections.
+        config: Full training configuration dict with model_source, data, training sections.
         output_dir: Directory for checkpoints and logs.
         resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
             (restores model + optimizer + scheduler + scaler and continues).
@@ -96,12 +104,12 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
 
     from tcip_mcp.pipelines.training.generic_trainer import TrainConfig, create_run
 
-    model_spec = config.get("model_spec") or config["model"]
+    model_source = config.get("model_source", {})
     train_cfg = config.get("training", {})
     data_cfg = config.get("data", {})
 
     train_config = TrainConfig(
-        model_spec=model_spec,
+        model_source=model_source,
         dataset=data_cfg,
         augmentation=config.get("augmentation", {}),
         sampler=config.get("sampler", "random"),
@@ -122,9 +130,9 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     # trainer write exactly where the web metrics stream reads (``<base>/<run_id>/``).
     run.output_dir = str(Path(output_dir) / run.run_id)
 
-    # Determine task from model spec heads
-    heads = model_spec.get("heads", [{}])
-    task = heads[0].get("task", "detection") if heads else "detection"
+    # Task drives collate + measurement routing: the bespoke model_source declares it,
+    # falling back to the data section.
+    task = model_source.get("task") or data_cfg.get("task", "detection")
 
     # Build data loaders (build_dataset is used inside _auto_train_val).
     from tcip_mcp.pipelines.data.samplers import build_sampler
@@ -175,32 +183,6 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
             "Provide a val split (data.val_images_dir) or enable auto_val.",
             task, run.run_id,
         )
-
-    # Fill spec params the agent didn't pin (in_chans from the raster, num_classes from the labels;
-    # explicit wins) at the same pre-compose seam as _inject_imbalance_loss. A hiccup mustn't fail the launch.
-    try:
-        from tcip_mcp.pipelines.derivations import resolve_spec_derivations
-        _base_ds = getattr(train_ds, "base", train_ds)
-        _img_dir = getattr(_base_ds, "images_dir", None) or data_cfg.get("images_dir")
-        _sample = None
-        if _img_dir:
-            for _p in sorted(Path(str(_img_dir)).glob("*")):
-                if _p.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"):
-                    _sample = str(_p)
-                    break
-        # union of train+val so a class landing only in val isn't dropped from the head
-        _cd = dict(getattr(train_ds, "class_distribution", None) or {})
-        _val_cd = getattr(val_ds, "class_distribution", None) if val_ds is not None else None
-        for _k, _v in (_val_cd or {}).items():
-            _cd[_k] = _cd.get(_k, 0) + _v
-        resolve_spec_derivations(model_spec, sample_image=_sample, class_distribution=_cd or None)
-    except Exception:
-        logger.debug("spec derivation skipped", exc_info=True)
-
-    # W8: inject imbalance loss + (auto) class weights into image-level head specs.
-    # train() composes the model from run.config["model_spec"] (== config), so editing
-    # the head specs here before the thread starts reaches the model.
-    _inject_imbalance_loss(config.get("loss"), model_spec, train_ds)
 
     # Auto-create experiment if not already tracked. Experiments are immutable:
     # reusing an id that already has a run would interleave metrics histories and
@@ -362,16 +344,15 @@ def run_hpo(
         from tcip_mcp.pipelines.data.samplers import build_sampler
         from torch.utils.data import DataLoader
 
-        model_spec = merged.get("model_spec") or merged.get("model")
-        if not model_spec:
+        model_source = merged.get("model_source")
+        if not model_source:
             # Worst-possible value in either direction — a dead trial must never
             # outrank a real one (0.0 beat every -composite under maximize).
             return float("inf") if direction == "minimize" else float("-inf")
 
         data_cfg = merged.get("data", {})
         train_cfg = merged.get("training", {})
-        heads = (model_spec.get("heads") or [{}])
-        task = heads[0].get("task", "detection") if heads else "detection"
+        task = model_source.get("task") or data_cfg.get("task", "detection")
 
         trial_dir = str(Path(output_dir) / f"trial_{trial.number}")
         # Tag as an HPO trial so it stays out of the Training-tab run list.
@@ -389,7 +370,6 @@ def run_hpo(
 
             # W4 auto-val gives the val_loader that W1's composite / ASHA need.
             train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
-            _inject_imbalance_loss(merged.get("loss"), model_spec, train_ds)
             sampler = build_sampler(merged.get("sampler", "random"), train_ds)
             batch_size = train_cfg.get("batch_size", trial_params.get("batch_size", 4))
             num_workers = train_cfg.get("num_workers", 0)
@@ -476,20 +456,14 @@ def run_hpo(
 
 
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
-    """Apply flat HPO params onto a deep copy of ``base_config``, in the right places.
+    """Apply flat HPO params onto a deep copy of ``base_config``, where ``train()`` reads them.
 
-    A param only counts if it lands where ``generic_trainer.train()`` actually reads
-    it. Architecture params go into ``model_spec`` (the prior implementation dropped
-    ``backbone`` entirely and wrote ``head`` / ``min_size`` to an unread
-    ``config["model"]`` key, so every trial trained the same model). Optimizer params
-    go into TOP-LEVEL ``config["optimizer"]`` and the unfreeze schedule into
-    TOP-LEVEL ``config["stages"]`` — the trainer reads both from the top level and
-    never reads ``training["stages"]`` or a stage's ``lr`` (the prior implementation
-    wrote there, so every lr/weight_decay trial trained identically):
+    Architecture is owned by the bespoke ``model_source`` builder (unknown to the sweep),
+    so only optimizer / schedule / batch axes are applied here. Optimizer params go into
+    TOP-LEVEL ``config["optimizer"]`` and the unfreeze schedule into TOP-LEVEL
+    ``config["stages"]`` — the trainer reads both from the top level and never reads
+    ``training["stages"]`` or a stage's ``lr``:
 
-      - ``backbone``     -> ``model_spec["backbone"]["name"]``
-      - ``head``         -> ``model_spec["heads"][0]["detector"]`` (faster_rcnn/fcos/retinanet)
-      - ``min_size``     -> ``model_spec["heads"][0]["min_size"]``
       - ``lr``           -> ``optimizer["head_lr"]`` (+ ``backbone_lr`` at lr*0.1) plus a
                             3-stage ``freeze_to`` progressive-unfreeze schedule
       - ``weight_decay`` -> ``optimizer["weight_decay"]``
@@ -500,15 +474,7 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     from tcip_mcp.pipelines.schemas import normalize_train_config
 
     cfg = normalize_train_config(copy.deepcopy(base_config))
-    spec = cfg.get("model_spec")
     training = cfg.setdefault("training", {})
-
-    def _first_head() -> dict:
-        heads = spec.get("heads") or [{}]
-        if not isinstance(heads[0], dict):
-            heads[0] = {}
-        spec["heads"] = heads
-        return heads[0]
 
     for key, value in params.items():
         if key == "lr":
@@ -528,19 +494,6 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
             training["batch_size"] = value
         elif key == "weight_decay":
             cfg.setdefault("optimizer", {})["weight_decay"] = value
-        elif spec is None:
-            # No model spec to mutate — keep scalar params on training as a fallback.
-            training[key] = value
-        elif key == "backbone":
-            bb = spec.get("backbone")
-            if isinstance(bb, dict):
-                bb["name"] = value
-            else:
-                spec["backbone"] = {"name": value}
-        elif key == "head":
-            _first_head()["detector"] = value
-        elif key == "min_size":
-            _first_head()["min_size"] = value
         else:
             training[key] = value
     return cfg
@@ -578,34 +531,6 @@ def _ensure_experiment(
     )
     create_experiment(fresh_id, config, parent_experiment=experiment_id, data_source=data_source)
     return fresh_id
-
-
-def _inject_imbalance_loss(loss_cfg, model_spec: dict, train_ds) -> None:
-    """W8: inject imbalance loss + (auto) class weights into image-level head specs.
-
-    Mutates ``model_spec["heads"]`` in place — the trainer composes the model from
-    the run config's ``model_spec``, so editing head specs before train() starts
-    reaches the model. The 'auto' scheme reads the built train dataset's
-    ``class_distribution``, so this must run after the dataset is built. No-op for
-    detection heads and non-dict ``loss_cfg``.
-    """
-    if not isinstance(loss_cfg, dict):
-        return
-    cw = loss_cfg.get("class_weights")
-    for h in model_spec.get("heads", []):
-        if h.get("name") not in ("classification", "semantic_seg"):
-            continue
-        h["loss"] = loss_cfg.get("name", "weighted_ce")
-        if cw == "auto":
-            from tcip_mcp.pipelines.components.losses import compute_class_weights
-            weights = compute_class_weights(
-                getattr(train_ds, "class_distribution", {}),
-                num_classes=h.get("num_classes"),
-                scheme=loss_cfg.get("weight_scheme", "balanced"),
-            )
-            h["class_weights"] = weights.tolist()
-        elif isinstance(cw, list):
-            h["class_weights"] = cw
 
 
 def _auto_train_val(task: str, data_cfg: dict, transforms):
