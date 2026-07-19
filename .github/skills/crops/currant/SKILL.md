@@ -86,7 +86,7 @@ path exists in principle — it does **not** waive validation or scale calibrati
   calibration makes them metric. Pixels are not millimeters.
 - **Percent-phenology families** (`bloom_*`, `fruit_ripe_*`, `leaf_out_*`,
   `leaf_senescence_95per_date`) are imageable only as derived outputs of a *validated*
-  classifier over a calibrated image time-series — not from a single frame or a raw
+  per-frame call over a calibrated image time-series — not from a single frame or a raw
   detection count.
 - `fruit_swd_presence` sits here only tentatively: late-stage berry collapse is
   visible, but early infestation is essentially invisible (see disease notes).
@@ -162,13 +162,13 @@ Mechanics live in the **annotation skill**; currant-specific difficulties:
 
 ## Measurement integrity
 
-Per the CLAUDE.md measurement-integrity invariant, the breeder defines each trait's
-measurement and the CV engineer operationalizes it — never a self-invented proxy. For
-currant specifically:
+Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
+against expert-scored ground truth before any result — see the catkin-elongation cautionary tale
+there). Currant-specific traps:
 
 - **Never substitute a raw RGB color threshold for ripeness.** `fruit_ripe_*` depends
   on a breeder-defined eating stage (color + firmness + separation); validate a
-  ripeness classifier against expert-scored fruit before emitting any date.
+  ripeness call against expert-scored fruit before emitting any date.
 - **Never regress chemistry from pixels.** A confident berry-color-to-brix,
   -pH, -TA, or -anthocyanin model is precisely the "precise, wrong phenotype" trap
   (`fruit_juice_brix`, `fruit_juice_pH`, `fruit_juice_TA`,
@@ -178,11 +178,6 @@ currant specifically:
   photo is **not** the same quantity as a cultivar's genetic resistance.
 - **`fruit_configuration`** is a categorical descriptor — do not manufacture a numeric
   surrogate for it.
-
-This is the same class of error the platform exists to prevent: a prior session
-defined catkin "elongation" from bounding-box height, which is scale/zoom/pose
-dependent and does not measure a morphological stage — it shipped fabricated phenology
-CSVs and was removed. No validated measurement → no result.
 
 ## Needs expert confirmation
 
