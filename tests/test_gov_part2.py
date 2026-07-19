@@ -67,3 +67,24 @@ def test_materialize_absolutizes_sessionend_capture_hook():
     cmd = cfg["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
     assert "agent_learning_capture.py" in cmd
     assert cmd.startswith('"')  # absolutized + quoted, like the guards (no cwd dependency)
+
+
+def test_materialize_absolutizes_every_agent_hook():
+    # The materialization loop is event-agnostic: every agent_*.py hook command, across all event
+    # groups, must be absolutized (the guards, the SessionEnd capture, the SessionStart ritual).
+    from tcip_web.terminal import _FENCE_SETTINGS, _materialize_fence_settings
+
+    dest = _materialize_fence_settings()
+    assert dest is not None
+    cfg = json.loads(dest.read_text(encoding="utf-8"))
+    guard_dir = _FENCE_SETTINGS.parent.as_posix()
+    seen = 0
+    for event_groups in cfg["hooks"].values():
+        for group in event_groups:
+            for hook in group.get("hooks", []):
+                cmd = hook.get("command", "")
+                if "agent_" in cmd:
+                    seen += 1
+                    assert cmd.startswith('"'), cmd
+                    assert guard_dir in cmd, cmd
+    assert seen >= 3  # the two guards + the SessionEnd capture, at minimum
