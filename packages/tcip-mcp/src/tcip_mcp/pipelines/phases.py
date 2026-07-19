@@ -35,9 +35,9 @@ def _run_training_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
     result = PhaseResult(phase_name=phase["name"], status="running")
     t0 = time.perf_counter()
 
-    if "model_spec" not in phase:
+    if "model_source" not in phase:
         result.status = "failed"
-        result.error = "Training phase needs 'model_spec'"
+        result.error = "Training phase needs 'model_source'"
         return result
 
     try:
@@ -69,7 +69,7 @@ def _run_training_phase(phase: dict, context: dict[str, Any], work_dir: Path) ->
         out = work_dir / phase["name"]
         training_cfg = phase.get("training", {})
         run_config = {
-            "model_spec": phase["model_spec"],
+            "model_source": phase["model_source"],
             "data": ds_cfg,
             "stages": phase.get("stages", [{"freeze_to": -1, "epochs": 5}, {"freeze_to": 0, "epochs": 5}]),
             "optimizer": phase.get("optimizer", {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 1e-4}),
