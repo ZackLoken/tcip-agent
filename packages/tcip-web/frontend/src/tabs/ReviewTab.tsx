@@ -234,7 +234,7 @@ export function ReviewTab() {
   const [reviewColors, setReviewColors] = useReviewColors();
   const classList = useStore((s) => s.classes.list);
 
-  // ── Live canvas push (agent visibility: visualize_canvas) ──────────────
+  // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // Which image the installed matches belong to — identity beats the loading flag (a failed or
   // superseded reload leaves stale matches with loading=false; identity still blocks the push).
   const matchesImageRef = useRef<string | null>(null);
