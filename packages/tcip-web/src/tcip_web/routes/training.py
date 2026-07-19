@@ -47,7 +47,7 @@ def _historical_training_runs() -> list[dict]:
     Every ``launch_training`` (standalone drift-retrain, GUI, or agent) writes an
     experiment, so this recovers runs the in-memory registry lost on restart — with no
     second persistence file. Only genuine *training* experiments are included (a
-    ``model_spec`` in the config); review-feedback / ad-hoc experiments are skipped, and
+    ``model_source`` in the config); review-feedback / ad-hoc experiments are skipped, and
     HPO trials never create experiments so they can't appear here. A non-terminal state
     on a run that isn't live means the process died -> surfaced as ``interrupted``.
     """
@@ -62,7 +62,9 @@ def _historical_training_runs() -> list[dict]:
         if not d.is_dir():
             continue
         config = read_json(d / "config.json", default={})
-        if not isinstance(config, dict) or not (config.get("model_spec") or config.get("model")):
+        if not isinstance(config, dict) or not (
+            config.get("model_source") or config.get("model_spec") or config.get("model")
+        ):
             continue  # not a training experiment (e.g. review-feedback lineage)
         status = read_json(d / "status.json", default={})
         state = status.get("state", "unknown")
