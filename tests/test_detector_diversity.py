@@ -1,6 +1,6 @@
-"""W6 — detector & architecture diversity: add_p2 necks, FCOS/RetinaNet, recommender.
+"""W6 — detector & architecture diversity: add_p2 necks, FCOS end-to-end.
 
-Build specs use ``resnet18`` (FPN normalizes the channel difference); CPU, tiny inputs, 1 epoch.
+Uses ``resnet18`` (FPN normalizes the channel difference); CPU, tiny inputs, 1 epoch.
 """
 
 from __future__ import annotations
@@ -13,13 +13,7 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
-import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
-import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
-import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 from tcip_mcp.pipelines.components.necks import FPN, PAN  # noqa: E402
-from tcip_mcp.pipelines.composer import compose_model, recommend_model_spec, validate_model_spec  # noqa: E402
-from tcip_mcp.pipelines.registry import HEADS  # noqa: E402
 
 
 def _features():
@@ -28,16 +22,6 @@ def _features():
         "s1": torch.randn(1, 128, 16, 16),
         "s2": torch.randn(1, 256, 8, 8),
         "s3": torch.randn(1, 512, 4, 4),
-    }
-
-
-def _det_spec(head_name, **head_extra):
-    head = {"name": head_name, "num_classes": 1, "min_size": 64, "max_size": 128}
-    head.update(head_extra)
-    return {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "fpn", "out_channels": 256},
-        "heads": [head],
     }
 
 
@@ -72,39 +56,18 @@ def test_necks_default_off_unchanged():
 # --------------------------------------------------------------------------
 
 def test_detection_anchor_count_with_p2():
-    spec = _det_spec("anchor_detection")
-    spec["neck"]["add_p2"] = True  # 5 pyramid levels
-    model = compose_model(spec)  # must not raise (guards the [..][:5] truncation crash)
-    assert len(model.detector.rpn.anchor_generator.sizes) == 5
+    from tcip_mcp.pipelines.components.backbones import _build_timm_backbone
+    from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter, _build_faster_rcnn
 
-
-def test_anchor_free_head_registered_and_valid():
-    assert "anchor_free_detection" in HEADS
-    spec = {
-        "backbone": {"name": "resnet18"},
-        "neck": {"name": "fpn"},
-        "heads": [{"name": "anchor_free_detection", "num_classes": 1}],
-    }
-    assert validate_model_spec(spec) == []
-
-
-# --------------------------------------------------------------------------
-# Recommender
-# --------------------------------------------------------------------------
-
-def test_recommend_detection_tiny_objects():
-    spec = recommend_model_spec("detection", 300, num_classes=2, object_size="tiny")
-    assert spec["heads"][0]["name"] == "anchor_free_detection"
-    assert spec["heads"][0]["detector"] == "fcos"
-    assert spec["neck"].get("add_p2") is True
-    assert spec["heads"][0]["anchor_base_size"] <= 8
-
-
-def test_recommend_detection_default_unchanged():
-    spec = recommend_model_spec("detection", 1000, num_classes=3)
-    assert spec["neck"]["name"] == "fpn"
-    assert "add_p2" not in spec["neck"]
-    assert spec["heads"][0]["name"] == "anchor_detection"
+    bb = _build_timm_backbone("resnet18", pretrained=False)
+    neck = FPN(bb.out_channels, 256, add_p2=True)  # 5 pyramid levels
+    adapter = BackboneNeckAdapter(bb, neck)
+    with torch.no_grad():
+        names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
+    assert len(names) == 5
+    det = _build_faster_rcnn(  # must not raise (guards the [..][:5] truncation crash)
+        adapter, 1, featmap_names=names, num_levels=len(names), min_size=64, max_size=128)
+    assert len(det.rpn.anchor_generator.sizes) == 5
 
 
 # --------------------------------------------------------------------------
@@ -136,9 +99,13 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
-    spec = _det_spec("anchor_free_detection", detector="fcos")
+    model_source = {
+        "builder": "tests.bespoke_models:build_bespoke_detection",
+        "builder_kwargs": {"num_classes": 1, "detector": "fcos", "min_size": 64, "max_size": 128},
+        "task": "detection",
+    }
     cfg = {
-        "model_spec": spec, "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 1}],
+        "model_source": model_source, "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False,
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
