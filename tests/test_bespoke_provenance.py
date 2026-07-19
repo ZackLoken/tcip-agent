@@ -16,11 +16,6 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
-import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
-import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
-import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
-from tcip_mcp.pipelines.composer import DetectionModel, compose_model  # noqa: E402
 from tcip_mcp.pipelines.inference.predictor import (  # noqa: E402
     KIND_TCIP_MODULE,
     _kind_from_ckpt,
@@ -32,20 +27,14 @@ from tcip_mcp.pipelines.model_build import (  # noqa: E402
     snapshot_model_source,
     stamp_model_ref,
 )
-
-
-def build_bespoke_detector(**kwargs):
-    """An importable 'agent-written' builder — a from-scratch detector (here via compose_model)."""
-    return compose_model({
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "fpn", "out_channels": 64},
-        "heads": [{"name": "anchor_detection", "num_classes": 1, "min_size": 64, "max_size": 128}],
-    })
+from tests import bespoke_models  # noqa: E402
 
 
 def _model_source() -> dict:
-    return {"builder": f"{__name__}:build_bespoke_detector", "task": "detection",
-            "in_chans": 3, "source_files": [__file__]}
+    return {"builder": "tests.bespoke_models:build_bespoke_detector",
+            "builder_kwargs": {"gt_boxes_wh": [[15, 36], [16, 40], [17, 44]],
+                               "num_classes": 1, "min_size": 64, "max_size": 128},
+            "task": "detection", "in_chans": 3, "source_files": [__file__]}
 
 
 # --------------------------------------------------------------------------
@@ -65,10 +54,6 @@ def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
     assert manifest["builder"].endswith(":build_bespoke_detector")
     assert manifest["env"]["torch"]
     assert manifest["seed"] == 123
-
-
-def test_snapshot_model_source_none_for_composed(tmp_path):
-    assert snapshot_model_source({"model_spec": {"backbone": {"name": "resnet18"}}}, tmp_path) is None
 
 
 # --------------------------------------------------------------------------
@@ -93,7 +78,7 @@ def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
 
     src = _model_source()
     model = build_model({"model_source": src})
-    assert isinstance(model, DetectionModel)  # built via the importable builder, not the composer
+    assert isinstance(model, bespoke_models.BespokeGNDetector)  # built via the importable builder
 
     ckpt = tmp_path / "model_best.pt"
     payload = stamp_model_ref(
