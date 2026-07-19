@@ -69,7 +69,7 @@ class TestPostPanelEventRoute:
         assert events[-1]["data"]["trial"] == 2
 
     def test_review_focus_persists_advisory_state(self, client: TestClient) -> None:
-        # The agent reads gui state back via get_active_context — a focus event must
+        # The agent reads gui state back via view_gui_state — a focus event must
         # land there even though the browser applies it with local setters only.
         resp = client.post(
             "/api/events/app",
@@ -195,10 +195,10 @@ class TestInferenceToolOutputSchema:
 
         assert hasattr(inference_tools, "export_predictions")
 
-    def test_export_results_csv_schema(self) -> None:
+    def test_tabulate_counts_schema(self) -> None:
         from tcip_mcp.tools import inference_tools
 
-        assert hasattr(inference_tools, "export_results_csv")
+        assert hasattr(inference_tools, "tabulate_counts")
 
 
 class TestHpoToolOutputSchema:
