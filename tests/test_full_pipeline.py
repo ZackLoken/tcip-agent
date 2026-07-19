@@ -1,6 +1,6 @@
-"""End-to-end integration test: compose → train → infer → export.
+"""End-to-end integration test: build → train → infer → export.
 
-Proves the full composable ML pipeline works as a connected system.
+Proves the full bespoke ``model_source`` pipeline works as a connected system.
 Uses synthetic data for classification and real sample data for detection.
 """
 
@@ -15,11 +15,7 @@ from torch.utils.data import DataLoader
 torchvision = pytest.importorskip("torchvision")
 from torchvision.utils import save_image
 
-# Trigger component registration (side-effect imports)
-import tcip_mcp.pipelines.components.backbones  # noqa: F401
-import tcip_mcp.pipelines.components.necks  # noqa: F401
-import tcip_mcp.pipelines.components.heads  # noqa: F401
-import tcip_mcp.pipelines.components.losses  # noqa: F401
+from tests import bespoke_models  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -52,23 +48,18 @@ def output_dir(tmp_path):
 # ---------------------------------------------------------------------------
 
 class TestFullClassificationPipeline:
-    """End-to-end: recommend → compose → train → checkpoint → predict → CSV."""
+    """End-to-end: bespoke builder → train → checkpoint → predict → CSV."""
 
-    def test_recommend_compose_train_infer_export(self, tiny_classification_data, output_dir):
-        # --- Step 1: Agent recommends a model spec ---
-        from tcip_mcp.pipelines.composer import recommend_model_spec, compose_model
+    def test_build_train_infer_export(self, tiny_classification_data, output_dir):
+        # --- Step 1: A bespoke classification model_source ---
+        model_source = {
+            "builder": "tests.bespoke_models:build_bespoke_classifier",
+            "builder_kwargs": {"num_classes": 2},
+            "task": "classification",
+        }
 
-        spec = recommend_model_spec(
-            task="classification",
-            dataset_size=12,  # tiny dataset → small backbone
-            num_classes=2,
-        )
-        assert "backbone" in spec
-        assert "heads" in spec
-        assert spec["heads"][0]["name"] == "classification"
-
-        # --- Step 2: Compose model and verify it runs ---
-        model = compose_model(spec)
+        # --- Step 2: Build the model and verify it runs ---
+        model = bespoke_models.build_bespoke_classifier(num_classes=2)
         dummy = torch.randn(2, 3, 64, 64)
         model.eval()
         with torch.no_grad():
@@ -86,8 +77,7 @@ class TestFullClassificationPipeline:
         assert dataset.num_classes == 2
         assert dataset.num_samples == 12
 
-        # Train/val split (folds in the former TestFullPipelineWithValidation): exercises the
-        # val_loader + early-stopping wiring on this run instead of a second full training.
+        # Train/val split: exercises the val_loader + early-stopping wiring on this run.
         collate = task_collate("classification")
         train_ds, val_ds = torch.utils.data.random_split(dataset, [8, 4])
         loader = DataLoader(train_ds, batch_size=4, shuffle=True, collate_fn=collate)
@@ -102,7 +92,7 @@ class TestFullClassificationPipeline:
         from tcip_mcp.pipelines.training.generic_trainer import create_run, train
 
         config = {
-            "model_spec": spec,
+            "model_source": model_source,
             "device": "cpu",
             "stages": [{"freeze_to": -1, "epochs": 2}],
             "mixed_precision": False,
@@ -119,7 +109,7 @@ class TestFullClassificationPipeline:
         assert completed_run.status == "completed"
         assert completed_run.current_epoch == 2
         assert len(completed_run.metrics_history) == 2
-        # val_loader + early-stopping wiring (folded from the former TestFullPipelineWithValidation)
+        # val_loader + early-stopping wiring
         assert "val_loss" in completed_run.metrics_history[-1]
 
         # Verify output files exist
@@ -139,7 +129,7 @@ class TestFullClassificationPipeline:
         # Verify checkpoint has required keys
         ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
         assert "model_state_dict" in ckpt
-        assert "model_spec" in ckpt
+        assert "model_source" in ckpt
 
         # --- Step 5: Load checkpoint and run inference ---
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -180,34 +170,6 @@ class TestFullClassificationPipeline:
         assert len(lines) == 5  # header + 4 images
 
 
-class TestModelSpecValidation:
-    """Verify the agent's spec validation catches errors."""
-
-    def test_invalid_backbone_rejected(self):
-        from tcip_mcp.pipelines.composer import validate_model_spec
-        issues = validate_model_spec({
-            "backbone": {"name": "nonexistent_net"},
-            "heads": [{"name": "classification", "num_classes": 5}],
-        })
-        assert any("backbone" in i.lower() or "unknown" in i.lower() for i in issues)
-
-    def test_missing_heads_rejected(self):
-        from tcip_mcp.pipelines.composer import validate_model_spec
-        issues = validate_model_spec({
-            "backbone": {"name": "resnet50"},
-        })
-        assert any("head" in i.lower() for i in issues)
-
-    def test_valid_spec_accepted(self):
-        from tcip_mcp.pipelines.composer import validate_model_spec
-        issues = validate_model_spec({
-            "backbone": {"name": "resnet50"},
-            "neck": {"name": "gap"},
-            "heads": [{"name": "classification", "num_classes": 3}],
-        })
-        assert issues == []
-
-
 # ---------------------------------------------------------------------------
 # Test: detection pipeline with real catkin data
 # ---------------------------------------------------------------------------
@@ -226,12 +188,9 @@ def detection_output_dir(tmp_path):
     reason="Sample detection data not found",
 )
 class TestDetectionPipelineRealData:
-    """End-to-end: compose → train → infer → export CSV using real catkin images."""
+    """End-to-end: build → train → infer → export CSV using real catkin images."""
 
-    def test_compose_train_infer_export(self, detection_output_dir):
-        from tcip_mcp.pipelines.composer import (
-            compose_model, DetectionModel, recommend_model_spec,
-        )
+    def test_build_train_infer_export(self, detection_output_dir):
         from tcip_mcp.pipelines.data.datasets import build_dataset
         from tcip_mcp.pipelines.training.generic_trainer import (
             create_run, train, task_collate,
@@ -239,18 +198,14 @@ class TestDetectionPipelineRealData:
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
         from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
-        # --- Step 1: Recommend and compose detection model ---
-        spec = recommend_model_spec(
-            task="detection", dataset_size=18, num_classes=1,
-        )
-        assert spec["heads"][0]["name"] == "anchor_detection"
-        # Override sizes for speed (real images are 5712×4284)
-        spec["backbone"]["pretrained"] = False
-        spec["heads"][0]["min_size"] = 320
-        spec["heads"][0]["max_size"] = 512
-
-        model = compose_model(spec)
-        assert isinstance(model, DetectionModel)
+        # --- Step 1: A bespoke detection model_source (small input sizes for speed) ---
+        model_source = {
+            "builder": "tests.bespoke_models:build_bespoke_detection",
+            "builder_kwargs": {"num_classes": 1, "min_size": 320, "max_size": 512},
+            "task": "detection",
+        }
+        model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=320, max_size=512)
+        assert isinstance(model, bespoke_models.BespokeDetection)
 
         # --- Step 2: Build dataset from real YOLO labels ---
         dataset = build_dataset(
@@ -278,7 +233,7 @@ class TestDetectionPipelineRealData:
 
         # --- Step 3: Train 1 epoch ---
         config = {
-            "model_spec": spec,
+            "model_source": model_source,
             "device": "cpu",
             "stages": [{"freeze_to": 0, "epochs": 1}],
             "mixed_precision": False,
@@ -301,7 +256,7 @@ class TestDetectionPipelineRealData:
         # Verify checkpoint format
         ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
         assert "model_state_dict" in ckpt
-        assert "model_spec" in ckpt
+        assert "model_source" in ckpt
 
         # --- Step 4: Inference on real images ---
         predictor = GenericPredictor(
