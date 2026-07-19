@@ -69,7 +69,7 @@ Goal: Diagnose training issues from worst-case analysis.
 1. `check_training_status` → verify training completed, review loss curves
 2. `get_worst_predictions` → identify failure cases
 3. `visualize_worst_predictions` → render failures → `view_image`
-4. Cross-reference visual findings with `evaluate_dataset`'s per-image TP/FP/FN breakdown
+4. Cross-reference visual findings with `evaluate_predictions`' per-image TP/FP/FN breakdown
    (no per-class breakdown for detection today — see the `evaluation` skill)
 5. Recommend: more data, augmentation changes, architecture changes, longer training
 
