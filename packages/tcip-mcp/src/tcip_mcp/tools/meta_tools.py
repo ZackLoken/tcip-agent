@@ -2,9 +2,8 @@
 
 Tools that let Claude sessions leave the system smarter than they started:
 - claude_reports: structured friction logging when Claude hits a problem
-- load_reports: read recent friction reports at session start (closes the loop)
 - project_retrospective: end-of-project reflection written to markdown
-- load_retrospectives: read recent retrospectives at session start
+- load_project_memory: read recent reports or retrospectives at session start (closes the loop)
 
 See docs/vision.md §6 for the design rationale.
 """
@@ -111,32 +110,49 @@ def claude_reports(
 
 @mcp.tool()
 @audited
-def load_reports(
+def load_project_memory(
+    kind: str,
     project_path: str = "",
     limit: int = 5,
     category: str = "",
     filter_substring: str = "",
 ) -> dict:
-    """Read recent friction reports so open problems aren't lost between sessions.
+    """Read one project-memory corpus into context so context isn't lost between sessions.
 
-    The counterpart to ``claude_reports``: that tool writes friction to
-    ``.tcip/reports/``; this one reads it back. Call it early in a session
-    (alongside ``load_retrospectives``) to pick up problems a previous session
-    surfaced but did not resolve. Returns the most recently written reports first.
+    The read side of the session-start ritual. ``kind`` selects a single corpus (a
+    selector, not an aggregator — one honest read of the chosen store):
+    ``'reports'`` reads ``.tcip/reports/`` (the counterpart to ``claude_reports``);
+    ``'retrospectives'`` reads ``.tcip/retrospectives/`` (the counterpart to
+    ``project_retrospective``). Call it early — once per kind — to pick up problems and
+    context a previous session surfaced but did not resolve. Returns the most recently
+    written entries first.
 
     Args:
+        kind: Which corpus to read — 'reports' or 'retrospectives'.
         project_path: Root directory of the project. Empty defaults to the active
-            project (matching ``get_project_status``) so the CLAUDE.md session-start
-            flow — load_reports + load_retrospectives + get_project_status — needs no path.
-        limit: Maximum number of reports to return (default 5).
-        category: Optional exact category filter (e.g. 'missing_tool'). One of the
-            ``claude_reports`` categories; empty means all categories.
-        filter_substring: Optional case-insensitive substring matched against the
-            report's filename or its detail/context text.
+            project (matching ``inspect_project``) so the CLAUDE.md session-start
+            flow — load_project_memory + inspect_project — needs no path.
+        limit: Maximum number of entries to return (default 5).
+        category: Reports only — optional exact category filter (e.g. 'missing_tool'),
+            one of the ``claude_reports`` categories; empty means all. Ignored for
+            retrospectives.
+        filter_substring: Optional case-insensitive substring matched against each
+            entry's filename or its text.
     """
     from tcip_mcp import workspace
 
     project_path = workspace.resolve_project_path(project_path)
+
+    if kind == "reports":
+        return _load_reports(project_path, limit, category, filter_substring)
+    if kind == "retrospectives":
+        return _load_retrospectives(project_path, limit, filter_substring)
+    return {"error": f"unknown kind '{kind}'", "valid_kinds": ["reports", "retrospectives"]}
+
+
+def _load_reports(
+    project_path: str, limit: int, category: str, filter_substring: str
+) -> dict:
     reports_dir = Path(project_path) / ".tcip" / "reports"
     if not reports_dir.exists():
         return {
@@ -279,30 +295,9 @@ def project_retrospective(
     }
 
 
-@mcp.tool()
-@audited
-def load_retrospectives(
-    project_path: str = "",
-    limit: int = 5,
-    filter_substring: str = "",
+def _load_retrospectives(
+    project_path: str, limit: int, filter_substring: str
 ) -> dict:
-    """Read recent retrospectives so you start the session with context.
-
-    Call this early in a session to learn what past sessions did, what worked,
-    what failed, and what knowledge they captured. Returns the most recently
-    modified retrospectives first.
-
-    Args:
-        project_path: Root directory of the project. Empty defaults to the active
-            project (matching ``get_project_status``) so the session-start flow needs no path.
-        limit: Maximum number of retrospectives to return (default 5).
-        filter_substring: Optional case-insensitive substring. Only
-            retrospectives whose filename OR content contains this string
-            will be returned.
-    """
-    from tcip_mcp import workspace
-
-    project_path = workspace.resolve_project_path(project_path)
     retros_dir = Path(project_path) / ".tcip" / "retrospectives"
     if not retros_dir.exists():
         return {
