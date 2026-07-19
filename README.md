@@ -96,7 +96,7 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 
 ## Conventions
 
-- **Annotations**: canonical on-disk format is per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance). Also imports/exports YOLO / COCO (dataset-level) / PASCAL VOC / LabelMe via an explicit format. Empty label files are valid negatives.
+- **Annotations**: canonical on-disk format is per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance). Also imports/exports YOLO / COCO (dataset-level) / PASCAL VOC / LabelMe via an explicit format. A negative is an empty label set **plus** an explicit human "Complete" — an empty label file alone is not a negative.
 - **Experiments**: tracked in `.tcip/experiments/<id>/` with config, metrics JSONL, artifacts, lineage.
 - **Audit log**: all MCP tool calls logged to `.tcip/audit.jsonl` via `@audited` decorator.
 - **Lazy imports**: heavy deps (torch, torchvision) imported inside function bodies for fast MCP startup.
@@ -117,7 +117,7 @@ LabelMe import/export via an explicit format), experiment tracking, annotation/r
 SAM-assisted labeling, and per-plant CSV export — including the
 Phase 1 **catkin bloom phenology** deliverable (per-plant `catkin_05/50/95per_date` = the
 dates a plant's *elongated fraction* of detected catkins crosses 5/50/95%; elongation is a
-validated classifier class, never a geometric proxy). The agent composes it end to end via
+validated per-catkin call, never a geometric proxy). The agent composes it end to end via
 `build_plant_mapping` → tiled inference → `compute_phenology`, and the same milestone code
 backs the Results tab, so a bloom date means one thing on both surfaces.
 
