@@ -21,7 +21,7 @@ from tcip_annotation import (
 def data_dir(tmp_path: Path) -> Path:
     """Minimal dataset in the canonical layout with per-image JSON labels/predictions.
 
-    Overrides the conftest fixture: evaluate_predictions reads GT and
+    Overrides the conftest fixture: score_predictions reads GT and
     predictions through the json_io per-image schema (pixel COCO xywh + native ``score``).
     The files keep a ``.txt`` name because the tools resolve them with ``fmt='yolo'`` — the
     JSON *content* is what json_io parses.
@@ -125,12 +125,12 @@ def test_compute_matches():
     assert len(matches["fn"]) == 0
 
 
-def test_evaluate_predictions_single_image(data_dir: Path):
+def test_score_predictions_single_image(data_dir: Path):
     pytest.importorskip("tcip_mcp.tools.annotation_tools")
-    from tcip_mcp.tools.annotation_tools import evaluate_predictions
+    from tcip_mcp.tools.annotation_tools import score_predictions
 
     img = data_dir / "images" / "2-11-26" / "img_001.jpg"
-    result = evaluate_predictions(str(img), iou_threshold=0.5, conf_threshold=0.25)
+    result = score_predictions(str(img), iou_threshold=0.5, conf_threshold=0.25)
     assert "tp" in result
     assert "fp" in result
     assert "fn" in result
