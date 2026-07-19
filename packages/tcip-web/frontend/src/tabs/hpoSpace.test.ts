@@ -14,12 +14,10 @@ describe("buildOptunaSpace", () => {
   it("emits Optuna-typed specs for the default params", () => {
     const space = buildOptunaSpace(DEFAULT_HPO_PARAMS);
     expect(space.lr).toEqual({ type: "loguniform", low: 1e-5, high: 1e-2 });
+    expect(space.weight_decay).toEqual({ type: "loguniform", low: 1e-5, high: 1e-2 });
     expect(space.batch_size).toEqual({ type: "categorical", choices: [2, 4] });
-    expect(space.backbone).toEqual({
-      type: "categorical",
-      choices: ["resnet50", "resnet101"],
-    });
-    // head + min_size are disabled by default -> excluded.
+    // Architecture axes (backbone / head / min_size) are model-specific and no longer swept.
+    expect(space.backbone).toBeUndefined();
     expect(space.head).toBeUndefined();
     expect(space.min_size).toBeUndefined();
   });
