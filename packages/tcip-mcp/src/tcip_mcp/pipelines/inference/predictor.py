@@ -20,6 +20,9 @@ from typing import Any, Protocol, runtime_checkable
 logger = logging.getLogger(__name__)
 
 KIND_TORCHVISION_COMPOSED = "torchvision_composed"
+# A bespoke, from-scratch model built by an agent-written importable builder (model_source),
+# not the registry composer. Reproduced by re-importing that builder — never by exec.
+KIND_TCIP_MODULE = "tcip_module"
 KIND_ULTRALYTICS = "ultralytics"
 DEFAULT_KIND = KIND_TORCHVISION_COMPOSED
 
@@ -52,6 +55,9 @@ def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:
     stamped = ckpt.get("kind") or (ckpt.get("model_spec") or {}).get("kind")
     if stamped:
         return str(stamped)
+    # Structural fallback for tcip checkpoints whose kind wasn't stamped.
+    if "model_source" in ckpt and "model_state_dict" in ckpt:
+        return KIND_TCIP_MODULE
     if "model_spec" in ckpt and "model_state_dict" in ckpt:
         return KIND_TORCHVISION_COMPOSED
     if "model" in ckpt and ("train_args" in ckpt or "names" in ckpt or "nc" in ckpt):
@@ -98,7 +104,9 @@ def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: 
         else:
             kind = _kind_from_ckpt(ckpt, checkpoint_path)
 
-    if kind == KIND_TORCHVISION_COMPOSED:
+    if kind in (KIND_TORCHVISION_COMPOSED, KIND_TCIP_MODULE):
+        # Both are tcip checkpoints GenericPredictor rebuilds from the checkpoint (composed
+        # model_spec, or a bespoke model_source re-imported through build_model — never exec).
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
         extra = {"checkpoint": ckpt} if ckpt is not None else {}
         return GenericPredictor(checkpoint_path=checkpoint_path, **extra, **kwargs)
