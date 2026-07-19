@@ -1,6 +1,6 @@
 ---
 name: pipeline-design
-description: "Pipeline patterns for phenotyping. The composable ML component registry is a library, not a scaffold. Choose a pattern that fits the trait — do not force every trait through the same structure. Load when deciding how to measure a new trait, choosing or composing an ML pipeline, or picking a model architecture for a trait."
+description: "Pipeline patterns for phenotyping. You build every model one way — an agent-written nn.Module + train(ctx) loop, via model_source. Choose a pattern that fits the trait — do not force every trait through the same structure. Load when deciding how to measure a new trait, designing an ML pipeline, or building a model architecture for a trait."
 ---
 
 # Pipeline Design
@@ -92,44 +92,27 @@ Good for: traits where breeders rank rather than measure absolutes (relative vig
 
 Failure modes: requires dense plot layout metadata; needs enough plants per plot for ranking to be meaningful.
 
-## Composable ML component registry
-
-Models are built from specs when you need a standard CNN/transformer architecture:
-
-```python
-model_spec = {
-    "backbone": {"name": "resnet50", "pretrained": True},
-    "neck": {"name": "fpn"},
-    "heads": [
-        {"name": "anchor_detection", "task": "detection", "num_classes": 3}
-    ],
-    "loss": {"name": "focal"}
-}
-```
-
-The registry is a **library**, not a constraint. Component names drift as the registry grows —
-call `list_components` for the live list rather than trusting a hand-maintained table. As of
-this writing:
-- **Backbones**: resnet18/34/50/101, efficientnet_b0-b4, mobilenetv2_100,
-  mobilenetv3_small_100/large_100, convnext_tiny/small, vit_small/base_patch16_224 (+
-  tv_resnet50/101 torchvision fallbacks)
-- **Necks**: fpn, pan, identity, gap
-- **Heads**: classification, ordinal, regression, anchor_detection, anchor_free_detection,
-  semantic_seg, temporal_lstm, temporal_transformer
-- **Losses**: cross_entropy, weighted_ce, focal, smooth_l1, huber, bce, dice, giou, corn, coral
-
-You can also ignore the registry entirely and write a model from scratch. No architecture is forced.
-
-This is the one canonical `model_spec` example — `training/SKILL.md` references it rather than
-repeating it (a prior duplicate there had drifted to the same non-existent `detection_head` /
-`focal_loss` names).
-
 ## You own the model AND the training loop
 
-The platform is a **toolkit you compose, not a mold you fill**. You are the CV scientist: for a
-trait the registry doesn't already serve well, write a bespoke `nn.Module` — from scratch or by
-modifying primitives — and, when the technique is novel, a custom training loop. Nothing forces a
-model to imitate the composed detectors or the default trainer.
+The platform is a **toolkit you build with, not a mold you fill**. You are the CV scientist:
+for every trait you write a bespoke `nn.Module` — from scratch or by importing the plain
+building blocks (FPN/PAN necks, the classification/ordinal/regression/semantic-seg heads, the
+losses, backbone wrappers, and `build_detector` + the `_build_*` detector functions) — and,
+when the technique is novel, a custom training loop. There is no model spec, no composer, and
+no component registry: nothing forces a model to a fixed shape or the default trainer.
+
+The building blocks are plain importable symbols, e.g.:
+
+```python
+from tcip_mcp.pipelines.components.backbones import BackboneWrapper, _build_timm_backbone
+from tcip_mcp.pipelines.components.necks import FPN, PAN
+from tcip_mcp.pipelines.components.heads import ClassificationHead, SemanticSegHead
+from tcip_mcp.pipelines.components.losses import build_loss, compute_class_weights
+from tcip_mcp.pipelines.components.detectors import build_detector, BackboneNeckAdapter
+```
+
+Compose them inside your own `nn.Module`, or ignore them and write the network from scratch.
+No architecture is imposed.
 
 **Tailor the architecture to the data in hand** (CLAUDE.md: derive, don't pin):
 
@@ -145,10 +128,10 @@ model to imitate the composed detectors or the default trainer.
 
 **Two seams make bespoke work first-class, and the platform guarantees integrity around it:**
 
-- `pipelines.model_build.build_model(config)` builds from either a `model_spec` (registry-composed)
-  or a `model_source` — an *importable* builder you wrote (`{"builder": "my_module:build_net",
-  "builder_kwargs": {...}, "source_files": [...], "task": "detection", "in_chans": 3}`). It is
-  imported, never `exec`'d, so the run is reproducible from source. `pipelines.model_contract`
+- `pipelines.model_build.build_model(config)` builds from a `model_source` — an *importable*
+  builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs": {...},
+  "source_files": [...], "task": "detection", "in_chans": 3}`). It is imported, never `exec`'d,
+  so the run is reproducible from source. `pipelines.model_contract`
   states the *only* model-side contract — the measurement boundary: your model must train (finite
   gradient loss) and emit inference output the library scorers consume. `check_model_contract` and
   `overfit_check` are the cheap pre-flight proofs it learns.
@@ -161,7 +144,7 @@ model to imitate the composed detectors or the default trainer.
   `ctx.default_train()` is **one convenience**, not a requirement — call it, extend it, or replace
   it entirely.
 
-When the registry and your own primitives both plateau on a trait, the next move is to research the
+When the plain blocks and your own primitives both plateau on a trait, the next move is to research the
 literature for a technique that fits — see the `cv-research` skill for the research→implement→validate
 loop (and the rule that a new method must beat the baseline on the *measured phenotype* before you
 trust it).
@@ -173,15 +156,16 @@ measurement, subject to the same validate-before-you-trust rule as any other.
 
 ## Multi-phase pipelines
 
-When a pattern requires chaining phases (Pattern A, C, D), use a pipeline spec:
+When a pattern requires chaining phases (Pattern A, C, D), use a pipeline spec whose
+training phases each point at a `model_source` builder:
 
 ```python
 pipeline_spec = {
     "name": "hazelnut_catkin_phenology",
     "phases": [
-        {"name": "isolate_bushes", "task": "instance_seg", "model_spec": {...}, "output": "bush_crops"},
-        {"name": "detect_catkins", "task": "detection", "input": "bush_crops", "model_spec": {...}, "output": "catkin_detections"},
-        {"name": "classify_stage", "task": "classification", "input": "catkin_detections", "model_spec": {...}, "output": "catkin_classes"},
+        {"name": "isolate_bushes", "task": "instance_seg", "model_source": {...}, "output": "bush_crops"},
+        {"name": "detect_catkins", "task": "detection", "input": "bush_crops", "model_source": {...}, "output": "catkin_detections"},
+        {"name": "classify_stage", "task": "classification", "input": "catkin_detections", "model_source": {...}, "output": "catkin_classes"},
         {"name": "aggregate", "task": "aggregation", "input": "catkin_classes", "output": "phenology_csv"}
     ]
 }
@@ -193,12 +177,7 @@ Phase names are not restricted to a fixed set. Use names that describe what the 
 
 | Tool | Purpose |
 |------|---------|
-| `list_components` | List available registry components |
-| `recommend_model` | Get model architecture recommendation for a task |
-| `validate_model_spec` | Validate a model spec against the registry |
-| `validate_pipeline_spec` | Validate a multi-phase pipeline spec |
-| `run_pipeline` | Execute a full pipeline |
-| `compose_and_summarize` | Build a model from spec and show architecture summary |
+| `run_pipeline` | Execute a full multi-phase pipeline |
 
 ## Design principles
 
@@ -206,5 +185,4 @@ Phase names are not restricted to a fixed set. Use names that describe what the 
 - Start with the simplest viable architecture for the chosen pattern.
 - Use pretrained backbones unless data is very different from ImageNet.
 - Use progressive unfreezing for transfer learning.
-- Validate pipeline specs before executing.
 - **Write a retrospective** (`project_retrospective`) when you finish, noting whether the pattern you chose was right. That feedback grows the library.
