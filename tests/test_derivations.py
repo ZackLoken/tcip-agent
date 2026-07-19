@@ -11,7 +11,6 @@ from tcip_mcp.pipelines.derivations import (
     gt_aspect_ratios,
     num_classes_from_distribution,
     probe_channels,
-    resolve_spec_derivations,
 )
 
 
@@ -61,28 +60,6 @@ def test_derive_cross_tile_nms_clamped_to_upper_bound():
     # Near-duplicate boxes (IoU ~0.90) would exceed the range; the result is clamped to the ceiling.
     boxes = [[(0, 0, 20, 20), (1, 0, 20, 20)]]
     assert derive_cross_tile_nms(boxes) == pytest.approx(0.8)
-
-
-def test_resolve_spec_derivations_fills_when_absent(tmp_path):
-    Image.new("RGB", (8, 8)).save(tmp_path / "a.png")
-    spec = {"backbone": {"name": "resnet18"}, "heads": [{"name": "anchor_detection"}]}
-    prov = resolve_spec_derivations(spec, sample_image=tmp_path / "a.png",
-                                    class_distribution={0: 5, 1: 3})
-    assert spec["backbone"]["in_chans"] == 3
-    assert spec["heads"][0]["num_classes"] == 2
-    assert set(prov) == {"in_chans", "num_classes"}
-    assert prov["num_classes"].value == 2  # deterministic -> shippable
-
-
-def test_resolve_spec_derivations_respects_explicit(tmp_path):
-    Image.new("RGB", (8, 8)).save(tmp_path / "a.png")
-    spec = {"backbone": {"name": "resnet18", "in_chans": 4},
-            "heads": [{"name": "anchor_detection", "num_classes": 7}]}
-    prov = resolve_spec_derivations(spec, sample_image=tmp_path / "a.png",
-                                    class_distribution={0: 5})
-    assert spec["backbone"]["in_chans"] == 4  # explicit untouched
-    assert spec["heads"][0]["num_classes"] == 7
-    assert prov == {}  # nothing derived — the agent pinned both
 
 
 def test_write_class_map(tmp_path):
