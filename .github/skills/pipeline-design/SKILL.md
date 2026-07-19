@@ -156,28 +156,25 @@ measurement, subject to the same validate-before-you-trust rule as any other.
 
 ## Multi-phase pipelines
 
-When a pattern requires chaining phases (Pattern A, C, D), use a pipeline spec whose
-training phases each point at a `model_source` builder:
+When a pattern requires chaining phases (Pattern A, C, D), write a logged script in
+`scripts/` that chains the canonical primitives — one build path, every step audited.
+Each training phase calls `launch_training` (full audited envelope, leakage-free split,
+tiling persistence) against a `model_source` builder; run each stage's model with
+`run_inference`; then aggregate with the importable postprocessing libs
+(`aggregate_per_plant` / `export_aggregated_csv`, or `compute_phenology` for bloom dates):
 
 ```python
-pipeline_spec = {
-    "name": "hazelnut_catkin_phenology",
-    "phases": [
-        {"name": "isolate_bushes", "task": "instance_seg", "model_source": {...}, "output": "bush_crops"},
-        {"name": "detect_catkins", "task": "detection", "input": "bush_crops", "model_source": {...}, "output": "catkin_detections"},
-        {"name": "classify_stage", "task": "classification", "input": "catkin_detections", "model_source": {...}, "output": "catkin_classes"},
-        {"name": "aggregate", "task": "aggregation", "input": "catkin_classes", "output": "phenology_csv"}
-    ]
-}
+# scripts/hazelnut_catkin_phenology.py — chain the primitives; each launch_training goes
+# through the audited envelope, so provenance and immutability hold across the whole run.
+isolate = launch_training(config={"model_source": {...}, "data": {...}}, ...)   # instance_seg
+detect = launch_training(config={"model_source": {...}, "data": {...}}, ...)    # detection
+classify = launch_training(config={"model_source": {...}, "data": {...}}, ...)  # classification
+run_inference(model_path=classify_best, images_dir=..., output_dir="catkin_classes")
+export_aggregated_csv(aggregate_per_plant("catkin_classes", plant_mapping), "phenology_csv")
 ```
 
-Phase names are not restricted to a fixed set. Use names that describe what the phase does for this specific trait.
-
-## Tools
-
-| Tool | Purpose |
-|------|---------|
-| `run_pipeline` | Execute a full multi-phase pipeline |
+Order the stages to describe what each does for this specific trait; there is no fixed
+phase vocabulary. See the `training` and `delivery` skills for the primitive signatures.
 
 ## Design principles
 
