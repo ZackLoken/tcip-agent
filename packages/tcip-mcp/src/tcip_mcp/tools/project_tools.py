@@ -107,7 +107,7 @@ def _resolve_project_path(project_path: str) -> str:
 
 @mcp.tool()
 @audited
-def get_active_context() -> dict:
+def view_gui_state() -> dict:
     """The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the
     exact current image. Lets the agent work through the app instead of globbing or asking which image
     is open. Reads the active-project marker + that project's gui.json. active_project is None when
@@ -152,7 +152,7 @@ def get_active_context() -> dict:
 
 @mcp.tool()
 @audited
-def get_project_status(project_path: str = "") -> dict:
+def inspect_project(project_path: str = "") -> dict:
     """Get an overview of a TCIP project.
 
     Args:
@@ -198,7 +198,7 @@ def get_project_status(project_path: str = "") -> dict:
 
 @mcp.tool()
 @audited
-def export_project(project_path: str, output_path: str = "", include_models: bool = False) -> dict:
+def archive_project(project_path: str, output_path: str = "", include_models: bool = False) -> dict:
     """Export an annotation project as a portable ZIP archive.
 
     Scans the canonical dataset layout (see :mod:`tcip_mcp.dataset_layout`): images under
