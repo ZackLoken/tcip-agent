@@ -97,12 +97,9 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     import numpy as np
     from torch.utils.data import DataLoader
 
-    import tcip_mcp.pipelines.components.backbones  # noqa: F401
-    import tcip_mcp.pipelines.components.necks  # noqa: F401
-    import tcip_mcp.pipelines.components.heads  # noqa: F401
-    from tcip_mcp.pipelines.composer import compose_model
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tests import bespoke_models
 
     IMG = 64
     images_dir = tmp_path / "images"
@@ -120,12 +117,7 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
         "semantic_seg", images_dir=str(images_dir), masks_dir=str(masks_dir), num_classes=2
     )
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
-    spec = {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "fpn", "out_channels": 256},
-        "heads": [{"name": "semantic_seg", "num_classes": 2}],
-    }
-    model = compose_model(spec)
+    model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
 
     result = evaluate(model, loader, torch.device("cpu"), "semantic_seg")
 
