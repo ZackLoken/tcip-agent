@@ -23,8 +23,8 @@ def test_validate_config_accepts_trainer_canonical_stages(tmp_path):
     imgs.mkdir()
     lbls.mkdir()
     cfg = {
-        "model_spec": {"backbone": {"name": "tv_resnet50"}, "neck": {"name": "fpn"},
-                       "heads": [{"name": "anchor_detection", "num_classes": 1}]},
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
         # launch_training's own default stage shape: freeze_to + epochs, no lr.
         "training": {"batch_size": 2,
@@ -54,8 +54,8 @@ def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
-    base = {"model_spec": {"backbone": {"name": "tv_resnet50"},
-                           "heads": [{"name": "anchor_detection"}]}}
+    base = {"model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                             "builder_kwargs": {"num_classes": 1}, "task": "detection"}}
     out = _apply_hpo_params(base, {"lr": 3e-3, "weight_decay": 2e-4})
 
     # Mirror generic_trainer.train()'s reads exactly (top-level keys + defaults).
@@ -91,8 +91,8 @@ class _FakeDataset:
 
 def _detection_base() -> dict:
     return {
-        "model_spec": {"backbone": {"name": "tv_resnet50"},
-                       "heads": [{"name": "anchor_detection", "task": "detection"}]},
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": "imgs", "labels_dir": "lbls"},
         "training": {"batch_size": 2},
     }
@@ -180,9 +180,9 @@ def test_run_hpo_failed_trial_never_wins(tmp_path, monkeypatch):
     assert result["best_value"] == pytest.approx(-11.0)  # best REAL trial wins
 
 
-def test_run_hpo_trials_use_base_augmentation_and_loss(tmp_path, monkeypatch):
+def test_run_hpo_trials_use_base_augmentation(tmp_path, monkeypatch):
     """Trials must train under the final run's regime: base_config augmentation
-    reaches the train dataset and the W8 imbalance loss reaches the head spec."""
+    reaches the train dataset. (The loss is owned by the bespoke model_source builder.)"""
     pytest.importorskip("torch")
     pytest.importorskip("optuna")
     monkeypatch.chdir(tmp_path)
@@ -192,20 +192,18 @@ def test_run_hpo_trials_use_base_augmentation_and_loss(tmp_path, monkeypatch):
 
     def fake_train(run, train_loader, val_loader, task="classification",
                    epoch_callback=None, resume_from=""):
-        captured["head"] = run.config["model_spec"]["heads"][0]
+        captured["model_source"] = run.config["model_source"]
         run.best_metric = 1.0
         run.status = "completed"
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
     base = {
-        "model_spec": {"backbone": {"name": "tv_resnet50"},
-                       "heads": [{"name": "classification", "task": "classification",
-                                  "num_classes": 2}]},
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
         "data": {"images_dir": "imgs"},
         "training": {"batch_size": 2},
         "augmentation": {"horizontal_flip": 0.5},
-        "loss": {"name": "focal", "class_weights": [1.0, 2.0]},
     }
     run_hpo(
         base, param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
@@ -213,8 +211,7 @@ def test_run_hpo_trials_use_base_augmentation_and_loss(tmp_path, monkeypatch):
         direction="maximize", pruner="none",
     )
     assert captured["transforms"] is not None       # augmentation was built + passed
-    assert captured["head"]["loss"] == "focal"      # W8 loss injected into the trial
-    assert captured["head"]["class_weights"] == [1.0, 2.0]
+    assert captured["model_source"]["builder"].endswith(":build_bespoke_classifier")
 
 
 # --------------------------------------------------------------------------
