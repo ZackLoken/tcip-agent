@@ -36,13 +36,18 @@ early_stopping:
 
 ## Config Structure
 
-`model_spec` composes from the registry (`backbone → neck → heads → loss`) — see the
-canonical example and current component names in `pipeline-design/SKILL.md`; don't
-re-derive it here.
+`model_source` points at the importable builder for your agent-written `nn.Module` (add
+`training_source` for a custom `train(ctx)` loop) — see how you build the model and import
+the plain blocks in `pipeline-design/SKILL.md`; don't re-derive it here.
 
 ```python
 config = {
-    "model_spec": {...},  # see pipeline-design skill
+    "model_source": {  # importable nn.Module builder — see pipeline-design skill
+        "builder": "my_module:build_net",
+        "builder_kwargs": {"in_chans": 3, "num_classes": 3},
+        "task": "detection",
+    },
+    # "training_source": {"train": "my_module:train"},  # optional custom loop
     "data": {
         "images_dir": "data/images",
         "labels_dir": "data/labels/detect",
