@@ -253,7 +253,7 @@ async def set_current_image(req: NavRequest) -> dict:
     """Persist the browser's current image position into ``GuiState.dataset``.
 
     The frontend debounces this so rapid arrow-key nav doesn't flood the store; the
-    agent reads the resulting index via ``get_active_context`` (last image the human
+    agent reads the resulting index via ``view_gui_state`` (last image the human
     looked at). Merges into the live dataset so the other selection fields survive.
     """
     dataset = store.state.dataset
