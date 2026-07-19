@@ -257,9 +257,9 @@ class TestVisualizeDatasetSample:
 
 class TestVisualizeWorstPredictions:
     def test_basic(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import visualize_worst_predictions
+        from tcip_mcp.tools.vision_tools import render_failure_cases
 
-        result = visualize_worst_predictions(
+        result = render_failure_cases(
             predictions_dir=str(viz_dataset / "predictions" / "live" / "detect"),
             labels_dir=str(viz_dataset / "annotations" / "default" / "detect"),
             images_dir=str(viz_dataset / "images"),
@@ -427,9 +427,9 @@ class TestSamPredictorCache:
 
 class TestVisualizeGridOverlayTool:
     def test_basic(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import visualize_grid_overlay
+        from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
-        result = visualize_grid_overlay(
+        result = overlay_reference_grid(
             image_path=str(viz_dataset / "images" / "img_001.jpg"),
         )
         assert "error" not in result
@@ -438,19 +438,19 @@ class TestVisualizeGridOverlayTool:
         assert result["rows"] == 6
 
     def test_missing_image(self):
-        from tcip_mcp.tools.vision_tools import visualize_grid_overlay
+        from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
-        result = visualize_grid_overlay(image_path="/nonexistent.jpg")
+        result = overlay_reference_grid(image_path="/nonexistent.jpg")
         assert "error" in result
 
 
 class TestSamAutoLabelTool:
-    """Test sam_auto_label tool (mocked SAM)."""
+    """Test generate_mask_candidates tool (mocked SAM)."""
 
     def test_missing_image(self):
-        from tcip_mcp.tools.vision_tools import sam_auto_label
+        from tcip_mcp.tools.vision_tools import generate_mask_candidates
 
-        result = sam_auto_label(image_path="/nonexistent.jpg")
+        result = generate_mask_candidates(image_path="/nonexistent.jpg")
         assert "error" in result
 
 
@@ -463,13 +463,13 @@ class TestAcceptCandidatesTool:
             assignments=[{"candidate_id": 0, "class_id": 1}],
         )
         assert "error" in result
-        assert "Run sam_auto_label first" in result["error"]
+        assert "Run generate_mask_candidates first" in result["error"]
 
     def test_with_cached_candidates(self, viz_dataset: Path):
         import json
         from tcip_mcp.tools.vision_tools import accept_candidates
 
-        # Simulate cached candidates from sam_auto_label
+        # Simulate cached candidates from generate_mask_candidates
         from tcip_mcp.project_paths import resolve_state
 
         state_dir = resolve_state(Path(".tcip") / "state")
@@ -700,12 +700,12 @@ class TestFullSamPipeline:
         return tmp_path
 
     def test_auto_label_then_accept(self, sam_dataset: Path):
-        from tcip_mcp.tools.vision_tools import accept_candidates, sam_auto_label
+        from tcip_mcp.tools.vision_tools import accept_candidates, generate_mask_candidates
 
         img_path = str(sam_dataset / "images" / "e2e.jpg")
 
         # Step 1: auto-label
-        auto_result = sam_auto_label(
+        auto_result = generate_mask_candidates(
             image_path=img_path,
             points_per_side=16,
             min_mask_region_area=500,
@@ -951,7 +951,7 @@ class TestFullPipelineIntegration:
         grid_render = render_grid_overlay(img_path)
         assert Path(grid_render).is_file()
 
-        # Step 3: Cache candidates (simulating sam_auto_label state save)
+        # Step 3: Cache candidates (simulating generate_mask_candidates state save)
         self._cache_candidates("sample", MOCK_CANDIDATES)
 
         # Step 4: Accept with class assignments
