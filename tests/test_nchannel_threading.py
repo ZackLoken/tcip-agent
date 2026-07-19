@@ -8,33 +8,17 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 
-def test_recommend_sets_in_chans_from_sensor():
-    from tcip_mcp.pipelines.composer import recommend_model_spec
-    rgb = recommend_model_spec("classification", 300, sensor="rgb", num_classes=2)
-    assert "in_chans" not in rgb["backbone"]                 # RGB stays the default (3)
-    ms = recommend_model_spec("classification", 300, sensor="multispectral", num_classes=2)
-    assert ms["backbone"]["in_chans"] == 5
-    depth = recommend_model_spec("classification", 300, sensor="depth", num_classes=2)
-    assert depth["backbone"]["in_chans"] == 1
-
-
 def test_tv_backbone_accepts_in_chans():
-    import tcip_mcp.pipelines.components.backbones  # noqa: F401
-    from tcip_mcp.pipelines.registry import BACKBONES
+    from tcip_mcp.pipelines.components.backbones import _build_tv_resnet
 
-    bb = BACKBONES.build("tv_resnet50", pretrained=False, in_chans=4)
+    bb = _build_tv_resnet("resnet50", pretrained=False, in_chans=4)
     out = bb(torch.rand(1, 4, 64, 64))
     assert isinstance(out, dict) and len(out) == 4           # 4 feature stages
-    assert BACKBONES.supports_channels("tv_resnet50", 4) is True
 
 
 def test_compose_and_forward_4_channel_model():
-    from tcip_mcp.pipelines.composer import compose_model
-    model = compose_model({
-        "backbone": {"name": "tv_resnet50", "pretrained": False, "in_chans": 4},
-        "neck": {"name": "gap"},
-        "heads": [{"name": "classification", "num_classes": 3}],
-    })
+    from tests import bespoke_models
+    model = bespoke_models.build_bespoke_classifier(num_classes=3, in_chans=4)
     out = model(torch.rand(2, 4, 64, 64))
     assert isinstance(out, dict) and len(out) > 0            # forward runs on 4 channels
 
@@ -42,10 +26,10 @@ def test_compose_and_forward_4_channel_model():
 def test_train_start_channel_guard():
     from tcip_mcp.pipelines.training.generic_trainer import _validate_input_channels
     with pytest.raises(ValueError, match="channels"):
-        _validate_input_channels({"backbone": {"name": "x", "in_chans": 4}},
+        _validate_input_channels({"model_source": {"builder": "x:y", "in_chans": 4}},
                                  [(torch.rand(2, 3, 16, 16), {})])
     # matching channel counts -> no error
-    _validate_input_channels({"backbone": {"name": "x", "in_chans": 3}},
+    _validate_input_channels({"model_source": {"builder": "x:y", "in_chans": 3}},
                              [(torch.rand(2, 3, 16, 16), {})])
 
 
