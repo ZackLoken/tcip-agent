@@ -325,8 +325,8 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
 
         # Get config summary
         config = exp.get("config", {})
-        model_spec = config.get("model_spec") or config.get("model", {})
-        summary["backbone"] = model_spec.get("backbone", {}).get("name", "unknown")
+        model_source = config.get("model_source", {})
+        summary["model"] = model_source.get("builder", "unknown")
 
         comparisons.append(summary)
 
