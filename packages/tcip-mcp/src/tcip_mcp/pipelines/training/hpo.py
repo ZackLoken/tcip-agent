@@ -46,9 +46,7 @@ def get_default_optuna_space() -> dict:
     return {
         "lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
         "batch_size": {"type": "categorical", "choices": [2, 4, 8]},
-        "head": {"type": "categorical", "choices": ["faster_rcnn", "fcos", "retinanet"]},
         "weight_decay": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
-        "backbone": {"type": "categorical", "choices": ["resnet50", "resnet101"]},
     }
 
 
@@ -58,8 +56,6 @@ def get_default_baseline_params() -> dict:
         "lr": 3e-4,
         "batch_size": 4,
         "weight_decay": 1e-4,
-        "head": "faster_rcnn",
-        "backbone": "resnet50",
     }
 
 
