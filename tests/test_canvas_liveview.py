@@ -1,4 +1,4 @@
-"""Live canvas view: the GUI's canvas-state push + the agent's visualize_canvas render.
+"""Live canvas view: the GUI's canvas-state push + the agent's capture_live_canvas render.
 
 Covers the two-file scheme (meta heartbeats never touch the geometry blob; geometry is valid
 only when its (image_path, tab) identity matches the meta), the display-resolved shape renderer
@@ -190,20 +190,20 @@ def _write_state(tmp_path: Path, img: str, shapes=SHAPES, *, shapes_image: str |
         }))
 
 
-def test_visualize_canvas_missing_state(tmp_path, monkeypatch):
+def test_capture_live_canvas_missing_state(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    from tcip_mcp.tools.vision_tools import visualize_canvas
-    res = visualize_canvas(refresh=False)
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    res = capture_live_canvas(refresh=False)
     assert "error" in res
 
 
-def test_visualize_canvas_renders_pushed_state(tmp_path, monkeypatch):
+def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
 
-    from tcip_mcp.tools.vision_tools import visualize_canvas
-    res = visualize_canvas(refresh=False)
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    res = capture_live_canvas(refresh=False)
     assert "error" not in res
     assert Path(res["image_path"]).is_file()
     assert res["classes"][0]["name"] == "catkin"
@@ -214,14 +214,14 @@ def test_visualize_canvas_renders_pushed_state(tmp_path, monkeypatch):
     assert res["project_root"] == str(tmp_path)
 
 
-def test_visualize_canvas_identity_stale_shapes_do_not_render(tmp_path, monkeypatch):
+def test_capture_live_canvas_identity_stale_shapes_do_not_render(tmp_path, monkeypatch):
     """Geometry left over from a previous image must not render under the current one."""
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img, shapes_image="C:/img/other.jpg")  # stale identity
 
-    from tcip_mcp.tools.vision_tools import visualize_canvas
-    res = visualize_canvas(refresh=False)
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    res = capture_live_canvas(refresh=False)
     assert "error" not in res
     assert res["shapes_missing"] is True
     assert res["shape_counts_by_tag"] == {}
