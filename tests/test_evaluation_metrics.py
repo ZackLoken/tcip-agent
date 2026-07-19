@@ -370,7 +370,7 @@ def test_validate_classification_metrics(tmp_path):
 def json_data_dir(tmp_path: Path) -> Path:
     """Minimal dataset with per-image JSON labels/predictions in the canonical layout.
 
-    evaluate_predictions reads GT and predictions through the json_io per-image schema
+    score_predictions reads GT and predictions through the json_io per-image schema
     (pixel COCO xywh + native ``score``). Files keep a ``.txt`` name because the tool
     resolves them with ``fmt='yolo'`` — json_io parses the JSON *content*.
     """
@@ -404,10 +404,10 @@ def json_data_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_evaluate_predictions_folder_uses_pycocotools(json_data_dir):
+def test_score_predictions_folder_uses_pycocotools(json_data_dir):
     data_dir = json_data_dir
-    from tcip_mcp.tools.annotation_tools import evaluate_predictions
-    r = evaluate_predictions(str(data_dir))
+    from tcip_mcp.tools.annotation_tools import score_predictions
+    r = score_predictions(str(data_dir))
     assert "map50" in r
     # fixture: each image has 2 GT, predictions = 1 TP + 1 FP -> tp=1,fp=1,fn=1 per image (x3 images).
     assert r["total_tp"] == 3 and r["total_fp"] == 3 and r["total_fn"] == 3
