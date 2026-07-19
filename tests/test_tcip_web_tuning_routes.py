@@ -29,7 +29,7 @@ def test_launch_creates_sweep_then_listed(client: TestClient) -> None:
     resp = client.post(
         "/api/tuning/launch",
         json={
-            "base_config": {"model_spec": {}, "data": {}, "training": {}},
+            "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
             "param_space": {"training.batch_size": [2, 4]},
             "n_trials": 1,
             "output_dir": "",
