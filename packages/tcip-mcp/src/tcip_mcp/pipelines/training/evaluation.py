@@ -513,6 +513,53 @@ def regression_metrics(pred_values: torch.Tensor, gt_values: torch.Tensor) -> di
     }
 
 
+def semantic_seg_metrics(preds: torch.Tensor, targets: torch.Tensor, num_classes: int,
+                         ignore_index: int | None = None) -> dict:
+    """Standard mean-IoU / Dice for semantic segmentation from per-pixel class maps.
+
+    ``preds`` and ``targets`` are integer class-id tensors of matching shape (any shape;
+    both are flattened). Per class: IoU = ``|P∩G| / |P∪G|`` and Dice = ``2|P∩G| / (|P|+|G|)``.
+    ``mIoU`` / ``dice`` average only over classes present in preds or targets — a class absent
+    from both has an undefined ratio (reported ``None`` per-class, excluded from the mean), the
+    standard convention. ``pixel_acc`` is the fraction of correctly labelled pixels. Pixels equal
+    to ``ignore_index`` in the GT are dropped before scoring.
+    """
+    pred = preds.detach().cpu().reshape(-1).long()
+    gt = targets.detach().cpu().reshape(-1).long()
+    if ignore_index is not None:
+        keep = gt != ignore_index
+        pred, gt = pred[keep], gt[keep]
+    per_class_iou: dict[int, float | None] = {}
+    per_class_dice: dict[int, float | None] = {}
+    ious, dices = [], []
+    for c in range(num_classes):
+        if c == ignore_index:
+            continue
+        p = pred == c
+        g = gt == c
+        inter = int((p & g).sum())
+        union = int((p | g).sum())
+        denom = int(p.sum()) + int(g.sum())
+        if union == 0:  # class absent from both — ratio undefined, exclude from the mean
+            per_class_iou[c] = None
+            per_class_dice[c] = None
+            continue
+        iou = inter / union
+        dice = 2 * inter / denom if denom > 0 else 0.0
+        per_class_iou[c] = iou
+        per_class_dice[c] = dice
+        ious.append(iou)
+        dices.append(dice)
+    pixel_acc = float((pred == gt).float().mean()) if gt.numel() else 0.0
+    return {
+        "mIoU": sum(ious) / len(ious) if ious else 0.0,
+        "dice": sum(dices) / len(dices) if dices else 0.0,
+        "pixel_acc": pixel_acc,
+        "per_class_iou": per_class_iou,
+        "per_class_dice": per_class_dice,
+    }
+
+
 # ====================================================================
 # Task-agnostic evaluate() — loss pass + prediction pass
 # ====================================================================
@@ -547,6 +594,7 @@ def evaluate(
     n_loss = 0
     per_image: list[dict] = []
     cls_p, cls_g, ord_p, ord_g, reg_p, reg_g = [], [], [], [], [], []
+    seg_p, seg_g = [], []
     detector = getattr(model, "detector", None)
 
     for batch in loader:
@@ -600,6 +648,16 @@ def evaluate(
             elif task == "regression" and "head0_values" in out:
                 reg_p.append(out["head0_values"].detach().cpu())
                 reg_g.append(targets["values"].detach().cpu())
+            elif task == "semantic_seg" and "head0_masks" in out:
+                pm = out["head0_masks"].detach().cpu()
+                gm = targets["masks"].detach().cpu()
+                # decode() argmaxes feature-resolution logits; upsample the label map (nearest)
+                # to the GT frame so metrics compare per-pixel at the annotation resolution.
+                if pm.shape[-2:] != gm.shape[-2:]:
+                    pm = torch.nn.functional.interpolate(
+                        pm.unsqueeze(1).float(), size=gm.shape[-2:], mode="nearest").squeeze(1).long()
+                seg_p.append(pm.reshape(-1))
+                seg_g.append(gm.reshape(-1))
 
     model.eval()
     loss = total_loss / max(n_loss, 1)
@@ -624,6 +682,12 @@ def evaluate(
         result.update({k: round(v, 6) for k, v in ordinal_metrics(torch.cat(ord_p), torch.cat(ord_g)).items()})
     elif task == "regression" and reg_p:
         result.update({k: round(v, 6) for k, v in regression_metrics(torch.cat(reg_p), torch.cat(reg_g)).items()})
+    elif task == "semantic_seg" and seg_p:
+        pred, gt = torch.cat(seg_p), torch.cat(seg_g)
+        num_classes = getattr(model.heads[0], "num_classes", int(gt.max()) + 1)
+        m = semantic_seg_metrics(pred, gt, num_classes)
+        # Scalars rounded; per-class dicts (with None for absent classes) passed through.
+        result.update({k: (round(v, 6) if isinstance(v, (int, float)) else v) for k, v in m.items()})
 
     return result
 
