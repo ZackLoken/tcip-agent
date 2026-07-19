@@ -1,8 +1,8 @@
 """Tests for composable ML primitives — Phases 5-12.
 
 Covers: datasets, samplers, optimizer factory, generic trainer basics,
-orchestrator validation, predictor, active learning scorers,
-PointNet++ backbone, temporal heads, and pipeline tools.
+predictor, active learning scorers, PointNet++ backbone, temporal heads,
+and tool imports.
 """
 
 from __future__ import annotations
@@ -115,15 +115,6 @@ class TestTrainConfig:
 
 
 # ====================================================================
-# Phase 7: Pipeline Orchestrator Validation
-# ====================================================================
-
-# (validate_pipeline is covered exactly by test_orchestrator_characterization.py::TestValidatePipeline,
-#  which pins the precise issue strings — including "Pipeline has no phases" — so the two weaker
-#  isinstance/any-substring checks that lived here were removed as strict duplicates.)
-
-
-# ====================================================================
 # Phase 8: Generic Predictor
 # ====================================================================
 
@@ -231,9 +222,6 @@ class TestTemporal:
 # ====================================================================
 
 class TestToolImports:
-    def test_pipeline_tools_importable(self):
-        import tcip_mcp.tools.pipeline_tools  # noqa: F401
-
     def test_model_tools_no_old_builder_import(self):
         """model_tools should not import from pipelines.models.builder."""
         import inspect
