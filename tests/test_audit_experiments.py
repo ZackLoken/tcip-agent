@@ -222,15 +222,15 @@ class TestExperiments:
         original = exp.EXPERIMENTS_DIR
         exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
 
-        exp.create_experiment("exp-x", {"model_spec": {"backbone": {"name": "resnet50"}}})
-        exp.create_experiment("exp-y", {"model_spec": {"backbone": {"name": "efficientnet_b0"}}})
+        exp.create_experiment("exp-x", {"model_source": {"builder": "my_models:resnet50_det"}})
+        exp.create_experiment("exp-y", {"model_source": {"builder": "my_models:effb0_cls"}})
         exp.log_metrics("exp-x", 0, {"mAP50": 0.6})
         exp.log_metrics("exp-y", 0, {"mAP50": 0.7})
 
         result = exp.compare_experiments(["exp-x", "exp-y"])
         assert result["count"] == 2
         exps = {e["experiment_id"]: e for e in result["experiments"]}
-        assert exps["exp-x"]["backbone"] == "resnet50"
+        assert exps["exp-x"]["model"] == "my_models:resnet50_det"
         assert exps["exp-y"]["final_metrics"]["mAP50"] == 0.7
 
         exp.EXPERIMENTS_DIR = original
