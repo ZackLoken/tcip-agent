@@ -250,112 +250,6 @@ def validate_data_quality(folder_path: str) -> dict:
 
 @mcp.tool()
 @audited
-def split_dataset(
-    folder_path: str,
-    train_ratio: float = 0.7,
-    val_ratio: float = 0.2,
-    test_ratio: float = 0.1,
-    seed: int = 42,
-    output_path: str | None = None,
-    stratified: bool = False,
-    copy_files: bool = True,
-) -> dict:
-    """Split dataset into train/val/test and create YOLO directory structure.
-
-    Creates output_path/{train,val,test}/{images,labels}/ with actual file
-    copies (or symlinks if copy_files=False). Also writes split manifest JSONs.
-
-    Uses the same leakage-free, group-aware splitter as ``make_splits``: sibling tiles of one
-    source image are kept in the same split (no tree-/canopy-level leakage). When stratified=True,
-    splits are additionally balanced by each source's foreground annotation count so dense and
-    sparse sources are proportionally represented.
-
-    Args:
-        folder_path: Path to the dataset root directory.
-        train_ratio: Fraction for training set.
-        val_ratio: Fraction for validation set.
-        test_ratio: Fraction for test set.
-        seed: Random seed for reproducibility.
-        output_path: Directory for split output (defaults to folder_path/splits).
-        stratified: Balance splits by each source's foreground annotation count.
-        copy_files: Copy files (True) or create symlinks (False).
-    """
-    if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
-        return {"error": "Ratios must sum to 1.0"}
-
-    scan = _scan_dataset(folder_path)
-    root = Path(folder_path)
-
-    # Build stem → file path maps
-    image_map: dict[str, str] = {}
-    for p in scan["images"]:
-        image_map[Path(p).stem] = p
-    label_map: dict[str, str] = {}
-    for p in scan["labels_detect"]:
-        label_map[Path(p).stem] = p
-
-    # Only split stems that have both image and label
-    paired_stems = sorted(set(image_map) & set(label_map))
-    if not paired_stems:
-        return {"error": "No paired image+label files found"}
-
-    # Group-aware split (same core as make_splits): sibling tiles stay in one split, no leakage.
-    from tcip_mcp.pipelines.data.splits import group_balanced_split
-
-    annotation_counts: dict[str, int] | None = None
-    if stratified:
-        # stratify by GT box count so dense and sparse sources are balanced per split
-        annotation_counts = {}
-        for stem in paired_stems:
-            with open(label_map[stem], "r") as f:
-                annotation_counts[stem] = sum(1 for line in f if line.strip())
-
-    splits = group_balanced_split(
-        paired_stems,
-        annotation_counts=annotation_counts,
-        splits=(train_ratio, val_ratio, test_ratio),
-        seed=seed,
-    )
-
-    out_dir = Path(output_path) if output_path else root / "splits"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create YOLO directory structure and copy/link files
-    place_fn = shutil.copy2 if copy_files else os.symlink
-    for split_name, stems in splits.items():
-        img_dir = out_dir / split_name / "images"
-        lbl_dir = out_dir / split_name / "labels"
-        img_dir.mkdir(parents=True, exist_ok=True)
-        lbl_dir.mkdir(parents=True, exist_ok=True)
-
-        for stem in stems:
-            src_img = Path(image_map[stem])
-            src_lbl = Path(label_map[stem])
-            dst_img = img_dir / src_img.name
-            dst_lbl = lbl_dir / src_lbl.name
-            if not dst_img.exists():
-                place_fn(str(src_img), str(dst_img))
-            if not dst_lbl.exists():
-                place_fn(str(src_lbl), str(dst_lbl))
-
-    # Write manifest JSONs for reference
-    for split_name, stems in splits.items():
-        out_file = out_dir / f"{split_name}.json"
-        with open(out_file, "w") as f:
-            json.dump(sorted(stems), f, indent=2)
-
-    return {
-        "splits": {k: len(v) for k, v in splits.items()},
-        "total": len(paired_stems),
-        "seed": seed,
-        "stratified": stratified,
-        "output_dir": str(out_dir),
-        "structure": f"{out_dir}/{{train,val,test}}/{{images,labels}}/",
-    }
-
-
-@mcp.tool()
-@audited
 def make_splits(
     folder_path: str,
     train_ratio: float = 0.7,
@@ -365,15 +259,20 @@ def make_splits(
     group_by: str = "tile_prefix",
     stratify_foreground: bool = True,
     output_path: str | None = None,
+    materialize: bool = False,
+    copy_files: bool = True,
 ) -> dict:
     """Compute a leakage-free, annotation-stratified train/val/test split.
 
-    Unlike ``split_dataset`` (which copies/symlinks files into a YOLO directory
-    tree), this is a lightweight, non-destructive complement: it only emits
-    ``{train,val,test}.json`` stem manifests plus a stats dict. Sibling tiles of
-    one source image are kept in the same split (no tree-/canopy-level leakage),
-    and — when ``stratify_foreground`` is set — splits are balanced by annotation
+    Non-destructive by default: emits ``{train,val,test}.json`` stem manifests plus a stats
+    dict. Sibling tiles of one source image are kept in the same split (no tree-/canopy-level
+    leakage), and — when ``stratify_foreground`` is set — splits are balanced by annotation
     count so dense and sparse sources are proportionally represented.
+
+    With ``materialize=True`` it additionally lays out a YOLO
+    ``{train,val,test}/{images,labels}/`` tree under ``output_path`` (defaulting to
+    ``folder_path/splits``), copying (or symlinking, ``copy_files=False``) each stem's image and
+    label — and adds ``output_dir`` / ``structure`` to the return.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -384,7 +283,11 @@ def make_splits(
         group_by: Group selector — ``"tile_prefix"`` (strip a trailing
             ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per image).
         stratify_foreground: Balance splits by foreground annotation count.
-        output_path: When set, write ``{train,val,test}.json`` manifests there.
+        output_path: Where to write manifests (and, when materializing, the file tree).
+            Defaults to ``folder_path/splits`` when materializing, else manifests are
+            written only if this is set.
+        materialize: Also copy/symlink files into a YOLO directory tree.
+        copy_files: Copy files (True) or create symlinks (False) when materializing.
     """
     if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
         return {"error": "Ratios must sum to 1.0"}
@@ -428,16 +331,16 @@ def make_splits(
     )
 
     counts = annotation_counts or {}
+    out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)
     manifest_dir = None
-    if output_path:
-        out = Path(output_path)
-        out.mkdir(parents=True, exist_ok=True)
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
         for split_name, split_stems in parts.items():
-            with open(out / f"{split_name}.json", "w") as f:
+            with open(out_dir / f"{split_name}.json", "w") as f:
                 json.dump(sorted(split_stems), f, indent=2)
-        manifest_dir = str(out)
+        manifest_dir = str(out_dir)
 
-    return {
+    result = {
         "splits": {k: len(v) for k, v in parts.items()},
         "foreground_annotations": {
             k: sum(int(counts.get(s, 0)) for s in v) for k, v in parts.items()
@@ -450,3 +353,26 @@ def make_splits(
         "stratified": stratified,
         "manifest_dir": manifest_dir,
     }
+
+    if materialize:
+        # Lay out a YOLO {train,val,test}/{images,labels}/ tree from the split assignment.
+        place_fn = shutil.copy2 if copy_files else os.symlink
+        for split_name, split_stems in parts.items():
+            img_dir = out_dir / split_name / "images"
+            lbl_dir = out_dir / split_name / "labels"
+            img_dir.mkdir(parents=True, exist_ok=True)
+            lbl_dir.mkdir(parents=True, exist_ok=True)
+            for stem in split_stems:
+                src_img = Path(image_map[stem])
+                dst_img = img_dir / src_img.name
+                if not dst_img.exists():
+                    place_fn(str(src_img), str(dst_img))
+                if stem in label_map:
+                    src_lbl = Path(label_map[stem])
+                    dst_lbl = lbl_dir / src_lbl.name
+                    if not dst_lbl.exists():
+                        place_fn(str(src_lbl), str(dst_lbl))
+        result["output_dir"] = str(out_dir)
+        result["structure"] = f"{out_dir}/{{train,val,test}}/{{images,labels}}/"
+
+    return result
