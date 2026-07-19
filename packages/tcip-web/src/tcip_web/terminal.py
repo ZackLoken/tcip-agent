@@ -1,12 +1,15 @@
 """Embedded agent terminal — run the real Claude Code CLI in a PTY.
 
 The in-app agent surface is the *actual* ``claude`` interactive TUI, not a chat
-re-implementation: we spawn the CLI in a pseudo-terminal (ConPTY via ``pywinpty`` on
-Windows, the stdlib ``pty`` on POSIX) with cwd = the repo root, so it loads
-``CLAUDE.md`` / ``.github/skills/`` / ``.mcp.json`` and inherits the machine's existing
-Claude Code auth exactly like a terminal session. Raw PTY bytes stream to xterm.js in
-the browser over a WebSocket; keystrokes stream back. No translation layer — fidelity
-is the point, and the translation layer is where the old chat's silent failures lived.
+re-implementation: we spawn the fenced CLI inside an interactive shell (PowerShell on
+Windows, bash on POSIX) in a pseudo-terminal (ConPTY via ``pywinpty`` on Windows, the
+stdlib ``pty`` on POSIX) with cwd = the repo root, so it loads ``CLAUDE.md`` /
+``.github/skills/`` / ``.mcp.json`` and inherits the machine's existing Claude Code auth
+exactly like a terminal session. The shell (not claude) is the PTY's top process, so an
+in-TUI ``/exit`` drops back to a live prompt where the ``claude --resume <id>`` hint stays
+usable. Raw PTY bytes stream to xterm.js in the browser over a WebSocket; keystrokes
+stream back. No translation layer — fidelity is the point, and the translation layer is
+where the old chat's silent failures lived.
 
 This module owns the process/PTY concerns; the HTTP/WS surface is
 ``routes/terminal.py``. The spawn command is injectable via ``TCIP_TERMINAL_CMD`` so
@@ -121,15 +124,36 @@ def _materialize_fence_settings() -> Optional[Path]:
     return dest
 
 
+def _resolve_fence() -> tuple[Optional[str], Optional[str]]:
+    """The fenced flags' values: ``(settings_path, workspace_dir)``, or ``(None, None)`` if no fence.
+
+    ``--settings`` applies the committed breeder-lane permission profile, materialized with
+    absolute hook paths so the Bash/PowerShell guards survive a ``cd``; ``--add-dir`` grants the
+    out-of-repo workspace. The wrapper below turns these into the fenced ``claude`` invocation.
+    """
+    if not _FENCE_SETTINGS.is_file():
+        return None, None
+    from tcip_mcp.workspace import workspace_root
+
+    materialized = _materialize_fence_settings()
+    if materialized is None:
+        logger.warning(
+            "Could not materialize absolute fence hook paths; falling back to the committed "
+            "template. Its relative hook paths over-deny after a shell cd (fail-safe, but "
+            "friction) — check temp-dir writability."
+        )
+    settings_path = materialized or _FENCE_SETTINGS
+    return str(settings_path), str(workspace_root())
+
+
 def resolve_terminal_command() -> Optional[list[str]]:
     """Argv for the agent terminal, or ``None`` when unavailable.
 
-    Order: an explicit ``TCIP_TERMINAL_CMD`` override (tests / power users), then the
-    ``claude`` CLI on PATH. The real CLI is spawned **fenced**: ``--settings`` applies the
-    committed breeder-lane permission profile (materialized with absolute hook paths so the
-    Bash/PowerShell guards survive a ``cd``), ``--add-dir`` grants the out-of-repo workspace,
-    and ``--permission-mode default`` surfaces anything un-allowed to the human for approval
-    rather than auto-running or auto-denying it.
+    Order: an explicit ``TCIP_TERMINAL_CMD`` override (tests / power users), then the ``claude``
+    CLI on PATH. The real CLI is spawned **fenced** and **directly** (no wrapping shell), so
+    ``/exit`` ends the process cleanly: ``--settings`` applies the breeder-lane profile (absolute
+    hook paths), ``--add-dir`` grants the workspace, ``--permission-mode default`` surfaces
+    un-allowed actions for approval.
     """
     override = os.environ.get(TERMINAL_CMD_ENV, "").strip()
     if override:
@@ -140,27 +164,43 @@ def resolve_terminal_command() -> Optional[list[str]]:
     exe = shutil.which(cli)
     if exe is None:
         return None
-    argv = [exe]
-    if _FENCE_SETTINGS.is_file():
-        from tcip_mcp.workspace import workspace_root
+    settings_path, ws = _resolve_fence()
+    if settings_path:
+        return [exe, "--settings", settings_path, "--add-dir", ws or "", "--permission-mode", "default"]
+    return [exe]
 
-        materialized = _materialize_fence_settings()
-        if materialized is None:
-            logger.warning(
-                "Could not materialize absolute fence hook paths; falling back to the committed "
-                "template. Its relative hook paths OVER-deny after a shell cd (fail-safe, but "
-                "friction) — check temp-dir writability."
+
+def _prewarm_blocking() -> None:
+    """Warm the controllable part of the cold first-spawn into the OS cache (see ``prewarm``)."""
+    try:
+        import importlib
+
+        importlib.import_module("tcip_mcp.server")  # the tool graph the MCP server loads at launch
+    except Exception:
+        logger.debug("prewarm: tcip_mcp import failed", exc_info=True)
+    if os.name == "nt":
+        try:
+            shell = shutil.which("powershell.exe") or "powershell.exe"
+            # Throwaway PowerShell to warm PowerShell + .NET; output discarded, bounded, best-effort.
+            subprocess.run(
+                [shell, "-NoProfile", "-Command", "$null"],
+                capture_output=True,
+                timeout=30,
+                check=False,
             )
-        settings_path = materialized or _FENCE_SETTINGS
-        argv += [
-            "--settings",
-            str(settings_path),
-            "--add-dir",
-            str(workspace_root()),
-            "--permission-mode",
-            "default",
-        ]
-    return argv
+        except Exception:
+            logger.debug("prewarm: powershell warm failed", exc_info=True)
+
+
+def prewarm() -> None:
+    """Kick off best-effort cold-cache warming on a daemon thread; never blocks web startup.
+
+    The first ``claude`` spawn is ~4-5s vs ~1s on restart — cold cache, not structure: cold
+    ``tcip_mcp`` import (the MCP server loads it at launch) plus, on Windows, cold PowerShell +
+    .NET. Warm both here so the operator's first terminal open pays only claude/node's own cold
+    cost. All failures are swallowed; the terminal still works if warming does nothing.
+    """
+    threading.Thread(target=_prewarm_blocking, name="terminal-prewarm", daemon=True).start()
 
 
 def _pty_backend_available() -> tuple[bool, str]:
