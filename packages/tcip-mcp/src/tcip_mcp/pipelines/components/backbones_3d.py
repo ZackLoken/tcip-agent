@@ -3,8 +3,8 @@
 PointNet++ set abstraction layers for tree structure analysis.
 
 Experimental — component only, not usable end-to-end, and **intentionally not
-registered** into the BACKBONES registry (``tcip_mcp.tools.pipeline_tools`` skips
-importing this module on purpose). There is no point-cloud dataset/loader in
+registered** into the BACKBONES registry (the backbone catalog skips this module on
+purpose). There is no point-cloud dataset/loader in
 ``pipelines.data`` and ``build_dataset`` has no point-cloud task type, so this
 backbone cannot be trained through the normal pipeline. Wiring a 3D data path is
 deferred future work; see the Roadmap in the repo README.
