@@ -19,7 +19,7 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
     pred = GenericPredictor.__new__(GenericPredictor)
     pred.device = torch.device("cpu")
     pred.in_chans = 3
-    pred.task = "anchor_detection"
+    pred.task = "detection"
     pred.score_threshold = 0.0
     pred._format_detection = lambda out, path, w, h: {"image": path, "count": 0}
 
@@ -43,7 +43,7 @@ def test_get_experiment_metrics_pagination(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import create_experiment, get_experiment, log_metrics
 
-    create_experiment("exp1", {"model_spec": {}})
+    create_experiment("exp1", {"model_source": {"builder": "x:y"}})
     for e in range(10):
         log_metrics("exp1", e, {"loss": float(e)})
 
