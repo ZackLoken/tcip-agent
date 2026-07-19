@@ -12,8 +12,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from tcip_mcp.pipelines.registry import NECKS
-
 
 class FPN(nn.Module):
     """Feature Pyramid Network.
@@ -137,31 +135,3 @@ def _build_identity(in_channels_list: list[int], **kw: Any) -> IdentityNeck:
 
 def _build_gap(in_channels_list: list[int], **kw: Any) -> GlobalAvgPoolNeck:
     return GlobalAvgPoolNeck(in_channels_list, **kw)
-
-
-# ---------------------------------------------------------------------------
-# Registration
-# ---------------------------------------------------------------------------
-
-NECKS.register_factory("fpn", _build_fpn, category="pyramid", metadata={
-    "description": "Feature Pyramid Network — multi-scale uniform-channel features",
-    "valid_tasks": ["detection", "instance_seg", "semantic_seg"],
-    "output_format": "multi_scale_dict",
-    "options": {"add_p2": "opt-in extra finer (stride-2) pyramid level for tiny objects"},
-})
-NECKS.register_factory("pan", _build_pan, category="pyramid", metadata={
-    "description": "Path Aggregation Network — bidirectional FPN",
-    "valid_tasks": ["detection", "instance_seg", "semantic_seg"],
-    "output_format": "multi_scale_dict",
-    "options": {"add_p2": "opt-in extra finer (stride-2) pyramid level for tiny objects"},
-})
-NECKS.register_factory("identity", _build_identity, category="passthrough", metadata={
-    "description": "Identity pass-through — no feature transformation",
-    "valid_tasks": ["all"],
-    "output_format": "multi_scale_dict",
-})
-NECKS.register_factory("gap", _build_gap, category="pooling", metadata={
-    "description": "Global Average Pooling — flat [B, C] vector for classification/regression",
-    "valid_tasks": ["classification", "ordinal", "regression"],
-    "output_format": "flat_vector",
-})
