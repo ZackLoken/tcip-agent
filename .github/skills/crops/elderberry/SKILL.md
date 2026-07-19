@@ -71,7 +71,7 @@ in each trait's crops.yml definition. Trait names are verbatim.
 - **Leaf morphology (calibrated close-up or flatbed scan; needs a scale):** `leaf_length`,
   `leaf_width`, `leaf_length_width_ratio`.
 - **Stem descriptor (close-up):** `stem_internode_length`.
-- **Disease & abiotic damage (visible symptoms; each an ordinal from a validated classifier):**
+- **Disease & abiotic damage (visible symptoms; each an ordinal from a validated model calibrated to the breeder's rubric):**
   `plant_borer`, `plant_eriophyid_mites`, `plant_jbeetle`, `plant_powderymildew_presence`,
   `bloom_frost_tolerance`.
 
@@ -172,9 +172,9 @@ difficulties:
 
 ## Measurement integrity (highest rule)
 
-Per **CLAUDE.md**: the breeder defines each trait's measurement; the CV engineer operationalizes
-*their* definition and **validates against expert-scored ground truth before any deliverable**.
-**Never invent a geometric or pixel proxy for a biological quantity.** Concretely for elderberry:
+Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
+against expert-scored ground truth before any result — see the catkin-elongation cautionary tale
+there). Elderberry-specific traps:
 
 - `cyme_shatter_resistance` is a physical **shake/retention test**, not something a bounding box,
   geometry, or still-image count can measure — do not manufacture a proxy from a static image.
@@ -193,11 +193,6 @@ Per **CLAUDE.md**: the breeder defines each trait's measurement; the CV engineer
   a pixel length without a scale is invalid science.
 - Chemistry (`fruit_anthocyanin_content`, `fruit_juice_brix`, `fruit_juice_pH`, `fruit_juice_TA`,
   `fruit_cyanide_content`) is not readable from RGB — color may correlate but is not the assay.
-
-Cautionary tale (in the platform's history): a prior session defined catkin "elongation" from
-bounding-box height, shipped fabricated phenology CSVs, and it was removed as invalid science. Do
-not manufacture a number so a result appears — if a trait cannot yet be validly measured from
-pixels, **say so**.
 
 ## Needs expert confirmation
 
