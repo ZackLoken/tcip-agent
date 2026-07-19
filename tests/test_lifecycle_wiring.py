@@ -13,7 +13,7 @@ def test_register_model_from_experiment_links_metrics_and_lineage(tmp_path, monk
     )
     from tcip_mcp.model_registry import ModelRegistry
 
-    create_experiment("exp1", {"model_spec": {"backbone": {"name": "x"}}}, data_source="imgs")
+    create_experiment("exp1", {"model_source": {"builder": "x:y"}}, data_source="imgs")
     log_metrics("exp1", 1, {"map50": 0.5})
     log_metrics("exp1", 2, {"map50": 0.81})
 
