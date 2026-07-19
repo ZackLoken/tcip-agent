@@ -38,38 +38,6 @@ def create_experiment(
 
 @mcp.tool()
 @audited
-def log_metrics(experiment_id: str, epoch: int, metrics: dict) -> dict:
-    """Log epoch metrics to an experiment's metrics.jsonl file.
-
-    Call this after each training epoch to record loss, mAP, precision, recall, etc.
-
-    Args:
-        experiment_id: Experiment to log to.
-        epoch: Epoch number (0-indexed).
-        metrics: Dict of metric values (e.g. {"train_loss": 0.5, "val_loss": 0.3, "mAP50": 0.72}).
-    """
-    from tcip_mcp.experiments import log_metrics as _log
-
-    return _log(experiment_id, epoch, metrics)
-
-
-@mcp.tool()
-@audited
-def record_artifact(experiment_id: str, name: str, path: str) -> dict:
-    """Register an artifact (model weights, predictions dir, etc.) with an experiment.
-
-    Args:
-        experiment_id: Experiment to record artifact for.
-        name: Artifact name (e.g. 'model_weights', 'predictions', 'best_checkpoint').
-        path: Path to the artifact file or directory.
-    """
-    from tcip_mcp.experiments import record_artifact as _record
-
-    return _record(experiment_id, name, path)
-
-
-@mcp.tool()
-@audited
 def get_experiment(experiment_id: str) -> dict:
     """Read the full state of an experiment including config, metrics, artifacts, and lineage.
 
