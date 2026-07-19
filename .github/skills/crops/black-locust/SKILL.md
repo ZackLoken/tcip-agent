@@ -158,12 +158,9 @@ Mechanics live in the `annotation` skill; the crop-specific hard parts:
 
 ## Measurement integrity
 
-Per the CLAUDE.md highest rule: **never invent a geometric or pixel proxy for a
-biological quantity.** The breeder defines each trait's measurement; validate
-against expert-scored ground truth before any downstream result. The platform's
-cautionary tale: a prior session defined catkin "elongation" from bounding-box
-height and shipped fabricated phenology CSVs — invalid science, since removed. Do
-not repeat that pattern. Crop-specific corollaries:
+Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
+against expert-scored ground truth before any result — see the catkin-elongation cautionary tale
+there). Black-locust-specific traps:
 
 - `dbh` / `plant_height` — an uncalibrated pixel width or bounding-box height is
   **not** a metric diameter or height. These need calibrated 3D (LiDAR/SfM with
