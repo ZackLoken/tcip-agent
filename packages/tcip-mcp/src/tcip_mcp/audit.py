@@ -43,6 +43,26 @@ def _write_entry(entry: dict[str, Any]) -> None:
         logger.debug("Failed to write audit entry", exc_info=True)
 
 
+def record_event(
+    tool: str, arguments: dict[str, Any] | None = None, *, status: str = "ok", **extra: Any
+) -> None:
+    """Emit one standalone audit line for code that isn't an ``@audited`` MCP tool.
+
+    The training envelope uses this to bracket the training body (which runs in a background
+    thread, outside any ``@audited`` MCP call) with open/close events on the same tamper-evident
+    ``.tcip/audit.jsonl`` sink — closing the hole where the whole ``train()`` body + registration
+    left no audit record. Best-effort, never raises.
+    """
+    entry: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tool": tool,
+        "arguments": _redact(arguments) if arguments else {},
+        "status": status,
+    }
+    entry.update(extra)
+    _write_entry(entry)
+
+
 def audited(fn: Callable) -> Callable:
     """Decorator that logs MCP tool calls to .tcip/audit.jsonl."""
 
