@@ -143,11 +143,9 @@ Defer annotation mechanics to the **annotation** skill. Chestnut-specific diffic
 
 ## Measurement integrity
 
-Per the CLAUDE.md invariant, **never invent a geometric or pixel proxy for a biological
-quantity**, and validate every measurement against expert-scored ground truth before any
-downstream result. The catkin-elongation cautionary tale applies directly: a prior session
-defined bloom from a bounding-box height threshold and shipped fabricated phenology CSVs — that
-was invalid science and was removed. For chestnut specifically:
+Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
+against expert-scored ground truth before any result — see the catkin-elongation cautionary tale
+there). Chestnut-specific traps:
 
 - `catkin_sex_ratio`: a size split or a made-up male/female class fabricates the ratio. The
   breeder defines what is counted (catkin types vs flower counts) and at which pollen phase.
