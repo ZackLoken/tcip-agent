@@ -55,7 +55,9 @@ that silently corrupts results and compounds across sessions. So:
   ambiguous data, missing path, unclear domain concept, an op that failed 2–3×, a
   decision needing human judgment, or behavior that surprised you. The free-text
   `detail` matters more than the category. Over-report; a report is cheap, a silent
-  guess is not.
+  guess is not. A mandated action that is blocked or fails — `doctor.py` won't run, a
+  ritual MCP call errors, a guard denies a read-only command — is itself always a
+  `claude_reports`, not a silent skip.
 - **End substantial work** (even if incomplete) with `project_retrospective`.
 - **Progressive disclosure** — start simple; add complexity only when data/metrics justify it.
 
