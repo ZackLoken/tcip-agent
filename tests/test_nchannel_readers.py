@@ -43,7 +43,6 @@ def test_grayscale_classification_end_to_end(tmp_path):
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.pipelines.composer import compose_model
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
 
@@ -58,13 +57,10 @@ def test_grayscale_classification_end_to_end(tmp_path):
     ds = build_dataset("classification", images_dir=str(images_dir),
                        csv_path=str(tmp_path / "labels.csv"), num_classes=2, num_channels=1)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
-    spec = {
-        "backbone": {"name": "tv_resnet50", "pretrained": False, "in_chans": 1},
-        "neck": {"name": "gap"},
-        "heads": [{"name": "classification", "num_classes": 2}],
-    }
-    compose_model(spec)
-    cfg = {"model_spec": spec, "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 1}],
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
+                    "builder_kwargs": {"num_classes": 2, "in_chans": 1},
+                    "task": "classification", "in_chans": 1}
+    cfg = {"model_source": model_source, "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 1}],
            "mixed_precision": False, "early_stopping": {"enabled": False}}
     run = train(create_run(cfg, str(tmp_path / "out")), loader, task="classification")
     assert run.status == "completed"  # 1-channel data + 1-channel model trains end to end
