@@ -20,6 +20,10 @@ const { termInstances, MockTerminal } = vi.hoisted(() => {
     paste = vi.fn();
     getSelection = vi.fn(() => "");
     hasSelection = vi.fn(() => false);
+    clearSelection = vi.fn();
+    scrollLines = vi.fn();
+    input = vi.fn();
+    parser = { registerCsiHandler: vi.fn(() => ({ dispose: vi.fn() })) };
     attachCustomKeyEventHandler = vi.fn();
     onData = vi.fn(() => ({ dispose: vi.fn() }));
     onResize = vi.fn(() => ({ dispose: vi.fn() }));
@@ -151,6 +155,15 @@ describe("TerminalRail", () => {
     term.getSelection.mockReturnValue("selected transcript text");
     host.dispatchEvent(new Event("mouseup", { bubbles: true }));
     expect(writeText).toHaveBeenCalledWith("selected transcript text");
+  });
+
+  it("forwards the wheel as SGR mouse-scroll events so Claude scrolls its conversation", async () => {
+    render(<TerminalRail />);
+    const host = await screen.findByTestId("terminal-host");
+    await waitFor(() => expect(termInstances[0].focus).toHaveBeenCalled());
+    host.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }));
+    // wheel-up encodes SGR button 64 — Claude receives it as a scroll, not a cursor key
+    expect(termInstances[0].input).toHaveBeenCalledWith(expect.stringContaining("<64;"));
   });
 
   it("exposes a resize separator", async () => {
