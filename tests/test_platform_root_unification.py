@@ -39,7 +39,7 @@ def test_experiment_and_registry_co_locate_under_adopted_project(tmp_path, monke
     monkeypatch.chdir(clean_cwd)  # so the "nothing leaked to cwd" check is meaningful
     from tcip_mcp import experiments
 
-    experiments.create_experiment("exp_unify", {"model_spec": {}}, data_source="imgs")
+    experiments.create_experiment("exp_unify", {"model_source": {"builder": "x:y"}}, data_source="imgs")
     assert (proj / ".tcip" / "experiments" / "exp_unify").is_dir()
 
     ckpt = tmp_path / "model_best.pt"
