@@ -31,8 +31,16 @@ _PROTECTED = re.compile(
     r"|agent_bash_guard\.py|agent_powershell_guard\.py"
     r"|agent_terminal\.settings\.json|tcip_agent_fence\.settings\.json"
 )
-# Shell constructs that write to a file / run arbitrary code.
-_WRITE_OP = re.compile(r">>?|\btee\b|\bsed\b\s+-i|\bcp\b|\bmv\b|\bdd\b")
+# A shell redirect that writes to a FILE: an optional leading fd number, ``>``/``>>``, then a
+# target token. ``>&`` / ``2>&1`` DUPLICATE a descriptor (no file) and are excluded by the
+# ``(?!&)`` — so ``2>&1`` / ``2>/dev/null`` on a read-only command no longer read as a write
+# into whatever protected token the command line happens to name.
+_REDIRECT = re.compile(r"\d*>>?(?!&)\s*(?P<target>[^\s;|&<>()]+)")
+# ``tee [-a] FILE`` writes to FILE.
+_TEE = re.compile(r"\btee\b\s+(?:-a\s+|--append\s+)?(?P<target>[^\s;|&<>()]+)")
+# In-place / copy writers, matched coarsely (paired with a protected token in main()). These
+# never appear in the read-only diagnostics the fence must let through.
+_WRITE_OP = re.compile(r"\bsed\b\s+-i|\bcp\b|\bmv\b|\bdd\b")
 # Inline / nested / arbitrary code execution — a spawned interpreter (``python -c``…) OR a
 # nested shell (``bash -c``, ``sh -c``, ``powershell -EncodedCommand``, ``cmd /c``) whose
 # payload the guard can't see through.
@@ -41,6 +49,26 @@ _INLINE_INTERP = re.compile(
     r"|\b(?:bash|sh|zsh)\b\s+-\w*c\b"
     r"|\b(?:powershell|pwsh)\b[\s\S]*?-(?:e|ec|enc|encodedcommand|command|c)\b"
     r"|\bcmd\b[\s\S]*?/c\b"
+)
+
+
+def _write_targets(cmd: str) -> list[str]:
+    """Resolved file targets of redirects and ``tee`` — only these gate the protected check.
+
+    Executing a script under ``scripts/`` is passing an *argument*, not writing there; only a
+    redirect/tee whose *target* lands under a protected dir is a mutation of platform code.
+    """
+    return [m.group("target") for m in _REDIRECT.finditer(cmd)] + [
+        m.group("target") for m in _TEE.finditer(cmd)
+    ]
+
+
+_PROTECTED_WRITE_MSG = (
+    "Writing into platform internals via the shell is blocked — the agent edits projects, not "
+    "platform code. If this was a read-only diagnostic that got mis-flagged (e.g. "
+    "`python scripts/doctor.py <root>`), that's a fence false-positive: file it with the "
+    "claude_reports tool (category unexpected_behavior; include the exact command) so the fence "
+    "can be fixed — do not route around it by editing platform files."
 )
 
 
@@ -72,8 +100,10 @@ def main() -> None:
 
     if _INLINE_INTERP.search(cmd):
         _deny("Inline interpreter execution is blocked in the agent terminal — use the TCIP tools.")
+    if any(_PROTECTED.search(t) for t in _write_targets(cmd)):
+        _deny(_PROTECTED_WRITE_MSG)
     if _WRITE_OP.search(cmd) and _PROTECTED.search(cmd):
-        _deny("Writing into platform internals via the shell is blocked — the agent edits projects, not platform code.")
+        _deny(_PROTECTED_WRITE_MSG)
 
     sys.exit(0)
 
