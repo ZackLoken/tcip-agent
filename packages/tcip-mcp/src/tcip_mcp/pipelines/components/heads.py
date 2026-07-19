@@ -13,8 +13,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from tcip_mcp.pipelines.registry import HEADS
-
 
 class BaseHead(nn.Module, abc.ABC):
     """Abstract base for all task heads."""
@@ -167,73 +165,6 @@ class RegressionHead(BaseHead):
 
 
 # ====================================================================
-# Detection Head (anchor-based, wraps torchvision)
-# ====================================================================
-
-class AnchorDetectionHead(BaseHead):
-    """Registry/validation marker for two-stage anchor-based detection (Faster R-CNN).
-
-    Not run standalone: ``compose_model`` routes a single ``anchor_detection`` head to
-    ``DetectionModel``, which builds the actual detector over the shared backbone+neck via
-    the DETECTORS factory (``components/detectors.py``). This class exists so the head name
-    validates and so a spec can carry detection kwargs (detector, min_size, ...).
-    """
-
-    task_type = "detection"
-    default_loss = "focal+smooth_l1"
-
-    def __init__(self, in_channels: int, num_classes: int, **kwargs: Any) -> None:
-        super().__init__()
-        self.num_classes = num_classes
-        self.in_channels = in_channels
-
-    def forward(self, features, targets=None):
-        raise NotImplementedError(
-            "AnchorDetectionHead is composed into DetectionModel (see compose_model and "
-            "components/detectors.py); it is not run standalone.")
-
-    def compute_loss(self, outputs, targets):
-        return {}
-
-    def decode(self, outputs):
-        return outputs
-
-
-# ====================================================================
-# Anchor-free / single-stage Detection Head (FCOS / RetinaNet)
-# ====================================================================
-
-class AnchorFreeDetectionHead(BaseHead):
-    """Registry/validation marker for anchor-free (FCOS) / single-stage (RetinaNet) detection.
-
-    Like ``AnchorDetectionHead``, the real wiring is ``compose_model`` routing this head
-    name to ``DetectionModel`` (which builds the detector via the DETECTORS factory). Not
-    run standalone.
-    """
-
-    task_type = "detection"
-    default_loss = "focal+giou+ctrness"
-
-    def __init__(self, in_channels: int, num_classes: int, detector: str = "fcos",
-                 **kwargs: Any) -> None:
-        super().__init__()
-        self.num_classes = num_classes
-        self.in_channels = in_channels
-        self.detector = detector
-
-    def forward(self, features, targets=None):
-        raise NotImplementedError(
-            "AnchorFreeDetectionHead is composed into DetectionModel (see compose_model "
-            "and components/detectors.py); it is not run standalone.")
-
-    def compute_loss(self, outputs, targets):
-        return {}
-
-    def decode(self, outputs):
-        return outputs
-
-
-# ====================================================================
 # Semantic Segmentation Head
 # ====================================================================
 
@@ -285,58 +216,3 @@ class SemanticSegHead(BaseHead):
     def decode(self, outputs):
         logits = outputs["logits"]
         return {"masks": logits.argmax(dim=1), "probabilities": F.softmax(logits, dim=1)}
-
-
-# ====================================================================
-# Registration
-# ====================================================================
-
-HEADS.register_factory("classification", lambda **kw: ClassificationHead(**kw),
-    category="image_level", metadata={
-        "description": "Multi-class classification head",
-        "valid_tasks": ["classification"],
-        "input_format": "flat_vector",
-        "required_params": ["in_channels", "num_classes"],
-    })
-
-HEADS.register_factory("ordinal", lambda **kw: OrdinalHead(**kw),
-    category="image_level", metadata={
-        "description": "Ordinal classification via CORN (conditional ordinal regression)",
-        "valid_tasks": ["ordinal"],
-        "input_format": "flat_vector",
-        "required_params": ["in_channels", "num_ranks"],
-        "when_to_use": "Disease scores (1-9), maturity ratings, ordinal trait scales",
-    })
-
-HEADS.register_factory("regression", lambda **kw: RegressionHead(**kw),
-    category="image_level", metadata={
-        "description": "Continuous value regression head",
-        "valid_tasks": ["regression"],
-        "input_format": "flat_vector",
-        "required_params": ["in_channels"],
-    })
-
-HEADS.register_factory("anchor_detection", lambda **kw: AnchorDetectionHead(**kw),
-    category="detection", metadata={
-        "description": "Anchor-based detector (Faster R-CNN style)",
-        "valid_tasks": ["detection"],
-        "input_format": "multi_scale_dict",
-        "required_params": ["in_channels", "num_classes"],
-    })
-
-HEADS.register_factory("anchor_free_detection", lambda **kw: AnchorFreeDetectionHead(**kw),
-    category="detection", metadata={
-        "description": "Anchor-free / single-stage detector (FCOS or RetinaNet)",
-        "valid_tasks": ["detection"],
-        "input_format": "multi_scale_dict",
-        "required_params": ["in_channels", "num_classes"],
-        "when_to_use": "Tiny/dense objects (FCOS, anchor-free) or a lighter single-stage detector",
-    })
-
-HEADS.register_factory("semantic_seg", lambda **kw: SemanticSegHead(**kw),
-    category="segmentation", metadata={
-        "description": "Pixel-wise semantic segmentation",
-        "valid_tasks": ["semantic_seg"],
-        "input_format": "multi_scale_dict",
-        "required_params": ["in_channels", "num_classes"],
-    })
