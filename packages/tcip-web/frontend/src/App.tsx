@@ -107,7 +107,7 @@ function App() {
         return;
       }
 
-      // Agent → GUI "push your canvas now": visualize_canvas pings before rendering so it
+      // Agent → GUI "push your canvas now": capture_live_canvas pings before rendering so it
       // sees the freshest state; the mounted tab answers with an immediate full push.
       if (ev.event_type === "canvas_state_request") {
         notifyCanvasStateRequest();
