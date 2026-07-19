@@ -12,7 +12,7 @@
  * Shapes are display-resolved AND display-filtered: each carries the exact hex color / dash /
  * label the GUI renders, and the builders reproduce the canvas's own visibility rules (mode
  * filters, active-class filter, derived detect boxes, the labels toggle, review's single-kind
- * rule) — so the server-side render (visualize_canvas) is faithful by construction.
+ * rule) — so the server-side render (capture_live_canvas) is faithful by construction.
  */
 
 import { polygonBbox } from "@/lib/polygonGeometry";
@@ -286,7 +286,7 @@ export function buildReviewShapes(
   return rest.concat(focused);
 }
 
-/* ── agent "push now" request (visualize_canvas refresh ping) ─────────────── */
+/* ── agent "push now" request (capture_live_canvas refresh ping) ─────────────── */
 
 const requestListeners = new Set<() => void>();
 
