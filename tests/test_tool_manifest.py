@@ -82,7 +82,17 @@ def test_consolidated_tools_present_and_removed_absent():
     from tcip_mcp.server import list_registered_tools
 
     registered = set(list_registered_tools())
-    for present in ("evaluate_predictions", "make_splits"):
+    for present in (
+        "make_splits", "focus", "get_experiment",
+        "register_model", "load_project_memory",
+        # R1 renames — the new names must register.
+        "archive_project", "inspect_project", "scan_dataset", "read_annotations",
+        "render_failure_cases", "overlay_reference_grid", "capture_live_canvas",
+        "generate_mask_candidates",
+        # R2 renames — the new names must register.
+        "preflight_config", "select_best_model", "score_predictions",
+        "tabulate_counts", "view_gui_state",
+    ):
         assert present in registered, f"{present} should be registered"
     removed = {
         "evaluate_detections", "evaluate_dataset", "split_dataset",
@@ -90,6 +100,22 @@ def test_consolidated_tools_present_and_removed_absent():
         # collapse to model_source-only: the menu/composer/spec tools are gone.
         "recommend_model", "list_components", "validate_model_spec",
         "validate_pipeline_spec", "compose_and_summarize",
+        "get_worst_predictions", "run_pipeline",
+        # focus_annotate + focus_review merged into focus(tab=).
+        "focus_annotate", "focus_review",
+        # get_experiment_lineage merged into get_experiment(view='lineage').
+        "get_experiment_lineage",
+        # register_model_from_experiment merged into register_model(experiment_id=).
+        "register_model_from_experiment",
+        # load_reports + load_retrospectives merged into load_project_memory(kind=).
+        "load_reports", "load_retrospectives",
+        # R1 renames — the old names must no longer register.
+        "export_project", "get_project_status", "load_dataset", "load_annotations",
+        "visualize_worst_predictions", "visualize_grid_overlay", "visualize_canvas",
+        "sam_auto_label",
+        # R2 renames — the old names must no longer register.
+        "validate_config", "get_best_model", "evaluate_predictions",
+        "export_results_csv", "get_active_context",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 
