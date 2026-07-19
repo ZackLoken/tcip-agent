@@ -248,7 +248,7 @@ async def post_panel_event(panel: str, event: PanelEvent):
     }
     _recent_events[panel].append(payload)
     # Agent focus events also update the advisory GuiState slice, so gui.json (what the
-    # agent reads back via get_active_context) reflects where it pointed the human — the
+    # agent reads back via view_gui_state) reflects where it pointed the human — the
     # browser applies the event locally and never syncs these fields back itself.
     if event.event_type == "review_focus":
         review = _gui_store.state.review.model_copy(
