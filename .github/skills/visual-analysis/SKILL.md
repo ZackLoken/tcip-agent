@@ -21,18 +21,18 @@ The agent can visually inspect images using `view_image` after rendering annotat
 | `visualize(source="predictions", path=<image>)` | Render model predictions on a single image |
 | `visualize(source="dataset", path=<folder>, n=16)` | Random grid of annotated dataset samples |
 | `visualize(source="comparison", path=<image>)` | Overlay GT (green) vs predictions (red) with match stats |
-| `visualize_worst_predictions` | Grid of top-K failure cases |
-| `sam_auto_label` | SAM candidate masks rendered with numbered overlay |
+| `render_failure_cases` | Grid of top-K failure cases |
+| `generate_mask_candidates` | SAM candidate masks rendered with numbered overlay |
 | `accept_candidates` | Stage classified SAM candidates as predictions (created_by="sam") for human review |
-| `visualize_grid_overlay` | Labeled grid overlay for spatial referencing |
-| `visualize_canvas` | The human's live GUI canvas: their image, viewport, and unsaved shapes in the GUI's own symbology (+ classes schema, TP/FP/FN legend on Review) |
+| `overlay_reference_grid` | Labeled grid overlay for spatial referencing |
+| `capture_live_canvas` | The human's live GUI canvas: their image, viewport, and unsaved shapes in the GUI's own symbology (+ classes schema, TP/FP/FN legend on Review) |
 
 `visualize` is one tool with a `source` of `annotations` / `predictions` / `dataset`
 (it replaced the former `visualize_annotations` / `visualize_predictions` /
 `visualize_dataset_sample`). All tools save renders to `.tcip/artifacts/viz/` and
 return the file path.
 
-`visualize_canvas` is the live view: the GUI continuously pushes its canvas state
+`capture_live_canvas` is the live view: the GUI continuously pushes its canvas state
 (hybrid — tiny heartbeats on pan/zoom, full display-resolved geometry on shape changes,
 including unsaved edits and the in-progress drawing). The tool pings the GUI for fresh
 state (`refresh=True`), renders the visible region (`crop_to_viewport`) or the full frame,
@@ -45,7 +45,7 @@ state's age. Use it to comment on work-in-progress before the human saves.
 
 Goal: Verify annotation quality before training.
 
-1. `load_dataset` → understand image inventory and format
+1. `scan_dataset` → understand image inventory and format
 2. `visualize(source="dataset", path=folder_path, n=16)` → grid overview
 3. `view_image` on the grid → assess overall annotation consistency
 4. For flagged images: `visualize(source="annotations", path=image_path)` → `view_image`
@@ -56,7 +56,7 @@ Goal: Verify annotation quality before training.
 Goal: Assess model quality after inference.
 
 1. `run_inference` or verify predictions exist
-2. `visualize_worst_predictions(predictions_dir, labels_dir, top_k=10)`
+2. `render_failure_cases(predictions_dir, labels_dir, top_k=10)`
 3. `view_image` on grid → categorize failure types
 4. For specific failures: `visualize(source="comparison", path=image_path)` → `view_image`
 5. Categorize: false positives, false negatives, localization errors, class confusion
@@ -67,11 +67,10 @@ Goal: Assess model quality after inference.
 Goal: Diagnose training issues from worst-case analysis.
 
 1. `check_training_status` → verify training completed, review loss curves
-2. `get_worst_predictions` → identify failure cases
-3. `visualize_worst_predictions` → render failures → `view_image`
-4. Cross-reference visual findings with `evaluate_predictions`' per-image TP/FP/FN breakdown
+2. `render_failure_cases` → surface + render failure cases → `view_image`
+3. Cross-reference visual findings with `score_predictions`' per-image TP/FP/FN breakdown
    (no per-class breakdown for detection today — see the `evaluation` skill)
-5. Recommend: more data, augmentation changes, architecture changes, longer training
+4. Recommend: more data, augmentation changes, architecture changes, longer training
 
 ### GT vs Prediction Comparison
 
