@@ -50,10 +50,10 @@ applied twice or skipped.
 
 | Tool | Purpose |
 |------|---------|
-| `load_annotations` | Load labels for a set of images (auto-detects format) |
+| `read_annotations` | Load labels for a set of images (auto-detects format) |
 | `save_annotations` | Write annotations to any supported format |
 | `sam_predict` | SAM-assisted polygon generation from point/box prompts |
-| `evaluate_predictions` | Score predictions vs GT (image file or dataset dir); `detail=True` adds per-detection TP/FP/FN match data |
+| `score_predictions` | Score predictions vs GT (image file or dataset dir); `detail=True` adds per-detection TP/FP/FN match data |
 | `push_panel_data` | Send images + annotations to the annotation or review panel |
 | `prioritize_review_queue` | Rank unlabeled images by uncertainty/diversity (`strategy="informativeness"`, default), or `strategy="confidence_triage"` to partition by confidence |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage |
@@ -72,7 +72,7 @@ The agent can autonomously label images by using SAM for geometry generation
 and its multimodal vision for classification and QA.
 
 **Full workflow:**
-1. `sam_auto_label(image_path)` → SAM generates candidate masks, renders numbered overlay
+1. `generate_mask_candidates(image_path)` → SAM generates candidate masks, renders numbered overlay
 2. Agent `view_image` on overlay → identifies and classifies each candidate
 3. `accept_candidates(image_path, assignments=[{candidate_id: 0, class_id: 1}, ...])` → stages
    accepted candidates as SAM predictions (`created_by="sam"`) in the predictions tree for
@@ -80,7 +80,7 @@ and its multimodal vision for classification and QA.
 4. Agent `view_image` on the staged result → visual QA pass
 
 **Corrective loop (for missed objects):**
-1. `visualize_grid_overlay(image_path)` → labeled grid (A1–H6) for spatial reference
+1. `overlay_reference_grid(image_path)` → labeled grid (A1–H6) for spatial reference
 2. Agent `view_image` → identifies missed regions by grid cell
 3. `sam_predict(image_path, grid_cells=["B3", "D5"])` → SAM segments at those locations
 4. Save new annotations via `save_annotations`
@@ -92,17 +92,17 @@ and its multimodal vision for classification and QA.
 
 | Tool | Role | Phase |
 |------|------|-------|
-| `sam_auto_label` | Generate all candidate masks | Discovery |
+| `generate_mask_candidates` | Generate all candidate masks | Discovery |
 | `accept_candidates` | Stage classified candidates as predictions | Classification |
-| `visualize_grid_overlay` | Spatial reference for corrections | Correction |
+| `overlay_reference_grid` | Spatial reference for corrections | Correction |
 | `sam_predict(grid_cells=...)` | Targeted segmentation | Correction |
 | `view_image` | Agent visual review | All phases |
 
 ## Review Protocol
 
-1. Load ground truth with `load_annotations`
+1. Load ground truth with `read_annotations`
 2. Load predictions (from inference or prior annotation)
-3. `evaluate_predictions` pairs predictions to GT by IoU (default threshold: 0.5) and returns
+3. `score_predictions` pairs predictions to GT by IoU (default threshold: 0.5) and returns
    aggregate TP/FP/FN; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with
    its class id, box/polygon, IoU, and confidence)
 4. Review in panel: accept correct predictions, correct errors, add missed objects
@@ -121,12 +121,13 @@ The agent must **never write ground truth the human hasn't seen**. Stage proposa
   fresh `<model>@r2` bucket (the response's `bucket` field is the one actually written), so a
   re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place, which is
   still refused when verdicts exist.
-- **`focus_review(project_root, dataset_root, trait, date, model_name, image_index, detection_idx,
-  filter_type, iou, conf)`** drives the live Review tab straight to a model's predictions on a
-  frame/detection, so the human sees exactly what you flagged (a false positive, a missed catkin)
-  without hunting. The Review analog of `focus_annotate`; a soft no-op if no GUI is running.
+- **`focus(tab='review', project_root, dataset_root, trait, date, model_name, image_index,
+  detection_idx, filter_type, iou, conf)`** drives the live Review tab straight to a model's
+  predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a
+  missed catkin) without hunting. The Review analog of `focus(tab='annotate')`; a soft no-op if no
+  GUI is running.
 
-Flow: run inference (or `stage_proposals`) → `focus_review` the human to the weakest/flagged
+Flow: run inference (or `stage_proposals`) → `focus(tab='review')` the human to the weakest/flagged
 frames → they accept on the canvas → only then does it become GT. See
 `.github/skills/delivery` for what ships after sign-off.
 
