@@ -46,6 +46,13 @@ async def _lifespan(_app: FastAPI):
         # reconstructs past runs on demand from the immutable .tcip/experiments/ records.
     except Exception:  # pragma: no cover - rehydrate is best-effort
         logger.exception("job registry rehydrate failed")
+    # Warm the cold first-spawn cost (tcip_mcp import + PowerShell/.NET) off the request path.
+    try:
+        from tcip_web import terminal
+
+        terminal.prewarm()
+    except Exception:  # pragma: no cover - prewarm is best-effort
+        logger.exception("agent terminal prewarm failed to start")
     yield
     # Kill any live agent terminals so no Claude Code process orphans the backend.
     # Off-loop: terminate can block seconds (taskkill / SIGTERM grace), and stalling the
@@ -53,9 +60,9 @@ async def _lifespan(_app: FastAPI):
     try:
         import asyncio
 
-        from tcip_web.routes import terminal
+        from tcip_web.routes import terminal as terminal_routes
 
-        await asyncio.to_thread(terminal.shutdown_all)
+        await asyncio.to_thread(terminal_routes.shutdown_all)
     except Exception:  # pragma: no cover - shutdown cleanup is best-effort
         logger.exception("agent terminal shutdown failed")
 
