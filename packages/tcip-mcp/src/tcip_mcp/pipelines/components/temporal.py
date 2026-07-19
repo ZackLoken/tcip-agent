@@ -11,8 +11,6 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from tcip_mcp.pipelines.registry import HEADS
-
 
 class TemporalLSTMHead(nn.Module):
     """LSTM over per-date embeddings → phenology milestone predictions.
@@ -132,20 +130,3 @@ def _build_temporal_lstm(in_channels: int = 512, num_milestones: int = 3, **kwar
 
 def _build_temporal_transformer(in_channels: int = 512, num_milestones: int = 3, **kwargs):
     return TemporalTransformerHead(in_channels=in_channels, num_milestones=num_milestones, **kwargs)
-
-
-HEADS.register_factory("temporal_lstm", _build_temporal_lstm, category="temporal", metadata={
-    "description": "BiLSTM temporal head for phenology milestone prediction",
-    "valid_tasks": ["temporal"],
-    "input_format": "sequence",
-    "output_format": "milestones",
-    "default_loss": "smooth_l1",
-})
-
-HEADS.register_factory("temporal_transformer", _build_temporal_transformer, category="temporal", metadata={
-    "description": "Transformer temporal head for phenology milestone prediction",
-    "valid_tasks": ["temporal"],
-    "input_format": "sequence",
-    "output_format": "milestones",
-    "default_loss": "smooth_l1",
-})
