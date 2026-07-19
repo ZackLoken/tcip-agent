@@ -11,12 +11,12 @@ import pytest
 
 
 # --------------------------------------------------------------------------
-# validate_config — per-stage 'lr' is optional (trainer never reads it)
+# preflight_config — per-stage 'lr' is optional (trainer never reads it)
 # --------------------------------------------------------------------------
 
-def test_validate_config_accepts_trainer_canonical_stages(tmp_path):
+def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import validate_config
+    from tcip_mcp.tools.training_tools import preflight_config
 
     imgs = tmp_path / "images"
     lbls = tmp_path / "labels"
@@ -30,17 +30,17 @@ def test_validate_config_accepts_trainer_canonical_stages(tmp_path):
         "training": {"batch_size": 2,
                      "stages": [{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}]},
     }
-    r = validate_config(cfg)
+    r = preflight_config(cfg)
     assert r["valid"] is True, r["issues"]
 
     # 'epochs' is still required per provided stage.
     cfg["training"]["stages"] = [{"freeze_to": 0}]
-    r2 = validate_config(cfg)
+    r2 = preflight_config(cfg)
     assert any("Stage 0 missing 'epochs'" in i for i in r2["issues"])
 
     # No stages at all is fine — launch_training supplies its own default schedule.
     del cfg["training"]["stages"]
-    assert validate_config(cfg)["valid"] is True
+    assert preflight_config(cfg)["valid"] is True
 
 
 # --------------------------------------------------------------------------
