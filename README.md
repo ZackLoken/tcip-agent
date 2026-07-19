@@ -44,8 +44,8 @@ packages/
   tcip-mcp/                    # MCP server (python -m tcip_mcp)
     src/tcip_mcp/
       tools/                   # domain tools (run scripts/list_tools.py for the current list)
-      pipelines/               # composable ML: registry, composer, trainer, predictor,
-                               #   postprocessing (plant mapping + catkin phenology)
+      pipelines/               # ML: model_build, trainer, predictor, envelope + plain
+                               #   nn.Module blocks; postprocessing (plant mapping + phenology)
   tcip-annotation/             # headless annotation library
   tcip-web/                    # FastAPI backend + React frontend
     src/tcip_web/
@@ -108,9 +108,9 @@ The pitch above describes the long-term target. What's actually built today is a
 narrower slice; this section keeps the two honest.
 
 **Working now:** 2D-image tasks end to end — detection, instance/semantic
-segmentation, classification, ordinal, regression — via the composable
-backbone/neck/head spec (detectors built through a registry-driven `DETECTORS`
-factory; `instance_seg` via Mask R-CNN), on **RGB and N-channel imagery** (multi-band
+segmentation, classification, ordinal, regression — via an agent-written `nn.Module`
+that imports the plain building blocks (necks, heads, losses, backbone wrappers, and
+`build_detector`; `instance_seg` via Mask R-CNN), on **RGB and N-channel imagery** (multi-band
 GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`), with
 training that loads the native per-image JSON labels directly (YOLO / COCO / PASCAL VOC /
 LabelMe import/export via an explicit format), experiment tracking, annotation/review,
@@ -143,11 +143,10 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   prioritize the next review batch by active-learning score.
 
 **Not built yet (contributions/experiments welcome):**
-- 3D point clouds (LiDAR / SfM). A `pointnet++` backbone is included as an
-  **experimental component** but is intentionally *unregistered* — there is no
-  point-cloud dataset/loader or task type, so it is not trainable through the normal
-  pipeline yet. (Multispectral / hyperspectral / depth as additional 2D channels *is*
-  now supported via the N-channel path above.)
+- 3D point clouds (LiDAR / SfM). A `pointnet++` backbone is included as a plain
+  importable module but there is no point-cloud dataset/loader or task type, so it is
+  not trainable through the normal pipeline yet. (Multispectral / hyperspectral / depth
+  as additional 2D channels *is* now supported via the N-channel path above.)
 - Temporal / relational pipeline patterns in general. The one temporal trait built today is
   **catkin bloom phenology** (per-plant elongated-fraction 05/50/95-per-date milestones — see
   "Working now"); broader phenology-sequence and relational patterns beyond the per-image case
