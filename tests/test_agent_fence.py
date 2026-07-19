@@ -37,6 +37,15 @@ def test_fence_settings_valid_json_denies_internals_allows_toolkit():
     assert "agent_powershell_guard.py" in hooks["PowerShell"]
 
 
+def test_fence_settings_wires_sessionstart_only_no_stop():
+    # The fast session-start ritual injection is wired; the blocking Stop hook was reverted
+    # (Anthropic guidance: Stop-block to force an action traps the user) and must stay absent.
+    data = json.loads(FENCE.read_text(encoding="utf-8"))
+    start = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    assert "agent_session_start.py" in start
+    assert "Stop" not in data["hooks"]
+
+
 def test_bash_and_powershell_guards_protect_the_same_roots():
     # Drift guard: the two shells must fence the same platform paths, or one becomes a hole.
     # Compare the compiled _PROTECTED regexes by behaviour, not source text.
@@ -69,19 +78,18 @@ def test_bash_and_powershell_guards_protect_the_same_roots():
 
 
 def test_resolve_command_fences_the_real_cli(monkeypatch, tmp_path):
+    # resolve_terminal_command spawns claude DIRECTLY (no wrapping shell) with the fence flags;
+    # --settings points at a materialized profile (valid JSON, still denies internals, guard hooks
+    # absolute/cd-proof).
     monkeypatch.delenv("TCIP_TERMINAL_CMD", raising=False)
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "ws"))
-    monkeypatch.setattr(pty_host.shutil, "which", lambda name: r"C:\fake\claude.exe")
+    monkeypatch.setattr(pty_host.shutil, "which", lambda name: f"/fake/{name}")
 
     argv = pty_host.resolve_terminal_command()
     assert argv is not None
-    assert argv[0] == r"C:\fake\claude.exe"
-    assert "--settings" in argv
-    assert "--add-dir" in argv
+    assert argv[0] == "/fake/claude"  # claude directly, not a wrapping shell
+    assert "--settings" in argv and "--add-dir" in argv
     assert argv[argv.index("--permission-mode") + 1] == "default"
-
-    # --settings points at a MATERIALIZED profile: valid JSON, still denies internals, and its
-    # guard hook commands are ABSOLUTE (cd-proof) rather than the repo-relative template form.
     settings_path = Path(argv[argv.index("--settings") + 1])
     assert settings_path.is_file()
     cfg = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -92,6 +100,17 @@ def test_resolve_command_fences_the_real_cli(monkeypatch, tmp_path):
         assert "_guard.py" in cmd
         assert guard_dir in cmd  # absolute guard-directory path baked in
         assert cmd.startswith('"')  # quoted python exe, not a bare relative "python ..."
+
+
+def test_prewarm_runs_without_raising(monkeypatch):
+    # The daemon-thread kickoff returns immediately and never raises; the blocking worker (with
+    # its subprocess stubbed out) swallows all errors and still imports the MCP tool graph.
+    monkeypatch.setattr(pty_host.subprocess, "run", lambda *a, **k: None)
+    pty_host.prewarm()
+    pty_host._prewarm_blocking()
+    import sys as _sys
+
+    assert "tcip_mcp.server" in _sys.modules
 
 
 def test_absolutize_guard_command_rewrites_relative_to_absolute():
@@ -138,6 +157,12 @@ def _run_guard(command: str) -> subprocess.CompletedProcess:
         "echo x > agent_bash_guard.py",  # self-modify (even relative, after a cd)
         'bash -c "echo hi > packages/x"',  # nested shell
         "powershell -e U2V0",  # nested encoded shell from Bash
+        # regression pins: a redirect/tee whose RESOLVED target is protected still blocks, even
+        # when a protected token also appears as a mere exec argument (scripts/) or beside an
+        # fd-dup (2>&1). These must stay DENY after the fence fix.
+        "python scripts/foo.py > packages/out.txt",  # exec arg scripts/, real write to packages/
+        "echo x > packages/y.py 2>&1",  # fd-dup present, but the > target is protected
+        "python scripts/doctor.py /c/p 2>&1 | tee packages/x",  # tee target protected
     ],
 )
 def test_guard_denies_shell_writes_to_internals(cmd):
@@ -163,6 +188,14 @@ def test_both_guards_deny_a_write_to_the_same_protected_path():
         "git status",
         "grep -r foo packages/tcip-mcp",
         "echo hello > /tmp/scratch.txt",  # a write, but not into repo internals
+        # fd redirects / non-protected targets are not writes into internals — the mandated
+        # diagnostics and their redirect variants must fall through (standing checks for the fix).
+        "python scripts/doctor.py C:/Users/zack/tcip-projects/hazelnut 2>&1",  # mandated command
+        "python scripts/doctor.py /c/proj 2>/dev/null",
+        "python scripts/list_tools.py",  # no redirect at all
+        "python scripts/list_tools.py > /tmp/tools.txt",  # real redirect, non-protected target
+        "python scripts/doctor.py /c/proj 2>&1 | tee /tmp/doctor.log",
+        "ls packages 2>&1",  # fd-dup while reading a protected dir
     ],
 )
 def test_guard_allows_reads_and_non_internal_writes(cmd):
@@ -224,6 +257,9 @@ def _run_ps_guard(command: str) -> subprocess.CompletedProcess:
         "git push origin main",
         'git commit -m "x"',
         "git reset --hard HEAD~1",
+        # regression pin: a redirect whose RESOLVED target is protected still blocks, even with
+        # scripts/ present only as an exec argument. Must stay DENY after the fence fix.
+        "python scripts/foo.py > packages\\out.txt",
     ],
 )
 def test_ps_guard_denies_mutations_and_dangerous(cmd):
@@ -248,12 +284,26 @@ def test_ps_guard_denies_mutations_and_dangerous(cmd):
         "Select-String -Pattern sc -Path packages\\tcip-mcp\\server.py",
         "git status",
         "git log --oneline -5",
+        # fd redirects / non-protected targets are not writes into internals (standing checks).
+        "python scripts/doctor.py C:\\Users\\zack\\proj 2>&1",  # mandated command, redirect form
+        "python scripts/list_tools.py 2>$null",
+        "python scripts/list_tools.py > $env:TEMP\\tools.txt",  # real redirect, non-protected
+        "Get-ChildItem packages 2>&1",  # fd-dup while reading a protected dir
     ],
 )
 def test_ps_guard_allows_reads(cmd):
     r = _run_ps_guard(cmd)
     assert r.returncode == 0, r.stdout
     assert r.stdout.strip() == ""
+
+
+def test_deny_reason_points_to_claude_reports():
+    # Requirement (c): a blocked protected-write self-documents — it tells the agent to file the
+    # false-positive with claude_reports rather than route around the fence.
+    r = _run_guard("echo x > packages/tcip-mcp/y.py")
+    assert r.returncode == 2 and "claude_reports" in r.stdout
+    r = _run_ps_guard('Set-Content packages\\tcip-mcp\\y.py "x"')
+    assert r.returncode == 2 and "claude_reports" in r.stdout
 
 
 def test_ps_guard_fails_open_on_garbage_stdin():
