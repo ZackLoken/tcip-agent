@@ -45,8 +45,7 @@ _STMT = r"(?:^|[\n;|&(){}]\s*)"
 # Write / create cmdlets and .NET writers — matched anywhere (the full names are unambiguous).
 # Only bites when paired with a protected path (see main()).
 _WRITE_OP = re.compile(
-    r">>?"  # > and >> redirection
-    r"|\bTee-Object\b"
+    r"\bTee-Object\b"
     r"|\b(?:Set|Add|Clear)-Content\b"
     r"|\bOut-File\b"
     r"|\b(?:New|Move|Copy|Rename)-Item\b"
@@ -90,6 +89,25 @@ _GIT_DANGER = re.compile(
 )
 
 
+# PowerShell file redirect (``>``, ``>>``, ``2>``, ``*>``…). ``2>&1`` / ``*>&1`` merge streams
+# (no file) and are excluded by ``(?!&)`` — so ``… 2>&1`` / ``… 2>$null`` on a read-only command
+# no longer counts as a write into a protected token the line merely names.
+_REDIRECT = re.compile(r"\d*>>?(?!&)\s*(?P<target>[^\s;|&<>()]+)")
+
+
+def _redirect_targets(cmd: str) -> list[str]:
+    return [m.group("target") for m in _REDIRECT.finditer(cmd)]
+
+
+_PROTECTED_WRITE_MSG = (
+    "Writing into platform internals via PowerShell is blocked — the agent edits projects, not "
+    "platform code. If this was a read-only diagnostic that got mis-flagged (e.g. "
+    "`python scripts/doctor.py <root>`), that's a fence false-positive: file it with the "
+    "claude_reports tool (category unexpected_behavior; include the exact command) so the fence "
+    "can be fixed — do not route around it by editing platform files."
+)
+
+
 def _deny(reason: str) -> None:
     print(
         json.dumps(
@@ -122,8 +140,10 @@ def main() -> None:
         _deny("Dangerous git (push/commit/reset/checkout/clean) is blocked in the agent terminal.")
     if _DELETE_OP.search(cmd) or _DELETE_ALIAS.search(cmd):
         _deny("File deletion via the shell is blocked — the agent mutates data through the audited TCIP tools.")
+    if any(_PROTECTED.search(t) for t in _redirect_targets(cmd)):
+        _deny(_PROTECTED_WRITE_MSG)
     if (_WRITE_OP.search(cmd) or _WRITE_ALIAS.search(cmd)) and _PROTECTED.search(cmd):
-        _deny("Writing into platform internals via PowerShell is blocked — the agent edits projects, not platform code.")
+        _deny(_PROTECTED_WRITE_MSG)
 
     sys.exit(0)
 
