@@ -94,7 +94,7 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     from tcip_mcp.pipelines.schemas import normalize_train_config
     config = normalize_train_config(config)
 
-    from tcip_mcp.pipelines.training.generic_trainer import TrainConfig, train, create_run
+    from tcip_mcp.pipelines.training.generic_trainer import TrainConfig, create_run
 
     model_spec = config.get("model_spec") or config["model"]
     train_cfg = config.get("training", {})
@@ -216,34 +216,18 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     except Exception as exc:  # Experiment tracking is best-effort, but failures must be visible.
         logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
 
-    def _run_with_tracking() -> None:
-        """Run training and wire its lifecycle into the experiment + model registry."""
-        from tcip_mcp.experiments import (
-            log_metrics, register_model_from_experiment, update_status,
-        )
+    # The training body runs inside the audited integrity envelope: it snapshots source/env,
+    # brackets the body with audit open/close events (closing the old un-audited daemon-thread
+    # hole), stamps checkpoints, and wires status/registration/lineage — around whatever training
+    # code runs. Absent `training_source`, the envelope calls ctx.default_train() (today's trainer,
+    # byte-identical); with it, the agent's custom train(ctx). See pipelines/training/envelope.py.
+    from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
 
-        def _epoch_cb(epoch: int, epoch_metrics: dict) -> None:
-            try:
-                log_metrics(experiment_id, epoch, epoch_metrics)
-            except Exception as exc:
-                logger.warning("Experiment metric log failed (%s epoch %s): %s", experiment_id, epoch, exc)
-
-        train(run, train_loader, val_loader, task, epoch_callback=_epoch_cb, resume_from=resume_from)
-
-        # train() set run.status to completed/failed (it does not re-raise normal failures).
-        try:
-            if run.status == "completed":
-                out = Path(run.output_dir)
-                best = out / "model_best.pt"
-                weights = str(best if best.is_file() else out / "model_final.pt")
-                update_status(experiment_id, "completed")
-                register_model_from_experiment(experiment_id, weights)
-            else:
-                update_status(experiment_id, run.status or "failed")  # "failed" or "cancelled"
-        except Exception as exc:
-            logger.warning("Experiment completion wiring failed for %s: %s", experiment_id, exc)
-
-    thread = threading.Thread(target=_run_with_tracking, daemon=True)
+    ctx = TrainContext(
+        run=run, train_loader=train_loader, val_loader=val_loader,
+        task=task, resume_from=resume_from, experiment_id=experiment_id,
+    )
+    thread = threading.Thread(target=run_training_envelope, args=(ctx,), daemon=True)
     thread.start()
 
     # Launch TensorBoard for live monitoring
