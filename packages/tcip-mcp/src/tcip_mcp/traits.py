@@ -7,8 +7,10 @@ measurement definition from living only in a session's memory.
 
 A ``TraitSpec`` says: what the phenotype *is* (count objective), what "finding one" *means*
 (localization), how the elongated/dormant call is defined (texture, not geometry), the milestone
-convention, and the tile-seam sliver policy. Operating-point *values* (conf, IoU, tolerances) are
-deliberately absent — those are derived per dataset at runtime.
+convention, and the tile-seam sliver policy. Operating-point *values* (conf, IoU, tolerances) and
+the CV task / pipeline decomposition (detection vs classification, one model vs detect-then-classify)
+are deliberately absent — those the agent derives and validates per dataset at runtime, the same way
+the values are.
 """
 
 from __future__ import annotations
@@ -30,16 +32,13 @@ class TraitSpec:
     """The semantics of one trait — read, never derived."""
 
     name: str
-    task: str  # "detection" | "classification" | ...
     # What the delivered phenotype is, and hence what the operating point optimizes.
     count_objective: str = COUNT_UNBIASED
     # What "a hit" means when validating counts. For small objects, center-match (IoU is noise).
     localization: str = CENTER_MATCH
     # How the localization tolerance is derived (semantic names the recipe; the value is per-dataset).
     localization_tolerance: str = "half_class_avg_size"
-    # The class id that is the phenotype-positive ("elongated"), or None if the trait is single-class.
-    positive_class_id: int | None = None
-    # Elongation/positive call is a learned texture classification — geometric proxies are forbidden.
+    # The elongated/positive call is learned from texture (frills/gills), never geometry — proxies forbidden.
     positive_is_texture: bool = False
     # Milestone crossing fractions and the quantity they cross.
     milestone_fractions: tuple[float, ...] = ()
@@ -58,19 +57,17 @@ class TraitUnknownError(KeyError):
 
 # --- Registry ---------------------------------------------------------------
 # Hazelnut catkin bloom (Phase 1). Semantics confirmed with the domain expert 2026-07-10:
-#   1. elongated = texture (salt-and-peppery frills/gills), not geometry (length:width too variable);
-#      the detector's 2-class output (class 1 = elongated) is a learned texture classification.
+#   1. elongated = a learned texture call (salt-and-peppery frills/gills), not geometry
+#      (length:width too variable); how the call is produced is the agent's pipeline choice.
 #   2. "a hit" = center within ~half the class's average size (IoU is noise at ~40px).
 #   3. phenotype = count-unbiased on elongated and total counts -> the elongated fraction.
 #   4. milestones 0.05/0.50/0.95 on the elongated fraction.
 #   5. tile-seam slivers dropped below a class-average-size threshold.
 CATKIN = TraitSpec(
     name="catkin",
-    task="detection",
     count_objective=COUNT_UNBIASED,
     localization=CENTER_MATCH,
     localization_tolerance="half_class_avg_size",
-    positive_class_id=1,
     positive_is_texture=True,
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",
