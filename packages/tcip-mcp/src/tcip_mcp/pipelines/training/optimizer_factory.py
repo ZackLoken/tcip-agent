@@ -12,8 +12,6 @@ from copy import deepcopy
 import torch
 from torch import nn
 
-from tcip_mcp.pipelines.registry import OPTIMIZERS
-
 
 def _build_sgd(params, lr: float = 1e-3, momentum: float = 0.9, weight_decay: float = 1e-4, **kw):
     return torch.optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
@@ -36,14 +34,12 @@ def _build_lamb(params, lr: float = 1e-3, weight_decay: float = 1e-2, **kw):
         return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
 
 
-OPTIMIZERS.register_factory("sgd", _build_sgd, category="optimizer", metadata={
-    "description": "SGD with momentum", "use_when": "Large datasets, well-tuned LR"})
-OPTIMIZERS.register_factory("adam", _build_adam, category="optimizer", metadata={
-    "description": "Adam", "use_when": "Quick experiments, default choice"})
-OPTIMIZERS.register_factory("adamw", _build_adamw, category="optimizer", metadata={
-    "description": "AdamW with decoupled weight decay", "use_when": "Default for transformers/timm"})
-OPTIMIZERS.register_factory("lamb", _build_lamb, category="optimizer", metadata={
-    "description": "LAMB (large-batch optimizer)", "use_when": "Large batch training"})
+_OPTIMIZER_BUILDERS = {
+    "sgd": _build_sgd,
+    "adam": _build_adam,
+    "adamw": _build_adamw,
+    "lamb": _build_lamb,
+}
 
 
 def build_optimizer(
@@ -63,7 +59,10 @@ def build_optimizer(
     else:
         param_groups = [{"params": model.parameters(), "lr": head_lr}]
 
-    factory = OPTIMIZERS.get(name)
+    try:
+        factory = _OPTIMIZER_BUILDERS[name]
+    except KeyError:
+        raise KeyError(f"Unknown optimizer '{name}'. Available: {sorted(_OPTIMIZER_BUILDERS)}") from None
     return factory(param_groups, lr=head_lr, weight_decay=weight_decay)
 
 
