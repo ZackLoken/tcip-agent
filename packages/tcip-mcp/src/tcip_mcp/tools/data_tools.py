@@ -87,7 +87,7 @@ def _scan_dataset(root: str) -> dict:
 
 @mcp.tool()
 @audited
-def load_dataset(folder_path: str) -> dict:
+def scan_dataset(folder_path: str) -> dict:
     """Scan a folder for images, labels, and predictions.
 
     Supports YOLO (.txt), PASCAL VOC (.xml), COCO (.json), and LabelMe (.json).
