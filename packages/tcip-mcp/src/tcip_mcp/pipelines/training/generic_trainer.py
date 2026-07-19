@@ -26,8 +26,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from tcip_mcp.pipelines.composer import compose_model, ComposedModel
-from tcip_mcp.pipelines.inference.predictor import KIND_TORCHVISION_COMPOSED
+from tcip_mcp.pipelines.composer import ComposedModel
+from tcip_mcp.pipelines.model_build import build_model, stamp_model_ref
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.pipelines.training.evaluation import evaluate
 from tcip_mcp.pipelines.training.optimizer_factory import (
@@ -213,16 +213,14 @@ def _save_checkpoint(
 ) -> None:
     """Write a resumable periodic checkpoint (W7).
 
-    Superset of the previous payload — ``GenericPredictor`` reads only
-    ``model_spec``/``model_state_dict`` and stays compatible.
+    Superset of the previous payload — ``GenericPredictor`` reads only the model reference
+    (``model_spec``/``model_source``) + ``model_state_dict`` and stays compatible.
     """
-    _atomic_torch_save({
-        "kind": KIND_TORCHVISION_COMPOSED,
+    _atomic_torch_save(stamp_model_ref({
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
         "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
-        "model_spec": config["model_spec"],
         "config": config,
         "stage": stage_idx,
         "stage_epoch": stage_epoch,
@@ -233,7 +231,7 @@ def _save_checkpoint(
         "global_step": global_step,
         "seed": seed,
         "metrics": metrics,
-    }, path)
+    }, config), path)
 
 
 # ====================================================================
@@ -319,14 +317,29 @@ def _selection_value(task: str, val_metrics: dict, avg_loss: float) -> float:
     return val_metrics.get("val_loss", avg_loss)
 
 
-def _validate_input_channels(model_spec: dict, loader: DataLoader) -> None:
-    """Fail loudly if the data's channel count doesn't match the backbone's ``in_chans``.
+def _expected_in_chans(config: dict) -> int:
+    """Input channels the model expects — from ``model_spec.backbone`` or ``model_source.in_chans``."""
+    spec = config.get("model_spec")
+    if isinstance(spec, dict):
+        bb = spec.get("backbone", {})
+        return bb.get("in_chans", 3) if isinstance(bb, dict) else 3
+    src = config.get("model_source")
+    if isinstance(src, dict):
+        return int(src.get("in_chans", 3))
+    bb = config.get("backbone")  # tolerate being handed a bare model_spec directly
+    if isinstance(bb, dict):
+        return bb.get("in_chans", 3)
+    return 3
+
+
+def _validate_input_channels(config: dict, loader: DataLoader) -> None:
+    """Fail loudly if the data's channel count doesn't match the model's expected ``in_chans``.
 
     Catches an N-channel/RGB mismatch up front with a clear message instead of an opaque
-    conv-shape error deep in the first forward pass.
+    conv-shape error deep in the first forward pass. Works for both a composed ``model_spec``
+    and a bespoke ``model_source`` (which declares ``in_chans``).
     """
-    bb = model_spec.get("backbone", {})
-    expected = bb.get("in_chans", 3) if isinstance(bb, dict) else 3
+    expected = _expected_in_chans(config)
     batch = next(iter(loader), None)
     if batch is None:
         return
@@ -397,9 +410,9 @@ def train(
             set_seed(int(seed), deterministic=config.get(
                 "deterministic", config.get("training", {}).get("deterministic", False)))
 
-        model = compose_model(config["model_spec"])
+        model = build_model(config)
         model.to(device)
-        _validate_input_channels(config["model_spec"], train_loader)
+        _validate_input_channels(config, train_loader)
 
         stages = config.get("stages", [{"freeze_to": 0, "epochs": 10}])
         use_amp = config.get("mixed_precision", True) and device.type == "cuda"
@@ -646,14 +659,12 @@ def train(
                 if sel < run.best_metric:
                     run.best_metric = sel
                     try:
-                        _atomic_torch_save({
-                            "kind": KIND_TORCHVISION_COMPOSED,
+                        _atomic_torch_save(stamp_model_ref({
                             "model_state_dict": model.state_dict(),
-                            "model_spec": config["model_spec"],
                             "config": config,
                             "metrics": epoch_metrics,
                             "stage": stage_idx, "epoch": run.current_epoch,
-                        }, out_dir / "model_best.pt")
+                        }, config), out_dir / "model_best.pt")
                     except PermissionError:
                         # Windows: a concurrent reader (GUI inference / evaluate_model)
                         # holding model_best.pt open can outlast the replace retries.
@@ -695,13 +706,11 @@ def train(
                 break  # stop before starting the next stage
 
         # Final checkpoint (saved even on cancellation so partial progress is recoverable).
-        _atomic_torch_save({
-            "kind": KIND_TORCHVISION_COMPOSED,
+        _atomic_torch_save(stamp_model_ref({
             "model_state_dict": model.state_dict(),
-            "model_spec": config["model_spec"],
             "config": config,
             "metrics": run.metrics_history,
-        }, out_dir / "model_final.pt")
+        }, config), out_dir / "model_final.pt")
 
         if run.cancel_event.is_set():
             run.status = "cancelled"
