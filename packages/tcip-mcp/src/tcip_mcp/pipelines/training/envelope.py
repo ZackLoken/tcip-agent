@@ -1,0 +1,324 @@
+"""The audited training envelope + ``TrainContext``.
+
+The envelope is the fixed integrity boundary the platform runs AROUND any training body — the
+default trainer *or* an agent's custom ``train(ctx)``. Whatever the training code does, the
+envelope guarantees (the rails CLAUDE.md protects): the run is on the tamper-evident audit log
+end to end, its source/env provenance is snapshotted, its experiment status / lineage /
+registration are wired, and any checkpoint it saves through ``ctx`` is stamped + atomic.
+
+``TrainContext`` hands the training code the craft library (data / model / optim / eval utils)
+plus the envelope-owned sinks (``log_metrics`` / ``save_checkpoint`` / ``record_artifact`` /
+``should_cancel`` / ``tb``) — the seams that keep a hand-rolled loop audited + immutable.
+
+The default (no ``training_source``, ``model_spec``) path is byte-identical to the pre-envelope
+flow: ``ctx.default_train()`` just calls today's ``generic_trainer.train()`` unchanged, and the
+envelope adds only provenance/audit *around* it.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TrainContext:
+    """The handle the envelope passes to a training body (default or custom).
+
+    Carries the prebuilt leakage-free loaders + run state, exposes the craft library as thin
+    passthroughs, and owns the audited/immutable sinks a custom loop must route through.
+    """
+
+    run: Any                      # TrainRun
+    train_loader: Any
+    val_loader: Any | None = None
+    task: str = "detection"
+    resume_from: str = ""
+    experiment_id: str | None = None
+    _tb: Any = None
+
+    # ---- config / reproducibility ----
+    @property
+    def config(self) -> dict:
+        return self.run.config
+
+    @property
+    def seed(self) -> Any:
+        c = self.config
+        return c.get("seed", c.get("training", {}).get("seed"))
+
+    @property
+    def device(self) -> Any:
+        import torch
+
+        return torch.device(self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
+
+    def set_seed(self, seed: int | None = None, deterministic: bool = False) -> None:
+        from tcip_mcp.pipelines.training.generic_trainer import set_seed
+
+        eff = self.seed if seed is None else seed
+        if eff is not None:
+            set_seed(int(eff), deterministic=deterministic)
+
+    # ---- model ----
+    def build_model(self) -> Any:
+        from tcip_mcp.pipelines.model_build import build_model
+
+        return build_model(self.config)
+
+    # ---- the default trainer: one optional convenience ----
+    def default_train(self) -> Any:
+        """Run today's strong default policy (progressive unfreeze / differential-LR / AMP+accum /
+        selection+early-stop / checkpoint cadence). Byte-identical to the pre-envelope trainer."""
+        from tcip_mcp.pipelines.training.generic_trainer import train
+
+        return train(self.run, self.train_loader, self.val_loader, self.task,
+                     epoch_callback=self._epoch_sink, resume_from=self.resume_from)
+
+    # ---- craft library passthroughs (compose, don't reinvent) ----
+    def build_dataset(self, task: str | None = None, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.data.datasets import build_dataset
+
+        return build_dataset(task or self.task, **kwargs)
+
+    def task_collate(self, task: str | None = None) -> Any:
+        from tcip_mcp.pipelines.training.generic_trainer import task_collate
+
+        return task_collate(task or self.task)
+
+    def build_sampler(self, name: str, dataset: Any) -> Any:
+        from tcip_mcp.pipelines.data.samplers import build_sampler
+
+        return build_sampler(name, dataset)
+
+    def build_augmentation(self, cfg: dict) -> Any:
+        from tcip_mcp.pipelines.data.augmentations import build_augmentation
+
+        return build_augmentation(cfg)
+
+    def auto_train_val(self, task: str | None = None, data_cfg: dict | None = None,
+                       transforms: Any = None) -> Any:
+        from tcip_mcp.tools.training_tools import _auto_train_val
+
+        return _auto_train_val(task or self.task, data_cfg or self.config.get("data", {}), transforms)
+
+    def resolve_spec_derivations(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.derivations import resolve_spec_derivations
+
+        return resolve_spec_derivations(*args, **kwargs)
+
+    def compute_class_weights(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.components.losses import compute_class_weights
+
+        return compute_class_weights(*args, **kwargs)
+
+    def build_optimizer(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
+
+        return build_optimizer(*args, **kwargs)
+
+    def build_scheduler(self, optimizer: Any, config: dict, epochs: int) -> Any:
+        from tcip_mcp.pipelines.training.generic_trainer import _build_scheduler
+
+        return _build_scheduler(optimizer, config, epochs)
+
+    def compute_lr_scale(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.training.optimizer_factory import compute_lr_scale
+
+        return compute_lr_scale(*args, **kwargs)
+
+    def snapshot_optimizer_state(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.training.optimizer_factory import snapshot_optimizer_state
+
+        return snapshot_optimizer_state(*args, **kwargs)
+
+    def restore_optimizer_state(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.training.optimizer_factory import restore_optimizer_state
+
+        return restore_optimizer_state(*args, **kwargs)
+
+    def evaluate(self, model: Any, loader: Any = None, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.training.evaluation import evaluate
+
+        return evaluate(model, self.val_loader if loader is None else loader,
+                        self.device, self.task, **kwargs)
+
+    # ---- measurement primitives (compose for dimensional traits) ----
+    def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.measurement import mask_geometry
+
+        return mask_geometry(*args, **kwargs)
+
+    def instance_geometries(self, *args: Any, **kwargs: Any) -> Any:
+        from tcip_mcp.pipelines.measurement import instance_geometries
+
+        return instance_geometries(*args, **kwargs)
+
+    # ---- envelope-owned sinks: keep a custom loop audited + immutable ----
+    def _epoch_sink(self, epoch: int, metrics: dict) -> None:
+        """Route epoch metrics into the experiment store (what _run_with_tracking used to do)."""
+        if self.experiment_id is None:
+            return
+        try:
+            from tcip_mcp.experiments import log_metrics
+
+            log_metrics(self.experiment_id, epoch, metrics)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Experiment metric log failed (%s epoch %s): %s",
+                           self.experiment_id, epoch, exc)
+
+    def log_metrics(self, epoch: int, metrics: dict) -> None:
+        """Custom-loop metric sink: experiment store + metrics.jsonl + TB (default_train writes
+        metrics.jsonl/TB itself, so it uses ``_epoch_sink`` and does not double-write)."""
+        self._epoch_sink(epoch, metrics)
+        out = Path(self.run.output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        with open(out / "metrics.jsonl", "a") as f:
+            f.write(json.dumps({"epoch": epoch, **metrics}) + "\n")
+        if self.tb is not None:
+            for k, v in metrics.items():
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    self.tb.add_scalar(k, v, epoch)
+            self.tb.flush()
+
+    def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
+        """Stamped, atomic checkpoint save. Stamps ``kind`` + ``model_spec``/``model_source`` +
+        ``config`` so a hand-rolled loop can't emit an unstamped, un-routable ``.pt``."""
+        from tcip_mcp.pipelines.model_build import stamp_model_ref
+        from tcip_mcp.pipelines.training.generic_trainer import _atomic_torch_save
+
+        payload = dict(state)
+        payload.setdefault("config", self.config)
+        stamp_model_ref(payload, self.config)
+        out = Path(self.run.output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / f"{tag}.pt"
+        _atomic_torch_save(payload, path)
+        return str(path)
+
+    def record_artifact(self, name: str, path: str) -> None:
+        if self.experiment_id is None:
+            return
+        try:
+            from tcip_mcp.experiments import record_artifact
+
+            record_artifact(self.experiment_id, name, str(path))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("record_artifact failed (%s/%s): %s", self.experiment_id, name, exc)
+
+    def should_cancel(self) -> bool:
+        return self.run.cancel_event.is_set()
+
+    @property
+    def tb(self) -> Any:
+        if self._tb is None:
+            try:
+                from torch.utils.tensorboard import SummaryWriter
+
+                self._tb = SummaryWriter(log_dir=str(Path(self.run.output_dir) / "tensorboard"))
+            except Exception:  # noqa: BLE001
+                self._tb = None
+        return self._tb
+
+
+def _snapshot_run_provenance(ctx: TrainContext) -> None:
+    """Snapshot env (+ bespoke model source) into the immutable experiment dir. Best-effort.
+
+    Closes the 'no source/env provenance' hole for every run: ``env.json`` records the library
+    versions + seed + model kind. For a bespoke ``model_source`` / ``training_source`` run, the
+    per-file source snapshot is added in S3 (``snapshot_model_source``)."""
+    if ctx.experiment_id is None:
+        return
+    try:
+        from tcip_mcp.experiments import experiments_dir
+        from tcip_mcp.pipelines.model_build import capture_env, snapshot_model_source
+        from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, KIND_TORCHVISION_COMPOSED
+        from tcip_mcp.utils.atomic_io import atomic_write_json
+
+        kind = KIND_TCIP_MODULE if ctx.config.get("model_source") else KIND_TORCHVISION_COMPOSED
+        env = {"env": capture_env(), "seed": ctx.seed, "model_kind": kind,
+               "run_id": ctx.run.run_id}
+        exp_dir = experiments_dir() / ctx.experiment_id
+        if exp_dir.is_dir():
+            atomic_write_json(exp_dir / "env.json", env)
+            # Bespoke run: copy the agent's model/training source (+ sha256) so it is reproducible
+            # from an importable builder, not exec. No-op for the composed default path.
+            snapshot_model_source(ctx.config, exp_dir)
+    except Exception:  # noqa: BLE001
+        logger.debug("run provenance snapshot skipped", exc_info=True)
+
+
+def run_training_envelope(ctx: TrainContext) -> None:
+    """Run a training body inside the audited integrity envelope (background-thread entry).
+
+    In order: snapshot source/env → OPEN an audit event around the body → dispatch
+    (agent ``train(ctx)`` if ``training_source`` set, else ``ctx.default_train()``) → close status
+    → register model + lineage + record artifact → CLOSE the audit event. Steps other than the
+    dispatch happen regardless of what the training code does or omits.
+    """
+    from tcip_mcp.audit import record_event
+
+    run = ctx.run
+    exp_id = ctx.experiment_id
+    audit_args = {"run_id": run.run_id, "experiment_id": exp_id, "task": ctx.task}
+
+    _snapshot_run_provenance(ctx)
+
+    record_event("training_run", audit_args, status="running")
+    t0 = time.monotonic()
+    try:
+        training_source = run.config.get("training_source")
+        if training_source:
+            from tcip_mcp.pipelines.model_build import _import_dotted
+
+            agent_train = _import_dotted(training_source)
+            agent_train(ctx)  # the agent's custom loop drives training through ctx
+            if run.status not in ("completed", "failed", "cancelled"):
+                # A custom loop that never set a terminal status is treated as completed
+                # (it returned without cancelling or raising).
+                run.status = "cancelled" if run.cancel_event.is_set() else "completed"
+        else:
+            ctx.default_train()  # today's trainer — byte-identical
+    except Exception as exc:  # noqa: BLE001
+        if run.status not in ("failed", "cancelled"):
+            run.status = "failed"
+        run.error = run.error or str(exc)
+        logger.exception("Training body failed for %s: %s", run.run_id, exc)
+
+    _finalize_run(ctx)
+
+    record_event("training_run", {**audit_args, "best_metric": run.best_metric},
+                 status=run.status or "failed",
+                 duration_ms=round((time.monotonic() - t0) * 1000, 1))
+
+
+def _finalize_run(ctx: TrainContext) -> None:
+    """Close status + register the model + record its weights artifact (the completion wiring)."""
+    run = ctx.run
+    exp_id = ctx.experiment_id
+    if exp_id is None:
+        return
+    try:
+        from tcip_mcp.experiments import (
+            record_artifact,
+            register_model_from_experiment,
+            update_status,
+        )
+
+        if run.status == "completed":
+            out = Path(run.output_dir)
+            best = out / "model_best.pt"
+            weights = str(best if best.is_file() else out / "model_final.pt")
+            update_status(exp_id, "completed")
+            register_model_from_experiment(exp_id, weights)
+            record_artifact(exp_id, "model_weights", weights)
+        else:
+            update_status(exp_id, run.status or "failed")  # "failed" or "cancelled"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Experiment completion wiring failed for %s: %s", exp_id, exc)
