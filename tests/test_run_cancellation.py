@@ -9,7 +9,7 @@ def test_cancel_run_helper_and_tool():
     from tcip_mcp.pipelines.training.generic_trainer import cancel_run, create_run
     from tcip_mcp.tools.training_tools import cancel_training
 
-    run = create_run({"model_spec": {}}, "out")
+    run = create_run({"model_source": {"builder": "x:y"}}, "out")
     assert cancel_run(run.run_id) is True
     assert run.cancel_event.is_set()
     assert cancel_run("no-such-run") is False
@@ -39,8 +39,8 @@ def test_cancel_before_training_yields_cancelled(tmp_path):
                        csv_path=str(tmp_path / "labels.csv"), num_classes=2)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
     cfg = {
-        "model_spec": {"backbone": {"name": "tv_resnet50", "pretrained": False},
-                       "neck": {"name": "gap"}, "heads": [{"name": "classification", "num_classes": 2}]},
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
         "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 3}],
         "mixed_precision": False, "early_stopping": {"enabled": False},
     }
