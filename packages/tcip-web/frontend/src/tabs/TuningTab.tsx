@@ -4,10 +4,10 @@ import { tuningApi, type Sweep, type SweepDetail } from "@/api/tuning";
 import { buildOptunaSpace, DEFAULT_HPO_PARAMS, parseNumList, type HpoParam } from "@/tabs/hpoSpace";
 
 const DEFAULT_BASE = `{
-  "model_spec": {
-    "backbone": {"name": "resnet50", "pretrained": true},
-    "neck": {"name": "fpn"},
-    "heads": [{"name": "anchor_detection", "num_classes": 1}]
+  "model_source": {
+    "builder": "my_models:build_net",
+    "builder_kwargs": {"num_classes": 1, "in_chans": 3},
+    "task": "detection"
   },
   "data": {"images_dir": "", "labels_dir": "", "task": "detection"},
   "training": {"batch_size": 4, "num_workers": 0, "stages": [{"epochs": 3}]}
