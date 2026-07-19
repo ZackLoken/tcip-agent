@@ -6,8 +6,8 @@ from pathlib import Path
 
 from tcip_mcp.tools.project_tools import (
     init_project,
-    get_project_status,
-    export_project,
+    inspect_project,
+    archive_project,
     import_project,
 )
 
@@ -20,18 +20,18 @@ def test_init_project(tmp_path: Path):
     assert ".tcip/" in result["created"]
 
 
-def test_get_project_status(tmp_path: Path):
-    status = get_project_status(str(tmp_path))
+def test_inspect_project(tmp_path: Path):
+    status = inspect_project(str(tmp_path))
     assert status["initialized"] is False
 
     init_project(str(tmp_path))
-    status = get_project_status(str(tmp_path))
+    status = inspect_project(str(tmp_path))
     assert status["initialized"] is True
     assert status["has_config"] is True
 
 
 def test_export_import_roundtrip(tmp_path: Path):
-    """export_project -> import_project -> get_project_status recovers the project."""
+    """archive_project -> import_project -> inspect_project recovers the project."""
     from PIL import Image
 
     src = tmp_path / "src_project"
@@ -49,7 +49,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     json_io.write_detect(str(labels / "img_000.json"), [BBox(10, 10, 30, 30, 0)], 64, 64)
 
     zip_path = tmp_path / "export.zip"
-    exported = export_project(str(src), str(zip_path))
+    exported = archive_project(str(src), str(zip_path))
     assert "error" not in exported
     assert zip_path.is_file()
 
@@ -58,7 +58,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     assert "error" not in imported
     assert imported["files_extracted"] == exported["files_added"]
 
-    status = get_project_status(str(dest))
+    status = inspect_project(str(dest))
     assert status["initialized"] is True
     assert status["has_config"] is True
     assert status["image_count"] == 1
