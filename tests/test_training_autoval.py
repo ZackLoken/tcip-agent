@@ -108,13 +108,6 @@ def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
 
 
 def test_train_emits_val_loss_with_autoval(tmp_path: Path):
-    # Component registration (side-effect imports).
-    import tcip_mcp.pipelines.components.backbones  # noqa: F401
-    import tcip_mcp.pipelines.components.necks  # noqa: F401
-    import tcip_mcp.pipelines.components.heads  # noqa: F401
-    import tcip_mcp.pipelines.components.losses  # noqa: F401
-    from tcip_mcp.pipelines.composer import compose_model
-
     images_dir, labels_dir, _ = _detection_dataset(tmp_path / "ds")
     data_cfg = {
         "images_dir": str(images_dir),
@@ -127,14 +120,10 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     train_loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("detection"))
     val_loader = DataLoader(val_ds, batch_size=2, collate_fn=task_collate("detection"))
 
-    spec = {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "fpn", "out_channels": 256},
-        "heads": [{"name": "anchor_detection", "num_classes": 1, "min_size": IMG, "max_size": IMG * 2}],
-    }
-    compose_model(spec)
     cfg = {
-        "model_spec": spec,
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1, "min_size": IMG, "max_size": IMG * 2},
+                         "task": "detection"},
         "device": "cpu",
         "stages": [{"freeze_to": -1, "epochs": 1}],
         "mixed_precision": False,
