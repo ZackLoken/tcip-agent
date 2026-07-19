@@ -17,7 +17,7 @@ follow this arc. Each step links out to the domain skill that owns its detail.
 
 ## 0. Orient
 
-Start the session with `load_reports` + `load_retrospectives`, then `get_project_status`
+Start the session with `load_project_memory` (kind='reports' and kind='retrospectives'), then `inspect_project`
 on any project you're handed. Surface friction with `claude_reports` the moment you hit
 it (missing site, ambiguous goal, unconfirmed format).
 
@@ -56,7 +56,7 @@ ingest_images(source="<raw folder or glob>", name="{crop}_{trait}_{site}")
   `undated` count (a sign the photos lack EXIF and dates may need `date_from`).
 
 `ingest_images` does **not** annotate, split, choose a task, or write `classes.json` — the
-next steps do. After it, `get_project_status` reports the capture dates and image count.
+next steps do. After it, `inspect_project` reports the capture dates and image count.
 
 ## 3. Translate the goal into a trait, task, and `classes.json`
 
@@ -74,12 +74,12 @@ Turn the sentence into a pipeline shape (see `.github/skills/pipeline-design`):
 
 There must be something to train on. Two paths (see `.github/skills/annotation`):
 
-- **Agent/MCP path**: `sam_auto_label` a starter batch → review the candidates visually
+- **Agent/MCP path**: `generate_mask_candidates` a starter batch → review the candidates visually
   (`visualize` / `view_image`) → `accept_candidates` the good ones. Empty label files are
   **valid negatives** — never delete or skip them.
 - **Human path**: hand off to the GUI Annotate tab for the breeder to label a seed set.
 
-Never train or evaluate on an unconfirmed format: if `load_annotations` returns
+Never train or evaluate on an unconfirmed format: if `read_annotations` returns
 `format_confident: false`, stop and confirm.
 
 ## 5. Split — `make_splits`
@@ -103,9 +103,9 @@ manifests + stats); pass `materialize=True` to also lay out a YOLO
 predictions, then deliver per `.github/skills/delivery`. Set the workspace's active
 project so the GUI opens what you built, closing the loop for the human.
 
-## Reading the live session — `get_active_context`
+## Reading the live session — `view_gui_state`
 
-The GUI (a separate process) and you share the workspace, not memory. `get_active_context`
+The GUI (a separate process) and you share the workspace, not memory. `view_gui_state`
 is the bridge: it reads the active-project marker (`<workspace>/.active`) plus that
 project's `<project_root>/.tcip/state/gui.json` and returns what the human is looking at
 right now — `active_project`, `project_root`, `annotation_type`, `date`, `active_tab`, and
@@ -116,10 +116,10 @@ frames, so it lags a beat — treat it as "roughly where they are," not a frame-
 **Adopt the project with `set_active_project` before doing project work.** Adoption writes the
 active marker *and* repins the platform-state root to `<workspace>/<project>`, so from then on
 the `@audited` log, the experiment store, and the model registry all live under that one
-project's `.tcip/` alongside its data — self-contained and portable (`export_project` bundles
+project's `.tcip/` alongside its data — self-contained and portable (`archive_project` bundles
 everything; `import_project` restores that ZIP into a destination dir, round-tripping back to a
-`get_project_status`-visible project). After adoption, `get_project_status`, `get_best_model`, `list_registered_models`,
-and `register_model_from_experiment` all default (`project_path=""`) to that project, and a
+`inspect_project`-visible project). After adoption, `inspect_project`, `select_best_model`, `list_registered_models`,
+and `register_model` all default (`project_path=""`) to that project, and a
 training run auto-registers there — so the model you trained is the one you retrieve. Pass an
 explicit `project_path` only to reach a *different* project's registry. The repin is a
 deliberate action, so a training run in flight keeps writing to the project it started under
