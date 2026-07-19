@@ -74,6 +74,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python packages/tcip-web/src/tcip_web/agent_session_start.py"
+          }
+        ]
+      }
     ]
   }
 }
