@@ -38,14 +38,25 @@ def create_experiment(
 
 @mcp.tool()
 @audited
-def get_experiment(experiment_id: str) -> dict:
-    """Read the full state of an experiment including config, metrics, artifacts, and lineage.
+def get_experiment(experiment_id: str, view: str = "full") -> dict:
+    """Read an experiment record.
+
+    With ``view='full'`` (default) returns the full state — config, metrics, artifacts,
+    and lineage. With ``view='lineage'`` returns only the data → model → predictions
+    chain (data source, parent model, model weights path, predictions path), enriched
+    with the config's data-source block.
 
     Args:
         experiment_id: Experiment to retrieve.
+        view: 'full' for the complete record, 'lineage' for the traced chain only.
     """
     from tcip_mcp.experiments import get_experiment as _get
+    from tcip_mcp.experiments import get_experiment_lineage as _lineage
 
+    if view == "lineage":
+        return _lineage(experiment_id)
+    if view != "full":
+        return {"error": f"Invalid view: {view!r} (expected 'full' or 'lineage')"}
     return _get(experiment_id)
 
 
@@ -63,18 +74,3 @@ def compare_experiments(experiment_ids: list[str]) -> dict:
     from tcip_mcp.experiments import compare_experiments as _compare
 
     return _compare(experiment_ids)
-
-
-@mcp.tool()
-@audited
-def get_experiment_lineage(experiment_id: str) -> dict:
-    """Trace the full data → model → predictions chain for an experiment.
-
-    Returns data source, parent model, model weights path, and predictions path.
-
-    Args:
-        experiment_id: Experiment to trace lineage for.
-    """
-    from tcip_mcp.experiments import get_experiment_lineage as _lineage
-
-    return _lineage(experiment_id)
