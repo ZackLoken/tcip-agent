@@ -20,7 +20,7 @@ def test_validate_flags_missing_sections(client: TestClient) -> None:
     resp = client.post("/api/training/validate", json={"config": {}})
     body = resp.json()
     assert body["valid"] is False
-    assert any("model_spec" in s for s in body["issues"])
+    assert any("model_source" in s for s in body["issues"])
 
 
 def test_validate_accepts_minimal_config(client: TestClient, tmp_path: Path) -> None:
@@ -29,18 +29,14 @@ def test_validate_accepts_minimal_config(client: TestClient, tmp_path: Path) -> 
     images.mkdir()
     labels.mkdir()
     cfg = {
-        "model_spec": {
-            "backbone": {"name": "resnet50"},
-            "neck": {"name": "fpn"},
-            "heads": [{"name": "detection_head", "task": "detection", "num_classes": 1}],
-            "loss": {"name": "focal_loss"},
-        },
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(images), "labels_dir": str(labels), "task": "detection"},
         "training": {"batch_size": 2, "stages": [{"lr": 1e-3, "epochs": 1}]},
     }
     resp = client.post("/api/training/validate", json={"config": cfg})
     body = resp.json()
-    # A real validate_model_spec call may add issues; we only assert the route works.
+    # A real builder-import check may add issues; we only assert the route works.
     assert "valid" in body
     assert "issues" in body
 
@@ -174,8 +170,8 @@ def test_list_runs_excludes_hpo_trials(monkeypatch) -> None:
     from tcip_mcp.pipelines.training import generic_trainer as gt
 
     monkeypatch.setattr(gt, "_RUNS", {})
-    gt.create_run({"model_spec": {}}, "out_a", origin="training")
-    gt.create_run({"model_spec": {}}, "out_b", origin="hpo_trial")
+    gt.create_run({"model_source": {"builder": "x:y"}}, "out_a", origin="training")
+    gt.create_run({"model_source": {"builder": "x:y"}}, "out_b", origin="hpo_trial")
 
     default = {r["run_id"] for r in gt.list_runs()}
     assert len(default) == 1  # only the standalone training run
