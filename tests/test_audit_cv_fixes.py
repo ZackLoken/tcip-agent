@@ -349,10 +349,9 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
     cfg = {
-        "model_spec": {"backbone": {"name": "resnet18", "pretrained": False},
-                       "neck": {"name": "fpn", "out_channels": 256},
-                       "heads": [{"name": "anchor_detection", "task": "detection",
-                                  "num_classes": 1, "min_size": 64, "max_size": 128}]},
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                         "task": "detection"},
         "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                  "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
                  "tiling": {"enabled": True}},  # no tile_size -> effective default must be persisted
