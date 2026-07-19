@@ -33,7 +33,7 @@ from tcip_mcp.audit import audited
 
 @mcp.tool()
 @audited
-def load_annotations(image_path: str, fmt: str | None = None) -> dict:
+def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     """Load labels and predictions for a single image.
 
     Supports the canonical per-image COCO/JSON (.json), plus YOLO (.txt), PASCAL VOC (.xml),
@@ -431,7 +431,7 @@ def _evaluate_folder(
 
 @mcp.tool()
 @audited
-def evaluate_predictions(
+def score_predictions(
     path: str,
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
@@ -573,7 +573,7 @@ def push_panel_data(
     """
     from tcip_mcp.web_client import post_panel_event
 
-    # 'app' is a real target: focus_annotate/focus_review/set_active_project all post to it.
+    # 'app' is a real target: focus/set_active_project all post to it.
     valid_panels = {"app", "annotate", "review", "training", "tuning", "inference", "results"}
     if panel not in valid_panels:
         return {"error": f"Unknown panel: {panel}. Valid: {sorted(valid_panels)}"}
@@ -586,7 +586,57 @@ def push_panel_data(
 
 @mcp.tool()
 @audited
-def focus_annotate(
+def focus(
+    tab: str,
+    project_root: str,
+    dataset_root: str,
+    trait: str,
+    date: str,
+    image_index: int | None = None,
+    mode: str | None = None,
+    model_name: str | None = None,
+    detection_idx: int = 0,
+    filter_type: str = "all",
+    iou_threshold: float = 0.5,
+    conf_threshold: float = DEFAULT_CONF,
+) -> dict:
+    """Drive the live GUI to a (trait, date) frame — the Annotate tab or the Review tab.
+
+    ``tab='annotate'`` lands the Annotate tab on the first annotated frame in the right mode
+    (emits ``annotate_focus``); ``tab='review'`` lands the Review tab on a model's predictions
+    (emits ``review_focus``). Requires the GUI to be running; returns ``delivered: false`` if not.
+
+    Args:
+        tab: Which GUI surface to drive — 'annotate' or 'review'.
+        project_root: Project root (== dataset_root for workspace projects).
+        dataset_root: Dataset root holding ``images/`` and ``annotations/`` (plus ``predictions/``
+            for review).
+        trait: Annotation campaign (e.g. "catkin", "bush").
+        date: Capture-date bucket (e.g. "2026-03-02").
+        image_index: Index into the date's sorted image list. Default: annotate → first frame with a
+            non-empty label; review → first frame with a non-empty prediction for the model.
+        mode: Annotate only — "box" or "polygon" (default: inferred from the labels on that frame).
+        model_name: Review only (required when ``tab='review'``) — the model whose
+            ``predictions/<model>/<date>/`` to review.
+        detection_idx: Review only — which detection to center in the Review navigator.
+        filter_type: Review only — "all" | "tp" | "fp" | "fn" match filter.
+        iou_threshold: Review only — IoU cutoff for the TP/FP/FN match classification.
+        conf_threshold: Review only — confidence cutoff for showing predictions.
+    """
+    if tab == "annotate":
+        return _focus_annotate(project_root, dataset_root, trait, date, mode=mode, image_index=image_index)
+    if tab == "review":
+        if not model_name:
+            return {"error": "tab='review' requires model_name"}
+        return _focus_review(
+            project_root, dataset_root, trait, date, model_name,
+            image_index=image_index, detection_idx=detection_idx, filter_type=filter_type,
+            iou_threshold=iou_threshold, conf_threshold=conf_threshold,
+        )
+    return {"error": f"tab must be 'annotate' or 'review', got {tab!r}"}
+
+
+def _focus_annotate(
     project_root: str,
     dataset_root: str,
     trait: str,
@@ -698,9 +748,7 @@ def focus_annotate(
     }
 
 
-@mcp.tool()
-@audited
-def focus_review(
+def _focus_review(
     project_root: str,
     dataset_root: str,
     trait: str,
@@ -716,7 +764,7 @@ def focus_review(
     what the agent flagged (a false positive, a missed catkin) without hunting for it.
 
     Posts a ``review_focus`` event the GUI honors with local setters — the Review analog of
-    ``focus_annotate`` — landing on the (trait, date) with ``model_name``'s predictions loaded,
+    ``focus(tab='annotate')`` — landing on the (trait, date) with ``model_name``'s predictions loaded,
     on ``image_index`` (default: the first frame that has predictions for this model, so the
     canvas isn't empty), at ``detection_idx`` under the given filter. Requires the GUI to be
     running; returns ``delivered: false`` if not.
@@ -820,7 +868,7 @@ def stage_proposals(
     wants a human to vet) goes to the PREDICTIONS tree, never ``annotations/``, so the human reviews
     it on the Review canvas and accepts/rejects/edits before it becomes GT. Only human-accepted
     shapes reach ground truth. Boxes land under ``detect/``, polygons (e.g. SAM masks) under
-    ``segment/`` — pass either or both. This never writes ground truth. Pair with ``focus_review``
+    ``segment/`` — pass either or both. This never writes ground truth. Pair with ``focus(tab='review')``
     to send the human straight to them.
 
     A prediction bucket that already carries review verdicts is immutable: by default a stage into
@@ -957,7 +1005,7 @@ def stage_proposals(
         segment_path = str(out)
 
     note = ("staged to predictions/ for canvas review — not committed as ground truth; the "
-            "human accepts on the Review tab before it becomes GT (focus_review to send them)")
+            "human accepts on the Review tab before it becomes GT (focus tab='review' to send them)")
     if resolution.redirected:
         note = (f"bucket {model_name!r} has {resolution.verdict_count} review verdict(s) — staged to a "
                 f"fresh bucket {bucket!r} instead so the reviewed predictions stay intact; " + note)
