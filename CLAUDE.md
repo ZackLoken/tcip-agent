@@ -16,12 +16,12 @@ editor required.
 **Scope today: 2D imagery (RGB + N-channel), object detection first** (Phase 1:
 hazelnut catkin phenology). The dataset layer reads RGB and multi-band 2D rasters
 (GeoTIFF / NPZ / grayscale); `num_channels` threads through `build_dataset` →
-`model_spec.in_chans` → the backbone, and inference is channel-aware — so
-multispectral 2D is a config choice, not new work. Detectors are built through a
-registry-driven `DETECTORS` factory (torchvision wrappers + external builders), and
-`instance_seg` is real (Mask R-CNN). **3D point clouds (LiDAR / SfM) are not built**:
-a `pointnet++` backbone exists but is intentionally *unregistered* with no
-point-cloud dataset/loader or task type — that's new work, not a config flag. See
+the backbone's `in_chans`, and inference is channel-aware — so multispectral 2D is a
+config choice, not new work. Detectors are built by the plain `build_detector` (+
+`_build_faster_rcnn`/`_build_fcos`/`_build_retinanet`/`_build_mask_rcnn`) that bespoke
+model code imports directly, and `instance_seg` is real (Mask R-CNN). **3D point clouds
+(LiDAR / SfM) are not built**: a `pointnet++` backbone is a plain importable module with
+no point-cloud dataset/loader or task type — that's new work, not a config flag. See
 Roadmap in README.
 
 Three processes, one shared `.tcip/` state dir:
@@ -100,9 +100,11 @@ that silently corrupts results and compounds across sessions. So:
 ## Pipelines & models
 
 - **No universal pipeline** — match the pattern to the trait (see `pipeline-design` skill).
-- Models compose from a spec (`backbone → neck → heads → loss`); the component
-  registry is a **library, not a constraint** — compose, or build a module in
-  PyTorch from scratch. Use `recommend_model` for a starting point.
+- **One build path.** You write an `nn.Module` — from scratch or by importing the plain
+  building blocks (FPN/PAN necks, the heads, losses, backbone wrappers, `build_detector`) —
+  plus a `train(ctx)` loop, built via `model_source` → `build_model`, proven by
+  `model_contract` (`check_model_contract`/`overfit_check`), run through the audited
+  envelope/`ctx`. There is no model spec, no composer, no component registry.
 - **Parameters: derive, don't pin.** When a threshold or operating point varies by
   dataset / model / trait (conf, IoU-for-a-hit, NMS, tile, anchors, `max_dets`), the deliverable
   is never the *value* — not one you pick, not one you derive from the current dataset and freeze
