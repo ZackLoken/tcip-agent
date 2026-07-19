@@ -23,20 +23,20 @@ Change detection is not a built task type — see README's Roadmap.
 
 | Tool | Purpose |
 |------|---------|
-| `evaluate_predictions` | Score on-disk predictions vs GT — an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
-| `get_worst_predictions` | Find N images with highest error |
+| `score_predictions` | Score on-disk predictions vs GT — an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
+| `render_failure_cases` | Surface + render the N images with highest triage error |
 | `compare_experiments` | Side-by-side metrics across experiments |
-| `get_experiment_lineage` | Trace data → model → predictions chain |
+| `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
 
 ## Failure Triage
 
 When metrics are poor, investigate systematically:
 
 1. **Data issues**: `validate_data_quality` — check for missing labels, format errors, class imbalance
-2. **Worst cases**: `get_worst_predictions` — visually inspect the worst N images
-3. **Per-image breakdown**: `evaluate_predictions` on a dataset dir — find images with the
+2. **Worst cases**: `render_failure_cases` — surface and visually inspect the worst N images
+3. **Per-image breakdown**: `score_predictions` on a dataset dir — find images with the
    highest FP/FN counts (no built-in per-class breakdown for detection; use
-   `evaluate_predictions(<image>, detail=True)` per image and aggregate by `class_id` if
+   `score_predictions(<image>, detail=True)` per image and aggregate by `class_id` if
    class-level numbers are needed)
 4. **Training dynamics**: Check metrics.jsonl — is loss still decreasing? Overfitting?
 5. **Architecture**: Is the model appropriate for the task and data scale?
