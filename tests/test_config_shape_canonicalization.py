@@ -5,10 +5,10 @@ reads them from the top level of ``run.config``. ``normalize_train_config`` must
 
 
 GUI_CONFIG = {
-    "model_spec": {
-        "backbone": {"name": "resnet50", "pretrained": True},
-        "neck": {"name": "fpn"},
-        "heads": [{"name": "anchor_detection", "num_classes": 1}],
+    "model_source": {
+        "builder": "module:build_net",
+        "builder_kwargs": {"num_classes": 1},
+        "task": "detection",
     },
     "data": {"images_dir": "", "labels_dir": "", "task": "detection"},
     "training": {
@@ -44,13 +44,6 @@ def test_normalize_top_level_wins_over_nested():
         "training": {"stages": [{"freeze_to": -1, "epochs": 99}]},
     })
     assert cfg["stages"] == [{"freeze_to": 0, "epochs": 3}]
-
-
-def test_normalize_resolves_model_alias():
-    from tcip_mcp.pipelines.schemas import normalize_train_config
-
-    cfg = normalize_train_config({"model": {"backbone": {"name": "resnet50"}}})
-    assert cfg["model_spec"] == {"backbone": {"name": "resnet50"}}
 
 
 def test_run_config_exposes_top_level_stages_after_normalize(tmp_path, monkeypatch):
