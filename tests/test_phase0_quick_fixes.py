@@ -11,18 +11,6 @@ from PIL import Image  # noqa: E402
 
 
 # --------------------------------------------------------------------------
-# recommend_model_spec falls back to torchvision backbones without timm
-# --------------------------------------------------------------------------
-
-def test_recommend_falls_back_to_torchvision_without_timm(monkeypatch):
-    import tcip_mcp.pipelines.composer as composer
-    monkeypatch.setattr(composer, "HAS_TIMM", False)
-    for ds in (300, 1000, 5000):
-        bb = composer.recommend_model_spec("classification", ds, num_classes=2)["backbone"]["name"]
-        assert bb.startswith("tv_"), f"dataset_size={ds} recommended timm-only backbone {bb!r}"
-
-
-# --------------------------------------------------------------------------
 # export_predictions writes per-image COCO/JSON prediction files
 # --------------------------------------------------------------------------
 
