@@ -2,8 +2,8 @@
 
 Verifies the full workflow using the MCP tool layer:
   init_project → load_dataset → validate_data_quality →
-  load_annotations → save_annotations → evaluate_detections →
-  evaluate_dataset → split_dataset → export_project
+  load_annotations → save_annotations → evaluate_predictions (image) →
+  evaluate_predictions (dataset) → make_splits → export_project
 
 Each step asserts filesystem state to prove persistence works.
 """
@@ -24,13 +24,12 @@ from tcip_mcp.tools.project_tools import (
 from tcip_mcp.tools.data_tools import (
     load_dataset,
     validate_data_quality,
-    split_dataset,
+    make_splits,
 )
 from tcip_mcp.tools.annotation_tools import (
     load_annotations,
     save_annotations,
-    evaluate_detections,
-    evaluate_dataset,
+    evaluate_predictions,
 )
 
 
@@ -136,7 +135,7 @@ class TestE2EPipeline:
         assert len(boxes) == 3  # we wrote 3 boxes
 
         # ── Step 7: Evaluate single image detections ─────────────────
-        eval_result = evaluate_detections(img_path, iou_threshold=0.5, conf_threshold=0.25)
+        eval_result = evaluate_predictions(img_path, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in eval_result
         # Should have precision, recall, f1 keys
         assert "precision" in eval_result
@@ -144,15 +143,15 @@ class TestE2EPipeline:
         assert "f1" in eval_result
         assert isinstance(eval_result["precision"], float)
 
-        # ── Step 8: Detailed per-detection breakdown (evaluate_detections detail=True) ─
-        match_result = evaluate_detections(img_path, iou_threshold=0.5, conf_threshold=0.25, detail=True)
+        # ── Step 8: Detailed per-detection breakdown (evaluate_predictions detail=True) ─
+        match_result = evaluate_predictions(img_path, iou_threshold=0.5, conf_threshold=0.25, detail=True)
         assert "error" not in match_result
         assert "detections" in match_result
         assert "img_w" in match_result
         assert "img_h" in match_result
 
         # ── Step 9: Evaluate full dataset ────────────────────────────
-        dataset_eval = evaluate_dataset(root, iou_threshold=0.5, conf_threshold=0.25)
+        dataset_eval = evaluate_predictions(root, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in dataset_eval
         assert dataset_eval["image_count"] == 5
         assert "precision" in dataset_eval
@@ -161,8 +160,8 @@ class TestE2EPipeline:
 
         # ── Step 10: Split dataset ───────────────────────────────────
         split_dir = tmp_path / "splits"
-        split_result = split_dataset(root, output_path=str(split_dir))
-        assert split_result["total"] == 5
+        split_result = make_splits(root, output_path=str(split_dir), materialize=True)
+        assert split_result["total_stems"] == 5
         assert (split_dir / "train.json").is_file()
         assert (split_dir / "val.json").is_file()
         assert sum(split_result["splits"].values()) == 5
@@ -207,7 +206,7 @@ class TestE2EPipelineEdgeCases:
         assert ds["unlabelled_images"] == 2
 
     def test_evaluate_no_predictions(self, tmp_path: Path):
-        """evaluate_detections handles images with no predictions."""
+        """evaluate_predictions handles images with no predictions."""
         images = tmp_path / "images"
         labels = tmp_path / "annotations" / "default" / "detect"
         for d in (images, labels):
@@ -219,7 +218,7 @@ class TestE2EPipelineEdgeCases:
         (labels / "test.txt").write_text("0 0.5 0.5 0.1 0.1\n")
 
         # No predictions directory — evaluate should handle gracefully
-        result = evaluate_detections(str(img_path))
+        result = evaluate_predictions(str(img_path))
         # Either returns an error dict or metrics with 0 TP
         assert isinstance(result, dict)
 
