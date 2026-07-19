@@ -143,6 +143,21 @@ export function TerminalRail() {
     term.focus();
     termRef.current = term;
 
+    // Copy fix (root cause): Claude Code turns on SGR mouse tracking, which hands every mouse +
+    // wheel event to it and disables xterm's own selection + scrollback. Swallow the mouse-mode
+    // set/reset (DEC private 1000-1016) so tracking never engages and xterm stays a normal
+    // selectable terminal — drag selects, the wheel scrolls the scrollback, drag-to-edge
+    // auto-scrolls, a selection survives streaming output, and it works at the shell prompt after
+    // /exit too. Claude is keyboard-driven; the wheel now scrolls the terminal scrollback instead
+    // of Claude's view — which is what you want when copying.
+    const MOUSE_MODES = new Set([1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016]);
+    const swallowMouseMode = (params: (number | number[])[]) => {
+      for (const p of params) if (MOUSE_MODES.has(Array.isArray(p) ? p[0] : p)) return true;
+      return false; // not a mouse mode (alt-screen, bracketed paste, cursor…) — let xterm handle it
+    };
+    term.parser.registerCsiHandler({ prefix: "?", final: "h" }, swallowMouseMode);
+    term.parser.registerCsiHandler({ prefix: "?", final: "l" }, swallowMouseMode);
+
     // Paste: Ctrl/Cmd+V fires a native paste event on xterm's hidden textarea, but the
     // browser doesn't always route it there (focus, or the app swallowing the key), so
     // Ctrl+V "did nothing". Intercept in the capture phase and hand the text to
@@ -157,17 +172,10 @@ export function TerminalRail() {
       }
     };
 
-    // Copy. Claude Code keeps SGR mouse tracking on for the whole session, and xterm
-    // disables its selection service whenever an app owns the mouse — a plain drag never
-    // creates a selection, which is why every earlier copy fix "didn't work". xterm's
-    // only escape hatch is shift+drag (its force-selection modifier), so restore
-    // conhost/QuickEdit semantics: an unmodified left press is re-dispatched with
-    // shiftKey set, making drag-select (and double/triple-click word/line select) work
-    // while wheel scrolling still reaches the TUI. Then:
-    //   • copy-on-select — a drag ending with a selection lands on the clipboard;
-    //   • right-click — copy the selection if there is one, else paste (conhost style);
-    //   • Ctrl/Cmd+Shift+C / Ctrl+Insert copy; Ctrl+Shift+V / Shift+Insert paste;
-    //   • plain Ctrl+C stays SIGINT, matching a native terminal.
+    // With mouse tracking suppressed above, xterm does normal selection, so the copy wiring is
+    // simple: copy-on-select (a drag ending with a selection lands on the clipboard); right-click
+    // copies the selection or else pastes (conhost style); Ctrl/Cmd+Shift+C / Ctrl+Insert copy;
+    // Ctrl+Shift+V / Shift+Insert paste; and Ctrl+C copies when text is selected, else stays SIGINT.
     const copySelection = () => {
       const sel = term.getSelection();
       if (sel) void navigator.clipboard?.writeText(sel).catch(() => {});
@@ -179,27 +187,6 @@ export function TerminalRail() {
           if (t) term.paste(t);
         })
         .catch(() => {});
-    };
-    const forceSelection = (ev: MouseEvent) => {
-      if (ev.button !== 0 || ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey) return;
-      ev.stopImmediatePropagation();
-      ev.preventDefault();
-      // Clone explicitly — spreading a MouseEvent doesn't copy its prototype props.
-      ev.target?.dispatchEvent(
-        new MouseEvent(ev.type, {
-          bubbles: true,
-          cancelable: true,
-          shiftKey: true,
-          button: ev.button,
-          buttons: ev.buttons,
-          detail: ev.detail,
-          clientX: ev.clientX,
-          clientY: ev.clientY,
-          screenX: ev.screenX,
-          screenY: ev.screenY,
-        }),
-      );
-      term.focus();
     };
     // Window-level: xterm finalizes drags via window listeners, so a release outside
     // the rail still completes the selection — a host listener would miss the copy.
@@ -227,6 +214,18 @@ export function TerminalRail() {
         return false;
       }
       if (
+        e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        (e.key === "C" || e.key === "c") &&
+        term.hasSelection()
+      ) {
+        copySelection(); // Windows-Terminal style: Ctrl+C copies a selection, else falls to SIGINT
+        term.clearSelection();
+        return false;
+      }
+      if (
         (mod && e.shiftKey && (e.key === "V" || e.key === "v")) ||
         (e.shiftKey && !mod && e.key === "Insert")
       ) {
@@ -237,8 +236,28 @@ export function TerminalRail() {
       return true;
     });
 
+    // Wheel scroll: mouse tracking is suppressed so drag selects locally, but Claude still expects
+    // mouse reports (it enabled tracking — xterm just swallowed the enable), so forward the wheel as
+    // SGR wheel events and Claude scrolls its own full-screen conversation (which has no xterm
+    // scrollback to scroll). Without this the wheel falls through to xterm's alternate-screen
+    // behavior and becomes cursor keys that Claude's prompt reads as history navigation.
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const btn = e.deltaY < 0 ? 64 : 65; // SGR mouse: 64 = wheel up, 65 = wheel down
+      const px =
+        e.deltaMode === 1
+          ? e.deltaY * 16
+          : e.deltaMode === 2
+            ? e.deltaY * term.rows * 16
+            : e.deltaY;
+      const ticks = Math.min(5, Math.max(1, Math.round(Math.abs(px) / 40)));
+      for (let i = 0; i < ticks; i++) term.input(`\x1b[<${btn};1;1M`);
+    };
+
     host.addEventListener("paste", onPaste, true);
-    host.addEventListener("mousedown", forceSelection, true);
+    host.addEventListener("wheel", onWheel, { capture: true, passive: false });
     host.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("mouseup", onWindowMouseUp);
 
@@ -312,7 +331,7 @@ export function TerminalRail() {
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       observer.disconnect();
       host.removeEventListener("paste", onPaste, true);
-      host.removeEventListener("mousedown", forceSelection, true);
+      host.removeEventListener("wheel", onWheel, true);
       host.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("mouseup", onWindowMouseUp);
       dataSub.dispose();
