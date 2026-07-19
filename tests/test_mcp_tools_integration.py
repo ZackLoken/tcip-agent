@@ -261,17 +261,17 @@ class TestSaveAnnotationsMultiFormat:
         assert load_result["detect_labels"]["count"] == 2
 
 
-# ── Evaluate detections integration test ────────────────────────────────────
+# ── Evaluate predictions integration test ───────────────────────────────────
 
 
-class TestEvaluateDetections:
-    """Test evaluate_detections with actual file I/O."""
+class TestEvaluatePredictions:
+    """Test evaluate_predictions with actual file I/O."""
 
     def test_evaluate_single_image(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import evaluate_detections
+        from tcip_mcp.tools.annotation_tools import evaluate_predictions
 
         img = str(yolo_dataset / "images" / "img_001.jpg")
-        result = evaluate_detections(img, iou_threshold=0.5, conf_threshold=0.25)
+        result = evaluate_predictions(img, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in result
         assert result["tp"] >= 0
         assert result["fp"] >= 0
@@ -279,10 +279,10 @@ class TestEvaluateDetections:
         assert 0.0 <= result["precision"] <= 1.0
         assert 0.0 <= result["recall"] <= 1.0
 
-    def test_evaluate_dataset(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import evaluate_dataset
+    def test_evaluate_folder(self, yolo_dataset: Path):
+        from tcip_mcp.tools.annotation_tools import evaluate_predictions
 
-        result = evaluate_dataset(str(yolo_dataset), iou_threshold=0.5)
+        result = evaluate_predictions(str(yolo_dataset), iou_threshold=0.5)
         assert result["image_count"] == 3
         assert "precision" in result
         assert "recall" in result
@@ -291,14 +291,14 @@ class TestEvaluateDetections:
 # ── Detail-mode matching integration test ───────────────────────────────────
 
 
-class TestEvaluateDetectionsDetail:
-    """Test evaluate_detections(detail=True) per-detection breakdown with actual file I/O."""
+class TestEvaluatePredictionsDetail:
+    """Test evaluate_predictions(detail=True) per-detection breakdown with actual file I/O."""
 
     def test_detail_breakdown(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import evaluate_detections
+        from tcip_mcp.tools.annotation_tools import evaluate_predictions
 
         img = str(yolo_dataset / "images" / "img_001.jpg")
-        result = evaluate_detections(img, iou_threshold=0.5, detail=True)
+        result = evaluate_predictions(img, iou_threshold=0.5, detail=True)
         assert "error" not in result
         assert "detections" in result
 
