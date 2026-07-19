@@ -96,10 +96,10 @@ class ConfigPayload(BaseModel):
 
 
 @router.post("/validate")
-def validate_config_route(payload: ConfigPayload) -> dict:
-    from tcip_mcp.tools.training_tools import validate_config
+def preflight_config_route(payload: ConfigPayload) -> dict:
+    from tcip_mcp.tools.training_tools import preflight_config
 
-    return validate_config(payload.config)
+    return preflight_config(payload.config)
 
 
 class LaunchPayload(BaseModel):
