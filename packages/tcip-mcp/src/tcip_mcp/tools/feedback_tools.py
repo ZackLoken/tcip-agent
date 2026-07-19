@@ -46,7 +46,7 @@ def materialize_review_dataset(
     Accepted/edited GT boxes become positive labels; rejected-only images become
     empty-label hard negatives. When ``experiment_id`` is given, records the review
     session as experiment lineage. Output (``images/`` + ``labels/detect/``) chains
-    straight into ``split_dataset`` / ``launch_training``.
+    straight into ``make_splits`` / ``launch_training``.
 
     Args:
         review_state_dir: Directory holding the review state (``review/`` shards, or a
