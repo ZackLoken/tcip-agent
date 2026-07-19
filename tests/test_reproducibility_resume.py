@@ -64,17 +64,14 @@ def _classification_data(tmp_path: Path, n: int = 6):
     return str(images_dir), str(csv_path)
 
 
-def _cls_spec():
-    return {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "gap"},
-        "heads": [{"name": "classification", "num_classes": 2}],
-    }
+def _model_source():
+    return {"builder": "tests.bespoke_models:build_bespoke_classifier",
+            "builder_kwargs": {"num_classes": 2}, "task": "classification"}
 
 
 def _cfg(stages, **extra):
     cfg = {
-        "model_spec": _cls_spec(), "device": "cpu", "stages": stages,
+        "model_source": _model_source(), "device": "cpu", "stages": stages,
         "mixed_precision": False,
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False}, "checkpoint_every_n_epochs": 1,
