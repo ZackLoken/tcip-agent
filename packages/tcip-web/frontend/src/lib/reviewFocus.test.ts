@@ -92,7 +92,7 @@ describe("applyReviewFocus", () => {
     expect(g.dataset.current_image_index).toBe(7);
     expect(g.review.filter_type).toBe("fn");
     expect(g.active_tab).toBe("review");
-    // The focused frame is persisted like user navigation, so get_active_context sees it.
+    // The focused frame is persisted like user navigation, so view_gui_state sees it.
     expect(api.dataset.nav).toHaveBeenCalledWith(7);
   });
 
