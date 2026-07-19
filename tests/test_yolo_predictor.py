@@ -78,11 +78,11 @@ def test_kind_from_ckpt_raises_on_ambiguous_checkpoint():
         _kind_from_ckpt({"optimizer": {}, "epoch": 3}, "ambiguous.pt")
 
 
-def test_kind_from_ckpt_sniffs_composed_checkpoint():
-    from tcip_mcp.pipelines.inference.predictor import _kind_from_ckpt, KIND_TORCHVISION_COMPOSED
+def test_kind_from_ckpt_sniffs_bespoke_checkpoint():
+    from tcip_mcp.pipelines.inference.predictor import _kind_from_ckpt, KIND_TCIP_MODULE
 
-    ckpt = {"model_spec": {"backbone": {}}, "model_state_dict": {}}
-    assert _kind_from_ckpt(ckpt, "composed.pt") == KIND_TORCHVISION_COMPOSED
+    ckpt = {"model_source": {"builder": "x:y"}, "model_state_dict": {}}
+    assert _kind_from_ckpt(ckpt, "bespoke.pt") == KIND_TCIP_MODULE
 
 
 def test_kind_from_ckpt_bare_module_is_ultralytics():
