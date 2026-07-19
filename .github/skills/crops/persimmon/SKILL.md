@@ -132,12 +132,9 @@ specific difficulties are:
 
 ## Measurement integrity
 
-Per the CLAUDE.md invariant, **never invent a geometric or pixel proxy for a biological
-quantity, and validate every measurement against expert-scored ground truth before
-producing any downstream result.** The breeder defines each trait's semantics; the agent
-derives the operating points that realize it. (Cautionary tale: a prior session defined
-catkin "elongation" from bounding-box height and shipped fabricated phenology CSVs — invalid
-science, since removed. Do not repeat that pattern here.) Persimmon-specific traps:
+Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
+against expert-scored ground truth before any result — see the catkin-elongation cautionary tale
+there). Persimmon-specific traps:
 
 - `fruit_ripe_50per_date` — American persimmon loses astringency only on **softening**
   (often post-frost), which **lags surface color**. An orange-pixel threshold calls hard,
