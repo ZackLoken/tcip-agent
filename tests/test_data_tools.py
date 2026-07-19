@@ -7,7 +7,6 @@ from pathlib import Path
 from tcip_mcp.tools.data_tools import (
     load_dataset,
     validate_data_quality,
-    split_dataset,
     make_splits,
 )
 
@@ -33,19 +32,19 @@ def test_validate_data_quality(data_dir: Path):
     assert 0 in result["class_ids"]
 
 
-def test_split_dataset(data_dir: Path, tmp_path: Path):
+def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
     out = tmp_path / "splits"
-    result = split_dataset(str(data_dir), output_path=str(out))
-    assert result["total"] == 3
+    result = make_splits(str(data_dir), output_path=str(out), materialize=True)
+    assert result["total_stems"] == 3
     assert sum(result["splits"].values()) == 3
-    assert (out / "train.json").is_file()
-    assert (out / "val.json").is_file()
-    assert (out / "test.json").is_file()
-
-
-def test_split_dataset_bad_ratios(data_dir: Path):
-    result = split_dataset(str(data_dir), train_ratio=0.5, val_ratio=0.5, test_ratio=0.5)
-    assert "error" in result
+    assert result["output_dir"] == str(out)
+    for split in ("train", "val", "test"):
+        assert (out / f"{split}.json").is_file()
+        assert (out / split / "images").is_dir()
+        assert (out / split / "labels").is_dir()
+    # Every image landed under exactly one split's images/ dir.
+    placed = sorted(p.stem for p in out.rglob("images/*") if p.is_file())
+    assert placed == ["img_001", "img_002", "img_003"]
 
 
 def test_make_splits_basic(data_dir: Path, tmp_path: Path):
