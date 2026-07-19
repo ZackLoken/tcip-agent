@@ -1,6 +1,6 @@
 """Pydantic v2 config schemas for structural/type validation (W7).
 
-Used by ``training_tools.validate_config`` to surface type/structure errors. The
+Used by ``training_tools.preflight_config`` to surface type/structure errors. The
 runtime trainer still reads the raw config dict; these schemas are validation-only.
 """
 
@@ -40,8 +40,8 @@ def normalize_train_config(config: dict) -> dict:
     silently trains the default single stage instead of the configured schedule.
 
     **Top-level wins**: a key already present at the top level is never overwritten by the
-    nested value — the orchestrator writes a flat config and the HPO objective writes tuned
-    params (lr, schedule) flat, and both must survive. The ``training`` section is left in
+    nested value — the HPO objective writes tuned params (lr, schedule) flat, and those must
+    survive. The ``training`` section is left in
     place for the validated schema and the experiment-record snapshot. Shallow copy: nested
     dicts are shared, so callers must not mutate them in place after normalizing.
     """
@@ -57,7 +57,7 @@ def validate_train_config_schema(config: dict) -> list[str]:
     """Validate a training config against the pydantic schema; return issue strings.
 
     Catches type/structure errors (e.g. ``batch_size="big"``, a stage missing ``epochs``).
-    Does not enforce ``model_source`` presence (``validate_config`` keeps its own check).
+    Does not enforce ``model_source`` presence (``preflight_config`` keeps its own check).
     """
     issues: list[str] = []
     try:
