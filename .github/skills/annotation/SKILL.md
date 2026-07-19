@@ -53,7 +53,7 @@ applied twice or skipped.
 | `load_annotations` | Load labels for a set of images (auto-detects format) |
 | `save_annotations` | Write annotations to any supported format |
 | `sam_predict` | SAM-assisted polygon generation from point/box prompts |
-| `evaluate_detections` | Compute precision/recall/AP; `detail=True` adds per-detection TP/FP/FN match data |
+| `evaluate_predictions` | Score predictions vs GT (image file or dataset dir); `detail=True` adds per-detection TP/FP/FN match data |
 | `push_panel_data` | Send images + annotations to the annotation or review panel |
 | `prioritize_review_queue` | Rank unlabeled images by uncertainty/diversity (`strategy="informativeness"`, default), or `strategy="confidence_triage"` to partition by confidence |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage |
@@ -102,7 +102,7 @@ and its multimodal vision for classification and QA.
 
 1. Load ground truth with `load_annotations`
 2. Load predictions (from inference or prior annotation)
-3. `evaluate_detections` pairs predictions to GT by IoU (default threshold: 0.5) and returns
+3. `evaluate_predictions` pairs predictions to GT by IoU (default threshold: 0.5) and returns
    aggregate TP/FP/FN; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with
    its class id, box/polygon, IoU, and confidence)
 4. Review in panel: accept correct predictions, correct errors, add missed objects
