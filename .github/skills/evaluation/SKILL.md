@@ -23,8 +23,7 @@ Change detection is not a built task type — see README's Roadmap.
 
 | Tool | Purpose |
 |------|---------|
-| `evaluate_detections` | Compute precision/recall/AP from matched boxes for one image |
-| `evaluate_dataset` | Aggregate detection metrics across a dataset, with a per-image TP/FP/FN breakdown |
+| `evaluate_predictions` | Score on-disk predictions vs GT — an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
 | `get_worst_predictions` | Find N images with highest error |
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment_lineage` | Trace data → model → predictions chain |
@@ -35,16 +34,17 @@ When metrics are poor, investigate systematically:
 
 1. **Data issues**: `validate_data_quality` — check for missing labels, format errors, class imbalance
 2. **Worst cases**: `get_worst_predictions` — visually inspect the worst N images
-3. **Per-image breakdown**: `evaluate_dataset` — find images with the highest FP/FN counts
-   (no built-in per-class breakdown for detection; use `evaluate_detections(detail=True)`
-   per image and aggregate by `class_id` if class-level numbers are needed)
+3. **Per-image breakdown**: `evaluate_predictions` on a dataset dir — find images with the
+   highest FP/FN counts (no built-in per-class breakdown for detection; use
+   `evaluate_predictions(<image>, detail=True)` per image and aggregate by `class_id` if
+   class-level numbers are needed)
 4. **Training dynamics**: Check metrics.jsonl — is loss still decreasing? Overfitting?
 5. **Architecture**: Is the model appropriate for the task and data scale?
 
 ## Comparison Protocol
 
 When comparing models:
-1. Same dataset split (use `split_dataset` with fixed seed)
+1. Same dataset split (use `make_splits` with fixed seed)
 2. Same evaluation set
 3. Compare on primary metric for the task
 4. For classification/ordinal, check per-class performance — overall accuracy can hide
