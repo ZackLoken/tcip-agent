@@ -5,7 +5,7 @@ Torch-free. Turns review verdicts (per-image shards under ``.tcip/state/review/`
   - rejected-only images        -> confirmed-negative JSON (``{"objects": []}``) backgrounds
 plus a ``curated_manifest.json`` for provenance. The output layout (``images/`` +
 ``labels/detect/``) matches ``data_tools._scan_dataset`` so the loop chains straight
-into ``split_dataset`` / ``launch_training`` with no glue.
+into ``make_splits`` / ``launch_training`` with no glue.
 
 The verdict log stores normalized YOLO center-form boxes (``[cx, cy, w, h]``); positives are
 denormalized to pixel coordinates using the copied image's dimensions (the canonical JSON is
