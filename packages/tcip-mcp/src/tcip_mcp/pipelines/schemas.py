@@ -1,45 +1,12 @@
 """Pydantic v2 config schemas for structural/type validation (W7).
 
-Used by ``training_tools.validate_config`` to surface type/structure errors and —
-via ``ModelSpecSchema``'s validator — registry + channel-compatibility issues,
-without duplicating composer logic. The runtime trainer still reads the raw config
-dict; these schemas are validation-only.
+Used by ``training_tools.validate_config`` to surface type/structure errors. The
+runtime trainer still reads the raw config dict; these schemas are validation-only.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-
-
-class BackboneSpec(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    name: str
-
-
-class NeckSpec(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    name: str = "gap"
-
-
-class HeadSpec(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    name: str
-
-
-class ModelSpecSchema(BaseModel):
-    model_config = ConfigDict(extra="allow", protected_namespaces=())
-    backbone: BackboneSpec
-    neck: NeckSpec = Field(default_factory=lambda: NeckSpec(name="gap"))
-    heads: list[HeadSpec] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def _check_components(self):
-        # Lazy import: avoid an import cycle / heavy torch import at module load.
-        from tcip_mcp.pipelines.composer import validate_model_spec
-        issues = validate_model_spec(self.model_dump())
-        if issues:
-            raise ValueError("; ".join(issues))
-        return self
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 
 class StageSpec(BaseModel):
@@ -59,8 +26,7 @@ class TrainingSection(BaseModel):
 
 class TrainConfigSchema(BaseModel):
     model_config = ConfigDict(extra="allow", protected_namespaces=())
-    model_spec: ModelSpecSchema | None = None
-    model: ModelSpecSchema | None = None
+    model_source: dict | None = None
     data: dict | None = None
     training: TrainingSection | None = None
 
@@ -68,14 +34,10 @@ class TrainConfigSchema(BaseModel):
 def normalize_train_config(config: dict) -> dict:
     """Canonicalize a training config for ``generic_trainer.train()``.
 
-    Two jobs:
-
-    1. Resolve the ``model`` / ``model_spec`` alias (``model_spec`` is runtime-canonical —
-       ``train()`` reads ``config["model_spec"]``).
-    2. Hoist the ``training.*`` section onto the top level. The validated/GUI schema nests
-       ``stages`` / ``mixed_precision`` / ``batch_size`` / … under ``training``, but ``train()``
-       reads them from the top level of ``run.config`` — so without this a GUI-launched run
-       silently trains the default single stage instead of the configured schedule.
+    Hoist the ``training.*`` section onto the top level. The validated/GUI schema nests
+    ``stages`` / ``mixed_precision`` / ``batch_size`` / … under ``training``, but ``train()``
+    reads them from the top level of ``run.config`` — so without this a GUI-launched run
+    silently trains the default single stage instead of the configured schedule.
 
     **Top-level wins**: a key already present at the top level is never overwritten by the
     nested value — the orchestrator writes a flat config and the HPO objective writes tuned
@@ -84,9 +46,6 @@ def normalize_train_config(config: dict) -> dict:
     dicts are shared, so callers must not mutate them in place after normalizing.
     """
     cfg = dict(config)
-    spec = cfg.get("model_spec") or cfg.get("model")
-    if spec is not None:
-        cfg["model_spec"] = spec
     training = cfg.get("training")
     if isinstance(training, dict):
         for key, value in training.items():
@@ -97,9 +56,8 @@ def normalize_train_config(config: dict) -> dict:
 def validate_train_config_schema(config: dict) -> list[str]:
     """Validate a training config against the pydantic schema; return issue strings.
 
-    Catches type errors (e.g. ``batch_size="big"``), empty ``heads``, and — via
-    ``ModelSpecSchema`` — registry/channel-compat issues. Does not enforce
-    ``model_spec`` presence (``validate_config`` keeps its own alias for that).
+    Catches type/structure errors (e.g. ``batch_size="big"``, a stage missing ``epochs``).
+    Does not enforce ``model_source`` presence (``validate_config`` keeps its own check).
     """
     issues: list[str] = []
     try:
