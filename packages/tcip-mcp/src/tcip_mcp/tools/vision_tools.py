@@ -281,7 +281,7 @@ def _viz_comparison(
 
 @mcp.tool()
 @audited
-def visualize_worst_predictions(
+def render_failure_cases(
     predictions_dir: str,
     labels_dir: str,
     images_dir: str = "",
@@ -464,7 +464,7 @@ def _viz_dataset_sample(
 
 @mcp.tool()
 @audited
-def sam_auto_label(
+def generate_mask_candidates(
     image_path: str,
     model_type: str = "hiera_b+",
     points_per_side: int = 16,
@@ -552,7 +552,7 @@ def accept_candidates(
 ) -> dict:
     """Assign classes to SAM candidates and stage them as SAM predictions for review.
 
-    After reviewing sam_auto_label output, the agent calls this tool with a mapping from
+    After reviewing generate_mask_candidates output, the agent calls this tool with a mapping from
     candidate IDs to class IDs. Rejected candidates are simply omitted from the assignments
     list. The masks are written to the predictions tree (``predictions/sam/<date>/<task>``) as
     per-image COCO/JSON with ``created_by="sam"`` and ``score`` = SAM's mask-quality
@@ -560,7 +560,7 @@ def accept_candidates(
     they become ground truth. This never writes GT.
 
     Args:
-        image_path: Absolute path to the image (same as sam_auto_label).
+        image_path: Absolute path to the image (same as generate_mask_candidates).
         assignments: List of dicts, each with 'candidate_id' (int) and
             'class_id' (int). Only listed candidates are staged.
     """
@@ -572,12 +572,12 @@ def accept_candidates(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    # Load cached candidates from the same platform-root state location sam_auto_label wrote to.
+    # Load cached candidates from the same platform-root state location generate_mask_candidates wrote to.
     from tcip_mcp.project_paths import resolve_state
 
     state_file = resolve_state(Path(".tcip") / "state" / f"candidates_{img.stem}.json")
     if not state_file.is_file():
-        return {"error": f"No candidates found for {img.stem}. Run sam_auto_label first."}
+        return {"error": f"No candidates found for {img.stem}. Run generate_mask_candidates first."}
 
     candidates = json.loads(state_file.read_text(encoding="utf-8"))
     cand_map = {c["candidate_id"]: c for c in candidates}
@@ -647,7 +647,7 @@ def accept_candidates(
 
 @mcp.tool()
 @audited
-def visualize_canvas(
+def capture_live_canvas(
     refresh: bool = True,
     crop_to_viewport: bool = True,
     max_edge: int = 1600,
@@ -770,7 +770,7 @@ def visualize_canvas(
 
 @mcp.tool()
 @audited
-def visualize_grid_overlay(
+def overlay_reference_grid(
     image_path: str,
     cols: int = 8,
     rows: int = 6,
