@@ -1,14 +1,8 @@
 """``build_model`` — the one indirection between a config/checkpoint and an ``nn.Module``.
 
-Two ways to obtain a model, exactly one required:
-
-* ``model_spec``  → ``compose_model(spec)`` — the registry-composed default path (unchanged,
-  byte-identical to calling ``compose_model`` directly).
-* ``model_source`` → import a dotted builder the agent wrote and call it — a registry-free path
-  for a bespoke, from-scratch PyTorch model. No ``exec``; the builder is imported like any module.
-
-This is the seam that lets the CV-scientist agent supply an arbitrary architecture without going
-through the composer, while the default composed path is left exactly as it was. The only
+The single build path is ``model_source``: import a dotted builder the agent wrote and call it.
+No ``exec``; the builder is imported like any module. The CV-scientist agent supplies an arbitrary
+architecture (from scratch or importing plain PyTorch blocks) through this seam. The only
 model-side contract is the measurement boundary (see ``model_contract``): whatever the model is,
 its inference output must be something the platform's library scorers can consume.
 
@@ -20,15 +14,14 @@ its inference output must be something the platform's library scorers can consum
      "task": "detection",                  # optional — measurement/eval routing
      "in_chans": 3}                        # optional — channel-compat check
 
-Pure-stdlib at import time (importlib only); the composer / torch import lazily inside the
-functions so MCP-server startup stays fast.
+Pure-stdlib at import time (importlib only); torch imports lazily inside the builder so
+MCP-server startup stays fast.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-MODEL_SPEC_KEY = "model_spec"
 MODEL_SOURCE_KEY = "model_source"
 
 
@@ -70,25 +63,13 @@ def build_from_model_source(model_source: dict) -> Any:
 
 
 def build_model(config_or_ckpt: dict) -> Any:
-    """Build a model from a training-config or checkpoint dict.
-
-    Dispatch: ``model_source`` (bespoke importable builder) when present, else ``model_spec`` →
-    ``compose_model`` (unchanged). Exactly one of the two must be present; both is an error so a
-    config can never silently build the wrong model.
-    """
+    """Build a model from a training-config or checkpoint dict via its ``model_source`` builder."""
     if not isinstance(config_or_ckpt, dict):
         raise ValueError("build_model expects a config/checkpoint dict")
     model_source = config_or_ckpt.get(MODEL_SOURCE_KEY)
-    model_spec = config_or_ckpt.get(MODEL_SPEC_KEY)
-    if model_source and model_spec is not None:
-        raise ValueError("Provide exactly one of model_spec / model_source, not both.")
     if model_source:
         return build_from_model_source(model_source)
-    if model_spec is not None:
-        from tcip_mcp.pipelines.composer import compose_model
-
-        return compose_model(model_spec)
-    raise ValueError("Config has neither 'model_spec' nor 'model_source'.")
+    raise ValueError("Config has no 'model_source'.")
 
 
 def capture_env() -> dict:
@@ -167,18 +148,15 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
 
 
 def stamp_model_ref(payload: dict, config: dict) -> dict:
-    """Stamp a checkpoint payload with its model reference (``model_spec`` | ``model_source``) + kind.
+    """Stamp a checkpoint payload with its ``model_source`` reference + kind.
 
     So a hand-rolled loop's checkpoint (via ``ctx.save_checkpoint``) and the default trainer's are
     both reproducible and kind-routable at inference. Uses ``setdefault`` — an explicit value the
-    caller already put in ``payload`` wins, and the composed default path stays byte-identical.
+    caller already put in ``payload`` wins.
     """
-    from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, KIND_TORCHVISION_COMPOSED
+    from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 
     if config.get(MODEL_SOURCE_KEY):
         payload.setdefault(MODEL_SOURCE_KEY, config[MODEL_SOURCE_KEY])
         payload.setdefault("kind", KIND_TCIP_MODULE)
-    elif config.get(MODEL_SPEC_KEY) is not None:
-        payload.setdefault(MODEL_SPEC_KEY, config[MODEL_SPEC_KEY])
-        payload.setdefault("kind", KIND_TORCHVISION_COMPOSED)
     return payload
