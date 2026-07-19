@@ -87,6 +87,9 @@ def test_consolidated_tools_present_and_removed_absent():
     removed = {
         "evaluate_detections", "evaluate_dataset", "split_dataset",
         "log_metrics", "record_artifact", "get_training_metrics_path",
+        # collapse to model_source-only: the menu/composer/spec tools are gone.
+        "recommend_model", "list_components", "validate_model_spec",
+        "validate_pipeline_spec", "compose_and_summarize",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 
