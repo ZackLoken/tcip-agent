@@ -284,8 +284,8 @@ def test_ingest_writes_audit_entry(tmp_path, monkeypatch):
     assert any(e["tool"] == "ingest_images" and e["status"] == "ok" for e in entries)
 
 
-def test_get_project_status_counts_canonical_images(tmp_path):
-    from tcip_mcp.tools.project_tools import get_project_status
+def test_inspect_project_counts_canonical_images(tmp_path):
+    from tcip_mcp.tools.project_tools import inspect_project
 
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
@@ -293,7 +293,7 @@ def test_get_project_status_counts_canonical_images(tmp_path):
     manifest = ingest_images(source=str(src), name="proj_status")
     proj = manifest["project_path"]
 
-    status = get_project_status(proj)
+    status = inspect_project(proj)
     assert status["initialized"] is True
     assert status["image_count"] == 2
     assert "2026-02-11" in status["dates"]
