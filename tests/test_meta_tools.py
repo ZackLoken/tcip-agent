@@ -1,4 +1,4 @@
-"""Tests for meta-loop tools (claude_reports, project_retrospective, load_retrospectives)."""
+"""Tests for meta-loop tools (claude_reports, project_retrospective, load_project_memory)."""
 
 from __future__ import annotations
 
@@ -7,9 +7,8 @@ from pathlib import Path
 
 from tcip_mcp.tools.meta_tools import (
     claude_reports,
-    load_reports,
+    load_project_memory,
     project_retrospective,
-    load_retrospectives,
 )
 
 
@@ -120,7 +119,7 @@ def test_project_retrospective_handles_empty_optional_fields(tmp_path: Path):
 
 
 def test_load_retrospectives_returns_empty_when_dir_missing(tmp_path: Path):
-    result = load_retrospectives(str(tmp_path))
+    result = load_project_memory("retrospectives", str(tmp_path))
     assert result["count"] == 0
     assert result["retrospectives"] == []
     assert "does not exist yet" in result["note"]
@@ -135,7 +134,7 @@ def test_load_retrospectives_returns_recent_first(tmp_path: Path):
     time.sleep(0.05)
     project_retrospective(str(tmp_path), project_id="third", task="t", worked="w", did_not_work="d")
 
-    result = load_retrospectives(str(tmp_path), limit=10)
+    result = load_project_memory("retrospectives", str(tmp_path), limit=10)
     assert result["count"] == 3
     ids = [r["project_id"] for r in result["retrospectives"]]
     assert ids == ["third", "second", "first"]
@@ -151,7 +150,7 @@ def test_load_retrospectives_respects_limit(tmp_path: Path):
             did_not_work="d",
         )
 
-    result = load_retrospectives(str(tmp_path), limit=2)
+    result = load_project_memory("retrospectives", str(tmp_path), limit=2)
     assert result["count"] == 2
     assert result["total_available"] == 5
 
@@ -172,18 +171,18 @@ def test_load_retrospectives_filter_substring(tmp_path: Path):
         did_not_work="d",
     )
 
-    result = load_retrospectives(str(tmp_path), filter_substring="hazelnut")
+    result = load_project_memory("retrospectives", str(tmp_path), filter_substring="hazelnut")
     assert result["count"] == 1
     assert result["retrospectives"][0]["project_id"] == "hazelnut-efb"
 
     # Filter also matches on content
-    result = load_retrospectives(str(tmp_path), filter_substring="bur detection")
+    result = load_project_memory("retrospectives", str(tmp_path), filter_substring="bur detection")
     assert result["count"] == 1
     assert result["retrospectives"][0]["project_id"] == "chestnut-bur"
 
 
 def test_load_reports_returns_empty_when_dir_missing(tmp_path: Path):
-    result = load_reports(str(tmp_path))
+    result = load_project_memory("reports", str(tmp_path))
     assert result["count"] == 0
     assert result["reports"] == []
     assert "does not exist yet" in result["note"]
@@ -196,7 +195,7 @@ def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
         detail="needed get_trait_profile",
         context={"crop": "hazelnut"},
     )
-    result = load_reports(str(tmp_path))
+    result = load_project_memory("reports", str(tmp_path))
     assert result["count"] == 1
     rep = result["reports"][0]
     assert rep["category"] == "missing_tool"
@@ -212,7 +211,7 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
         claude_reports(str(tmp_path), category="unexpected_behavior", detail=f"r{i}")
         time.sleep(0.02)
 
-    result = load_reports(str(tmp_path), limit=2)
+    result = load_project_memory("reports", str(tmp_path), limit=2)
     assert result["count"] == 2
     assert result["total_available"] == 4
     # Most recent first
@@ -224,7 +223,7 @@ def test_load_reports_filters_by_category(tmp_path: Path):
     claude_reports(str(tmp_path), category="missing_tool", detail="a")
     claude_reports(str(tmp_path), category="ambiguous_data", detail="b")
 
-    result = load_reports(str(tmp_path), category="ambiguous_data")
+    result = load_project_memory("reports", str(tmp_path), category="ambiguous_data")
     assert result["count"] == 1
     assert result["reports"][0]["detail"] == "b"
 
@@ -233,6 +232,6 @@ def test_load_reports_filter_substring(tmp_path: Path):
     claude_reports(str(tmp_path), category="missing_tool", detail="trait profile lookup")
     claude_reports(str(tmp_path), category="missing_tool", detail="something else entirely")
 
-    result = load_reports(str(tmp_path), filter_substring="trait profile")
+    result = load_project_memory("reports", str(tmp_path), filter_substring="trait profile")
     assert result["count"] == 1
     assert result["reports"][0]["detail"] == "trait profile lookup"
