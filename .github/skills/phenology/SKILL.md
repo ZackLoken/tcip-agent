@@ -13,11 +13,10 @@ project** (that fragility is exactly what this skill exists to prevent).
 
 Bloom is the **fraction of a plant's detected catkins that are _elongated_.**
 "Elongated" is an **expert-defined, visible morphological stage** — a *validated* per-catkin
-elongation call learned from the imagery, never a geometric proxy — bounding-box height /
-aspect ratio is scale-, zoom-, and pose-dependent and does **not** measure elongation. (A
-prior session invented a bbox-height threshold and shipped it into a delivered CSV; that was
-removed. See the CLAUDE.md measurement-integrity invariant.) How that call is produced (a
-single multi-class detector, detect-then-classify, …) is a **pipeline-design** choice — the
+elongation call learned from the imagery. It's a *state*, not a dimension: judge it from the
+object, not off a bbox's height. (See the CLAUDE.md measurement-integrity invariant.) How that
+call is produced (a single multi-class detector, detect-then-classify, …) is a **pipeline-design**
+choice — the
 trait definition does not fix it.
 
 Milestones, per plant, from that plant's elongated-fraction time series:
