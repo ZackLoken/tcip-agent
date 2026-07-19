@@ -23,10 +23,15 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     classification_metrics,
     coco_detection_metrics,
     compute_composite_objective,
+    count_bias_at,
     effective_iou_type,
+    gt_class_avg_size,
     ordinal_metrics,
+    pick_count_unbiased,
+    pick_f1_max,
     regression_metrics,
     run_test_evaluation,
+    sweep_operating_point,
 )
 from tcip_mcp.pipelines.training.generic_trainer import _selection_value  # noqa: E402
 
@@ -118,6 +123,94 @@ def test_coco_empty():
     # (c) both empty.
     m = coco_detection_metrics([_rec([], [])])
     assert m["tp"] == 0 and m["fp"] == 0 and m["map50"] == 0.0
+
+
+# --------------------------------------------------------------------------
+# S0 GOLDEN — count-unbiased sweep numerics on fixed synthetic records.
+# Pins the center-match sweep + operating-point pickers the calibration relies on.
+# --------------------------------------------------------------------------
+
+def _sweep_records():
+    """Two images with hand-verifiable center-match outcomes at tolerance 10.
+
+    All boxes are 20x20 (char size 20 → gt_class_avg_size 20; half = 10 tolerance).
+    """
+    def box(cx, cy, s=20.0):
+        return [cx - s / 2, cy - s / 2, s, s]
+
+    def ann(cx, cy, score=None):
+        a = {"category_id": 0, "bbox": box(cx, cy)}
+        if score is not None:
+            a["score"] = score
+        return a
+
+    a = {"width": 400, "height": 400,
+         "gt": [ann(100, 100)],
+         "dt": [ann(100, 100, 0.9), ann(300, 300, 0.6)]}       # 1 TP + 1 far FP
+    b = {"width": 400, "height": 400,
+         "gt": [ann(100, 100), ann(200, 200)],
+         "dt": [ann(100, 100, 0.9), ann(200, 200, 0.3)]}       # 2 TP (one low-conf)
+    return [a, b]
+
+
+def test_golden_gt_class_avg_size():
+    assert gt_class_avg_size(_sweep_records(), class_id=0) == pytest.approx(20.0)
+
+
+def test_golden_sweep_operating_point_curve():
+    sweep = sweep_operating_point(_sweep_records(), tolerance=10.0, class_id=0)
+    curve = sweep["curve"]
+    assert [round(c["conf"], 2) for c in curve] == [0.0, 0.3, 0.6, 0.9]
+
+    at = {round(c["conf"], 2): c for c in curve}
+    # conf 0.6: image-a keeps both dets (1 TP + 1 FP), image-b drops the 0.3 det (1 TP, 1 FN).
+    assert (at[0.6]["tp"], at[0.6]["fp"], at[0.6]["fn"]) == (2, 1, 1)
+    assert at[0.6]["count_bias_mean"] == pytest.approx(0.0)   # +1 and -1 cancel → unbiased
+    assert at[0.6]["abs_count_error_mean"] == pytest.approx(1.0)
+    # conf 0.9: only the 0.9 dets survive → image-a 1 TP, image-b 1 TP + 1 FN.
+    assert (at[0.9]["tp"], at[0.9]["fp"], at[0.9]["fn"]) == (2, 0, 1)
+    assert at[0.9]["count_bias_mean"] == pytest.approx(-0.5)   # mean of [0, -1]
+
+
+def test_golden_operating_point_pickers():
+    sweep = sweep_operating_point(_sweep_records(), tolerance=10.0, class_id=0)
+    assert pick_count_unbiased(sweep) == pytest.approx(0.6)   # zero count bias
+    assert pick_f1_max(sweep) == pytest.approx(0.0)           # recall-max point
+    assert count_bias_at(sweep, 0.6)["count_bias_mean"] == pytest.approx(0.0)
+
+
+# --------------------------------------------------------------------------
+# S0 GOLDEN — COCO box AND mask mAP exact values on fixed synthetic records.
+# --------------------------------------------------------------------------
+
+def test_golden_coco_box_and_mask_map():
+    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0}]
+    dt_perfect = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
+    m = coco_detection_metrics([_rec(gt, dt_perfect)])
+    assert (m["map"], m["map50"], m["map75"]) == pytest.approx((1.0, 1.0, 1.0))
+    assert (m["precision"], m["recall"], m["f1"]) == pytest.approx((1.0, 1.0, 1.0))
+    assert (m["tp"], m["fp"], m["fn"]) == (1, 0, 0)
+
+    # 1 TP + 1 FP against 2 GT → P=R=F1=0.5, counts 1/1/1.
+    gt2 = [
+        {"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0},
+        {"category_id": 1, "bbox": [50, 50, 10, 10], "area": 100, "iscrowd": 0},
+    ]
+    dt2 = [
+        {"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9},
+        {"category_id": 1, "bbox": [80, 80, 10, 10], "score": 0.7},
+    ]
+    m2 = coco_detection_metrics([_rec(gt2, dt2)])
+    assert (m2["precision"], m2["recall"], m2["f1"]) == pytest.approx((0.5, 0.5, 0.5))
+    assert (m2["tp"], m2["fp"], m2["fn"]) == (1, 1, 1)
+
+    # segm: a perfect mask match scores map50 = 1.0.
+    poly = [10.0, 10.0, 30.0, 10.0, 30.0, 30.0, 10.0, 30.0]
+    gt_s = [{"category_id": 1, "bbox": [10, 10, 20, 20], "area": 400, "iscrowd": 0, "segmentation": [poly]}]
+    dt_s = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9, "segmentation": [poly]}]
+    ms = coco_detection_metrics([_rec(gt_s, dt_s)], iou_type="segm")
+    assert ms["iou_type"] == "segm"
+    assert ms["map50"] == pytest.approx(1.0)
 
 
 # --------------------------------------------------------------------------
