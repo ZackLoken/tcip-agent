@@ -28,9 +28,10 @@ from tcip_mcp.pipelines.orchestrator import (
 )
 from tests._orchestrator_helpers import build_stub_trainer
 
-MODEL_SPEC = {
-    "backbone": "resnet18",
-    "heads": [{"name": "detection", "task": "detection", "num_classes": 2}],
+MODEL_SOURCE = {
+    "builder": "tests.bespoke_models:build_bespoke_detection",
+    "builder_kwargs": {"num_classes": 2},
+    "task": "detection",
 }
 
 
@@ -161,29 +162,6 @@ class TestValidatePipeline:
             ],
         }) == []
 
-    def test_dict_model_spec_is_validated_and_deduplicated(self):
-        issues = validate_pipeline({
-            "name": "p",
-            "phases": [{
-                "name": "train",
-                "task": "detection",
-                "model_spec": {"backbone": {"name": "not_a_backbone"}},
-            }],
-        })
-        assert any("Unknown backbone: not_a_backbone" in i for i in issues)
-        assert any("heads" in i for i in issues)
-        # All model_spec issues carry the phase prefix and are deduplicated.
-        assert all(i.startswith("Phase 0 (train): ") for i in issues)
-        assert len(issues) == len(set(issues))
-
-    def test_string_model_spec_skips_composer_validation(self):
-        # Only dict model_specs go through validate_model_spec.
-        assert validate_pipeline({
-            "name": "p",
-            "phases": [{"name": "t", "task": "detection", "model_spec": "some_registered_name"}],
-        }) == []
-
-
 # ====================================================================
 # _infer_phase_type
 # ====================================================================
@@ -191,16 +169,16 @@ class TestValidatePipeline:
 class TestInferPhaseType:
     def test_explicit_type_always_wins(self):
         assert _infer_phase_type(
-            {"type": "custom_x", "task": "aggregation", "model_spec": {}}) == "custom_x"
+            {"type": "custom_x", "task": "aggregation", "model_source": {}}) == "custom_x"
 
     def test_task_aggregation_and_export(self):
         assert _infer_phase_type({"task": "aggregation"}) == "aggregation"
         assert _infer_phase_type({"task": "export"}) == "export"
 
-    def test_model_spec_means_training(self):
-        assert _infer_phase_type({"task": "detection", "model_spec": {}}) == "training"
+    def test_model_source_means_training(self):
+        assert _infer_phase_type({"task": "detection", "model_source": {}}) == "training"
 
-    def test_checkpoint_without_model_spec_means_inference(self):
+    def test_checkpoint_without_model_source_means_inference(self):
         assert _infer_phase_type({"task": "detection", "checkpoint": "x.pt"}) == "inference"
 
     def test_bare_phase_defaults_to_training(self):
@@ -228,18 +206,18 @@ class TestRegisterPhaseRunner:
 # ====================================================================
 
 class TestTrainingPhaseBranches:
-    def test_missing_model_spec_fails_before_timing(self, tmp_path):
+    def test_missing_model_source_fails_before_timing(self, tmp_path):
         result = PipelineOrchestrator(work_dir=str(tmp_path / "runs")).run_phase(
             {"name": "t", "task": "detection"})
         assert result.status == "failed"
-        assert result.error == "Training phase needs 'model_spec'"
+        assert result.error == "Training phase needs 'model_source'"
         # Early return happens before the elapsed clock is stamped.
         assert result.elapsed_seconds == 0.0
 
     def test_dataset_dirs_inherited_from_input_context(self, det_data, stub_trainer, tmp_path):
         orch = PipelineOrchestrator(work_dir=str(tmp_path / "runs"))
         result = orch.run_phase(
-            {"name": "t", "task": "detection", "model_spec": MODEL_SPEC,
+            {"name": "t", "task": "detection", "model_source": MODEL_SOURCE,
              "input": "crops", "dataset": {}},
             context={"crops": {"images_dir": det_data["images_dir"],
                                "labels_dir": det_data["labels_dir"]}},
@@ -251,7 +229,7 @@ class TestTrainingPhaseBranches:
     def test_explicit_dataset_dirs_win_over_context(self, det_data, stub_trainer, tmp_path):
         orch = PipelineOrchestrator(work_dir=str(tmp_path / "runs"))
         result = orch.run_phase(
-            {"name": "t", "task": "detection", "model_spec": MODEL_SPEC,
+            {"name": "t", "task": "detection", "model_source": MODEL_SOURCE,
              "input": "crops",
              "dataset": {"images_dir": det_data["images_dir"],
                          "labels_dir": det_data["labels_dir"]}},
@@ -272,7 +250,7 @@ class TestTrainingPhaseBranches:
         orch = PipelineOrchestrator(work_dir=str(tmp_path / "runs"))
         with caplog.at_level(logging.ERROR, logger="tcip_mcp.pipelines.orchestrator"):
             result = orch.run_phase({
-                "name": "t", "task": "detection", "model_spec": MODEL_SPEC,
+                "name": "t", "task": "detection", "model_source": MODEL_SOURCE,
                 "dataset": {"images_dir": det_data["images_dir"],
                             "labels_dir": det_data["labels_dir"]},
             })
@@ -286,7 +264,7 @@ class TestTrainingPhaseBranches:
         stub_trainer["run_error"] = "training diverged"
         orch = PipelineOrchestrator(work_dir=str(tmp_path / "runs"))
         result = orch.run_phase({
-            "name": "t", "task": "detection", "model_spec": MODEL_SPEC,
+            "name": "t", "task": "detection", "model_source": MODEL_SOURCE,
             "dataset": {"images_dir": det_data["images_dir"],
                         "labels_dir": det_data["labels_dir"]},
         })
@@ -311,7 +289,7 @@ class TestTrainingPhaseBranches:
         monkeypatch.setattr(experiments, "log_metrics", boom)
         orch = PipelineOrchestrator(work_dir=str(tmp_path / "runs"))
         result = orch.run_phase({
-            "name": "t", "task": "detection", "model_spec": MODEL_SPEC,
+            "name": "t", "task": "detection", "model_source": MODEL_SOURCE,
             "dataset": {"images_dir": det_data["images_dir"],
                         "labels_dir": det_data["labels_dir"]},
         })
@@ -327,7 +305,7 @@ class TestTrainingPhaseBranches:
         monkeypatch.setattr(experiments, "register_model_from_experiment", boom)
         orch = PipelineOrchestrator(work_dir=str(tmp_path / "runs"))
         result = orch.run_phase({
-            "name": "t", "task": "detection", "model_spec": MODEL_SPEC,
+            "name": "t", "task": "detection", "model_source": MODEL_SOURCE,
             "dataset": {"images_dir": det_data["images_dir"],
                         "labels_dir": det_data["labels_dir"]},
         })
