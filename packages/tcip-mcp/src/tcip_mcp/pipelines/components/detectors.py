@@ -1,31 +1,39 @@
-"""Detector factory — registry-driven 2D object detectors.
+"""2D object-detector builders — plain torchvision detector factories.
 
-A detection spec (a single head named ``anchor_detection`` / ``anchor_free_detection``)
-is composed into a ``DetectionModel`` (see ``composer.py``) whose *actual* detector is
-looked up here by name. New detectors — Mask R-CNN, DETR, YOLO, or an external framework
-— are added by **registering a builder**, not by editing ``DetectionModel``.
-
-Each builder receives the composed backbone+neck ``adapter`` and the resolved
-``featmap_names`` / ``num_levels``, and returns an ``nn.Module`` honoring the
-torchvision-detection forward contract: ``model(images, targets)`` returns a loss dict in
-train mode and ``list[dict]`` predictions in eval mode.
-
-External packages register via :func:`register_external_detector` or a ``tcip.components``
-entry point (see ``registry.load_plugins``).
+Bespoke model code imports these directly: build a ``BackboneNeckAdapter`` over an
+agent-composed backbone+neck, then call ``build_detector`` (or a ``_build_*`` builder
+directly) to get an ``nn.Module`` honoring the torchvision-detection forward contract:
+``model(images, targets)`` returns a loss dict in train mode and ``list[dict]``
+predictions in eval mode.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any
 
-from tcip_mcp.pipelines.registry import DETECTORS
+import torch
+import torch.nn as nn
 
-_BASE_META = {
-    "valid_tasks": ["detection"],
-    "input_format": "multi_scale_dict",
-    "output_format": "boxes",
-    "required_deps": ["torchvision"],
-}
+
+class BackboneNeckAdapter(nn.Module):
+    """Wrap a backbone+neck so a torchvision detector can consume it as its backbone."""
+
+    def __init__(self, backbone: nn.Module, neck: nn.Module) -> None:
+        super().__init__()
+        self.backbone = backbone
+        self.neck = neck
+        self.out_channels = (
+            neck.out_channels if isinstance(neck.out_channels, int)
+            else neck.out_channels[-1]
+        )
+
+    def forward(self, x: torch.Tensor) -> OrderedDict:
+        features = self.backbone(x)
+        neck_out = self.neck(features)
+        if isinstance(neck_out, dict):
+            return OrderedDict(sorted(neck_out.items()))
+        return OrderedDict({"0": neck_out})
 
 
 def _default_anchor_sizes(num_levels: int, base: int = 32) -> tuple[tuple[int, ...], ...]:
@@ -47,7 +55,7 @@ def _build_faster_rcnn(
     from torchvision.ops import MultiScaleRoIAlign
 
     sizes = _default_anchor_sizes(num_levels, anchor_base_size)
-    # aspect_ratios is a spec kwarg (was hardcoded): set/derive it per trait — elongated catkins
+    # aspect_ratios is a builder kwarg (was hardcoded): set/derive it per trait — elongated catkins
     # (~1:3-1:6) need a tall ratio the default (0.5,1,2) can't match.
     ar = tuple(float(r) for r in aspect_ratios)
     anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
@@ -94,20 +102,6 @@ def _build_retinanet(
     )
 
 
-DETECTORS.register_factory("faster_rcnn", _build_faster_rcnn, category="anchor_based", metadata={
-    **_BASE_META, "description": "torchvision Faster R-CNN over a composed backbone+neck",
-    "anchor_free": False,
-})
-DETECTORS.register_factory("fcos", _build_fcos, category="anchor_free", metadata={
-    **_BASE_META, "description": "torchvision FCOS (anchor-free) over a composed backbone+neck",
-    "anchor_free": True,
-})
-DETECTORS.register_factory("retinanet", _build_retinanet, category="anchor_based", metadata={
-    **_BASE_META, "description": "torchvision RetinaNet (single-stage) over a composed backbone+neck",
-    "anchor_free": False,
-})
-
-
 def _build_mask_rcnn(
     adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
     anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333,
@@ -130,27 +124,20 @@ def _build_mask_rcnn(
     )
 
 
-DETECTORS.register_factory("mask_rcnn", _build_mask_rcnn, category="instance_seg", metadata={
-    **_BASE_META, "valid_tasks": ["instance_seg"], "output_format": "boxes+masks",
-    "description": "torchvision Mask R-CNN (instance segmentation) over a composed backbone+neck",
-    "anchor_free": False,
-})
+_DETECTOR_BUILDERS = {
+    "faster_rcnn": _build_faster_rcnn,
+    "fcos": _build_fcos,
+    "retinanet": _build_retinanet,
+    "mask_rcnn": _build_mask_rcnn,
+}
 
 
 def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> Any:
-    """Look up a registered detector builder by name and instantiate it.
-
-    Raises ``KeyError`` (listing available detectors) for an unknown name.
-    """
-    return DETECTORS.build(name, adapter=adapter, num_classes=num_classes, **kwargs)
-
-
-def register_external_detector(
-    name: str, builder: Any, *, metadata: dict | None = None
-) -> None:
-    """Register a detector builder defined outside this package (plugins/experiments).
-
-    ``builder`` must accept ``(adapter, num_classes, *, featmap_names, num_levels, **kwargs)``
-    and return an nn.Module with the torchvision-detection forward contract.
-    """
-    DETECTORS.register_external(name, builder, category="external", metadata=metadata)
+    """Instantiate a detector builder by name. Raises ``KeyError`` for an unknown name."""
+    try:
+        fn = _DETECTOR_BUILDERS[name]
+    except KeyError:
+        raise KeyError(
+            f"Unknown detector '{name}'. Available: {sorted(_DETECTOR_BUILDERS)}"
+        ) from None
+    return fn(adapter, num_classes, **kwargs)
