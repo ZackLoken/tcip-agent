@@ -1,15 +1,14 @@
 """Model-kind contract + the predictor factory.
 
 Inference dispatches on a model KIND so the platform can run more than one framework of
-detector without special-casing at every call site. A tcip-composed checkpoint (a
-torchvision detector built from a ``model_spec``) is the default and historical kind; a
-pretrained ultralytics YOLO checkpoint is a foreign artifact we sniff.
+detector without special-casing at every call site. A tcip checkpoint (a bespoke model built
+by an agent-written importable builder) is the default kind; a pretrained ultralytics YOLO
+checkpoint is a foreign artifact we sniff.
 
-Kind travels three ways: stamped on tcip checkpoints at save time (a top-level ``kind`` key,
-mirrored into ``model_spec``), recorded on the registry entry, and — for a foreign ``.pt``
-we never wrote — sniffed from the checkpoint's top-level keys. An undeterminable kind raises
-rather than guessing and running a wrong forward, which would silently corrupt the count
-(and the count is the phenotype).
+Kind travels three ways: stamped on tcip checkpoints at save time (a top-level ``kind`` key),
+recorded on the registry entry, and — for a foreign ``.pt`` we never wrote — sniffed from the
+checkpoint's top-level keys. An undeterminable kind raises rather than guessing and running a
+wrong forward, which would silently corrupt the count (and the count is the phenotype).
 """
 
 from __future__ import annotations
@@ -19,12 +18,11 @@ from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
-KIND_TORCHVISION_COMPOSED = "torchvision_composed"
-# A bespoke, from-scratch model built by an agent-written importable builder (model_source),
-# not the registry composer. Reproduced by re-importing that builder — never by exec.
+# A bespoke, from-scratch model built by an agent-written importable builder (model_source).
+# Reproduced by re-importing that builder — never by exec.
 KIND_TCIP_MODULE = "tcip_module"
 KIND_ULTRALYTICS = "ultralytics"
-DEFAULT_KIND = KIND_TORCHVISION_COMPOSED
+DEFAULT_KIND = KIND_TCIP_MODULE
 
 
 @runtime_checkable
@@ -52,18 +50,16 @@ def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:
     if not isinstance(ckpt, dict):
         # ultralytics can pickle a bare nn.Module in some export paths.
         return KIND_ULTRALYTICS
-    stamped = ckpt.get("kind") or (ckpt.get("model_spec") or {}).get("kind")
+    stamped = ckpt.get("kind")
     if stamped:
         return str(stamped)
     # Structural fallback for tcip checkpoints whose kind wasn't stamped.
     if "model_source" in ckpt and "model_state_dict" in ckpt:
         return KIND_TCIP_MODULE
-    if "model_spec" in ckpt and "model_state_dict" in ckpt:
-        return KIND_TORCHVISION_COMPOSED
     if "model" in ckpt and ("train_args" in ckpt or "names" in ckpt or "nc" in ckpt):
         return KIND_ULTRALYTICS
     raise ValueError(
-        f"Cannot determine model kind for {checkpoint_path}: no 'kind'/'model_spec' (tcip) and "
+        f"Cannot determine model kind for {checkpoint_path}: no 'kind'/'model_source' (tcip) and "
         f"no ultralytics markers ('model' + 'train_args'/'names'/'nc'). "
         f"Top-level keys: {sorted(ckpt)[:12]}"
     )
@@ -89,10 +85,10 @@ def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: 
 
     ckpt = None
     if kind is None:
-        # Sniff by loading once; hand the loaded checkpoint to the composed predictor so the
-        # weights aren't read from disk twice. If the file can't be read (missing / corrupt /
-        # a test stub), fall back to the historical composed kind — GenericPredictor then
-        # surfaces the real load error rather than us masking it here.
+        # Sniff by loading once; hand the loaded checkpoint to the predictor so the weights aren't
+        # read from disk twice. If the file can't be read (missing / corrupt / a test stub), fall
+        # back to the default tcip kind — GenericPredictor then surfaces the real load error rather
+        # than us masking it here.
         import torch
 
         try:
@@ -104,9 +100,9 @@ def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: 
         else:
             kind = _kind_from_ckpt(ckpt, checkpoint_path)
 
-    if kind in (KIND_TORCHVISION_COMPOSED, KIND_TCIP_MODULE):
-        # Both are tcip checkpoints GenericPredictor rebuilds from the checkpoint (composed
-        # model_spec, or a bespoke model_source re-imported through build_model — never exec).
+    if kind == KIND_TCIP_MODULE:
+        # A tcip checkpoint GenericPredictor rebuilds by re-importing the bespoke model_source
+        # builder through build_model — never exec.
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
         extra = {"checkpoint": ckpt} if ckpt is not None else {}
         return GenericPredictor(checkpoint_path=checkpoint_path, **extra, **kwargs)
