@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @mcp.tool()
 @audited
-def validate_config(config: dict) -> dict:
+def preflight_config(config: dict) -> dict:
     """Validate a training configuration before launching.
 
     Config structure:
@@ -91,7 +91,7 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
         resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
             (restores model + optimizer + scheduler + scaler and continues).
     """
-    validation = validate_config(config)
+    validation = preflight_config(config)
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
 
@@ -655,8 +655,6 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
 
 
-@mcp.tool()
-@audited
 def get_worst_predictions(
     predictions_dir: str,
     labels_dir: str,
@@ -668,7 +666,7 @@ def get_worst_predictions(
     no loss. The score is ``2·|n_gt−n_pred as a shortfall| + |surplus| + (1−avg_conf)`` — purely
     the difference in box *counts* plus mean confidence, so an image with the right count but
     every box mislocated scores as good. Use it to surface likely-bad frames for a human to look
-    at; for true TP/FP/FN ranking use ``evaluate_predictions`` (``detail=True``, IoU-matched).
+    at; for true TP/FP/FN ranking use ``score_predictions`` (``detail=True``, IoU-matched).
 
     Args:
         predictions_dir: Directory with per-image JSON prediction files
