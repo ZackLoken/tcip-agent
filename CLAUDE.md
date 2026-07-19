@@ -46,8 +46,8 @@ Your default failure mode is **pushing through friction by guessing** — fillin
 blanks silently, treating an uncertain read as settled. In a scientific pipeline
 that silently corrupts results and compounds across sessions. So:
 
-- **Start a session** with `load_reports` and `load_retrospectives` to pick up open
-  friction and prior context, then `get_project_status`, then run
+- **Start a session** with `load_project_memory` (kind='reports' and kind='retrospectives')
+  to pick up open friction and prior context, then `inspect_project`, then run
   `python scripts/doctor.py <project_root>` — it flags data-state inconsistencies
   (unconfirmed negatives, registry pollution, provenance smells) that code reads miss.
   Report anything it finds via `claude_reports` before acting on the data.
@@ -87,7 +87,7 @@ that silently corrupts results and compounds across sessions. So:
 - **A negative is empty labels + an explicit human Complete** (the `image_status.json` store) —
   an empty label file alone is never a negative (it may be emptied mid-work) and never trains
   as one. Don't delete empty label files without asking.
-- **Never train or evaluate on an unconfirmed format.** If `load_annotations`
+- **Never train or evaluate on an unconfirmed format.** If `read_annotations`
   returns `"format_confident": false`, stop and confirm the format — an undetected
   mismatch makes real annotations read as empty negatives.
 - **State changes go through `@audited` MCP tools.** `.tcip/audit.jsonl` is the
@@ -115,10 +115,10 @@ that silently corrupts results and compounds across sessions. So:
 ## Visual analysis loop
 
 You can see images: call `visualize` (with `source="annotations"|"predictions"|"comparison"|
-"dataset"`) or a specialized renderer (`visualize_worst_predictions`, `visualize_grid_overlay`,
-`visualize_canvas`, `sam_auto_label`) → it writes to `.tcip/artifacts/viz/` and returns
+"dataset"`) or a specialized renderer (`render_failure_cases`, `overlay_reference_grid`,
+`capture_live_canvas`, `generate_mask_candidates`) → it writes to `.tcip/artifacts/viz/` and returns
 `image_path` → call `view_image` on it → describe what you see, then recommend.
-`visualize_canvas` shows the human's live GUI canvas — their image, viewport, and unsaved
+`capture_live_canvas` shows the human's live GUI canvas — their image, viewport, and unsaved
 shapes with the GUI's own symbology. See the `visual-analysis` skill.
 
 ## Commands
