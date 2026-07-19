@@ -99,19 +99,16 @@ class TestOptimizerFactory:
         opt = build_optimizer("sgd", model, head_lr=1e-2)
         assert isinstance(opt, torch.optim.SGD)
 
-    def test_registry_listing(self):
-        from tcip_mcp.pipelines.registry import OPTIMIZERS
-        import tcip_mcp.pipelines.training.optimizer_factory  # noqa: F401
-        entries = OPTIMIZERS.list()
-        names = [e["name"] for e in entries]
-        assert "adamw" in names
-        assert "sgd" in names
+    def test_optimizer_builders_available(self):
+        from tcip_mcp.pipelines.training.optimizer_factory import _OPTIMIZER_BUILDERS
+        assert "adamw" in _OPTIMIZER_BUILDERS
+        assert "sgd" in _OPTIMIZER_BUILDERS
 
 
 class TestTrainConfig:
     def test_dataclass_defaults(self):
         from tcip_mcp.pipelines.training.generic_trainer import TrainConfig
-        cfg = TrainConfig(model_spec={"backbone": "resnet50"}, dataset={"task": "classification"})
+        cfg = TrainConfig(model_source={"builder": "x:y"}, dataset={"task": "classification"})
         assert cfg.mixed_precision is True
         assert cfg.batch_size == 4
         assert len(cfg.stages) >= 2
@@ -193,13 +190,12 @@ class TestPointCloud:
         assert "sa3" in out
         assert out["sa3"].shape[0] == 2
 
-    def test_pointnet_not_registered(self):
-        # Phase 0.3 task-honesty: PointNet++/3D is deferred and intentionally not
-        # registered (no point-cloud dataset/task/inference path exists yet). The
-        # backbone class still works in isolation (see test_pointnet_backbone_forward).
-        from tcip_mcp.pipelines.registry import BACKBONES
-        import tcip_mcp.pipelines.components.backbones_3d  # noqa: F401
-        assert "pointnet++" not in BACKBONES
+    def test_pointnet_not_wired(self):
+        # Phase 0.3 task-honesty: PointNet++/3D is deferred — a plain importable module with
+        # no point-cloud dataset/task/inference path yet, and not in the 2D backbone catalog.
+        # The backbone class still works in isolation (see test_pointnet_backbone_forward).
+        from tcip_mcp.pipelines.components.backbones import _TIMM_BACKBONES
+        assert "pointnet++" not in _TIMM_BACKBONES
 
 
 # ====================================================================
@@ -221,11 +217,13 @@ class TestTemporal:
         out = head(x)
         assert out.shape == (2, 4)
 
-    def test_temporal_heads_registered(self):
-        from tcip_mcp.pipelines.registry import HEADS
-        import tcip_mcp.pipelines.components.temporal  # noqa: F401
-        assert "temporal_lstm" in HEADS
-        assert "temporal_transformer" in HEADS
+    def test_temporal_head_builders_available(self):
+        from tcip_mcp.pipelines.components.temporal import (
+            _build_temporal_lstm,
+            _build_temporal_transformer,
+        )
+        assert _build_temporal_lstm(in_channels=16, num_milestones=3) is not None
+        assert _build_temporal_transformer(in_channels=16, num_milestones=3) is not None
 
 
 # ====================================================================
