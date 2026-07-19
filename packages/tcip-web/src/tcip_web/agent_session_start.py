@@ -3,8 +3,8 @@
 Fast and stdlib-only by design (Anthropic guidance: SessionStart hooks must be quick — they are for
 context loading, never slow work). It spawns no subprocess and imports nothing heavy: it reads the
 active-project marker, counts open reports/retrospectives, and injects an ``additionalContext``
-directive telling the agent to run the ritual (``load_reports``/``load_retrospectives``/
-``get_project_status``/``doctor.py``) as its first actions. A shell hook has no MCP client, so it
+directive telling the agent to run the ritual (``load_project_memory``/
+``inspect_project``/``doctor.py``) as its first actions. A shell hook has no MCP client, so it
 cannot run those calls itself — it makes them salient and dynamic, which prose in a large always-on
 file does not. ``additionalContext`` lands as a fresh session-start reminder at the top of context.
 
@@ -51,8 +51,8 @@ def _active_context(proj: str) -> str:
     return (
         "[TCIP session-start ritual — auto-injected by the SessionStart hook]\n"
         f"Active project: {name} ({proj}) — {nrep} friction report(s), {nret} retrospective(s) open.\n\n"
-        "If this session continues work on that project, run the ritual first: load_reports, "
-        "load_retrospectives, get_project_status, then python scripts/doctor.py <project_root>.\n"
+        "If this session continues work on that project, run the ritual first: load_project_memory "
+        "(kind='reports' and kind='retrospectives'), inspect_project, then python scripts/doctor.py <project_root>.\n"
         "If the user's task is to create or switch to a different project, do that first (init_project "
         "then set_active_project), then run the ritual on the project you end up in — do not run it on "
         "a stale active project.\n"
@@ -67,8 +67,8 @@ def _no_project_context() -> str:
         "  • New project  → init_project(<path>) then set_active_project(<name>) to make it active "
         "(init_project only scaffolds; set_active_project sets the marker the GUI + ritual read).\n"
         "  • Resume existing work → set_active_project(<name>) (or open it in the GUI).\n"
-        "Once a project is active, run the ritual: load_reports + load_retrospectives + "
-        "get_project_status, then python scripts/doctor.py <project_root>.\n"
+        "Once a project is active, run the ritual: load_project_memory (kind='reports' and "
+        "kind='retrospectives') + inspect_project, then python scripts/doctor.py <project_root>.\n"
         "If any mandated action is blocked or errors, that itself is a claude_reports — never a silent skip."
     )
 
