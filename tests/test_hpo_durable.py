@@ -19,7 +19,7 @@ def test_run_hpo_threads_durable_storage_and_writes_result(tmp_path, monkeypatch
     monkeypatch.setattr(hpo_mod, "optuna_search", fake_search)
     from tcip_mcp.tools.training_tools import run_hpo
 
-    res = run_hpo(base_config={"model_spec": {}}, n_trials=1, output_dir=str(tmp_path))
+    res = run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1, output_dir=str(tmp_path))
 
     # A unique study name + a sqlite storage URL (as_posix'd) were threaded into the search.
     assert captured["study_name"].startswith("hpo_")
@@ -42,5 +42,5 @@ def test_run_hpo_defaults_storage_to_platform_root_when_no_output_dir(tmp_path, 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     from tcip_mcp.tools.training_tools import run_hpo
 
-    run_hpo(base_config={"model_spec": {}}, n_trials=1)  # no output_dir
+    run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1)  # no output_dir
     assert (tmp_path / ".tcip" / "hpo").as_posix() in captured["storage"]
