@@ -5,22 +5,22 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_mcp.tools.data_tools import (
-    load_dataset,
+    scan_dataset,
     validate_data_quality,
     make_splits,
 )
 
 
-def test_load_dataset(data_dir: Path):
-    result = load_dataset(str(data_dir))
+def test_scan_dataset(data_dir: Path):
+    result = scan_dataset(str(data_dir))
     assert result["image_count"] == 3
     assert result["labels_detect_count"] == 3
     assert result["paired_images"] == 3
     assert result["unlabelled_images"] == 0
 
 
-def test_load_dataset_not_found():
-    result = load_dataset("/nonexistent/path")
+def test_scan_dataset_not_found():
+    result = scan_dataset("/nonexistent/path")
     assert "error" in result
 
 
