@@ -1,9 +1,9 @@
 """End-to-end integration test: agent pipeline through MCP tools.
 
 Verifies the full workflow using the MCP tool layer:
-  init_project → load_dataset → validate_data_quality →
-  load_annotations → save_annotations → evaluate_predictions (image) →
-  evaluate_predictions (dataset) → make_splits → export_project
+  init_project → scan_dataset → validate_data_quality →
+  read_annotations → save_annotations → score_predictions (image) →
+  score_predictions (dataset) → make_splits → archive_project
 
 Each step asserts filesystem state to prove persistence works.
 """
@@ -18,18 +18,18 @@ from PIL import Image
 
 from tcip_mcp.tools.project_tools import (
     init_project,
-    get_project_status,
-    export_project,
+    inspect_project,
+    archive_project,
 )
 from tcip_mcp.tools.data_tools import (
-    load_dataset,
+    scan_dataset,
     validate_data_quality,
     make_splits,
 )
 from tcip_mcp.tools.annotation_tools import (
-    load_annotations,
+    read_annotations,
     save_annotations,
-    evaluate_predictions,
+    score_predictions,
 )
 
 
@@ -57,7 +57,7 @@ def project_dir(tmp_path: Path) -> Path:
         img = Image.new("RGB", (640, 480), color=(100 + i * 20, 100, 100))
         img.save(images / f"{name}.jpg")
 
-        # GT: 2 boxes per image. load_annotations / validate_data_quality read GT through
+        # GT: 2 boxes per image. read_annotations / validate_data_quality read GT through
         # format_io, which understands YOLO .txt (not the json_io per-image schema).
         gt_lines = [
             "0 0.5 0.5 0.10 0.10",
@@ -93,11 +93,11 @@ class TestE2EPipeline:
         assert (project_dir / ".tcip").is_dir()
         assert (project_dir / ".tcip" / "config.toml").is_file()
 
-        status = get_project_status(root)
+        status = inspect_project(root)
         assert status["initialized"] is True
 
         # ── Step 3: Load dataset ─────────────────────────────────────
-        ds = load_dataset(root)
+        ds = scan_dataset(root)
         assert ds["image_count"] == 5
         assert ds["labels_detect_count"] == 5
         assert ds["predictions_detect_count"] == 5
@@ -112,7 +112,7 @@ class TestE2EPipeline:
 
         # ── Step 5: Load annotations for one image ───────────────────
         img_path = str(project_dir / "images" / "2-11-26" / "img_000.jpg")
-        ann = load_annotations(img_path)
+        ann = read_annotations(img_path)
         assert "error" not in ann
         assert ann["detect_labels"]["count"] >= 2
         assert ann["detect_predictions"]["count"] >= 2
@@ -135,7 +135,7 @@ class TestE2EPipeline:
         assert len(boxes) == 3  # we wrote 3 boxes
 
         # ── Step 7: Evaluate single image detections ─────────────────
-        eval_result = evaluate_predictions(img_path, iou_threshold=0.5, conf_threshold=0.25)
+        eval_result = score_predictions(img_path, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in eval_result
         # Should have precision, recall, f1 keys
         assert "precision" in eval_result
@@ -143,15 +143,15 @@ class TestE2EPipeline:
         assert "f1" in eval_result
         assert isinstance(eval_result["precision"], float)
 
-        # ── Step 8: Detailed per-detection breakdown (evaluate_predictions detail=True) ─
-        match_result = evaluate_predictions(img_path, iou_threshold=0.5, conf_threshold=0.25, detail=True)
+        # ── Step 8: Detailed per-detection breakdown (score_predictions detail=True) ─
+        match_result = score_predictions(img_path, iou_threshold=0.5, conf_threshold=0.25, detail=True)
         assert "error" not in match_result
         assert "detections" in match_result
         assert "img_w" in match_result
         assert "img_h" in match_result
 
         # ── Step 9: Evaluate full dataset ────────────────────────────
-        dataset_eval = evaluate_predictions(root, iou_threshold=0.5, conf_threshold=0.25)
+        dataset_eval = score_predictions(root, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in dataset_eval
         assert dataset_eval["image_count"] == 5
         assert "precision" in dataset_eval
@@ -173,7 +173,7 @@ class TestE2EPipeline:
 
         # ── Step 11: Export project as ZIP ───────────────────────────
         zip_path = str(tmp_path / "export.zip")
-        export_result = export_project(root, zip_path)
+        export_result = archive_project(root, zip_path)
         assert "error" not in export_result
         assert Path(zip_path).is_file()
         assert Path(zip_path).stat().st_size > 0
@@ -184,11 +184,11 @@ class TestE2EPipelineEdgeCases:
 
     def test_empty_project(self, tmp_path: Path):
         """Pipeline tools handle an uninitialised project gracefully."""
-        status = get_project_status(str(tmp_path))
+        status = inspect_project(str(tmp_path))
         assert status["initialized"] is False
 
     def test_dataset_with_missing_labels(self, tmp_path: Path):
-        """load_dataset reports unlabelled images correctly."""
+        """scan_dataset reports unlabelled images correctly."""
         images = tmp_path / "images"
         images.mkdir()
         labels = tmp_path / "annotations" / "default" / "detect"
@@ -200,13 +200,13 @@ class TestE2EPipelineEdgeCases:
             img.save(images / f"img_{i:03d}.jpg")
         (labels / "img_000.txt").write_text("0 0.5 0.5 0.1 0.1\n")
 
-        ds = load_dataset(str(tmp_path))
+        ds = scan_dataset(str(tmp_path))
         assert ds["image_count"] == 3
         assert ds["labels_detect_count"] == 1
         assert ds["unlabelled_images"] == 2
 
     def test_evaluate_no_predictions(self, tmp_path: Path):
-        """evaluate_predictions handles images with no predictions."""
+        """score_predictions handles images with no predictions."""
         images = tmp_path / "images"
         labels = tmp_path / "annotations" / "default" / "detect"
         for d in (images, labels):
@@ -218,7 +218,7 @@ class TestE2EPipelineEdgeCases:
         (labels / "test.txt").write_text("0 0.5 0.5 0.1 0.1\n")
 
         # No predictions directory — evaluate should handle gracefully
-        result = evaluate_predictions(str(img_path))
+        result = score_predictions(str(img_path))
         # Either returns an error dict or metrics with 0 TP
         assert isinstance(result, dict)
 
