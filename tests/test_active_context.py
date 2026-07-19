@@ -1,4 +1,4 @@
-"""get_active_context + active-project anchoring — the agent reads the live GUI session (Root A)."""
+"""view_gui_state + active-project anchoring — the agent reads the live GUI session (Root A)."""
 
 from __future__ import annotations
 
@@ -30,18 +30,18 @@ def _setup(tmp_path, monkeypatch, *, with_gui=True):
     return proj
 
 
-def test_get_active_context_none_when_no_project(tmp_path, monkeypatch):
+def test_view_gui_state_none_when_no_project(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     ws.mkdir()
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
-    from tcip_mcp.tools.project_tools import get_active_context
-    assert get_active_context()["active_project"] is None
+    from tcip_mcp.tools.project_tools import view_gui_state
+    assert view_gui_state()["active_project"] is None
 
 
-def test_get_active_context_reads_gui(tmp_path, monkeypatch):
+def test_view_gui_state_reads_gui(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
-    from tcip_mcp.tools.project_tools import get_active_context
-    ctx = get_active_context()
+    from tcip_mcp.tools.project_tools import view_gui_state
+    ctx = view_gui_state()
     assert ctx["active_project"] == "hazelnut_catkin_valley"
     assert ctx["annotation_type"] == "catkin"
     assert ctx["date"] == "2026-02-11"
@@ -51,17 +51,17 @@ def test_get_active_context_reads_gui(tmp_path, monkeypatch):
     assert "2026-02-11" in ctx["current_image"]
 
 
-def test_get_active_context_no_gui_yet(tmp_path, monkeypatch):
+def test_view_gui_state_no_gui_yet(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch, with_gui=False)
-    from tcip_mcp.tools.project_tools import get_active_context
-    ctx = get_active_context()
+    from tcip_mcp.tools.project_tools import view_gui_state
+    ctx = view_gui_state()
     assert ctx["active_project"] == "hazelnut_catkin_valley"
     assert "note" in ctx
 
 
-def test_get_project_status_anchors_to_active_project(tmp_path, monkeypatch):
+def test_inspect_project_anchors_to_active_project(tmp_path, monkeypatch):
     proj = _setup(tmp_path, monkeypatch)
-    from tcip_mcp.tools.project_tools import get_project_status
-    st = get_project_status()  # empty project_path -> the active project
+    from tcip_mcp.tools.project_tools import inspect_project
+    st = inspect_project()  # empty project_path -> the active project
     assert st["project_path"] == str(proj)
     assert st["initialized"] is True
