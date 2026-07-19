@@ -258,7 +258,7 @@ def test_effective_iou_type_resolution():
 def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     """test_results.json must record the iou_type evaluate() actually scored with
     (instance_seg defaults to segm AP — recording 'bbox' would misreport mask AP)."""
-    import tcip_mcp.pipelines.composer as composer
+    import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
 
     class _DummyModel:
@@ -269,8 +269,8 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
             pass
 
     ckpt_path = tmp_path / "model_best.pt"
-    torch.save({"model_spec": {}, "model_state_dict": {}}, str(ckpt_path))
-    monkeypatch.setattr(composer, "compose_model", lambda spec: _DummyModel())
+    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
+    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
     r = run_test_evaluation(str(ckpt_path), None, "cpu", "instance_seg", str(tmp_path / "seg"))
@@ -293,11 +293,6 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
 torchvision = pytest.importorskip("torchvision")
 from torch.utils.data import DataLoader  # noqa: E402
 
-import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
-import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
-import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
-import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
-from tcip_mcp.pipelines.composer import compose_model  # noqa: E402
 from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train  # noqa: E402
 
@@ -310,9 +305,9 @@ def _save_png(path: Path) -> None:
     save_image(torch.rand(3, IMG, IMG) * 0.3, str(path))
 
 
-def _cfg(spec) -> dict:
+def _cfg(model_source) -> dict:
     return {
-        "model_spec": spec, "device": "cpu",
+        "model_source": model_source, "device": "cpu",
         "stages": [{"freeze_to": -1, "epochs": 1}], "mixed_precision": False,
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
@@ -332,13 +327,10 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
-    spec = {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "fpn", "out_channels": 256},
-        "heads": [{"name": "anchor_detection", "num_classes": 1, "min_size": IMG, "max_size": IMG * 2}],
-    }
-    compose_model(spec)
-    run = create_run(_cfg(spec), str(tmp_path / "out"))
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                    "builder_kwargs": {"num_classes": 1, "min_size": IMG, "max_size": IMG * 2},
+                    "task": "detection"}
+    run = create_run(_cfg(model_source), str(tmp_path / "out"))
     run = train(run, loader, val_loader=loader, task="detection")  # no AttributeError on model.heads
 
     assert run.status == "completed", getattr(run, "error", run.status)
@@ -363,13 +355,9 @@ def test_validate_classification_metrics(tmp_path):
     ds = build_dataset("classification", images_dir=str(images_dir), csv_path=str(csv_path), num_classes=2)
     loader = DataLoader(ds, batch_size=3, collate_fn=task_collate("classification"))
 
-    spec = {
-        "backbone": {"name": "resnet18", "pretrained": False},
-        "neck": {"name": "gap"},
-        "heads": [{"name": "classification", "num_classes": 2}],
-    }
-    compose_model(spec)
-    run = create_run(_cfg(spec), str(tmp_path / "out"))
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_classifier",
+                    "builder_kwargs": {"num_classes": 2}, "task": "classification"}
+    run = create_run(_cfg(model_source), str(tmp_path / "out"))
     run = train(run, loader, val_loader=loader, task="classification")
 
     assert run.status == "completed", getattr(run, "error", run.status)
