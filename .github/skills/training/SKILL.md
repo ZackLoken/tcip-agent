@@ -70,12 +70,12 @@ config = {
 
 | Tool | Purpose |
 |------|---------|
-| `validate_config` | Validate config before training |
+| `preflight_config` | Validate config before training |
 | `launch_training` | Start async training run (auto-launches TensorBoard) |
 | `check_training_status` | Check run progress, metrics, and TensorBoard URL |
 | `list_training_runs` | List all runs in session |
 | `run_hpo` | HPO via random search or Optuna with TensorBoard logging |
-| `get_worst_predictions` | Find images with worst prediction quality |
+| `render_failure_cases` | Surface + render images with worst prediction quality |
 | `create_experiment` | Track training run with full lineage |
 
 ## TensorBoard
