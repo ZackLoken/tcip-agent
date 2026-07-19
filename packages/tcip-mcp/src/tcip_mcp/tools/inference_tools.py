@@ -422,7 +422,7 @@ def export_predictions(
 
 @mcp.tool()
 @audited
-def export_results_csv(
+def tabulate_counts(
     checkpoint_path: str,
     images_dir: str,
     output_path: str,
