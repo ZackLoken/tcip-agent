@@ -44,7 +44,7 @@ def test_session_start_injects_ritual_directive_with_live_counts(tmp_path, monke
     assert json.loads(out)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert "hazelnut_demo" in ctx
     assert "3 friction report(s)" in ctx and "2 retrospective(s)" in ctx
-    for step in ("load_reports", "load_retrospectives", "get_project_status", "doctor.py"):
+    for step in ("load_project_memory", "inspect_project", "doctor.py"):
         assert step in ctx
 
 
