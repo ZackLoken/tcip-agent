@@ -43,7 +43,7 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
   if (typeof d.image_index === "number") {
     const ds = store.gui.dataset;
     store.patchGui({ dataset: { ...ds, current_image_index: d.image_index } });
-    // Persist like user navigation does, so get_active_context sees the focused frame.
+    // Persist like user navigation does, so view_gui_state sees the focused frame.
     void api.dataset.nav(d.image_index).catch(() => {});
   }
   if (d.mode) store.setMode(d.mode);
