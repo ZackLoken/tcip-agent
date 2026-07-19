@@ -37,7 +37,6 @@ try:
     import tcip_mcp.tools.training_tools  # noqa: F401, E402
     import tcip_mcp.tools.inference_tools  # noqa: F401, E402
     import tcip_mcp.tools.model_tools  # noqa: F401, E402
-    import tcip_mcp.tools.pipeline_tools  # noqa: F401, E402
 except (ImportError, OSError) as e:
     logger.warning("Torch-dependent tools unavailable: %s", e)
 
