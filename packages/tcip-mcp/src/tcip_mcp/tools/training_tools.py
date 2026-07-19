@@ -748,30 +748,6 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
 
 @mcp.tool()
 @audited
-def get_training_metrics_path(run_id: str) -> dict:
-    """Return the path to the live metrics JSONL file for a training run.
-
-    The GUI reads this file independently to populate the training dashboard charts.
-    Each line is a JSON object with keys: epoch, train_loss, val_loss, map50, lr, stage.
-
-    Args:
-        run_id: Training run identifier.
-    """
-    from tcip_mcp.pipelines.training.generic_trainer import get_run
-
-    run = get_run(run_id)
-    if run is None:
-        return {"error": f"Run not found: {run_id}"}
-    metrics_path = Path(run.output_dir) / "metrics.jsonl"
-    return {
-        "run_id": run_id,
-        "metrics_path": str(metrics_path),
-        "exists": metrics_path.is_file(),
-    }
-
-
-@mcp.tool()
-@audited
 def get_worst_predictions(
     predictions_dir: str,
     labels_dir: str,
@@ -783,7 +759,7 @@ def get_worst_predictions(
     no loss. The score is ``2·|n_gt−n_pred as a shortfall| + |surplus| + (1−avg_conf)`` — purely
     the difference in box *counts* plus mean confidence, so an image with the right count but
     every box mislocated scores as good. Use it to surface likely-bad frames for a human to look
-    at; for true TP/FP/FN ranking use ``evaluate_detections`` (``detail=True``, IoU-matched).
+    at; for true TP/FP/FN ranking use ``evaluate_predictions`` (``detail=True``, IoU-matched).
 
     Args:
         predictions_dir: Directory with per-image JSON prediction files
