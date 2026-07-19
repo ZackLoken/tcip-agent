@@ -29,15 +29,15 @@ def build_scorer(method: str, task: str):
 
 
 def require_composed_detector(predictor, *, purpose: str = "uncertainty scoring") -> str | None:
-    """Return an error string if ``predictor`` isn't a composed torchvision detector, else None.
+    """Return an error string if ``predictor`` isn't a bespoke tcip nn.Module detector, else None.
 
     The uncertainty/diversity scorers read logits from ``predictor.model`` as an ``nn.Module``;
     a YOLO/ultralytics predictor's ``.model`` is not one, so scoring it is invalid.
     """
-    from tcip_mcp.pipelines.inference.predictor import KIND_TORCHVISION_COMPOSED
+    from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 
     kind = getattr(predictor, "kind", None)
-    if kind != KIND_TORCHVISION_COMPOSED:
-        return (f"{purpose} needs a composed torchvision detector, not a '{kind or 'unknown'}' "
+    if kind != KIND_TCIP_MODULE:
+        return (f"{purpose} needs a bespoke tcip detector, not a '{kind or 'unknown'}' "
                 f"model (its .model is not an nn.Module the scorer can read logits from)")
     return None
