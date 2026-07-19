@@ -12,7 +12,7 @@ import { api } from "@/api/client";
 import { useStore } from "@/store";
 
 // Debounce the backend nav sync: rapid arrow-key traversal patches local state on every
-// step but only persists the settled position (which get_active_context reads). Fire-and-
+// step but only persists the settled position (which view_gui_state reads). Fire-and-
 // forget — a dropped sync just leaves gui.json one image stale until the next move.
 let navSyncTimer: ReturnType<typeof setTimeout> | null = null;
 function syncNavIndex(index: number): void {
