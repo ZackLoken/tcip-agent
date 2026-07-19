@@ -1,8 +1,8 @@
-"""Task-agnostic training loop for ComposedModel.
+"""Task-agnostic training loop for a bespoke ``model_source`` model.
 
 This trainer works with *any* task type (detection, classification,
 ordinal, regression, segmentation) because it delegates everything
-to ComposedModel.forward() which returns a loss dict in train mode.
+to the model's forward() which returns a loss dict in train mode.
 
 Preserves: TensorBoard, JSONL metrics, progressive unfreezing,
 early stopping, mixed precision, gradient accumulation, checkpoints.
@@ -26,7 +26,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from tcip_mcp.pipelines.composer import ComposedModel
+from tcip_mcp.pipelines.model_contract import TCIPModel
 from tcip_mcp.pipelines.model_build import build_model, stamp_model_ref
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.pipelines.training.evaluation import evaluate
@@ -69,7 +69,7 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
 @dataclass
 class TrainConfig:
     """Everything the trainer needs — fully serializable for checkpoints."""
-    model_spec: dict
+    model_source: dict
     dataset: dict           # {task, images_dir, labels_dir, ...}
     augmentation: dict = field(default_factory=dict)
     sampler: str = "random"
@@ -292,7 +292,7 @@ def _build_scheduler(optimizer, config: dict, epochs: int):
 
 @torch.no_grad()
 def _validate(
-    model: ComposedModel, val_loader: DataLoader, device: torch.device, task: str, *,
+    model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str, *,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
 ) -> dict:
@@ -318,17 +318,10 @@ def _selection_value(task: str, val_metrics: dict, avg_loss: float) -> float:
 
 
 def _expected_in_chans(config: dict) -> int:
-    """Input channels the model expects — from ``model_spec.backbone`` or ``model_source.in_chans``."""
-    spec = config.get("model_spec")
-    if isinstance(spec, dict):
-        bb = spec.get("backbone", {})
-        return bb.get("in_chans", 3) if isinstance(bb, dict) else 3
+    """Input channels the model expects — from ``model_source.in_chans``."""
     src = config.get("model_source")
     if isinstance(src, dict):
         return int(src.get("in_chans", 3))
-    bb = config.get("backbone")  # tolerate being handed a bare model_spec directly
-    if isinstance(bb, dict):
-        return bb.get("in_chans", 3)
     return 3
 
 
@@ -369,7 +362,7 @@ def train(
 ) -> TrainRun:
     """Execute a task-agnostic training run.
 
-    The model is built from run.config["model_spec"] via compose_model().
+    The model is built from run.config["model_source"] via build_model().
     ``epoch_callback(epoch:int, epoch_metrics:dict)`` (optional) is invoked after
     each epoch's metrics are recorded — used by HPO to report intermediate values
     for pruning. It may raise to abort the run (e.g. ``optuna.TrialPruned``).
@@ -469,14 +462,14 @@ def train(
             if stage_idx < resume_stage:
                 continue
 
-            # Progressive unfreezing
+            # Progressive unfreezing — best-effort: a bespoke model may not expose freeze_backbone.
             freeze_to = stage.get("freeze_to", 0)
-            if freeze_to < 0:
-                num_stages = getattr(model.backbone, "num_stages", 4)
-                model.freeze_backbone(num_stages)
-            elif freeze_to == 0:
+            if freeze_to == 0 or not hasattr(model, "freeze_backbone"):
                 for p in model.parameters():
                     p.requires_grad = True
+            elif freeze_to < 0:
+                num_stages = getattr(getattr(model, "backbone", None), "num_stages", 4)
+                model.freeze_backbone(num_stages)
             else:
                 model.freeze_backbone(freeze_to)
 
