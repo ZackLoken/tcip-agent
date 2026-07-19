@@ -87,7 +87,7 @@ milestone date mean the same thing on both surfaces. If you change a definition,
 there — never fork a second copy. So the agent composes tools end to end:
 `build_plant_mapping` → `run_inference` → (elongation call) → `compute_phenology`.
 
-**Don't confuse `evaluate_detections`** (IoU GT-vs-prediction *eval* matching) with plant-GPS
+**Don't confuse `evaluate_predictions`** (IoU GT-vs-prediction *eval* matching) with plant-GPS
 mapping — they are unrelated.
 
 ## Plant mapping — why the sequence-anchored matcher
