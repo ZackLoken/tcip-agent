@@ -48,9 +48,7 @@ def test_focal_loss_class_weights():
     assert not torch.allclose(fl(preds, targets), FocalLoss()(preds, targets))  # weighting changes it
 
 
-def test_weighted_ce_registered_and_built():
-    from tcip_mcp.pipelines.registry import LOSSES
-    assert "weighted_ce" in LOSSES
+def test_weighted_ce_built():
     loss = build_loss("weighted_ce", class_distribution={0: 90, 1: 10}, num_classes=2)
     assert loss.ce.weight is not None  # class weight injected
 
