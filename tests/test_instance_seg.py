@@ -8,28 +8,13 @@ pytest.importorskip("torchvision")
 pytest.importorskip("pycocotools")
 
 
-def test_mask_rcnn_registered_and_recommended_for_instance_seg():
-    import tcip_mcp.pipelines.components.detectors  # noqa: F401
-    from tcip_mcp.pipelines.composer import recommend_model_spec
-    from tcip_mcp.pipelines.registry import DETECTORS
-
-    assert "mask_rcnn" in DETECTORS
-    assert DETECTORS.describe("mask_rcnn")["valid_tasks"] == ["instance_seg"]
-    spec = recommend_model_spec("instance_seg", dataset_size=300, num_classes=2)
-    assert spec["heads"][0]["detector"] == "mask_rcnn"
-
-
 def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
-    from tcip_mcp.pipelines.composer import DetectionModel, compose_model
+    from tests import bespoke_models
 
-    model = compose_model({
-        # resnet18 (not tv_resnet50): loss_mask / predicted-masks are mask-head assertions,
-        # independent of backbone depth — the FPN out_channels normalizes the channel difference.
-        "backbone": {"name": "resnet18"},
-        "neck": {"name": "fpn", "out_channels": 64},
-        "heads": [{"name": "anchor_detection", "num_classes": 1, "detector": "mask_rcnn"}],
-    })
-    assert isinstance(model, DetectionModel)
+    # resnet18: loss_mask / predicted-masks are mask-head assertions, independent of backbone
+    # depth — the FPN out_channels normalizes the channel difference.
+    model = bespoke_models.build_bespoke_instance_seg(num_classes=1, min_size=64, max_size=128)
+    assert isinstance(model, bespoke_models.BespokeDetection)
 
     img = torch.rand(3, 64, 64)
     masks = torch.zeros((1, 64, 64), dtype=torch.uint8)
