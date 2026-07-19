@@ -1,8 +1,9 @@
 /**
  * HPO search-space model for the Tuning tab's structured form. Covers exactly the params
- * the backend's `_apply_hpo_params` actually sweeps (lr / weight_decay / batch_size /
- * backbone / head / min_size) and builds the Optuna-typed space the `run_hpo` tool expects
- * — so users configure a sweep with a form instead of hand-writing Optuna JSON.
+ * the backend's `_apply_hpo_params` actually sweeps (lr / weight_decay / batch_size) and
+ * builds the Optuna-typed space the `run_hpo` tool expects — so users configure a sweep
+ * with a form instead of hand-writing Optuna JSON. Architecture axes are model-specific
+ * (`builder_kwargs`, unknown to the GUI) and no longer swept generically.
  */
 
 export type HpoParam =
@@ -28,23 +29,6 @@ export const DEFAULT_HPO_PARAMS: HpoParam[] = [
     high: 1e-2,
   },
   { key: "batch_size", label: "Batch size", kind: "numlist", enabled: true, values: [2, 4] },
-  {
-    key: "backbone",
-    label: "Backbone",
-    kind: "choices",
-    enabled: true,
-    options: ["resnet50", "resnet101"],
-    selected: ["resnet50", "resnet101"],
-  },
-  {
-    key: "head",
-    label: "Detector head",
-    kind: "choices",
-    enabled: false,
-    options: ["faster_rcnn", "fcos", "retinanet"],
-    selected: ["faster_rcnn"],
-  },
-  { key: "min_size", label: "Min image size", kind: "numlist", enabled: false, values: [640, 800] },
 ];
 
 /** Parse a comma-separated list of numbers, dropping blanks / non-numbers.
