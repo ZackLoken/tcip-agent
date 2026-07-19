@@ -53,7 +53,7 @@ dependencies:
       - ruff
       # --- SAM-assisted labeling (optional) ---
       # The SAM2 wrapper degrades gracefully if this is absent. Install when you
-      # need sam_predict / sam_auto_label; the distribution is finicky to pin
+      # need sam_predict / generate_mask_candidates; the distribution is finicky to pin
       # cross-platform, so it is intentionally left out of the default solve:
       #   pip install "sam-2"   # imported as `sam2`
       # --- local packages (editable; run from repo root) ---
