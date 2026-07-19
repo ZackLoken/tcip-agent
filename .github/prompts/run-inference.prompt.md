@@ -11,4 +11,4 @@ Run batch inference:
 3. Use `run_inference` to generate predictions
 4. Use `export_predictions` to save per-image JSON prediction files
 5. Use `push_panel_data` to visualize results in the inference panel
-6. Use `evaluate_dataset` if ground truth is available for comparison
+6. Use `evaluate_predictions` (on the dataset dir) if ground truth is available for comparison
