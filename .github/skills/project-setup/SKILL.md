@@ -89,10 +89,11 @@ tiles of one source image in the same split). Non-destructive by default (writes
 manifests + stats); pass `materialize=True` to also lay out a YOLO
 `{train,val,test}/{images,labels}/` tree.
 
-## 6. Recommend a model, train, infer
+## 6. Build a model, train, infer
 
-- `recommend_model` for a starting point (compose from `backbone → neck → heads →
-  loss`; the registry is a library, not a constraint — see `.github/skills/pipeline-design`).
+- Write an `nn.Module` (from scratch or importing the plain blocks) + a `train(ctx)` loop,
+  build via `model_source` → `build_model`, pre-flight with `model_contract` — see
+  `.github/skills/pipeline-design`.
 - `launch_training` (immutable experiment per run) → watch metrics.
 - `run_inference` to produce predictions for the review loop.
 
