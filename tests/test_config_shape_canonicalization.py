@@ -37,7 +37,7 @@ def test_normalize_hoists_training_section_to_top_level():
 def test_normalize_top_level_wins_over_nested():
     from tcip_mcp.pipelines.schemas import normalize_train_config
 
-    # The orchestrator writes a flat config; the HPO objective writes tuned params flat.
+    # The HPO objective writes tuned params flat.
     # A pre-existing top-level key must never be clobbered by the nested value.
     cfg = normalize_train_config({
         "stages": [{"freeze_to": 0, "epochs": 3}],
