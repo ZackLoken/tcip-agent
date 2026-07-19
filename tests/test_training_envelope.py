@@ -103,7 +103,7 @@ def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypat
 
     monkeypatch.setattr(gt, "train", _stub_train)
 
-    config = {"model_spec": {"backbone": {"name": "resnet18"}}, "device": "cpu"}
+    config = {"model_source": {"builder": "x:y", "task": "classification"}, "device": "cpu"}
     create_experiment("expD", config)
     update_status("expD", "running")
     run = create_run(config, str(out))
