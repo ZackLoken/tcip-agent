@@ -2,22 +2,16 @@
 
 These are the "deterministic" and "distribution" derivations (CLAUDE.md "Parameters: derive, don't
 pin"): channels from *this* raster, num_classes from *this* label set, anchor aspect ratios from
-*this* dataset's GT box shapes. Each runs at the pre-compose seam and fills a spec value the agent did
-not pin — never a value frozen from a different dataset. Explicit agent values always win; a derived
-value that contradicts an explicit one is surfaced (the runtime channel check already fails loud).
+*this* dataset's GT box shapes. The agent's model builder / train(ctx) calls these to size a bespoke
+model to the data in hand — never a value frozen from a different dataset.
 
 Heavy deps (PIL/numpy/tifffile) are imported lazily so this stays cheap to import.
 """
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 from pathlib import Path
-
-from tcip_mcp.pipelines.resolution import ResolvedParam, derived
-
-logger = logging.getLogger(__name__)
 
 
 def probe_channels(image_path: str | Path) -> int:
@@ -113,43 +107,6 @@ def derive_cross_tile_nms(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]
         return None
     lo, hi = clamp
     return float(min(max(float(np.percentile(tail, percentile)) + margin, lo), hi))
-
-
-def resolve_spec_derivations(model_spec: dict, *, sample_image: str | Path | None,
-                             class_distribution: dict[int, int] | None) -> dict[str, ResolvedParam]:
-    """Fill data-derived spec params the agent did not pin; return their ResolvedParams (provenance).
-
-    - ``in_chans`` from the probed raster (only when the backbone did not set it explicitly).
-    - ``num_classes`` from the label set (only when a detection head did not set it explicitly).
-
-    Mutates ``model_spec`` in place at the pre-compose seam (mirrors ``_inject_imbalance_loss``).
-    Explicit values are left untouched — the runtime channel/label checks catch a real mismatch.
-    """
-    provenance: dict[str, ResolvedParam] = {}
-
-    bb = model_spec.get("backbone")
-    if isinstance(bb, dict) and sample_image is not None and "in_chans" not in bb:
-        # Isolate the probe: a raster-read failure must not suppress the num_classes derivation below
-        # (which would then surface as an opaque compose-time TypeError with the real cause hidden).
-        try:
-            ch = probe_channels(sample_image)
-            bb["in_chans"] = ch
-            provenance["in_chans"] = derived("in_chans", ch, derivation_class="deterministic",
-                                             derived_from=f"probed bands of {Path(sample_image).name}")
-        except Exception:
-            logger.warning("in_chans probe failed for %s; leaving backbone.in_chans unset",
-                           sample_image, exc_info=True)
-
-    if class_distribution:
-        nc = num_classes_from_distribution(class_distribution)
-        # Real detection head names (composer _DETECTION_HEADS + instance_seg) — not "detection".
-        # Missing anchor_free_detection meant FCOS (the catkin detector) never derived num_classes.
-        for h in model_spec.get("heads", []):
-            if h.get("name") in ("anchor_detection", "anchor_free_detection", "instance_seg") and "num_classes" not in h:
-                h["num_classes"] = nc
-                provenance["num_classes"] = derived("num_classes", nc, derivation_class="deterministic",
-                                                    derived_from="max class id + 1 in the label set")
-    return provenance
 
 
 # Every ``derived_from`` label ever stamped by ``resolution.derived()`` must appear here, mapped
