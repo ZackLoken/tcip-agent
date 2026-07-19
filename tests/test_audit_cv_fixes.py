@@ -588,7 +588,7 @@ def test_cv0_export_predictions_validated_from_bundle(tmp_path, monkeypatch):
     assert r["validated"] is True and r["conf_source"] == "calibration"
 
 
-def test_cv0_export_results_csv_carries_operating_point(tmp_path, monkeypatch):
+def test_cv0_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
     import tcip_mcp.tools.inference_tools as itools
 
     captured = {}
@@ -604,7 +604,7 @@ def test_cv0_export_results_csv_carries_operating_point(tmp_path, monkeypatch):
 
     monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
     monkeypatch.setattr(itools, "export_detection_csv", lambda results, path: str(path))
-    r = itools.export_results_csv("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
                                   trait="catkin", calibration_labels_dir=str(tmp_path))
     assert captured["trait"] == "catkin"                    # calibration threaded through
     assert captured["calibration_labels_dir"] == str(tmp_path)
