@@ -161,10 +161,12 @@ def test_catkin_trait_semantics():
     assert t is CATKIN
     assert t.count_objective == "count_unbiased"
     assert t.localization == "center_match"
-    assert t.positive_class_id == 1
+    assert t.localization_tolerance == "half_class_avg_size"
     assert t.positive_is_texture is True
     assert t.milestone_fractions == (0.05, 0.50, 0.95)
     assert t.milestone_on == "positive_fraction"
+    assert t.sliver_policy == "class_avg_size"
+    assert t.count_bias_tolerance == 1.0
 
 
 def test_unknown_trait_lists_available():
