@@ -1,6 +1,6 @@
 ---
 name: phenology
-description: "Compute and deliver bloom phenology — the catkin/pistillate 05/50/95-per-date milestones — as one row per plant, by composing existing pieces instead of re-scripting. Covers the operationalization (dates a plant's validated-classifier elongated fraction crosses 5/50/95%, never a bbox-height proxy), the end-to-end pattern, the pieces to compose (compute_phenology tool, phenology module, plant mapping), and the measurement-integrity guard. Load when computing bloom milestones, building plant mapping, delivering a per-plant phenology CSV, or handling hazelnut catkin or pistillate bloom timing."
+description: "Compute and deliver bloom phenology — the catkin/pistillate 05/50/95-per-date milestones — as one row per plant, by composing existing pieces instead of re-scripting. Covers the operationalization (dates a plant's validated elongated fraction crosses 5/50/95%, never a bbox-height proxy), the end-to-end pattern, the pieces to compose (compute_phenology tool, phenology module, plant mapping), and the measurement-integrity guard. Load when computing bloom milestones, building plant mapping, delivering a per-plant phenology CSV, or handling hazelnut catkin or pistillate bloom timing."
 ---
 
 # Bloom phenology — the 05/50/95-per-date trait
@@ -12,12 +12,13 @@ project** (that fragility is exactly what this skill exists to prevent).
 ## The authoritative trait definition (do not redefine)
 
 Bloom is the **fraction of a plant's detected catkins that are _elongated_.**
-"Elongated" is an **expert-defined, visible morphological stage** emitted by a *validated*
-2-class classifier (class 1 = elongated). It is a **classification**, never a geometric
-proxy — bounding-box height / aspect ratio is scale-, zoom-, and pose-dependent and does
-**not** measure elongation. (A prior session invented a bbox-height threshold and shipped
-it into a delivered CSV; that was removed. See the CLAUDE.md measurement-integrity
-invariant.)
+"Elongated" is an **expert-defined, visible morphological stage** — a *validated* per-catkin
+elongation call learned from the imagery, never a geometric proxy — bounding-box height /
+aspect ratio is scale-, zoom-, and pose-dependent and does **not** measure elongation. (A
+prior session invented a bbox-height threshold and shipped it into a delivered CSV; that was
+removed. See the CLAUDE.md measurement-integrity invariant.) How that call is produced (a
+single multi-class detector, detect-then-classify, …) is a **pipeline-design** choice — the
+trait definition does not fix it.
 
 Milestones, per plant, from that plant's elongated-fraction time series:
 
@@ -30,7 +31,7 @@ Milestones, per plant, from that plant's elongated-fraction time series:
 
 Crossings interpolate linearly between the two neighbouring capture dates. Pistillate
 milestones (`pistillate_05/50/95per_date`) are the identical pattern on the pistillate-
-flower detector/classifier.
+flower elongation/receptivity call.
 
 > **Provisional operationalization (pending breeder confirmation).** `crops.yml` is the
 > immutable authority ("Date when most catkins have elongated"). The implementation computes
@@ -46,26 +47,27 @@ it as a new, separately-named trait and get the definition in writing first.
 
 ## The measurement-integrity guard
 
-Because "elongated" is a classifier class, predictions that carry **no** elongation class
-cannot yield a valid bloom fraction. Every surface reports `elongation_classified`:
-when it is false, the milestones are **not** a measurement — do not deliver them. Run and
-*validate* the 2-class elongation classifier first (see the `evaluation` skill).
+Because "elongated" is a learned per-catkin call, predictions that carry **no** elongation
+call cannot yield a valid bloom fraction. Every surface reports `elongation_classified`:
+when it is false, the milestones are **not** a measurement — do not deliver them. Train and
+*validate* whatever model produces the elongation call first (see the `evaluation` skill).
 
 ## End-to-end pattern
 
 ```
-per date:  images ─► detect catkins ─► classify each elongated vs not (validated 2-class)
-                  ─► write per-image JSON preds (class id = elongation class)
+per date:  images ─► detect catkins ─► call each catkin elongated vs not (validated)
+                  ─► write per-image JSON preds (carrying the elongation call)
 across dates: plant mapping (image → plant_id) ─► per (plant, date) elongated fraction
                   ─► crossings at 5/50/95% (elongation_date = the 95% crossing) ─► per-plant CSV
                   ─► carry genotype/accession through to the deliverable
 ```
 
-- **Detection at scale:** `run_inference(tile=True, tile_size=…, overlap=…)` **is** SAHI-
-  style tiled sliding-window inference. Use it for high-res ground imagery with many small
-  catkins — do **not** re-script tiling.
-- **Elongated vs not is a classification step**, distinct from detection. The fraction is
-  `n(class==elongated) / n(total detections)` for that plant on that date.
+- **Detection at scale:** `run_inference` already supports tiled sliding-window (SAHI-style)
+  inference — compose it, don't re-script tiling. Whether and how to tile (tile size, overlap)
+  is a data-derived choice: derive it from the imagery resolution and catkin size at runtime,
+  and defer the how to the `pipeline-design` / `evaluation` skills.
+- **The elongated-vs-not call is a distinct decision** from "is this a catkin". The fraction is
+  `n(elongated) / n(total detected catkins)` for that plant on that date.
 - **Genotype:** carry `accession_name` from the plant mapping into the CSV — breeders
   select on genotype, not `plant_id`.
 
@@ -83,7 +85,7 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 `plant_mapping` module. The MCP tools and the web routes all call them, so a mapping and a
 milestone date mean the same thing on both surfaces. If you change a definition, change it
 there — never fork a second copy. So the agent composes tools end to end:
-`build_plant_mapping` → `run_inference(tile=True)` → (elongation classifier) → `compute_phenology`.
+`build_plant_mapping` → `run_inference` → (elongation call) → `compute_phenology`.
 
 **Don't confuse `evaluate_detections`** (IoU GT-vs-prediction *eval* matching) with plant-GPS
 mapping — they are unrelated.
@@ -100,7 +102,7 @@ honest, interpretable signals. It deliberately emits **no** fabricated 0–1 "co
 
 ## Delivery checklist
 
-1. `elongation_classified` is **true** (predictions carry the elongation class).
+1. `elongation_classified` is **true** (predictions carry the elongation call).
 2. Every expected plant has a row; genotype/`accession` is carried through.
 3. Milestones are chronologically sane (`05per` ≤ `50per` ≤ `95per`; `elongation_date` — the
    majority crossing — equals `95per`).
