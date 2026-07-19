@@ -9,7 +9,7 @@ when shapes actually change. State is split across two files under
   - ``canvas_shapes.json`` — the geometry blob; written only by full pushes.
 
 There is no read-modify-write merge (so no lock and no interleaving that can resurrect stale
-geometry): each file is written atomically, and the reader (``visualize_canvas``) treats the
+geometry): each file is written atomically, and the reader (``capture_live_canvas``) treats the
 geometry as valid only when its ``(image_path, tab)`` identity matches the meta document —
 a heartbeat for a different image/tab implicitly invalidates stale shapes.
 
