@@ -40,7 +40,8 @@ def _write_entry(entry: dict[str, Any]) -> None:
 
         append_jsonl(resolve_state(AUDIT_PATH), entry)
     except Exception:
-        logger.debug("Failed to write audit entry", exc_info=True)
+        # A dropped audit line is a real provenance gap — surface it, don't bury it at debug.
+        logger.warning("Failed to write audit entry", exc_info=True)
 
 
 def record_event(
@@ -49,7 +50,7 @@ def record_event(
     """Emit one standalone audit line for code that isn't an ``@audited`` MCP tool.
 
     The training envelope uses this to bracket the training body (which runs in a background
-    thread, outside any ``@audited`` MCP call) with open/close events on the same tamper-evident
+    thread, outside any ``@audited`` MCP call) with open/close events on the same append-only
     ``.tcip/audit.jsonl`` sink — closing the hole where the whole ``train()`` body + registration
     left no audit record. Best-effort, never raises.
     """
