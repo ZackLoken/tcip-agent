@@ -36,6 +36,7 @@ dependencies:
       - torchvision>=0.17
       - timm>=1.0
       - opencv-python>=4.5
+      - scikit-image>=0.22
       - pycocotools>=2.0.7
       # --- web backend ---
       - fastapi>=0.115.0
@@ -43,8 +44,20 @@ dependencies:
       # --- inference helpers (lazy-imported by tcip-web) ---
       - ultralytics>=8.3
       - sahi>=0.11
-      # --- hyperparameter optimization (lazy-imported) ---
+      # --- hyperparameter optimization (Ray Tune, lazy-imported) ---
+      # Ray drives the sweep; search-algorithm backends are agent-selectable and each
+      # degrades gracefully if absent. Installed via pip (Ray on Windows is pip-only).
+      - ray[tune]>=2.9
       - optuna>=3.0
+      - hyperopt
+      - bayesian-optimization
+      - nevergrad
+      - ax-platform
+      - zoopt
+      - ConfigSpace
+      - hpbandster
+      # hebo (HEBOSearch) is intentionally omitted: it fails to build on Windows/Py3.12
+      # (its pinned numpy needs the removed pkgutil.ImpImporter). Ray runs fine without it.
       # --- dev / test ---
       - pytest>=7.0
       - pytest-asyncio>=0.21
