@@ -62,7 +62,7 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     assert best["kind"] == KIND_TCIP_MODULE
     assert best["model_source"] == config["model_source"]
 
-    # Body is bracketed on the tamper-evident audit log (open running + close completed).
+    # Body is bracketed on the append-only audit log (open running + close completed).
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "completed"]
     assert events[-1]["arguments"]["run_id"] == run.run_id
