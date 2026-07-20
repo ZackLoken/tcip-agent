@@ -1,6 +1,6 @@
 ---
 name: elderberry
-description: "Botany, phenology, disease, and imaging reference for American elderberry (Sambucus nigra subsp. canadensis, syn. Sambucus canadensis; the European S. nigra ssp. nigra underperforms in the US Midwest) — a multi-stemmed, sucker-forming deciduous shrub that bears perfect (hermaphroditic), insect-pollinated flowers in large flat-topped compound cymes on current-season shoots, opposite pinnately compound leaves, and dense clusters of tiny (~3-6 mm) green-to-purple-black drupes. Load when phenotyping elderberry, working with elderberry imagery, or measuring elderberry traits: it partitions field-imageable traits from lab/destructive chemistry, mass, count, and sensory ones, maps the leaf-out to bloom to fruit-ripening to senescence calendar onto crops.yml date traits, and describes disease/pest symptoms (spotted wing drosophila, shoot/cane borers, eriophyid mites, Japanese beetle, powdery mildew). crops.yml is the trait authority; the cyme (not a catkin) is the primary detection unit."
+description: "Botany, phenology, disease, and imaging reference for American elderberry (Sambucus nigra subsp. canadensis, syn. Sambucus canadensis; the European S. nigra ssp. nigra underperforms in the US Midwest) — a multi-stemmed, sucker-forming deciduous shrub that bears perfect (hermaphroditic), insect-pollinated flowers in large flat-topped compound cymes on current-season shoots, opposite pinnately compound leaves, and dense clusters of tiny (~3-6 mm) green-to-purple-black drupes. Load when phenotyping elderberry, working with elderberry imagery, or measuring elderberry traits: it partitions field-imageable traits from lab/destructive chemistry, mass, count, and sensory ones, maps the leaf-out to bloom to fruit-ripening to senescence calendar onto crops.yml date traits, and describes disease/pest symptoms (spotted wing drosophila, shoot/cane borers, eriophyid mites, Japanese beetle, powdery mildew). crops.yml is the trait authority; elderberry bears no catkins — its inflorescence is the compound cyme."
 ---
 
 # Elderberry — Sambucus nigra subsp. canadensis
@@ -128,8 +128,8 @@ days-from-January-1 (derived, not an independent observation) — deliver it alo
   `leaf_color_fall`, `leaf_glossiness`).
 - **Cyme (inflorescence → infructescence)** — large flat-topped to convex compound cyme,
   ~10-25+ cm across, terminal on current-season shoots; creamy-white and showy at bloom, then a
-  dense green→purple-black berry head that nods under weight. **This is the primary detection
-  unit** (`inflorescence_count`, `cyme_diameter`, `cyme_orientation`, `fruit_per_cyme`).
+  dense green→purple-black berry head that nods under weight. Bears on `inflorescence_count`,
+  `cyme_diameter`, `cyme_orientation`, and `fruit_per_cyme`.
 - **Individual flower** — ~5-6 mm, 5 creamy/ivory-white petals, 5 pale-anthered stamens; opens
   roughly synchronously across a cyme (`bloom_color`).
 - **Berry (drupe)** — small, ~3-6 mm; green when immature (camouflaged against foliage), ripening
@@ -156,12 +156,15 @@ confirmation (see expert flags).
 Defer all mechanics (tools, formats, IoU, SAM) to the **`annotation`** skill. Elderberry-specific
 difficulties:
 
-- **The cyme is the detection unit — not a catkin, strig, raceme, or burr** (those belong to
-  other TCIP crops). Do **not** annotate "catkins" on elderberry; label the whole cyme /
-  fruiting-cyme head.
+- **Elderberry bears no catkins, strigs, racemes, or burrs** (those belong to other TCIP
+  crops) — its inflorescence/infructescence is the compound cyme. Do not import another crop's
+  annotation vocabulary here.
 - **Tiny, dense, mutually-occluding berries** (~3-6 mm) make exhaustive per-berry boxing
-  occlusion-limited and inconsistent; **cyme-level (whole-head) detection/counting is far more
-  reliable** and is the recommended unit for yield-related traits.
+  occlusion-limited and inconsistent at typical standoff, and a visible per-berry count is a
+  proxy for the true count rather than the count itself. What a trait counts — a cyme head or
+  individual berries — is its `crops.yml` definition and the breeder's to confirm; note
+  `fruit_per_cyme` is a per-berry quantity. How that count is obtained from pixels is yours to
+  derive.
 - **Low contrast at fruit set** — green immature berries and green cymes blend into foliage; ripe
   purple-black berries contrast strongly, so favor ripe-stage imaging for fruit traits.
 - **No separate male/female flowers** — there is nothing to split into staminate vs pistillate;
