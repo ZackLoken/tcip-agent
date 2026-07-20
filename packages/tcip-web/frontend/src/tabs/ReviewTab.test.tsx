@@ -158,6 +158,51 @@ describe("ReviewTab empty states", () => {
   });
 });
 
+describe("ReviewTab validation-reference affordance", () => {
+  const refBtn = () => screen.getByRole("button", { name: /validation reference/i });
+
+  it("promotes a validated review and surfaces the honest result", async () => {
+    const spy = vi.spyOn(api.review, "validateReference").mockResolvedValue({
+      validated: true,
+      reference: "review_confirmed",
+      reviewed_image_count: 4,
+      conf: 0.42,
+      reason: "Validated. Your review confirms this model's counts.",
+      buckets_stamped: [PRED_DIR_A],
+    });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(refBtn());
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({
+        project_root: "C:/proj",
+        trait: "annotations",
+        pred_detect_dir: PRED_DIR_A,
+        pred_segment_dir: null,
+      }),
+    );
+    expect(await screen.findByText("Validated")).toBeInTheDocument();
+  });
+
+  it("shows a not-yet result honestly when the gate refuses", async () => {
+    vi.spyOn(api.review, "validateReference").mockResolvedValue({
+      validated: false,
+      reference: "false",
+      reviewed_image_count: 2,
+      conf: 0.5,
+      reason: "Not yet. Too few images have been reviewed.",
+      buckets_stamped: [PRED_DIR_A],
+    });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(refBtn());
+    expect(await screen.findByText("Not yet")).toBeInTheDocument();
+    expect(screen.queryByText("Validated")).not.toBeInTheDocument();
+  });
+});
+
 describe("ReviewTab detection nav bounds", () => {
   it("disables Prev at the first detection and Next at the last", async () => {
     matchesSpy.mockResolvedValue(matchesRes([det(), det({ det_type: "fp" })]));
