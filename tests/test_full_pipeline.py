@@ -160,7 +160,9 @@ class TestFullClassificationPipeline:
                 "count": len(preds) if isinstance(preds, list) else 1,
                 "scores": confs if isinstance(confs, list) else [confs] if confs else [],
             })
-        export_detection_csv(csv_results, csv_path)
+        # Uncalibrated smoke export: acknowledge the count is unvalidated (the delivery gate refuses
+        # a bare write) — it is stamped measurement_validated=false.
+        export_detection_csv(csv_results, csv_path, acknowledge_unvalidated=True)
 
         assert Path(csv_path).is_file()
         content = Path(csv_path).read_text()
@@ -275,7 +277,7 @@ class TestDetectionPipelineRealData:
 
         # --- Step 5: Export detection CSV ---
         csv_path = str(out / "catkin_detections.csv")
-        export_detection_csv(results, csv_path)
+        export_detection_csv(results, csv_path, acknowledge_unvalidated=True)
 
         assert Path(csv_path).is_file()
         content = Path(csv_path).read_text()
