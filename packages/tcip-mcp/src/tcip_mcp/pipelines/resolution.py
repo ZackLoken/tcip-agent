@@ -19,6 +19,7 @@ Pure stdlib — no torch, safe to import anywhere.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,11 +28,21 @@ from typing import Any
 SOURCES = ("explicit", "derived", "default")
 # How a parameter is (or should be) determined — see the scope doc / CLAUDE.md.
 DERIVATION_CLASSES = ("deterministic", "distribution", "calibration", "semantic", "engineering")
-# validated_vs_gt: None = not applicable (facts, e.g. num_classes); "validated_held_out" = passed on a
-# disjoint held-out split of this dataset's reference annotations (not truth — bounded by label quality);
-# "false" = no such validation exists.
+# validated_vs_gt records WHICH reference confirmed a calibration operating point — the shared-reference
+# principle (CLAUDE.md): a reference sized to the trait, not dense GT for every trait. Both shippable
+# references pass the IDENTICAL disjoint-split + count-bias gate; the value keeps them distinct so
+# provenance says which one validated.
+#   None                = not applicable (facts, e.g. num_classes).
+#   "validated_held_out" = passed on a disjoint held-out split of this dataset's GT annotations.
+#   "review_confirmed"   = passed on a breeder-confirmed sample of the model's own outputs (review
+#                          verdicts reconstructed into the same records the GT path sweeps).
+#   "false"              = no such validation exists (not truth — every reference is bounded by its
+#                          label/verdict quality).
 VALIDATED_HELD_OUT = "validated_held_out"
+VALIDATED_REVIEW_CONFIRMED = "review_confirmed"
 VALIDATED_FALSE = "false"
+# The references that make a calibration operating point shippable (each cleared the same gate).
+VALIDATED_SHIPPABLE = (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED)
 
 # Shared inference operating-point defaults, referenced by both run_inference and the web route so the
 # same model+images can't give a different count by entry point.
@@ -74,7 +85,7 @@ class ResolvedParam:
             raise ValueError(f"source must be one of {SOURCES}, got {self.source!r}")
         if self.derivation_class not in DERIVATION_CLASSES:
             raise ValueError(f"derivation_class must be one of {DERIVATION_CLASSES}, got {self.derivation_class!r}")
-        if self.validated_vs_gt not in (None, VALIDATED_HELD_OUT, VALIDATED_FALSE):
+        if self.validated_vs_gt not in (None, VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_FALSE):
             raise ValueError(f"validated_vs_gt invalid: {self.validated_vs_gt!r}")
 
     @property
@@ -82,11 +93,12 @@ class ResolvedParam:
         """Can this value flow into a delivered result as a trustworthy number?
 
         Non-calibration params (facts, structural choices, engineering knobs) are always shippable.
-        A calibration param is shippable only when validated against held-out GT for its dataset.
+        A calibration param is shippable only when a reference sized to the trait (held-out GT or a
+        breeder-confirmed output sample) cleared the disjoint-split + count-bias gate for its dataset.
         """
         if self.derivation_class != "calibration":
             return True
-        return self.validated_vs_gt == VALIDATED_HELD_OUT
+        return self.validated_vs_gt in VALIDATED_SHIPPABLE
 
     @property
     def value(self) -> Any:
@@ -254,6 +266,139 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
         h.update(lp.read_bytes() if lp.is_file() else b"")
         h.update(b"\0")
     return h.hexdigest()[:16]
+
+
+# --- on-disk operating-point reconciliation (the delivery gate reads the sidecar, not a caller string) ---
+
+def read_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
+    """The bucket's ``operating_point.json`` stamp, or ``None`` if absent/unreadable (never raises)."""
+    p = Path(pred_dir) / "operating_point.json"
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _sidecar_reference(sidecar: dict | None) -> str:
+    """Which reference the sidecar's conf operating point cleared — held_out / review_confirmed / false.
+
+    Falls back to the top-level ``validated`` bool (a shippable stamp) when the per-param reference is
+    missing, but never upgrades an unvalidated stamp.
+    """
+    if not sidecar or not sidecar.get("validated"):
+        return VALIDATED_FALSE
+    conf = (sidecar.get("operating_point") or {}).get("conf") or {}
+    ref = conf.get("validated_vs_gt")
+    return ref if ref in VALIDATED_SHIPPABLE else VALIDATED_HELD_OUT
+
+
+def _validity_rank(state: str | None) -> int:
+    """Floor ordering: unvalidated (0) < any shippable reference (1). ``None`` = no assertion (skip)."""
+    if state is None:
+        return 99
+    return 1 if state in VALIDATED_SHIPPABLE else 0
+
+
+def reconcile_operating_point_validity(
+    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+) -> dict:
+    """Floor the operating-point validity against every bucket's on-disk sidecar (T5-3 fix).
+
+    The delivery gate must not trust a caller's asserted string: it reads each prediction bucket's
+    ``operating_point.json`` and takes the FLOOR of asserted-vs-on-disk. A missing/unreadable sidecar,
+    or any bucket stamped ``validated=false``, floors the whole curve to ``false`` — never a crash. An
+    asserted string can only lower the on-disk result, never raise it (prefer the on-disk truth). The
+    on-disk reference (held_out vs review_confirmed) is preserved so provenance still records which one.
+
+    Returns ``{validated, on_disk_validated, missing_sidecars, unvalidated_buckets, conf, per_bucket}``.
+    """
+    per_bucket: dict[str, str] = {}
+    missing: list[str] = []
+    unvalidated: list[str] = []
+    refs: set[str] = set()
+    confs: list[float] = []
+    all_validated = bool(pred_dirs)
+    for d in pred_dirs:
+        sc = read_operating_point_sidecar(d)
+        if sc is None:
+            missing.append(str(d))
+            per_bucket[str(d)] = VALIDATED_FALSE
+            all_validated = False
+            continue
+        ref = _sidecar_reference(sc)
+        per_bucket[str(d)] = ref
+        if ref in VALIDATED_SHIPPABLE:
+            refs.add(ref)
+            conf_val = ((sc.get("operating_point") or {}).get("conf") or {}).get("value")
+            if isinstance(conf_val, (int, float)):
+                confs.append(float(conf_val))
+        else:
+            unvalidated.append(str(d))
+            all_validated = False
+
+    if all_validated and refs:
+        on_disk = VALIDATED_HELD_OUT if VALIDATED_HELD_OUT in refs else VALIDATED_REVIEW_CONFIRMED
+    else:
+        on_disk = VALIDATED_FALSE
+
+    # Floor: the asserted string may only lower the on-disk result (prefer on-disk).
+    validated = on_disk if _validity_rank(asserted) >= _validity_rank(on_disk) else VALIDATED_FALSE
+    return {
+        "validated": validated,
+        "on_disk_validated": all_validated and bool(refs),
+        "missing_sidecars": missing,
+        "unvalidated_buckets": unvalidated,
+        "conf": (confs[0] if len(set(confs)) == 1 else None),
+        "per_bucket": per_bucket,
+    }
+
+
+# --- the delivery gate (one refuse-or-stamp check shared by every phenotype-delivery door) ---
+
+@dataclass(frozen=True)
+class DeliveryGateResult:
+    """Outcome of the delivery gate: whether the deliverable may be written, and how to stamp it."""
+
+    ok: bool
+    unvalidated: tuple[str, ...]  # dimensions whose validity is not a shippable reference
+    stamp: dict[str, str]  # per-dimension validity to stamp onto the deliverable
+    reason: str = ""  # generic refusal message when not ok
+
+
+def check_delivery_gate(
+    flags: dict[str, str | None], *, acknowledge_unvalidated: bool = False,
+) -> DeliveryGateResult:
+    """Refuse-or-stamp a phenotype delivery against the validity of each dimension it rests on.
+
+    ``flags`` maps each measurement dimension the deliverable depends on (e.g. ``"operating_point"``,
+    ``"classifier"``, or a single ``"measurement"`` for a continuous/ordinal trait with no conf
+    op-point) to its RECONCILED validity state — a shippable reference (``validated_held_out`` /
+    ``review_confirmed``) or anything else (treated as unvalidated). Read the on-disk state before
+    calling; the gate does not trust a caller-asserted string on its own.
+
+    Every dimension validated -> the gate passes. Any not -> it refuses UNLESS
+    ``acknowledge_unvalidated=True``, the escape hatch that ships a clearly-flagged provisional
+    deliverable and stamps every unvalidated dimension ``false`` so the un-trustworthiness travels
+    downstream. The refusal targets a *silent bare number*, not an honestly-acknowledged provisional
+    CSV. ``stamp`` records, per dimension, the reference it cleared (or ``false``).
+    """
+    stamp = {name: (st if st in VALIDATED_SHIPPABLE else VALIDATED_FALSE)
+             for name, st in flags.items()}
+    unvalidated = tuple(name for name, st in flags.items() if st not in VALIDATED_SHIPPABLE)
+    if unvalidated and not acknowledge_unvalidated:
+        return DeliveryGateResult(
+            ok=False, unvalidated=unvalidated, stamp=stamp,
+            reason=(
+                f"delivery refused: unvalidated measurement dimension(s) {list(unvalidated)}. A "
+                "phenotype deliverable requires each dimension validated against a reference sized to "
+                "the trait (held-out GT or a breeder-confirmed output sample); validate it, or pass "
+                "acknowledge_unvalidated=True to write a clearly-flagged provisional result stamped "
+                "validated=false."
+            ),
+        )
+    return DeliveryGateResult(ok=True, unvalidated=unvalidated, stamp=stamp)
 
 
 # --- validation (mirrors composer.validate_model_spec: returns list[str], empty = valid) ---
