@@ -143,9 +143,8 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   prioritize the next review batch by active-learning score.
 
 **Not built yet (contributions/experiments welcome):**
-- 3D point clouds (LiDAR / SfM). A `pointnet++` backbone is included as a plain
-  importable module but there is no point-cloud dataset/loader or task type, so it is
-  not trainable through the normal pipeline yet. (Multispectral / hyperspectral / depth
+- 3D point clouds (LiDAR / SfM). There is no point-cloud dataset/loader or task type,
+  so this is new work rather than a config flag. (Multispectral / hyperspectral / depth
   as additional 2D channels *is* now supported via the N-channel path above.)
 - Temporal / relational pipeline patterns in general. The one temporal trait built today is
   **catkin bloom phenology** (per-plant elongated-fraction 05/50/95-per-date milestones — see
