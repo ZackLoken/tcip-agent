@@ -19,6 +19,65 @@ def _compute_sha256(filepath: str | Path) -> str:
     return h.hexdigest()
 
 
+# Process-level cache so a multi-GB checkpoint is hashed once per run, not once per delivery
+# call (G7). Keyed by (resolved path, size, mtime) so an edited/replaced file re-hashes.
+_SHA_CACHE: dict[tuple[str, int, int], str] = {}
+
+
+def checkpoint_sha256(filepath: str | Path) -> str | None:
+    """Cached SHA-256 of a checkpoint file (``None`` if missing).
+
+    Readers of a delivered phenotype resolve the producing checkpoint's identity through here so
+    they carry its content hash without re-hashing the file on every call.
+    """
+    p = Path(filepath)
+    if not p.is_file():
+        return None
+    st = p.stat()
+    key = (str(p.resolve()), st.st_size, int(st.st_mtime))
+    sha = _SHA_CACHE.get(key)
+    if sha is None:
+        sha = _compute_sha256(p)
+        _SHA_CACHE[key] = sha
+    return sha
+
+
+def resolve_model_identity(
+    checkpoint_path: str | Path,
+    *,
+    experiment_id: str | None = None,
+    project_path: str | None = None,
+) -> dict:
+    """Best-effort producing-model identity for a checkpoint: ``{checkpoint, sha256, experiment_id}``.
+
+    ``sha256`` is the cached content hash (never re-hashed per call). ``experiment_id`` is the
+    caller's if given, else recovered from a registry entry whose ``checkpoint_path`` matches
+    (via its ``experiment:<id>`` tag). A raw/foreign checkpoint legitimately has no experiment —
+    the identity records the sha and leaves ``experiment_id`` ``None`` rather than failing.
+    """
+    from tcip_mcp.project_paths import project_root
+
+    ckpt = Path(checkpoint_path)
+    sha = checkpoint_sha256(ckpt)
+    exp = experiment_id
+    if exp is None and sha is not None:
+        try:
+            registry = ModelRegistry(project_path or str(project_root()))
+            for m in registry.list_models():
+                if m.get("sha256") == sha or (
+                    m.get("checkpoint_path") and Path(m["checkpoint_path"]) == ckpt
+                ):
+                    for tag in m.get("tags", []):
+                        if isinstance(tag, str) and tag.startswith("experiment:"):
+                            exp = tag.split(":", 1)[1]
+                            break
+                    if exp:
+                        break
+        except Exception:
+            exp = None
+    return {"checkpoint": ckpt.stem, "sha256": sha, "experiment_id": exp}
+
+
 class ModelRegistry:
     """Simple file-based model registry in .tcip/models/."""
 
