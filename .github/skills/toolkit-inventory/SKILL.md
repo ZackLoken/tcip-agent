@@ -1,0 +1,124 @@
+---
+name: toolkit-inventory
+description: "The composition vocabulary for the whole library — the string names build_detector / build_loss / build_model accept, the heads/necks/backbones you import, the derivations that size a model to the data, the ctx craft library a train(ctx) loop composes, the two bespoke seams (model_source / training_source / dataset_source), and the auto-label proposal-engine and active-learning scorer registries you can register your own into. Load when composing an nn.Module or train(ctx) loop, reaching for a building block and unsure of its name, wiring a bespoke dataset/proposer/scorer, or asking 'what pieces already exist so I don't rebuild one'."
+---
+
+# Toolkit inventory — the pieces to compose
+
+**This is a library you compose, not a menu you pick from.** The platform hands you plain
+importable PyTorch primitives, a few name→builder factories, and open seams for the parts you
+write yourself. The tables below inventory what exists **so nothing is rediscovered or rebuilt** —
+they are a map, not a fixed set. Adding a primitive (a new head, a new proposal engine, a new
+acquisition scorer) is expected; it extends the map, it does not close it. For *how to choose a
+pipeline shape* and the design philosophy see the `pipeline-design` skill; this skill is the
+name-and-location reference that skill's import block points at.
+
+`build_detector` and `build_loss` already self-document at runtime — an unknown name raises
+`KeyError: Unknown … Available: [...]`. The heads, necks, backbones, and ctx methods have **no**
+such factory, so this skill is where their names live.
+
+## Model building blocks (import and compose inside your own `nn.Module`)
+
+| Piece | Where | Names / notes |
+|-------|-------|---------------|
+| `build_detector(name, adapter, num_classes, **kw)` | `pipelines.components.detectors` | names: `faster_rcnn`, `fcos`, `retinanet`, `mask_rcnn`. kwargs are per-trait, not pinned: `aspect_ratios`, `anchor_base_size`, `min_size`/`max_size`, `num_levels`, `featmap_names`. Wrap a backbone+neck in `BackboneNeckAdapter` first. Unknown name → `KeyError` listing the available set. |
+| `build_loss(name, ...)` | `pipelines.components.losses` | names: `cross_entropy`, `weighted_ce`, `focal`, `smooth_l1`, `huber`, `bce`, `dice`, `giou`, `corn`, `coral`. Compose terms with `+` (e.g. `"bce+dice"` → `CombinedLoss`). A weightable loss (`cross_entropy`/`weighted_ce`/`focal`) auto-injects inverse-frequency weights when given `class_distribution`. `compute_class_weights` is the standalone weigher. |
+| Heads (no factory — import the class) | `pipelines.components.heads` | `ClassificationHead` (task `classification`, default loss `cross_entropy`), `OrdinalHead` (task `ordinal`, `corn`), `RegressionHead` (task `regression`, `smooth_l1`), `SemanticSegHead` (task `semantic_seg`, blends CE+Dice internally). Each implements `forward` / `compute_loss` / `decode`. |
+| Necks (no factory — import the class) | `pipelines.components.necks` | `FPN`, `PAN` (both take `add_p2` for a finer level), `IdentityNeck` (pass-through), `GlobalAvgPoolNeck` (→ flat `[B, C]` vector for classification/ordinal/regression heads). |
+| Backbones | `pipelines.components.backbones` | `BackboneWrapper` (uniform multi-scale interface, stage freezing), `_build_timm_backbone` (timm, `features_only`), `_build_tv_resnet` (torchvision fallback). `in_chans` threads through for N-channel input. |
+
+**`task` strings** (the `model_source["task"]` value; also the `build_dataset` task keys and the
+head `task_type`s): `detection`, `instance_seg`, `semantic_seg`, `classification`, `ordinal`,
+`regression`. They route measurement/eval and dataset loading — a genuinely new task uses the
+`dataset_source` seam below.
+
+## Deriving a model to the data in hand (derive, don't pin)
+
+| Derivation | Where | Returns |
+|------------|-------|---------|
+| `probe_channels(image_path)` | `pipelines.derivations` | band count of *this* raster (RGB→3, N-band GeoTIFF→N) — feed `in_chans`. |
+| `num_classes_from_distribution(dist)` | `pipelines.derivations` | `max class id + 1` from *this* label set. |
+| `gt_aspect_ratios(boxes)` | `pipelines.derivations` | anchor aspect ratios spanning *this* dataset's GT box shapes (elongated organs a default `(0.5,1,2)` can't match). |
+| `derive_cross_tile_nms(gt_boxes_per_image)` | `pipelines.derivations` | cross-tile NMS IoU from the GT neighbor-overlap tail, or `None` (underivable → honest placeholder). |
+
+`gt_aspect_ratios` is **derive → pass**, never auto-injected into `build_detector` (that would
+re-pin the method):
+
+```python
+from tcip_mcp.pipelines.derivations import gt_aspect_ratios
+from tcip_mcp.pipelines.components.detectors import build_detector
+ratios = gt_aspect_ratios([(b.w, b.h) for b in gt_boxes])   # this dataset's shapes
+model = build_detector("faster_rcnn", adapter, num_classes=n, aspect_ratios=tuple(ratios))
+```
+
+Every data-sounding `derived_from` label a value carries must map to a real implementation in
+`DERIVATION_IMPLEMENTATIONS` (`pipelines.derivations`) — `test_provenance_honesty` enforces it, so
+a derivation label can never again be stamped without a computation behind it.
+
+## The three bespoke seams (parallel; each imported, never `exec`'d)
+
+| Seam | Where | What you supply |
+|------|-------|-----------------|
+| `model_source` | `pipelines.model_build.build_model` | `{"builder": "my_module:build_net", "builder_kwargs": {...}, "source_files": [...], "task": "detection", "in_chans": 3}` — your `nn.Module`. `preflight_config(smoke=True)` (run by `launch_training`) builds + smokes it at the resolved dims before the training thread spawns. |
+| `training_source` | `pipelines.training.envelope` | a dotted `train(ctx)` — your loop, handed the `TrainContext` craft library below. |
+| `dataset_source` | `pipelines.data.datasets.build_from_dataset_source` | `{"builder": "my_module:build_ds", "builder_kwargs": {...}, "source_files": [...], "task": "..."}` — a bespoke `Dataset` for a task the known loaders don't cover. Mirrors `model_source`; the known loaders stay the default. |
+
+The `model_contract` (`check_model_contract` / `overfit_check`) states the *only* model-side
+contract — the measurement boundary: the model must train (finite-gradient loss) and emit inference
+output the library scorers consume.
+
+## The `ctx` craft library (`TrainContext`, `pipelines.training.envelope`)
+
+A hand-rolled `train(ctx)` composes these instead of reimplementing them. `ctx.default_train()` is
+**one convenience**, not a requirement.
+
+| Group | Methods |
+|-------|---------|
+| model / correctness | `ctx.build_model`, `ctx.check_contract`, `ctx.overfit_check` (voluntary diagnostic, non-gating), `ctx.default_train` |
+| data | `ctx.build_dataset`, `ctx.tiled_dataset`, `ctx.task_collate`, `ctx.build_sampler`, `ctx.build_augmentation`, `ctx.auto_train_val` |
+| optimize / schedule / freeze | `ctx.build_optimizer`, `ctx.build_scheduler`, `ctx.apply_stage_freeze` (progressive-unfreeze + monotonic guard — the primitive the default trainer uses), `ctx.compute_lr_scale`, `ctx.set_seed`, `ctx.evaluate`, `ctx.compute_class_weights` |
+| measurement | `ctx.calibrate` (resolve a trait's operating point from record sweeps — the derived, held-out-validated point), `ctx.mask_geometry`, `ctx.instance_geometries` |
+| audited sinks | `ctx.log_metrics`, `ctx.save_checkpoint` (stamps kind + `model_source` + `experiment_id`), `ctx.record_artifact`, `ctx.should_cancel` |
+
+Route metrics and checkpoints through the sinks and the run stays audited, immutably versioned, and
+provenance-snapshotted no matter what the loop does.
+
+## Auto-labeling — the proposal-engine registry (`pipelines.proposal`)
+
+An auto-label engine turns an image into candidate shapes for a human to review. The seam is as
+open as `model_source`: name a built-in or bring your own by dotted `module:factory`, so you can
+wire, trial, and compare techniques and deduce which serves a task best by how well each engine's
+high-conf proposals survive breeder review.
+
+| Piece | Role |
+|-------|------|
+| `Proposer` protocol | `propose(image)` → whole-image candidates; `segment(image, points/box)` → one prompted mask. Implement either. |
+| `register_proposal_engine(name, engine)` | register your engine so `engine=<name>` resolves to it. |
+| `resolve_proposer(engine)` / `available_engines()` | resolve a built-in name **or** a dotted `module:factory`; list the built-ins. |
+| `SamProposer` (`"sam"`) | the built-in SAM2 reference engine; its stability / predicted-IoU signals ride under `engine_meta`. SAM ships as the runnable example; no engine is privileged. |
+
+Candidates use a neutral schema (`candidate_id` / `bbox` / `area` / `polygon` / `score` / `engine`
+/ `engine_meta`) so the shared review/staging path stays method-agnostic.
+
+## Active learning — the scorer registry (`pipelines.active_learning.scorer`)
+
+An acquisition function is a capability, not a fixed menu — scorers resolve through a dict registry
+you can extend rather than a welded `if/elif`.
+
+| Piece | Role |
+|-------|------|
+| `BaseScorer` | `score(image_paths, model, device)` → `(path, score)` pairs, descending. |
+| `SCORER_REGISTRY` / `register_scorer(name, factory)` | built-ins: `uncertainty`, `diversity`, `combined`; register your own (margin, least-confidence, …) under a name. |
+| `resolve_scorer(method, task)` | resolve by name; an unregistered name falls back to `combined`. |
+
+`require_composed_detector` (`active_learning.helpers`) is the honest guard the logit-reading
+scorers use — it returns an error rather than reading logits off a non-`nn.Module` model, and
+`confidence_triage` is the kind-agnostic fallback.
+
+## When the map runs out
+
+If no existing piece fits, **write the primitive** — a new head, a bespoke `train(ctx)`, a second
+proposal engine, a novel acquisition scorer — and register or import it. When the plain blocks and
+your own primitives both plateau on a trait, research the literature (see `cv-research`) and prove
+the new method beats the baseline **on the measured phenotype** before trusting it. Capture what you
+built in a `project_retrospective` so the next session finds it on the map.
