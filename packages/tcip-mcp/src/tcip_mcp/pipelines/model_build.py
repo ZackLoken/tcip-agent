@@ -72,6 +72,36 @@ def build_model(config_or_ckpt: dict) -> Any:
     raise ValueError("Config has no 'model_source'.")
 
 
+def resolve_contract_dims(config: dict, task: str) -> dict:
+    """Resolve the ``(in_chans, num_classes, img_size)`` the smoke contract must forward at.
+
+    Read from the same config the builder reads, never the contract's tiny 64px default: a model
+    with a minimum-spatial-size assumption must be smoked at the size it will actually see, or a
+    valid model false-fails. ``img_size`` is the tile edge when detection tiling is on (the real
+    training input), else a safe non-tiny fallback that clears typical stride-32 backbones.
+    ``in_chans`` / ``num_classes`` come from ``model_source`` / ``builder_kwargs`` with a fallback —
+    resolved, not invented-and-hard-failed (an absent count falls back, it never blocks the smoke).
+    """
+    ms = config.get(MODEL_SOURCE_KEY) or {}
+    bk = ms.get("builder_kwargs") if isinstance(ms, dict) else None
+    bk = bk if isinstance(bk, dict) else {}
+
+    def _int(value: Any, fallback: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    in_chans = _int(ms.get("in_chans", bk.get("in_chans")), 3)
+    num_classes = _int(bk.get("num_classes"), 1)
+
+    img_size = 224  # safe non-tiny default (7x7 at stride 32); overridden by the real tile edge below
+    tiling = (config.get("data") or {}).get("tiling")
+    if task == "detection" and isinstance(tiling, dict) and tiling.get("enabled", True) and tiling.get("tile_size"):
+        img_size = _int(tiling.get("tile_size"), img_size)
+    return {"in_chans": in_chans, "num_classes": num_classes, "img_size": img_size}
+
+
 # The checkout's commit can't change within a process — resolve it once (a subprocess per training
 # run is wasteful and its latency widens audit races between concurrent runs). Sentinel: unset.
 _GIT_COMMIT: str | None = ""
@@ -122,12 +152,12 @@ def capture_env() -> dict:
 
 
 def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
-    """Copy a bespoke run's model + training source into ``<exp>/model_src/`` with sha256 + env.
+    """Copy a bespoke run's model + training + dataset source into ``<exp>/model_src/`` with sha256 + env.
 
-    Called by the training envelope when ``model_source`` / ``training_source`` is set. Records the
-    agent-written source files (``model_source.source_files`` + the ``training_source`` module file)
-    so the run is reproducible from an importable builder — never ``exec``. Best-effort: a missing
-    file is skipped, and any failure returns without raising (provenance must not sink a run).
+    Called by the training envelope when ``model_source`` / ``training_source`` / ``data.dataset_source``
+    is set. Records the agent-written source files (each source's ``source_files`` + the builder/loop
+    module files) so the run is reproducible from importable builders — never ``exec``. Best-effort: a
+    missing file is skipped, and any failure returns without raising (provenance must not sink a run).
     Returns the manifest, or ``None`` when there is nothing bespoke to snapshot.
     """
     import hashlib
@@ -137,7 +167,8 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
 
     model_source = config.get(MODEL_SOURCE_KEY)
     training_source = config.get("training_source")
-    if not model_source and not training_source:
+    dataset_source = (config.get("data") or {}).get("dataset_source")
+    if not model_source and not training_source and not dataset_source:
         return None
 
     files: list[str] = []
@@ -145,8 +176,12 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     if isinstance(model_source, dict):
         builder = model_source.get("builder")
         files.extend(model_source.get("source_files") or [])
-    # Snapshot the agent's training-loop module too (best-effort — resolve mod:fn -> module file).
-    for dotted in (builder, training_source):
+    dataset_builder = None
+    if isinstance(dataset_source, dict):
+        dataset_builder = dataset_source.get("builder")
+        files.extend(dataset_source.get("source_files") or [])
+    # Snapshot the agent's training-loop + dataset modules too (best-effort — resolve mod:fn -> file).
+    for dotted in (builder, training_source, dataset_builder):
         if isinstance(dotted, str) and dotted:
             mod_name = dotted.partition(":")[0] if ":" in dotted else dotted.rpartition(".")[0]
             try:
@@ -175,6 +210,7 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     manifest = {
         "builder": builder,
         "training_source": training_source,
+        "dataset_builder": dataset_builder,
         "files": entries,
         "env": capture_env(),
         "seed": config.get("seed", config.get("training", {}).get("seed")),
