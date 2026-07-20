@@ -60,10 +60,14 @@ next steps do. After it, `inspect_project` reports the capture dates and image c
 
 ## 3. Translate the goal into a trait, task, and `classes.json`
 
-Turn the sentence into a pipeline shape (see `.github/skills/pipeline-design`):
+Turn the breeder's sentence into a trait and the classes they distinguish. The CV task is yours to
+derive from the data, not from the phrasing (see `.github/skills/pipeline-design`):
 
-- **Task**: "detect the individual catkins" → object **detection** (`detect`). Dense
-  small objects → detection; whole-region measurement may be segmentation.
+- **Task**: the task string is an input to `build_dataset`, which routes a known set; a bespoke
+  `dataset_source` is the seam for a task it does not route. A breeder saying "detect the
+  individual catkins" names the *object* and the *phenotype* — the catkin, and a count — not the
+  CV task. Which task measures that is yours to derive from object scale, separability, and what
+  the trait actually counts; their verb is vocabulary, not the answer.
 - **Trait / annotation campaign**: the `<trait>` path segment under `annotations/`
   (e.g. `catkin`). Multiple campaigns can coexist (`catkin`, `bush`).
 - **Classes**: write `classes.json` for what the breeder actually distinguishes. Keep it
