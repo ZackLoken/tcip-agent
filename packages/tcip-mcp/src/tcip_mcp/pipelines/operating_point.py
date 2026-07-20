@@ -153,7 +153,7 @@ def resolve_operating_point(
 
     # --- conf: the count operating point (calibration) ---
     if calibration_records:
-        tol = 0.5 * gt_class_avg_size(calibration_records)  # derived tolerance (half class avg size)
+        tol = trait.localization_tolerance_frac * gt_class_avg_size(calibration_records)  # spec owns the "half"
         cal_sweep = sweep_operating_point(calibration_records, tolerance=tol)
         conf = pick_count_unbiased(cal_sweep) if trait.count_objective == "count_unbiased" else pick_f1_max(cal_sweep)
         conf = DEFAULT_CONF if conf is None else conf
@@ -168,7 +168,7 @@ def resolve_operating_point(
             hold_ids = {r["image_id"] for r in holdout_records if "image_id" in r}
             disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
             censored = censored or _conf_censored(holdout_records, DEFAULT_CONF)
-            hold_tol = 0.5 * gt_class_avg_size(holdout_records)
+            hold_tol = trait.localization_tolerance_frac * gt_class_avg_size(holdout_records)
             hold_sweep = sweep_operating_point(holdout_records, tolerance=hold_tol)
             hb = count_bias_at(hold_sweep, conf)  # bias on the holdout at the calibration-chosen conf
             passed = (disjoint and not censored and hb is not None
