@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 
 import { tuningApi, type Sweep, type SweepDetail } from "@/api/tuning";
-import { buildOptunaSpace, DEFAULT_HPO_PARAMS, parseNumList, type HpoParam } from "@/tabs/hpoSpace";
+import {
+  buildSearchSpace,
+  DEFAULT_HPO_PARAMS,
+  parseNumList,
+  SCHEDULERS,
+  SEARCH_ALGORITHMS,
+  type HpoParam,
+} from "@/tabs/hpoSpace";
 
 const DEFAULT_BASE = `{
   "model_source": {
@@ -19,7 +26,8 @@ export function TuningTab() {
   const [base, setBase] = useState(DEFAULT_BASE);
   const [params, setParams] = useState<HpoParam[]>(DEFAULT_HPO_PARAMS);
   const [nTrials, setNTrials] = useState(5);
-  const [direction, setDirection] = useState<"maximize" | "minimize">("maximize");
+  const [searchAlg, setSearchAlg] = useState<string>("random");
+  const [scheduler, setScheduler] = useState<string>("asha");
   const [outputDir, setOutputDir] = useState("");
 
   const [sweeps, setSweeps] = useState<Sweep[]>([]);
@@ -75,7 +83,7 @@ export function TuningTab() {
 
   async function launch() {
     setLaunchMsg(null);
-    const space = buildOptunaSpace(params);
+    const space = buildSearchSpace(params);
     if (Object.keys(space).length === 0) {
       setLaunchMsg({ text: "Enable at least one parameter to sweep.", ok: false });
       return;
@@ -86,7 +94,8 @@ export function TuningTab() {
         param_space: space,
         n_trials: nTrials,
         output_dir: outputDir,
-        direction,
+        search_alg: searchAlg,
+        scheduler,
       });
       if (resp.sweep_id) {
         setLaunchMsg({ text: `Launched ${resp.sweep_id}`, ok: true });
@@ -113,10 +122,8 @@ export function TuningTab() {
           spellCheck={false}
         />
 
-        {/* Structured Optuna search space */}
-        <label className="tcip-label mb-1">
-          Search space — Optuna (TPE + ASHA) trains each trial
-        </label>
+        {/* Structured search space (fed to Ray Tune) */}
+        <label className="tcip-label mb-1">Search space — each trial trains for real</label>
         <div className="tcip-panel p-2 mb-3">
           {params.map((p) => (
             <div key={p.key} className="py-1 border-b border-tcip-border last:border-0">
@@ -212,14 +219,31 @@ export function TuningTab() {
             />
           </label>
           <label className="flex flex-col gap-1">
-            Direction
+            Search algorithm
             <select
               className="tcip-select w-full"
-              value={direction}
-              onChange={(e) => setDirection(e.target.value as "maximize" | "minimize")}
+              value={searchAlg}
+              onChange={(e) => setSearchAlg(e.target.value)}
             >
-              <option value="maximize">Maximize</option>
-              <option value="minimize">Minimize</option>
+              {SEARCH_ALGORITHMS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            Scheduler
+            <select
+              className="tcip-select w-full"
+              value={scheduler}
+              onChange={(e) => setScheduler(e.target.value)}
+            >
+              {SCHEDULERS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
           </label>
         </div>
