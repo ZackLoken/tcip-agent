@@ -54,6 +54,14 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
     Returns a small ratio set covering the p10..p90 of GT box aspect ratios (plus 1.0), so anchors
     match the actual object shapes in this dataset (e.g. elongated catkins) rather than a fixed
     (0.5, 1, 2). ``class_distribution_boxes`` is a list of ``(w, h)`` in pixels.
+
+    Wiring (derive -> pass; the agent's builder path, never auto-injected into build_detector so a
+    method isn't re-pinned)::
+
+        from tcip_mcp.pipelines.derivations import gt_aspect_ratios
+        from tcip_mcp.pipelines.components.detectors import build_detector
+        ratios = gt_aspect_ratios([(b.w, b.h) for b in gt_boxes])   # this dataset's shapes
+        model = build_detector("faster_rcnn", num_classes=n, aspect_ratios=tuple(ratios))
     """
     import numpy as np
     ratios = [h / w for (w, h) in class_distribution_boxes if w > 0 and h > 0]
@@ -118,6 +126,7 @@ DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     "probed bands of": "tcip_mcp.pipelines.derivations.probe_channels",  # f-string prefix
     "max class id + 1 in the label set": "tcip_mcp.pipelines.derivations.num_classes_from_distribution",
     "count-unbiased center-match sweep": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
+    "count-unbiased center-match sweep over review verdicts": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
     "GT neighbor-IoU distribution (p99 + margin)": "tcip_mcp.pipelines.derivations.derive_cross_tile_nms",
     "~1.5x p99 GT objects/image": "tcip_mcp.pipelines.operating_point._max_dets_from_density",
     "model imgsz / persisted training geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
