@@ -39,10 +39,16 @@ flower elongation/receptivity call.
 > mapping in `phenology.plant_milestones` if they rule otherwise. `elongation_onset_date`
 > (first date any elongation appears) remains a **separate** helper, not the delivered trait.
 
-**Not a count-of-peak, not a sigmoid fit.** Do not normalize catkin *count* to the season
-peak and call the crossings bloom — that is an abundance signal and a different (wrong)
-trait. There is no wanted abundance-phenology trait; if a stakeholder asks for one, treat
-it as a new, separately-named trait and get the definition in writing first.
+**Not a count-of-peak.** Do not normalize catkin *count* to the season peak and call the
+crossings bloom — that is an abundance signal and a different (wrong) trait. There is no
+wanted abundance-phenology trait; if a stakeholder asks for one, treat it as a new,
+separately-named trait and get the definition in writing first.
+
+This bans the *quantity*, not an estimator. The crossing is defined on the positive
+fraction; how you estimate the date at which that fraction reaches a level — the canonical
+implementation interpolates linearly between neighbouring capture dates — is a method
+question, and a sparse or irregular capture cadence is exactly the case where it deserves
+thought rather than a default.
 
 ## The measurement-integrity guard
 
