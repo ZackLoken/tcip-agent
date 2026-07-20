@@ -35,7 +35,7 @@ Examples use real `crops.yml` trait names — verify any trait against `crops.ym
 | Date (bloom) | Elongated-fraction crossing | `catkin_50per_date` → date the elongated fraction crosses 50% (see `phenology` skill) |
 | Ordinal | Mode | `efb_damage` → most common rating |
 | Continuous | Mean | `fruit_diameter` → average across images |
-| Area | Sum / 3D model | `plant_surface_area` → planimetric crown area (3D canopy model; not a raw 2D pixel sum) |
+| Area | Sum / 3D model | `plant_surface_area` → planimetric crown area from a 3D canopy model — **out of current build scope** (3D LiDAR/SfM is not built today; see CLAUDE.md Scope). A validated 2D mask yields a calibrated pixel area, not this trait |
 
 ## Tools
 
