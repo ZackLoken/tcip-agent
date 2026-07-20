@@ -41,7 +41,7 @@ Examples use real `crops.yml` trait names — verify any trait against `crops.ym
 
 | Tool | Purpose |
 |------|---------|
-| logged `scripts/` script | Produces the Per-Plant CSV Schema above by chaining `launch_training` + `run_inference` then the importable postprocessing libs `aggregate_per_plant` / `export_aggregated_csv` — see `pipeline-design` skill for the chaining pattern |
+| logged `scripts/` script | Produces the Per-Plant CSV Schema above by chaining `launch_training` + `run_inference` then the importable postprocessing libs `aggregate_per_plant` / `export_aggregated_csv` — see `pipeline-design` skill for the chaining mechanics |
 | `export_predictions` | Export predictions as per-image JSON (COCO-shaped). A bucket (`output_dir`) with review verdicts is immutable — the export redirects to a fresh `<dir>@r2` bucket (see the response's `output_dir`); `overwrite=True` forces in-place but is refused when verdicts exist |
 | `run_inference` | Run batch inference on images |
 | `compute_phenology` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping — its own column schema; see `phenology` skill |
