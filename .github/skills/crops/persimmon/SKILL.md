@@ -133,8 +133,9 @@ specific difficulties are:
 ## Measurement integrity
 
 Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
-against expert-scored ground truth before any result — see the catkin-elongation cautionary tale
-there). Persimmon-specific traps:
+against a reference sized to the trait — GT annotations, or a breeder-confirmed sample of the
+model's own outputs (review-confirmation) — before any result, not dense GT for every trait; see
+the catkin-elongation cautionary tale there). Persimmon-specific traps:
 
 - `fruit_ripe_50per_date` — American persimmon loses astringency only on **softening**
   (often post-frost), which **lags surface color**. An orange-pixel threshold calls hard,
