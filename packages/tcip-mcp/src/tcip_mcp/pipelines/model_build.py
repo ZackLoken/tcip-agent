@@ -72,16 +72,52 @@ def build_model(config_or_ckpt: dict) -> Any:
     raise ValueError("Config has no 'model_source'.")
 
 
+# The checkout's commit can't change within a process — resolve it once (a subprocess per training
+# run is wasteful and its latency widens audit races between concurrent runs). Sentinel: unset.
+_GIT_COMMIT: str | None = ""
+
+
+def _tcip_git_commit() -> str | None:
+    """Best-effort short git commit of the tcip-mcp checkout (``None`` if unavailable), cached."""
+    global _GIT_COMMIT
+    if _GIT_COMMIT != "":
+        return _GIT_COMMIT
+    import subprocess
+    from pathlib import Path
+
+    try:
+        repo = Path(__file__).resolve().parents[4]
+        out = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        _GIT_COMMIT = (out.stdout.strip() or None) if out.returncode == 0 else None
+    except Exception:
+        _GIT_COMMIT = None
+    return _GIT_COMMIT
+
+
 def capture_env() -> dict:
-    """Best-effort snapshot of the library versions a run's reproducibility depends on."""
+    """Best-effort snapshot of the code + library versions a run's reproducibility depends on.
+
+    Records the platform git commit (the decisive code) alongside the ML library versions; each
+    field is null rather than fatal when unresolvable, so provenance never sinks a run.
+    """
     import sys
 
-    env: dict[str, Any] = {"python": sys.version.split()[0]}
-    for name in ("torch", "torchvision", "timm"):
+    env: dict[str, Any] = {"python": sys.version.split()[0], "tcip_git_commit": _tcip_git_commit()}
+    for name in ("torch", "torchvision", "timm", "numpy"):
         try:
             env[name] = getattr(__import__(name), "__version__", "unknown")
         except Exception:
             env[name] = None
+    # CUDA/driver fingerprint — a run's numerics depend on it; null on a CPU-only or torch-less env.
+    try:
+        import torch
+
+        env["cuda"] = torch.version.cuda if torch.cuda.is_available() else None
+    except Exception:
+        env["cuda"] = None
     return env
 
 
@@ -147,16 +183,20 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     return manifest
 
 
-def stamp_model_ref(payload: dict, config: dict) -> dict:
-    """Stamp a checkpoint payload with its ``model_source`` reference + kind.
+def stamp_model_ref(payload: dict, config: dict, *, experiment_id: str | None = None) -> dict:
+    """Stamp a checkpoint payload with its ``model_source`` reference, kind, and experiment id.
 
     So a hand-rolled loop's checkpoint (via ``ctx.save_checkpoint``) and the default trainer's are
-    both reproducible and kind-routable at inference. Uses ``setdefault`` — an explicit value the
-    caller already put in ``payload`` wins.
+    both reproducible, kind-routable, and traceable back to the run that produced them. Uses
+    ``setdefault`` — an explicit value the caller already put in ``payload`` wins. ``experiment_id``
+    is optional: a raw/foreign checkpoint legitimately has none, so it is stamped only when known.
     """
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 
     if config.get(MODEL_SOURCE_KEY):
         payload.setdefault(MODEL_SOURCE_KEY, config[MODEL_SOURCE_KEY])
         payload.setdefault("kind", KIND_TCIP_MODULE)
+    eid = experiment_id if experiment_id is not None else config.get("experiment_id")
+    if eid is not None:
+        payload.setdefault("experiment_id", eid)
     return payload
