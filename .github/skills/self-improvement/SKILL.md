@@ -38,9 +38,27 @@ than the category.
 At the end of substantial work (or when asked for a "learning review"), read the journal plus
 the session and draft **concrete, reviewable artifacts**, not vague notes:
 
-- **New or updated skill files** (`.github/skills/<name>/SKILL.md`) — the primary output. A
-  skill is the right home for a repeated pattern, a domain definition, or an inventory of
-  existing machinery so no one re-discovers it.
+- **A crop-level constraint** (`.github/skills/crops/<crop>/SKILL.md`) — the primary output. A
+  physical or biological limit you observed and can evidence: an organ unresolvable below some
+  GSD, a stage only distinguishable in a window. State it as a constraint with its evidence, the
+  way `crop-science` does, and flag it for expert confirmation rather than hardening it.
+- **A trait-semantics question for the breeder** — into that crop's "Needs expert confirmation"
+  ledger; on confirmation it belongs in `crops.yml` / `TraitSpec`, which the expert owns.
+- **A `CLAUDE.md` diff** — for a behavior/invariant that should govern every session. Proposed
+  as a diff; **never applied silently** (CLAUDE.md is governance).
+- **A tool / architecture proposal** — when a capability should be lifted from a web route or a
+  script into a shared `pipelines/` module and an MCP tool the agent can compose. Describe the
+  seam; the owner decides whether it's worth the build.
+- **Dataset evidence stays with its dataset** (`.tcip/`, via `project_retrospective`): measured
+  object scale, capture cadence, class imbalance, where the operating point resolved and why.
+  Machine-local is correct here — it describes one dataset, and the next one re-derives rather
+  than inherits.
+
+What must **not** go in a skill: a reusable pipeline shape, or a hand-maintained inventory of
+existing machinery. A pipeline shape recorded here becomes a recipe for a problem it was never
+measured against — the ceiling this platform exists to avoid. An inventory goes stale the first
+time the source moves. Both were how this skill's output grew a ceiling; the destinations above
+are unchanged, the permitted *shape* is what narrowed.
 - **A `CLAUDE.md` diff** — for a behavior/invariant that should govern every session. Proposed
   as a diff; **never applied silently** (CLAUDE.md is governance).
 - **A tool / architecture proposal** — when a capability should be lifted from a web route or a
