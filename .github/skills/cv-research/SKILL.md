@@ -100,8 +100,11 @@ The discipline:
    splits, same eval, same seed policy. Confounded comparisons prove nothing.
 3. **Measure on the phenotype, not a surrogate.** A better mAP that does not move the *measured
    trait* (the count, the date, the dimensional measurement the breeder scores) is not an
-   improvement for this platform — it is a benchmark artifact. Validate against expert-scored ground
-   truth, the same bar every measurement faces. This is the **measurement-integrity invariant**
+   improvement for this platform — it is a benchmark artifact. Validate against a reference sized to
+   the trait — GT annotations, or a breeder-confirmed sample of the model's own outputs
+   (review-confirmation), not dense GT for every trait — the same bar every measurement faces (either
+   reference passes the identical disjoint-split + count-bias gate). This is the
+   **measurement-integrity invariant**
    (CLAUDE.md): a confident, precise, wrong phenotype is the worst thing this platform can produce,
    and a new technique gets no exemption from that bar.
 4. **Keep it only if it wins, and say so honestly.** If it ties or loses, discard it and record why
