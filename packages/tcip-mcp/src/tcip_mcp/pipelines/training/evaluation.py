@@ -309,7 +309,7 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     spec = get_trait(trait_name)
     if spec.localization == CENTER_MATCH:
         return {"kind": "center_match",
-                "tolerance": float(0.5 * gt_class_avg_size(per_image, class_id=class_id)),
+                "tolerance": float(spec.localization_tolerance_frac * gt_class_avg_size(per_image, class_id=class_id)),
                 "derived_from": f"{spec.localization_tolerance} over GT in hand", "trait": trait_name}
     return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
             "derived_from": f"trait localization={spec.localization}", "trait": trait_name}
