@@ -738,15 +738,52 @@ def _autoresolve_json_labels(kwargs: dict) -> None:
             "JSON first (scripts/migrate_labels_to_json.py). YOLO is import-only.")
 
 
+def _probe_num_channels(images_dir: str | Path | None, stems: list[str] | None,
+                        default: int = 3) -> int:
+    """Band count of ONE sample raster from ``images_dir`` (derive-don't-pin, not a pinned 3).
+
+    Probes a single image (guard: one sample, not every image) so a multi-band raster threads its
+    real channel count through ``in_chans`` instead of silently defaulting to RGB. Falls back to
+    ``default`` when no readable raster is found — an honest default, never a crash.
+    """
+    if not images_dir:
+        return default
+    images_dir = Path(images_dir)
+    sample: Path | None = None
+    for stem in (stems or []):
+        try:
+            sample = _find_image(images_dir, stem)
+            break
+        except FileNotFoundError:
+            continue
+    if sample is None:
+        for f in sorted(images_dir.iterdir()) if images_dir.is_dir() else []:
+            if f.suffix.lower() in IMAGE_EXTS:
+                sample = f
+                break
+    if sample is None:
+        return default
+    try:
+        from tcip_mcp.pipelines.derivations import probe_channels
+        return int(probe_channels(sample))
+    except Exception:
+        return default
+
+
 def build_dataset(task: str, **kwargs) -> BaseDataset:
     """Factory: build a dataset by task type.
 
     An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac,
     dedup_iou, skip_empty}``) wraps the detection dataset in a
     :class:`TiledDetectionDataset` (W3). Ignored for non-detection tasks.
+
+    ``num_channels`` is derived by probing one sample raster when the caller does not pin it, so a
+    multi-band input threads its real band count through ``in_chans`` instead of defaulting to RGB.
     """
     tiling = kwargs.pop("tiling", None)
-    num_channels = kwargs.pop("num_channels", 3)
+    num_channels = kwargs.pop("num_channels", None)
+    if num_channels is None:
+        num_channels = _probe_num_channels(kwargs.get("images_dir"), kwargs.get("stems"))
     cls = _DATASET_MAP.get(task)
     if cls is None:
         raise ValueError(f"Unknown task '{task}'. Available: {list(_DATASET_MAP.keys())}")
