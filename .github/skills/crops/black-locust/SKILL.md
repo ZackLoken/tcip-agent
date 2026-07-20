@@ -158,8 +158,10 @@ Mechanics live in the `annotation` skill; the crop-specific hard parts:
 
 ## Measurement integrity
 
-Per the **CLAUDE.md** measurement-integrity invariant (validate against expert-scored ground truth;
-geometry needs a validated mask + physical scale). Black-locust-specific traps:
+Per the **CLAUDE.md** measurement-integrity invariant (validate against a reference sized to the
+trait — GT annotations, or a breeder-confirmed sample of the model's own outputs (review-confirmation),
+not dense GT for every trait; geometry needs a validated mask + physical scale). Black-locust-specific
+traps:
 
 - `dbh` / `plant_height` — an uncalibrated pixel width or bounding-box height is
   **not** a metric diameter or height. These need calibrated 3D (LiDAR/SfM with
