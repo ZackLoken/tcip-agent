@@ -330,6 +330,14 @@ def make_splits(
         seed=seed,
     )
 
+    # Content hash of the labels this split partitions — two runs with the same seed still yield
+    # different splits over different GT, so the hash + seed together identify the partition (R5).
+    dataset_hash = None
+    if label_map:
+        from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
+        labels_root = Path(next(iter(label_map.values()))).parent
+        dataset_hash = _dataset_hash(labels_root, stems=stems)
+
     counts = annotation_counts or {}
     out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)
     manifest_dir = None
@@ -338,6 +346,9 @@ def make_splits(
         for split_name, split_stems in parts.items():
             with open(out_dir / f"{split_name}.json", "w") as f:
                 json.dump(sorted(split_stems), f, indent=2)
+        with open(out_dir / "split_manifest.json", "w") as f:
+            json.dump({"seed": seed, "dataset_hash": dataset_hash, "group_by": group_by,
+                       "splits": {k: sorted(v) for k, v in parts.items()}}, f, indent=2)
         manifest_dir = str(out_dir)
 
     result = {
@@ -349,6 +360,7 @@ def make_splits(
         "total_annotations": sum(int(v) for v in counts.values()),
         "groups": len({group_key_fn(s) for s in stems}),
         "seed": seed,
+        "dataset_hash": dataset_hash,
         "group_by": group_by,
         "stratified": stratified,
         "manifest_dir": manifest_dir,
