@@ -17,16 +17,24 @@ logger = logging.getLogger(__name__)
 
 @mcp.tool()
 @audited
-def preflight_config(config: dict) -> dict:
+def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -> dict:
     """Validate a training configuration before launching.
 
     Config structure:
         model_source: {builder, builder_kwargs, task, in_chans}
-        data: {images_dir, labels_dir, task}
+        data: {images_dir, labels_dir, task}  # known loaders, OR a bespoke
+              # {dataset_source: {builder, builder_kwargs, source_files, task}, task}
         training: {batch_size, device, stages, mixed_precision, ...}
 
     Args:
         config: Full training configuration dict.
+        smoke: When True, actually build the model and run ``check_model_contract`` (a synthetic
+            train+eval forward at the resolved in_chans/num_classes/img_size). A contract failure is
+            a guaranteed real-run failure, so it is appended to ``issues`` and blocks the launch —
+            ``launch_training`` runs this before spawning the training thread. Default False keeps
+            the always-on web ``/validate`` path fast (no torch import, no build).
+        overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic and
+            report it under ``overfit_check`` — never gating (a noisy-but-valid model can fail it).
     """
     from tcip_mcp.pipelines.schemas import validate_train_config_schema
 
@@ -50,6 +58,18 @@ def preflight_config(config: dict) -> dict:
     data_cfg = config.get("data")
     if not data_cfg:
         issues.append("Missing 'data' section")
+    elif data_cfg.get("dataset_source") is not None:
+        # Bespoke dataset seam (mirrors model_source): the agent's builder owns loading, so the
+        # known-loader images_dir/labels_dir aren't required — only the builder must import.
+        dataset_source = data_cfg["dataset_source"]
+        if not isinstance(dataset_source, dict) or not dataset_source.get("builder"):
+            issues.append("data.dataset_source must be a dict with a 'builder' (module:function)")
+        else:
+            from tcip_mcp.pipelines.model_build import _import_dotted
+            try:
+                _import_dotted(dataset_source["builder"])
+            except Exception as exc:
+                issues.append(f"data.dataset_source.builder not importable: {exc}")
     else:
         for key in ("images_dir", "labels_dir"):
             path = data_cfg.get(key)
@@ -95,10 +115,33 @@ def preflight_config(config: dict) -> dict:
         if "epochs" not in stage:
             issues.append(f"Stage {i} missing 'epochs'")
 
-    return {
-        "valid": len(issues) == 0,
-        "issues": issues,
-    }
+    result: dict = {"valid": False, "issues": issues}
+
+    # Smoke: build the model and run the correctness contract at the RESOLVED dims, so a broken
+    # bespoke builder is caught here (before the daemon thread spawns) rather than surfacing only as
+    # run.status='failed'. Only attempt once the structural checks pass — otherwise the config can't
+    # build and the contract would just re-report the same failure. Overfit stays a voluntary,
+    # non-gating diagnostic (a valid model can fail 20 steps on noise).
+    if smoke and not issues:
+        try:
+            from tcip_mcp.pipelines.model_build import build_model, resolve_contract_dims
+            from tcip_mcp.pipelines.model_contract import check_model_contract, overfit_check
+
+            ms = config.get("model_source") or {}
+            task = ms.get("task") or (config.get("data") or {}).get("task", "detection")
+            dims = resolve_contract_dims(config, task)
+            model = build_model(config)
+            report = check_model_contract(model, task, **dims)
+            result["smoke"] = {**report, "dims": dims, "task": task}
+            if not report["ok"]:
+                issues.extend(f"model contract: {msg}" for msg in report["issues"])
+            if overfit:
+                result["overfit_check"] = overfit_check(model, task, **dims)
+        except Exception as exc:  # noqa: BLE001 — a build/contract crash is itself a blocking issue
+            issues.append(f"model smoke build failed: {exc}")
+
+    result["valid"] = len(issues) == 0
+    return result
 
 
 @mcp.tool()
@@ -115,7 +158,9 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
         resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
             (restores model + optimizer + scheduler + scaler and continues).
     """
-    validation = preflight_config(config)
+    # smoke=True: build the model and run the correctness contract before spawning the training
+    # thread, so a broken builder returns here instead of wasting a full audited run.
+    validation = preflight_config(config, smoke=True)
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
 
@@ -638,6 +683,11 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         return kw
 
     src = _source_kwargs()
+    if data_cfg.get("dataset_source"):
+        # Bespoke seam (mirrors model_source): route build_dataset to the agent's builder for a
+        # task the known loaders don't cover. Threaded through src so the split machinery still
+        # passes it (with stems) to every train/val build below.
+        src["dataset_source"] = data_cfg["dataset_source"]
     tiling = data_cfg.get("tiling")  # W3: detection tiling (None for other tasks/configs)
 
     # 1. Explicit validation source.
