@@ -143,9 +143,14 @@ python -m tcip_web                 # backend + built UI → http://127.0.0.1:876
 
 The MCP server auto-launches when an MCP client connects (`.mcp.json`). If the
 `mcp__tcip__*` tools aren't available, the repo's `.mcp.json` didn't launch it — you're
-not at the repo root; relaunch from there. Durable platform state (`.tcip/audit.jsonl`,
-`.tcip/experiments/`) resolves via `$TCIP_PROJECT_ROOT` (the server/backend pin it to the
-repo root at startup), so a process started from a subdir no longer fragments `.tcip/`.
+not at the repo root; relaunch from there. If a tool call fails with `InputValidationError`
+for a name you expected, or a tool you know was renamed still appears under its old name,
+the client is holding a **stale tool index** cached from an earlier server build — restart
+the MCP client (or reconnect) so it re-reads the running server's tools; confirm against
+`python scripts/list_tools.py`, which reflects the source, not the cache. Durable platform
+state (`.tcip/audit.jsonl`, `.tcip/experiments/`) resolves via `$TCIP_PROJECT_ROOT` (the
+server/backend pin it to the repo root at startup), so a process started from a subdir no
+longer fragments `.tcip/`.
 
 ## Conventions
 
