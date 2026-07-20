@@ -32,7 +32,7 @@ GOLDEN_MAKE_SPLITS = {
 
 # split_dataset (seed=1) and make_splits (seed=1) assign the same groups per split.
 GOLDEN_TREE = sorted([
-    "train.json", "val.json", "test.json",
+    "train.json", "val.json", "test.json", "split_manifest.json",
     "train/images/srcB_0_0.jpg", "train/images/srcB_1_0.jpg", "train/images/srcB_2_0.jpg",
     "train/images/srcD_0_0.jpg", "train/images/srcD_1_0.jpg", "train/images/srcD_2_0.jpg",
     "train/labels/srcB_0_0.json", "train/labels/srcB_1_0.json", "train/labels/srcB_2_0.json",
@@ -69,6 +69,9 @@ def test_make_splits_stats_golden(tmp_path: Path):
     out = tmp_path / "m"
     result = make_splits(str(root), output_path=str(out), seed=1)
     result.pop("manifest_dir")
+    # dataset_hash is a content hash of the labels (R5) — present + stable, but not pinned in the golden.
+    dh = result.pop("dataset_hash")
+    assert isinstance(dh, str) and len(dh) == 16
     assert result == GOLDEN_MAKE_SPLITS
 
 
