@@ -71,6 +71,25 @@ class TrainContext:
 
         return build_model(self.config)
 
+    def _contract_dims(self, **overrides: Any) -> dict:
+        from tcip_mcp.pipelines.model_build import resolve_contract_dims
+
+        return {**resolve_contract_dims(self.config, self.task), **overrides}
+
+    def check_contract(self, model: Any = None, **overrides: Any) -> dict:
+        """Run the measurement-boundary contract on ``model`` (built if omitted) at the run's
+        resolved dims, so a hand-rolled ``train(ctx)`` can self-prove before the full loop."""
+        from tcip_mcp.pipelines.model_contract import check_model_contract
+
+        return check_model_contract(model or self.build_model(), self.task, **self._contract_dims(**overrides))
+
+    def overfit_check(self, model: Any = None, **overrides: Any) -> dict:
+        """Voluntary diagnostic: drive a few steps on one tiny batch and confirm the loss falls —
+        the cheap proof a from-scratch model actually learns. Non-gating."""
+        from tcip_mcp.pipelines.model_contract import overfit_check
+
+        return overfit_check(model or self.build_model(), self.task, **self._contract_dims(**overrides))
+
     # ---- the default trainer: one optional convenience ----
     def default_train(self) -> Any:
         """Run today's strong default policy (progressive unfreeze / differential-LR / AMP+accum /
@@ -85,6 +104,13 @@ class TrainContext:
         from tcip_mcp.pipelines.data.datasets import build_dataset
 
         return build_dataset(task or self.task, **kwargs)
+
+    def tiled_dataset(self, base: Any, **kwargs: Any) -> Any:
+        """Wrap a detection dataset in the native-resolution tiler (same derived sliver cutoff the
+        default path uses); ``kwargs``: tile_size / overlap / sliver_frac / dedup_iou / skip_empty."""
+        from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
+
+        return TiledDetectionDataset(base, **kwargs)
 
     def task_collate(self, task: str | None = None) -> Any:
         from tcip_mcp.pipelines.training.generic_trainer import task_collate
@@ -122,6 +148,15 @@ class TrainContext:
 
         return _build_scheduler(optimizer, config, epochs)
 
+    def apply_stage_freeze(self, model: Any, freeze_to: int, *, prev_trainable: int | None = None,
+                           enforce_monotonic: bool = True) -> int:
+        """Apply a stage's progressive-unfreeze policy (+ the monotonic guard) and return the new
+        trainable-param count — the identical primitive the default trainer uses per stage."""
+        from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
+
+        return apply_stage_freeze(model, freeze_to, prev_trainable=prev_trainable,
+                                  enforce_monotonic=enforce_monotonic)
+
     def compute_lr_scale(self, *args: Any, **kwargs: Any) -> Any:
         from tcip_mcp.pipelines.training.optimizer_factory import compute_lr_scale
 
@@ -144,6 +179,14 @@ class TrainContext:
                         self.device, self.task, **kwargs)
 
     # ---- measurement primitives (compose for dimensional traits) ----
+    def calibrate(self, trait_name: str, **kwargs: Any) -> Any:
+        """Resolve the trait's operating point (conf/tile/max_dets) from record sweeps — the derived,
+        held-out-validated point, not a pin. Pass calibration_records/holdout_records (kwargs mirror
+        ``resolve_operating_point``)."""
+        from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+        return resolve_operating_point(trait_name, **kwargs)
+
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
         from tcip_mcp.pipelines.measurement import mask_geometry
 
