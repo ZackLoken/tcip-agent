@@ -178,7 +178,7 @@ def test_compute_phenology_derives_class_id_and_stamps_provisional(tmp_path: Pat
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        classes_json_path=str(cj),  # elongated_class_id=None -> derived from the map by name
+        classes_json_path=str(cj),  # positive_class_id=None -> derived from the map by name
         classifier_validated="validated_held_out",
         operating_point_validated="validated_held_out",
     )
