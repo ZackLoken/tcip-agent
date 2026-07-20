@@ -105,3 +105,62 @@ def resolve_writable_bucket(
     if overwrite:
         raise BucketHasVerdicts(requested, base, suggested)
     return BucketResolution(name=suggested, redirected=True, verdict_count=base, requested=requested)
+
+
+def stage_prediction_shapes(
+    dataset_root: str,
+    model_name: str,
+    date: str | None,
+    stem: str,
+    *,
+    boxes: list,
+    polygons: list,
+    img_w: int,
+    img_h: int,
+    overwrite: bool = False,
+) -> dict:
+    """Write already-built pred boxes/polygons into a verdict-guarded prediction bucket.
+
+    The one staging path shared by ``stage_proposals`` and ``accept_proposals`` so both honor
+    prediction-bucket immutability: a bucket that carries review verdicts is never overwritten (the
+    default redirects to the next free ``<name>@r2`` variant; ``overwrite=True`` raises
+    :class:`BucketHasVerdicts`). ``boxes``/``polygons`` are pixel-space ``PredBBox``/``PredPolygon``
+    already stamped with their producer. Returns the bucket actually written and per-task paths.
+    """
+    from tcip_annotation import json_io
+
+    from tcip_mcp.dataset_layout import prediction_dir
+
+    review_state_dir = Path(dataset_root) / ".tcip" / "state"
+
+    def _bucket_dirs(name: str) -> list[Path]:
+        return [Path(prediction_dir(dataset_root, name, date, "detect")),
+                Path(prediction_dir(dataset_root, name, date, "segment"))]
+
+    resolution = resolve_writable_bucket(review_state_dir, model_name, _bucket_dirs, overwrite=overwrite)
+    bucket = resolution.name
+
+    detect_path = None
+    if boxes:
+        det_dir = Path(prediction_dir(dataset_root, bucket, date, "detect"))
+        det_dir.mkdir(parents=True, exist_ok=True)
+        out = det_dir / f"{stem}.json"
+        json_io.write_detect(out, boxes, img_w, img_h)
+        detect_path = str(out)
+
+    segment_path = None
+    if polygons:
+        seg_dir = Path(prediction_dir(dataset_root, bucket, date, "segment"))
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        out = seg_dir / f"{stem}.json"
+        json_io.write_segment(out, polygons, img_w, img_h)
+        segment_path = str(out)
+
+    return {
+        "bucket": bucket,
+        "redirected": resolution.redirected,
+        "verdict_count": resolution.verdict_count,
+        "requested": resolution.requested,
+        "detect_path": detect_path,
+        "segment_path": segment_path,
+    }
