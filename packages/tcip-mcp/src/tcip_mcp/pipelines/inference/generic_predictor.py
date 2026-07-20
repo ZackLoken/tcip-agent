@@ -14,6 +14,7 @@ from PIL import Image
 from tcip_mcp.pipelines.model_build import build_model
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
+from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU, DEFAULT_TILE_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +119,8 @@ class GenericPredictor:
 
     @torch.no_grad()
     def predict_batch(
-        self, image_paths: list[str], tile: bool = False, tile_size: int = 224,
-        overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = 0.3,
+        self, image_paths: list[str], tile: bool = False, tile_size: int = DEFAULT_TILE_SIZE,
+        overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU,
         batch_size: int = 16, postprocess: str = "nms",
     ) -> list[dict]:
         """Run inference on multiple images (optionally tiled for small objects).
@@ -158,8 +159,8 @@ class GenericPredictor:
 
     @torch.no_grad()
     def predict_tiled(
-        self, image_path: str, tile_size: int = 224, overlap: float = 0.2,
-        tile_batch_size: int = 96, global_nms_iou: float = 0.3, postprocess: str = "nms",
+        self, image_path: str, tile_size: int = DEFAULT_TILE_SIZE, overlap: float = 0.2,
+        tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU, postprocess: str = "nms",
     ) -> dict:
         """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict ->
         core-region reconstruction -> cross-tile merge -> full-image detections.
