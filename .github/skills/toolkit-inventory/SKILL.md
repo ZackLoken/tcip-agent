@@ -9,9 +9,9 @@ description: "The composition vocabulary for the whole library — the string na
 importable PyTorch primitives, a few name→builder factories, and open seams for the parts you
 write yourself. The tables below inventory what exists **so nothing is rediscovered or rebuilt** —
 they are a map, not a fixed set. Adding a primitive (a new head, a new proposal engine, a new
-acquisition scorer) is expected; it extends the map, it does not close it. For *how to choose a
-pipeline shape* and the design philosophy see the `pipeline-design` skill; this skill is the
-name-and-location reference that skill's import block points at.
+acquisition scorer) is expected; it extends the map, it does not close it. For the build path, the
+bespoke seams, and what the platform can ingest today see the `pipeline-design` skill — it supplies
+no pipeline shape on purpose; this skill is the name-and-location reference its import block points at.
 
 `build_detector` and `build_loss` already self-document at runtime — an unknown name raises
 `KeyError: Unknown … Available: [...]`. The heads, necks, backbones, and ctx methods have **no**
@@ -48,7 +48,10 @@ re-pin the method):
 from tcip_mcp.pipelines.derivations import gt_aspect_ratios
 from tcip_mcp.pipelines.components.detectors import build_detector
 ratios = gt_aspect_ratios([(b.w, b.h) for b in gt_boxes])   # this dataset's shapes
-model = build_detector("faster_rcnn", adapter, num_classes=n, aspect_ratios=tuple(ratios))
+names = ["0", "1", "2", "3"]                                 # your neck's output keys
+model = build_detector("faster_rcnn", adapter, num_classes=n,
+                       featmap_names=names, num_levels=len(names),
+                       aspect_ratios=tuple(ratios))
 ```
 
 Every data-sounding `derived_from` label a value carries must map to a real implementation in
