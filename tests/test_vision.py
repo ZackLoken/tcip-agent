@@ -444,32 +444,42 @@ class TestVisualizeGridOverlayTool:
         assert "error" in result
 
 
-class TestSamAutoLabelTool:
-    """Test generate_mask_candidates tool (mocked SAM)."""
+class TestProposeAnnotationsTool:
+    """Test propose_annotations tool (mocked engine)."""
 
     def test_missing_image(self):
-        from tcip_mcp.tools.vision_tools import generate_mask_candidates
+        from tcip_mcp.tools.vision_tools import propose_annotations
 
-        result = generate_mask_candidates(image_path="/nonexistent.jpg")
+        result = propose_annotations(image_path="/nonexistent.jpg")
         assert "error" in result
 
+    def test_unknown_engine(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import propose_annotations
 
-class TestAcceptCandidatesTool:
-    def test_no_prior_candidates(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        result = propose_annotations(
+            image_path=str(viz_dataset / "images" / "img_001.jpg"),
+            engine="does_not_exist",
+        )
+        assert "error" in result
+        assert "does_not_exist" in result["error"]
 
-        result = accept_candidates(
+
+class TestAcceptProposalsTool:
+    def test_no_prior_proposals(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import accept_proposals
+
+        result = accept_proposals(
             image_path=str(viz_dataset / "images" / "img_003.jpg"),
             assignments=[{"candidate_id": 0, "class_id": 1}],
         )
         assert "error" in result
-        assert "Run generate_mask_candidates first" in result["error"]
+        assert "Run propose_annotations first" in result["error"]
 
-    def test_with_cached_candidates(self, viz_dataset: Path):
+    def test_with_cached_proposals(self, viz_dataset: Path):
         import json
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals
 
-        # Simulate cached candidates from generate_mask_candidates
+        # Simulate cached proposals from propose_annotations (neutral schema + engine envelope).
         from tcip_mcp.project_paths import resolve_state
 
         state_dir = resolve_state(Path(".tcip") / "state")
@@ -479,24 +489,26 @@ class TestAcceptCandidatesTool:
                 "candidate_id": 0,
                 "bbox": [100.0, 100.0, 200.0, 200.0],
                 "area": 10000,
-                "stability_score": 0.95,
-                "predicted_iou": 0.90,
+                "score": 0.90,
+                "engine": "sam",
+                "engine_meta": {"stability_score": 0.95, "predicted_iou": 0.90},
                 "polygon": [[100, 100], [200, 100], [200, 200], [100, 200]],
             },
             {
                 "candidate_id": 1,
                 "bbox": [300.0, 300.0, 400.0, 400.0],
                 "area": 5000,
-                "stability_score": 0.88,
-                "predicted_iou": 0.85,
+                "score": 0.85,
+                "engine": "sam",
+                "engine_meta": {"stability_score": 0.88, "predicted_iou": 0.85},
                 "polygon": [[300, 300], [400, 300], [400, 400], [300, 400]],
             },
         ]
-        (state_dir / "candidates_img_001.json").write_text(
-            json.dumps(candidates), encoding="utf-8"
+        (state_dir / "proposals_img_001.json").write_text(
+            json.dumps({"engine": "sam", "candidates": candidates}), encoding="utf-8"
         )
 
-        result = accept_candidates(
+        result = accept_proposals(
             image_path=str(viz_dataset / "images" / "img_001.jpg"),
             assignments=[
                 {"candidate_id": 0, "class_id": 0},
@@ -539,8 +551,9 @@ MOCK_CANDIDATES = [
         "candidate_id": 0,
         "bbox": [50.0, 40.0, 200.0, 180.0],
         "area": 21000,
-        "stability_score": 0.96,
-        "predicted_iou": 0.93,
+        "score": 0.93,
+        "engine": "sam",
+        "engine_meta": {"stability_score": 0.96, "predicted_iou": 0.93},
         "polygon": [
             (50, 40), (200, 40), (200, 180), (50, 180),
         ],
@@ -549,8 +562,9 @@ MOCK_CANDIDATES = [
         "candidate_id": 1,
         "bbox": [300.0, 250.0, 450.0, 400.0],
         "area": 15000,
-        "stability_score": 0.91,
-        "predicted_iou": 0.88,
+        "score": 0.88,
+        "engine": "sam",
+        "engine_meta": {"stability_score": 0.91, "predicted_iou": 0.88},
         "polygon": [
             (300, 250), (450, 250), (450, 400), (300, 400),
         ],
@@ -559,8 +573,9 @@ MOCK_CANDIDATES = [
         "candidate_id": 2,
         "bbox": [500.0, 100.0, 600.0, 200.0],
         "area": 8000,
-        "stability_score": 0.85,
-        "predicted_iou": 0.80,
+        "score": 0.80,
+        "engine": "sam",
+        "engine_meta": {"stability_score": 0.85, "predicted_iou": 0.80},
         "polygon": [
             (500, 100), (600, 100), (600, 200), (500, 200),
         ],
@@ -656,7 +671,7 @@ class TestSamAutoMask:
 
 @requires_sam
 class TestSamPredictFromGrid:
-    """Integration tests for sam_predict with grid_cells (real SAM)."""
+    """Integration tests for segment_prompt with grid_cells (real SAM)."""
 
     @pytest.fixture
     def real_dataset(self, tmp_path: Path) -> Path:
@@ -671,10 +686,10 @@ class TestSamPredictFromGrid:
         return tmp_path
 
     def test_grid_cell_produces_polygon(self, real_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import sam_predict
+        from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(real_dataset / "images" / "grid_test.jpg")
-        result = sam_predict(
+        result = segment_prompt(
             image_path=img_path,
             grid_cells=["B2"],
         )
@@ -700,12 +715,12 @@ class TestFullSamPipeline:
         return tmp_path
 
     def test_auto_label_then_accept(self, sam_dataset: Path):
-        from tcip_mcp.tools.vision_tools import accept_candidates, generate_mask_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
 
         img_path = str(sam_dataset / "images" / "e2e.jpg")
 
         # Step 1: auto-label
-        auto_result = generate_mask_candidates(
+        auto_result = propose_annotations(
             image_path=img_path,
             points_per_side=16,
             min_mask_region_area=500,
@@ -716,7 +731,7 @@ class TestFullSamPipeline:
 
         # Step 2: accept first two candidates
         cands = auto_result["candidates"][:2]
-        accept_result = accept_candidates(
+        accept_result = accept_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": c["id"], "class_id": i}
@@ -738,8 +753,9 @@ MOCK_CANDIDATES = [
         "candidate_id": 0,
         "bbox": [50.0, 40.0, 200.0, 180.0],
         "area": 21000,
-        "stability_score": 0.96,
-        "predicted_iou": 0.93,
+        "score": 0.93,
+        "engine": "sam",
+        "engine_meta": {"stability_score": 0.96, "predicted_iou": 0.93},
         "polygon": [
             (50, 40), (200, 40), (200, 180), (50, 180),
         ],
@@ -748,8 +764,9 @@ MOCK_CANDIDATES = [
         "candidate_id": 1,
         "bbox": [300.0, 250.0, 450.0, 400.0],
         "area": 15000,
-        "stability_score": 0.91,
-        "predicted_iou": 0.88,
+        "score": 0.88,
+        "engine": "sam",
+        "engine_meta": {"stability_score": 0.91, "predicted_iou": 0.88},
         "polygon": [
             (300, 250), (450, 250), (450, 400), (300, 400),
         ],
@@ -758,8 +775,9 @@ MOCK_CANDIDATES = [
         "candidate_id": 2,
         "bbox": [500.0, 100.0, 600.0, 200.0],
         "area": 8000,
-        "stability_score": 0.85,
-        "predicted_iou": 0.80,
+        "score": 0.80,
+        "engine": "sam",
+        "engine_meta": {"stability_score": 0.85, "predicted_iou": 0.80},
         "polygon": [
             (500, 100), (600, 100), (600, 200), (500, 200),
         ],
@@ -781,8 +799,9 @@ class TestCandidateCacheRoundTrip:
             assert orig["candidate_id"] == restored["candidate_id"]
             assert orig["bbox"] == restored["bbox"]
             assert orig["area"] == restored["area"]
-            assert abs(orig["stability_score"] - restored["stability_score"]) < 1e-6
-            assert abs(orig["predicted_iou"] - restored["predicted_iou"]) < 1e-6
+            assert abs(orig["score"] - restored["score"]) < 1e-6
+            assert abs(orig["engine_meta"]["stability_score"]
+                       - restored["engine_meta"]["stability_score"]) < 1e-6
             # Polygon vertices â€” JSON turns tuples into lists
             for (ox, oy), rp in zip(orig["polygon"], restored["polygon"]):
                 rx, ry = rp if isinstance(rp, (list, tuple)) else (rp["x"], rp["y"])
@@ -813,19 +832,19 @@ class TestFullPipelineIntegration:
 
         state_dir = resolve_state(Path(".tcip") / "state")
         state_dir.mkdir(parents=True, exist_ok=True)
-        (state_dir / f"candidates_{stem}.json").write_text(
-            json.dumps(candidates, default=str), encoding="utf-8",
+        (state_dir / f"proposals_{stem}.json").write_text(
+            json.dumps({"engine": "sam", "candidates": candidates}, default=str), encoding="utf-8",
         )
 
     def test_accept_writes_json_detect(self, pipeline_dataset: Path):
         """SAM detections are staged as predictions: pixel bbox, class ids, and score preserved."""
         from tcip_annotation import json_io
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._cache_candidates("sample", MOCK_CANDIDATES)
 
-        result = accept_candidates(
+        result = accept_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": 0, "class_id": 0},
@@ -851,12 +870,12 @@ class TestFullPipelineIntegration:
     def test_accept_writes_json_segment(self, pipeline_dataset: Path):
         """SAM segmentations are staged as predictions: pixel polygon vertices, class id, score."""
         from tcip_annotation import json_io
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._cache_candidates("sample", MOCK_CANDIDATES)
 
-        result = accept_candidates(
+        result = accept_proposals(
             image_path=img_path,
             assignments=[{"candidate_id": 0, "class_id": 2}],
         )
@@ -880,12 +899,12 @@ class TestFullPipelineIntegration:
     def test_detect_and_segment_consistent(self, pipeline_dataset: Path):
         """Detection and segmentation predictions cover the same objects."""
         from tcip_annotation import json_io
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._cache_candidates("sample", MOCK_CANDIDATES)
 
-        result = accept_candidates(
+        result = accept_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": 0, "class_id": 0},
@@ -906,13 +925,13 @@ class TestFullPipelineIntegration:
 
     def test_partial_accept_skips_rejected(self, pipeline_dataset: Path):
         """Only accepted candidates appear in output; rejected are omitted."""
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._cache_candidates("sample", MOCK_CANDIDATES)
 
         # Accept only candidate 1 out of 3
-        result = accept_candidates(
+        result = accept_proposals(
             image_path=img_path,
             assignments=[{"candidate_id": 1, "class_id": 0}],
         )
@@ -921,12 +940,12 @@ class TestFullPipelineIntegration:
 
     def test_invalid_candidate_id_silently_skipped(self, pipeline_dataset: Path):
         """Assignments with non-existent candidate_id are ignored."""
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._cache_candidates("sample", MOCK_CANDIDATES)
 
-        result = accept_candidates(
+        result = accept_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": 999, "class_id": 0},  # non-existent
@@ -939,7 +958,7 @@ class TestFullPipelineIntegration:
     def test_render_then_accept_pipeline(self, pipeline_dataset: Path):
         """Full render â†’ accept â†’ verify pipeline (sans SAM)."""
         from tcip_annotation.viz import render_candidates, render_grid_overlay
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
 
@@ -951,11 +970,11 @@ class TestFullPipelineIntegration:
         grid_render = render_grid_overlay(img_path)
         assert Path(grid_render).is_file()
 
-        # Step 3: Cache candidates (simulating generate_mask_candidates state save)
+        # Step 3: Cache candidates (simulating propose_annotations state save)
         self._cache_candidates("sample", MOCK_CANDIDATES)
 
         # Step 4: Accept with class assignments
-        result = accept_candidates(
+        result = accept_proposals(
             image_path=img_path,
             assignments=[
                 {"candidate_id": 0, "class_id": 0},
@@ -971,11 +990,11 @@ class TestFullPipelineIntegration:
 
 
 class TestGridCellToSamPrompt:
-    """Test grid cell â†’ point prompt conversion in sam_predict."""
+    """Test grid cell -> point prompt conversion in segment_prompt."""
 
     def test_grid_cells_converted_to_points(self, viz_dataset: Path):
         """Grid cells should convert to points before hitting SAM."""
-        from tcip_mcp.tools.annotation_tools import sam_predict
+        from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
 
@@ -987,7 +1006,7 @@ class TestGridCellToSamPrompt:
                 (100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0),
             ]
 
-            result = sam_predict(
+            result = segment_prompt(
                 image_path=img_path,
                 grid_cells=["A1", "D3"],
             )
@@ -1006,7 +1025,7 @@ class TestGridCellToSamPrompt:
 
     def test_single_grid_cell_uses_single_point(self, viz_dataset: Path):
         """Single grid cell should use predict_from_point (not predict_from_points)."""
-        from tcip_mcp.tools.annotation_tools import sam_predict
+        from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
 
@@ -1017,7 +1036,7 @@ class TestGridCellToSamPrompt:
                 (100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0),
             ]
 
-            sam_predict(
+            segment_prompt(
                 image_path=img_path,
                 grid_cells=["C4"],
             )
@@ -1034,24 +1053,24 @@ class TestGridCellToSamPrompt:
 
     def test_invalid_grid_cell_returns_error(self, viz_dataset: Path):
         """Invalid grid cell like 'Z9' should return error, not crash."""
-        from tcip_mcp.tools.annotation_tools import sam_predict
+        from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
-        result = sam_predict(image_path=img_path, grid_cells=["Z9"])
+        result = segment_prompt(image_path=img_path, grid_cells=["Z9"])
         assert "error" in result
         assert "Invalid grid cell" in result["error"]
 
     def test_no_prompts_returns_error(self, viz_dataset: Path):
         """Calling with no prompts at all should error."""
-        from tcip_mcp.tools.annotation_tools import sam_predict
+        from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
-        result = sam_predict(image_path=img_path)
+        result = segment_prompt(image_path=img_path)
         assert "error" in result
 
 
 class TestSamPredictionStaging:
-    """accept_candidates stages SAM masks as predictions (predictions/sam), not ground truth."""
+    """accept_proposals stages engine masks as predictions (predictions/sam), not ground truth."""
 
     @pytest.fixture
     def format_dataset(self, tmp_path: Path) -> Path:
@@ -1066,16 +1085,16 @@ class TestSamPredictionStaging:
 
         state_dir = resolve_state(Path(".tcip") / "state")
         state_dir.mkdir(parents=True, exist_ok=True)
-        (state_dir / f"candidates_{stem}.json").write_text(
-            json.dumps(MOCK_CANDIDATES, default=str), encoding="utf-8",
+        (state_dir / f"proposals_{stem}.json").write_text(
+            json.dumps({"engine": "sam", "candidates": MOCK_CANDIDATES}, default=str), encoding="utf-8",
         )
 
     def test_json_detect_and_segment_written(self, format_dataset: Path):
         from tcip_annotation import json_io
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals
 
         self._cache("fmt_test")
-        result = accept_candidates(
+        result = accept_proposals(
             image_path=str(format_dataset / "images" / "fmt_test.jpg"),
             assignments=[{"candidate_id": 0, "class_id": 0}],
         )
@@ -1097,9 +1116,9 @@ class TestSamPredictionStaging:
     def test_prediction_carries_sam_score(self, format_dataset: Path):
         """Staged SAM output is a prediction — each object has created_by="sam" and a ``score``."""
         self._cache("fmt_test")
-        from tcip_mcp.tools.vision_tools import accept_candidates
+        from tcip_mcp.tools.vision_tools import accept_proposals
 
-        accept_candidates(
+        accept_proposals(
             image_path=str(format_dataset / "images" / "fmt_test.jpg"),
             assignments=[{"candidate_id": 0, "class_id": 0}],
         )
