@@ -36,6 +36,33 @@ def _exp_dir(experiment_id: str) -> Path:
     return experiments_dir() / experiment_id
 
 
+# Once a run reaches a terminal state its record is immutable (experiments are immutable). The lock
+# is additive-only (D6): populated fields freeze, but a still-empty field may take its first write —
+# so the post-completion predictions link + model registration still land.
+_TERMINAL_STATES = {"completed", "failed"}
+
+
+def _current_state(exp_dir: Path) -> str | None:
+    status_path = exp_dir / "status.json"
+    if not status_path.is_file():
+        return None
+    try:
+        return json.loads(status_path.read_text()).get("state")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _audit_refused(experiment_id: str, op: str, detail: dict[str, Any]) -> None:
+    """Record a refused post-terminal mutation on the append-only audit log (best-effort)."""
+    try:
+        from tcip_mcp.audit import record_event
+
+        record_event("experiment_mutation_refused", {"experiment_id": experiment_id, "op": op,
+                                                      **detail}, status="refused")
+    except Exception:
+        logger.debug("could not audit refused mutation", exc_info=True)
+
+
 def create_experiment(
     experiment_id: str,
     config: dict[str, Any],
@@ -90,6 +117,12 @@ def update_status(experiment_id: str, state: str) -> dict[str, Any]:
     status_path = d / "status.json"
     with file_transaction(status_path):
         status = json.loads(status_path.read_text())
+        current = status.get("state")
+        # Terminal-state lock: a completed/failed run cannot be re-opened to a non-terminal state.
+        if current in _TERMINAL_STATES and state != current and state not in _TERMINAL_STATES:
+            _audit_refused(experiment_id, "update_status", {"from": current, "to": state})
+            return {"error": f"Experiment {experiment_id} is {current} (terminal); refusing to "
+                             f"re-open to {state!r}.", "state": current}
         status["state"] = state
 
         now = datetime.now(timezone.utc).isoformat()
@@ -132,6 +165,11 @@ def log_metrics(
     if not d.exists():
         return {"error": f"Experiment not found: {experiment_id}"}
 
+    # Terminal-state lock: a completed/failed run's metric history is frozen — no new epochs.
+    if _current_state(d) in _TERMINAL_STATES:
+        _audit_refused(experiment_id, "log_metrics", {"epoch": epoch})
+        return {"error": f"Experiment {experiment_id} is terminal; refusing to log a new epoch."}
+
     entry = {
         "epoch": epoch,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -156,6 +194,12 @@ def record_artifact(
     artifacts_path = d / "artifacts.json"
     with file_transaction(artifacts_path):
         artifacts = json.loads(artifacts_path.read_text())
+        # Terminal-state lock (additive-only): a new artifact name may be recorded post-completion,
+        # but an existing one is frozen — no silent overwrite of a delivered pointer.
+        if name in artifacts and _current_state(d) in _TERMINAL_STATES:
+            _audit_refused(experiment_id, "record_artifact", {"artifact": name})
+            return {"error": f"Experiment {experiment_id} is terminal; artifact {name!r} already "
+                             f"recorded and is immutable.", "artifact": name}
         artifacts[name] = {"path": path, "recorded": datetime.now(timezone.utc).isoformat()}
         atomic_write_json(artifacts_path, artifacts)
 
@@ -174,6 +218,15 @@ def update_lineage(
     lineage_path = d / "lineage.json"
     with file_transaction(lineage_path):
         lineage = json.loads(lineage_path.read_text())
+        # Terminal-state lock (additive-only): once terminal, a still-empty field may take its first
+        # write (the post-completion predictions link, model_weights on registration), but a
+        # populated field is frozen — no overwrite of a recorded lineage edge.
+        if _current_state(d) in _TERMINAL_STATES:
+            refused = {k: v for k, v in updates.items()
+                       if lineage.get(k) not in (None, "", [], {}) and lineage.get(k) != v}
+            if refused:
+                _audit_refused(experiment_id, "update_lineage", {"fields": sorted(refused)})
+                updates = {k: v for k, v in updates.items() if k not in refused}
         lineage.update(updates)
         atomic_write_json(lineage_path, lineage)
 
