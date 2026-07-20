@@ -147,9 +147,11 @@ The sensing exists to produce trustworthy per-plant phenotypes that breeders sel
 1. **Collect at the right phenophase** — GDD-informed scheduling, repeated visits bracketing
    any milestone, matched to the modality that can physically resolve the target structure.
 2. **Automate the measurement** — derive and *validate* a CV measurement per trait within its
-   modality's physical limits, against expert ground truth. Operating points (conf,
-   IoU-for-a-hit, NMS, tile size, thresholds) are derived from the data in hand at runtime,
-   not pinned.
+   modality's physical limits, against a reference sized to the trait — GT annotations, or a
+   breeder-confirmed sample of the model's own outputs (review-confirmation), not dense GT for
+   every trait (either reference passes the identical disjoint-split + count-bias gate). Operating
+   points (conf, IoU-for-a-hit, NMS, tile size, thresholds) are derived from the data in hand at
+   runtime, not pinned.
 3. **Deliver per-genotype / per-plant values** — carry accession/genotype through so breeders
    select on genotype, not `plant_id`. Genomic/phenomic selection depends on trustworthy
    per-plant phenotypes, which is exactly why a confident-but-wrong measurement is the worst
