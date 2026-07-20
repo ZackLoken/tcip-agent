@@ -49,7 +49,10 @@ it as a new, separately-named trait and get the definition in writing first.
 Because "elongated" is a learned per-catkin call, predictions that carry **no** elongation
 call cannot yield a valid bloom fraction. Every surface reports `elongation_classified`:
 when it is false, the milestones are **not** a measurement — do not deliver them. Train and
-*validate* whatever model produces the elongation call first (see the `evaluation` skill).
+*validate* whatever model produces the elongation call first — against a reference sized to the
+trait: GT annotations, **or** a breeder-confirmed sample of the model's own outputs
+(review-confirmation), not dense GT for every trait (either passes the identical disjoint-split +
+count-bias gate). See the `evaluation` skill.
 
 ## End-to-end pattern
 
