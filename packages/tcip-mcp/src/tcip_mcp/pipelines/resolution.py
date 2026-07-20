@@ -401,7 +401,7 @@ def check_delivery_gate(
     return DeliveryGateResult(ok=True, unvalidated=unvalidated, stamp=stamp)
 
 
-# --- validation (mirrors composer.validate_model_spec: returns list[str], empty = valid) ---
+# --- validation (returns list[str] of problems, empty = valid) ---
 
 def validate_resolved_bundle(
     bundle: ResolvedBundle,
