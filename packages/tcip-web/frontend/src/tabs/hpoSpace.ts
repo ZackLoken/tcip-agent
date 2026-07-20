@@ -1,9 +1,9 @@
 /**
  * HPO search-space model for the Tuning tab's structured form. Covers exactly the params
  * the backend's `_apply_hpo_params` actually sweeps (lr / weight_decay / batch_size) and
- * builds the Optuna-typed space the `run_hpo` tool expects — so users configure a sweep
- * with a form instead of hand-writing Optuna JSON. Architecture axes are model-specific
- * (`builder_kwargs`, unknown to the GUI) and no longer swept generically.
+ * builds the typed param-space the `run_hpo` tool feeds to Ray Tune — so users configure a
+ * sweep with a form instead of hand-writing JSON. Architecture axes are model-specific
+ * (`builder_kwargs`, unknown to the GUI) and not swept generically.
  */
 
 export type HpoParam =
@@ -31,6 +31,28 @@ export const DEFAULT_HPO_PARAMS: HpoParam[] = [
   { key: "batch_size", label: "Batch size", kind: "numlist", enabled: true, values: [2, 4] },
 ];
 
+/**
+ * Search algorithms Ray Tune can drive. `random`/`grid` are native; the rest need their
+ * backend installed on the server (an unavailable pick surfaces as a clear sweep error).
+ * The agent normally chooses per task/data — this menu is here for the human's direct use.
+ */
+export const SEARCH_ALGORITHMS = [
+  "random",
+  "grid",
+  "optuna",
+  "bayesopt",
+  "hyperopt",
+  "nevergrad",
+  "ax",
+  "hebo",
+  "zoopt",
+  "bohb",
+] as const;
+
+/** Trial schedulers (all native). `bohb` pairs with the bohb searcher; `none` runs every
+ *  trial to completion. */
+export const SCHEDULERS = ["asha", "hyperband", "bohb", "pbt", "median", "none"] as const;
+
 /** Parse a comma-separated list of numbers, dropping blanks / non-numbers.
  *  (Blanks must be dropped BEFORE Number() — `Number("")` is 0, not NaN.) */
 export function parseNumList(s: string): number[] {
@@ -43,17 +65,17 @@ export function parseNumList(s: string): number[] {
 }
 
 /**
- * Build the Optuna-typed search space from the form params. Only enabled params are
- * included; an enabled categorical with no selected values/choices is skipped (an empty
- * `choices` would make Optuna raise).
+ * Build the typed search space from the form params. Only enabled params are included; an
+ * enabled categorical with no selected values/choices is skipped (an empty `choices` would
+ * make the backend raise).
  */
-export function buildOptunaSpace(params: HpoParam[]): Record<string, unknown> {
+export function buildSearchSpace(params: HpoParam[]): Record<string, unknown> {
   const space: Record<string, unknown> = {};
   for (const p of params) {
     if (!p.enabled) continue;
     if (p.kind === "loguniform") {
       // Skip a param whose bounds were cleared to NaN — an unbounded log-uniform makes
-      // the sweep launch and then crash at runtime inside Optuna.
+      // the sweep launch and then crash at runtime.
       if (Number.isFinite(p.low) && Number.isFinite(p.high)) {
         space[p.key] = { type: "loguniform", low: p.low, high: p.high };
       }
