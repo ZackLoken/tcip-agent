@@ -7,13 +7,21 @@ description: "Model evaluation methods, metrics interpretation, failure triage, 
 
 ## Metrics by Task Type
 
-| Task | Primary Metric | Secondary Metrics |
+| Task | Comparability metric (labeled) | Other metrics |
 |------|---------------|-------------------|
 | Detection | mAP@50 | mAP@50:95, precision, recall |
 | Instance Segmentation | mask mAP@50 | box mAP, mask quality (IoU distribution) |
 | Classification | Accuracy | F1 (macro/weighted), confusion matrix, per-class precision/recall |
 | Regression | RMSE | R², MAE, residual distribution |
 | Ordinal | Quadratic weighted κ | Adjacent accuracy, confusion matrix |
+
+These are **labeled comparability metrics** — a fixed-convention number (mAP@50 = AP at IoU 0.5) that
+lets runs be compared on the same ruler. They do **not** govern the phenotype. The criterion that
+governs the delivered measurement (which detections are a hit, what the count is) is the *trait's*
+localization criterion with a tolerance derived from the data in hand — e.g. a center-match with
+`half_class_avg_size` tolerance for ~40px catkins, not a frozen IoU@0.5. Choose the governing
+criterion per trait/data; keep mAP@50 alongside only as the comparability label (see `operating_point`
+/ the derive-don't-pin rail). There is no single mandated "primary" metric per task.
 
 Detection/instance-seg metrics (`coco_detection_metrics`) are aggregate only — no per-class AP
 today. Per-class precision/recall/F1 is real for classification/ordinal (`evaluate_model`).
