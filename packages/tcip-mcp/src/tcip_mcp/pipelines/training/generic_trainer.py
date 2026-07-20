@@ -317,6 +317,35 @@ def _selection_value(task: str, val_metrics: dict, avg_loss: float) -> float:
     return val_metrics.get("val_loss", avg_loss)
 
 
+def apply_stage_freeze(
+    model: TCIPModel, freeze_to: int, *, prev_trainable: int | None = None,
+    enforce_monotonic: bool = True,
+) -> int:
+    """Apply a stage's progressive-unfreeze policy and return the resulting trainable-param count.
+
+    ``freeze_to``: ``0`` (or a model with no ``freeze_backbone``) trains everything; ``<0`` freezes
+    all backbone stages; ``>0`` freezes up to that stage — best-effort, a bespoke model need not
+    expose ``freeze_backbone``. When ``enforce_monotonic`` and ``prev_trainable`` is given, an
+    unfreeze that shrinks the trainable set raises (progressive unfreeze must only ever grow it).
+    Extracted so a hand-rolled ``train(ctx)`` gets the identical policy + guard the default trainer uses.
+    """
+    if not freeze_to or not hasattr(model, "freeze_backbone"):
+        for p in model.parameters():
+            p.requires_grad = True
+    elif freeze_to < 0:
+        num_stages = getattr(getattr(model, "backbone", None), "num_stages", 4)
+        model.freeze_backbone(num_stages)
+    else:
+        model.freeze_backbone(freeze_to)
+
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    if enforce_monotonic and prev_trainable is not None and trainable < prev_trainable:
+        raise RuntimeError(
+            f"Non-decreasing unfreeze violated: {trainable} < {prev_trainable} trainable params"
+        )
+    return trainable
+
+
 def _expected_in_chans(config: dict) -> int:
     """Input channels the model expects — from ``model_source.in_chans``."""
     src = config.get("model_source")
@@ -462,24 +491,12 @@ def train(
             if stage_idx < resume_stage:
                 continue
 
-            # Progressive unfreezing — best-effort: a bespoke model may not expose freeze_backbone.
-            freeze_to = stage.get("freeze_to", 0)
-            if freeze_to == 0 or not hasattr(model, "freeze_backbone"):
-                for p in model.parameters():
-                    p.requires_grad = True
-            elif freeze_to < 0:
-                num_stages = getattr(getattr(model, "backbone", None), "num_stages", 4)
-                model.freeze_backbone(num_stages)
-            else:
-                model.freeze_backbone(freeze_to)
-
-            # W2: progressive unfreezing must only ever grow the trainable set.
-            trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-            if enforce_monotonic_unfreeze and prev_trainable is not None and trainable < prev_trainable:
-                raise RuntimeError(
-                    f"Non-decreasing unfreeze violated at stage {stage_idx}: "
-                    f"{trainable} < {prev_trainable} trainable params"
-                )
+            # Progressive unfreezing (+ monotonic guard) — the shared craft primitive a custom
+            # train(ctx) reuses via ctx.apply_stage_freeze.
+            trainable = apply_stage_freeze(
+                model, stage.get("freeze_to", 0), prev_trainable=prev_trainable,
+                enforce_monotonic=enforce_monotonic_unfreeze,
+            )
             prev_trainable = trainable
 
             # W2: per-stage accumulation + optional effective-batch LR scaling.
