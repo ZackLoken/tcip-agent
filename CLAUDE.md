@@ -105,7 +105,7 @@ that silently corrupts results and compounds across sessions. So:
 
 ## Pipelines & models
 
-- **No universal pipeline** — match the pattern to the trait (see `pipeline-design` skill).
+- **No universal pipeline** — derive the decomposition from the data in hand (see `pipeline-design` skill).
 - **One build path.** You write an `nn.Module` — from scratch or by importing the plain
   building blocks (FPN/PAN necks, the heads, losses, backbone wrappers, `build_detector`) —
   plus a `train(ctx)` loop, built via `model_source` → `build_model`, proven by
