@@ -323,16 +323,42 @@ def _detection_breakdown(matches, gt_boxes, gt_polys, pred_boxes, pred_polys) ->
     return detections
 
 
+def _apply_governing_criterion(out: dict, records: list, *, trait: str | None,
+                               iou_threshold: float, conf_threshold: float) -> dict:
+    """Override the human-facing TP/FP/FN + P/R/F1 with the trait's DERIVED criterion (R3/D9).
+
+    A count trait (catkin's center-match) governs the review count that feeds the phenotype; AP@0.5
+    stays as a labeled comparability metric. With no trait, ``out`` is returned unchanged (the IoU
+    convention governs, the prior behavior). The per-box ``matches`` overlay is left as-is (display).
+    """
+    from tcip_mcp.pipelines.training.evaluation import governing_counts, resolve_match_criterion
+
+    criterion = resolve_match_criterion(trait, records, iou_threshold=iou_threshold)
+    if criterion["kind"] != "center_match":
+        return out
+    gc = governing_counts(records, criterion, conf_threshold=conf_threshold)
+    out.update({
+        "iou_tp": out.get("tp"), "iou_fp": out.get("fp"), "iou_fn": out.get("fn"),
+        "tp": gc["tp"], "fp": gc["fp"], "fn": gc["fn"],
+        "precision": round(gc["precision"], 4), "recall": round(gc["recall"], 4),
+        "f1": round(gc["f1"], 4),
+        "governing_criterion": criterion, "map50_role": "comparability_only",
+    })
+    return out
+
+
 def _evaluate_image(
     image_path: str,
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
     detail: bool = False,
+    trait: str | None = None,
 ) -> dict:
     """Match predictions against ground truth for a single image (COCOeval).
 
     mAP / TP / FP / FN come from pycocotools; the ``matches`` block is a
-    per-box overlay for the GUI review panel (``compute_matches``).
+    per-box overlay for the GUI review panel (``compute_matches``). With a count ``trait`` the
+    reported count is governed by the trait's derived criterion (R3), map50 kept as comparability.
     """
     loaded = _load_image_annotations(image_path)
     if loaded is None:
@@ -360,6 +386,8 @@ def _evaluate_image(
         "conf_threshold": conf_threshold,
         "matches": matches,
     }
+    out = _apply_governing_criterion(out, [record], trait=trait,
+                                     iou_threshold=iou_threshold, conf_threshold=conf_threshold)
     if detail:
         out["img_w"] = w
         out["img_h"] = h
@@ -371,6 +399,7 @@ def _evaluate_folder(
     folder_path: str,
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
+    trait: str | None = None,
 ) -> dict:
     """Aggregate detection metrics across all images in a dataset."""
     root = Path(folder_path)
@@ -413,7 +442,7 @@ def _evaluate_folder(
         c = counts_by_id.get(idx, {"tp": 0, "fp": 0, "fn": 0})
         per_image.append({"image": img.name, "tp": c["tp"], "fp": c["fp"], "fn": c["fn"]})
 
-    return {
+    out = {
         "path": folder_path,
         "image_count": len(images),
         "map": round(m["map"], 4),
@@ -427,6 +456,27 @@ def _evaluate_folder(
         "iou_type": dataset_iou_type,
         "per_image": per_image,
     }
+    # R3/D9: a count trait's derived criterion governs the aggregate review count; map50 stays
+    # comparability. Recompute per-image counts under the same criterion so both agree.
+    from tcip_mcp.pipelines.training.evaluation import governing_counts, resolve_match_criterion
+    criterion = resolve_match_criterion(trait, records, iou_threshold=iou_threshold)
+    if criterion["kind"] == "center_match":
+        gc = governing_counts(records, criterion, conf_threshold=conf_threshold)
+        out.update({
+            "iou_total_tp": out["total_tp"], "iou_total_fp": out["total_fp"],
+            "iou_total_fn": out["total_fn"],
+            "total_tp": gc["tp"], "total_fp": gc["fp"], "total_fn": gc["fn"],
+            "precision": round(gc["precision"], 4), "recall": round(gc["recall"], 4),
+            "f1": round(gc["f1"], 4),
+            "governing_criterion": criterion, "map50_role": "comparability_only",
+        })
+        out["per_image"] = [
+            {"image": img.name,
+             **{k: governing_counts([rec], criterion, conf_threshold=conf_threshold)[k]
+                for k in ("tp", "fp", "fn")}}
+            for rec, img in zip(records, valid_images)
+        ]
+    return out
 
 
 @mcp.tool()
@@ -436,6 +486,7 @@ def score_predictions(
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
     detail: bool = False,
+    trait: str | None = None,
 ) -> dict:
     """Score on-disk predictions against on-disk ground truth (COCOeval).
 
@@ -446,16 +497,19 @@ def score_predictions(
 
     Args:
         path: Absolute path to an image file (single-image match) or a dataset root (aggregate).
-        iou_threshold: IoU threshold for a positive match.
+        iou_threshold: IoU threshold for a positive match (the AP@0.5 comparability convention).
         conf_threshold: Minimum confidence to consider a prediction. Defaults to the shared
             ``DEFAULT_CONF`` so the reported operating point matches evaluate_model / inference.
         detail: Single-image only — also return the per-detection ``detections`` breakdown.
+        trait: When set, the trait's DERIVED localization criterion (traits.py — e.g. catkin's
+            center-match at half the class-average size) governs the reported TP/FP/FN count; map50
+            stays a labeled comparability metric. Absent -> the IoU convention governs (prior behavior).
     """
     p = Path(path)
     if p.is_file():
-        return _evaluate_image(path, iou_threshold, conf_threshold, detail)
+        return _evaluate_image(path, iou_threshold, conf_threshold, detail, trait)
     if p.is_dir():
-        return _evaluate_folder(path, iou_threshold, conf_threshold)
+        return _evaluate_folder(path, iou_threshold, conf_threshold, trait)
     return {"error": f"Path not found: {path}"}
 
 
