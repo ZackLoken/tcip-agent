@@ -173,8 +173,9 @@ difficulties:
 ## Measurement integrity (highest rule)
 
 Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
-against expert-scored ground truth before any result — see the catkin-elongation cautionary tale
-there). Elderberry-specific traps:
+against a reference sized to the trait — GT annotations, or a breeder-confirmed sample of the
+model's own outputs (review-confirmation) — before any result, not dense GT for every trait; see
+the catkin-elongation cautionary tale there). Elderberry-specific traps:
 
 - `cyme_shatter_resistance` is a physical **shake/retention test**, not something a bounding box,
   geometry, or still-image count can measure — do not manufacture a proxy from a static image.
