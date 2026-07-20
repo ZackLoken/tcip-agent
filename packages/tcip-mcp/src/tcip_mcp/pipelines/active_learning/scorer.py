@@ -1,6 +1,9 @@
 """Active learning scorers — rank unlabeled images by informativeness.
 
-Scorers:
+An acquisition function is a capability, not a fixed menu: scorers resolve through a small dict
+registry (``resolve_scorer``) the agent can extend with ``register_scorer`` — compose a new
+acquisition function (e.g. margin, least-confidence) and register it rather than pick from a welded
+if/elif. The built-in reference scorers:
   - UncertaintyScorer: prediction entropy / confidence spread
   - DiversityScorer: embedding distance from labeled set
   - CombinedScorer: weighted combination of uncertainty + diversity
@@ -10,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 import numpy as np
 import torch
@@ -185,3 +189,24 @@ class CombinedScorer(BaseScorer):
 
         combined.sort(key=lambda x: x[1], reverse=True)
         return combined
+
+
+# The acquisition-function seam: one Protocol (BaseScorer) + one dict registry. Built-in reference
+# scorers are pre-registered; the agent registers its own with register_scorer(name, factory) instead
+# of editing a closed menu. A factory takes the task string and returns a BaseScorer.
+SCORER_REGISTRY: dict[str, Callable[[str], BaseScorer]] = {
+    "uncertainty": lambda task: UncertaintyScorer(task=task),
+    "diversity": lambda task: DiversityScorer(),
+    "combined": lambda task: CombinedScorer(task=task),
+}
+
+
+def register_scorer(name: str, factory: Callable[[str], BaseScorer]) -> None:
+    """Register an acquisition-function scorer under ``name`` so ``method=<name>`` resolves to it."""
+    SCORER_REGISTRY[name] = factory
+
+
+def resolve_scorer(method: str, task: str) -> BaseScorer:
+    """Resolve a scorer by method name; an unregistered name falls back to the combined scorer."""
+    factory = SCORER_REGISTRY.get(method, SCORER_REGISTRY["combined"])
+    return factory(task)
