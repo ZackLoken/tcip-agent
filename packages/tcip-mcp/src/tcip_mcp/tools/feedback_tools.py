@@ -111,7 +111,7 @@ def prioritize_review_queue(
     skip_reviewed: bool = True,
     low: float = 0.3,
     high: float = 0.8,
-    auto_threshold: float = 0.8,
+    auto_threshold: float | None = None,
 ) -> dict:
     """Order un-reviewed images for the next review batch.
 
@@ -133,7 +133,12 @@ def prioritize_review_queue(
         skip_reviewed: Exclude already-completed images from the queue.
         low: Lower confidence bound for the review band (``confidence_triage`` only).
         high: Upper confidence bound for the review band (``confidence_triage`` only).
-        auto_threshold: Confidence at/above which a label auto-accepts (``confidence_triage`` only).
+        auto_threshold: Confidence at/above which a prediction is auto-accepted AS GROUND TRUTH
+            (``confidence_triage`` only). ``None`` (default) refuses to auto-accept: turning
+            predictions into GT at a pinned 0.8 fabricates labels the model was never confirmed to
+            get right. Per D11, derive this threshold from the model's VALIDATED confidence
+            distribution and confirm with a breeder spot-check that high-conf actually equals truth,
+            then pass it explicitly — the result is stamped as requiring that confirmation.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -169,13 +174,33 @@ def prioritize_review_queue(
                     "auto_accepted_images": []}
         predictor = build_predictor(checkpoint_path)
         predictions = predictor.predict_batch(paths)
-        accepted = auto_accept(predictions, threshold=auto_threshold)
         needs_review = review_queue(predictions, low=low, high=high)
+        # D11: auto-accept turns predictions into GT. Refuse to do so at a pinned threshold — the
+        # threshold must be derived from the model's validated conf distribution and breeder
+        # spot-checked. With no explicit (confirmed) threshold, accept nothing and say why.
+        if auto_threshold is None:
+            return {
+                "strategy": strategy,
+                "total_images": len(predictions),
+                "reviewed_skipped": reviewed_skipped,
+                "auto_accepted": 0,
+                "auto_accept_refused": (
+                    "auto_threshold=None: auto-accepting predictions as GT requires a threshold "
+                    "derived from the model's validated confidence distribution and confirmed by a "
+                    "breeder spot-check (D11); pass auto_threshold explicitly once confirmed."),
+                "needs_review": len(needs_review),
+                "review_images": [r.get("image", "") for r in needs_review],
+                "auto_accepted_images": [],
+            }
+        accepted = auto_accept(predictions, threshold=auto_threshold)
         return {
             "strategy": strategy,
             "total_images": len(predictions),
             "reviewed_skipped": reviewed_skipped,
             "auto_accepted": len(accepted),
+            "auto_accept_requires_breeder_confirmation": (
+                "auto-accepted labels are GT only if this threshold was breeder-confirmed on a "
+                "high-conf sample (D11)"),
             "needs_review": len(needs_review),
             "review_images": [r.get("image", "") for r in needs_review],
             "auto_accepted_images": [a.get("image", "") for a in accepted],
