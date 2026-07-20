@@ -78,8 +78,12 @@ that silently corrupts results and compounds across sessions. So:
     visual call. If a trait can't yet be measured validly from pixels, say so — don't
     manufacture a number. (A prior session read catkin "elongation" — a state — off bbox
     height: invalid, shipped fabricated phenology, removed.)
-  - **Validate the measurement against expert-scored ground truth before producing any
-    downstream result** (curve, milestone, CSV, delivery). No validated measurement → no
+  - **Validate the measurement before producing any downstream result** (curve, milestone,
+    CSV, delivery): the expert confirms the model has the trait's measurement straight on a
+    *reference sized to the trait* — GT annotations, or a breeder-confirmed sample of the
+    model's own outputs (the review-confirmation loop, a valid lighter path), not dense GT
+    for every trait. Either reference passes the *identical* disjoint-split + count-bias
+    gate, and the provenance records which one validated. No validated measurement → no
     result.
   - **Never commit unvalidated domain logic as if it were a definition.** Provisional logic
     is flagged provisional and validated or removed; it must not silently become
@@ -91,7 +95,7 @@ that silently corrupts results and compounds across sessions. So:
   returns `"format_confident": false`, stop and confirm the format — an undetected
   mismatch makes real annotations read as empty negatives.
 - **State changes go through `@audited` MCP tools.** `.tcip/audit.jsonl` is the
-  tamper-evident record; don't route mutations around it.
+  append-only record; don't route mutations around it.
 - **Experiments are immutable.** Each run is `.tcip/experiments/<id>/`
   (config/metrics/artifacts/lineage). New run; don't overwrite history.
 - **Confirm before destructive/outward actions** (deleting labels, overwriting
