@@ -166,7 +166,7 @@ def main() -> int:
             mapping_path=str(mapping_path),
             predictions_by_date=preds_by_date,
             output_csv_path=str(csv_out),
-            elongated_class_id=ELONGATED_CLASS,
+            positive_class_id=ELONGATED_CLASS,
             acknowledge_unvalidated=True,
         )
         check("no error", "error" not in r, r.get("error", ""))
@@ -201,7 +201,7 @@ def main() -> int:
             mapping_path=str(mapping_path),
             predictions_by_date={d: str(preds_flat / d) for d in DATES},
             output_csv_path=str(csv_blocked),
-            elongated_class_id=ELONGATED_CLASS,
+            positive_class_id=ELONGATED_CLASS,
         )
         check("returns an error", "error" in g, str(g)[:80])
         check("elongation_classified false", g.get("elongation_classified") is False)
