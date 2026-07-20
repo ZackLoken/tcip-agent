@@ -21,11 +21,15 @@ The final deliverable is a CSV with one row per plant per trait:
 
 ## Aggregation Rules
 
-Different trait types require different aggregation from per-image to per-plant:
+Aggregating per-image measurements into a per-plant value is an agent **choice keyed to the trait's
+read-semantics**, not a frozen one-function-per-type map. The table below is a starting reference of
+common choices — pick (or compose) the aggregation the trait's definition actually calls for (a
+skewed count may want a median, a robust mean, or a yield-model estimate; a date wants a crossing),
+and record which you used. When the trait carries read-semantics fields (`TraitSpec`), those govern.
 
 Examples use real `crops.yml` trait names — verify any trait against `crops.yml` before use.
 
-| Trait Type | Aggregation | Example |
+| Trait Type | Common choice | Example |
 |-----------|-------------|---------|
 | Count | Median across images | `stem_count` → median across the plant's images |
 | Date (bloom) | Elongated-fraction crossing | `catkin_50per_date` → date the elongated fraction crosses 50% (see `phenology` skill) |
@@ -46,6 +50,28 @@ Examples use real `crops.yml` trait names — verify any trait against `crops.ym
 `tabulate_counts` produces a **different**, per-image `image, detection_count,
 avg_confidence` CSV — not the per-plant schema above. Don't reach for it when the
 per-plant schema is what's wanted.
+
+## The delivery gate (measurement integrity)
+
+Every phenotype-delivery door refuses a **bare write** — an unvalidated measurement number with no
+acknowledgement. The count/date/value is the phenotype, so each door runs one shared
+`check_delivery_gate`: it ships only when each measurement dimension the deliverable rests on is
+validated against a reference sized to the trait (held-out GT **or** a breeder-confirmed output
+sample — see the `evaluation` and `cv-research` skills), read from the predictions' own
+`operating_point.json` sidecar, not a caller-asserted string.
+
+- `compute_phenology` gates both the elongation classifier and the count operating point; the web
+  `/export_csv` phenology branch gates the same, per row.
+- `tabulate_counts` gates the count operating point on the run's resolved bundle; `export_detection_csv`
+  and `export_aggregated_csv` gate at the writer (they have no calibrated wrapper) — pass
+  `measurement_validated` (a shippable reference) or `pred_dirs` to reconcile it from the sidecars.
+- To ship a **provisional** result, pass `acknowledge_unvalidated=True`: the door writes but stamps
+  `measurement_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
+  provisional delivery, never for silently shipping a bare number.
+
+The **prediction-bucket writers stay ungated but honestly stamped** (`export_predictions` /
+`run_inference`): the review loop must be able to produce unvalidated predictions to *reach* a
+validated measurement — the gate lives at the final phenotype door, not on the intermediate labels.
 
 ## Quality Control
 
