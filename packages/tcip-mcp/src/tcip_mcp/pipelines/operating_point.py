@@ -3,8 +3,10 @@
 This is the single place all four consumers — train-eval, test-eval, inference, export — get the
 operating point, so the same model + images can't yield different counts by entry door (the audit's
 divergent-defaults bug). The confidence threshold is a *calibration* param: derived by a center-match
-count-unbiased sweep over a labeled subset and validated on a held-out split, or carried as
-``validated=false`` when no GT exists (never a frozen literal). See the scope doc and traits.py.
+count-unbiased sweep over a reference sized to the trait, and validated on a disjoint held-out split of
+that reference — GT annotations (``validated_held_out``) OR a breeder-confirmed sample of the model's
+own outputs (``review_confirmed``), the same gate either way — or carried as ``validated=false`` when
+no reference exists (never a frozen literal). See the scope doc and traits.py.
 """
 
 from __future__ import annotations
@@ -14,8 +16,15 @@ from typing import Any
 
 from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 from tcip_mcp.pipelines.resolution import (
+    DEFAULT_CONF,
+    DEFAULT_MAX_DETS,
+    DEFAULT_NMS_IOU,
+    DEFAULT_TILE_SIZE,
+    DEFAULT_TILED,
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
+    VALIDATED_REVIEW_CONFIRMED,
+    VALIDATED_SHIPPABLE,
     ResolvedBundle,
     ResolvedParam,
     default,
@@ -30,12 +39,10 @@ from tcip_mcp.pipelines.training.evaluation import (
 )
 from tcip_mcp.traits import get_trait
 
-# Documented defaults for the non-count operating-point params (overridable / derivable).
-_DEFAULT_TILED = True
-_DEFAULT_TILE_SIZE = 640
-_DEFAULT_CROSS_TILE_NMS = 0.5  # merge tile-seam duplicates; a distribution derivation can refine
-_DEFAULT_MAX_DETS = 300
-_DEFAULT_CONF_PLACEHOLDER = 0.5  # only ever consumed via unvalidated_value(); never trustworthy
+# The non-count operating-point fallbacks all resolve to resolution.py's single source of truth
+# (DEFAULT_TILED / DEFAULT_TILE_SIZE / DEFAULT_NMS_IOU / DEFAULT_MAX_DETS / DEFAULT_CONF) so the same
+# model+images can't give a different count by entry door. cross_tile_nms shares the NMS-IoU knob (a
+# distribution derivation refines it); the conf placeholder is only ever read via unvalidated_value().
 
 
 def set_detector_operating_point(model: Any, *, score_thresh: float | None = None,
@@ -87,12 +94,32 @@ def records_over_loader(model: Any, loader: Any, device: Any, task: str) -> list
     return records
 
 
+def _min_dt_score(records: list[dict]) -> float | None:
+    """Lowest detection score across a reference, or None if it holds no detections."""
+    scores = [d["score"] for rec in records for d in rec.get("dt", []) if "score" in d]
+    return min(scores) if scores else None
+
+
+def _conf_censored(records: list[dict] | None, display_floor: float) -> bool:
+    """True when a reference's detections were filtered above the calibration floor.
+
+    The count-unbiased sweep is only trustworthy when the reference includes the low-conf tail —
+    predictions generated at/below the calibration floor (``_calibrate_operating_point`` floors the
+    detector to ``score_thresh=0.01`` for exactly this reason). A reference whose lowest detection
+    score sits at or above the display conf floor (e.g. predictions a human reviewed, staged at
+    ``DEFAULT_CONF``) is truncated: the sweep can't reach the boxes a lower conf would recover, so its
+    count-unbiased point and held-out bias are not trustworthy and must not stamp a ``validated`` claim.
+    """
+    lo = _min_dt_score(records or [])
+    return lo is not None and lo >= display_floor
+
+
 def _max_dets_from_density(records: list[dict], floor: int = 100) -> int:
     """A generous cap = ~1.5x the p99 GT objects-per-image, so dense scenes aren't truncated."""
     import numpy as np
     counts = [len(rec.get("gt", [])) for rec in records]
     if not counts:
-        return _DEFAULT_MAX_DETS
+        return DEFAULT_MAX_DETS
     return max(floor, int(math.ceil(1.5 * float(np.quantile(counts, 0.99)))))
 
 
@@ -106,10 +133,22 @@ def resolve_operating_point(
     tiled: bool | None = None,
     cross_tile_nms: float | None = None,
     max_dets: int | None = None,
+    validated_reference: str = VALIDATED_HELD_OUT,
 ) -> ResolvedBundle:
     """Resolve the operating point for (trait, dataset). Pure over records — callers pass the model
-    pass output; ``records_over_loader`` produces it. ``tile_size`` may be model-derived (imgsz)."""
+    pass output; ``records_over_loader`` produces it. ``tile_size`` may be model-derived (imgsz).
+
+    ``validated_reference`` is the stamp a *passing* held-out gate earns: ``validated_held_out`` when
+    the records came from GT annotations (default), ``review_confirmed`` when they were reconstructed
+    from a breeder-confirmed sample of the model's own outputs (feedback.review_calibration). Both
+    references pass the SAME disjoint + count-bias gate here — the stamp only records which one it was.
+    """
+    if validated_reference not in VALIDATED_SHIPPABLE:
+        raise ValueError(f"validated_reference must be one of {VALIDATED_SHIPPABLE}, got {validated_reference!r}")
     trait = get_trait(trait_name)
+    review = validated_reference == VALIDATED_REVIEW_CONFIRMED
+    conf_derived_from = ("count-unbiased center-match sweep over review verdicts"
+                         if review else "count-unbiased center-match sweep")
     params: dict[str, ResolvedParam] = {}
 
     # --- conf: the count operating point (calibration) ---
@@ -117,28 +156,36 @@ def resolve_operating_point(
         tol = 0.5 * gt_class_avg_size(calibration_records)  # derived tolerance (half class avg size)
         cal_sweep = sweep_operating_point(calibration_records, tolerance=tol)
         conf = pick_count_unbiased(cal_sweep) if trait.count_objective == "count_unbiased" else pick_f1_max(cal_sweep)
-        conf = _DEFAULT_CONF_PLACEHOLDER if conf is None else conf
+        conf = DEFAULT_CONF if conf is None else conf
+        # conf-censoring guard: a count-unbiased 'validated' claim is only honest if the reference
+        # shows the low-conf tail; a display-filtered reference (min score >= the display floor) is
+        # truncated and cannot be stamped validated — carry it as an unvalidated placeholder instead.
+        censored = _conf_censored(calibration_records, DEFAULT_CONF)
         if holdout_records:
             # Disjointness can only be proven from image_ids, so fail closed (not disjoint) when
             # either set has none — else the same records passed as cal+holdout look validated.
             cal_ids = {r["image_id"] for r in calibration_records if "image_id" in r}
             hold_ids = {r["image_id"] for r in holdout_records if "image_id" in r}
             disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
+            censored = censored or _conf_censored(holdout_records, DEFAULT_CONF)
             hold_tol = 0.5 * gt_class_avg_size(holdout_records)
             hold_sweep = sweep_operating_point(holdout_records, tolerance=hold_tol)
             hb = count_bias_at(hold_sweep, conf)  # bias on the holdout at the calibration-chosen conf
-            passed = disjoint and hb is not None and abs(hb["count_bias_mean"]) <= trait.count_bias_tolerance
+            passed = (disjoint and not censored and hb is not None
+                      and abs(hb["count_bias_mean"]) <= trait.count_bias_tolerance)
             sweep_data = {"calibration": cal_sweep, "f1_max_conf": pick_f1_max(cal_sweep),
                           "holdout_bias": hb, "count_bias_tolerance": trait.count_bias_tolerance,
-                          "disjoint": disjoint, "passed_holdout": passed}
-            # validated only if the holdout is disjoint AND the bias passed there — not merely because
-            # a holdout was supplied. Reference here is the annotations, not truth (bounded by them).
-            validated = VALIDATED_HELD_OUT if passed else VALIDATED_FALSE
+                          "disjoint": disjoint, "conf_censored": censored, "passed_holdout": passed}
+            # validated only if the holdout is disjoint AND uncensored AND the bias passed there — not
+            # merely because a holdout was supplied. Reference here is the annotations/verdicts, not
+            # truth; the stamp records which reference (GT vs review-confirmed) cleared the gate.
+            validated = validated_reference if passed else VALIDATED_FALSE
         else:
-            sweep_data = {"calibration": cal_sweep, "note": "calibrated but not held-out-measured"}
+            sweep_data = {"calibration": cal_sweep, "conf_censored": censored,
+                          "note": "calibrated but not held-out-measured"}
             validated = VALIDATED_FALSE
         params["conf"] = derived("conf", float(conf), derivation_class="calibration",
-                                 derived_from="count-unbiased center-match sweep",
+                                 derived_from=conf_derived_from,
                                  validated_vs_gt=validated, dataset_scoped=True,
                                  dataset_hash=dataset_hash, sweep=sweep_data)
         if max_dets is None:
@@ -146,7 +193,7 @@ def resolve_operating_point(
     else:
         # No GT for this dataset: cannot calibrate. Carry an unvalidated placeholder (un-shippable
         # via the firewall) — no valley heuristic, no chosen value dressed as trustworthy.
-        params["conf"] = derived("conf", _DEFAULT_CONF_PLACEHOLDER, derivation_class="calibration",
+        params["conf"] = derived("conf", DEFAULT_CONF, derivation_class="calibration",
                                  derived_from="no GT for this dataset; unvalidated placeholder",
                                  validated_vs_gt=VALIDATED_FALSE, dataset_scoped=True, dataset_hash=dataset_hash)
 
@@ -154,9 +201,9 @@ def resolve_operating_point(
     params["tile_size"] = (
         derived("tile_size", int(tile_size), derivation_class="deterministic",
                 derived_from="model imgsz / persisted training geometry")
-        if tile_size else default("tile_size", _DEFAULT_TILE_SIZE)
+        if tile_size else default("tile_size", DEFAULT_TILE_SIZE)
     )
-    params["tiled"] = default("tiled", _DEFAULT_TILED if tiled is None else bool(tiled))
+    params["tiled"] = default("tiled", DEFAULT_TILED if tiled is None else bool(tiled))
     # cross_tile_nms: an explicit override wins and is stamped as such; otherwise derive it from the
     # calibration GT's neighbor-IoU distribution; failing that (no GT / no genuine overlaps) an honest
     # default — never a derivation label on a number no derivation produced.
@@ -173,11 +220,11 @@ def resolve_operating_point(
             derived("cross_tile_nms", nms, derivation_class="distribution",
                     derived_from="GT neighbor-IoU distribution (p99 + margin)")
             if nms is not None
-            else default("cross_tile_nms", _DEFAULT_CROSS_TILE_NMS, derivation_class="distribution")
+            else default("cross_tile_nms", DEFAULT_NMS_IOU, derivation_class="distribution")
         )
     params["max_dets"] = (
         derived("max_dets", int(max_dets), derivation_class="distribution",
                 derived_from="~1.5x p99 GT objects/image")
-        if max_dets is not None else default("max_dets", _DEFAULT_MAX_DETS)
+        if max_dets is not None else default("max_dets", DEFAULT_MAX_DETS)
     )
     return ResolvedBundle(trait=trait_name, dataset_hash=dataset_hash, params=params)
