@@ -45,28 +45,43 @@ def _milestone_targets(spec) -> dict[str, float]:
     return {f"{int(round(f * 100)):02d}per": f for f in spec.milestone_fractions}
 
 
-# The delivered per-plant phenology CSV schema — one canonical column set/order so the
-# ``compute_phenology`` MCP tool and any other exporter emit the same file.
-PHENOLOGY_CSV_COLUMNS = [
-    "plant_id",
-    "accession",
-    "n_dates",
-    "catkin_elongation_date",
-    # Whether the elongation-date reading (which milestone "most elongated" maps to) is still provisional
+def phenology_csv_columns(spec) -> list[str]:
+    """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitSpec``.
+
+    The milestone/alias column NAMES come from the spec (``phenology_prefix`` + each milestone key,
+    plus the majority alias/provisional columns built from ``majority_label``) so the schema carries
+    no trait vocabulary of its own — catkin resolves to ``catkin_05per_date`` … ``catkin_elongation_date``,
+    while a different trait's spec yields its own prefix with no change here. The surrounding
+    provenance columns (operating point, classifier validation, producer identity) are trait-neutral.
+    """
+    prefix = spec.phenology_prefix
+    majority = f"{prefix}_{spec.majority_label}_date"
+    # Whether the majority-date reading (which milestone "most elongated" maps to) is still provisional
     # pending breeder confirmation — a read-semantics marker carried with the delivery, not settled fact.
-    "catkin_elongation_provisional",
-    "catkin_05per_date",
-    "catkin_50per_date",
-    "catkin_95per_date",
-    # Provenance stamp: how the counts behind these milestones were produced, and whether the
-    # measurement is trustworthy. A delivered phenotype must carry this so it can be traced.
-    "operating_point_conf",
-    "operating_point_validated",
-    "elongation_classifier_validated",
-    # Producing-model identity — the exact checkpoint (content hash) + run behind the counts.
-    "producer_model_sha256",
-    "producer_experiment_id",
-]
+    provisional = f"{prefix}_{spec.majority_label}_provisional"
+    fraction_cols = [f"{prefix}_{key}_date" for key in _milestone_targets(spec)]
+    return [
+        "plant_id",
+        "accession",
+        "n_dates",
+        majority,
+        provisional,
+        *fraction_cols,
+        # Provenance stamp: how the counts behind these milestones were produced, and whether the
+        # measurement is trustworthy. A delivered phenotype must carry this so it can be traced.
+        "operating_point_conf",
+        "operating_point_validated",
+        "elongation_classifier_validated",
+        # Producing-model identity — the exact checkpoint (content hash) + run behind the counts.
+        "producer_model_sha256",
+        "producer_experiment_id",
+    ]
+
+
+# Catkin's delivered CSV schema (Phase 1) — one canonical column set/order so the
+# ``compute_phenology`` MCP tool and any other exporter emit the same file. Another trait resolves
+# its own schema through ``phenology_csv_columns`` from that trait's spec.
+PHENOLOGY_CSV_COLUMNS = phenology_csv_columns(get_trait("catkin"))
 
 
 # ── ISO date helpers ─────────────────────────────────────────────────────
@@ -137,20 +152,22 @@ def elongation_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
     return None
 
 
-def plant_milestones(series: list[tuple[str, float]]) -> dict:
-    """The catkin phenology dates for one plant's elongated-fraction series.
+def plant_milestones(series: list[tuple[str, float]], spec=None) -> dict:
+    """The phenology dates for one plant's positive-fraction series, keyed by the trait's own columns.
 
-    Crossing fractions and the "most elongated" majority mapping come from the trait's semantics
-    (``TraitSpec``, read per-call), so the milestone definition lives in one place instead of
-    scattered literals.
+    Both the column names (``phenology_prefix`` + each milestone key, plus the majority alias) and the
+    crossing fractions and "most elongated" majority mapping come from the trait's semantics
+    (``TraitSpec``), so the milestone definition lives in one place instead of scattered literals.
+    ``spec`` defaults to the Phase-1 catkin trait; passing another trait's spec yields its own columns.
     """
-    spec = get_trait("catkin")
-    out = {f"catkin_{key}_date": crossing_date(series, frac)
+    spec = spec or get_trait("catkin")
+    prefix = spec.phenology_prefix
+    out = {f"{prefix}_{key}_date": crossing_date(series, frac)
            for key, frac in _milestone_targets(spec).items()}
-    # crops.yml "most catkins elongated" maps to the majority milestone the spec names (95% crossing;
-    # a provisional reading pending breeder confirmation — see spec.majority_provisional).
+    # e.g. catkin's crops.yml "most catkins elongated" maps to the majority milestone the spec names
+    # (95% crossing; a provisional reading pending breeder confirmation — see spec.majority_provisional).
     if spec.majority_milestone:
-        out["catkin_elongation_date"] = out.get(f"catkin_{spec.majority_milestone}_date")
+        out[f"{prefix}_{spec.majority_label}_date"] = out.get(f"{prefix}_{spec.majority_milestone}_date")
     return out
 
 
