@@ -102,11 +102,25 @@ def _write_preds(dir_path: Path, stem: str, lines: list[str]) -> None:
     json_io.write_detect(dir_path / f"{stem}.json", _pred_boxes(lines), 8, 8)
 
 
+def _write_op_sidecar(dir_path: Path, *, validated: bool, conf: float = 0.4) -> None:
+    """The operating_point.json a calibrated export_predictions writes — the on-disk validity
+    compute_phenology reconciles the count operating point against (W1-R3)."""
+    ref = "validated_held_out" if validated else "false"
+    (dir_path / "operating_point.json").write_text(json.dumps({
+        "validated": validated,
+        "operating_point": {"conf": {"value": conf, "validated_vs_gt": ref}},
+    }), encoding="utf-8")
+
+
 def test_compute_phenology_writes_canonical_csv(tmp_path: Path) -> None:
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
     # P1: 0/1 elongated early, 1/1 elongated late → fraction 0.0 → 1.0.
     _write_preds(d1, "P1_a", ["0 0.9 0.5 0.5 0.1 0.1"])
     _write_preds(d2, "P1_b", ["1 0.9 0.5 0.5 0.1 0.1"])
+    # W1-R3: the count operating point's validity is read from each bucket's operating_point.json,
+    # not the caller string — a calibrated export writes it validated_held_out.
+    _write_op_sidecar(d1, validated=True)
+    _write_op_sidecar(d2, validated=True)
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(
         mapping_path,
@@ -228,6 +242,10 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
     _write_preds(d1, "P1_a", ["0 0.9 0.5 0.5 0.1 0.1"])
     _write_preds(d2, "P1_b", ["1 0.9 0.5 0.5 0.1 0.1"])
+    # W1-R3: the op point is validated ON DISK (as a calibrated export writes it), so the preserved
+    # 'validated half' is read from the sidecar, not the caller string.
+    _write_op_sidecar(d1, validated=True)
+    _write_op_sidecar(d2, validated=True)
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(mapping_path, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -240,7 +258,7 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
         output_csv_path=str(out_csv),
         elongated_class_id=1,
         classifier_validated=None,                       # classifier not validated
-        operating_point_validated="validated_held_out",  # op point validated
+        operating_point_validated="validated_held_out",  # op point validated (backed on disk)
         acknowledge_unvalidated=True,
     )
     assert "error" not in res
