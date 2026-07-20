@@ -236,6 +236,10 @@ class ExportCsvPayload(BaseModel):
     # Optional structural hint — the frontend can pre-compute onset-date rows
     # via /onset_dates and pass the rows directly. We honour whatever keys are
     # present.
+    # When these rows are a bloom delivery, pass the prediction buckets the curve was
+    # computed from so the gate reads the count operating point's validity from each
+    # bucket's operating_point.json (the on-disk floor), not a caller-supplied row string.
+    predictions_by_date: Optional[dict[str, str]] = None
 
 
 @router.post("/export_csv")
@@ -244,20 +248,59 @@ def export_csv(payload: ExportCsvPayload) -> Response:
         raise HTTPException(400, "no rows to export")
 
     # Phenology-delivery guard: if these rows are a bloom-phenotype delivery (carry milestone dates),
-    # every row must carry a held-out-validated classifier AND operating point — the same gate
+    # every row must carry a validated classifier AND a validated count operating point — the same gate
     # compute_phenology enforces, applied here so this generic export can't become a second, un-gated
-    # door that ships an unvalidated phenotype CSV.
-    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+    # door that ships an unvalidated phenotype CSV. The operating point's validity is read from each
+    # bucket's operating_point.json (floored against any row string), never trusted from the row alone.
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_SHIPPABLE,
+        check_delivery_gate,
+        reconcile_operating_point_validity,
+    )
     _milestones = {"catkin_05per_date", "catkin_50per_date", "catkin_95per_date"}
     if any(_milestones & set(r.keys()) for r in payload.rows):
-        for r in payload.rows:
-            if (r.get("elongation_classifier_validated") != VALIDATED_HELD_OUT
-                    or r.get("operating_point_validated") != VALIDATED_HELD_OUT):
+        op_state: str | None = None
+        if payload.predictions_by_date:
+            recon = reconcile_operating_point_validity(list(payload.predictions_by_date.values()))
+            op_state = recon["validated"]
+            if op_state not in VALIDATED_SHIPPABLE:
                 raise HTTPException(
                     400,
-                    "phenology delivery requires a held-out-validated classifier AND operating point in "
-                    "every row (elongation_classifier_validated / operating_point_validated = "
-                    "'validated_held_out'); produce it via compute_phenology, which gates and stamps it.",
+                    "phenology delivery: the count operating point is not validated on disk "
+                    f"(reconciled from operating_point.json = {op_state!r}; missing sidecars: "
+                    f"{recon['missing_sidecars']}; unvalidated buckets: {recon['unvalidated_buckets']}). "
+                    "Produce the predictions via a calibrated export_predictions, then compute_phenology.",
+                )
+        for r in payload.rows:
+            # On-disk reconciliation wins when buckets were supplied; else fall back to the row's stamp
+            # (itself written by compute_phenology's on-disk gate) — never upgrade an unvalidated row.
+            row_op = op_state if op_state is not None else r.get("operating_point_validated")
+            # The web door has no acknowledge escape — an unvalidated phenotype CSV is refused outright.
+            gate = check_delivery_gate(
+                {"classifier": r.get("elongation_classifier_validated"), "operating_point": row_op})
+            if not gate.ok:
+                raise HTTPException(
+                    400,
+                    "phenology delivery requires a validated classifier AND count operating point in "
+                    "every row (elongation_classifier_validated + operating_point_validated a shippable "
+                    "reference); produce it via compute_phenology, which reads the on-disk operating "
+                    f"point, gates, and stamps it. Unvalidated: {list(gate.unvalidated)}.",
+                )
+    else:
+        # Non-phenology delivery: a per-plant phenotype row (the delivery schema — a measured
+        # trait_name + value) is equally a delivery door, so gate it against its stamped validity.
+        # Scoped to phenotype rows (trait_name + value) so diagnostic / inventory tables — which
+        # carry neither — still export freely (over-correction guard).
+        pheno_rows = [r for r in payload.rows if "trait_name" in r and "value" in r]
+        for r in pheno_rows:
+            gate = check_delivery_gate({"measurement": r.get("measurement_validated")})
+            if not gate.ok:
+                raise HTTPException(
+                    400,
+                    "per-plant phenotype delivery requires a validated measurement in every row "
+                    "(measurement_validated a shippable reference — held-out GT or a breeder-confirmed "
+                    "sample); produce the CSV via export_aggregated_csv, which gates and stamps it. "
+                    f"Unvalidated: {list(gate.unvalidated)}.",
                 )
     keys: list[str] = []
     seen: set[str] = set()
