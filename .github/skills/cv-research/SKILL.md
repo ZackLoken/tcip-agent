@@ -68,16 +68,22 @@ for the full contract; the seams you use here are:
   "in_chans": ...}`), imported not `exec`'d, so the run reproduces from source.
 - **The model contract is the only hard boundary.** `pipelines.model_contract` /
   `check_model_contract` require just that your module trains (finite-gradient loss) and emits
-  inference output the library scorers consume. Prove it learns cheaply first with `overfit_check`
-  on a handful of images before spending a real run.
+  inference output the library scorers consume. You don't call it by hand: `launch_training` smokes
+  it automatically (`preflight_config(smoke=True)` builds the model + runs the contract at the
+  *resolved* in_chans/num_classes/img_size before the thread spawns), so a broken builder fails the
+  launch instead of wasting a run. From inside a custom loop, `ctx.check_contract()` self-proves at
+  the same resolved dims; prove it learns cheaply first with `ctx.overfit_check()` (voluntary,
+  non-gating).
 - **A custom `train(ctx)` when the technique needs one** (a new loss schedule, a two-stage curriculum,
   a contrastive pretext, EMA weights, a distillation loop). Point `training_source` at it. The
   `TrainContext` (`pipelines.training.envelope`) hands you the craft library — leakage-free loaders,
-  `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed` — and the
-  envelope-owned sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`,
-  `ctx.should_cancel`. Route metrics and checkpoints through those sinks and the run stays audited,
-  immutably versioned, and provenance-snapshotted no matter what your loop does. `ctx.default_train()`
-  is a convenience to call, extend, or replace.
+  `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed`, the
+  progressive-unfreeze primitive `ctx.apply_stage_freeze`, `ctx.tiled_dataset`, `ctx.calibrate`,
+  and the correctness checks `ctx.check_contract` / `ctx.overfit_check` — plus the envelope-owned
+  sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`, `ctx.should_cancel`. Route
+  metrics and checkpoints through those sinks and the run stays audited, immutably versioned, and
+  provenance-snapshotted no matter what your loop does. `ctx.default_train()` is a convenience to
+  call, extend, or replace.
 
 **Fit to the data in hand, don't transplant blind.** A paper's hyperparameters are for its dataset.
 Derive the operating points from *your* data at runtime (CLAUDE.md: derive, don't pin) — anchor sizes
