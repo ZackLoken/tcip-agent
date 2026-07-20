@@ -133,8 +133,10 @@ Defer annotation mechanics to the `annotation` skill. Crop-specific difficulties
 
 ## Measurement integrity
 
-Per the **CLAUDE.md** measurement-integrity invariant (validate against expert-scored ground truth;
-geometry can't proxy a state or replace the CV step). Hazelnut-specific traps:
+Per the **CLAUDE.md** measurement-integrity invariant (validate against a reference sized to the
+trait — GT annotations, or a breeder-confirmed sample of the model's own outputs (review-confirmation),
+not dense GT for every trait; geometry can't proxy a state or replace the CV step). Hazelnut-specific
+traps:
 
 - **`catkin_elongation_date`** — elongation/anthesis is a breeder-defined *visible morphological
   state* (loosening + pollen shed), established by a validated call against expert scoring: a state,
