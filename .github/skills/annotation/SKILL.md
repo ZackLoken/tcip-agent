@@ -24,8 +24,9 @@ directly. An unspecified format resolves to `.json` (`dataset_layout.py`'s `labe
 | **LabelMe** | One `.json` per image | Pixel coordinates | `.json` + `"shapes"` key |
 
 These are explicit import/export paths via `tcip_annotation.format_io`, not the default
-write path. Use `detect_format()` from `format_io` to auto-detect.
-Use `load_annotations` / `save_annotations` from `format_io` for format-agnostic I/O.
+write path. Use `detect_format()` from `format_io` to auto-detect. For format-agnostic I/O
+call the library functions `format_io.load_annotations` / `format_io.save_annotations`; the
+agent-facing MCP tool that wraps the read side is `read_annotations` (see Tools below).
 
 ## Coordinate frame — upright, EXIF applied once
 
@@ -66,6 +67,9 @@ agent can register another engine (`register_proposal_engine`) or pass a dotted 
 wrote — a Grounding DINO / open-vocab detector, or a bespoke proposer — exactly the way `model_source`
 lets it bring a model. Engine-specific knobs travel in `engine_params`; the candidate schema is
 neutral (`candidate_id` / `bbox` / `area` / `polygon` / `score`), engine signals under `engine_meta`.
+That bespoke proposer may be classical-analysis-based (an OpenCV / scikit-image pipeline the agent
+writes) — one option among engines, not a prescribed step; its proposals are soft and prove out only
+by surviving review.
 
 **Trial and compare by review — pick the engine the data justifies.** Don't assume one engine; wire
 two or three, propose on the same images, and let the breeder's review decide: the useful engine is
