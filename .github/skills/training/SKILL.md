@@ -70,8 +70,8 @@ config = {
 
 | Tool | Purpose |
 |------|---------|
-| `preflight_config` | Validate config before training |
-| `launch_training` | Start async training run (auto-launches TensorBoard) |
+| `preflight_config` | Validate config (`smoke=True` also builds + contract-smokes the model) |
+| `launch_training` | Start async training run (smokes the builder first, auto-launches TensorBoard) |
 | `check_training_status` | Check run progress, metrics, and TensorBoard URL |
 | `list_training_runs` | List all runs in session |
 | `run_hpo` | HPO via random search or Optuna with TensorBoard logging |
