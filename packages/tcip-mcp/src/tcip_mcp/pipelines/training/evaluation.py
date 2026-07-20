@@ -32,6 +32,9 @@ from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 # mAP50 terms are multiplied by 10 to lift them onto the same scale as val_loss,
 # so a weight here acts on that *scaled* term (a 0.35 f1 weight ~ 3.5 loss-units
 # of pull at f1=0). See compute_composite_objective for the exact formula.
+# These weights silently decide which checkpoint wins, so they are a caller-owned SELECTION POLICY
+# (validated=false, not a data derivation): overridable via the ``score_weights`` kwarg on every
+# eval surface. Documented default, not a frozen truth — no derivation label is claimed for it.
 DEFAULT_SCORE_WEIGHTS: dict[str, float] = {"loss": 0.45, "f1": 0.35, "map50": 0.20}
 
 
@@ -285,6 +288,65 @@ def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tup
             used[best_j] = True
             tp += 1
     return tp, len(dt) - tp, len(gt_centers) - tp
+
+
+def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
+                            class_id: int | None = None, iou_threshold: float = 0.5) -> dict:
+    """The ONE localization criterion that GOVERNS a trait's phenotype count + model selection (R3/D9).
+
+    Reads the trait's semantic ``localization`` (center_match vs iou_match, traits.py) and derives its
+    per-dataset tolerance from the GT in hand — never a pinned value. Returns
+    ``{kind, tolerance | iou_threshold, derived_from, trait}``. With no trait (or an iou_match trait),
+    it is IoU matching at ``iou_threshold`` — the labeled comparability convention (AP@0.5), which
+    governs nothing on its own; a count trait's derived center-match tolerance is what the phenotype
+    and checkpoint selection rest on.
+    """
+    if not trait_name:
+        return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
+                "derived_from": "comparability convention (AP@0.5)", "trait": None}
+    from tcip_mcp.traits import CENTER_MATCH, get_trait
+
+    spec = get_trait(trait_name)
+    if spec.localization == CENTER_MATCH:
+        return {"kind": "center_match",
+                "tolerance": float(0.5 * gt_class_avg_size(per_image, class_id=class_id)),
+                "derived_from": f"{spec.localization_tolerance} over GT in hand", "trait": trait_name}
+    return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
+            "derived_from": f"trait localization={spec.localization}", "trait": trait_name}
+
+
+def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: float,
+                     class_id: int | None = None, max_dets: int = 1000) -> dict:
+    """tp/fp/fn/precision/recall/f1 at the criterion that GOVERNS the phenotype count (R3).
+
+    ``center_match`` uses greedy nearest-center matching at the derived tolerance; ``iou_match`` reuses
+    the COCO IoU matcher. This count is what a count-trait phenotype and model selection rest on —
+    distinct from AP@0.5, which stays a labeled comparability metric that governs nothing.
+    """
+    if criterion["kind"] == "center_match":
+        tol = float(criterion["tolerance"])
+        tp = fp = fn = 0
+        for rec in per_image:
+            gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
+            dt = sorted(
+                (d for d in rec.get("dt", [])
+                 if d.get("score", 1.0) >= conf_threshold
+                 and (class_id is None or d["category_id"] == class_id)),
+                key=lambda d: -d.get("score", 1.0),
+            )
+            t, f, n = _center_match_image(gt, dt, tol)
+            tp += t
+            fp += f
+            fn += n
+    else:
+        m = coco_detection_metrics(per_image, iou_threshold=criterion["iou_threshold"],
+                                   conf_threshold=conf_threshold, max_dets=max_dets)
+        tp, fp, fn = int(m["tp"]), int(m["fp"]), int(m["fn"])
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return {"tp": tp, "fp": fp, "fn": fn, "precision": round(precision, 6),
+            "recall": round(recall, 6), "f1": round(f1, 6), "criterion": criterion}
 
 
 def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: int | None = None,
@@ -583,8 +645,15 @@ def evaluate(
     model, loader, device, task: str, *,
     conf_threshold: float = 0.25, iou_threshold: float = 0.5,
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
+    trait: str | None = None,
 ) -> dict:
-    """Compute per-task validation/test metrics. Returns BARE metric keys."""
+    """Compute per-task validation/test metrics. Returns BARE metric keys.
+
+    ``trait``: when set, a count trait's DERIVED localization criterion (traits.py, e.g. catkin's
+    center-match at half the class-average size) governs the reported detection count and the f1 the
+    selection composite optimizes; map50 stays a labeled comparability metric (D9). Absent -> the
+    IoU@``iou_threshold`` convention governs (the prior behavior).
+    """
     is_detection = task in ("detection", "instance_seg")
     is_instance_seg = task == "instance_seg"
     eff_iou_type = effective_iou_type(task, iou_type)
@@ -672,7 +741,19 @@ def evaluate(
             "map_at_maxdets": round(m["map_at_maxdets"], 6),
             "map50_at_maxdets": round(m["map50_at_maxdets"], 6),
         })
-        result["objective"] = round(compute_composite_objective(loss, m["f1"], m["map50"], score_weights), 6)
+        # R3/D9: a count trait's derived criterion governs the reported count + the selection f1;
+        # map50 stays a labeled comparability metric. Without a trait the IoU convention governs.
+        criterion = resolve_match_criterion(trait, per_image, iou_threshold=iou_threshold)
+        if criterion["kind"] == "center_match":
+            gc = governing_counts(per_image, criterion, conf_threshold=conf_threshold, max_dets=max_dets)
+            result.update({
+                "precision": gc["precision"], "recall": gc["recall"], "f1": gc["f1"],
+                "governing_criterion": criterion, "map50_role": "comparability_only",
+                "iou_precision": round(m["precision"], 6), "iou_recall": round(m["recall"], 6),
+                "iou_f1": round(m["f1"], 6),
+            })
+        governing_f1 = result["f1"]
+        result["objective"] = round(compute_composite_objective(loss, governing_f1, m["map50"], score_weights), 6)
     elif task == "classification" and cls_p:
         num_classes = getattr(model.heads[0], "num_classes", int(torch.cat(cls_g).max()) + 1)
         # classification_metrics now also returns per_class/count_bias dicts — round only the scalars.
@@ -692,11 +773,23 @@ def evaluate(
     return result
 
 
+def _producer_identity(ckpt_path: str) -> dict:
+    """Producing-model identity for a test-results stamp (checkpoint sha + experiment id).
+
+    Best-effort — a foreign checkpoint records the sha and leaves the experiment id null rather
+    than failing the evaluation.
+    """
+    from tcip_mcp.model_registry import resolve_model_identity
+
+    identity = resolve_model_identity(ckpt_path)
+    return {"model_sha256": identity["sha256"], "experiment_id": identity["experiment_id"]}
+
+
 def run_test_evaluation(
     ckpt_path: str, loader, device, task: str, output_dir: str, *,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
-    tiling: dict | None = None,
+    tiling: dict | None = None, trait: str | None = None,
 ) -> dict:
     """Load ``model_best.pt``, evaluate ``loader``, write ``test_results.json``.
 
@@ -714,11 +807,12 @@ def run_test_evaluation(
 
     metrics = evaluate(model, loader, device, task, conf_threshold=conf_threshold,
                        iou_threshold=iou_threshold, iou_type=iou_type, max_dets=max_dets,
-                       score_weights=score_weights)
+                       score_weights=score_weights, trait=trait)
     tiled = bool(tiling and tiling.get("enabled", True) and task == "detection")
     result = {
         **metrics,
         "model_path": str(ckpt_path), "task": task,
+        **_producer_identity(ckpt_path),
         "iou_type": effective_iou_type(task, iou_type),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
         "tiled": tiled,
@@ -737,6 +831,7 @@ def run_full_frame_evaluation(
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
     tile_size: int = 640, overlap: float = 0.2, global_nms_iou: float = 0.3,
     max_dets: int = 1000, postprocess: str = "nms", device: str | None = None,
+    trait: str | None = None,
 ) -> dict:
     """Delivery-grade detection eval (CV1 Tier-2): tiled INFERENCE reconstructed to full frame,
     matched to full-frame GT.
@@ -781,9 +876,23 @@ def run_full_frame_evaluation(
     result = {
         **{k: m[k] for k in keys},
         "model_path": str(ckpt_path), "task": "detection", "iou_type": "bbox",
+        **_producer_identity(ckpt_path),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
         "tile_size": tile_size, "tiled": True, "eval_regime": "full-frame-tiled-inference",
     }
+    # R3/D9: for a count trait, the delivery-grade count that gates the phenotype is the derived
+    # criterion's tp/fp/fn (center-match for catkin), NOT AP@0.5 — kept alongside, clearly labeled.
+    criterion = resolve_match_criterion(trait, per_image, iou_threshold=iou_threshold)
+    if criterion["kind"] == "center_match":
+        gc = governing_counts(per_image, criterion, conf_threshold=conf_threshold, max_dets=max_dets)
+        result.update({
+            "governing_counts": gc, "governing_criterion": criterion,
+            "map50_role": "comparability_only",
+            "iou_tp": m["tp"], "iou_fp": m["fp"], "iou_fn": m["fn"],
+            "iou_precision": m["precision"], "iou_recall": m["recall"], "iou_f1": m["f1"],
+            "tp": gc["tp"], "fp": gc["fp"], "fn": gc["fn"],
+            "precision": gc["precision"], "recall": gc["recall"], "f1": gc["f1"],
+        })
     out = Path(output_dir) / "test_results.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
