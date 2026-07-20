@@ -25,6 +25,7 @@ export const tuningApi = {
     param_space: unknown;
     n_trials: number;
     output_dir: string;
-    direction: string;
+    search_alg: string;
+    scheduler: string;
   }) => postJson<{ sweep_id?: string; [k: string]: unknown }>("/api/tuning/launch", body),
 };
