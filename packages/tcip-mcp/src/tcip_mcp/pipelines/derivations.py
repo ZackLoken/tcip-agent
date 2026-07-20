@@ -61,7 +61,10 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
         from tcip_mcp.pipelines.derivations import gt_aspect_ratios
         from tcip_mcp.pipelines.components.detectors import build_detector
         ratios = gt_aspect_ratios([(b.w, b.h) for b in gt_boxes])   # this dataset's shapes
-        model = build_detector("faster_rcnn", num_classes=n, aspect_ratios=tuple(ratios))
+        names = ["0", "1", "2", "3"]                                 # your neck's output keys
+        model = build_detector("faster_rcnn", adapter, num_classes=n,
+                               featmap_names=names, num_levels=len(names),
+                               aspect_ratios=tuple(ratios))
     """
     import numpy as np
     ratios = [h / w for (w, h) in class_distribution_boxes if w > 0 and h > 0]
