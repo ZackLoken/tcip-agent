@@ -1,96 +1,69 @@
 ---
 name: pipeline-design
-description: "Pipeline patterns for phenotyping. You build every model one way — an agent-written nn.Module + train(ctx) loop, via model_source. Choose a pattern that fits the trait — do not force every trait through the same structure. Load when deciding how to measure a new trait, designing an ML pipeline, or building a model architecture for a trait."
+description: "The one build path, the bespoke seams, and what the platform can ingest today. You build every model one way — an agent-written nn.Module + train(ctx) loop, via model_source. No pipeline shape is supplied; the decomposition is yours to derive from the data. Load when deciding how to measure a new trait, designing an ML pipeline, or building a model architecture for a trait."
 ---
 
 # Pipeline Design
 
-## There is no universal pipeline structure
+## No pipeline shape is supplied
 
-Different traits need different pipeline shapes. An earlier version of this skill led with a "Two-Layer Paradigm" (Isolation → Task → Post-processing) and treated it as universal. That paradigm is **one pattern among many**, not a scaffold every trait must fit into. It works well for traits that localize to plant-parts inside pre-segmented plants (catkin counts on isolated bushes, burs on isolated trees). It breaks for:
+This skill deliberately gives you no pattern to match a trait against. How many stages a trait
+needs, what each one does, and whether it is one model or several is your decomposition to derive
+from the data in hand — and it is the decision this platform exists to have you make.
 
-- Traits that are not localizable (overall plant vigor from a canopy photo).
-- Traits requiring temporal reasoning across many images (phenology onset dates).
-- Traits requiring 3D reasoning (crown volume, biomass from point clouds).
-- Traits that are relational (how does this plant compare to its neighbors on the same day).
-- Traits from non-spatial data (NIR spectra for kernel oil percentage).
+Derive it by measuring the dataset, not by classifying the trait:
 
-Pick a pattern from the library below based on the trait's characteristics. If none fit, design a new one — and capture it as a retrospective so it becomes part of this library next time.
+- `scan_dataset` — how many images, at what resolution, and which capture dates exist.
+- `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)` — the object scale and elongation
+  that actually occur here, rather than an assumed shape.
+- Object scale against your tile size — whether objects survive tiling, and whether a seam cuts
+  them. `pipelines.derivations.derive_cross_tile_nms` returns `None` when the GT gives no basis
+  for a threshold; that `None` is the honest answer, not a failure.
+- Capture-date bucketing from `ingest_images` — whether a time series exists at all, and at what
+  cadence.
 
-## Pattern library
+Those readings are facts about *this* dataset. A trait category is not.
 
-### Pattern A: Isolate → Detect/Segment → Aggregate
+## What the platform can ingest today
 
-```
-aerial imagery → plant instance seg → per-plant crops → part detection → per-plant count/CSV
-```
+Interface constraints you cannot read off the toolkit. If a trait needs something in the second
+list, say so plainly rather than approximating it — the platform not being able to measure a trait
+yet is an honest answer, and a manufactured number is not.
 
-Good for: counting plant parts on discrete plants (chestnut burs, hazelnut catkins, elderberry fruit clusters) when plants are individually separable in imagery.
+Buildable now:
 
-Failure modes: plants that overlap or merge; very small parts where SAM-style candidates are unreliable.
+- 2D imagery from any capture modality — aerial, ground, rover-mounted, lab/benchtop.
+- RGB and N-channel rasters (GeoTIFF, NPZ, grayscale). `num_channels` threads to the backbone's
+  `in_chans`, and inference is channel-aware.
+- The task strings `build_dataset` routes, or a bespoke `dataset_source` you write for a task it
+  does not route. The seam is open; the loader set is not a taxonomy.
 
-### Pattern B: Whole-plant classification/regression
+Not buildable now — no loader, no task type, no scaffolding carried:
 
-```
-canopy photo → classifier or regressor → per-plant score → CSV
-```
+- **3D point clouds** (LiDAR / SfM). No point-cloud dataset or loader, and no task type. See
+  CLAUDE.md's Scope section and README's Roadmap.
+- **Non-imagery spectral readings** (a bare NIR / hyperspectral sample, not a raster). The dataset
+  layer reads 2D imagery; there is no loader for a spectrum.
+- **A *learned* contextual-ranking task** — a model that scores a plant relative to its plot or
+  block neighbours. No task type or loader exists for it. Note this is narrower than it sounds:
+  ranking plants by a measurement you already produced is ordinary postprocessing over the
+  per-plant table, and is available now.
 
-Good for: ordinal severity scoring (EFB severity), overall vigor scoring, traits where the phenotype is gestalt rather than localizable.
+## Conditions in this domain's imagery
 
-Failure modes: training label scarcity; strong lighting/weather covariates.
+Properties of the subjects and the capture, observed on real breeding-block imagery. What any of
+them costs you depends on what you are measuring and how — that part is yours to work out.
 
-### Pattern C: Point-cloud tree segmentation → tree-level geometric measurement
-
-> **Out of current build scope.** 3D point clouds (LiDAR / SfM) are not built — see CLAUDE.md's
-> Scope section and README's Roadmap. There is no point-cloud dataset/loader or task type, and
-> no 3D scaffolding is carried. This pattern describes future capability, not something you can
-> compose today.
-
-```
-LiDAR or SfM point cloud → ground filter → CHM → watershed tree seg → per-tree geometry → CSV
-```
-
-Good for: biomass, crown volume, height, DBH-proxy, canopy architecture.
-
-Failure modes: dense canopies where watershed under-segments; low point density; ground-plane noise.
-
-### Pattern D: Temporal / phenology sequence
-
-```
-image time series → per-plant isolation → per-time-step trait estimate → curve fit → onset/midpoint/completion date → CSV
-```
-
-Good for: phenology traits (flowering onset, catkin elongation, leaf-out date, senescence).
-
-Failure modes: irregular sampling intervals; missing time points; wind/lighting confounding trait signal.
-
-### Pattern E: Non-spatial spectral
-
-> **Out of current build scope.** The dataset layer reads 2D imagery (RGB + N-channel
-> rasters) — a bare non-imagery spectral reading has no dataset/loader today. This pattern
-> describes future capability, not something you can compose today.
-
-```
-spectral reading (NIR, hyperspectral) → preprocessor → regression/classification → per-sample value → CSV
-```
-
-Good for: kernel oil percentage, moisture, sugar content, disease screening from reflectance.
-
-Failure modes: instrument drift; sample preparation variability; calibration transfer across instruments.
-
-### Pattern F: Relational / contextual
-
-> **Out of current build scope.** README's Roadmap lists relational pipeline patterns beyond
-> per-image traits as not built yet; there is no contextual-ranking task type today. This
-> pattern describes future capability, not something you can compose today.
-
-```
-plot-level imagery → per-plant detection → contextual ranking within plot/block/day → rank-based phenotype → CSV
-```
-
-Good for: traits where breeders rank rather than measure absolutes (relative vigor, relative bloom advancement).
-
-Failure modes: requires dense plot layout metadata; needs enough plants per plot for ranking to be meaningful.
+- Plants in a row overlap and merge at typical standoff; their boundaries are frequently not
+  separable in the image at all.
+- Lighting and weather vary between captures enough that a model can learn the covariate instead
+  of the trait.
+- Objects of interest are often a few pixels across, near the resolution floor, and tiling cuts
+  them at seams.
+- Labelled examples are scarce, and scarcest where labelling one costs a judgment call rather than
+  a box.
+- Capture cadence is irregular and dates go missing within a season.
+- Wind moves the subject between captures of the same plant.
 
 ## You own the model AND the training loop
 
@@ -161,34 +134,36 @@ measurement, subject to the same validate-before-you-trust rule as any other.
 
 ## Multi-phase pipelines
 
-When a pattern requires chaining phases (Pattern A, C, D), write a logged script in
+When a trait's decomposition needs more than one training phase, write a logged script in
 `scripts/` that chains the canonical primitives — one build path, every step audited.
 Each training phase calls `launch_training` (full audited envelope, leakage-free split,
 tiling persistence) against a `model_source` builder; run each stage's model with
 `run_inference`; then aggregate with the importable postprocessing libs
-(`aggregate_per_plant` / `export_aggregated_csv`, or `compute_phenology` for bloom dates):
+(`aggregate_per_plant` / `export_aggregated_csv`, or `compute_phenology` for milestone dates):
 
 ```python
-# scripts/hazelnut_catkin_phenology.py — chain the primitives; each launch_training goes
+# scripts/<trait>_pipeline.py — chain the primitives; each launch_training goes
 # through the audited envelope, so provenance and immutability hold across the whole run.
-isolate = launch_training(config={"model_source": {...}, "data": {...}}, ...)   # instance_seg
-detect = launch_training(config={"model_source": {...}, "data": {...}}, ...)    # detection
-classify = launch_training(config={"model_source": {...}, "data": {...}}, ...)  # classification
-run_inference(model_path=classify_best, images_dir=..., output_dir="catkin_classes")
+stage_a = launch_training(config={"model_source": {...}, "data": {...}})
+stage_b = launch_training(config={"model_source": {...}, "data": {...}})
+run_inference(model_path=stage_b_best, images_dir=images_dir, output_dir="stage_b_preds")
 # The final CSV is a phenotype delivery door: it refuses a bare write. Pass pred_dirs so the count
 # operating point's validity is read from each bucket's operating_point.json (or measurement_validated
 # for a continuous/ordinal trait), or acknowledge_unvalidated=True for a flagged provisional CSV.
-export_aggregated_csv(aggregate_per_plant("catkin_classes", plant_mapping), "phenology_csv",
-                      pred_dirs=["catkin_classes"])
+export_aggregated_csv(aggregate_per_plant("stage_b_preds", plant_mapping), "phenotype_csv",
+                      pred_dirs=["stage_b_preds"])
 ```
 
-Order the stages to describe what each does for this specific trait; there is no fixed
-phase vocabulary. See the `training` and `delivery` skills for the primitive signatures.
+How many stages there are, and what each one does, is your decomposition to derive — the chaining
+mechanics are identical for one stage or four, and there is no fixed phase vocabulary. See the
+`training` and `delivery` skills for the primitive signatures.
 
 ## Design principles
 
-- **Match the pattern to the trait, not the trait to the pattern.** If the pattern list doesn't fit, design a new one.
-- Start with the simplest viable architecture for the chosen pattern.
-- Use pretrained backbones unless data is very different from ImageNet.
-- Use progressive unfreezing for transfer learning.
-- **Write a retrospective** (`project_retrospective`) when you finish, noting whether the pattern you chose was right. That feedback grows the library.
+- Start with the simplest thing that could measure the trait, and add complexity only when the
+  data or the metrics justify it (CLAUDE.md's progressive-disclosure rail).
+- **Write a retrospective** (`project_retrospective`) when you finish. Record what you measured
+  about *this* dataset and what it implied — object scale, capture cadence, class imbalance, where
+  the operating point resolved and why. Not a reusable pipeline shape: the next dataset re-derives
+  its own decomposition, and a shape recorded here would become a recipe for a problem it was never
+  measured against.
