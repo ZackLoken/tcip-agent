@@ -20,6 +20,30 @@ from __future__ import annotations
 
 from typing import Any
 
+# The mask-binarization threshold is a dimensional-phenotype knob: 0.5 is an honest engineering
+# default, not a validated derivation. A calibrated mask-area measurement should derive it against
+# validated masks (measured area vs GT); until then its provenance must travel as validated=false so
+# a frozen 0.5 never silently defines every area/length number. Surfaced here as the one shared
+# placeholder (resolve_binarize_threshold) so a delivery door stamps it rather than pinning it.
+DEFAULT_MASK_BINARIZE_THRESHOLD = 0.5
+
+
+def resolve_binarize_threshold(value: float | None = None):
+    """The mask-binarization threshold as a firewalled ``ResolvedParam`` (default 0.5, validated=false).
+
+    A calibration-class param: un-shippable as a bare number until derived/validated against validated
+    masks (``.value`` raises), so a dimensional measurement can't silently freeze 0.5. An explicit
+    ``value`` is honored but still stamped unvalidated until a door validates it.
+    """
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, ResolvedParam
+
+    v = DEFAULT_MASK_BINARIZE_THRESHOLD if value is None else float(value)
+    return ResolvedParam("mask_binarize_threshold", v,
+                         source="explicit" if value is not None else "default",
+                         derivation_class="calibration",
+                         derived_from="documented default (derive against validated masks)",
+                         validated_vs_gt=VALIDATED_FALSE)
+
 
 def _to_numpy(mask: Any):
     """Accept a numpy array or a torch tensor; return a numpy array (heavy imports lazy)."""
@@ -86,7 +110,7 @@ def _resolve_scale(mm_per_px: float | None, gsd: float | None) -> float | None:
 
 
 def mask_geometry(mask: Any, *, mm_per_px: float | None = None, gsd: float | None = None,
-                  threshold: float = 0.5) -> dict:
+                  threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> dict:
     """Dimensional geometry of a single validated 2D mask (``[H, W]`` or ``[1, H, W]``).
 
     Returns pixel measurements always, and mm-unit measurements when a scale is given::
@@ -129,7 +153,7 @@ def mask_geometry(mask: Any, *, mm_per_px: float | None = None, gsd: float | Non
 
 
 def instance_geometries(masks: Any, *, mm_per_px: float | None = None, gsd: float | None = None,
-                        threshold: float = 0.5) -> list[dict]:
+                        threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> list[dict]:
     """Per-instance :func:`mask_geometry` over an ``[N, H, W]`` mask stack (or a single ``[H, W]``)."""
     arr = _to_numpy(masks)
     if arr.ndim == 2:
