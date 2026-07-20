@@ -13,10 +13,11 @@ as bbox height/aspect. Milestones:
                                majority crossing, i.e. synonymous with catkin_95per_date
 
 ``catkin_elongation_date`` follows ``crops.yml`` ("Date when most catkins have elongated"),
-operationalized here as the 95% majority crossing. This is the current best-guess reading of
-that text, pending breeder confirmation — correct the mapping in ``plant_milestones`` if they
-rule otherwise. ``elongation_onset_date`` (the first date any elongation appears) is a
-separate helper, not the delivered trait.
+operationalized as the majority crossing the trait spec names (``TraitSpec.majority_milestone``
+= "95per"). This is the current best-guess reading of that text, flagged provisional
+(``TraitSpec.majority_provisional``) pending breeder confirmation — correct the mapping in the
+spec if they rule otherwise. ``elongation_onset_date`` (the first date any elongation appears)
+is a separate helper, not the delivered trait.
 
 This module is pure (stdlib only): it consumes an already-classified per-(plant, date)
 count and never touches pixels. Because "elongated" is a classifier class, if the
@@ -34,9 +35,15 @@ from typing import Optional
 
 from tcip_mcp.traits import get_trait
 
-# Milestone crossing fractions, sourced from the trait's confirmed semantics (Tier C, read never
-# derived) — not a standalone literal. Keyed "NNper" to match the CSV column names.
-MILESTONE_TARGETS = {f"{int(round(f * 100)):02d}per": f for f in get_trait("catkin").milestone_fractions}
+
+def _milestone_targets(spec) -> dict[str, float]:
+    """Milestone crossing fractions from the trait's confirmed semantics (Tier C, read never derived).
+
+    Resolved per call (not a module-load snapshot) so a config-authored trait or a repinned project
+    is honored. Keyed "NNper" to match the CSV column names.
+    """
+    return {f"{int(round(f * 100)):02d}per": f for f in spec.milestone_fractions}
+
 
 # The delivered per-plant phenology CSV schema — one canonical column set/order so the
 # ``compute_phenology`` MCP tool and any other exporter emit the same file.
@@ -45,6 +52,9 @@ PHENOLOGY_CSV_COLUMNS = [
     "accession",
     "n_dates",
     "catkin_elongation_date",
+    # Whether the elongation-date reading (which milestone "most elongated" maps to) is still provisional
+    # pending breeder confirmation — a read-semantics marker carried with the delivery, not settled fact.
+    "catkin_elongation_provisional",
     "catkin_05per_date",
     "catkin_50per_date",
     "catkin_95per_date",
@@ -130,12 +140,17 @@ def elongation_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
 def plant_milestones(series: list[tuple[str, float]]) -> dict:
     """The catkin phenology dates for one plant's elongated-fraction series.
 
-    Crossing fractions come from ``MILESTONE_TARGETS`` (the trait's semantics), so the milestone
-    definition lives in one place instead of scattered literals.
+    Crossing fractions and the "most elongated" majority mapping come from the trait's semantics
+    (``TraitSpec``, read per-call), so the milestone definition lives in one place instead of
+    scattered literals.
     """
-    out = {f"catkin_{key}_date": crossing_date(series, frac) for key, frac in MILESTONE_TARGETS.items()}
-    # crops.yml "most catkins elongated" = the 95% majority crossing (best-guess reading, pending breeder confirmation)
-    out["catkin_elongation_date"] = out["catkin_95per_date"]
+    spec = get_trait("catkin")
+    out = {f"catkin_{key}_date": crossing_date(series, frac)
+           for key, frac in _milestone_targets(spec).items()}
+    # crops.yml "most catkins elongated" maps to the majority milestone the spec names (95% crossing;
+    # a provisional reading pending breeder confirmation — see spec.majority_provisional).
+    if spec.majority_milestone:
+        out["catkin_elongation_date"] = out.get(f"catkin_{spec.majority_milestone}_date")
     return out
 
 
@@ -161,7 +176,7 @@ def count_by_class(json_path: Path, elongated_class_id: int) -> tuple[int, int, 
 def per_plant_series(
     mapping: dict[str, list],
     predictions_by_date: dict[str, str],
-    elongated_class_id: int = 1,
+    elongated_class_id: int,
 ) -> tuple[dict[str, dict], set[int]]:
     """Aggregate classified predictions into a per-plant elongated-fraction series.
 
@@ -202,7 +217,7 @@ def per_plant_series(
 def per_plant_phenology(
     mapping: dict[str, list],
     predictions_by_date: dict[str, str],
-    elongated_class_id: int = 1,
+    elongated_class_id: int,
 ) -> dict:
     """Full canonical pipeline: classified predictions + plant mapping → per-plant milestones.
 
