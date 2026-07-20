@@ -113,7 +113,7 @@ class ModelRegistry:
             config: Training config dict.
             metrics: Evaluation metrics dict.
             tags: Optional tags for filtering.
-            kind: Model kind (``torchvision_composed`` / ``ultralytics``) so the GUI + agent
+            kind: Model kind (``tcip_module`` / ``ultralytics``) so the GUI + agent
                 know how to run it; ``build_predictor`` can still sniff it at inference time.
         """
         ckpt = Path(checkpoint_path)
