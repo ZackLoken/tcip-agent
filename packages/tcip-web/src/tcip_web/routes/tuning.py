@@ -71,7 +71,8 @@ class LaunchHPOPayload(BaseModel):
     param_space: Optional[dict[str, Any]] = None
     n_trials: int = 5
     output_dir: str = ""
-    direction: str = "maximize"
+    search_alg: str = "random"
+    scheduler: str = "asha"
 
 
 def _worker(job: HPOJob, payload: LaunchHPOPayload) -> None:
@@ -85,7 +86,8 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload) -> None:
             param_space=payload.param_space,
             n_trials=payload.n_trials,
             output_dir=payload.output_dir,
-            direction=payload.direction,
+            search_alg=payload.search_alg,
+            scheduler=payload.scheduler,
         )
         job.result = res if isinstance(res, dict) else {"raw": res}
         job.status = "completed"
