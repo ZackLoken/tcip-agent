@@ -515,26 +515,30 @@ def score_predictions(
 
 @mcp.tool()
 @audited
-def sam_predict(
+def segment_prompt(
     image_path: str,
     points: list[dict] | None = None,
     box: dict | None = None,
     grid_cells: list[str] | None = None,
-    model_type: str = "hiera_b+",
+    engine: str = "sam",
+    engine_params: dict | None = None,
 ) -> dict:
-    """Run SAM (Segment Anything) prediction on an image.
+    """Turn an interactive prompt (points, a box, or grid cells) into a mask polygon, via an engine.
 
-    Provide point prompts, a box prompt, OR grid cell references.
-    Grid cells (e.g. ['B3', 'D5']) are converted to pixel coordinates
-    using the grid overlay system (8 cols x 6 rows by default).
+    Provide point prompts, a box prompt, OR grid-cell references (e.g. ['B3', 'D5'], converted to
+    foreground point prompts via the 8-col x 6-row grid overlay). The segmentation method is a
+    capability, not a hardcode: 'sam' is the built-in SAM2 reference engine; the agent can bring
+    another prompted-segmentation engine behind the same seam (a dotted 'module:factory').
 
     Args:
         image_path: Absolute path to the image file.
         points: List of point prompts, each with x, y, and label (1=fg, 0=bg).
         box: Box prompt with x1, y1, x2, y2 in pixel coordinates.
-        grid_cells: List of grid cell references like ['B3', 'D5']. Each
-            cell is treated as a foreground point prompt at the cell center.
-        model_type: SAM2 variant — hiera_t / hiera_s / hiera_b+ (default) / hiera_l.
+        grid_cells: List of grid cell references like ['B3', 'D5']. Each is a foreground point at the
+            cell center.
+        engine: Segmentation engine — 'sam' (built-in) or a dotted 'module:factory' the agent brings.
+        engine_params: Engine-specific knobs forwarded to the engine (e.g. SAM's model_type). Omit
+            for the engine's own defaults.
     """
     img = Path(image_path)
     if not img.is_file():
@@ -555,49 +559,30 @@ def sam_predict(
             except ValueError as e:
                 return {"error": f"Invalid grid cell {cell!r}: {e}"}
 
+    from tcip_mcp.pipelines.proposal import resolve_proposer
+
     try:
-        from tcip_annotation.sam_wrapper import (
-            predict_from_box,
-            predict_from_point,
-            predict_from_points,
-        )
+        proposer = resolve_proposer(engine)
+    except (ValueError, ImportError) as e:
+        return {"error": str(e)}
+
+    try:
+        polygon = proposer.segment(image_path, points=points, box=box, **(engine_params or {}))
     except ImportError as e:
-        return {"error": f"SAM dependencies not available: {e}"}
-
-    try:
-        if box is not None:
-            polygon = predict_from_box(
-                image_path,
-                box["x1"], box["y1"], box["x2"], box["y2"],
-                model_type=model_type,
-            )
-        elif points is not None and len(points) == 1:
-            p = points[0]
-            polygon = predict_from_point(
-                image_path,
-                p["x"], p["y"],
-                label=p.get("label", 1),
-                model_type=model_type,
-            )
-        else:
-            pts = [(p["x"], p["y"]) for p in (points or [])]
-            lbls = [p.get("label", 1) for p in (points or [])]
-            polygon = predict_from_points(
-                image_path, pts, lbls,
-                model_type=model_type,
-            )
-
-        if not polygon:
-            return {"error": "SAM produced empty mask", "polygon": []}
-
-        return {
-            "polygon": [{"x": x, "y": y} for x, y in polygon],
-            "vertex_count": len(polygon),
-        }
+        return {"error": f"segmentation engine dependencies not available: {e}"}
     except FileNotFoundError as e:
         return {"error": str(e)}
     except Exception as e:
-        return {"error": f"SAM prediction failed: {e}"}
+        return {"error": f"segmentation failed: {e}"}
+
+    if not polygon:
+        return {"error": "engine produced empty mask", "polygon": []}
+
+    return {
+        "polygon": [{"x": x, "y": y} for x, y in polygon],
+        "vertex_count": len(polygon),
+        "engine": engine,
+    }
 
 
 @mcp.tool()
@@ -944,11 +929,10 @@ def stage_proposals(
         overwrite: Write in place even into an existing bucket. Refused if the bucket has review
             verdicts; the default (False) auto-redirects to a fresh bucket instead.
     """
-    from tcip_annotation import json_io
     from tcip_annotation.state import PredBBox, PredPolygon
 
-    from tcip_mcp.dataset_layout import image_dir, prediction_dir
-    from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_writable_bucket
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
     from tcip_mcp.workspace import is_valid_name
 
     # Confine the path segments so a malformed model/date/stem (an absolute path, a stray ``..``)
@@ -1014,65 +998,51 @@ def stage_proposals(
         return {"error": f"no image found for stem {stem!r} under {image_dir(dataset_root, date)}"}
     img_w, img_h = get_image_dimensions(str(img_file))
 
-    # Prediction-bucket immutability: don't overwrite a bucket that has review verdicts. Verdicts
-    # (and the predictions they reference) colocate under the dataset's ``.tcip/state``.
-    review_state_dir = Path(dataset_root) / ".tcip" / "state"
-
-    def _bucket_dirs(name: str) -> list[Path]:
-        return [Path(prediction_dir(dataset_root, name, date, "detect")),
-                Path(prediction_dir(dataset_root, name, date, "segment"))]
-
-    try:
-        resolution = resolve_writable_bucket(review_state_dir, model_name, _bucket_dirs, overwrite=overwrite)
-    except BucketHasVerdicts as exc:
-        return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
-    bucket = resolution.name
-
     # Stamp the real producer (model_name) as created_by + a stage-time created_at, so a staged
     # prediction's origin travels into GT natively when a human accepts it on the Review canvas.
     from datetime import datetime, timezone
     created_at = datetime.now(timezone.utc).isoformat()
 
-    detect_path = None
-    if norm_boxes is not None:
-        pred_boxes = [
-            PredBBox(
-                (cx - w / 2) * img_w, (cy - h / 2) * img_h,
-                (cx + w / 2) * img_w, (cy + h / 2) * img_h,
-                cls, confidence=conf, created_by=model_name, created_at=created_at,
-            )
-            for (cls, conf, cx, cy, w, h) in norm_boxes
-        ]
-        out = Path(prediction_dir(dataset_root, bucket, date, "detect")) / f"{stem}.json"
-        json_io.write_detect(out, pred_boxes, img_w, img_h)
-        detect_path = str(out)
+    pred_boxes = [
+        PredBBox(
+            (cx - w / 2) * img_w, (cy - h / 2) * img_h,
+            (cx + w / 2) * img_w, (cy + h / 2) * img_h,
+            cls, confidence=conf, created_by=model_name, created_at=created_at,
+        )
+        for (cls, conf, cx, cy, w, h) in (norm_boxes or [])
+    ]
+    pred_polys = [
+        PredPolygon([(x * img_w, y * img_h) for x, y in pts], cls,
+                    confidence=conf, created_by=model_name, created_at=created_at)
+        for (cls, conf, pts) in (norm_polys or [])
+    ]
 
-    segment_path = None
-    if norm_polys is not None:
-        pred_polys = [
-            PredPolygon([(x * img_w, y * img_h) for x, y in pts], cls,
-                        confidence=conf, created_by=model_name, created_at=created_at)
-            for (cls, conf, pts) in norm_polys
-        ]
-        out = Path(prediction_dir(dataset_root, bucket, date, "segment")) / f"{stem}.json"
-        json_io.write_segment(out, pred_polys, img_w, img_h)
-        segment_path = str(out)
+    # Prediction-bucket immutability runs in the shared staging helper: a bucket with review
+    # verdicts is never overwritten in place — accept_proposals and stage_proposals go through it.
+    try:
+        staged = stage_prediction_shapes(
+            dataset_root, model_name, date, stem,
+            boxes=pred_boxes, polygons=pred_polys, img_w=img_w, img_h=img_h, overwrite=overwrite,
+        )
+    except BucketHasVerdicts as exc:
+        return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
+    bucket = staged["bucket"]
 
     note = ("staged to predictions/ for canvas review — not committed as ground truth; the "
             "human accepts on the Review tab before it becomes GT (focus tab='review' to send them)")
-    if resolution.redirected:
-        note = (f"bucket {model_name!r} has {resolution.verdict_count} review verdict(s) — staged to a "
+    if staged["redirected"]:
+        note = (f"bucket {model_name!r} has {staged['verdict_count']} review verdict(s) — staged to a "
                 f"fresh bucket {bucket!r} instead so the reviewed predictions stay intact; " + note)
 
     return {
         "staged": len(boxes) + len(polygons),
         "n_detect": len(boxes),
         "n_segment": len(polygons),
-        "detect_path": detect_path,
-        "segment_path": segment_path,
+        "detect_path": staged["detect_path"],
+        "segment_path": staged["segment_path"],
         "model_name": model_name,
         "bucket": bucket,
-        "bucket_redirected": resolution.redirected,
+        "bucket_redirected": staged["redirected"],
         "date": date,
         "stem": stem,
         "note": note,
