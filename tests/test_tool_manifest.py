@@ -88,10 +88,11 @@ def test_consolidated_tools_present_and_removed_absent():
         # R1 renames — the new names must register.
         "archive_project", "inspect_project", "scan_dataset", "read_annotations",
         "render_failure_cases", "overlay_reference_grid", "capture_live_canvas",
-        "generate_mask_candidates",
         # R2 renames — the new names must register.
         "preflight_config", "select_best_model", "score_predictions",
         "tabulate_counts", "view_gui_state",
+        # W2 de-SAM renames — method-neutral auto-labeling seam.
+        "propose_annotations", "accept_proposals", "segment_prompt",
     ):
         assert present in registered, f"{present} should be registered"
     removed = {
@@ -113,6 +114,8 @@ def test_consolidated_tools_present_and_removed_absent():
         "export_project", "get_project_status", "load_dataset", "load_annotations",
         "visualize_worst_predictions", "visualize_grid_overlay", "visualize_canvas",
         "sam_auto_label",
+        # W2 de-SAM renames — the old SAM-hardcoded names must no longer register.
+        "generate_mask_candidates", "accept_candidates", "sam_predict",
         # R2 renames — the old names must no longer register.
         "validate_config", "get_best_model", "evaluate_predictions",
         "export_results_csv", "get_active_context",
