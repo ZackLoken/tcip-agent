@@ -62,9 +62,7 @@ def _historical_training_runs() -> list[dict]:
         if not d.is_dir():
             continue
         config = read_json(d / "config.json", default={})
-        if not isinstance(config, dict) or not (
-            config.get("model_source") or config.get("model_spec") or config.get("model")
-        ):
+        if not isinstance(config, dict) or not config.get("model_source"):
             continue  # not a training experiment (e.g. review-feedback lineage)
         status = read_json(d / "status.json", default={})
         state = status.get("state", "unknown")
