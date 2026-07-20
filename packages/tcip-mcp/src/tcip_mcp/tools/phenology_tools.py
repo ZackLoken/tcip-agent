@@ -28,7 +28,7 @@ def build_plant_mapping(
     plant_csv_paths: list[str],
     output_mapping_path: str,
     dates: list[str] | None = None,
-    nn_tolerance_m: float = 10.0,
+    nn_tolerance_m: float | None = None,
 ) -> dict:
     """Assign each geolocated image to a plant, then persist the mapping for phenology.
 
@@ -48,7 +48,9 @@ def build_plant_mapping(
         output_mapping_path: Where to persist the mapping JSON (e.g.
             ``<project>/.tcip/state/plant_mapping.json``).
         dates: Optional subset of date folders to map (default: all under ``images_root``).
-        nn_tolerance_m: Nearest-neighbour tolerance (m); larger allows looser GPS matches.
+        nn_tolerance_m: Nearest-neighbour tolerance (m). ``None`` (default) derives it from the
+            plot's grid pitch (pitch/6) so the match radius stays within half a grid cell; an
+            explicit value is honored but still capped at that pitch-derived ceiling.
 
     Returns a compact per-date summary (images, mapped count, avg GPS distance) plus totals
     and the persisted path — not the full per-image mapping (that lives in the JSON).
@@ -98,6 +100,36 @@ def build_plant_mapping(
     }
 
 
+def _resolve_producer_identity(predictions_by_date: dict[str, str]) -> dict:
+    """Collect producing-model identity from each date's ``operating_point.json`` sidecar.
+
+    A single producer across dates carries through; differing producers collapse to ``"multiple"``
+    so a curve spliced from two models is not silently attributed to one. Best-effort — a missing
+    sidecar contributes nothing rather than failing the delivery.
+    """
+    shas: set[str] = set()
+    exps: set[str] = set()
+    for pred_dir in predictions_by_date.values():
+        sidecar = Path(pred_dir) / "operating_point.json"
+        if not sidecar.is_file():
+            continue
+        try:
+            data = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if data.get("checkpoint_sha256"):
+            shas.add(str(data["checkpoint_sha256"]))
+        if data.get("experiment_id"):
+            exps.add(str(data["experiment_id"]))
+
+    def _one(vals: set[str]) -> str | None:
+        if not vals:
+            return None
+        return next(iter(vals)) if len(vals) == 1 else "multiple"
+
+    return {"sha256": _one(shas), "experiment_id": _one(exps)}
+
+
 @mcp.tool()
 @audited
 def compute_phenology(
@@ -131,9 +163,12 @@ def compute_phenology(
         classifier_validated: The elongation classifier's ``validated_vs_gt`` state; a CSV
             is only written unacknowledged when this is ``validated_held_out``.
         operating_point_conf: The count operating point (conf) the predictions were produced
-            at — stamped into the CSV for provenance.
-        operating_point_validated: The count operating point's ``validated_vs_gt`` state; like
-            ``classifier_validated``, must be ``validated_held_out`` to deliver unacknowledged.
+            at — stamped into the CSV; the on-disk sidecar value is preferred when present.
+        operating_point_validated: An optional caller assertion of the count operating point's
+            validity. It only *lowers* the result: the real state is read from each bucket's
+            ``operating_point.json`` and floored against this (a missing/unvalidated sidecar
+            floors the curve to ``false``). Must reconcile to a shippable reference
+            (``validated_held_out`` / ``review_confirmed``) to deliver unacknowledged.
         acknowledge_unvalidated: Override the gate — write the CSV even when the classifier or
             operating point is unvalidated, stamping the un-validated dimension as ``false`` so
             the un-trustworthiness travels with the delivery.
@@ -176,31 +211,57 @@ def compute_phenology(
     # elongated/dormant call being right, so a delivery requires a classifier validated against
     # held-out GT — presence of the class is not enough. Refuse unless explicitly acknowledged,
     # and in that case stamp the CSV validated=false so the un-trustworthiness travels downstream.
-    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+    from tcip_mcp.pipelines.resolution import (
+        check_delivery_gate,
+        reconcile_operating_point_validity,
+    )
 
-    # A delivered phenotype needs both the classifier and the count operating point validated against
-    # held-out GT — gate both, or acknowledge. The stamp uses the checked value, not the caller's string.
-    classifier_ok = classifier_validated == VALIDATED_HELD_OUT
-    op_ok = operating_point_validated == VALIDATED_HELD_OUT
-    if not (classifier_ok and op_ok) and not acknowledge_unvalidated:
+    # The count operating point's validity is read from each prediction bucket's operating_point.json
+    # (stamped by export_predictions), floored against any caller assertion — never trusted from the
+    # caller's string alone (T5-3). A missing/unvalidated sidecar floors the whole curve to false.
+    recon = reconcile_operating_point_validity(
+        list(predictions_by_date.values()), asserted=operating_point_validated)
+    op_state = recon["validated"]
+    if operating_point_conf is None and recon["conf"] is not None:
+        operating_point_conf = recon["conf"]  # prefer the on-disk conf over a caller string
+
+    # A delivered phenotype needs BOTH the classifier and the count operating point validated against a
+    # reference sized to the trait — the one shared refuse-or-stamp gate, or an explicit acknowledge.
+    gate = check_delivery_gate(
+        {"classifier": classifier_validated, "operating_point": op_state},
+        acknowledge_unvalidated=acknowledge_unvalidated,
+    )
+    if not gate.ok:
+        floor_note = ""
+        if recon["missing_sidecars"] or recon["unvalidated_buckets"]:
+            floor_note = (f" On-disk operating-point reconciliation floored the count to invalid "
+                          f"(missing sidecars: {recon['missing_sidecars']}; unvalidated buckets: "
+                          f"{recon['unvalidated_buckets']}).")
         return {
             "error": (
-                "a delivered bloom phenotype requires BOTH a held-out-validated elongation classifier "
-                f"(got classifier_validated={classifier_validated!r}) AND a held-out-validated count "
-                f"operating point (got operating_point_validated={operating_point_validated!r}). "
-                "Validate both (evaluate_model task='classification' for the classifier; "
-                "resolve_operating_point for the count), or pass acknowledge_unvalidated=True to write "
-                "a clearly-flagged provisional CSV."
+                "a delivered bloom phenotype requires BOTH a validated elongation classifier "
+                f"(got classifier_validated={classifier_validated!r}) AND a validated count operating "
+                f"point (reconciled from the buckets' operating_point.json = {op_state!r})." + floor_note
+                + " Validate both (evaluate_model task='classification' for the classifier; a calibrated "
+                "export_predictions for the count), or pass acknowledge_unvalidated=True to write a "
+                "clearly-flagged provisional CSV."
             ),
-            "elongation_classifier_validated": classifier_validated or "false",
-            "operating_point_validated": operating_point_validated or "false",
+            "elongation_classifier_validated": gate.stamp["classifier"],
+            "operating_point_validated": op_state,
+            "operating_point_missing_sidecars": recon["missing_sidecars"],
             "n_plants": len(rows),
         }
 
+    # Producing-model identity is recovered from the prediction dirs' operating_point.json sidecars
+    # (stamped by export_predictions) so the delivered curve names the exact checkpoint + run behind
+    # its counts. Distinct producers across dates collapse to "multiple"; absent -> left empty.
+    producer = _resolve_producer_identity(predictions_by_date)
     stamp = {
         "operating_point_conf": operating_point_conf,
-        "operating_point_validated": VALIDATED_HELD_OUT if op_ok else "false",
-        "elongation_classifier_validated": VALIDATED_HELD_OUT if classifier_ok else "false",
+        "operating_point_validated": gate.stamp["operating_point"],
+        "elongation_classifier_validated": gate.stamp["classifier"],
+        "producer_model_sha256": producer.get("sha256"),
+        "producer_experiment_id": producer.get("experiment_id"),
     }
     csv_path = phenology.write_phenology_csv(rows, Path(output_csv_path), stamp=stamp)
     n_with_50 = sum(1 for r in rows if r.get("catkin_50per_date"))
