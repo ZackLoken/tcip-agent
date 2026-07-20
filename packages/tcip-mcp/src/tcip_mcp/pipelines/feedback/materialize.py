@@ -87,8 +87,13 @@ def materialize_dataset(
     include_hard_negatives: bool = True,
     copy_files: bool = True,
     only_completed: bool = False,
+    producer_model: dict | None = None,
 ) -> dict:
-    """Write ``output_dir/images/`` + ``output_dir/labels/detect/`` + manifest."""
+    """Write ``output_dir/images/`` + ``output_dir/labels/detect/`` + manifest.
+
+    ``producer_model`` (best-effort, may be ``None``) records the identity of the model whose
+    predictions the human reviewed, so the curated GT is traceable to what produced it.
+    """
     partition = partition_review_verdicts(review_state, only_completed=only_completed)
     out = Path(output_dir)
     images_out = out / "images"
@@ -145,6 +150,7 @@ def materialize_dataset(
         "review_state": review_state_path,
         "source_images_dir": str(source_images_dir),
         "output_dir": str(out),
+        "producer_model": producer_model,
         "counts": counts,
         "class_ids": sorted(class_ids),
         "images": manifest_images,
