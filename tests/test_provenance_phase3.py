@@ -1,7 +1,7 @@
 """Phase 3 — native provenance stamping at the non-web write sites + the identity helper.
 
-Web sites (annotate save, review accept/edit) are covered in test_tcip_web_routes.py; SAM
-(accept_candidates) and stage_proposals in test_vision.py / test_review_channel.py.
+Web sites (annotate save, review accept/edit) are covered in test_tcip_web_routes.py; the
+proposal engines (accept_proposals) and stage_proposals in test_vision.py / test_review_channel.py.
 """
 
 from __future__ import annotations
