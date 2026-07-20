@@ -37,6 +37,70 @@ def test_validated_heldout_calibration_value_ok():
 def test_non_calibration_value_always_ok():
     # facts (deterministic) and knobs (engineering) ship regardless of validated_vs_gt
     assert derived("num_classes", 2, derivation_class="deterministic", derived_from="labels").value == 2
+
+
+def test_review_confirmed_calibration_is_shippable():
+    from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED
+    p = derived("conf", 0.4, derivation_class="calibration",
+                derived_from="count-unbiased center-match sweep over review verdicts",
+                validated_vs_gt=VALIDATED_REVIEW_CONFIRMED)
+    assert p.is_shippable  # a review-confirmed reference ships (distinct flag, same gate)
+    assert p.value == 0.4
+
+
+# --- W1-R3: reconcile the delivery gate against on-disk operating_point.json (T5-3) ---
+
+def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
+    import json
+    d = tmp_path / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "operating_point.json").write_text(json.dumps({
+        "validated": validated,
+        "operating_point": {"conf": {"value": conf, "validated_vs_gt": ref if validated else "false"}},
+    }), encoding="utf-8")
+    return str(d)
+
+
+def test_reconcile_missing_sidecar_floors_to_false(tmp_path):
+    from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
+    # A caller asserting validated cannot open the gate when no sidecar backs it (the T5-3 hole).
+    r = reconcile_operating_point_validity([str(tmp_path / "nope")], asserted=VALIDATED_HELD_OUT)
+    assert r["validated"] == VALIDATED_FALSE
+    assert r["missing_sidecars"] == [str(tmp_path / "nope")]
+
+
+def test_reconcile_all_validated_on_disk(tmp_path):
+    from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
+    dirs = [_bucket(tmp_path, "d1", validated=True), _bucket(tmp_path, "d2", validated=True)]
+    r = reconcile_operating_point_validity(dirs)  # no caller assertion needed
+    assert r["validated"] == VALIDATED_HELD_OUT
+    assert r["on_disk_validated"] is True
+    assert r["conf"] == 0.6
+
+
+def test_reconcile_one_unvalidated_bucket_floors_whole_curve(tmp_path):
+    from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
+    dirs = [_bucket(tmp_path, "d1", validated=True), _bucket(tmp_path, "d2", validated=False)]
+    r = reconcile_operating_point_validity(dirs, asserted=VALIDATED_HELD_OUT)
+    assert r["validated"] == VALIDATED_FALSE
+    assert r["unvalidated_buckets"] == [str(tmp_path / "d2")]
+
+
+def test_reconcile_asserted_false_lowers_on_disk_validated(tmp_path):
+    from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
+    dirs = [_bucket(tmp_path, "d1", validated=True)]
+    # The floor: an explicit asserted='false' lowers even a validated-on-disk bucket.
+    r = reconcile_operating_point_validity(dirs, asserted=VALIDATED_FALSE)
+    assert r["validated"] == VALIDATED_FALSE
+
+
+def test_reconcile_review_confirmed_reference_preserved(tmp_path):
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_REVIEW_CONFIRMED, reconcile_operating_point_validity,
+    )
+    dirs = [_bucket(tmp_path, "d1", validated=True, ref=VALIDATED_REVIEW_CONFIRMED)]
+    r = reconcile_operating_point_validity(dirs)
+    assert r["validated"] == VALIDATED_REVIEW_CONFIRMED  # provenance records which reference
     from tcip_mcp.pipelines.resolution import default
     assert default("lr", 1e-3).value == 1e-3
 
