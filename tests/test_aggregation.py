@@ -163,7 +163,8 @@ def test_export_aggregated_csv(tmp_path):
     ]
     out_path = tmp_path / "out" / "aggregated.csv"
     export_aggregated_csv(
-        results, str(out_path), trait_name="catkin_count", crop="hazelnut"
+        results, str(out_path), trait_name="catkin_count", crop="hazelnut",
+        acknowledge_unvalidated=True,
     )
 
     with open(out_path, newline="") as f:
