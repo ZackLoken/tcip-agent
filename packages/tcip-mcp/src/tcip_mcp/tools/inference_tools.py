@@ -89,6 +89,7 @@ def _sweep_summary(conf_param) -> dict:
         "f1_max_conf": sweep.get("f1_max_conf"),
         "holdout_bias": hb.get("count_bias_mean") if isinstance(hb, dict) else None,
         "passed_holdout": sweep.get("passed_holdout"),
+        "conf_censored": sweep.get("conf_censored"),
         "count_bias_tolerance": sweep.get("count_bias_tolerance"),
     }
 
@@ -112,6 +113,7 @@ def run_inference(
     trait: str | None = None,
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
+    experiment_id: str | None = None,
 ) -> dict:
     """Run a trained model on images.
 
@@ -142,6 +144,8 @@ def run_inference(
         calibration_labels_dir: Labeled dir for a disjoint cal/holdout split to calibrate + held-out
             validate the operating point. Its GT identity scopes the resolved conf (dataset firewall).
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
+        experiment_id: The run that produced the checkpoint, for provenance. Best-effort resolved
+            from the registry when omitted; a raw/foreign checkpoint legitimately has none.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -249,6 +253,24 @@ def run_inference(
         else:
             target_hash, cross_dataset_check = None, "not-comparable-unlabeled-target"
         issues = bundle.shippable_issues(target_dataset_hash=target_hash)
+        # Channel firewall (T6-3): probe ONE target raster and check its band count against the
+        # checkpoint's in_chans via validate_resolved_bundle, so a channel-wrong inference surfaces in
+        # the provenance rather than being silently coerced by the loader.
+        if image_paths:
+            from tcip_mcp.pipelines.derivations import probe_channels
+            from tcip_mcp.pipelines.resolution import (
+                ResolvedBundle, default as _resolved_default, validate_resolved_bundle,
+            )
+            try:
+                probed = int(probe_channels(image_paths[0]))
+            except Exception:
+                probed = None
+            if probed is not None:
+                chan_bundle = ResolvedBundle(trait=trait or "", dataset_hash=None, params={
+                    "in_chans": _resolved_default(
+                        "in_chans", int(getattr(predictor, "in_chans", 3)),
+                        derivation_class="deterministic")})
+                issues = issues + validate_resolved_bundle(chan_bundle, probed_channels=probed)
         # validated only when held-out passed AND nothing is un-shippable under the target actually used.
         extra = {
             "validated": bool(bundle.is_shippable and not issues),
@@ -301,8 +323,19 @@ def run_inference(
     )
     total_detections = sum(r["count"] for r in results)
 
+    # Producing-model identity travels with the result so every downstream deliverable can name the
+    # exact checkpoint (content hash) + run behind the count. sha is cached (never re-hashed per call).
+    from datetime import datetime, timezone
+
+    from tcip_mcp.model_registry import resolve_model_identity
+
+    identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
     out = {
         "checkpoint": checkpoint_path,
+        "checkpoint_sha256": identity["sha256"],
+        "experiment_id": identity["experiment_id"],
+        "images_dir": images_dir,
+        "produced_at": datetime.now(timezone.utc).isoformat(),
         "image_count": len(results),
         "total_detections": total_detections,
         "tiled": tile,
@@ -334,6 +367,7 @@ def export_predictions(
     trait: str | None = None,
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
+    experiment_id: str | None = None,
     overwrite: bool = False,
 ) -> dict:
     """Run inference and save predictions as per-image COCO/JSON files.
@@ -390,6 +424,7 @@ def export_predictions(
         tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, max_dets=max_dets,
         postprocess=postprocess, trait=trait,
         calibration_labels_dir=calibration_labels_dir, calibration_images_dir=calibration_images_dir,
+        experiment_id=experiment_id,
     )
     if "error" in result:
         return result
@@ -398,26 +433,47 @@ def export_predictions(
 
     out.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
-    producer = f"model:{Path(checkpoint_path).stem}"
+    # Producer carries the checkpoint's content hash so an accepted prediction's GT names the exact
+    # model that produced it, not just a (collidable) filename stem.
+    sha = result.get("checkpoint_sha256")
+    producer = f"model:{Path(checkpoint_path).stem}" + (f"@{sha[:12]}" if sha else "")
     for r in result["results"]:
         out_json = out / f"{Path(r['image']).stem}.json"
         write_predictions_json(out_json, r, created_by=producer)
         written.append(str(out_json))
 
-    # Stamp the operating point beside the delivered labels. ``validated`` is derived from the run's
-    # resolved bundle (true only when a held-out calibration passed) — never hardcoded, or a passing
-    # calibration would be dishonestly recorded as unvalidated (and vice versa).
+    # Stamp the operating point + producing-model identity beside the delivered labels. ``validated``
+    # is derived from the run's resolved bundle (true only when a held-out calibration passed) —
+    # never hardcoded, or a passing calibration would be recorded as unvalidated (and vice versa).
     atomic_write_json(out / "operating_point.json",
                       {"operating_point": result.get("operating_point"),
                        "validated": bool(result.get("validated", False)),
-                       "shippable_issues": result.get("shippable_issues", [])})
+                       "shippable_issues": result.get("shippable_issues", []),
+                       "checkpoint": Path(checkpoint_path).stem,
+                       "checkpoint_sha256": sha,
+                       "experiment_id": result.get("experiment_id"),
+                       "images_dir": images_dir,
+                       "produced_at": result.get("produced_at")})
+
+    # Close the data→model→predictions chain: link this bucket into the producing run's lineage.
+    # Additive first-write — the terminal-state lock permits it into a still-empty predictions field.
+    exp_id = result.get("experiment_id")
+    if exp_id:
+        try:
+            from tcip_mcp.experiments import update_lineage
+
+            update_lineage(exp_id, predictions=str(out))
+        except Exception:
+            logger.warning("could not link predictions into experiment lineage", exc_info=True)
 
     return {"image_count": len(written), "output_dir": str(out), "files": written,
             "bucket_redirected": resolution.redirected,
             "requested_output_dir": output_dir if resolution.redirected else None,
             "operating_point": result.get("operating_point"),
             "validated": bool(result.get("validated", False)),
-            "conf_source": result.get("conf_source")}
+            "conf_source": result.get("conf_source"),
+            "checkpoint_sha256": sha,
+            "experiment_id": exp_id}
 
 
 @mcp.tool()
@@ -438,6 +494,8 @@ def tabulate_counts(
     trait: str | None = None,
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
+    experiment_id: str | None = None,
+    acknowledge_unvalidated: bool = False,
 ) -> dict:
     """Run inference and export a CSV summary of detection counts per image.
 
@@ -447,6 +505,12 @@ def tabulate_counts(
     must not be produced at a different, untiled, truncating operating point. Earlier this door
     hardcoded ``conf=0.5`` and passed no tiling/max_dets, under-reporting dense
     small-object counts relative to the other two doors.
+
+    Delivery gate: the count is a phenotype, so the CSV is not written unless the count operating
+    point is validated on the run's own resolved bundle (not a caller string) — or
+    ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional CSV stamped
+    ``measurement_validated=false``. Calibrate per dataset (``trait`` + ``calibration_labels_dir``)
+    to reach a validated count.
 
     Args:
         checkpoint_path: Path to model .pt checkpoint.
@@ -464,6 +528,8 @@ def tabulate_counts(
         trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``).
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
+        acknowledge_unvalidated: Write the count CSV even when the operating point is unvalidated,
+            stamping it ``measurement_validated=false`` so the un-trustworthiness travels downstream.
     """
     result = run_inference(
         checkpoint_path=checkpoint_path,
@@ -480,18 +546,58 @@ def tabulate_counts(
         trait=trait,
         calibration_labels_dir=calibration_labels_dir,
         calibration_images_dir=calibration_images_dir,
+        experiment_id=experiment_id,
     )
     if "error" in result:
         return result
 
-    csv_path = export_detection_csv(result["results"], output_path)
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
+        VALIDATED_HELD_OUT,
+        VALIDATED_SHIPPABLE,
+        check_delivery_gate,
+    )
+
+    op = result.get("operating_point") or {}
+    conf_prov = op.get("conf") or {}
+    # The count operating point's validity is the run's RESOLVED bundle state, not a caller string:
+    # prefer the conf param's on-the-run reference, falling back to the resolved validated bool.
+    op_ref = conf_prov.get("validated_vs_gt")
+    if op_ref not in VALIDATED_SHIPPABLE:
+        op_ref = VALIDATED_HELD_OUT if result.get("validated") else VALIDATED_FALSE
+    gate = check_delivery_gate({"operating_point": op_ref},
+                               acknowledge_unvalidated=acknowledge_unvalidated)
+    if not gate.ok:
+        return {
+            "error": gate.reason,
+            "operating_point_validated": op_ref,
+            "operating_point": result.get("operating_point"),
+            "validated": False,
+            "image_count": result["image_count"],
+            "total_detections": result["total_detections"],
+        }
+
+    provenance = {
+        "producer_model_sha256": result.get("checkpoint_sha256"),
+        "experiment_id": result.get("experiment_id"),
+        "operating_point_conf": op.get("conf"),
+        "produced_at": result.get("produced_at"),
+    }
+    csv_path = export_detection_csv(
+        result["results"], output_path, provenance=provenance,
+        measurement_validated=gate.stamp["operating_point"],
+        acknowledge_unvalidated=acknowledge_unvalidated,
+    )
     return {
         "csv_path": csv_path,
         "image_count": result["image_count"],
         "total_detections": result["total_detections"],
-        # Carry the operating point that produced these counts — the CSV is a count-bearing
-        # deliverable and the numbers are only as trustworthy as the operating point behind them.
+        # Carry the operating point + producing model that produced these counts — the CSV is a
+        # count-bearing deliverable; the numbers are only as trustworthy as what stands behind them.
         "operating_point": result.get("operating_point"),
         "validated": bool(result.get("validated", False)),
+        "operating_point_validated": gate.stamp["operating_point"],
         "conf_source": result.get("conf_source"),
+        "checkpoint_sha256": result.get("checkpoint_sha256"),
+        "experiment_id": result.get("experiment_id"),
     }
