@@ -139,7 +139,7 @@ def test_compute_phenology_writes_canonical_csv(tmp_path: Path) -> None:
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,
+        positive_class_id=1,
         classifier_validated="validated_held_out",  # a validated run may deliver
         operating_point_conf=0.4,
         operating_point_validated="validated_held_out",
@@ -182,7 +182,7 @@ def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> Non
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,  # classifier_validated defaults to None -> unvalidated
+        positive_class_id=1,  # classifier_validated defaults to None -> unvalidated
     )
     assert "error" in res and "requires BOTH" in res["error"]  # gate refuses on the unvalidated classifier
     assert not out_csv.exists()  # nothing delivered
@@ -202,7 +202,7 @@ def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) 
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,
+        positive_class_id=1,
         acknowledge_unvalidated=True,  # provisional delivery, clearly flagged
     )
     assert "error" not in res
@@ -228,7 +228,7 @@ def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,
+        positive_class_id=1,
         classifier_validated="validated_held_out",
         operating_point_validated=None,  # op point not validated → still refuse
     )
@@ -256,7 +256,7 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,
+        positive_class_id=1,
         classifier_validated=None,                       # classifier not validated
         operating_point_validated="validated_held_out",  # op point validated (backed on disk)
         acknowledge_unvalidated=True,
@@ -286,7 +286,7 @@ def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> N
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,
+        positive_class_id=1,
     )
 
     assert "error" in res
