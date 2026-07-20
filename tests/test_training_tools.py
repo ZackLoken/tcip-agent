@@ -1,11 +1,9 @@
 """training_tools fixes — validator/StageSpec alignment, HPO param plumbing,
-ASHA pruning direction, failed-trial sentinels, HPO/train regime parity,
+HPO trial reporting (per-epoch trace + failed-trial sentinels), HPO/train regime parity,
 experiment immutability on relaunch, and canonical-format confidence parsing
 in get_worst_predictions."""
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 
@@ -78,7 +76,9 @@ def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
 
 
 # --------------------------------------------------------------------------
-# run_hpo — ASHA pruning direction, failed-trial sentinels, regime parity
+# _run_hpo_trial — reports the composite (lower=better) each epoch + final, with
+# failed / empty trials reporting +inf so a dead trial can never win a min sweep.
+# The trial runs directly (no Ray) so the training machinery can be stubbed.
 # --------------------------------------------------------------------------
 
 class _FakeDataset:
@@ -99,7 +99,9 @@ def _detection_base() -> dict:
 
 
 def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
-    """Stub dataset building + training so run_hpo trials run instantly."""
+    """Stub dataset building + training + loaders so a trial runs instantly, no Ray."""
+    import torch.utils.data as tud
+    from tcip_mcp.pipelines.data import samplers
     from tcip_mcp.pipelines.training import generic_trainer as gt
     from tcip_mcp.tools import training_tools as tt
 
@@ -112,81 +114,56 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
 
     monkeypatch.setattr(tt, "_auto_train_val", fake_auto_train_val)
     monkeypatch.setattr(gt, "train", fake_train)
+    monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
+    monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
 
 
-def test_run_hpo_asha_maximize_never_prunes_best_trial(tmp_path, monkeypatch):
-    """The composite objective is lower=better; under direction='maximize' + ASHA a
-    trial that beats every prior trial at every epoch must complete, not be pruned
-    (raw un-negated reports made ASHA kill exactly the improving trials)."""
+def test_run_hpo_trial_reports_each_epoch_then_final_composite(monkeypatch):
+    """Every epoch's composite plus the final best_metric are reported (lower=better),
+    so a min-mode scheduler sees the improving trace."""
     pytest.importorskip("torch")
-    pytest.importorskip("optuna")
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.training_tools import run_hpo
-
-    n_epochs = 5
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
-        t = int(Path(run.output_dir).name.split("_")[-1])  # trial number
-        # Strictly improving within a trial; each later trial dominates all
-        # earlier ones at every epoch (a converging TPE sweep).
-        values = [100.0 - 10.0 * t - e for e in range(n_epochs)]
-        for epoch, value in enumerate(values):
+        for epoch, value in enumerate([50.0, 40.0, 30.0]):
             if epoch_callback:
                 epoch_callback(epoch, {"val_objective": value})
-        run.best_metric = min(values)
+        run.best_metric = 30.0
         run.status = "completed"
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    result = run_hpo(
-        _detection_base(),
-        param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
-        n_trials=6, output_dir=str(tmp_path),
-        direction="maximize", pruner="asha", grace_period=1, reduction_factor=2,
-    )
-    states = {t["number"]: t["state"] for t in result["all_trials"]}
-    assert states[5] == "TrialState.COMPLETE"  # the best trial survived ASHA
-    # best_value is the negated best composite of the best trial (lowest composite).
-    assert result["best_value"] == pytest.approx(-(100.0 - 50.0 - (n_epochs - 1)))
+    reported: list = []
+    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), "trial_0")
+    assert reported == [50.0, 40.0, 30.0, 30.0]  # per-epoch trace + final composite
 
 
-def test_run_hpo_failed_trial_never_wins(tmp_path, monkeypatch):
-    """A crashed trial must rank below every real trial: it used to return 0.0,
-    which beat all successful trials' negative -composite values under maximize."""
+def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch):
+    """A crashed trial (or one with no model_source) reports +inf — the worst value under
+    mode='min' — so it can never become the sweep's best."""
     pytest.importorskip("torch")
-    pytest.importorskip("optuna")
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.training_tools import run_hpo
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
-        t = int(Path(run.output_dir).name.split("_")[-1])
-        if t == 0:
-            raise RuntimeError("CUDA out of memory")
-        run.best_metric = 10.0 + t  # trial 1 is the best real trial
-        run.status = "completed"
-        return run
+        raise RuntimeError("CUDA out of memory")
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    result = run_hpo(
-        _detection_base(),
-        param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
-        n_trials=3, output_dir=str(tmp_path),
-        direction="maximize", pruner="none",
-    )
-    values = {t["number"]: t["value"] for t in result["all_trials"]}
-    assert values[0] == float("-inf")               # crashed trial = worst possible
-    assert result["best_value"] == pytest.approx(-11.0)  # best REAL trial wins
+    reported: list = []
+    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), "trial_0")
+    assert reported == [float("inf")]
+
+    empty: list = []
+    _run_hpo_trial({"lr": 3e-4}, empty.append, {"data": {}}, "trial_1")  # no model_source
+    assert empty == [float("inf")]
 
 
-def test_run_hpo_trials_use_base_augmentation(tmp_path, monkeypatch):
-    """Trials must train under the final run's regime: base_config augmentation
-    reaches the train dataset. (The loss is owned by the bespoke model_source builder.)"""
+def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch):
+    """Trials train under the final run's regime: base_config augmentation reaches the train
+    dataset, and the bespoke model_source is carried through. (Loss is owned by the builder.)"""
     pytest.importorskip("torch")
-    pytest.importorskip("optuna")
-    monkeypatch.chdir(tmp_path)
-    from tcip_mcp.tools.training_tools import run_hpo
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
 
     captured: dict = {}
 
@@ -205,11 +182,7 @@ def test_run_hpo_trials_use_base_augmentation(tmp_path, monkeypatch):
         "training": {"batch_size": 2},
         "augmentation": {"horizontal_flip": 0.5},
     }
-    run_hpo(
-        base, param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
-        n_trials=1, output_dir=str(tmp_path),
-        direction="maximize", pruner="none",
-    )
+    _run_hpo_trial({"lr": 3e-4}, [].append, base, "trial_0")
     assert captured["transforms"] is not None       # augmentation was built + passed
     assert captured["model_source"]["builder"].endswith(":build_bespoke_classifier")
 
