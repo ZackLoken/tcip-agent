@@ -14,15 +14,17 @@ neutral stdio server (any MCP client), and the GUI is a standalone browser app �
 editor required.
 
 **Scope today: 2D imagery (RGB + N-channel), object detection first** (Phase 1:
-hazelnut catkin phenology). The dataset layer reads RGB and multi-band 2D rasters
-(GeoTIFF / NPZ / grayscale); `num_channels` threads through `build_dataset` →
-the backbone's `in_chans`, and inference is channel-aware — so multispectral 2D is a
-config choice, not new work. Detectors are built by the plain `build_detector` (+
+hazelnut catkin phenology). The dataset layer serves the known task loaders
+(detection / instance_seg / semantic_seg / classification / ordinal / regression) OR a
+bespoke `dataset_source` the agent writes — an importable builder for a new task, routed
+by `build_dataset` and snapshotted for provenance, mirroring `model_source`. It reads RGB
+and multi-band 2D rasters (GeoTIFF / NPZ / grayscale); `num_channels` threads through
+`build_dataset` → the backbone's `in_chans`, and inference is channel-aware — so
+multispectral 2D is a config choice, not new work. Detectors are built by the plain `build_detector` (+
 `_build_faster_rcnn`/`_build_fcos`/`_build_retinanet`/`_build_mask_rcnn`) that bespoke
 model code imports directly, and `instance_seg` is real (Mask R-CNN). **3D point clouds
-(LiDAR / SfM) are not built**: a `pointnet++` backbone is a plain importable module with
-no point-cloud dataset/loader or task type — that's new work, not a config flag. See
-Roadmap in README.
+(LiDAR / SfM) are not built** and carry no scaffolding — there is no point-cloud
+dataset/loader or task type; that's new work, not a config flag. See Roadmap in README.
 
 Three processes, one shared `.tcip/` state dir:
 
@@ -108,7 +110,10 @@ that silently corrupts results and compounds across sessions. So:
   building blocks (FPN/PAN necks, the heads, losses, backbone wrappers, `build_detector`) —
   plus a `train(ctx)` loop, built via `model_source` → `build_model`, proven by
   `model_contract` (`check_model_contract`/`overfit_check`), run through the audited
-  envelope/`ctx`. There is no model spec, no composer, no component registry.
+  envelope/`ctx`. There is no model spec, no composer, no component registry. The
+  `toolkit-inventory` skill maps the pieces to compose — the `build_detector`/`build_loss`/task
+  string names, the heads/necks/backbones, the derivations, the `ctx` craft library, and the
+  `model_source`/`training_source`/`dataset_source` seams.
 - **Parameters: derive, don't pin.** When a threshold or operating point varies by
   dataset / model / trait (conf, IoU-for-a-hit, NMS, tile, anchors, `max_dets`), the deliverable
   is never the *value* — not one you pick, not one you derive from the current dataset and freeze
@@ -120,7 +125,7 @@ that silently corrupts results and compounds across sessions. So:
 
 You can see images: call `visualize` (with `source="annotations"|"predictions"|"comparison"|
 "dataset"`) or a specialized renderer (`render_failure_cases`, `overlay_reference_grid`,
-`capture_live_canvas`, `generate_mask_candidates`) → it writes to `.tcip/artifacts/viz/` and returns
+`capture_live_canvas`, `propose_annotations`) → it writes to `.tcip/artifacts/viz/` and returns
 `image_path` → call `view_image` on it → describe what you see, then recommend.
 `capture_live_canvas` shows the human's live GUI canvas — their image, viewport, and unsaved
 shapes with the GUI's own symbology. See the `visual-analysis` skill.
@@ -160,5 +165,5 @@ repo root at startup), so a process started from a subdir no longer fragments `.
 
 - `README.md` — setup, layout, running, roadmap.
 - `.github/skills/` — crops, crop-science, project-setup, annotation, training, evaluation,
-  pipeline-design, cv-research, phenology, visual-analysis, delivery, self-improvement. Load before
-  acting in a domain (current list: `ls .github/skills/`).
+  pipeline-design, toolkit-inventory, cv-research, phenology, visual-analysis, delivery,
+  self-improvement. Load before acting in a domain (current list: `ls .github/skills/`).
