@@ -24,12 +24,12 @@ def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
     from tcip_web.routes.training import _historical_training_runs
 
     # Live run: marked running, heartbeat refreshed by a fresh metric log.
-    create_experiment("live", {"model_spec": {"backbone": {"name": "x"}}}, data_source="imgs")
+    create_experiment("live", {"model_source": {"builder": "x:y"}}, data_source="imgs")
     update_status("live", "running")
     log_metrics("live", 1, {"val_map50": 0.5})
 
     # Dead run: running state but a forced-stale heartbeat (process gone).
-    create_experiment("dead", {"model_spec": {"backbone": {"name": "x"}}}, data_source="imgs")
+    create_experiment("dead", {"model_source": {"builder": "x:y"}}, data_source="imgs")
     update_status("dead", "running")
     sp = tmp_path / ".tcip" / "experiments" / "dead" / "status.json"
     s = json.loads(sp.read_text())
