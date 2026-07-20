@@ -358,11 +358,18 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
         "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
                      "mixed_precision": False},
     }
+    import threading
+    before = set(threading.enumerate())
     res = training_tools.launch_training(cfg, str(tmp_path / "out"))
     eid = res["experiment_id"]
     persisted = json.loads((tmp_path / ".tcip" / "experiments" / eid / "config.json").read_text())
     assert persisted["data"]["tiling"]["tile_size"] == 224  # TiledDetectionDataset default
     assert persisted["data"]["tiling"]["overlap"] == pytest.approx(0.2)
+    # Await the background training thread so its audit close-event lands in this test's pinned
+    # root; leaking the daemon lets that event bleed into a later test's log (tests repin
+    # TCIP_PROJECT_ROOT per test, so a late write resolves against whoever is running then).
+    for t in set(threading.enumerate()) - before:
+        t.join(timeout=60)
 
 
 # ======================================================================
@@ -603,7 +610,10 @@ def test_cv0_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
         }
 
     monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
-    monkeypatch.setattr(itools, "export_detection_csv", lambda results, path: str(path))
+    monkeypatch.setattr(
+        itools, "export_detection_csv",
+        lambda results, path, provenance=None, measurement_validated=None,
+        acknowledge_unvalidated=False: str(path))
     r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
                                   trait="catkin", calibration_labels_dir=str(tmp_path))
     assert captured["trait"] == "catkin"                    # calibration threaded through
