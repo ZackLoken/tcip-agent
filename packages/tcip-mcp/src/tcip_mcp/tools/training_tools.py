@@ -58,6 +58,30 @@ def preflight_config(config: dict) -> dict:
             elif not Path(path).is_dir():
                 issues.append(f"Directory not found: data.{key} = '{path}'")
 
+    # Channel firewall (T6-3): probe one sample raster and check its band count against the declared
+    # in_chans, so a channel-wrong train is caught here rather than deep in the daemon thread. Only
+    # fires when a raster is actually readable — never a false-fail on an empty/absent dir.
+    if isinstance(model_source, dict) and model_source.get("in_chans") is not None and data_cfg:
+        images_dir = data_cfg.get("images_dir")
+        if images_dir and Path(images_dir).is_dir():
+            from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
+            sample = next((f for f in sorted(Path(images_dir).iterdir())
+                           if f.suffix.lower() in IMAGE_EXTS), None)
+            if sample is not None:
+                from tcip_mcp.pipelines.derivations import probe_channels
+                from tcip_mcp.pipelines.resolution import (
+                    ResolvedBundle, default as _resolved_default, validate_resolved_bundle,
+                )
+                try:
+                    probed = int(probe_channels(sample))
+                except Exception:
+                    probed = None
+                if probed is not None:
+                    b = ResolvedBundle(trait="", dataset_hash=None, params={
+                        "in_chans": _resolved_default(
+                            "in_chans", int(model_source["in_chans"]), derivation_class="deterministic")})
+                    issues.extend(validate_resolved_bundle(b, probed_channels=probed))
+
     # Training config validation
     train_cfg = config.get("training", {})
     batch_size = train_cfg.get("batch_size", 2)
@@ -194,7 +218,11 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
         experiment_id = _ensure_experiment(
             experiment_id, config, data_cfg.get("images_dir"), resume_from, run.run_id,
         )
+        # Thread the resolved id into the live config so the default trainer's checkpoints carry it
+        # (the envelope's ctx.save_checkpoint stamps it explicitly). run.config is this same dict.
+        config["experiment_id"] = experiment_id
         update_status(experiment_id, "running")
+        _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
     except Exception as exc:  # Experiment tracking is best-effort, but failures must be visible.
         logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
 
@@ -533,6 +561,41 @@ def _ensure_experiment(
     return fresh_id
 
 
+def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict) -> None:
+    """Persist which stems (+ seed + dataset_hash) produced this run's metrics (R5).
+
+    The same seed yields a different split if the label set changes, so a metric is only
+    reproducible with the exact train/val membership recorded beside it. Best-effort — a
+    provenance write must never sink a launch.
+    """
+    def _stems(ds) -> list[str]:
+        return sorted(getattr(ds, "stems", None) or getattr(ds, "_stems", []) or [])
+
+    try:
+        from tcip_mcp.experiments import experiments_dir, record_artifact
+        from tcip_mcp.pipelines.resolution import dataset_hash
+        from tcip_mcp.utils.atomic_io import atomic_write_json
+
+        labels_dir = data_cfg.get("labels_dir", "")
+        dh = None
+        if labels_dir and Path(labels_dir).is_dir():
+            dh = dataset_hash(labels_dir)
+        split = data_cfg.get("split", {})
+        manifest = {
+            "train": _stems(train_ds),
+            "val": _stems(val_ds) if val_ds is not None else [],
+            "seed": int(split.get("seed", 42)),
+            "dataset_hash": dh,
+        }
+        exp_dir = experiments_dir() / experiment_id
+        if exp_dir.is_dir():
+            path = exp_dir / "split.json"
+            atomic_write_json(path, manifest)
+            record_artifact(experiment_id, "split", str(path))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("split manifest persist failed for %s: %s", experiment_id, exc)
+
+
 def _auto_train_val(task: str, data_cfg: dict, transforms):
     """Build ``(train_ds, val_ds)`` for a run, deriving a leakage-free val split.
 
@@ -738,6 +801,7 @@ def evaluate_model(
     use_tiled_inference: bool = False,
     global_nms_iou: float = DEFAULT_NMS_IOU,
     postprocess: str = "nms",
+    trait: str | None = None,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
@@ -767,6 +831,9 @@ def evaluate_model(
             tile-level eval. None + a run id reuses the run's training tiling; None + a
             checkpoint path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
+        trait: When set, the trait's DERIVED localization criterion (traits.py — catkin's
+            center-match) governs the reported count and the selection f1; AP@0.5 (``iou_threshold``)
+            is kept as a labeled comparability metric (D9). Absent -> the IoU convention governs.
     """
     import torch
     from torch.utils.data import DataLoader
@@ -799,7 +866,7 @@ def evaluate_model(
             conf_threshold=conf_threshold, iou_threshold=iou_threshold,
             tile_size=int(tcfg.get("tile_size", 640)), overlap=float(tcfg.get("overlap", 0.2)),
             global_nms_iou=global_nms_iou, postprocess=postprocess,
-            max_dets=max_dets if max_dets > 100 else 1000,
+            max_dets=max_dets if max_dets > 100 else 1000, trait=trait,
         )
 
     # Tile-level diagnostic (or untiled). Only detection tiles; a run id reuses its training tiling.
@@ -823,5 +890,5 @@ def evaluate_model(
     return run_test_evaluation(
         ckpt, loader, device, task, str(Path(ckpt).parent),
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
-        iou_type=iou_type, max_dets=max_dets, tiling=tiling,
+        iou_type=iou_type, max_dets=max_dets, tiling=tiling, trait=trait,
     )
