@@ -53,6 +53,9 @@ PHENOLOGY_CSV_COLUMNS = [
     "operating_point_conf",
     "operating_point_validated",
     "elongation_classifier_validated",
+    # Producing-model identity — the exact checkpoint (content hash) + run behind the counts.
+    "producer_model_sha256",
+    "producer_experiment_id",
 ]
 
 
