@@ -293,8 +293,24 @@ def test_export_csv_refuses_unvalidated_phenology(client: TestClient) -> None:
 
 
 def test_export_csv_non_phenology_unaffected(client: TestClient) -> None:
-    # A generic (non-phenology) export is not gated.
+    # A diagnostic / inventory export (no trait_name + value) is not a phenotype delivery — not gated.
     rows = [{"plant_id": "PLANT_A", "some_metric": 42}]
+    resp = client.post("/api/results/export_csv", json={"rows": rows, "filename": "x.csv"})
+    assert resp.status_code == 200
+
+
+def test_export_csv_refuses_unvalidated_per_plant_phenotype(client: TestClient) -> None:
+    # A per-plant phenotype row (trait_name + value) with no validation stamp must not ship (R4:
+    # the non-phenology delivery door is gated too).
+    rows = [{"plant_id": "PLANT_A", "trait_name": "catkin_count", "value": 7}]
+    resp = client.post("/api/results/export_csv", json={"rows": rows, "filename": "x.csv"})
+    assert resp.status_code == 400
+
+
+def test_export_csv_ships_validated_per_plant_phenotype(client: TestClient) -> None:
+    # The same per-plant phenotype row ships once it carries a shippable measurement reference.
+    rows = [{"plant_id": "PLANT_A", "trait_name": "catkin_count", "value": 7,
+             "measurement_validated": "validated_held_out"}]
     resp = client.post("/api/results/export_csv", json={"rows": rows, "filename": "x.csv"})
     assert resp.status_code == 200
 
