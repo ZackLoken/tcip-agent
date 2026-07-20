@@ -175,17 +175,36 @@ _STRATEGIES = {
 }
 
 
+_PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "produced_at",
+                       "measurement_validated"]
+
+
 def export_aggregated_csv(
     results: list[dict],
     output_path: str,
     trait_name: str = "trait",
     crop: str = "",
     pipeline_version: str = "",
+    provenance: dict | None = None,
+    *,
+    measurement_validated: str | None = None,
+    pred_dirs: list[str] | None = None,
+    acknowledge_unvalidated: bool = False,
 ) -> str:
     """Export per-plant aggregated results to a delivery CSV.
 
     Follows the per-plant CSV schema from the delivery skill:
-    plant_id, crop, trait_name, value, confidence, n_images, pipeline_version
+    plant_id, crop, trait_name, value, confidence, n_images, pipeline_version — plus an optional
+    producing-model provenance stamp (checkpoint sha, experiment id, timestamp) so the final
+    per-plant value is traceable to the exact model that produced it.
+
+    The final per-plant CSV is a delivery door: it refuses a *bare* write (an unvalidated phenotype
+    with no acknowledgement) via the shared ``check_delivery_gate`` and stamps the reconciled validity
+    into every row. For a count trait, pass ``pred_dirs`` (the prediction buckets the counts came from)
+    so the count operating point's validity is read from each ``operating_point.json`` sidecar and
+    floored against ``measurement_validated``. For a continuous/ordinal trait with no conf op-point,
+    pass ``measurement_validated`` directly (its own validation reference). ``acknowledge_unvalidated``
+    ships a clearly-flagged provisional CSV stamped ``validated=false``.
 
     Args:
         results: Output from aggregate_per_plant().
@@ -193,16 +212,38 @@ def export_aggregated_csv(
         trait_name: Name of the trait being measured.
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
+        provenance: Optional producing-model stamp added as trailing columns.
+        measurement_validated: The trait measurement's validation reference (a shippable reference).
+        pred_dirs: Prediction buckets to reconcile the count operating point's validity from (count
+            traits); floored against ``measurement_validated``.
+        acknowledge_unvalidated: Write an unvalidated phenotype as a flagged provisional CSV.
 
     Returns:
         Path to the written CSV file.
     """
+    from tcip_mcp.pipelines.resolution import (
+        check_delivery_gate,
+        reconcile_operating_point_validity,
+    )
+
+    state = measurement_validated
+    if pred_dirs:
+        # A count trait: the measurement validity IS the count operating point's, read from the
+        # buckets' sidecars and floored against any caller assertion (never trusted from the string).
+        state = reconcile_operating_point_validity(pred_dirs, asserted=measurement_validated)["validated"]
+    gate = check_delivery_gate({"measurement": state},
+                               acknowledge_unvalidated=acknowledge_unvalidated)
+    if not gate.ok:
+        raise ValueError(gate.reason)
+
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
+    stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
+    stamp["measurement_validated"] = gate.stamp["measurement"]
     fieldnames = [
         "plant_id", "crop", "trait_name", "value",
         "confidence", "n_images", "pipeline_version",
-    ]
+    ] + _PROVENANCE_COLUMNS
 
     with open(output_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -217,6 +258,7 @@ def export_aggregated_csv(
                 "confidence": r.get("confidence", ""),
                 "n_images": r.get("observations", 0),
                 "pipeline_version": pipeline_version,
+                **stamp,
             })
 
     return output_path
