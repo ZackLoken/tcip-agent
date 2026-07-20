@@ -378,15 +378,25 @@ def build_mapping(
     plant_csv_paths: list[Path],
     *,
     dates: Optional[list[str]] = None,
-    nn_tolerance_m: float = NN_TOLERANCE_METERS,
+    nn_tolerance_m: Optional[float] = None,
 ) -> dict[str, list[Assignment]]:
-    """Build per-date plant assignments for every image under ``images_root``."""
+    """Build per-date plant assignments for every image under ``images_root``.
+
+    ``nn_tolerance_m`` is DERIVED from the plot's ``grid_pitch_m`` when the caller does not pin it
+    (not a pinned 10 m): pitch/6, so assign_plants' loosest 3x gate keeps the effective match radius
+    within half a grid cell. An explicit value is honored but still capped at that ceiling. No
+    derivable pitch (< 2 georeferenced plants) -> the honest ``NN_TOLERANCE_METERS`` fallback.
+    """
     plants = read_plant_csvs(plant_csv_paths)
-    # Cap the match tolerance so a detection can't reach an adjacent plot. assign_plants' loosest gate
-    # is 3x nn_tolerance, so cap at pitch/6 -> effective radius <= pitch/2.
+    # The ceiling: assign_plants' loosest gate is 3x nn_tolerance, so pitch/6 -> effective radius
+    # <= pitch/2. Derive the tolerance from the layout in hand; only cap an explicit override.
     pitch = grid_pitch_m(plants)
     _cap = pitch / 6
-    if pitch > 0 and nn_tolerance_m > _cap:
+    if nn_tolerance_m is None:
+        nn_tolerance_m = _cap if pitch > 0 else NN_TOLERANCE_METERS
+        logger.info("nn_tolerance_m derived %.2f from grid pitch %.1f (effective radius <= pitch/2)",
+                    nn_tolerance_m, pitch)
+    elif pitch > 0 and nn_tolerance_m > _cap:
         logger.info("capping nn_tolerance_m %.1f -> %.2f (grid pitch %.1f: effective radius <= pitch/2)",
                     nn_tolerance_m, _cap, pitch)
         nn_tolerance_m = _cap
