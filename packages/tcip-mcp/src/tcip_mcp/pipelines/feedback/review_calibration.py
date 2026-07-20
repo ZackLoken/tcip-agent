@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED, ResolvedBundle
 
@@ -132,3 +133,40 @@ def resolve_operating_point_from_review(
         tile_size=tile_size, tiled=tiled, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         validated_reference=VALIDATED_REVIEW_CONFIRMED,
     )
+
+
+def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: int) -> dict[str, Any]:
+    """Translate a review-confirmed operating-point bundle into a breeder-legible validation result.
+
+    Reads the conf param's own sweep diagnostics (the SAME gate output ``resolve_operating_point``
+    already produced — never a re-run) and maps them to plain language a non-CV breeder can act on:
+    validated, or a specific "not yet" with the reason (predictions produced at too high a conf, not
+    enough reviewed images to hold some back, or the held-back counts didn't agree closely enough).
+    Pure over the bundle — no torch, no re-derivation.
+    """
+    conf = bundle.params.get("conf")
+    validated = bool(conf is not None and conf.is_shippable)
+    reference = conf.validated_vs_gt if conf is not None else None
+    # Report the derived number without shipping it — the honest raw-read accessor, not .value.
+    conf_value = (float(conf.unvalidated_value(acknowledge_unvalidated=True))
+                  if conf is not None else None)
+    sweep = (conf.sweep if conf is not None else None) or {}
+    if validated:
+        reason = (f"Validated. Your review of {reviewed_image_count} reviewed image(s) confirms this "
+                  "model's counts closely enough to use as a validation reference for results.")
+    elif sweep.get("conf_censored"):
+        reason = ("Not yet. The reviewed predictions were produced at too high a confidence cutoff, so "
+                  "the check can't see the borderline detections it needs. Re-run the predictions at a "
+                  "low confidence, review those, then try again.")
+    elif "passed_holdout" not in sweep:
+        reason = ("Not yet. Too few images have been reviewed — the check needs at least two fully "
+                  "reviewed images so it can hold some back to test against. Review a few more, then "
+                  "try again.")
+    elif not sweep.get("disjoint", False):
+        reason = ("Not yet. The reviewed images couldn't be split into independent groups to "
+                  "cross-check. Review more images, then try again.")
+    else:
+        reason = ("Not yet. On the held-back images, the model's counts didn't agree closely enough "
+                  "with your review to trust them yet. Reviewing more images, or improving the model, "
+                  "can help.")
+    return {"validated": validated, "reference": reference, "conf": conf_value, "reason": reason}
