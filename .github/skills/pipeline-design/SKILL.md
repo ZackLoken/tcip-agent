@@ -170,7 +170,11 @@ isolate = launch_training(config={"model_source": {...}, "data": {...}}, ...)   
 detect = launch_training(config={"model_source": {...}, "data": {...}}, ...)    # detection
 classify = launch_training(config={"model_source": {...}, "data": {...}}, ...)  # classification
 run_inference(model_path=classify_best, images_dir=..., output_dir="catkin_classes")
-export_aggregated_csv(aggregate_per_plant("catkin_classes", plant_mapping), "phenology_csv")
+# The final CSV is a phenotype delivery door: it refuses a bare write. Pass pred_dirs so the count
+# operating point's validity is read from each bucket's operating_point.json (or measurement_validated
+# for a continuous/ordinal trait), or acknowledge_unvalidated=True for a flagged provisional CSV.
+export_aggregated_csv(aggregate_per_plant("catkin_classes", plant_mapping), "phenology_csv",
+                      pred_dirs=["catkin_classes"])
 ```
 
 Order the stages to describe what each does for this specific trait; there is no fixed
