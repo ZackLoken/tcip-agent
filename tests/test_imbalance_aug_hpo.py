@@ -215,45 +215,106 @@ def test_random_rotation_rotates_semantic_mask():
 
 
 # --------------------------------------------------------------------------
-# HPO
+# HPO — Ray Tune: search algorithms + schedulers are agent-selectable
 # --------------------------------------------------------------------------
 
 def test_get_default_baseline_params_subset_of_space():
-    from tcip_mcp.pipelines.training.hpo import get_default_baseline_params, get_default_optuna_space
-    assert set(get_default_baseline_params()).issubset(set(get_default_optuna_space()))
+    from tcip_mcp.pipelines.training.hpo import get_default_baseline_params, get_default_space
+    assert set(get_default_baseline_params()).issubset(set(get_default_space()))
 
 
-def test_build_pruner_asha():
-    pytest.importorskip("optuna")
-    from optuna.pruners import SuccessiveHalvingPruner, MedianPruner
-    from tcip_mcp.pipelines.training.hpo import _build_pruner
-    assert isinstance(_build_pruner("asha"), SuccessiveHalvingPruner)
-    assert isinstance(_build_pruner("median"), MedianPruner)
-
-
-def test_optuna_warm_start_trial0_is_baseline():
-    pytest.importorskip("optuna")
-    from tcip_mcp.pipelines.training.hpo import optuna_search
-    space = {
+def test_to_tune_space_maps_every_param_type():
+    pytest.importorskip("ray")
+    from ray import tune
+    from tcip_mcp.pipelines.training.hpo import _to_tune_space
+    space = _to_tune_space({
         "lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
-        "batch_size": {"type": "categorical", "choices": [2, 4, 8]},
-    }
-    baseline = {"lr": 3e-4, "batch_size": 4}
-    result = optuna_search(
-        lambda config, trial: config["lr"], param_space=space, n_trials=2,
-        direction="minimize", warm_start=True, baseline_params=baseline,
+        "wd": {"type": "uniform", "low": 0.0, "high": 0.1},
+        "bs": {"type": "categorical", "choices": [2, 4]},
+        "k": {"type": "int", "low": 1, "high": 3},
+    })
+    assert isinstance(space["lr"], tune.search.sample.Float)
+    assert isinstance(space["bs"], tune.search.sample.Categorical)
+    assert isinstance(space["k"], tune.search.sample.Integer)
+
+
+def test_grid_mode_enumerates_discrete_axes():
+    pytest.importorskip("ray")
+    from tcip_mcp.pipelines.training.hpo import _to_tune_space
+    space = _to_tune_space({"bs": {"type": "categorical", "choices": [2, 4, 8]}}, grid=True)
+    # grid_search wraps a plain dict with a "grid_search" key, not a sampler.
+    assert space["bs"] == {"grid_search": [2, 4, 8]}
+
+
+def test_build_scheduler_aliases():
+    pytest.importorskip("ray")
+    from ray.tune.schedulers import (
+        AsyncHyperBandScheduler, MedianStoppingRule, PopulationBasedTraining,
+    )
+    from ray import tune
+    from tcip_mcp.pipelines.training.hpo import build_scheduler
+    assert isinstance(build_scheduler("asha"), AsyncHyperBandScheduler)
+    assert isinstance(build_scheduler("median"), MedianStoppingRule)
+    # PBT mutates hyperparameters mid-training, so it needs the search space as mutations.
+    assert isinstance(
+        build_scheduler("pbt", hyperparam_mutations={"lr": tune.loguniform(1e-5, 1e-2)}),
+        PopulationBasedTraining,
+    )
+    assert build_scheduler("none") is None
+
+
+def test_build_search_alg_native_and_backend():
+    pytest.importorskip("ray")
+    from tcip_mcp.pipelines.training.hpo import build_search_alg
+    # Native random/grid need no searcher (BasicVariantGenerator handles them).
+    assert build_search_alg("random") is None
+    assert build_search_alg("grid") is None
+    # A backend the agent picks that isn't installed raises clearly (never silently swapped).
+    with pytest.raises(ValueError, match="not installed"):
+        build_search_alg("hebo")
+
+
+def test_available_search_algs_lists_natives_and_installed_backends():
+    pytest.importorskip("ray")
+    from tcip_mcp.pipelines.training.hpo import available_search_algs
+    algs = available_search_algs()
+    assert "random" in algs and "grid" in algs
+    pytest.importorskip("optuna")
+    assert "optuna" in algs  # backend installed in this env
+
+
+def test_tune_search_warm_start_and_optimizes(tmp_path):
+    """End-to-end Ray Tune: a real sweep finds the minimum, honors warm_start, and reports
+    each trial. Uses a pure-math objective so no training is needed."""
+    pytest.importorskip("ray")
+
+    def obj(config, report):
+        report((config["x"] - 2.0) ** 2)
+
+    from tcip_mcp.pipelines.training.hpo import tune_search
+    result = tune_search(
+        obj,
+        param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
+        metric="objective", mode="min", num_samples=6,
+        search_alg="random", scheduler="none",
+        warm_start=True, baseline_params={"x": 2.0},
     )
     assert result["warm_start"] is True
-    assert result["all_trials"][0]["params"]["lr"] == pytest.approx(3e-4)
-    assert result["all_trials"][0]["params"]["batch_size"] == 4
+    assert result["n_trials"] == 6
+    assert result["search_alg"] == "random" and result["scheduler"] == "none"
+    # The x=2.0 warm-start point is the exact minimum (objective 0.0).
+    assert result["best_value"] == pytest.approx(0.0, abs=1e-9)
+    assert result["best_params"]["x"] == pytest.approx(2.0)
 
 
-def test_run_hpo_is_optuna_only():
-    # The use_optuna=False random-search branch (enumerate-only, never trained) was removed;
-    # run_hpo is Optuna-only now. Its training path is covered in test_training_tools.py.
+def test_run_hpo_exposes_agent_search_choices_not_pinned():
+    """run_hpo lets the agent choose search_alg + scheduler; the old Optuna/pruner pins
+    are gone (capability-not-method)."""
     import inspect
 
     from tcip_mcp.tools.training_tools import run_hpo
     params = inspect.signature(run_hpo).parameters
-    assert "n_trials" in params  # signature is introspectable (not opaque *args/**kwargs)
-    assert "use_optuna" not in params
+    assert "search_alg" in params and "scheduler" in params
+    assert "pruner" not in params and "direction" not in params
+    assert params["search_alg"].default == "random"
+    assert params["scheduler"].default == "asha"
