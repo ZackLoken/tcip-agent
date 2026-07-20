@@ -74,7 +74,7 @@ config = {
 | `launch_training` | Start async training run (smokes the builder first, auto-launches TensorBoard) |
 | `check_training_status` | Check run progress, metrics, and TensorBoard URL |
 | `list_training_runs` | List all runs in session |
-| `run_hpo` | HPO via random search or Optuna with TensorBoard logging |
+| `run_hpo` | HPO on Ray Tune — you pick the search algorithm + trial scheduler |
 | `render_failure_cases` | Surface + render images with worst prediction quality |
 | `create_experiment` | Track training run with full lineage |
 
@@ -87,16 +87,24 @@ config = {
 
 ## HPO
 
-`run_hpo` runs an Optuna TPE/ASHA search that trains each trial:
+`run_hpo` runs a Ray Tune sweep that trains each trial for real (minimizing the composite
+selection objective). The search *algorithm* and trial *scheduler* are yours to choose per
+task/data — match them to the space and budget; the defaults are a starting point, not a rule:
 
 ```python
-run_hpo(base_config=config, n_trials=20, output_dir="runs/hpo_1")
+run_hpo(base_config=config, n_trials=20, search_alg="optuna", scheduler="asha",
+        output_dir="runs/hpo_1")
 ```
-- TPE sampler with ASHA/MedianPruner for early trial termination
-- Per-trial TensorBoard logs in `output_dir/hpo_tensorboard/trial_{n}/`
-- HParams plugin logs for side-by-side param comparison
-- Auto-launches TensorBoard pointing at HPO log directory
-- Returns `best_params`, `best_value`, `all_trials`, and `tensorboard` URL
+- `search_alg`: `random`/`grid` (native) or a backend when installed — `optuna`, `bayesopt`,
+  `hyperopt`, `nevergrad`, `ax`, `hebo`, `zoopt`, `bohb`. An uninstalled pick errors clearly
+  (never silently swapped). Call `hpo.available_search_algs()` for the live list on this box.
+- `scheduler`: `asha`, `hyperband`, `bohb` (pair with the `bohb` searcher), `pbt`, `median`,
+  or `none` to run every trial to completion. `grace_period`/`reduction_factor` tune the
+  halving schedulers.
+- `warm_start=True` seeds the search with a known-good baseline; `max_concurrent` bounds
+  parallel trials (default 1 — safe for single-GPU training).
+- Ray persists trials under `output_dir` (also the TensorBoard logdir); auto-launches
+  TensorBoard. Returns `best_params`, `best_value`, `all_trials`, and `tensorboard` URL.
 
 ## Dataset Splits
 
