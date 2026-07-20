@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { buildOptunaSpace, DEFAULT_HPO_PARAMS, parseNumList, type HpoParam } from "@/tabs/hpoSpace";
+import {
+  buildSearchSpace,
+  DEFAULT_HPO_PARAMS,
+  parseNumList,
+  SCHEDULERS,
+  SEARCH_ALGORITHMS,
+  type HpoParam,
+} from "@/tabs/hpoSpace";
 
 describe("parseNumList", () => {
   it("parses a comma list and drops blanks/non-numbers", () => {
@@ -10,13 +17,13 @@ describe("parseNumList", () => {
   });
 });
 
-describe("buildOptunaSpace", () => {
-  it("emits Optuna-typed specs for the default params", () => {
-    const space = buildOptunaSpace(DEFAULT_HPO_PARAMS);
+describe("buildSearchSpace", () => {
+  it("emits typed specs for the default params", () => {
+    const space = buildSearchSpace(DEFAULT_HPO_PARAMS);
     expect(space.lr).toEqual({ type: "loguniform", low: 1e-5, high: 1e-2 });
     expect(space.weight_decay).toEqual({ type: "loguniform", low: 1e-5, high: 1e-2 });
     expect(space.batch_size).toEqual({ type: "categorical", choices: [2, 4] });
-    // Architecture axes (backbone / head / min_size) are model-specific and no longer swept.
+    // Architecture axes (backbone / head / min_size) are model-specific and not swept.
     expect(space.backbone).toBeUndefined();
     expect(space.head).toBeUndefined();
     expect(space.min_size).toBeUndefined();
@@ -28,6 +35,18 @@ describe("buildOptunaSpace", () => {
       { key: "head", label: "head", kind: "choices", enabled: true, options: ["a"], selected: [] },
       { key: "bs", label: "bs", kind: "numlist", enabled: true, values: [] },
     ];
-    expect(buildOptunaSpace(params)).toEqual({});
+    expect(buildSearchSpace(params)).toEqual({});
+  });
+});
+
+describe("agent strategy menus", () => {
+  it("offers native + backend search algorithms and the native schedulers", () => {
+    expect(SEARCH_ALGORITHMS).toContain("random");
+    expect(SEARCH_ALGORITHMS).toContain("grid");
+    expect(SEARCH_ALGORITHMS).toContain("optuna");
+    expect(SEARCH_ALGORITHMS).toContain("bohb");
+    expect(SCHEDULERS).toContain("asha");
+    expect(SCHEDULERS).toContain("pbt");
+    expect(SCHEDULERS).toContain("none");
   });
 });
