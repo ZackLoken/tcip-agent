@@ -35,7 +35,7 @@ from tcip_annotation import (
     write_segment_labels,
 )
 from tcip_annotation.utils import get_image_dimensions
-from tcip_mcp.utils.atomic_io import append_jsonl, read_json
+from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, read_json
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
 
@@ -665,6 +665,142 @@ def save_gt(payload: SaveGtPayload) -> dict:
         "n_polygons": len(payload.polygons),
     })
     return {"status": "ok" if ok else "partial"}
+
+
+# ── Promote a completed review into a validation reference (D17) ───────────
+
+
+class ValidateReferenceRequest(BaseModel):
+    project_root: str
+    trait: str
+    # The prediction bucket(s) whose review is being promoted — the same per-image prediction dirs
+    # the delivery gate reads an ``operating_point.json`` from. Either/both (detect + segment).
+    pred_detect_dir: Optional[str] = None
+    pred_segment_dir: Optional[str] = None
+
+
+class ValidateReferenceResponse(BaseModel):
+    # True only when the review cleared the identical gate the backend uses (or the bucket was already
+    # validated). A refusal is surfaced honestly here, never silently upgraded.
+    validated: bool
+    reference: Optional[str]  # "review_confirmed" | "validated_held_out" | "false" | None
+    reviewed_image_count: int
+    conf: Optional[float]  # the derived count operating point (for transparency)
+    reason: str  # plain-language, breeder-facing — always present
+    buckets_stamped: list[str]
+
+
+@router.post("/validate_reference")
+def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceResponse:
+    """Promote a completed review session into a validation reference for its (model, trait, date-set).
+
+    Reconstructs the review verdicts into the COCO records ``resolve_operating_point`` consumes (W1's
+    ``review_calibration`` adapter) and runs them through the IDENTICAL disjoint-split + count-bias gate
+    and conf-censoring guard the held-out-GT path uses — no shortcut to "validated". On success the
+    bucket's ``operating_point.json`` is stamped ``review_confirmed`` (so the delivery gate can read it);
+    on refusal an honest ``validated=false`` placeholder is written and the reason is returned. An
+    already-validated bucket is never downgraded.
+    """
+    bucket_dirs = [d for d in (req.pred_detect_dir, req.pred_segment_dir) if d]
+    for d in bucket_dirs:
+        _guard_path(d)
+    if not bucket_dirs:
+        return ValidateReferenceResponse(
+            validated=False, reference=None, reviewed_image_count=0, conf=None,
+            reason="No predictions are selected to validate. Choose a model with predictions for "
+                   "this dataset, then try again.",
+            buckets_stamped=[])
+
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.prediction_buckets import bucket_stems
+
+    stems = bucket_stems(*bucket_dirs)
+    engine = _get_engine(req.project_root)
+    completed = {
+        name: data
+        for name, data in engine.raw_state.get("image", {}).items()
+        if Path(name).stem in stems and data.get("img_status") == "completed"
+    }
+    n = len(completed)
+
+    # Never downgrade: predictions already validated (e.g. against held-out GT) stay validated — a
+    # review reference isn't needed there, and this action must not be able to lower them.
+    sidecars = {d: (read_operating_point_sidecar(d) or {}) for d in bucket_dirs}
+    if all(sc.get("validated") for sc in sidecars.values()):
+        ref = next((((sc.get("operating_point") or {}).get("conf") or {}).get("validated_vs_gt")
+                    for sc in sidecars.values()), None)
+        return ValidateReferenceResponse(
+            validated=True, reference=ref, reviewed_image_count=n, conf=None,
+            reason="These predictions are already validated, so a review reference isn't needed here.",
+            buckets_stamped=[])
+
+    if n == 0:
+        return ValidateReferenceResponse(
+            validated=False, reference=None, reviewed_image_count=0, conf=None,
+            reason="No completed reviews yet for this model on this date. Review the predictions and "
+                   "mark the images Reviewed, then try again.",
+            buckets_stamped=[])
+
+    from tcip_mcp.pipelines.feedback import (
+        describe_review_validation,
+        resolve_operating_point_from_review,
+        review_reference_hash,
+        review_to_records,
+    )
+    from tcip_mcp.traits import TraitUnknownError
+
+    review_state = {"image": completed}
+    try:
+        bundle = resolve_operating_point_from_review(review_state, req.trait, only_completed=True)
+    except TraitUnknownError:
+        raise HTTPException(
+            400,
+            f"a validation reference is not defined for trait {req.trait!r} yet — this action is "
+            "available for traits the platform can calibrate a count operating point for.",
+        ) from None
+
+    result = describe_review_validation(bundle, reviewed_image_count=n)
+
+    # Stamp each bucket's provenance sidecar (operating_point.json is not a label, so this never
+    # touches the reviewed per-image predictions or the verdict-immutability guard).
+    op_prov = bundle.to_provenance()["operating_point"]
+    ref_hash = review_reference_hash(review_to_records(review_state))
+    now_iso = datetime.now(timezone.utc).isoformat()
+    stamped: list[str] = []
+    for d in bucket_dirs:
+        if sidecars[d].get("validated"):
+            continue  # a mixed set: leave an already-validated bucket untouched (no downgrade)
+        sidecar = dict(sidecars[d])
+        sidecar.update({
+            "operating_point": op_prov,
+            "validated": result["validated"],
+            "validated_reference": result["reference"],
+            "validation_source": "review_confirmed",
+            "review_reference_hash": ref_hash,
+            "review_image_count": n,
+            "shippable_issues": bundle.shippable_issues(),
+            "validated_at": now_iso,
+        })
+        sidecar.setdefault("produced_at", now_iso)
+        Path(d).mkdir(parents=True, exist_ok=True)
+        atomic_write_json(Path(d) / "operating_point.json", sidecar)
+        stamped.append(d)
+
+    _audit(req.project_root, "gui_review_validate_reference", {
+        "trait": req.trait,
+        "validated": result["validated"],
+        "reference": result["reference"],
+        "reviewed_image_count": n,
+        "buckets_stamped": stamped,
+    })
+    return ValidateReferenceResponse(
+        validated=bool(result["validated"]),
+        reference=result["reference"],
+        reviewed_image_count=n,
+        conf=result["conf"],
+        reason=result["reason"],
+        buckets_stamped=stamped,
+    )
 
 
 @router.get("/image_status")
