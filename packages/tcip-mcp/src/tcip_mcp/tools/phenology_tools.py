@@ -100,6 +100,47 @@ def build_plant_mapping(
     }
 
 
+def _resolve_positive_class_id(trait_name: str, classes_json_path: str | None) -> tuple[int | None, str]:
+    """Resolve the trait's positive (elongated) class id from ``classes.json`` BY NAME.
+
+    The id is a mapping fact read from the labels' class map, never a pinned magic default. Returns
+    ``(class_id, message)``; ``class_id`` is ``None`` when it cannot be resolved honestly (no class
+    map, or the trait's ``positive_class_name`` is absent from it) so the caller refuses rather than
+    silently falling back to a guessed id.
+    """
+    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.traits import get_trait
+
+    name = get_trait(trait_name).positive_class_name
+    if not name:
+        return None, f"trait {trait_name!r} defines no positive_class_name"
+    if classes_json_path:
+        candidates = [Path(classes_json_path)]
+    else:
+        state = Path(".tcip") / "state"
+        candidates = [resolve_state(state / "classes" / f"{trait_name}.json"),
+                      resolve_state(state / "classes.json")]
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        for cid, entry in data.items():
+            if isinstance(entry, dict) and entry.get("name") == name:
+                try:
+                    return int(cid), f"resolved {name!r} -> class {cid} from {path}"
+                except (TypeError, ValueError):
+                    continue
+        present = [e.get("name") for e in data.values() if isinstance(e, dict)]
+        return None, f"class map {path} has no class named {name!r} (classes: {present})"
+    return None, ("no class map found — name the elongated class via write_class_map or the GUI so "
+                  "the id is derived from labels")
+
+
 def _resolve_producer_identity(predictions_by_date: dict[str, str]) -> dict:
     """Collect producing-model identity from each date's ``operating_point.json`` sidecar.
 
@@ -136,7 +177,8 @@ def compute_phenology(
     mapping_path: str,
     predictions_by_date: dict[str, str],
     output_csv_path: str,
-    elongated_class_id: int = 1,
+    elongated_class_id: int | None = None,
+    classes_json_path: str | None = None,
     classifier_validated: str | None = None,
     operating_point_conf: float | None = None,
     operating_point_validated: str | None = None,
@@ -146,10 +188,11 @@ def compute_phenology(
 
     Bloom is the **fraction of a plant's detected catkins that are elongated** — where
     "elongated" is an expert-defined morphological stage emitted by a *validated* 2-class
-    classifier (class ``elongated_class_id``), never a geometric proxy such as bounding-box
+    classifier (the ``elongated`` class), never a geometric proxy such as bounding-box
     height. For each plant this reports:
 
         catkin_elongation_date   date most catkins have elongated (crops.yml) = the 95% crossing
+                                 (provisional reading, pending breeder confirmation)
         catkin_05/50/95per_date  dates the elongated fraction crosses 5/50/95%
 
     Args:
@@ -159,7 +202,12 @@ def compute_phenology(
         predictions_by_date: ``{date: predictions_dir}`` — each dir holds per-image COCO/JSON
             prediction files (``<stem>.json``) from the elongation classifier.
         output_csv_path: Where to write the delivered per-plant ``catkin_phenology.csv``.
-        elongated_class_id: Class id the classifier assigns to "elongated" (default 1).
+        elongated_class_id: Class id the classifier assigns to "elongated". ``None`` (default)
+            derives it from ``classes.json`` by the trait's positive class name (a mapping fact
+            from the labels, never a pinned default) — the tool refuses if that name is absent
+            rather than guessing an id. An explicit id is honored as-is.
+        classes_json_path: Optional explicit path to the class map used to resolve the elongated
+            class id; ``None`` uses the trait's canonical ``.tcip/state/classes`` map.
         classifier_validated: The elongation classifier's ``validated_vs_gt`` state; a CSV
             is only written unacknowledged when this is ``validated_held_out``.
         operating_point_conf: The count operating point (conf) the predictions were produced
@@ -188,6 +236,15 @@ def compute_phenology(
         return {"error": f"could not read mapping {mapping_path}: {e}"}
     if not isinstance(mapping, dict) or not mapping:
         return {"error": f"mapping at {mapping_path} is empty or malformed"}
+
+    trait_name = "catkin"
+    if elongated_class_id is None:
+        elongated_class_id, msg = _resolve_positive_class_id(trait_name, classes_json_path)
+        if elongated_class_id is None:
+            return {"error": ("could not resolve the elongated class id from the class map by name "
+                              f"({msg}). Name the elongation class so the id is derived from the "
+                              "labels, or pass elongated_class_id explicitly."),
+                    "n_plants": 0}
 
     result = phenology.per_plant_phenology(
         mapping, predictions_by_date, elongated_class_id=elongated_class_id
@@ -256,10 +313,16 @@ def compute_phenology(
     # (stamped by export_predictions) so the delivered curve names the exact checkpoint + run behind
     # its counts. Distinct producers across dates collapse to "multiple"; absent -> left empty.
     producer = _resolve_producer_identity(predictions_by_date)
+    from tcip_mcp.traits import get_trait
+
+    # Carry the elongation-date read-semantics marker with the delivery: whether "most elongated"
+    # mapping to a milestone crossing is still provisional (breeders to confirm), read from the spec.
+    provisional = "true" if get_trait(trait_name).majority_provisional else "false"
     stamp = {
         "operating_point_conf": operating_point_conf,
         "operating_point_validated": gate.stamp["operating_point"],
         "elongation_classifier_validated": gate.stamp["classifier"],
+        "catkin_elongation_provisional": provisional,
         "producer_model_sha256": producer.get("sha256"),
         "producer_experiment_id": producer.get("experiment_id"),
     }
