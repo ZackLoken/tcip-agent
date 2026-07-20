@@ -12,20 +12,14 @@ from __future__ import annotations
 def build_scorer(method: str, task: str):
     """Return the active-learning scorer for a method name.
 
-    ``method`` is 'uncertainty' | 'diversity' | 'combined' (anything else → combined, matching
-    the prior inline behaviour). ``task`` is threaded to the logit-reading scorers.
+    Resolves through the scorer registry (``scorer.resolve_scorer``): the built-in
+    'uncertainty' | 'diversity' | 'combined', or any acquisition function the agent registered with
+    ``register_scorer``. An unknown ``method`` falls back to combined (the prior inline behaviour).
+    ``task`` is threaded to the logit-reading scorers.
     """
-    from tcip_mcp.pipelines.active_learning.scorer import (
-        CombinedScorer,
-        DiversityScorer,
-        UncertaintyScorer,
-    )
+    from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
 
-    if method == "uncertainty":
-        return UncertaintyScorer(task=task)
-    if method == "diversity":
-        return DiversityScorer()
-    return CombinedScorer(task=task)
+    return resolve_scorer(method, task)
 
 
 def require_composed_detector(predictor, *, purpose: str = "uncertainty scoring") -> str | None:
