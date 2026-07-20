@@ -389,15 +389,15 @@ def render_candidates(
     output_path: str | None = None,
     alpha: float = 0.35,
 ) -> str:
-    """Render numbered SAM candidate masks on image for agent review.
+    """Render numbered proposal-engine candidate masks on image for agent review.
 
     Each candidate is drawn as a semi-transparent colored polygon with a
-    large numbered label. Colors cycle through the palette.
+    large numbered label. Colors cycle through the palette. Engine-agnostic.
 
     Args:
         image_path: Path to the source image.
-        candidates: List of dicts from auto_mask(), each with:
-            candidate_id, bbox, polygon, area, stability_score, predicted_iou.
+        candidates: Neutral candidate dicts, each with candidate_id, bbox, polygon, area, score
+            (SAM populates these via its proposer adapter).
         output_path: Where to save. Defaults to .tcip/artifacts/viz/.
         alpha: Fill transparency (0=transparent, 1=opaque).
 
@@ -447,8 +447,8 @@ def render_candidates(
             fill=(255, 255, 255), font=font_label,
         )
 
-        # Stability + IoU info below the number
-        info = f"s={cand.get('stability_score', 0):.2f}"
+        # Proposal score below the number (neutral across engines)
+        info = f"s={cand.get('score', 0):.2f}"
         overlay_draw.text((cx - 12, cy + radius + 2), info, fill=color, font=font_small)
 
     # Composite overlay onto image
