@@ -97,7 +97,21 @@ def _build_timm_backbone(
     pretrained: bool = True,
     **kwargs: Any,
 ) -> BackboneWrapper:
-    """Build a backbone from timm with multi-scale features."""
+    """Build a backbone from timm with multi-scale features.
+
+    Requests ``features_only=True, out_indices=(1, 2, 3, 4)``. Two consequences, both observable
+    rather than listed — check them on the model you actually built, not against a table:
+
+    - ``out_indices`` is fixed here and cannot be overridden (passing it collides with this
+      builder's own argument and raises ``TypeError``). Architectures exposing only four feature
+      stages, indices 0-3 — ``convnext_*``, ``swin_*`` — therefore raise ``IndexError`` on the
+      request for index 4 and cannot be built through this helper at all; call
+      ``timm.create_model`` directly in your ``model_source`` for those. ``resnet*``,
+      ``efficientnet_*`` and ``vit_*`` build.
+    - Getting four levels does not mean getting a pyramid. Read ``model.feature_info.reduction()``:
+      a plain ViT returns four maps at one reduction (nothing for a neck to fuse across scales),
+      where a CNN returns increasing reductions.
+    """
     if not HAS_TIMM:
         raise ImportError(f"timm is required for backbone '{name}'")
     model = timm.create_model(
@@ -202,25 +216,3 @@ def _freeze_sequential_fraction(
                 p.requires_grad = False
 
 
-# ---------------------------------------------------------------------------
-# Reference catalog — dataset-size / task hints for the agent choosing a timm backbone.
-# ---------------------------------------------------------------------------
-
-_TIMM_BACKBONES: dict[str, dict] = {
-    "resnet18": {"category": "cnn", "params_M": 11.7, "dataset_size": "any", "tasks": "all"},
-    "resnet34": {"category": "cnn", "params_M": 21.8, "dataset_size": "any", "tasks": "all"},
-    "resnet50": {"category": "cnn", "params_M": 25.6, "dataset_size": ">500", "tasks": "all"},
-    "resnet101": {"category": "cnn", "params_M": 44.5, "dataset_size": ">2000", "tasks": "all"},
-    "efficientnet_b0": {"category": "cnn", "params_M": 5.3, "dataset_size": "<500", "tasks": "all"},
-    "efficientnet_b1": {"category": "cnn", "params_M": 7.8, "dataset_size": "<1000", "tasks": "all"},
-    "efficientnet_b2": {"category": "cnn", "params_M": 9.2, "dataset_size": "<2000", "tasks": "all"},
-    "efficientnet_b3": {"category": "cnn", "params_M": 12.0, "dataset_size": "<5000", "tasks": "all"},
-    "efficientnet_b4": {"category": "cnn", "params_M": 19.3, "dataset_size": ">2000", "tasks": "all"},
-    "mobilenetv2_100": {"category": "cnn", "params_M": 3.5, "dataset_size": "<500", "tasks": "all"},
-    "mobilenetv3_small_100": {"category": "cnn", "params_M": 2.5, "dataset_size": "<500", "tasks": "all"},
-    "mobilenetv3_large_100": {"category": "cnn", "params_M": 5.5, "dataset_size": "<1000", "tasks": "all"},
-    "convnext_tiny": {"category": "cnn", "params_M": 28.6, "dataset_size": ">1000", "tasks": "all"},
-    "convnext_small": {"category": "cnn", "params_M": 50.2, "dataset_size": ">2000", "tasks": "all"},
-    "vit_small_patch16_224": {"category": "vit", "params_M": 22.1, "dataset_size": ">2000", "tasks": "classification,regression,ordinal"},
-    "vit_base_patch16_224": {"category": "vit", "params_M": 86.6, "dataset_size": ">5000", "tasks": "classification,regression,ordinal"},
-}
