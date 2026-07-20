@@ -1,6 +1,6 @@
 ---
 name: annotation
-description: "Annotation and review workflows for TCIP's native per-image JSON labels, with import/export to YOLO, COCO, PASCAL VOC, and LabelMe. Covers SAM-assisted labeling, review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running SAM-assisted labeling, or preparing/QCing training data."
+description: "Annotation and review workflows for TCIP's native per-image JSON labels, with import/export to YOLO, COCO, PASCAL VOC, and LabelMe. Covers engine-assisted auto-labeling (a method-neutral proposal seam; SAM is the built-in reference engine), review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data."
 ---
 
 # Annotation Workflow
@@ -9,7 +9,7 @@ description: "Annotation and review workflows for TCIP's native per-image JSON l
 
 The on-disk default for both GT and predictions is **one per-image, COCO-shaped `.json`**
 (`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
-`accepted_at` provenance per object. `stage_proposals`, `accept_candidates`, and
+`accepted_at` provenance per object. `stage_proposals`, `accept_proposals`, and
 `export_predictions` all read/write this schema; a dataset-level COCO training set is
 assembled from these per-image files (`datasets.py`'s `to_coco_dataset`), not authored
 directly. An unspecified format resolves to `.json` (`dataset_layout.py`'s `label_ext()`).
@@ -41,7 +41,7 @@ applied twice or skipped.
 
 ## Stages
 
-1. **Initial labeling** — Manual or SAM-assisted bounding box and polygon annotation
+1. **Initial labeling** — Manual or engine-assisted bounding box and polygon annotation
 2. **Review** — IoU matching between predictions and ground truth to accept/correct/reject
 3. **Active learning** — Score unlabeled images by model uncertainty to prioritize annotation effort
 4. **Quality audit** — Per-class AP, coverage analysis, inter-annotator agreement
@@ -52,37 +52,51 @@ applied twice or skipped.
 |------|---------|
 | `read_annotations` | Load labels for a set of images (auto-detects format) |
 | `save_annotations` | Write annotations to any supported format |
-| `sam_predict` | SAM-assisted polygon generation from point/box prompts |
+| `segment_prompt` | Engine-assisted polygon generation from point/box/grid prompts (`engine='sam'` default) |
 | `score_predictions` | Score predictions vs GT (image file or dataset dir); `detail=True` adds per-detection TP/FP/FN match data |
 | `push_panel_data` | Send images + annotations to the annotation or review panel |
 | `prioritize_review_queue` | Rank unlabeled images by uncertainty/diversity (`strategy="informativeness"`, default), or `strategy="confidence_triage"` to partition by confidence |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set (accepted/edited → labels, rejected → hard negatives) with experiment lineage |
 
-## SAM-Assisted Labeling
+## Engine-assisted auto-labeling (the engine is a capability, not a fixed method)
 
-### Manual Prompting
-1. User clicks a point or draws a rough box on the annotation canvas
-2. `sam_predict` generates a precise polygon mask
+Auto-labeling runs through a **method-neutral proposal seam** (`tcip_mcp.pipelines.proposal`): the
+agent names an `engine` and the platform runs it. `engine='sam'` is the built-in SAM2 reference; the
+agent can register another engine (`register_proposal_engine`) or pass a dotted `module:factory` it
+wrote — a Grounding DINO / open-vocab detector, or a bespoke proposer — exactly the way `model_source`
+lets it bring a model. Engine-specific knobs travel in `engine_params`; the candidate schema is
+neutral (`candidate_id` / `bbox` / `area` / `polygon` / `score`), engine signals under `engine_meta`.
+
+**Trial and compare by review — pick the engine the data justifies.** Don't assume one engine; wire
+two or three, propose on the same images, and let the breeder's review decide: the useful engine is
+the one whose high-confidence proposals *survive review* (high accept rate, few edits). That accept
+rate is the measured comparison — the same signal that gates auto-accept in the review→retrain loop.
+Do not promise an engine that isn't built; SAM is the one that ships as a runnable example.
+
+### Manual/prompted segmentation
+1. User clicks a point or draws a rough box on the annotation canvas (or the agent names a grid cell)
+2. `segment_prompt(image_path, points=/box=/grid_cells=, engine='sam')` returns a precise polygon
 3. Polygon is saved in the project's configured annotation format
-4. Supports point prompts (positive/negative) and box prompts
+4. Supports point prompts (positive/negative), box prompts, and grid-cell references
 
-### Vision-Guided Auto-Labeling (SAM as "Hands", Agent as "Eyes")
+### Vision-guided auto-labeling (the engine is the "hands", the agent's vision the "eyes")
 
-The agent can autonomously label images by using SAM for geometry generation
-and its multimodal vision for classification and QA.
+The agent labels images by using a proposal engine for geometry and its multimodal vision for
+classification and QA.
 
 **Full workflow:**
-1. `generate_mask_candidates(image_path)` → SAM generates candidate masks, renders numbered overlay
+1. `propose_annotations(image_path, engine='sam')` → the engine proposes candidates, renders a numbered overlay
 2. Agent `view_image` on overlay → identifies and classifies each candidate
-3. `accept_candidates(image_path, assignments=[{candidate_id: 0, class_id: 1}, ...])` → stages
-   accepted candidates as SAM predictions (`created_by="sam"`) in the predictions tree for
-   human review on the Review canvas — never writes GT directly
+3. `accept_proposals(image_path, assignments=[{candidate_id: 0, class_id: 1}, ...])` → stages
+   accepted candidates as predictions (`created_by=<engine>`) in the predictions tree for human
+   review on the Review canvas — never writes GT directly, and through the verdict-guarded staging
+   helper so a re-run never orphans recorded verdicts
 4. Agent `view_image` on the staged result → visual QA pass
 
 **Corrective loop (for missed objects):**
 1. `overlay_reference_grid(image_path)` → labeled grid (A1–H6) for spatial reference
 2. Agent `view_image` → identifies missed regions by grid cell
-3. `sam_predict(image_path, grid_cells=["B3", "D5"])` → SAM segments at those locations
+3. `segment_prompt(image_path, grid_cells=["B3", "D5"])` → the engine segments at those locations
 4. Save new annotations via `save_annotations`
 
 **Grid cell system:**
@@ -92,10 +106,10 @@ and its multimodal vision for classification and QA.
 
 | Tool | Role | Phase |
 |------|------|-------|
-| `generate_mask_candidates` | Generate all candidate masks | Discovery |
-| `accept_candidates` | Stage classified candidates as predictions | Classification |
+| `propose_annotations` | Propose candidate masks with a chosen engine | Discovery |
+| `accept_proposals` | Stage classified candidates as predictions | Classification |
 | `overlay_reference_grid` | Spatial reference for corrections | Correction |
-| `sam_predict(grid_cells=...)` | Targeted segmentation | Correction |
+| `segment_prompt(grid_cells=...)` | Targeted segmentation | Correction |
 | `view_image` | Agent visual review | All phases |
 
 ## Review Protocol
