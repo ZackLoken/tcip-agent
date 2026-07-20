@@ -22,8 +22,8 @@ The agent can visually inspect images using `view_image` after rendering annotat
 | `visualize(source="dataset", path=<folder>, n=16)` | Random grid of annotated dataset samples |
 | `visualize(source="comparison", path=<image>)` | Overlay GT (green) vs predictions (red) with match stats |
 | `render_failure_cases` | Grid of top-K failure cases |
-| `generate_mask_candidates` | SAM candidate masks rendered with numbered overlay |
-| `accept_candidates` | Stage classified SAM candidates as predictions (created_by="sam") for human review |
+| `propose_annotations` | Engine-proposed candidate masks rendered with numbered overlay (`engine='sam'` default) |
+| `accept_proposals` | Stage classified candidates as predictions (created_by=<engine>) for human review |
 | `overlay_reference_grid` | Labeled grid overlay for spatial referencing |
 | `capture_live_canvas` | The human's live GUI canvas: their image, viewport, and unsaved shapes in the GUI's own symbology (+ classes schema, TP/FP/FN legend on Review) |
 
@@ -103,9 +103,8 @@ When inspecting rendered annotations/predictions, evaluate:
 
 ## Vision-Guided Auto-Labeling
 
-Full workflow, tool/role table, and the corrective (grid-cell) loop live in
-`.github/skills/annotation` (it owns the format/write semantics — `accept_candidates`
-stages to predictions, never GT directly). The visual-QA-specific angle here: after each
-`accept_candidates` or `sam_predict` call, `view_image` the staged result before moving on
-— catching a wrong class or a sloppy mask before it reaches human review is cheaper than
-catching it after.
+Full workflow, tool/role table, the method-neutral engine seam, and the corrective (grid-cell) loop
+live in `.github/skills/annotation` (it owns the format/write semantics — `accept_proposals` stages
+to predictions, never GT directly). The visual-QA-specific angle here: after each `accept_proposals`
+or `segment_prompt` call, `view_image` the staged result before moving on — catching a wrong class
+or a sloppy mask before it reaches human review is cheaper than catching it after.
