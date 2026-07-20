@@ -229,6 +229,15 @@ export function ReviewTab() {
   const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
   // A reviewed (completed) image is locked — no verdicts/edits until it's reopened.
   const reviewLocked = imageStatus === "completed";
+  // Result of "use this review as a validation reference" (dataset-level, so it clears on selection).
+  const [validating, setValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<{
+    validated: boolean;
+    reason: string;
+  } | null>(null);
+  useEffect(() => {
+    setValidationResult(null);
+  }, [visKey]);
   // User-tunable symbology colours (persisted + shared with the status bar); legend swatches
   // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
   const [reviewColors, setReviewColors] = useReviewColors();
@@ -612,6 +621,38 @@ export function ReviewTab() {
     }
   }
 
+  // Promote the current dataset's completed review into a validation reference. Runs the platform's
+  // own validation gate server-side; the honest validated / not-yet result is surfaced (never forced).
+  async function promoteReviewToValidationReference() {
+    if (!dataset.project_root || !dataset.annotation_type) {
+      useStore.getState().pushToast("Select a dataset with a trait and predictions first.");
+      return;
+    }
+    if (!dataset.predictions_detect_dir && !dataset.predictions_segment_dir) {
+      useStore
+        .getState()
+        .pushToast("No predictions to validate — select a model with predictions.");
+      return;
+    }
+    setValidating(true);
+    try {
+      const res = await api.review.validateReference({
+        project_root: dataset.project_root,
+        trait: dataset.annotation_type,
+        pred_detect_dir: dataset.predictions_detect_dir,
+        pred_segment_dir: dataset.predictions_segment_dir,
+      });
+      setValidationResult({ validated: res.validated, reason: res.reason });
+      useStore.getState().pushToast(res.reason);
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Could not check the review: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setValidating(false);
+    }
+  }
+
   // ── In-place edit: pick the shape up on this canvas, adjust, save to GT ──
 
   function startEdit() {
@@ -782,6 +823,30 @@ export function ReviewTab() {
                     : "Hidden"}
             </FilterChip>
           </span>
+
+          <span aria-hidden className="mx-1 h-4 w-px bg-tcip-border" />
+          {/* Dataset-level: promote this review into a validation reference the results can trust.
+              The backend runs the same validation check and answers validated / not-yet honestly. */}
+          <button
+            className="tcip-btn"
+            onClick={() => void promoteReviewToValidationReference()}
+            disabled={validating || !!edit}
+            title="Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check — it will tell you if it isn't enough yet."
+          >
+            {validating ? "Checking…" : "Use review as validation reference"}
+          </button>
+          {validationResult && (
+            <span
+              className={`tcip-badge ${
+                validationResult.validated
+                  ? "bg-tcip-tp/20 text-tcip-tp"
+                  : "bg-tcip-fn/20 text-tcip-fn"
+              }`}
+              title={validationResult.reason}
+            >
+              {validationResult.validated ? "Validated" : "Not yet"}
+            </span>
+          )}
 
           <span className="flex-1" />
 
