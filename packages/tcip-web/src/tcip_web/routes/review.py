@@ -111,7 +111,7 @@ def _audit(project_root: str, tool: str, arguments: dict) -> None:
     """Append a GUI review mutation to ``<project_root>/.tcip/audit.jsonl`` (best-effort).
 
     Review verdicts + GT writes change tracked state, so — like @audited MCP tools and
-    the annotate save path — they belong in the tamper-evident log. Never fails the request.
+    the annotate save path — they belong in the append-only log. Never fails the request.
     """
     if not project_root:
         return
