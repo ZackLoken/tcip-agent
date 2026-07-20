@@ -417,7 +417,7 @@ def test_golden_compute_phenology_refuses_without_elongation_class(tmp_path: Pat
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,
+        positive_class_id=1,
     )
     assert "error" in res
     assert res["elongation_classified"] is False
@@ -435,7 +435,7 @@ def test_golden_compute_phenology_requires_both_validated_flags(tmp_path: Path):
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,
+        positive_class_id=1,
     )
     assert "error" in res and "requires BOTH" in res["error"]
     assert not out_csv.exists()
@@ -454,7 +454,7 @@ def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sideca
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,
+        positive_class_id=1,
         classifier_validated="validated_held_out",
         operating_point_conf=0.4,
         operating_point_validated="validated_held_out",  # asserted, but unbacked on disk
@@ -477,7 +477,7 @@ def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        elongated_class_id=1,
+        positive_class_id=1,
         classifier_validated="validated_held_out",
         operating_point_conf=0.4,
         operating_point_validated="validated_held_out",
