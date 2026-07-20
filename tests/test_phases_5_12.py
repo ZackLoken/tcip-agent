@@ -1,8 +1,7 @@
 """Tests for composable ML primitives — Phases 5-12.
 
 Covers: datasets, samplers, optimizer factory, generic trainer basics,
-predictor, active learning scorers, temporal heads,
-and tool imports.
+predictor, active learning scorers, and tool imports.
 """
 
 from __future__ import annotations
@@ -167,31 +166,21 @@ class TestActiveLearningScoringLogic:
 
 
 # ====================================================================
-# Phase 11: Temporal Modeling
+# Phase 11: Temporal Modeling — removed
 # ====================================================================
+# components/temporal.py was deleted: it declared task_type = "temporal", which
+# _DATASET_MAP does not route, so a model built on it could not be trained,
+# evaluated, or measured. Its milestone convention was also a trait semantic
+# frozen as a constructor default. Sequence modeling remains available — the
+# agent writes it in its own model_source builder, where the milestone
+# definition comes from the trait's TraitSpec.
 
-class TestTemporal:
-    def test_lstm_head_forward(self):
-        from tcip_mcp.pipelines.components.temporal import TemporalLSTMHead
-        head = TemporalLSTMHead(in_channels=128, num_milestones=4)
-        x = torch.randn(2, 6, 128)  # [B, T, C]
-        out = head(x)
-        assert out.shape == (2, 4)
 
-    def test_transformer_head_forward(self):
-        from tcip_mcp.pipelines.components.temporal import TemporalTransformerHead
-        head = TemporalTransformerHead(in_channels=128, num_milestones=4)
-        x = torch.randn(2, 6, 128)
-        out = head(x)
-        assert out.shape == (2, 4)
-
-    def test_temporal_head_builders_available(self):
-        from tcip_mcp.pipelines.components.temporal import (
-            _build_temporal_lstm,
-            _build_temporal_transformer,
-        )
-        assert _build_temporal_lstm(in_channels=16, num_milestones=3) is not None
-        assert _build_temporal_transformer(in_channels=16, num_milestones=3) is not None
+def test_temporal_component_module_is_gone():
+    """The unroutable task_type must not come back as importable scaffolding."""
+    import importlib
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("tcip_mcp.pipelines.components.temporal")
 
 
 # ====================================================================
