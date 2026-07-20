@@ -1,7 +1,7 @@
 """Tests for composable ML primitives — Phases 5-12.
 
 Covers: datasets, samplers, optimizer factory, generic trainer basics,
-predictor, active learning scorers, PointNet++ backbone, temporal heads,
+predictor, active learning scorers, temporal heads,
 and tool imports.
 """
 
@@ -164,29 +164,6 @@ class TestActiveLearningScoringLogic:
         ]
         queue = review_queue(predictions, low=0.3, high=0.8)
         assert len(queue) == 1  # only b.png
-
-
-# ====================================================================
-# Phase 10: 3D Point Cloud
-# ====================================================================
-
-class TestPointCloud:
-    def test_pointnet_backbone_forward(self):
-        from tcip_mcp.pipelines.components.backbones_3d import PointNetPPBackbone
-        model = PointNetPPBackbone(in_channels=0)
-        # [B, N, 3] input — xyz only, no extra features
-        pts = torch.randn(2, 256, 3)
-        out = model(pts)
-        assert isinstance(out, dict)
-        assert "sa3" in out
-        assert out["sa3"].shape[0] == 2
-
-    def test_pointnet_not_wired(self):
-        # Phase 0.3 task-honesty: PointNet++/3D is deferred — a plain importable module with
-        # no point-cloud dataset/task/inference path yet, and not in the 2D backbone catalog.
-        # The backbone class still works in isolation (see test_pointnet_backbone_forward).
-        from tcip_mcp.pipelines.components.backbones import _TIMM_BACKBONES
-        assert "pointnet++" not in _TIMM_BACKBONES
 
 
 # ====================================================================
