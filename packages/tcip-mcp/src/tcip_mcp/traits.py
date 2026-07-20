@@ -57,6 +57,11 @@ class TraitSpec:
     # frozen literal buried in the phenology code.
     majority_milestone: str = ""
     majority_provisional: bool = False
+    # Phenology CSV column vocabulary — the milestone-column prefix and the label the majority
+    # alias/provisional columns carry, so the delivered schema derives its names from this spec rather
+    # than from literals in the phenology module (catkin -> catkin_elongation_date / catkin_05per_date).
+    phenology_prefix: str = ""
+    majority_label: str = ""
     # How the tile-seam sliver cutoff is derived (the policy string names the basis; ``sliver_frac`` owns
     # the multiplier). Partial objects count unless below ``sliver_frac * class_avg_size``.
     sliver_policy: str = "class_avg_size"
@@ -95,6 +100,8 @@ CATKIN = TraitSpec(
     milestone_on="positive_fraction",
     majority_milestone="95per",       # crops.yml "most catkins elongated" -> the 95% majority crossing
     majority_provisional=True,        # provisional reading, pending breeder confirmation
+    phenology_prefix="catkin",        # milestone columns are catkin_05per_date, catkin_elongation_date, ...
+    majority_label="elongation",      # the majority alias/provisional columns: catkin_elongation_{date,provisional}
     sliver_policy="class_avg_size",
     sliver_frac=0.5,
     delivers=("catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"),
