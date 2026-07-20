@@ -177,38 +177,42 @@ def compute_phenology(
     mapping_path: str,
     predictions_by_date: dict[str, str],
     output_csv_path: str,
-    elongated_class_id: int | None = None,
+    positive_class_id: int | None = None,
     classes_json_path: str | None = None,
     classifier_validated: str | None = None,
     operating_point_conf: float | None = None,
     operating_point_validated: str | None = None,
     acknowledge_unvalidated: bool = False,
 ) -> dict:
-    """Per-plant catkin bloom milestones from classified predictions + a plant mapping.
+    """Per-plant phenology milestones from classified predictions + a plant mapping.
 
-    Bloom is the **fraction of a plant's detected catkins that are elongated** — where
-    "elongated" is an expert-defined morphological stage emitted by a *validated* 2-class
-    classifier (the ``elongated`` class), never a geometric proxy such as bounding-box
-    height. For each plant this reports:
+    A phenology milestone is a crossing of the **fraction of a plant's detected objects that are in
+    the trait's positive/measured state** — an expert-defined morphological stage emitted by a
+    *validated* classifier (the trait's positive class), never a geometric proxy such as bounding-box
+    height. For the Phase-1 catkin trait the positive state is ``elongated`` and this reports:
 
         catkin_elongation_date   date most catkins have elongated (crops.yml) = the 95% crossing
                                  (provisional reading, pending breeder confirmation)
         catkin_05/50/95per_date  dates the elongated fraction crosses 5/50/95%
+
+    Column names and crossing fractions come from the trait's ``TraitSpec``; a different trait yields
+    its own prefixed columns without a code change.
 
     Args:
         mapping_path: Path to a persisted plant-mapping JSON (``{date: [assignment, ...]}``
             with ``stem`` / ``plot_name`` / ``accession_name`` per assignment) — produced by
             the web plant-mapping step or ``build_plant_mapping``.
         predictions_by_date: ``{date: predictions_dir}`` — each dir holds per-image COCO/JSON
-            prediction files (``<stem>.json``) from the elongation classifier.
-        output_csv_path: Where to write the delivered per-plant ``catkin_phenology.csv``.
-        elongated_class_id: Class id the classifier assigns to "elongated". ``None`` (default)
-            derives it from ``classes.json`` by the trait's positive class name (a mapping fact
-            from the labels, never a pinned default) — the tool refuses if that name is absent
-            rather than guessing an id. An explicit id is honored as-is.
-        classes_json_path: Optional explicit path to the class map used to resolve the elongated
+            prediction files (``<stem>.json``) from the state classifier.
+        output_csv_path: Where to write the delivered per-plant CSV (e.g. ``catkin_phenology.csv``).
+        positive_class_id: Class id the classifier assigns to the trait's positive/measured state
+            (for catkin, "elongated"). ``None`` (default) derives it from ``classes.json`` by the
+            trait's positive class name (a mapping fact from the labels, never a pinned default) —
+            the tool refuses if that name is absent rather than guessing an id. An explicit id is
+            honored as-is.
+        classes_json_path: Optional explicit path to the class map used to resolve the positive
             class id; ``None`` uses the trait's canonical ``.tcip/state/classes`` map.
-        classifier_validated: The elongation classifier's ``validated_vs_gt`` state; a CSV
+        classifier_validated: The state classifier's ``validated_vs_gt`` state; a CSV
             is only written unacknowledged when this is ``validated_held_out``.
         operating_point_conf: The count operating point (conf) the predictions were produced
             at — stamped into the CSV; the on-disk sidecar value is preferred when present.
@@ -221,11 +225,11 @@ def compute_phenology(
             operating point is unvalidated, stamping the un-validated dimension as ``false`` so
             the un-trustworthiness travels with the delivery.
 
-    Returns a summary. **Measurement-integrity guard:** if the predictions carry no
-    elongation class anywhere, the elongated fraction is not a valid bloom measurement — the
-    tool refuses to write the CSV and returns ``error`` with ``elongation_classified: false``
-    so an unvalidated curve is never delivered (see the CLAUDE.md measurement-integrity
-    invariant).
+    Returns a summary. **Measurement-integrity guard:** if the predictions carry no positive-state
+    class anywhere (for catkin, the elongation class), the positive fraction is not a valid
+    measurement — the tool refuses to write the CSV and returns ``error`` with
+    ``elongation_classified: false`` so an unvalidated curve is never delivered (see the CLAUDE.md
+    measurement-integrity invariant).
     """
     mp = Path(mapping_path)
     if not mp.is_file():
@@ -237,27 +241,31 @@ def compute_phenology(
     if not isinstance(mapping, dict) or not mapping:
         return {"error": f"mapping at {mapping_path} is empty or malformed"}
 
+    from tcip_mcp.traits import get_trait
+
     trait_name = "catkin"
-    if elongated_class_id is None:
-        elongated_class_id, msg = _resolve_positive_class_id(trait_name, classes_json_path)
-        if elongated_class_id is None:
-            return {"error": ("could not resolve the elongated class id from the class map by name "
-                              f"({msg}). Name the elongation class so the id is derived from the "
-                              "labels, or pass elongated_class_id explicitly."),
+    spec = get_trait(trait_name)
+    pos = spec.positive_class_name or "positive"
+    if positive_class_id is None:
+        positive_class_id, msg = _resolve_positive_class_id(trait_name, classes_json_path)
+        if positive_class_id is None:
+            return {"error": (f"could not resolve the {pos} class id from the class map by name "
+                              f"({msg}). Name the {pos} class so the id is derived from the "
+                              "labels, or pass positive_class_id explicitly."),
                     "n_plants": 0}
 
     result = phenology.per_plant_phenology(
-        mapping, predictions_by_date, elongated_class_id=elongated_class_id
+        mapping, predictions_by_date, elongated_class_id=positive_class_id
     )
     rows = result["rows"]
 
     if not result["elongation_classified"]:
         return {
             "error": (
-                "predictions carry no elongation class "
-                f"(class {elongated_class_id}); classes seen: {result['classes_seen']}. "
-                "The elongated fraction is not a valid bloom measurement — run and validate "
-                "the 2-class elongation classifier before computing phenology."
+                f"predictions carry no {pos} class "
+                f"(class {positive_class_id}); classes seen: {result['classes_seen']}. "
+                f"The {pos} fraction is not a valid measurement — run and validate "
+                f"the {pos}-state classifier before computing phenology."
             ),
             "elongation_classified": False,
             "classes_seen": result["classes_seen"],
@@ -313,16 +321,17 @@ def compute_phenology(
     # (stamped by export_predictions) so the delivered curve names the exact checkpoint + run behind
     # its counts. Distinct producers across dates collapse to "multiple"; absent -> left empty.
     producer = _resolve_producer_identity(predictions_by_date)
-    from tcip_mcp.traits import get_trait
 
-    # Carry the elongation-date read-semantics marker with the delivery: whether "most elongated"
-    # mapping to a milestone crossing is still provisional (breeders to confirm), read from the spec.
-    provisional = "true" if get_trait(trait_name).majority_provisional else "false"
+    # Carry the majority-date read-semantics marker with the delivery: whether the trait's "most in
+    # state" mapping to a milestone crossing is still provisional (breeders to confirm), read from the
+    # spec. The column name derives from the spec too, matching phenology_csv_columns.
+    provisional = "true" if spec.majority_provisional else "false"
+    provisional_col = f"{spec.phenology_prefix}_{spec.majority_label}_provisional"
     stamp = {
         "operating_point_conf": operating_point_conf,
         "operating_point_validated": gate.stamp["operating_point"],
         "elongation_classifier_validated": gate.stamp["classifier"],
-        "catkin_elongation_provisional": provisional,
+        provisional_col: provisional,
         "producer_model_sha256": producer.get("sha256"),
         "producer_experiment_id": producer.get("experiment_id"),
     }
