@@ -138,7 +138,7 @@ def test_cancel_unknown_run_returns_404(client: TestClient) -> None:
 def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
     # No live runs (post-restart): the list is rebuilt from .tcip/experiments/. A genuine
     # training experiment left 'running' by a crash resurfaces as 'interrupted'; a
-    # review-feedback experiment (no model_spec) is not a training run and is excluded.
+    # review-feedback experiment (no model_source) is not a training run and is excluded.
     monkeypatch.chdir(tmp_path)
     import json as _json
 
@@ -147,7 +147,7 @@ def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
     exp = tmp_path / ".tcip" / "experiments" / "run_1"
     exp.mkdir(parents=True)
     (exp / "config.json").write_text(
-        _json.dumps({"model_spec": {"backbone": {"name": "resnet50"}}})
+        _json.dumps({"model_source": {"builder": "torchvision:fasterrcnn_resnet50_fpn"}})
     )
     (exp / "status.json").write_text(_json.dumps({"state": "running"}))
 
