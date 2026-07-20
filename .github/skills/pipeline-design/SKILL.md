@@ -42,9 +42,9 @@ Failure modes: training label scarcity; strong lighting/weather covariates.
 ### Pattern C: Point-cloud tree segmentation → tree-level geometric measurement
 
 > **Out of current build scope.** 3D point clouds (LiDAR / SfM) are not built — see CLAUDE.md's
-> Scope section and README's Roadmap. A `pointnet++` backbone exists but is intentionally
-> unregistered; there is no point-cloud dataset/loader or task type. This pattern describes
-> future capability, not something you can compose today.
+> Scope section and README's Roadmap. There is no point-cloud dataset/loader or task type, and
+> no 3D scaffolding is carried. This pattern describes future capability, not something you can
+> compose today.
 
 ```
 LiDAR or SfM point cloud → ground filter → CHM → watershed tree seg → per-tree geometry → CSV
@@ -112,7 +112,9 @@ from tcip_mcp.pipelines.components.detectors import build_detector, BackboneNeck
 ```
 
 Compose them inside your own `nn.Module`, or ignore them and write the network from scratch.
-No architecture is imposed.
+No architecture is imposed. The `toolkit-inventory` skill is the name-and-location map for the
+whole set — the `build_detector` / `build_loss` / task string names, the heads/necks/backbones,
+the derivations, the `ctx` craft library, and the proposal-engine and scorer registries.
 
 **Tailor the architecture to the data in hand** (CLAUDE.md: derive, don't pin):
 
@@ -133,16 +135,19 @@ No architecture is imposed.
   "source_files": [...], "task": "detection", "in_chans": 3}`). It is imported, never `exec`'d,
   so the run is reproducible from source. `pipelines.model_contract`
   states the *only* model-side contract — the measurement boundary: your model must train (finite
-  gradient loss) and emit inference output the library scorers consume. `check_model_contract` and
-  `overfit_check` are the cheap pre-flight proofs it learns.
+  gradient loss) and emit inference output the library scorers consume. `launch_training` runs this
+  contract for you — `preflight_config(smoke=True)` builds the model and smokes it at the *resolved*
+  in_chans/num_classes/img_size before the training thread spawns, so a broken builder fails the
+  launch, not a wasted run. `ctx.check_contract` / `ctx.overfit_check` are the same proofs on demand.
 - `training_source` points the envelope at your custom `train(ctx)`. The `TrainContext` (`ctx`,
   `pipelines.training.envelope`) hands you the craft library — prebuilt leakage-free loaders,
-  `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed` — plus the
-  envelope-owned sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`,
-  `ctx.should_cancel`. Route your loop's metrics and checkpoints through those sinks and the run
-  stays audited, immutably versioned, and provenance-snapshotted no matter what your loop does.
-  `ctx.default_train()` is **one convenience**, not a requirement — call it, extend it, or replace
-  it entirely.
+  `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed`, the
+  progressive-unfreeze primitive `ctx.apply_stage_freeze`, `ctx.tiled_dataset`, `ctx.calibrate`,
+  and the correctness checks `ctx.check_contract` / `ctx.overfit_check` — plus the envelope-owned
+  sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`, `ctx.should_cancel`. Route
+  your loop's metrics and checkpoints through those sinks and the run stays audited, immutably
+  versioned, and provenance-snapshotted no matter what your loop does. `ctx.default_train()` is
+  **one convenience**, not a requirement — call it, extend it, or replace it entirely.
 
 When the plain blocks and your own primitives both plateau on a trait, the next move is to research the
 literature for a technique that fits — see the `cv-research` skill for the research→implement→validate
