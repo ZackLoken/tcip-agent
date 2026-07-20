@@ -83,6 +83,25 @@ A hand-rolled `train(ctx)` composes these instead of reimplementing them. `ctx.d
 Route metrics and checkpoints through the sinks and the run stays audited, immutably versioned, and
 provenance-snapshotted no matter what the loop does.
 
+## Hyperparameter search — Ray Tune (`pipelines.training.hpo`, `run_hpo`)
+
+HPO is a capability, not a fixed algorithm. `run_hpo` trains each trial for real (minimizing the
+composite objective) and lets you choose the search *algorithm* and trial *scheduler* per task,
+space, and budget — no method is welded in. Match them to the problem; the defaults
+(`random` + `asha`) are a floor, not a rule.
+
+| Piece | Role |
+|-------|------|
+| `search_alg` | `random` / `grid` (native), or a backend when installed — `optuna`, `bayesopt`, `hyperopt`, `nevergrad`, `ax`, `hebo`, `zoopt`, `bohb`. An uninstalled pick errors clearly (never silently swapped). |
+| `scheduler` | `asha`, `hyperband`, `bohb` (pair with the `bohb` searcher), `pbt`, `median`, or `none`. `grace_period` / `reduction_factor` tune the halving schedulers. |
+| `available_search_algs()` / `available_schedulers()` | the live menu on *this* machine (probes which backends import) — call it rather than assuming. |
+| `tune_search(objective_fn, param_space, …)` | the seam under `run_hpo`: bring your own `objective_fn(config, report)` (call `report(value)` each step) with any `metric`/`mode`, and it drives the same searcher/scheduler machinery for a search that isn't a training sweep. |
+
+Trials run under the base config's regime (same augmentation / imbalance handling) so the winning
+hyperparameters transfer to `launch_training`. `warm_start` seeds a known-good point;
+`max_concurrent` bounds parallel trials (default 1 — safe for single-GPU training). Ray persists
+trials under `output_dir` (also the TensorBoard logdir).
+
 ## Auto-labeling — the proposal-engine registry (`pipelines.proposal`)
 
 An auto-label engine turns an image into candidate shapes for a human to review. The seam is as
@@ -114,6 +133,18 @@ you can extend rather than a welded `if/elif`.
 `require_composed_detector` (`active_learning.helpers`) is the honest guard the logit-reading
 scorers use — it returns an error rather than reading logits off a non-`nn.Module` model, and
 `confidence_triage` is the kind-agnostic fallback.
+
+## Classical image analysis (OpenCV, scikit-image)
+
+The classical CV toolkit — `cv2` (OpenCV) and `skimage` (scikit-image) — is importable and yours to
+compose, another set of primitives on the map, not a menu with a prescribed use. Trained ML models
+are the deliverable; classical analysis is a *situational* assist. In some situations it can cheaply
+produce a method's required inputs (a rough mask/box to prompt a proposer, a channel/threshold
+derivation) or bootstrap soft labels for training. It has real failure modes — it doesn't generalize
+across lighting/background/scale the way a trained model does, and can be confidently wrong — so the
+agent judges when it fits. Any labels it produces are **soft**: they go through the review/validation
+loop (staged as predictions, breeder-reviewed) before they are trusted as GT — never written to
+`annotations/` blind. It can also back a bring-your-own proposer (see the annotation skill).
 
 ## When the map runs out
 
