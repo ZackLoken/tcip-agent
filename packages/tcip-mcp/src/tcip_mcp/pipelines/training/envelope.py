@@ -2,7 +2,7 @@
 
 The envelope is the fixed integrity boundary the platform runs AROUND any training body — the
 default trainer *or* an agent's custom ``train(ctx)``. Whatever the training code does, the
-envelope guarantees (the rails CLAUDE.md protects): the run is on the tamper-evident audit log
+envelope guarantees (the rails CLAUDE.md protects): the run is on the append-only audit log
 end to end, its source/env provenance is snapshotted, its experiment status / lineage /
 registration are wired, and any checkpoint it saves through ``ctx`` is stamped + atomic.
 
@@ -189,7 +189,7 @@ class TrainContext:
 
         payload = dict(state)
         payload.setdefault("config", self.config)
-        stamp_model_ref(payload, self.config)
+        stamp_model_ref(payload, self.config, experiment_id=self.experiment_id)
         out = Path(self.run.output_dir)
         out.mkdir(parents=True, exist_ok=True)
         path = out / f"{tag}.pt"
