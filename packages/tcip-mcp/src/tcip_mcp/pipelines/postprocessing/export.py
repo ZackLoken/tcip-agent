@@ -36,22 +36,50 @@ def write_predictions_json(json_path: str | Path, result: dict, created_by: str 
     json_io.write_detect(str(json_path), preds, int(w), int(h), keep_empty=True)
 
 
+_PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "operating_point_conf",
+                       "produced_at", "measurement_validated"]
+
+
 def export_detection_csv(
     image_results: list[dict],
     output_path: str,
+    provenance: dict | None = None,
+    *,
+    measurement_validated: str | None = None,
+    acknowledge_unvalidated: bool = False,
 ) -> str:
     """Export per-image detection counts to CSV.
+
+    The count is the phenotype for count traits, so this is a delivery door: it refuses a *bare*
+    write (an unvalidated count with no acknowledgement) via the shared ``check_delivery_gate`` and
+    stamps the reconciled validity into every row. Pass ``measurement_validated`` = the count
+    operating point's reconciled state (a shippable reference), or ``acknowledge_unvalidated=True``
+    to write a clearly-flagged provisional CSV stamped ``validated=false``. The ``provenance`` stamp
+    (producing checkpoint sha, experiment id, operating-point conf, timestamp) travels alongside — the
+    number is only as trustworthy as the operating point + model behind it.
 
     Args:
         image_results: List of dicts with 'image', 'count', 'boxes', etc.
         output_path: Path for the output CSV file.
+        provenance: Optional producing-model / operating-point stamp added as trailing columns.
+        measurement_validated: The count operating point's reconciled validity reference.
+        acknowledge_unvalidated: Write an unvalidated count as a flagged provisional CSV.
 
     Returns:
         Path to the written CSV file.
     """
+    from tcip_mcp.pipelines.resolution import check_delivery_gate
+
+    gate = check_delivery_gate({"measurement": measurement_validated},
+                               acknowledge_unvalidated=acknowledge_unvalidated)
+    if not gate.ok:
+        raise ValueError(gate.reason)
+
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    fieldnames = ["image", "detection_count", "avg_confidence"]
+    stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
+    stamp["measurement_validated"] = gate.stamp["measurement"]
+    fieldnames = ["image", "detection_count", "avg_confidence"] + _PROVENANCE_COLUMNS
 
     with open(output_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -64,6 +92,7 @@ def export_detection_csv(
                 "image": Path(r.get("image", "")).name,
                 "detection_count": r.get("count", len(r.get("boxes", []))),
                 "avg_confidence": round(avg_conf, 4),
+                **stamp,
             })
 
     return output_path
