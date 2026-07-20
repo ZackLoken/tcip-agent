@@ -1,47 +1,55 @@
-"""HPO — hyperparameter optimization with Optuna integration + TensorBoard logging.
+"""HPO — hyperparameter optimization on Ray Tune.
 
-Supports:
-  - Optuna TPE/ASHA search that trains each trial (requires `pip install optuna`)
-  - Per-trial TensorBoard logging (each trial gets its own subdirectory)
+Search *algorithms* and trial *schedulers* are agent-selectable per task/data; no single
+method is welded in. The agent picks from whatever backends are installed (Ray degrades to
+what imports on this machine) and overrides the derivable defaults when the data warrants.
+
+Facts (not a recipe — the agent chooses):
+  - search algorithms: ``random``/``grid`` are native; ``optuna``, ``bayesopt``, ``hyperopt``,
+    ``nevergrad``, ``ax``, ``hebo``, ``zoopt``, ``bohb`` need their pip backend.
+  - trial schedulers: ``asha`` (async HyperBand), ``hyperband``, ``bohb`` (pair with the bohb
+    searcher), ``pbt``, ``median``; ``none`` runs every trial to completion.
 """
 
 from __future__ import annotations
 
 import logging
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-try:
-    import optuna
-    from optuna.pruners import MedianPruner, SuccessiveHalvingPruner, HyperbandPruner
-    from optuna.samplers import TPESampler
+# Native samplers (BasicVariantGenerator) — no extra dependency. ``grid`` becomes a grid
+# over the discrete axes of the space; ``random`` samples them.
+_NATIVE_SEARCH = {"random", "grid", "variant_generator", "", None}
+# The backend module each searcher imports at instantiation (probe with find_spec so
+# discovery has no side effects). ``bohb`` also needs ConfigSpace.
+_SEARCH_BACKEND_MODULE = {
+    "optuna": "optuna", "hyperopt": "hyperopt", "bayesopt": "bayes_opt",
+    "nevergrad": "nevergrad", "ax": "ax", "hebo": "hebo", "zoopt": "zoopt",
+    "bohb": "hpbandster",
+}
+# Seed kwarg differs per searcher; pass it only where the constructor accepts one.
+_SEARCHER_SEED_KWARG = {"optuna": "seed", "hyperopt": "random_state_seed", "bayesopt": "random_state"}
+# Scheduler aliases -> Ray's create_scheduler name.
+_SCHEDULER_ALIASES = {
+    "asha": "async_hyperband", "async_hyperband": "async_hyperband",
+    "hyperband": "hyperband", "pbt": "pbt", "bohb": "hb_bohb", "hb_bohb": "hb_bohb",
+    "median": "median_stopping_rule", "median_stopping_rule": "median_stopping_rule",
+}
+_NO_SCHEDULER = {"none", "fifo", "", None}
+# Schedulers that consume the grace-period / reduction-factor early-stopping knobs.
+_HALVING_SCHEDULERS = {"async_hyperband", "hyperband", "hb_bohb"}
 
-    HAS_OPTUNA = True
-except ImportError:
-    HAS_OPTUNA = False
 
-try:
-    from torch.utils.tensorboard import SummaryWriter
-    HAS_TB = True
-except ImportError:
-    SummaryWriter = None  # type: ignore[misc,assignment]
-    HAS_TB = False
+def get_default_space() -> dict:
+    """A small, safe starting space the agent overrides per dataset (never a fixed recipe).
 
-
-# ---------------------------------------------------------------------------
-# Optuna integration
-# ---------------------------------------------------------------------------
-
-def get_default_optuna_space() -> dict:
-    """Return Optuna-compatible search space definition.
-
-    Each key maps to a dict with 'type' and parameters:
-      - 'categorical': {'choices': [...]}
-      - 'loguniform': {'low': float, 'high': float}
-      - 'uniform': {'low': float, 'high': float}
-      - 'int': {'low': int, 'high': int}
+    Each key maps to ``{'type': ..., ...}``:
+      - ``categorical``: ``{'choices': [...]}``
+      - ``loguniform`` / ``uniform``: ``{'low': float, 'high': float}``
+      - ``int``: ``{'low': int, 'high': int}`` (both bounds inclusive)
     """
     return {
         "lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
@@ -51,166 +59,227 @@ def get_default_optuna_space() -> dict:
 
 
 def get_default_baseline_params() -> dict:
-    """A known-good baseline to warm-start trial 0 (subset of the default space)."""
-    return {
-        "lr": 3e-4,
-        "batch_size": 4,
-        "weight_decay": 1e-4,
-    }
+    """A known-good point to warm-start (subset of the default space)."""
+    return {"lr": 3e-4, "batch_size": 4, "weight_decay": 1e-4}
 
 
-def _build_pruner(
-    name: str = "asha", *, grace_period: int = 5, reduction_factor: int = 3,
-    n_startup_trials: int = 3, n_warmup_steps: int = 5,
+def available_search_algs() -> list[str]:
+    """Search algorithms usable on this machine: natives + backends whose module imports."""
+    algs = ["random", "grid"]
+    for name, module in _SEARCH_BACKEND_MODULE.items():
+        if find_spec(module) is not None:
+            algs.append(name)
+    return algs
+
+
+def available_schedulers() -> list[str]:
+    """Trial schedulers Ray Tune offers (all native — none need an extra backend)."""
+    return ["asha", "hyperband", "bohb", "pbt", "median", "none"]
+
+
+def _to_tune_space(param_space: dict, grid: bool = False) -> dict:
+    """Convert the platform param-space dict into a Ray Tune search space.
+
+    ``grid=True`` enumerates the discrete axes (categorical / int) via ``grid_search``;
+    continuous axes stay sampled (a grid can't enumerate a continuous range).
+    """
+    from ray import tune
+
+    space: dict[str, Any] = {}
+    for name, spec in param_space.items():
+        ptype = spec["type"]
+        if ptype == "loguniform":
+            space[name] = tune.loguniform(spec["low"], spec["high"])
+        elif ptype == "uniform":
+            space[name] = tune.uniform(spec["low"], spec["high"])
+        elif ptype == "int":
+            vals = list(range(int(spec["low"]), int(spec["high"]) + 1))
+            space[name] = tune.grid_search(vals) if grid else tune.randint(spec["low"], spec["high"] + 1)
+        elif ptype == "categorical":
+            choices = list(spec["choices"])
+            space[name] = tune.grid_search(choices) if grid else tune.choice(choices)
+        else:
+            raise ValueError(f"Unknown param type: {ptype}")
+    return space
+
+
+def build_search_alg(
+    name: str | None, *, seed: int = 42, points_to_evaluate: list[dict] | None = None,
 ):
-    """Build an Optuna pruner. ``asha``/``successive_halving`` -> ASHA;
-    ``hyperband`` -> Hyperband; ``median`` -> MedianPruner; else/``none`` -> NopPruner.
+    """Build a Ray Tune searcher, or ``None`` for the native random/grid sampler.
 
-    Switching the default to ASHA is safe: with no intermediate ``trial.report``
-    calls ``SuccessiveHalvingPruner`` never prunes.
+    ``metric``/``mode`` are set once on the Tuner (Ray forbids setting them in both places),
+    so they are not passed here. Raises a clear error if the agent picks a backend that is not
+    installed — the choice is honored, never silently swapped for another algorithm.
     """
-    name = (name or "none").lower()
-    if name in ("asha", "successive_halving"):
-        return SuccessiveHalvingPruner(min_resource=grace_period, reduction_factor=reduction_factor)
-    if name == "hyperband":
-        return HyperbandPruner(min_resource=grace_period, reduction_factor=reduction_factor)
-    if name == "median":
-        return MedianPruner(n_startup_trials=n_startup_trials, n_warmup_steps=n_warmup_steps)
-    return optuna.pruners.NopPruner()
+    key = (name or "random").lower()
+    if key in _NATIVE_SEARCH:
+        if points_to_evaluate:
+            from ray.tune.search.basic_variant import BasicVariantGenerator
+            return BasicVariantGenerator(points_to_evaluate=list(points_to_evaluate))
+        return None
 
-
-def _suggest_param(trial: Any, name: str, spec: dict) -> Any:
-    """Suggest a single parameter from an Optuna trial."""
-    ptype = spec["type"]
-    if ptype == "categorical":
-        return trial.suggest_categorical(name, spec["choices"])
-    elif ptype == "loguniform":
-        return trial.suggest_float(name, spec["low"], spec["high"], log=True)
-    elif ptype == "uniform":
-        return trial.suggest_float(name, spec["low"], spec["high"])
-    elif ptype == "int":
-        return trial.suggest_int(name, spec["low"], spec["high"])
-    else:
-        raise ValueError(f"Unknown param type: {ptype}")
-
-
-def optuna_search(
-    objective_fn: Callable[..., float],
-    param_space: dict | None = None,
-    n_trials: int = 20,
-    direction: str = "maximize",
-    study_name: str = "tcip_hpo",
-    storage: str | None = None,
-    seed: int = 42,
-    pruning: bool = True,
-    pruner: str = "asha",
-    grace_period: int = 5,
-    reduction_factor: int = 3,
-    warm_start: bool = False,
-    baseline_params: dict | None = None,
-    tb_logdir: str | None = None,
-) -> dict:
-    """Run HPO using Optuna with TPE sampler and optional ASHA pruning.
-
-    Args:
-        objective_fn: Callable taking (config dict, trial number) and returning a scalar metric.
-                     For detection, this should return val mAP50.
-        param_space: Optuna-compatible space dict (see get_default_optuna_space).
-                    If None, uses default space.
-        n_trials: Number of trials to run.
-        direction: 'maximize' (for mAP) or 'minimize' (for loss).
-        study_name: Name of the Optuna study.
-        storage: Optional database URL for persistent study (e.g. 'sqlite:///hpo.db').
-        seed: Random seed for reproducibility.
-        pruning: Whether to use MedianPruner for early stopping of poor trials.
-        tb_logdir: Optional base directory for TensorBoard logs. Each trial writes
-                  to tb_logdir/trial_{n}/. If None, TensorBoard logging is skipped.
-
-    Returns:
-        Dict with 'best_params', 'best_value', 'n_trials', 'study_name',
-        'all_trials', and 'tensorboard_logdir' (if TB logging enabled).
-
-    Raises:
-        ImportError: If optuna is not installed.
-    """
-    if not HAS_OPTUNA:
-        raise ImportError(
-            "Optuna is required for optuna_search. Install with: pip install optuna"
+    module = _SEARCH_BACKEND_MODULE.get(key)
+    if module is not None and find_spec(module) is None:
+        raise ValueError(
+            f"search_alg '{key}' needs the '{module}' backend, which is not installed. "
+            f"Available here: {available_search_algs()}"
         )
 
-    if param_space is None:
-        param_space = get_default_optuna_space()
+    from ray.tune.search import create_searcher
 
-    sampler = TPESampler(seed=seed)
-    pruner_obj = _build_pruner(
-        pruner, grace_period=grace_period, reduction_factor=reduction_factor,
-    ) if pruning else optuna.pruners.NopPruner()
+    kwargs: dict[str, Any] = {}
+    seed_kw = _SEARCHER_SEED_KWARG.get(key)
+    if seed_kw:
+        kwargs[seed_kw] = seed
+    if points_to_evaluate:
+        kwargs["points_to_evaluate"] = list(points_to_evaluate)
+    try:
+        return create_searcher(key, **kwargs)
+    except TypeError:
+        # Searcher rejected an optional kwarg (seed / points_to_evaluate); retry minimal.
+        return create_searcher(key)
 
-    study = optuna.create_study(
-        study_name=study_name,
-        direction=direction,
-        sampler=sampler,
-        pruner=pruner_obj,
-        storage=storage,
-        load_if_exists=True,
-    )
 
-    # Warm-start trial 0 with a known-good baseline (filtered to the search space).
+def build_scheduler(
+    name: str | None, *, grace_period: int = 5, reduction_factor: int = 3,
+    hyperparam_mutations: dict | None = None,
+):
+    """Build a Ray Tune trial scheduler, or ``None`` to run every trial to completion.
+
+    ``metric``/``mode`` are set once on the Tuner, not here (Ray forbids both). PBT mutates
+    hyperparameters mid-training, so it needs ``hyperparam_mutations`` (the search space).
+    """
+    key = (str(name).lower() if name is not None else None)
+    if key in _NO_SCHEDULER:
+        return None
+    ray_name = _SCHEDULER_ALIASES.get(key, key)
+
+    from ray.tune.schedulers import create_scheduler
+
+    kwargs: dict[str, Any] = {}
+    if ray_name in _HALVING_SCHEDULERS:
+        kwargs.update(grace_period=grace_period, reduction_factor=reduction_factor)
+    if ray_name == "pbt" and hyperparam_mutations:
+        kwargs["hyperparam_mutations"] = hyperparam_mutations
+    return create_scheduler(ray_name, **kwargs)
+
+
+def tune_search(
+    objective_fn: Callable[[dict, Callable[[float], None]], Any],
+    param_space: dict | None = None,
+    *,
+    metric: str = "objective",
+    mode: str = "min",
+    num_samples: int = 20,
+    search_alg: str | None = "random",
+    scheduler: str | None = "asha",
+    grace_period: int = 5,
+    reduction_factor: int = 3,
+    seed: int = 42,
+    max_concurrent: int = 1,
+    warm_start: bool = False,
+    baseline_params: dict | None = None,
+    storage_path: str | None = None,
+    study_name: str = "tcip_hpo",
+) -> dict:
+    """Run an HPO sweep on Ray Tune.
+
+    Args:
+        objective_fn: ``fn(config, report)`` — trains one trial for the trial's ``config``
+            and calls ``report(value)`` for each step it wants the searcher/scheduler to see
+            (report at least once; the last value is the trial's result under ``mode``).
+        param_space: platform param-space dict (see ``get_default_space``); ``None`` uses it.
+        metric / mode: the reported metric name and whether to ``min`` or ``max`` it.
+        num_samples: number of trials (with a grid space, samples over the grid).
+        search_alg / scheduler: agent-selected names (see module docstring). ``None`` schedules
+            nothing; native ``random``/``grid`` need no searcher backend.
+        max_concurrent: trials to run at once (default 1 — safe for single-GPU training).
+        warm_start: seed the search with ``baseline_params`` (or the default baseline).
+        storage_path: where Ray persists trial results (also the TensorBoard logdir root).
+
+    Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
+    ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).
+    """
+    import ray
+    from ray import tune
+
+    space = _to_tune_space(param_space or get_default_space(), grid=(search_alg == "grid"))
+
+    points = None
     if warm_start:
         baseline = baseline_params or get_default_baseline_params()
-        enqueued = {k: v for k, v in baseline.items() if k in param_space}
-        if enqueued:
-            study.enqueue_trial(enqueued)
+        filtered = {k: v for k, v in baseline.items() if k in space}
+        points = [filtered] if filtered else None
 
-    def wrapped_objective(trial: optuna.Trial) -> float:
-        config = {}
-        for name, spec in param_space.items():
-            config[name] = _suggest_param(trial, name, spec)
-        logger.info("Trial %d: %s", trial.number, config)
+    searcher = build_search_alg(search_alg, seed=seed, points_to_evaluate=points)
+    sched = build_scheduler(
+        scheduler, grace_period=grace_period, reduction_factor=reduction_factor,
+        hyperparam_mutations=space,
+    )
 
-        # Pass the trial (not just its number) so the objective can report
-        # intermediate values for ASHA pruning (trial.report / should_prune).
-        value = objective_fn(config, trial)
+    # Concurrency: a backend searcher must be wrapped (TuneConfig.max_concurrent_trials is
+    # ignored once Ray wraps a searcher). The native sampler (None / BasicVariantGenerator)
+    # honors max_concurrent_trials on the Tuner directly.
+    from ray.tune.search import Searcher
+    from ray.tune.search.basic_variant import BasicVariantGenerator
 
-        # Log trial result to TensorBoard
-        if tb_logdir and HAS_TB:
-            trial_dir = str(Path(tb_logdir) / f"trial_{trial.number}")
-            writer = SummaryWriter(log_dir=trial_dir)
-            # Log each param as a scalar at step=trial.number
-            for pname, pval in config.items():
-                if isinstance(pval, (int, float)):
-                    writer.add_scalar(f"hpo/params/{pname}", pval, trial.number)
-            writer.add_scalar("hpo/objective", value, trial.number)
-            # Log params as hparams for TensorBoard HParams plugin
-            writer.add_hparams(
-                {k: v for k, v in config.items() if isinstance(v, (int, float, str, bool))},
-                {"hpo/objective": value},
-            )
-            writer.close()
+    tune_max: int | None = max_concurrent
+    if (isinstance(searcher, Searcher) and not isinstance(searcher, BasicVariantGenerator)
+            and max_concurrent and max_concurrent > 0):
+        from ray.tune.search import ConcurrencyLimiter
+        searcher = ConcurrencyLimiter(searcher, max_concurrent=max_concurrent)
+        tune_max = None
 
-        return value
+    def trainable(config: dict) -> None:
+        objective_fn(config, lambda value: tune.report({metric: float(value)}))
 
-    study.optimize(wrapped_objective, n_trials=n_trials)
+    run_kwargs: dict[str, Any] = {"verbose": 0}
+    if storage_path:
+        run_kwargs["storage_path"] = Path(storage_path).resolve().as_posix()
+        run_kwargs["name"] = study_name
+
+    started = not ray.is_initialized()
+    if started:
+        ray.init(include_dashboard=False, log_to_driver=False,
+                 ignore_reinit_error=True, configure_logging=False)
+    try:
+        tuner = tune.Tuner(
+            trainable,
+            param_space=space,
+            tune_config=tune.TuneConfig(
+                num_samples=num_samples, search_alg=searcher, scheduler=sched,
+                max_concurrent_trials=tune_max, metric=metric, mode=mode,
+                reuse_actors=False,
+            ),
+            run_config=tune.RunConfig(**run_kwargs),
+        )
+        results = tuner.fit()
+    finally:
+        if started:
+            ray.shutdown()
 
     all_trials = []
-    for t in study.trials:
+    for r in results:
         all_trials.append({
-            "number": t.number,
-            "params": t.params,
-            "value": t.value,
-            "state": str(t.state),
+            "params": {k: r.config.get(k) for k in space},
+            "value": (r.metrics or {}).get(metric),
+            "iterations": (r.metrics or {}).get("training_iteration"),
+            "state": "ERROR" if r.error else "COMPLETE",
         })
 
-    result = {
-        "best_params": study.best_params,
-        "best_value": study.best_value,
-        "n_trials": len(study.trials),
+    best = results.get_best_result(metric=metric, mode=mode)
+    result: dict[str, Any] = {
+        "best_params": {k: best.config.get(k) for k in space},
+        "best_value": (best.metrics or {}).get(metric),
+        "n_trials": len(results),
         "study_name": study_name,
         "all_trials": all_trials,
-        "pruner": pruner,
+        "search_alg": (search_alg or "random"),
+        "scheduler": (scheduler if scheduler is not None else "none"),
         "warm_start": warm_start,
         "baseline_params": (baseline_params or get_default_baseline_params()) if warm_start else None,
     }
-    if tb_logdir:
-        result["tensorboard_logdir"] = tb_logdir
+    if storage_path:
+        result["tensorboard_logdir"] = f"{run_kwargs['storage_path']}/{study_name}"
     return result
