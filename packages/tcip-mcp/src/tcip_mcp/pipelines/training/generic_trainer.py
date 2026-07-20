@@ -214,7 +214,7 @@ def _save_checkpoint(
     """Write a resumable periodic checkpoint (W7).
 
     Superset of the previous payload — ``GenericPredictor`` reads only the model reference
-    (``model_spec``/``model_source``) + ``model_state_dict`` and stays compatible.
+    (``model_source``) + ``model_state_dict`` and stays compatible.
     """
     _atomic_torch_save(stamp_model_ref({
         "model_state_dict": model.state_dict(),
@@ -358,8 +358,8 @@ def _validate_input_channels(config: dict, loader: DataLoader) -> None:
     """Fail loudly if the data's channel count doesn't match the model's expected ``in_chans``.
 
     Catches an N-channel/RGB mismatch up front with a clear message instead of an opaque
-    conv-shape error deep in the first forward pass. Works for both a composed ``model_spec``
-    and a bespoke ``model_source`` (which declares ``in_chans``).
+    conv-shape error deep in the first forward pass. Reads the bespoke ``model_source``
+    (which declares ``in_chans``).
     """
     expected = _expected_in_chans(config)
     batch = next(iter(loader), None)
