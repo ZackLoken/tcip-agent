@@ -464,44 +464,42 @@ def _viz_dataset_sample(
 
 @mcp.tool()
 @audited
-def generate_mask_candidates(
+def propose_annotations(
     image_path: str,
-    model_type: str = "hiera_b+",
-    points_per_side: int = 16,
-    pred_iou_thresh: float = 0.86,
-    stability_score_thresh: float = 0.92,
-    min_mask_region_area: int = 100,
+    engine: str = "sam",
+    engine_params: dict | None = None,
 ) -> dict:
-    """Generate SAM candidate masks and render them for agent review.
+    """Propose candidate annotations on an image for review, using a chosen auto-labeling engine.
 
-    Runs SAM auto-mask generation, renders numbered candidates on the image,
-    and returns both the render path and candidate data. The agent should
-    use view_image on the rendered output, then call accept_candidates
-    to assign classes and save.
+    Runs the engine's whole-image proposal pass, renders the numbered candidates, caches them, and
+    returns the render path and neutral candidate data. Use view_image on the render, then call
+    accept_proposals to assign classes and stage the accepted ones as predictions.
+
+    The engine is a capability, not a fixed method: 'sam' is the built-in SAM2 reference; the agent
+    can register another engine (``register_proposal_engine``) or pass a dotted 'module:factory' it
+    wrote — then trial and compare engines by how well each one's high-conf proposals survive breeder
+    review, and pick the most useful for the task.
 
     Args:
         image_path: Absolute path to the image file.
-        model_type: SAM2 variant (hiera_t / hiera_s / hiera_b+ / hiera_l).
-        points_per_side: Grid density for auto-mask generation.
-        pred_iou_thresh: Minimum predicted IoU to keep a mask.
-        stability_score_thresh: Minimum stability score to keep a mask.
-        min_mask_region_area: Minimum mask area in pixels.
+        engine: Proposal engine — 'sam' (built-in) or a dotted 'module:factory' the agent brings.
+        engine_params: Engine-specific knobs forwarded to the engine (e.g. SAM's model_type,
+            points_per_side, pred_iou_thresh, stability_score_thresh, min_mask_region_area). Omit for
+            the engine's own defaults.
     """
-    from tcip_annotation.sam_wrapper import auto_mask
+    from tcip_mcp.pipelines.proposal import resolve_proposer
 
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
     try:
-        candidates = auto_mask(
-            image_path,
-            model_type=model_type,
-            points_per_side=points_per_side,
-            pred_iou_thresh=pred_iou_thresh,
-            stability_score_thresh=stability_score_thresh,
-            min_mask_region_area=min_mask_region_area,
-        )
+        proposer = resolve_proposer(engine)
+    except (ValueError, ImportError) as e:
+        return {"error": str(e)}
+
+    try:
+        candidates = proposer.propose(image_path, **(engine_params or {}))
     except ImportError as e:
         return {"error": str(e)}
     except FileNotFoundError as e:
@@ -510,33 +508,37 @@ def generate_mask_candidates(
     if not candidates:
         return {
             "image_path": None,
-            "summary": "No candidate masks generated",
+            "engine": engine,
+            "summary": f"Engine {engine!r} proposed no candidates",
             "candidates": [],
         }
 
     out = render_candidates(image_path, candidates)
 
     # Resolve state via the platform root (like write_class_map), not a CWD-relative path, so the
-    # handoff to accept_candidates survives CWD != project root.
+    # handoff to accept_proposals survives CWD != project root. The envelope records the engine so
+    # accept_proposals stamps the right producer and stages into the matching bucket.
     from tcip_mcp.project_paths import resolve_state
 
     import json
-    state_file = resolve_state(Path(".tcip") / "state" / f"candidates_{img.stem}.json")
+    state_file = resolve_state(Path(".tcip") / "state" / f"proposals_{img.stem}.json")
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps(candidates, default=str), encoding="utf-8")
+    state_file.write_text(
+        json.dumps({"engine": engine, "candidates": candidates}, default=str), encoding="utf-8"
+    )
 
     return {
         "image_path": out,
-        "summary": f"Generated {len(candidates)} candidate masks. "
-                   f"Review the numbered overlay, then call accept_candidates "
+        "engine": engine,
+        "summary": f"Engine {engine!r} proposed {len(candidates)} candidates. "
+                   f"Review the numbered overlay, then call accept_proposals "
                    f"with class assignments.",
         "candidate_count": len(candidates),
         "candidates": [
             {
                 "id": c["candidate_id"],
                 "area": c["area"],
-                "stability": round(c["stability_score"], 3),
-                "iou": round(c["predicted_iou"], 3),
+                "score": round(c["score"], 3),
                 "bbox": [round(v, 1) for v in c["bbox"]],
             }
             for c in candidates
@@ -546,45 +548,47 @@ def generate_mask_candidates(
 
 @mcp.tool()
 @audited
-def accept_candidates(
+def accept_proposals(
     image_path: str,
     assignments: list[dict],
 ) -> dict:
-    """Assign classes to SAM candidates and stage them as SAM predictions for review.
+    """Assign classes to reviewed proposals and stage them as predictions for canvas review.
 
-    After reviewing generate_mask_candidates output, the agent calls this tool with a mapping from
-    candidate IDs to class IDs. Rejected candidates are simply omitted from the assignments
-    list. The masks are written to the predictions tree (``predictions/sam/<date>/<task>``) as
-    per-image COCO/JSON with ``created_by="sam"`` and ``score`` = SAM's mask-quality
-    (predicted_iou) — they are model output, so a human accepts them on the Review canvas before
-    they become ground truth. This never writes GT.
+    After reviewing propose_annotations output, the agent calls this tool with a mapping from
+    candidate IDs to class IDs. Rejected candidates are simply omitted from the assignments list.
+    The masks are written to the predictions tree (``predictions/<engine>/<date>/<task>``) as
+    per-image COCO/JSON with ``created_by=<engine>`` and ``score`` = the engine's proposal score —
+    they are model output, so a human accepts them on the Review canvas before they become ground
+    truth. Staging goes through the prediction-bucket verdict guard, so a re-run never overwrites
+    reviewed predictions or orphans their verdicts. This never writes GT.
 
     Args:
-        image_path: Absolute path to the image (same as generate_mask_candidates).
+        image_path: Absolute path to the image (same as propose_annotations).
         assignments: List of dicts, each with 'candidate_id' (int) and
             'class_id' (int). Only listed candidates are staged.
     """
     import json
-    from tcip_annotation import json_io
     from tcip_annotation.state import PredBBox, PredPolygon
 
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    # Load cached candidates from the same platform-root state location generate_mask_candidates wrote to.
+    # Load cached proposals from the same platform-root state location propose_annotations wrote to.
     from tcip_mcp.project_paths import resolve_state
 
-    state_file = resolve_state(Path(".tcip") / "state" / f"candidates_{img.stem}.json")
+    state_file = resolve_state(Path(".tcip") / "state" / f"proposals_{img.stem}.json")
     if not state_file.is_file():
-        return {"error": f"No candidates found for {img.stem}. Run generate_mask_candidates first."}
+        return {"error": f"No proposals found for {img.stem}. Run propose_annotations first."}
 
-    candidates = json.loads(state_file.read_text(encoding="utf-8"))
+    envelope = json.loads(state_file.read_text(encoding="utf-8"))
+    engine = envelope.get("engine", "unknown")
+    candidates = envelope.get("candidates", [])
     cand_map = {c["candidate_id"]: c for c in candidates}
 
     w, h = get_image_dimensions(image_path)
 
-    # Build SAM predictions from accepted candidates (created_by="sam", score = mask-quality).
+    # Build predictions from accepted candidates (created_by=<engine>, score = the engine's score).
     from datetime import datetime, timezone
     staged_at = datetime.now(timezone.utc).isoformat()
     boxes: list[PredBBox] = []
@@ -597,12 +601,12 @@ def accept_candidates(
         if cand is None:
             continue
 
-        score = float(cand.get("predicted_iou", 0.0))  # SAM's mask-quality head, in [0, 1]
+        score = float(cand.get("score", 0.0))  # neutral proposal score, in [0, 1]
         poly_pts = cand["polygon"]
         if len(poly_pts) >= 3:
             polygons.append(PredPolygon(
                 [(float(x), float(y)) for x, y in poly_pts], class_id,
-                confidence=score, created_by="sam", created_at=staged_at,
+                confidence=score, created_by=engine, created_at=staged_at,
             ))
 
         # Also stage a bounding box (from polygon extent)
@@ -610,22 +614,23 @@ def accept_candidates(
         ys = [p[1] for p in poly_pts]
         boxes.append(PredBBox(
             min(xs), min(ys), max(xs), max(ys), class_id,
-            confidence=score, created_by="sam", created_at=staged_at,
+            confidence=score, created_by=engine, created_at=staged_at,
         ))
 
-    # Stage into the predictions tree (predictions/sam/<date>/<task>) — model output for a human to
-    # accept on the Review canvas, never written straight to ground truth.
-    from tcip_mcp.dataset_layout import parse_image_path, prediction_dir
+    # Stage into the predictions tree through the shared verdict-guarded helper — model output for a
+    # human to accept on the Review canvas, never written straight to ground truth.
+    from tcip_mcp.dataset_layout import parse_image_path
+    from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
 
     root, date, _stem = parse_image_path(str(img))
-    if boxes:
-        det_dir = Path(prediction_dir(root, "sam", date, "detect"))
-        det_dir.mkdir(parents=True, exist_ok=True)
-        json_io.write_detect(str(det_dir / f"{img.stem}.json"), boxes, w, h)
-    if polygons:
-        seg_dir = Path(prediction_dir(root, "sam", date, "segment"))
-        seg_dir.mkdir(parents=True, exist_ok=True)
-        json_io.write_segment(str(seg_dir / f"{img.stem}.json"), polygons, w, h)
+    try:
+        staged = stage_prediction_shapes(
+            str(root), engine, date, img.stem,
+            boxes=boxes, polygons=polygons, img_w=w, img_h=h, overwrite=False,
+        )
+    except BucketHasVerdicts as exc:
+        return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
+    bucket = staged["bucket"]
 
     # Render final result for QA
     from tcip_annotation.viz import render_detections
@@ -635,11 +640,19 @@ def accept_candidates(
     ]
     out = render_detections(image_path, box_dicts)
 
+    note = (f"Staged {len(boxes)} detections and {len(polygons)} segmentations "
+            f"from {len(assignments)} {engine!r} proposals as predictions (created_by={engine!r}) "
+            f"for review — not ground truth.")
+    if staged["redirected"]:
+        note = (f"bucket {engine!r} has {staged['verdict_count']} review verdict(s) — staged to a fresh "
+                f"bucket {bucket!r} instead so the reviewed predictions stay intact. " + note)
+
     return {
         "image_path": out,
-        "summary": f"Staged {len(boxes)} detections and {len(polygons)} segmentations "
-                   f"from {len(assignments)} SAM candidates as predictions (created_by='sam') "
-                   f"for review — not ground truth.",
+        "engine": engine,
+        "bucket": bucket,
+        "bucket_redirected": staged["redirected"],
+        "summary": note,
         "detection_count": len(boxes),
         "segmentation_count": len(polygons),
     }
