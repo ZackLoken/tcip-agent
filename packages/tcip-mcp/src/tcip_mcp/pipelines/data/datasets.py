@@ -2,7 +2,9 @@
 
 Each dataset type returns (image_tensor, target_dict) where the target
 format is task-specific but always dict-based. A factory function
-`build_dataset` dispatches to the correct class by task type.
+`build_dataset` dispatches to the correct class by task type, or — for a
+task the known loaders don't cover — to a bespoke ``dataset_source`` builder
+the agent supplies (mirrors ``model_source``; see `build_from_dataset_source`).
 """
 
 from __future__ import annotations
@@ -717,6 +719,34 @@ _DATASET_MAP = {
     "regression": RegressionDataset,
 }
 
+DATASET_SOURCE_KEY = "dataset_source"
+
+
+def build_from_dataset_source(dataset_source: dict, **kwargs: Any) -> Dataset:
+    """Import the agent's dataset builder and call it — the bespoke-task escape (mirrors
+    ``build_from_model_source``). Registry-free, no ``exec``: the builder is imported like any
+    module. It receives the run's data context (``images_dir`` / ``labels_dir`` / ``stems`` /
+    ``transforms`` / ``task`` — whatever ``build_dataset`` was given) merged with its own
+    ``builder_kwargs`` (which win on conflict), and must return a torch ``Dataset``. Declare
+    ``**kwargs`` on the builder to ignore context keys it doesn't use.
+
+    ``dataset_source`` schema (parallels ``model_source``)::
+
+        {"builder": "my_module:build_ds",  # required — 'module:function' (or 'module.function')
+         "builder_kwargs": {...},          # optional — passed to the builder (win on conflict)
+         "source_files": [...],            # optional — provenance (snapshot_model_source copies these)
+         "task": "..."}                    # optional — measurement/eval routing
+    """
+    if not isinstance(dataset_source, dict):
+        raise ValueError("dataset_source must be a dict")
+    from tcip_mcp.pipelines.model_build import _import_dotted
+
+    fn = _import_dotted(dataset_source.get("builder"))
+    builder_kwargs = dataset_source.get("builder_kwargs") or {}
+    if not isinstance(builder_kwargs, dict):
+        raise ValueError("dataset_source.builder_kwargs must be a dict")
+    return fn(**{**kwargs, **builder_kwargs})
+
 
 def _autoresolve_json_labels(kwargs: dict) -> None:
     """Route a canonical per-image-JSON label dir onto the assembled-COCO path for training/eval.
@@ -770,8 +800,8 @@ def _probe_num_channels(images_dir: str | Path | None, stems: list[str] | None,
         return default
 
 
-def build_dataset(task: str, **kwargs) -> BaseDataset:
-    """Factory: build a dataset by task type.
+def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:
+    """Factory: build a dataset by task type, or via a bespoke ``dataset_source`` builder.
 
     An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac,
     dedup_iou, skip_empty}``) wraps the detection dataset in a
@@ -779,11 +809,23 @@ def build_dataset(task: str, **kwargs) -> BaseDataset:
 
     ``num_channels`` is derived by probing one sample raster when the caller does not pin it, so a
     multi-band input threads its real band count through ``in_chans`` instead of defaulting to RGB.
+
+    ``dataset_source`` is the bespoke seam (mirrors ``model_source``): when given, an agent-supplied
+    importable builder produces the dataset for a task the known loaders don't cover. The known
+    loaders stay the default; the ``Unknown task`` error below is still raised for a bad known-task
+    NAME (an honest typo signal) — the seam is the escape for a genuinely new task.
     """
     tiling = kwargs.pop("tiling", None)
     num_channels = kwargs.pop("num_channels", None)
     if num_channels is None:
         num_channels = _probe_num_channels(kwargs.get("images_dir"), kwargs.get("stems"))
+
+    if dataset_source is not None:
+        ds = build_from_dataset_source(dataset_source, task=task, **kwargs)
+        if getattr(ds, "expected_channels", None) is None:
+            ds.expected_channels = num_channels
+        return ds
+
     cls = _DATASET_MAP.get(task)
     if cls is None:
         raise ValueError(f"Unknown task '{task}'. Available: {list(_DATASET_MAP.keys())}")
