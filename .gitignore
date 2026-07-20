@@ -8,6 +8,9 @@
 # ── Design docs (working notes, not for version control) ────────────────────
 /docs
 
+# ── Review corpus (478-agent review output; evidence for the refactor, ~70MB) ──
+/.review-corpus/
+
 # ── Python ────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
@@ -82,3 +85,4 @@ Thumbs.db
 *.log
 tensorboard_runs/
 *.zip
+/.review-corpus
