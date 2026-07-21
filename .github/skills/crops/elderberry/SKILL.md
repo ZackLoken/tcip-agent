@@ -171,7 +171,9 @@ difficulties:
   one bloom class.
 - **Color / gloss traits need an in-frame calibration target** (`fruit_color_rgb`, `bloom_color`,
   `leaf_color_green`, the gloss traits); without it, color is not a valid measurement.
-- **Empty images are valid negatives** (no cyme / no fruit / no symptom) — never drop them.
+- **An image with no cyme / fruit / symptom is a real observation** — never drop it. It trains as
+  a negative only once the breeder confirms it Complete; an empty label file alone reads as
+  unannotated (see CLAUDE.md's negative invariant).
 
 ## Measurement integrity (highest rule)
 
