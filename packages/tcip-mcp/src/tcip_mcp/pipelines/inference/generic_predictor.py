@@ -23,29 +23,7 @@ logger = logging.getLogger(__name__)
 _DETECTION_TASKS = frozenset({"detection", "instance_seg"})
 
 
-def _crop_pad_tile(img, x: int, y: int, tile_size: int, w: int, h: int):
-    """Crop a ``tile_size`` window at (x, y) and zero-pad short (edge) tiles.
-
-    Channel-generic: PIL for 1/3/4-channel images, numpy ``[H, W, C]`` for multi-band rasters
-    (which have no ``.crop``) — so tiled inference works on the multispectral 2D inputs the
-    dataset layer already reads, not just RGB.
-    """
-    x2, y2 = min(x + tile_size, w), min(y + tile_size, h)
-    if isinstance(img, Image.Image):
-        crop = img.crop((x, y, x2, y2))
-        if crop.size != (tile_size, tile_size):
-            padded = Image.new(img.mode, (tile_size, tile_size))  # 0-fill for the image's mode
-            padded.paste(crop, (0, 0))
-            crop = padded
-        return crop
-    import numpy as np
-
-    crop = img[y:y2, x:x2]
-    ph, pw = tile_size - crop.shape[0], tile_size - crop.shape[1]
-    if ph or pw:
-        pad_width = [(0, ph), (0, pw)] + ([(0, 0)] if crop.ndim == 3 else [])
-        crop = np.pad(crop, pad_width, mode="constant")
-    return crop
+from tcip_mcp.pipelines.image_utils import crop_pad_tile as _crop_pad_tile  # noqa: E402
 
 
 class GenericPredictor:
