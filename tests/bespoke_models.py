@@ -195,7 +195,7 @@ def train_bespoke(ctx) -> None:
 # a loss dict in train mode (``head{i}_{k}``), decoded predictions in eval mode.
 # ---------------------------------------------------------------------------
 
-from tcip_mcp.pipelines.components.backbones import _build_timm_backbone
+from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter, build_detector
 from tcip_mcp.pipelines.components.heads import (
     ClassificationHead,
@@ -207,7 +207,11 @@ from tcip_mcp.pipelines.components.necks import FPN, GlobalAvgPoolNeck
 
 
 def _resnet18(in_chans: int = 3):
-    return _build_timm_backbone("resnet18", pretrained=False, in_chans=in_chans)
+    import timm
+
+    m = timm.create_model("resnet18", pretrained=False, features_only=True,
+                          out_indices=(1, 2, 3, 4), in_chans=in_chans)
+    return BackboneWrapper(m, m.feature_info.channels())
 
 
 class BespokeComposed(nn.Module):
