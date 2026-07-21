@@ -72,11 +72,25 @@ def test_classification_head_loss_optional():
 
 def test_semantic_seg_head_weighted_ce():
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
-    h = SemanticSegHead(in_channels=64, num_classes=3, loss="weighted_ce", class_weights=[1.0, 2.0, 3.0])
+    h = SemanticSegHead(in_channels=64, num_classes=3, class_weights=[1.0, 2.0, 3.0])
     out = h(torch.randn(2, 64, 16, 16))
     losses = h.compute_loss(out, {"masks": torch.randint(0, 3, (2, 16, 16))})
     assert "ce_loss" in losses and "dice_loss" in losses
     assert losses["ce_loss"].requires_grad and losses["dice_loss"].requires_grad
+
+
+def test_semantic_seg_head_advertises_no_loss_choice():
+    """The head welds CE + multi-class Dice; it must not accept a loss name it cannot honor.
+
+    Previously `loss=` was accepted and silently discarded. There is no registry loss to route
+    to — `build_loss("cross_entropy+dice")` raises at forward, because the registry's DiceLoss is
+    binary while this head emits multi-class logits.
+    """
+    import pytest as _pytest
+    from tcip_mcp.pipelines.components.heads import SemanticSegHead
+    with _pytest.raises(TypeError):
+        SemanticSegHead(in_channels=64, num_classes=3, loss="weighted_ce")
+    assert SemanticSegHead.default_loss == ""
 
 
 # --------------------------------------------------------------------------
