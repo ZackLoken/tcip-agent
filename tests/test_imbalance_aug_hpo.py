@@ -53,6 +53,31 @@ def test_weighted_ce_built():
     assert loss.ce.weight is not None  # class weight injected
 
 
+def test_class_distribution_on_an_unweightable_loss_refuses():
+    """Imbalance handling that silently vanishes is worse than a build that refuses."""
+    with pytest.raises(ValueError, match="not weightable"):
+        build_loss("dice", class_distribution={0: 90, 1: 10}, num_classes=2)
+
+
+def test_combined_loss_routes_each_kwarg_to_the_terms_that_accept_it():
+    """A per-term hyperparameter reaches its own term, not every term."""
+    loss = build_loss("cross_entropy+dice", label_smoothing=0.1, smooth=2.0)
+    ce, dice = loss.losses
+    assert ce.ce.label_smoothing == 0.1
+    assert dice.smooth == 2.0
+
+
+def test_combined_loss_weights_only_the_weightable_term():
+    loss = build_loss("cross_entropy+dice", class_distribution={0: 90, 1: 10}, num_classes=2)
+    ce, _dice = loss.losses
+    assert ce.ce.weight is not None  # dice never sees class_distribution, so it builds fine
+
+
+def test_combined_loss_refuses_a_kwarg_no_term_accepts():
+    with pytest.raises(ValueError, match="not accepted by any term"):
+        build_loss("cross_entropy+dice", nonexistent_param=1)
+
+
 def test_classification_head_loss_optional():
     from tcip_mcp.pipelines.components.heads import ClassificationHead
     feats = torch.randn(4, 512)
