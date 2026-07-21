@@ -155,9 +155,9 @@ def write_detect_labels(
     """Write detect boxes to a YOLO label file (atomic write).
 
     When ``boxes`` is empty: by default the file is removed. Pass ``keep_empty=True``
-    to instead write a 0-byte file — used by the interactive annotator so that clearing
-    all boxes records a *confirmed negative* (empty label file = valid negative) rather
-    than deleting the record (see CLAUDE.md invariant).
+    to instead write a 0-byte file — used by the interactive annotator so that clearing all boxes
+    keeps the record rather than deleting it. An empty file is *not* a negative on its own: it
+    trains as one only once a human marks that image Complete (see CLAUDE.md's negative invariant).
     """
     if boxes:
         lines = []
