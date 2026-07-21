@@ -39,9 +39,34 @@ def _image_stems(root: Path) -> dict[str, str]:
 
 def check_negatives(root: Path, findings: list) -> None:
     """A negative is empty labels + human Complete — flag every disk/status disagreement."""
-    statuses = _load(root / ".tcip" / "state" / "image_status.json") or {}
+    from tcip_mcp.dataset_layout import (
+        LEGACY_BUCKET, normalize_status_store, parse_annotation_dir, status_bucket,
+    )
+
+    # Through the same normalizer the web layer reads with. Inspecting the raw JSON here would see
+    # nothing on a store that has not been migrated yet — precisely when a legacy entry most needs
+    # reporting, since that is the state a project is in before anyone opens the GUI.
+    by_bucket = normalize_status_store(_load(root / ".tcip" / "state" / "image_status.json"))
     stems = _image_stems(root)
-    neg_names = {n for n, s in statuses.items() if s == "negative"}
+    legacy = by_bucket.pop(LEGACY_BUCKET, {})
+    if legacy:
+        findings.append(("warn", f"{len(legacy)} confirmation(s) predate campaign scoping and are "
+                        "not trusted as training negatives — re-confirm them in the GUI"))
+
+    def _negatives_for(label_path: Path) -> set[str]:
+        """Negatives confirmed for *this* label file's own campaign.
+
+        A negative in one campaign says nothing about another — that is what scoping means — so
+        comparing against every bucket would resurrect the cross-campaign leak as a false alarm.
+        """
+        parsed = parse_annotation_dir(label_path.parent)
+        if parsed is None:
+            return set()
+        campaign, date, _task = parsed
+        bucket = by_bucket.get(status_bucket(campaign, date), {})
+        return {n for n, s in bucket.items() if s == "negative"}
+
+    neg_names = {n for b in by_bucket.values() for n, s in b.items() if s == "negative"}
 
     for label in (root / "annotations").rglob("*.json") if (root / "annotations").is_dir() else []:
         if ".original" in label.parts:
@@ -50,11 +75,12 @@ def check_negatives(root: Path, findings: list) -> None:
         if not isinstance(data, dict) or "objects" not in data:
             continue
         name = stems.get(label.stem, f"{label.stem}.JPG")
-        if data["objects"] == [] and name not in neg_names:
-            findings.append(("warn", f"{label.relative_to(root)}: empty label but status is "
-                            f"{statuses.get(name, 'unannotated')!r} — not a confirmed negative; "
-                            "excluded from training (delete the file or mark Complete to resolve)"))
-        elif data["objects"] and name in neg_names:
+        own = _negatives_for(label)  # this campaign's confirmations, not every campaign's
+        if data["objects"] == [] and name not in own:
+            findings.append(("warn", f"{label.relative_to(root)}: empty label but not a confirmed "
+                            "negative for this campaign; excluded from training (delete the file, "
+                            "or mark the image Complete while this campaign is selected)"))
+        elif data["objects"] and name in own:
             findings.append(("error", f"{label.relative_to(root)}: {len(data['objects'])} objects "
                             "but the status store says 'negative' — contradictory; re-review"))
         if label.stem not in stems:
