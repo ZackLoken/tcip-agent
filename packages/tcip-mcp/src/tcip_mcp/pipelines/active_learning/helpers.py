@@ -15,9 +15,9 @@ def build_scorer(method: str, task: str):
     Resolves through the scorer registry (``scorer.resolve_scorer``): the built-in
     'uncertainty' | 'diversity' | 'combined', any acquisition function registered with
     ``register_scorer``, or a dotted ``module:factory`` you wrote. An unresolvable name raises
-    ``ValueError`` — it is not silently scored as combined, because a queue ordered by an
-    acquisition function nobody chose is worse than a refusal. ``task`` is threaded to the
-    logit-reading scorers.
+    ``ValueError`` — including a dotted name that fails to import — rather than being silently
+    scored as combined, because a queue ordered by an acquisition function nobody chose is worse
+    than a refusal. ``task`` is threaded to the logit-reading scorers.
     """
     from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
 
