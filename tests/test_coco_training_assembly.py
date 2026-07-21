@@ -200,3 +200,166 @@ def test_count_label_lines_txt_fallback(tmp_path):
     labels.mkdir()
     (labels / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n0 0.2 0.2 0.1 0.1\n")
     assert count_label_lines(labels, "a") == 2
+
+
+# ====================================================================
+# The negative rail on the SAMPLE SET, not just the assembled COCO
+# ====================================================================
+
+def _rail_fixture(tmp_path):
+    """One annotated image, one empty-unconfirmed, one with no label file, one confirmed negative."""
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations" / "default" / "detect"
+    labels.mkdir(parents=True)
+    _make_images(images, ["ann", "empty", "nolabel", "neg"])
+    json_io.write_detect(labels / "ann.json", [BBox(4, 4, 12, 12, 0)], 100, 100, keep_empty=True)
+    json_io.write_detect(labels / "empty.json", [], 100, 100, keep_empty=True)
+    json_io.write_detect(labels / "neg.json", [], 100, 100, keep_empty=True)
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    (state / "image_status.json").write_text(json.dumps({"neg.jpg": "negative"}))
+    return images, labels
+
+
+@pytest.mark.parametrize("label_format", [None, "json", "coco"])
+def test_only_annotated_and_confirmed_negatives_train(tmp_path, label_format):
+    """The rail is a property of the data, not of which kwargs the caller passed.
+
+    Enumerating samples from images_dir served unannotated images as zero-box samples, so a
+    project where the breeder labelled 30 of 400 trained on 370 images asserted to be empty.
+    """
+    from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset
+
+    images, labels = _rail_fixture(tmp_path)
+    kwargs = {"images_dir": str(images), "labels_dir": str(labels), "num_classes": 1}
+    if label_format == "coco":
+        kwargs["coco_data"] = assemble_coco(labels, images)
+        kwargs["label_format"] = "coco"
+    elif label_format:
+        kwargs["label_format"] = label_format
+
+    ds = build_dataset("detection", **kwargs)
+    assert sorted(ds.stems) == ["ann", "neg"], ds.stems
+    assert ds.sample_counts["annotated"] == 1
+    assert ds.sample_counts["confirmed_negative"] == 1
+    assert ds.sample_counts["skipped_unannotated"] >= 1
+
+
+def test_caller_supplied_stems_are_filtered_too(tmp_path):
+    """Split stems go through the same gate — otherwise the split reintroduces the fabrications."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    images, labels = _rail_fixture(tmp_path)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
+                       num_classes=1, stems=["ann", "empty", "nolabel", "neg"])
+    assert sorted(ds.stems) == ["ann", "neg"]
+
+
+def test_no_trainable_samples_raises_rather_than_training_on_nothing(tmp_path):
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations" / "default" / "detect"
+    labels.mkdir(parents=True)
+    _make_images(images, ["a", "b"])
+    json_io.write_detect(labels / "a.json", [], 100, 100, keep_empty=True)  # unconfirmed empty
+
+    with pytest.raises(ValueError, match="no trainable samples"):
+        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
+
+
+def test_instance_seg_applies_the_same_rail(tmp_path):
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations" / "default" / "segment"
+    labels.mkdir(parents=True)
+    _make_images(images, ["ann", "nolabel"])
+    json_io.write_segment(labels / "ann.json",
+                          [Polygon([(4, 4), (12, 4), (12, 12), (4, 12)], 0)], 100, 100,
+                          keep_empty=True)
+
+    ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels),
+                       num_classes=1)
+    assert ds.stems == ["ann"]
+
+
+@pytest.mark.parametrize("ext", [".jpg", ".JPG"])
+def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
+    """The name compared against the status store must be the real one on disk.
+
+    `Path.exists()` is case-insensitive on Windows and macOS, so probing constructed paths returns
+    the name that was built, not the one on disk. The status store is keyed on the real filename,
+    so a fabricated name matches nothing and every human-confirmed negative is silently dropped —
+    including the review loop's hard negatives. `IMG_*.JPG` is this repo's canonical camera name.
+    """
+    from PIL import Image as _Image
+
+    from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations" / "default" / "detect"
+    images.mkdir(parents=True)
+    labels.mkdir(parents=True)
+    for stem in ("IMG_0001", "IMG_0002"):
+        _Image.new("RGB", (100, 100)).save(images / f"{stem}{ext}")
+    json_io.write_detect(labels / "IMG_0001.json", [BBox(4, 4, 12, 12, 0)], 100, 100,
+                         keep_empty=True)
+    json_io.write_detect(labels / "IMG_0002.json", [], 100, 100, keep_empty=True)
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    (state / "image_status.json").write_text(json.dumps({f"IMG_0002{ext}": "negative"}))
+
+    # The assembled COCO carries the real names, so to_coco_dataset can match the store.
+    coco = assemble_coco(labels, images)
+    assert {im["file_name"] for im in coco["images"]} == {f"IMG_0001{ext}", f"IMG_0002{ext}"}
+
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
+    assert sorted(ds.stems) == ["IMG_0001", "IMG_0002"], ds.stems
+    assert ds.sample_counts["confirmed_negative"] == 1
+
+
+def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path):
+    """Existence is the whole rail for masks — an all-background mask is a real annotation."""
+    import numpy as np
+    from PIL import Image as _Image
+
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    images, masks = tmp_path / "images", tmp_path / "masks"
+    images.mkdir()
+    masks.mkdir()
+    for stem in ("has_mask", "all_background", "no_mask"):
+        _Image.new("RGB", (32, 32)).save(images / f"{stem}.jpg")
+    _Image.fromarray(np.ones((32, 32), dtype=np.uint8)).save(masks / "has_mask.png")
+    _Image.fromarray(np.zeros((32, 32), dtype=np.uint8)).save(masks / "all_background.png")
+
+    ds = build_dataset("semantic_seg", images_dir=str(images), masks_dir=str(masks), num_classes=2)
+    assert sorted(ds.stems) == ["all_background", "has_mask"]  # no_mask dropped, empty mask kept
+
+
+def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
+    """"Annotate this" and "confirm this empty one" are different jobs — the count must say which."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    images, labels = _rail_fixture(tmp_path)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
+    assert ds.sample_counts == {"annotated": 1, "confirmed_negative": 1,
+                                "skipped_unannotated": 1, "skipped_unconfirmed_empty": 1}
+
+
+def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_path):
+    """An externally supplied COCO never passed through assemble_coco, so its zero-annotation
+    images are not confirmed negatives — inferring that from the file's shape is the K13 bug."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    images, labels = _rail_fixture(tmp_path)
+    external = {
+        "images": [{"id": 1, "file_name": "ann.jpg"}, {"id": 2, "file_name": "empty.jpg"}],
+        "annotations": [{"id": 1, "image_id": 1, "category_id": 1, "bbox": [4, 4, 8, 8]}],
+        "categories": [{"id": 1, "name": "c0"}],
+    }
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
+                       num_classes=1, coco_data=external, label_format="coco")
+    assert ds.stems == ["ann"], "an unconfirmed zero-annotation COCO image must not train"
+    assert ds.sample_counts["confirmed_negative"] == 0
