@@ -2,8 +2,15 @@
 
 Wrap a module that **already emits a list, tuple, or dict of feature maps** — timm's
 ``features_only=True``, torchvision's ``create_feature_extractor`` / ``IntermediateLayerGetter``,
-or a staged module you wrote. The wrapper standardizes that to ``{"s0": ..., "sN": ...}``, carries
-a declared ``out_channels``, and adds per-stage ``freeze_to`` for progressive unfreezing.
+or a staged module you wrote. The wrapper renames those to ``{"s0": ..., "sN": ...}``, carries a
+declared ``out_channels``, and adds per-stage ``freeze_to`` for progressive unfreezing.
+
+**Emit finest first.** Stages are renamed in the order the module returns them (a dict's insertion
+order), and the necks rebuild pyramid order from those names, so ``s0`` must be the
+highest-resolution stage. The renaming is what makes that ordering survive: ``FPN``/``PAN`` sort the
+keys they are handed, so a module's own names (``feat1``/``feat4``, ``low``/``mid``/``high``) would
+otherwise be consumed in alphabetical order — silently, and without a shape error whenever the
+stage widths are uniform. Pass ``feature_keys=[...]`` to name the stages yourself instead.
 
 It does not turn a classifier into a feature extractor: wrapping a plain
 ``torchvision.models.resnet50`` yields ``{"s0": (1, 1000)}`` — the logit vector, one entry —
@@ -62,19 +69,24 @@ class BackboneWrapper(nn.Module):
             Dict mapping ``"s0"`` … ``"sN"`` to feature tensors, where
             ``s0`` is the earliest (highest-resolution) stage.
         """
-        if hasattr(self.model, "forward_features"):
-            # timm features_only model
-            features = self.model(x)
-            if isinstance(features, (list, tuple)):
-                return {f"s{i}": f for i, f in enumerate(features)}
-            return {"s0": features}
-        # Fallback: single feature map from backbone
         out = self.model(x)
         if isinstance(out, dict):
-            return out
-        if isinstance(out, (list, tuple)):
-            return {f"s{i}": f for i, f in enumerate(out)}
-        return {"s0": out}
+            # Renamed, not passed through: the necks reconstruct pyramid order from these keys
+            # (``sorted(features.keys())``), so a module emitting its own names — torchvision's
+            # ``feat1``/``feat4``, or a staged module's ``low``/``mid``/``high`` — would be
+            # consumed out of order, silently, whenever the stage widths are uniform.
+            feats = list(out.values())
+        elif isinstance(out, (list, tuple)):
+            feats = list(out)
+        else:
+            feats = [out]
+        keys = self._feature_keys or [f"s{i}" for i in range(len(feats))]
+        if len(keys) != len(feats):
+            raise ValueError(
+                f"feature_keys has {len(keys)} names but the backbone emitted {len(feats)} "
+                f"feature maps"
+            )
+        return dict(zip(keys, feats))
 
     def freeze_to(self, stage: int) -> None:
         """Freeze all parameters up to (exclusive) *stage*.
