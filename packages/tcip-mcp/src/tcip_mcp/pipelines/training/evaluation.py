@@ -850,8 +850,20 @@ def run_full_frame_evaluation(
         score_threshold=conf_threshold, nms_iou=global_nms_iou, max_dets=max_dets)
 
     img_dir, lbl_dir = Path(images_dir), Path(labels_dir)
-    image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-    paths = sorted(p for p in img_dir.iterdir() if p.suffix.lower() in image_exts)
+    # Same negative rail the training set uses: an image with no label record has no ground truth,
+    # so scoring it turns every correct detection into a false positive and drags down the very
+    # precision this delivery-grade number gates a phenotype on.
+    from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS, image_name_map, trainable_stems
+
+    names = image_name_map(img_dir)
+    if lbl_dir.is_dir():
+        keep, sample_counts = trainable_stems(lbl_dir, img_dir)
+        paths = [img_dir / names[s] for s in keep if s in names]
+    else:
+        # No label store, so no rail to apply and no ground truth either. Filtering to nothing here
+        # would refuse a call that is merely metric-less, not wrong.
+        sample_counts = {}
+        paths = sorted(p for p in img_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS)
     per_image: list[dict] = []
     for p in paths:
         r = predictor.predict_tiled(str(p), tile_size=tile_size, overlap=overlap,
@@ -879,6 +891,9 @@ def run_full_frame_evaluation(
         **_producer_identity(ckpt_path),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
         "tile_size": tile_size, "tiled": True, "eval_regime": "full-frame-tiled-inference",
+        # Which images this number was computed over, and which were held out for having no
+        # ground truth — so a reviewer can reconstruct the denominator, not just the metric.
+        "scored_images": len(paths), "sample_counts": sample_counts,
     }
     # R3/D9: for a count trait, the delivery-grade count that gates the phenotype is the derived
     # criterion's tp/fp/fn (center-match for catkin), NOT AP@0.5 — kept alongside, clearly labeled.
