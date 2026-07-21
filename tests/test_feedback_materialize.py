@@ -109,3 +109,34 @@ def test_unit_scale_label_round_trips(tmp_path):
     assert b.class_id == 3
     assert (b.x1 + b.x2) / 2 == pytest.approx(cx, abs=1e-6)
     assert (b.x2 - b.x1) == pytest.approx(w, abs=1e-6)
+
+
+def test_hard_negatives_survive_into_training(tmp_path):
+    """A rejected-only image is a human-confirmed negative and must train as one.
+
+    The status store is campaign-scoped, so materialize has to write the bucket its emitted label
+    dir resolves to. An unbucketed write is quarantined as unattributable, which would silently
+    discard every rejection verdict the review loop exists to harvest.
+    """
+    from PIL import Image
+
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+
+    src = tmp_path / "src"
+    src.mkdir()
+    for name in ("imgA.png", "imgB.png"):
+        Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
+    out = tmp_path / "out"
+    state = {"image": {
+        "imgA.png": {"img_status": "completed", "detections": [
+            {"action": "accepted", "class_id": 0, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2],
+             "pred_bbox_norm": None}]},
+        "imgB.png": {"img_status": "completed", "detections": [
+            {"action": "rejected", "class_id": 0, "gt_bbox_norm": None,
+             "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
+    }}
+    materialize_dataset(state, str(src), str(out))
+
+    labels_out = out / "labels" / "detect"
+    assert confirmed_negative_names(labels_out) == {"imgB.png"}
+    assert json.loads((labels_out / "imgB.json").read_text())["objects"] == []
