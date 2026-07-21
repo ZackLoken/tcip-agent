@@ -13,9 +13,11 @@ def build_scorer(method: str, task: str):
     """Return the active-learning scorer for a method name.
 
     Resolves through the scorer registry (``scorer.resolve_scorer``): the built-in
-    'uncertainty' | 'diversity' | 'combined', or any acquisition function the agent registered with
-    ``register_scorer``. An unknown ``method`` falls back to combined (the prior inline behaviour).
-    ``task`` is threaded to the logit-reading scorers.
+    'uncertainty' | 'diversity' | 'combined', any acquisition function registered with
+    ``register_scorer``, or a dotted ``module:factory`` you wrote. An unresolvable name raises
+    ``ValueError`` — it is not silently scored as combined, because a queue ordered by an
+    acquisition function nobody chose is worse than a refusal. ``task`` is threaded to the
+    logit-reading scorers.
     """
     from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
 
