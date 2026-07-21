@@ -150,6 +150,26 @@ class TestLosses:
         assert hasattr(combined, "losses")
         assert len(combined.losses) == 2
 
+    def test_combined_loss_receives_class_weighting(self):
+        """The weighting context must reach a combined loss's weightable term.
+
+        It used to be dropped: the `+` branch recursed without forwarding class_distribution,
+        so imbalance handling silently vanished for every combined loss.
+        """
+        from tcip_mcp.pipelines.components.losses import build_loss
+        combined = build_loss("cross_entropy+dice", class_distribution={0: 100, 1: 10, 2: 5},
+                              num_classes=3)
+        weights = dict(combined.losses[0].named_buffers()).get("ce.weight")
+        assert weights is not None, "class weighting did not reach the cross_entropy term"
+        assert weights.numel() == 3
+        assert weights[0] < weights[2]  # the majority class is down-weighted
+
+    def test_combined_loss_refuses_unusable_class_weighting(self):
+        """A class_distribution no term can consume must raise, not be silently discarded."""
+        from tcip_mcp.pipelines.components.losses import build_loss
+        with pytest.raises(ValueError, match="weightable"):
+            build_loss("bce+dice", class_distribution={0: 100, 1: 10}, num_classes=2)
+
     def test_giou_loss(self):
         from tcip_mcp.pipelines.components.losses import GIoULoss
         loss_fn = GIoULoss()
