@@ -154,8 +154,20 @@ def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> 
                 if p.kind not in (p.VAR_KEYWORD, p.VAR_POSITIONAL)} - {"adapter", "num_classes"}
     unknown = sorted(set(kwargs) - accepted)
     if unknown:
+        # Name the detectors that do take each rejected kwarg. A key valid elsewhere is an
+        # architecture difference (fcos is anchor-free, so it has no aspect_ratios) rather than a
+        # typo, and the two need different responses from the caller.
+        elsewhere = {
+            k: [o for o, f in _DETECTOR_BUILDERS.items()
+                if k in inspect.signature(f).parameters]
+            for k in unknown
+        }
+        detail = "; ".join(
+            f"{k!r} is accepted by {others}" if (others := elsewhere[k]) else f"{k!r} by none"
+            for k in unknown
+        )
         raise TypeError(
             f"build_detector('{name}', ...) got unexpected keyword argument(s) {unknown}. "
-            f"Accepted: {sorted(accepted)}"
+            f"Accepted by '{name}': {sorted(accepted)}. {detail}."
         )
     return fn(adapter, num_classes, **kwargs)
