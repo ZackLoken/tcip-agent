@@ -135,24 +135,31 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             dims = resolve_contract_dims(config, task)
             model = build_model(config)
             report = check_model_contract(model, task, **dims)
+            batch, why_no_batch = None, None
             if report.get("not_smokeable"):
                 # The contract has no synthetic batch schema for this task. Rather than enumerate
                 # tasks (a taxonomy) or skip the check (a rail made optional), smoke it against a
                 # real batch from the run's own dataset — a better reference than a synthetic one
                 # for every task, and the only one for a task the platform does not enumerate.
-                batch = _one_real_batch(task, config.get("data") or {})
+                batch, why_no_batch = _one_real_batch(task, config)
                 if batch is not None:
                     report = check_model_contract(model, task, sample_batch=batch, **dims)
-            result["smoke"] = {**report, "dims": dims, "task": task}
+            # ``dims`` shape the synthetic batch only, so they describe nothing once a real batch
+            # is used — record which reference actually proved the contract.
+            result["smoke"] = {**report, "task": task,
+                               "batch_source": "dataset" if batch is not None else "synthetic",
+                               "dims": None if batch is not None else dims}
             if report.get("not_smokeable"):
                 issues.append(
-                    f"model contract: {report['not_smokeable']} No batch could be built from "
-                    "data config either, so the measurement boundary is unproven for this run."
+                    f"model contract: {report['not_smokeable']} Building one from the run's data "
+                    f"config failed too ({why_no_batch}), so the measurement boundary is unproven."
                 )
             elif not report["ok"]:
                 issues.extend(f"model contract: {msg}" for msg in report["issues"])
             if overfit:
-                result["overfit_check"] = overfit_check(model, task, **dims)
+                # Same batch the contract used — otherwise this re-synthesizes and reports a false
+                # "does not learn" for exactly the bespoke tasks the real-batch path exists for.
+                result["overfit_check"] = overfit_check(model, task, sample_batch=batch, **dims)
         except Exception as exc:  # noqa: BLE001 — a build/contract crash is itself a blocking issue
             issues.append(f"model smoke build failed: {exc}")
 
@@ -649,28 +656,66 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
         logger.warning("split manifest persist failed for %s: %s", experiment_id, exc)
 
 
-def _one_real_batch(task: str, data_cfg: dict, n: int = 2):
-    """One collated ``(images, targets)`` batch from the run's own dataset, or ``None``.
+def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
+    """The ``build_dataset`` kwargs for a run's data config.
+
+    One definition shared by the training path and the preflight smoke, so the batch the contract
+    is proved against is built from the same keys as the batch the run will train on.
+    """
+    if task in ("detection", "instance_seg"):
+        kw = {"images_dir": data_cfg.get("images_dir", ""),
+              "labels_dir": data_cfg.get("labels_dir", "")}
+        # Thread the on-disk label format through to the dataset. Dropping it here
+        # silently defaults to YOLO parsing, so a VOC/LabelMe/COCO dataset reads as
+        # all-empty negatives — the undetected-format mismatch CLAUDE.md warns about.
+        if data_cfg.get("label_format"):
+            kw["label_format"] = data_cfg["label_format"]
+        if data_cfg.get("coco_json"):
+            kw["coco_json"] = data_cfg["coco_json"]
+    elif task == "semantic_seg":
+        kw = {"images_dir": data_cfg.get("images_dir", ""),
+              "masks_dir": data_cfg.get("masks_dir", data_cfg.get("labels_dir", ""))}
+    else:
+        kw = {"images_dir": data_cfg.get("images_dir", "")}
+        if data_cfg.get("csv_path"):
+            kw["csv_path"] = data_cfg["csv_path"]
+    if data_cfg.get("dataset_source"):
+        # Bespoke seam (mirrors model_source): route build_dataset to the agent's builder for a
+        # task the known loaders don't cover. Threaded through src so the split machinery still
+        # passes it (with stems) to every train/val build below.
+        kw["dataset_source"] = data_cfg["dataset_source"]
+    return kw
+
+
+def _one_real_batch(task: str, config: dict, n: int = 2):
+    """``(batch, reason_it_failed)`` — one collated ``(images, targets)`` from the run's dataset.
 
     Lets the model contract smoke a task it has no synthetic schema for, without the platform
-    enumerating tasks. Best-effort by design: a config that cannot yield a batch returns ``None``
-    and the caller decides what that means — this function never decides whether a run proceeds.
+    enumerating tasks. Built through the same source kwargs and augmentation the run itself uses,
+    so a batch that smokes here is the batch that trains. Best-effort by design: a config that
+    cannot yield a batch returns ``(None, reason)`` and the caller decides what that means — this
+    function never decides whether a run proceeds. The reason is returned rather than only logged,
+    so a caller that blocks can say what actually failed.
     """
+    data_cfg = config.get("data") or {}
     try:
         from tcip_mcp.pipelines.data.datasets import build_dataset
         from tcip_mcp.pipelines.training.generic_trainer import task_collate
 
-        src: dict = {"images_dir": data_cfg.get("images_dir", "")}
-        for key in ("labels_dir", "label_format", "coco_json", "masks_dir", "csv_path",
-                    "dataset_source"):
-            if data_cfg.get(key):
-                src[key] = data_cfg[key]
-        ds = build_dataset(task, **src, transforms=None, tiling=data_cfg.get("tiling"))
+        transforms = None
+        if config.get("augmentation"):
+            from tcip_mcp.pipelines.data.augmentations import build_augmentation
+            transforms = build_augmentation(config["augmentation"])
+
+        src = _dataset_source_kwargs(task, data_cfg)
+        ds = build_dataset(task, **src, transforms=transforms, tiling=data_cfg.get("tiling"))
         items = [ds[i] for i in range(min(n, len(ds)))]
-        return task_collate(task)(items) if items else None
+        if not items:
+            return None, "the dataset built but is empty"
+        return task_collate(task)(items), None
     except Exception as exc:  # noqa: BLE001 — an unbuildable batch is a caller decision, not a crash
         logger.info("could not build a real batch to smoke task %r: %s", task, exc)
-        return None
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def _auto_train_val(task: str, data_cfg: dict, transforms):
@@ -694,32 +739,7 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
 
     STEM_TASKS = {"detection", "instance_seg", "semantic_seg", "classification"}
 
-    def _source_kwargs() -> dict:
-        if task in ("detection", "instance_seg"):
-            kw = {"images_dir": data_cfg.get("images_dir", ""),
-                  "labels_dir": data_cfg.get("labels_dir", "")}
-            # Thread the on-disk label format through to the dataset. Dropping it here
-            # silently defaults to YOLO parsing, so a VOC/LabelMe/COCO dataset reads as
-            # all-empty negatives — the undetected-format mismatch CLAUDE.md warns about.
-            if data_cfg.get("label_format"):
-                kw["label_format"] = data_cfg["label_format"]
-            if data_cfg.get("coco_json"):
-                kw["coco_json"] = data_cfg["coco_json"]
-            return kw
-        if task == "semantic_seg":
-            return {"images_dir": data_cfg.get("images_dir", ""),
-                    "masks_dir": data_cfg.get("masks_dir", data_cfg.get("labels_dir", ""))}
-        kw = {"images_dir": data_cfg.get("images_dir", "")}
-        if data_cfg.get("csv_path"):
-            kw["csv_path"] = data_cfg["csv_path"]
-        return kw
-
-    src = _source_kwargs()
-    if data_cfg.get("dataset_source"):
-        # Bespoke seam (mirrors model_source): route build_dataset to the agent's builder for a
-        # task the known loaders don't cover. Threaded through src so the split machinery still
-        # passes it (with stems) to every train/val build below.
-        src["dataset_source"] = data_cfg["dataset_source"]
+    src = _dataset_source_kwargs(task, data_cfg)
     tiling = data_cfg.get("tiling")  # W3: detection tiling (None for other tasks/configs)
 
     # 1. Explicit validation source.
