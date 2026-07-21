@@ -247,21 +247,54 @@ def _label_record_state(stem: str, labels_dir, label_format: str) -> tuple[bool,
 
 
 def confirmed_negative_names(labels_dir) -> set[str]:
-    """Image names a human explicitly marked negative (empty + Complete) for this label dir.
+    """Image names a human marked negative (empty + Complete) **for this label dir's campaign**.
 
-    Walks up from ``labels_dir`` to the project's ``.tcip/state/image_status.json`` (the GUI's
-    completion store). An empty label file alone is never a negative — someone may have just
-    emptied it mid-work — so training trusts only this human confirmation. No store → empty set.
+    Walks up from ``labels_dir`` to the project's ``.tcip/state/image_status.json`` and reads only
+    the bucket for this dir's ``(trait, date)``. A confirmation is a human's statement about one
+    trait on one image; a store keyed by image name alone re-applies it to campaigns they never
+    looked at, so an image full of bushes trains as "contains no bushes".
+
+    An empty label file alone is never a negative — someone may have just emptied it mid-work — so
+    training trusts only this confirmation. No store, or a store with no entries for this campaign,
+    yields an empty set. A ``labels_dir`` whose campaign cannot be resolved raises: silently
+    returning nothing would drop every hard negative the review loop harvested.
     """
+    from tcip_mcp.dataset_layout import parse_annotation_dir, status_bucket
+
     d = Path(labels_dir).resolve()
     for parent in (d, *d.parents):
         status_file = parent / ".tcip" / "state" / "image_status.json"
-        if status_file.is_file():
-            try:
-                statuses = json.loads(status_file.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+        if not status_file.is_file():
+            continue
+        try:
+            statuses = json.loads(status_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return set()
+        parsed = parse_annotation_dir(d)
+        if parsed is None:
+            # Refuse only when there is something to lose. A derived tree — a
+            # ``{train,val,test}/labels`` split, a curated export — cannot name its campaign, and
+            # raising there would block the platform's own documented split -> train path. But if
+            # the store holds confirmed negatives this dir might have been entitled to, silently
+            # returning none of them would drop the human's work invisibly, which is worse.
+            has_negatives = any(
+                s == "negative" for b in statuses.values() if isinstance(b, dict)
+                for s in b.values()
+            )
+            if not has_negatives:
                 return set()
-            return {name for name, s in statuses.items() if s == "negative"}
+            raise ValueError(
+                f"cannot tell which campaign {labels_dir} belongs to, and this project has "
+                f"human-confirmed negatives that would be silently dropped. Expected the canonical "
+                f"<root>/annotations/<campaign>/[<date>/]<task> layout. A derived tree (a split, a "
+                f"curated export) should carry its own .tcip/state/image_status.json — see "
+                f"materialize_review_dataset."
+            )
+        campaign, date, _task = parsed
+        bucket = statuses.get(status_bucket(campaign, date))
+        if not isinstance(bucket, dict):
+            return set()  # this campaign has no confirmations yet
+        return {name for name, s in bucket.items() if s == "negative"}
     return set()
 
 
