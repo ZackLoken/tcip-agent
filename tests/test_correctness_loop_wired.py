@@ -50,6 +50,20 @@ def _bespoke_task_dataset(**_kwargs):
     return _DS()
 
 
+def _strict_bespoke_dataset(images_dir=None, transforms=None, task=None, stems=None):
+    """Declares only what the training path passes — no `**kwargs` catch-all to absorb stray keys."""
+    from torch.utils.data import Dataset
+
+    class _DS(Dataset):
+        def __len__(self):
+            return 4
+
+        def __getitem__(self, idx):
+            return torch.zeros(3, 32, 32), {"values": torch.tensor(float(idx))}
+
+    return _DS()
+
+
 def _unbuildable_dataset(**_kwargs):
     raise RuntimeError("cannot open the source for this task")
 
@@ -139,7 +153,7 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# A task the contract has no synthetic schema for is smoked against a REAL batch —
+# A task the contract has no synthetic schema for is smoked against a real batch —
 # no task taxonomy, and no run launching with the contract silently skipped.
 # --------------------------------------------------------------------------
 
@@ -156,12 +170,43 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
                                     "task": "bunch_compactness"}},
         "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}]},
     }
-    r = preflight_config(cfg, smoke=True)
+    r = preflight_config(cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
     # The contract actually ran — a real batch stood in for the missing synthetic schema.
     assert r["smoke"]["not_smokeable"] is None
     assert r["smoke"]["ok"] is True
     assert r["smoke"]["train_loss"] is not None
+    assert r["smoke"]["batch_source"] == "dataset"  # provenance: which reference proved it
+    # The same batch reaches overfit_check; re-synthesizing here would report a false "does not
+    # learn" for exactly the bespoke tasks the real-batch path exists to serve.
+    assert r["overfit_check"]["issue"] is None, r["overfit_check"]
+    assert r["overfit_check"]["passed"] is True, r["overfit_check"]
+
+
+def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeypatch):
+    """The smoked dataset is built from the run's own source kwargs, not a private key list.
+
+    A bespoke builder only has to accept what the training path passes it. Preflight forwarding
+    extra keys (labels_dir, masks_dir, ...) would reject a dataset that trains fine, turning the
+    contract rail into a blocker for valid work.
+    """
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.tools.training_tools import _dataset_source_kwargs, _one_real_batch
+
+    imgs, lbls = tmp_path / "images", tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    data = {"images_dir": str(imgs), "labels_dir": str(lbls),
+            "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset",
+                               "task": "bunch_compactness"}}
+
+    # The training path and the smoke path derive the same kwargs from the same config.
+    assert _dataset_source_kwargs("bunch_compactness", data) == {
+        "images_dir": str(imgs), "dataset_source": data["dataset_source"]}
+
+    batch, why = _one_real_batch("bunch_compactness", {"data": data})
+    assert why is None, why
+    assert batch is not None
 
 
 def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
@@ -180,7 +225,13 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     }
     r = preflight_config(cfg, smoke=True)
     assert r["valid"] is False
-    assert any("model contract" in i for i in r["issues"])
+    # Assert on what only the blocking path produces. "valid is False" alone is vacuous here: the
+    # pre-fix code reached False by a different route (an unknown task fell through to a
+    # classification-shaped synthetic batch, which this model rejects).
+    assert r["smoke"]["not_smokeable"]
+    assert any("measurement boundary is unproven" in i for i in r["issues"]), r["issues"]
+    # The real reason the batch could not be built is surfaced, not swallowed into the log.
+    assert any("cannot open the source" in i for i in r["issues"]), r["issues"]
 
 
 # --------------------------------------------------------------------------
