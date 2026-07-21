@@ -186,7 +186,13 @@ export function AnnotateToolbar({
         : "unannotated";
     setImageStatus(currentImage, newStatus);
     try {
-      await classesApi.setImageStatus(dataset.project_root, currentImage, newStatus);
+      await classesApi.setImageStatus(
+        dataset.project_root,
+        currentImage,
+        newStatus,
+        dataset.annotation_type,
+        dataset.date,
+      );
     } catch (e) {
       useStore
         .getState()
