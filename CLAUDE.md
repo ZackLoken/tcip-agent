@@ -45,8 +45,12 @@ hazelnut catkin phenology). The dataset layer serves the known task loaders
 bespoke `dataset_source` the agent writes — an importable builder for a new task, routed
 by `build_dataset` and snapshotted for provenance, mirroring `model_source`. It reads RGB
 and multi-band 2D rasters (GeoTIFF / NPZ / grayscale); `num_channels` threads through
-`build_dataset` → the backbone's `in_chans`, and inference is channel-aware — so
-multispectral 2D is a config choice, not new work. Detectors are built by the plain `build_detector` (+
+`build_dataset` → the backbone's `in_chans`, and training, tiling and inference are all
+channel-aware. Multispectral 2D needs one derivation, not new work: a detector at `in_chans != 3`
+requires per-band `image_mean`/`image_std` (ImageNet's 3-element defaults silently broadcast a
+1-channel image to 3 and raise at any other count), so derive them with
+`derivations.band_normalization_stats` and pass them through `builder_kwargs` to `build_detector`,
+which refuses to build without them rather than normalizing against numbers it picked. Detectors are built by the plain `build_detector` (+
 `_build_faster_rcnn`/`_build_fcos`/`_build_retinanet`/`_build_mask_rcnn`) that bespoke
 model code imports directly, and `instance_seg` is real (Mask R-CNN). **3D point clouds
 (LiDAR / SfM) are not built** and carry no scaffolding — there is no point-cloud
