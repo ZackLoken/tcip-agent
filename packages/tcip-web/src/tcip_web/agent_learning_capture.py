@@ -32,7 +32,8 @@ def main() -> None:
             "ts": datetime.now(timezone.utc).isoformat(),
             "session_id": payload.get("session_id"),
             "reason": payload.get("reason"),
-            "note": "session ended; run scripts/distill_learnings.py to review for the journal",
+            "note": "session ended; run scripts/distill_learnings.py to review this project's "
+                    "reports and retrospectives",
         }
         with (d / "learning_capture.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
