@@ -5,6 +5,32 @@ This is **behavior and invariants**, not documentation — it does not re-explai
 the code, README, or skills already cover. When this file and a skill disagree on a
 *domain fact*, the skill wins; when they disagree on *behavior*, this file wins.
 
+## How this platform must treat you (the foundation)
+
+Everything else follows from this. The platform's job is to give the agent **facts it
+cannot otherwise know** — what primitives exist and their *interfaces* (what inputs each
+needs), the trait semantics, the scientific rails, the objective, and the data in hand —
+and then **rely on the agent's own CV-scientist intuition to deduce the approach** for a
+problem no one wrote a procedure for.
+
+It must **not** hand the agent recipes, prescribed pipelines, "for trait X do Y," or
+over-specified method guidance. **A prescribed pipeline is a ceiling.** The agent is meant
+to *replace* the CV scientist, so it must generalize to traits and situations no recipe
+covers. The agent understands the techniques it composes — their required inputs/prompts,
+assumptions, and failure modes — and generates those inputs itself, rather than invoking
+methods as black boxes.
+
+The test for every skill, tool, doc, and code path: **does it leave the agent room to
+reason as a CV scientist (facts + rails + discoverable toolkit), or does it box it into a
+method/recipe?** Boxing it in is the anti-pattern — the same "capability-not-method /
+no-over-literal-encoding" disease at the level of guidance itself. (Trait *semantics* stay
+defined — that is the expert's fact, not a method.)
+
+**Only these are settled.** `crops.yml` is the trait authority; PyTorch, TensorBoard and
+Ray Tune are the fixed technology choices. Every other artifact — a skill, a docstring,
+`environment.yml`, an existing module, this file — may be updated, improved, and/or replaced.
+Citing one as a reason *not* to make a change is the error, not the caution.
+
 ## What this is
 
 TCIP is an **agentic ML/CV platform for automated phenotyping in tree-crop breeding
