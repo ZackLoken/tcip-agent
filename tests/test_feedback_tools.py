@@ -78,6 +78,34 @@ def test_prioritize_review_queue_checkpoint_missing(tmp_path):
     assert "error" in r  # early guard, no torch import needed
 
 
+def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
+    """The refusal is a ValueError whatever the name looks like.
+
+    ``build_scorer``'s callers catch ``ValueError`` to turn a refusal into an error dict. A dotted
+    name that fails to import used to raise ``ModuleNotFoundError`` straight out of the audited
+    MCP tool instead.
+    """
+    import pytest
+
+    from tcip_mcp.pipelines.active_learning.helpers import build_scorer
+
+    with pytest.raises(ValueError):
+        build_scorer("no_such_scorer", "detection")
+    with pytest.raises(ValueError, match="Could not import scorer"):
+        build_scorer("not_a_module.at_all:make", "detection")
+
+
+def test_unresolvable_proposal_engine_raises_valueerror():
+    import pytest
+
+    from tcip_mcp.pipelines.proposal import resolve_proposer
+
+    with pytest.raises(ValueError):
+        resolve_proposer("no_such_engine")
+    with pytest.raises(ValueError, match="Could not import proposal engine"):
+        resolve_proposer("not_a_module.at_all:make")
+
+
 def test_feedback_tools_register_in_manifest():
     from tcip_mcp.server import list_registered_tools
     names = list_registered_tools()
