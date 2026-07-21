@@ -10,6 +10,62 @@ torch = pytest.importorskip("torch")
 # Phase 1: Neck forward tests
 # ====================================================================
 
+class TestBackboneOrdering:
+    """The wrapper renames stages so pyramid order survives into the necks.
+
+    The necks rebuild order with ``sorted(features.keys())``. A module that emits its own names
+    would be consumed alphabetically — and with uniform stage widths there is no shape error to
+    catch it, so the finest map silently lands where a detector assigns the smallest anchors.
+    """
+
+    def _staged(self):
+        import torch.nn as nn
+
+        class Staged(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Conv2d(3, 64, 3, stride=2, padding=1)
+                self.b = nn.Conv2d(64, 64, 3, stride=2, padding=1)
+                self.c = nn.Conv2d(64, 64, 3, stride=2, padding=1)
+
+            def forward(self, x):
+                lo = self.a(x)
+                mid = self.b(lo)
+                return {"low": lo, "mid": mid, "high": self.c(mid)}
+
+        return Staged()
+
+    def test_self_named_stages_are_renamed_finest_first(self):
+        from tcip_mcp.pipelines.components.backbones import BackboneWrapper
+
+        out = BackboneWrapper(self._staged(), [64, 64, 64])(torch.zeros(1, 3, 64, 64))
+        assert list(out.keys()) == ["s0", "s1", "s2"]
+        # s0 is the finest stage, not whatever sorted() would have put first ("high", 8x8).
+        assert out["s0"].shape[-1] == 32
+        assert out["s2"].shape[-1] == 8
+
+    def test_pyramid_order_survives_into_the_neck(self):
+        from tcip_mcp.pipelines.components.backbones import BackboneWrapper
+        from tcip_mcp.pipelines.components.necks import FPN
+
+        feats = BackboneWrapper(self._staged(), [64, 64, 64])(torch.zeros(1, 3, 64, 64))
+        p = FPN([64, 64, 64], out_channels=64)(feats)
+        assert [p[k].shape[-1] for k in sorted(p)] == [32, 16, 8]  # finest -> coarsest
+
+    def test_feature_keys_names_the_stages(self):
+        from tcip_mcp.pipelines.components.backbones import BackboneWrapper
+
+        w = BackboneWrapper(self._staged(), [64, 64, 64], feature_keys=["p3", "p4", "p5"])
+        assert list(w(torch.zeros(1, 3, 64, 64)).keys()) == ["p3", "p4", "p5"]
+
+    def test_feature_keys_length_mismatch_raises(self):
+        from tcip_mcp.pipelines.components.backbones import BackboneWrapper
+
+        w = BackboneWrapper(self._staged(), [64, 64, 64], feature_keys=["only_one"])
+        with pytest.raises(ValueError, match="1 names but the backbone emitted 3"):
+            w(torch.zeros(1, 3, 64, 64))
+
+
 class TestNecks:
     def _dummy_features(self, channels=(64, 128, 256, 512)):
         return {
