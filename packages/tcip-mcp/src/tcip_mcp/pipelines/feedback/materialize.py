@@ -141,9 +141,16 @@ def materialize_dataset(
     # empty files (someone may have emptied a label mid-work).
     negatives = {e["image"]: "negative" for e in manifest_images if e["status"] == "hard_negative"}
     if negatives:
+        from tcip_mcp.dataset_layout import parse_annotation_dir, status_bucket
+
+        # Written into the bucket the emitted label dir resolves to, so training reads these back
+        # as confirmed negatives. An unbucketed write would be quarantined as unattributable and
+        # every human rejection verdict would be silently dropped from the retrain.
+        campaign, date, _task = parse_annotation_dir(labels_out) or (None, None, "detect")
         status_file = out / ".tcip" / "state" / "image_status.json"
         status_file.parent.mkdir(parents=True, exist_ok=True)
-        status_file.write_text(json.dumps(negatives, indent=2))
+        status_file.write_text(
+            json.dumps({status_bucket(campaign, date): negatives}, indent=2))
 
     manifest = {
         "created": datetime.now(timezone.utc).isoformat(),
