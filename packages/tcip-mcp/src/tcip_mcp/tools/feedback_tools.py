@@ -16,17 +16,14 @@ from tcip_mcp.pipelines.feedback.materialize import (
     materialize_dataset, reviewed_image_names, select_unreviewed,
 )
 
-REVIEW_STATE_FILENAME = "review_stats.json"  # legacy single-file layout; ReviewEngine migrates it
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
 
 def _review_state_exists(review_state_dir: str) -> bool:
-    """True if there's a legacy ``review_stats.json`` or a non-empty ``review/`` shard dir."""
-    d = Path(review_state_dir)
-    if (d / REVIEW_STATE_FILENAME).is_file():
-        return True
+    """True if the ``review/`` shard dir holds any review state."""
     from tcip_annotation.review_engine import REVIEW_SHARD_DIRNAME
-    shard_dir = d / REVIEW_SHARD_DIRNAME
+
+    shard_dir = Path(review_state_dir) / REVIEW_SHARD_DIRNAME
     return shard_dir.is_dir() and any(shard_dir.glob("*.json"))
 
 
@@ -50,7 +47,7 @@ def materialize_review_dataset(
 
     Args:
         review_state_dir: Directory holding the review state (``review/`` shards, or a
-            legacy ``review_stats.json``).
+            ``review/`` shards).
         source_images_dir: Directory of the reviewed source images.
         output_dir: Destination for the curated dataset (distinct from the source).
         experiment_id: Optional experiment to record the review-session lineage on.
@@ -59,12 +56,12 @@ def materialize_review_dataset(
         copy_files: Copy images (True) or symlink (False).
     """
     if not _review_state_exists(review_state_dir):
-        return {"error": f"no review state (review/ shards or legacy review_stats.json) in {review_state_dir}"}
+        return {"error": f"no review state (review/ shards) in {review_state_dir}"}
     if not Path(source_images_dir).is_dir():
         return {"error": f"Source images dir not found: {source_images_dir}"}
 
     from tcip_annotation.review_engine import ReviewEngine
-    engine = ReviewEngine(review_state_dir)  # migrates a legacy review_stats.json, if any
+    engine = ReviewEngine(review_state_dir)
     review_state = engine.raw_state
     state_path = engine.shard_dir
 
@@ -85,7 +82,7 @@ def materialize_review_dataset(
         # even when the experiment pre-existed.
         update_lineage(experiment_id, data_source=review_state_dir, review_session={
             "review_state_dir": review_state_dir,
-            "review_stats": str(state_path),
+            "review_shards": str(state_path),
             "n_positive": result["positive"],
             "n_hard_negative": result["hard_negative"],
             "n_boxes": result["total_boxes"],
