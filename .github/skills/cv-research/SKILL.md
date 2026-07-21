@@ -73,7 +73,8 @@ for the full contract; the seams you use here are:
   *resolved* in_chans/num_classes/img_size before the thread spawns), so a broken builder fails the
   launch instead of wasting a run. From inside a custom loop, `ctx.check_contract()` self-proves at
   the same resolved dims; prove it learns cheaply first with `ctx.overfit_check()` (voluntary,
-  non-gating).
+  non-gating). For a task outside the ones `build_dataset` routes, pass `sample_batch=` — an
+  `(images, targets)` pair from your dataset — since no synthetic target shape is invented for it.
 - **A custom `train(ctx)` when the technique needs one** (a new loss schedule, a two-stage curriculum,
   a contrastive pretext, EMA weights, a distillation loop). Point `training_source` at it. The
   `TrainContext` (`pipelines.training.envelope`) hands you the craft library — leakage-free loaders,
