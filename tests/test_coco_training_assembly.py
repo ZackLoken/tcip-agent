@@ -83,8 +83,8 @@ def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):
     json_io.write_detect(labels / "img1.json", [], 100, 100, keep_empty=True)  # emptied mid-work
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
-    (state / "image_status.json").write_text(_json.dumps({"img0.jpg": "negative",
-                                                          "img1.jpg": "partial"}))
+    (state / "image_status.json").write_text(_json.dumps(
+        {"default": {"img0.jpg": "negative", "img1.jpg": "partial"}}))
     coco = assemble_coco(labels, images)
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}  # human-confirmed only
 
@@ -217,7 +217,8 @@ def _rail_fixture(tmp_path):
     json_io.write_detect(labels / "neg.json", [], 100, 100, keep_empty=True)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps({"neg.jpg": "negative"}))
+    (state / "image_status.json").write_text(
+        json.dumps({"default": {"neg.jpg": "negative"}}))
     return images, labels
 
 
@@ -308,7 +309,8 @@ def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
     json_io.write_detect(labels / "IMG_0002.json", [], 100, 100, keep_empty=True)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps({f"IMG_0002{ext}": "negative"}))
+    (state / "image_status.json").write_text(
+        json.dumps({"default": {f"IMG_0002{ext}": "negative"}}))
 
     # The assembled COCO carries the real names, so to_coco_dataset can match the store.
     coco = assemble_coco(labels, images)
@@ -363,3 +365,106 @@ def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_pa
                        num_classes=1, coco_data=external, label_format="coco")
     assert ds.stems == ["ann"], "an unconfirmed zero-annotation COCO image must not train"
     assert ds.sample_counts["confirmed_negative"] == 0
+
+
+def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
+    """A Complete is a statement about one trait. Re-applying it elsewhere trains an image full of
+    bushes as containing no bushes."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset, confirmed_negative_names
+
+    images = tmp_path / "images"
+    catkin = tmp_path / "annotations" / "catkin" / "detect"
+    bush = tmp_path / "annotations" / "bush" / "detect"
+    catkin.mkdir(parents=True)
+    bush.mkdir(parents=True)
+    _make_images(images, ["ann", "shared"])
+    for d in (catkin, bush):
+        json_io.write_detect(d / "ann.json", [BBox(4, 4, 12, 12, 0)], 100, 100, keep_empty=True)
+        json_io.write_detect(d / "shared.json", [], 100, 100, keep_empty=True)
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    # Confirmed negative for catkin only — the breeder never judged it for bush.
+    (state / "image_status.json").write_text(json.dumps({"catkin": {"shared.jpg": "negative"}}))
+
+    assert confirmed_negative_names(catkin) == {"shared.jpg"}
+    assert confirmed_negative_names(bush) == set()
+    assert sorted(build_dataset("detection", images_dir=str(images), labels_dir=str(catkin),
+                                num_classes=1).stems) == ["ann", "shared"]
+    assert build_dataset("detection", images_dir=str(images), labels_dir=str(bush),
+                         num_classes=1).stems == ["ann"]
+
+
+def test_pre_scoping_confirmations_are_quarantined_not_trusted(tmp_path):
+    """Flat entries record no trait, so they cannot be attributed to one. Never a training
+    negative until the breeder re-confirms — laundering them into a campaign is the bug."""
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+
+    labels = tmp_path / "annotations" / "catkin" / "detect"
+    labels.mkdir(parents=True)
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    (state / "image_status.json").write_text(json.dumps({"shared.jpg": "negative"}))  # legacy flat
+
+    assert confirmed_negative_names(labels) == set()
+
+
+def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
+    """Silently returning nothing would discard every hard negative the review loop harvested."""
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+
+    labels = tmp_path / "some" / "flat" / "labels"
+    labels.mkdir(parents=True)
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    (state / "image_status.json").write_text(json.dumps({"catkin": {"a.jpg": "negative"}}))
+
+    with pytest.raises(ValueError, match="cannot tell which campaign"):
+        confirmed_negative_names(labels)
+
+
+def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
+    """Refuse only when there is something to lose.
+
+    A split or curated export cannot name its campaign. Raising there would block the platform's
+    own documented split -> train path; with no confirmed negatives in the project there is nothing
+    to drop, so it must proceed.
+    """
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+
+    labels = tmp_path / "some" / "flat" / "labels"
+    labels.mkdir(parents=True)
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    (state / "image_status.json").write_text(json.dumps({"catkin": {"a.jpg": "complete"}}))
+
+    assert confirmed_negative_names(labels) == set()
+
+
+def test_split_tree_carries_its_confirmed_negatives(tmp_path):
+    """make_splits(materialize=True) emits {train,val,test}/labels, which cannot name its campaign,
+    so it must carry the confirmations rather than inherit them by accident."""
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.tools.data_tools import make_splits
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations" / "catkin" / "detect"
+    labels.mkdir(parents=True)
+    _make_images(images, [f"i{n:02d}" for n in range(10)])
+    for n in range(10):
+        stem = f"i{n:02d}"
+        boxes = [] if n % 2 else [BBox(4, 4, 12, 12, 0)]
+        json_io.write_detect(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    (state / "image_status.json").write_text(json.dumps(
+        {"catkin": {f"i{n:02d}.jpg": "negative" for n in range(1, 10, 2)}}))
+
+    out = tmp_path / "splits"
+    make_splits(str(tmp_path), output_path=str(out), materialize=True)
+
+    carried = set()
+    for split in ("train", "val", "test"):
+        d = out / split / "labels"
+        if d.is_dir():
+            carried |= confirmed_negative_names(d)
+    assert carried, "the split tree lost every human-confirmed negative"
