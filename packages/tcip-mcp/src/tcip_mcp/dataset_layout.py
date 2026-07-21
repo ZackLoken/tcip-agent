@@ -136,35 +136,18 @@ def status_bucket(campaign: Optional[str], date: Optional[str]) -> str:
 
 
 def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
-    """``{bucket: {image_name: status}}``, quarantining pre-scoping entries.
+    """``{bucket: {image_name: status}}`` — a shape guard, shared by every reader.
 
-    The store used to be keyed by image name alone, so a Complete recorded while annotating one
-    campaign was re-applied to every other one. Flat entries record no campaign, so they cannot be
-    attributed to one — they land in ``LEGACY_BUCKET``, which is never read as a training negative
-    and never re-derived into a confirmation.
-
-    Every reader goes through here. A reader that inspected the raw JSON instead would see nothing
-    at all on a store that has not been migrated yet — which is exactly when a legacy entry most
-    needs reporting.
+    A bucket is ``status_bucket(campaign, date)``. Anything that is not a dict of strings is not a
+    campaign's confirmations and is ignored, so a malformed store yields no confirmations rather
+    than a wrong one.
     """
     if not isinstance(raw, dict):
         return {}
-    store: dict[str, dict[str, str]] = {}
-    legacy: dict[str, str] = {}
-    for key, value in raw.items():
-        if isinstance(value, dict):
-            store[key] = {k: v for k, v in value.items() if isinstance(v, str)}
-        elif isinstance(value, str):
-            legacy[key] = value
-    if legacy:
-        store.setdefault(LEGACY_BUCKET, {}).update(legacy)
-    return store
-
-
-#: Where confirmations from before the store was scoped live. They record no campaign, so they
-#: cannot be attributed to one — never trusted as a training negative, never auto-promoted,
-#: surfaced to the breeder for re-confirmation instead.
-LEGACY_BUCKET = "_unscoped_legacy"
+    return {
+        key: {k: v for k, v in value.items() if isinstance(v, str)}
+        for key, value in raw.items() if isinstance(value, dict)
+    }
 
 
 def prediction_dir(dataset_root: str | Path, model: Optional[str], date: Optional[str], task: str) -> Path:
