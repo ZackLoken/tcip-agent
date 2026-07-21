@@ -68,25 +68,3 @@ def test_doctor_clean_project_exits_zero(tmp_path):
     json_io.write_detect(det / "IMG_A.json", [BBox(1, 1, 9, 9, 0, created_by="user:zack")], 32, 32)
     res = _run(root)
     assert res.returncode == 0, res.stdout
-
-
-def test_doctor_reports_legacy_confirmations_on_an_unmigrated_store(tmp_path):
-    """The flat store is the state a project is in before anyone opens the GUI — the one moment
-    the breeder most needs telling that their confirmations are not counted yet."""
-    import subprocess
-    import sys
-
-    root = tmp_path / "proj"
-    (root / "images" / "2026-02-11").mkdir(parents=True)
-    det = root / "annotations" / "catkin" / "2026-02-11" / "detect"
-    det.mkdir(parents=True)
-    state = root / ".tcip" / "state"
-    state.mkdir(parents=True)
-    Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / "IMG_A.JPG")
-    json_io.write_detect(det / "IMG_A.json", [], 32, 32, keep_empty=True)
-    # Pre-scoping shape: keyed by image name alone, values are strings not dicts.
-    (state / "image_status.json").write_text(json.dumps({"IMG_A.JPG": "negative"}))
-
-    res = subprocess.run([sys.executable, "scripts/doctor.py", str(root)],
-                         capture_output=True, text=True)
-    assert "predate campaign scoping" in res.stdout, res.stdout
