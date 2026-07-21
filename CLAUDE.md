@@ -139,6 +139,13 @@ which touches neither the tree, the index, nor the stash list.
   - **Never commit unvalidated domain logic as if it were a definition.** Provisional logic
     is flagged provisional and validated or removed; it must not silently become
     institutional truth that the next session reuses.
+- **An annotation campaign is not a trait.** `annotations/<campaign>/` names an object class that
+  must be isolated. Sometimes that is a trait's own subject (catkins, for `catkin_50per_date`);
+  often it is an enabling object no trait names — a *bush* isolated so anything can be aggregated
+  per plant, a *leaf* isolated before leaf area is measured. So campaign names are not governed by
+  `crops.yml` and must not be validated against it. (The code still calls this `trait` in
+  `dataset_layout` and `annotation_type` in the web layer; both names are wrong and a rename is
+  pending.)
 - **A negative is empty labels + an explicit human Complete** (the `image_status.json` store) —
   an empty label file alone is never a negative (it may be emptied mid-work) and never trains
   as one. Don't delete empty label files without asking.
