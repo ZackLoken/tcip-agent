@@ -127,7 +127,10 @@ def prioritize_review_queue(
         review_state_dir: Optional review-state dir; with ``skip_reviewed`` excludes
             already-completed images.
         strategy: ``informativeness`` | ``confidence_triage``.
-        method: Informativeness scorer — ``uncertainty`` | ``diversity`` | ``combined``.
+        method: Informativeness scorer. ``uncertainty`` | ``diversity`` | ``combined`` are the
+            built-in reference implementations, not the allowed set — register your own with
+            ``register_scorer``, or pass a dotted ``module:factory`` you wrote. An
+            unresolvable name is refused rather than silently scored as ``combined``.
         task: Task type for the uncertainty scorer.
         budget: Number of images to return (``informativeness`` only).
         skip_reviewed: Exclude already-completed images from the queue.
@@ -219,7 +222,10 @@ def prioritize_review_queue(
     guard = require_composed_detector(predictor, purpose="review-queue scoring")
     if guard:
         return {"error": guard}
-    scorer = build_scorer(method, task)
+    try:
+        scorer = build_scorer(method, task)
+    except ValueError as e:  # unknown scorer — refuse rather than silently reordering the queue
+        return {"error": str(e)}
 
     scored = scorer.score(paths, predictor.model, predictor.device)[:budget]
     return {
