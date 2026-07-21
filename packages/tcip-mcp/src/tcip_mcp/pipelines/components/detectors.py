@@ -46,10 +46,68 @@ def _default_anchor_sizes(num_levels: int, base: int = 32) -> tuple[tuple[int, .
     return tuple((base * 2 ** i,) for i in range(num_levels))
 
 
+def _probe_in_chans(adapter: Any) -> int | None:
+    """A *hint* at the input band count, from the first ``Conv2d`` in registration order.
+
+    Only ever consulted when the caller passes no ``in_chans``, and never allowed to contradict
+    one. ``modules()`` yields in attribute-assignment order, which says nothing about the forward
+    graph: an adapter that registers its neck first reports the neck's width, and one that
+    band-projects N bands through a 1x1 conv into a pretrained 3-channel backbone reports whichever
+    conv was assigned first. Treating this as authoritative both blocks correct builds and lets
+    wrong ones through, so it stays a fallback. ``None`` when there is no conv at all.
+    """
+    for module in adapter.modules():
+        if isinstance(module, nn.Conv2d):
+            return int(module.in_channels)
+    return None
+
+
+def _normalization(adapter: Any, in_chans: int | None, image_mean, image_std,
+                   detector: str) -> dict:
+    """Validated ``image_mean``/``image_std`` kwargs for a torchvision detector.
+
+    torchvision's ``GeneralizedRCNNTransform`` defaults to 3-element ImageNet statistics and
+    broadcasts them against a ``[C, H, W]`` input, so any ``C != 3`` raises inside the transform
+    with an error naming no channel concept. Nothing is synthesized here: per-band statistics are a
+    property of the dataset, so an N-channel build without them is refused rather than normalized
+    against numbers the platform picked. Derive them with
+    ``pipelines.derivations.band_normalization_stats`` and pass them.
+    """
+    # The caller is authoritative: only they know the band count, and the probe is a registration-
+    # order guess that is wrong for band-projection and neck-first adapters alike.
+    if in_chans is None:
+        probed = _probe_in_chans(adapter)
+        in_chans = probed if probed is not None else 3
+    if image_mean is None and image_std is None:
+        if in_chans == 3:
+            return {}  # torchvision's own ImageNet default applies
+        raise ValueError(
+            f"build_detector('{detector}', ..., in_chans={in_chans}) needs per-band image_mean and "
+            f"image_std of length {in_chans}: torchvision normalizes with 3-element ImageNet "
+            f"statistics by default, which do not describe a {in_chans}-band image — at 1 channel "
+            f"they silently broadcast it to 3, and at any other count they raise inside the "
+            f"transform. Derive them from your training split with "
+            f"pipelines.derivations.band_normalization_stats(...) and pass both."
+        )
+    if image_mean is None or image_std is None:
+        raise ValueError(
+            f"build_detector('{detector}', ...) needs image_mean and image_std together; got only "
+            f"{'image_mean' if image_mean is not None else 'image_std'}."
+        )
+    mean, std = [float(v) for v in image_mean], [float(v) for v in image_std]
+    if len(mean) != in_chans or len(std) != in_chans:
+        raise ValueError(
+            f"build_detector('{detector}', ..., in_chans={in_chans}) got image_mean of length "
+            f"{len(mean)} and image_std of length {len(std)}; both must be {in_chans}."
+        )
+    return {"image_mean": mean, "image_std": std}
+
+
 def _build_faster_rcnn(
     adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
     anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333,
-    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0), **_: Any,
+    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0), in_chans: int | None = None,
+    image_mean: Any = None, image_std: Any = None, **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import FasterRCNN
     from torchvision.models.detection.rpn import AnchorGenerator
@@ -65,12 +123,15 @@ def _build_faster_rcnn(
         adapter, num_classes=num_classes + 1,  # +1 for background
         rpn_anchor_generator=anchor_generator, box_roi_pool=roi_pool,
         min_size=min_size, max_size=max_size,
+        **_normalization(adapter, in_chans, image_mean, image_std, "faster_rcnn"), **kwargs,
     )
 
 
 def _build_fcos(
     adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
-    anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333, **_: Any,
+    anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333,
+    in_chans: int | None = None, image_mean: Any = None, image_std: Any = None,
+    **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import FCOS
     from torchvision.models.detection.rpn import AnchorGenerator
@@ -81,13 +142,15 @@ def _build_fcos(
     return FCOS(
         adapter, num_classes=num_classes + 1,
         anchor_generator=anchor_generator, min_size=min_size, max_size=max_size,
+        **_normalization(adapter, in_chans, image_mean, image_std, "fcos"), **kwargs,
     )
 
 
 def _build_retinanet(
     adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
     anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333,
-    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0), **_: Any,
+    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0), in_chans: int | None = None,
+    image_mean: Any = None, image_std: Any = None, **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import RetinaNet
     from torchvision.models.detection.rpn import AnchorGenerator
@@ -100,13 +163,15 @@ def _build_retinanet(
     return RetinaNet(
         adapter, num_classes=num_classes + 1,
         anchor_generator=anchor_generator, min_size=min_size, max_size=max_size,
+        **_normalization(adapter, in_chans, image_mean, image_std, "retinanet"), **kwargs,
     )
 
 
 def _build_mask_rcnn(
     adapter: Any, num_classes: int, *, featmap_names: list[str], num_levels: int,
     anchor_base_size: int = 32, min_size: int = 800, max_size: int = 1333,
-    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0), **_: Any,
+    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0), in_chans: int | None = None,
+    image_mean: Any = None, image_std: Any = None, **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import MaskRCNN
     from torchvision.models.detection.rpn import AnchorGenerator
@@ -122,6 +187,7 @@ def _build_mask_rcnn(
         rpn_anchor_generator=anchor_generator,
         box_roi_pool=box_roi_pool, mask_roi_pool=mask_roi_pool,
         min_size=min_size, max_size=max_size,
+        **_normalization(adapter, in_chans, image_mean, image_std, "mask_rcnn"), **kwargs,
     )
 
 
@@ -132,14 +198,54 @@ _DETECTOR_BUILDERS = {
     "mask_rcnn": _build_mask_rcnn,
 }
 
+# The torchvision class each builder constructs. Its own constructor parameters (box_score_thresh,
+# rpn_nms_thresh, detections_per_img, ...) are part of the surface an agent may tune, so they are
+# accepted and forwarded rather than rejected as unknown — while a typo still raises.
+_DETECTOR_CLASSES = {
+    "faster_rcnn": ("torchvision.models.detection", "FasterRCNN"),
+    "fcos": ("torchvision.models.detection", "FCOS"),
+    "retinanet": ("torchvision.models.detection", "RetinaNet"),
+    "mask_rcnn": ("torchvision.models.detection", "MaskRCNN"),
+}
+
+
+# Structural arguments the builders construct and pass themselves. Accepting them would let a
+# caller past the guard only to hit "got multiple values for keyword argument" from torchvision;
+# they are shaped through anchor_base_size / aspect_ratios / featmap_names / num_levels instead.
+_BUILDER_SUPPLIED = frozenset({
+    "rpn_anchor_generator", "anchor_generator", "box_roi_pool", "mask_roi_pool",
+})
+
+
+def _accepted_kwargs(name: str) -> set[str]:
+    """Every keyword ``build_detector(name, ...)` accepts.
+
+    The builder's own named parameters plus the torchvision detector class's, since the builder
+    forwards its ``**kwargs`` to that constructor.
+    """
+    import importlib
+
+    def _named(obj) -> set[str]:
+        return {n for n, p in inspect.signature(obj).parameters.items()
+                if p.kind not in (p.VAR_KEYWORD, p.VAR_POSITIONAL)}
+
+    module, cls_name = _DETECTOR_CLASSES[name]
+    cls = getattr(importlib.import_module(module), cls_name)
+    return (_named(_DETECTOR_BUILDERS[name]) | _named(cls)) - {
+        "adapter", "backbone", "num_classes",
+    } - _BUILDER_SUPPLIED
+
 
 def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> Any:
     """Instantiate a detector builder by name.
 
-    Raises ``KeyError`` for an unknown name and ``TypeError`` for an unrecognized kwarg. The
-    ``_build_*`` functions end in ``**_: Any``, so without this check a mistyped or unsupported
-    key is swallowed and the parameter it was meant to set stays at its pinned default — the
-    derived value silently does not apply, with no error and no record.
+    Raises ``KeyError`` for an unknown name and ``TypeError`` for an unrecognized kwarg, so a
+    mistyped or inapplicable key cannot leave the parameter it was meant to set at a pinned default
+    with no error and no record. Accepted keys are the builder's own plus the torchvision detector
+    class's, which the builder forwards — the library's real surface, not a shorter list of it.
+
+    An ``in_chans != 3`` build additionally requires ``image_mean``/``image_std`` of that length;
+    see ``_normalization``.
     """
     try:
         fn = _DETECTOR_BUILDERS[name]
@@ -147,19 +253,14 @@ def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> 
         raise KeyError(
             f"Unknown detector '{name}'. Available: {sorted(_DETECTOR_BUILDERS)}"
         ) from None
-    # Named parameters only — the trailing VAR_KEYWORD is what we are guarding against, so
-    # including it would make the accepted set universal and the check a no-op.
-    params = inspect.signature(fn).parameters
-    accepted = {n for n, p in params.items()
-                if p.kind not in (p.VAR_KEYWORD, p.VAR_POSITIONAL)} - {"adapter", "num_classes"}
+    accepted = _accepted_kwargs(name)
     unknown = sorted(set(kwargs) - accepted)
     if unknown:
         # Name the detectors that do take each rejected kwarg. A key valid elsewhere is an
         # architecture difference (fcos is anchor-free, so it has no aspect_ratios) rather than a
         # typo, and the two need different responses from the caller.
         elsewhere = {
-            k: [o for o, f in _DETECTOR_BUILDERS.items()
-                if k in inspect.signature(f).parameters]
+            k: [o for o in _DETECTOR_BUILDERS if k in _accepted_kwargs(o)]
             for k in unknown
         }
         detail = "; ".join(
