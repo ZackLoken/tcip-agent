@@ -2,7 +2,7 @@
 
 Checks the bug family found in field sessions (2026-07-16): status-store vs disk disagreements
 on negatives, registry entries pointing at missing/test-fixture checkpoints, provenance smells,
-un-migrated legacy state, and orphaned labels. Read-only. Run at session start:
+and orphaned labels. Read-only. Run at session start:
 
     python scripts/doctor.py <project_root>
 
@@ -40,18 +40,13 @@ def _image_stems(root: Path) -> dict[str, str]:
 def check_negatives(root: Path, findings: list) -> None:
     """A negative is empty labels + human Complete — flag every disk/status disagreement."""
     from tcip_mcp.dataset_layout import (
-        LEGACY_BUCKET, normalize_status_store, parse_annotation_dir, status_bucket,
+        normalize_status_store, parse_annotation_dir, status_bucket,
     )
 
-    # Through the same normalizer the web layer reads with. Inspecting the raw JSON here would see
-    # nothing on a store that has not been migrated yet — precisely when a legacy entry most needs
-    # reporting, since that is the state a project is in before anyone opens the GUI.
+    # Through the same normalizer the web layer reads with, so the two can never disagree about
+    # what the store says.
     by_bucket = normalize_status_store(_load(root / ".tcip" / "state" / "image_status.json"))
     stems = _image_stems(root)
-    legacy = by_bucket.pop(LEGACY_BUCKET, {})
-    if legacy:
-        findings.append(("warn", f"{len(legacy)} confirmation(s) predate campaign scoping and are "
-                        "not trusted as training negatives — re-confirm them in the GUI"))
 
     def _negatives_for(label_path: Path) -> set[str]:
         """Negatives confirmed for *this* label file's own campaign.
@@ -138,9 +133,6 @@ def check_provenance(root: Path, findings: list) -> None:
 
 def check_state(root: Path, findings: list) -> None:
     state = root / ".tcip" / "state"
-    if (state / "review_stats.json").is_file():
-        findings.append(("warn", "legacy review_stats.json still present — the engine migrates "
-                        "it to review/ shards on first load; a leftover suggests it never loaded"))
     stems = _image_stems(root)
     shard_dir = state / "review"
     if shard_dir.is_dir():
