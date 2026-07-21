@@ -288,10 +288,24 @@ def build_loss(
 
     When ``class_distribution`` is supplied and the loss is weightable
     (``cross_entropy``/``weighted_ce``/``focal``), an inverse-frequency ``weight``
-    tensor is injected unless ``weight`` was passed explicitly.
+    tensor is injected unless ``weight`` was passed explicitly. The weighting context is
+    forwarded into a combined loss's terms, and a ``class_distribution`` that no term can
+    consume raises rather than being dropped — imbalance handling that silently vanishes is
+    worse than a build that refuses.
     """
     if "+" in name:
-        sub_losses = [build_loss(p.strip(), **kwargs) for p in name.split("+")]
+        parts = [p.strip() for p in name.split("+")]
+        if class_distribution is not None and not any(p in _WEIGHTABLE_LOSSES for p in parts):
+            raise ValueError(
+                f"class_distribution was supplied for '{name}', but none of {parts} is weightable "
+                f"(weightable: {sorted(_WEIGHTABLE_LOSSES)}) — the weighting would have no effect. "
+                "Compose a weightable term, or drop class_distribution."
+            )
+        sub_losses = [
+            build_loss(p, class_distribution=class_distribution, num_classes=num_classes,
+                       weight_scheme=weight_scheme, **kwargs)
+            for p in parts
+        ]
         return CombinedLoss(sub_losses)
     if class_distribution is not None and "weight" not in kwargs and name in _WEIGHTABLE_LOSSES:
         kwargs["weight"] = compute_class_weights(class_distribution, num_classes=num_classes, scheme=weight_scheme)
