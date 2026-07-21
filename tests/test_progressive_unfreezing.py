@@ -73,17 +73,38 @@ def test_snapshot_restore_roundtrip():
     assert model[0].weight not in new_opt.state
 
 
-def test_freeze_to_is_per_stage_for_tv_backbones():
-    """tv_* fallback backbones must freeze per stage, not all-or-nothing.
+def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
+    """A wrapped agent-written backbone must freeze per stage, not all-or-nothing.
 
-    Regression: _freeze_sequential_fraction saw _MultiStageExtractor's sole
-    named child (the ``stages`` ModuleList) and froze the entire backbone for
-    any freeze_to >= 1, so intermediate schedule stages silently trained
-    heads-only.
+    Regression: _freeze_sequential_fraction saw a wrapper's sole named child (a
+    ``stages`` ModuleList) and froze the entire backbone for any freeze_to >= 1,
+    so intermediate schedule stages silently trained heads-only. A module whose
+    stages live one level down inside a ModuleList is the common shape when the
+    agent composes its own staged backbone.
     """
-    from tcip_mcp.pipelines.components.backbones import _build_tv_resnet
+    import torch.nn as nn
 
-    bb = _build_tv_resnet("resnet50", pretrained=False)
+    from tcip_mcp.pipelines.components.backbones import BackboneWrapper
+
+    class Staged(nn.Module):
+        """Sole named child is a ModuleList — the shape the descent exists for."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            chans = [16, 32, 64, 128]
+            self.stages = nn.ModuleList([
+                nn.Conv2d(c_in, c_out, 3, stride=2, padding=1)
+                for c_in, c_out in zip([3, *chans[:-1]], chans)
+            ])
+
+        def forward(self, x):
+            out = {}
+            for i, stage in enumerate(self.stages):
+                x = stage(x)
+                out[f"s{i}"] = x
+            return out
+
+    bb = BackboneWrapper(Staged(), [16, 32, 64, 128])
     counts = []
     for stage in range(bb.num_stages + 1):  # 0 .. 4
         bb.freeze_to(stage)
