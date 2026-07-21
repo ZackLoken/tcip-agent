@@ -1,17 +1,15 @@
-"""Distill worksheet — gather the raw material for a learning review in one place.
+"""Distill worksheet — gather one project's learning record in one place.
 
-The *judgment* step (drafting new `.github/skills/*` files + a CLAUDE.md diff) is the agent's
-job, per the `self-improvement` skill — a script can't write a skill. What this does is collect
-and structure the inputs so that review is cheap and nothing is dropped: the learning journal,
-plus the machine-local friction reports and retrospectives that never reach the repo on their
-own. Run it on demand ("review what I've learned") or from the SessionEnd capture hook.
+Learning lands with the project (see the `self-improvement` skill): friction goes to
+`.tcip/reports/` via ``claude_reports``, and end-of-work findings to `.tcip/retrospectives/` via
+``project_retrospective``. This gathers both, plus the SessionEnd capture backstop, so a review is
+cheap and nothing is dropped.
 
     conda activate tcip-agent
     python scripts/distill_learnings.py [--project <root>]
 
-Output is a Markdown worksheet: undistilled journal entries first, then recurring themes across
-journal + reports + retrospectives, then the reports/retros the next skill/CLAUDE.md proposals
-should draw from. Nothing is written or applied — governance stays human.
+Output is a Markdown worksheet: recurring themes across the project's reports and retrospectives,
+then the records themselves. It *gathers* — nothing is written, applied, or promoted anywhere.
 """
 
 from __future__ import annotations
@@ -23,7 +21,6 @@ from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-JOURNAL = REPO_ROOT / ".github" / "skills" / "_learning" / "journal.md"
 
 # Words that mark friction worth turning into a durable rule/skill (recurrence = signal).
 _THEME_WORDS = re.compile(
@@ -33,23 +30,6 @@ _THEME_WORDS = re.compile(
     r"phenology|catkin|elongat|plant.mapping|classifier|derive|pin)\b",
     re.IGNORECASE,
 )
-
-
-def _journal_sections(text: str) -> list[tuple[str, str]]:
-    """Split the journal into (heading, body) sections at ``## `` boundaries."""
-    parts = re.split(r"(?m)^## ", text)
-    out: list[tuple[str, str]] = []
-    for p in parts[1:]:  # parts[0] is the file preamble
-        head, _, body = p.partition("\n")
-        out.append((head.strip(), body))
-    return out
-
-
-def _undistilled(sections: list[tuple[str, str]]) -> list[str]:
-    """Journal headings whose body never records a distilled/applied status."""
-    done = re.compile(r"\b(distilled|applied|committed|status:\s*(done|applied|committed))\b",
-                      re.IGNORECASE)
-    return [h for h, body in sections if not done.search(body)]
 
 
 def _themes(*texts: str, top: int = 12) -> list[tuple[str, int]]:
@@ -78,17 +58,7 @@ def _read_jsonl_dir(d: Path) -> list[dict]:
 
 def build_worksheet(project_root: Path) -> str:
     """Assemble the Markdown distill worksheet (pure — no writes)."""
-    lines: list[str] = ["# Learning-review worksheet", ""]
-
-    journal_text = JOURNAL.read_text(encoding="utf-8") if JOURNAL.is_file() else ""
-    sections = _journal_sections(journal_text)
-    undistilled = _undistilled(sections)
-
-    lines.append(f"**Journal:** {len(sections)} entries, {len(undistilled)} not yet distilled.")
-    if undistilled:
-        lines.append("\n## Undistilled journal entries (draft skills / CLAUDE.md diffs from these)")
-        for h in undistilled:
-            lines.append(f"- {h}")
+    lines: list[str] = [f"# Learning-review worksheet — {project_root}", ""]
 
     reports = _read_jsonl_dir(project_root / ".tcip" / "reports")
     retros_dir = project_root / ".tcip" / "retrospectives"
@@ -96,7 +66,7 @@ def build_worksheet(project_root: Path) -> str:
     report_text = " ".join(str(r.get("detail", "")) for r in reports)
     retro_text = " ".join(p.read_text(encoding="utf-8") for p in retros)
 
-    themes = _themes(journal_text, report_text, retro_text)
+    themes = _themes(report_text, retro_text)
     if themes:
         lines.append("\n## Recurring themes (candidates for a skill line or a CLAUDE.md rule)")
         for word, n in themes:
@@ -125,7 +95,7 @@ def build_worksheet(project_root: Path) -> str:
                 except json.JSONDecodeError:
                     continue
     if captures:
-        lines.append(f"\n## Session captures ({len(captures)}) — SessionEnd backstop; distill any real signal into the journal")
+        lines.append(f"\n## Session captures ({len(captures)}) — SessionEnd backstop")
         for c in captures[-10:]:
             lines.append(f"- {c.get('ts', '?')}  session {c.get('session_id', '?')}")
 
