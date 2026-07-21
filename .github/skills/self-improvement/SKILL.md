@@ -1,112 +1,75 @@
 ---
 name: self-improvement
-description: "How the agent turns friction into durable, team-shared platform improvements. Load this whenever the user pushes back, corrects you, repeats an annoyance, when you discover machinery you didn't know existed, nearly reinvent something, or hit a missing tool/skill — and at the end of substantial work. Captures the signal to the learning journal and distills it into proposed skills / CLAUDE.md edits / tool changes for the human to approve. The goal: the platform gets better without the owner in the loop."
+description: "How the agent turns friction and findings into a durable record that the next session picks up. Load this whenever the user pushes back, corrects you, repeats an annoyance, when you discover machinery you didn't know existed, nearly reinvent something, or hit a missing tool/skill — and at the end of substantial work. Everything lands with the project, via claude_reports and project_retrospective, and load_project_memory reads it back."
 ---
 
-# Self-improvement — learning that reaches the whole team
+# Self-improvement — learning that stays with the project
 
-The owner (Zack) is stepping back; the breeders direct Claude as their ML/CV engineer. For
-that to hold **without him translating**, what you learn has to land in the **repo**
-(`.github/skills/`, `CLAUDE.md`, tools) — the only place that reaches every breeder's
-machine. Your `~/.claude` memory and a project's `.tcip/` retrospectives are *machine-local*
-and never travel. This skill is how a correction today becomes a capability tomorrow.
+Learning lands **with the project it came from**, in that project's `.tcip/` store. Nothing a
+session learns writes into the repo: skills, `CLAUDE.md`, and platform code change only when the
+owner changes them.
+
+That scoping is deliberate. What a session learns is almost always *about this data* — this block's
+object scale, this season's capture cadence, where the operating point resolved and why. Recording
+it project-side keeps it attached to the dataset that produced it, and means the next project
+derives its own answer from its own data rather than inheriting one measured somewhere else. Where
+something is genuinely general, the owner is the transport: they read these records and decide what
+becomes a platform change.
+
+The loop is three live, audited tools — no separate journal file:
+
+| When | Tool | Lands |
+|---|---|---|
+| The moment friction happens | `claude_reports` | `.tcip/reports/` |
+| End of substantial work, even if incomplete | `project_retrospective` | `.tcip/retrospectives/` |
+| Start of the next session | `load_project_memory` (`kind='reports'`, then `'retrospectives'`) | read back into context |
 
 ## Capture — the moment friction happens
 
-Append to the journal (`.github/skills/_learning/journal.md`) the moment you notice any of:
+Call `claude_reports` when you notice any of these. One line is enough in the moment; the free-text
+`detail` matters far more than the category.
 
-- **Pushback / correction** — the user says "no, do it this way", "don't do X", "actually
-  it's Y". The thing you got wrong is a candidate rule.
-- **Repetition** — you're told the same thing a second time (a sign it belongs in a skill or
-  CLAUDE.md, not just this conversation).
-- **Wrong assumption** — you assumed something about the data/domain/tools that turned out
-  false (e.g. "GPS is too coarse for per-plant" when the plant grid is RTK-accurate).
-- **Re-discovery** — you spent real effort (searches, Explore agents, reading) finding
-  machinery that already existed. If *you* had to dig for it, the next session will too:
-  it wants a skill entry or a pointer.
-- **Near-reinvention** — you were about to write code for something the toolkit already does
-  (e.g. a SAHI tiling script when `run_inference(tile=True, ...)` exists).
-- **Missing / hard tool** — a capability that should be a tool or skill but is buried in a web
-  route, a script, or nowhere.
-- **Environment / setup friction** — a missing dependency, a stale config path, a slow default.
+- **Pushback / correction** — "no, do it this way", "don't do X", "actually it's Y".
+- **Repetition** — you're told the same thing a second time.
+- **Wrong assumption** — something you assumed about the data, domain, or tools turned out false
+  (e.g. "GPS is too coarse for per-plant" when the plant grid is RTK-accurate).
+- **Re-discovery** — you spent real effort finding machinery that already existed. If you had to
+  dig, so will the next session.
+- **Near-reinvention** — you were about to write something the toolkit already does.
+- **Missing / hard tool** — a capability that should exist but is buried in a web route, a script,
+  or nowhere.
+- **Environment / setup friction** — a missing dependency, a stale path, a slow default.
+- **A blocked or failed mandated action** — a ritual call that errored, a guard that denied a
+  read-only command, `doctor.py` refusing to run. Never skip one silently.
 
-One line is enough in the moment; precision beats volume. The free-text detail matters more
-than the category.
+Over-report. A report is cheap; a silent guess is not.
 
-## Distill — turn the journal into proposals
+## Record — what the retrospective should contain
 
-At the end of substantial work (or when asked for a "learning review"), read the journal plus
-the session and draft **concrete, reviewable artifacts**, not vague notes:
+At the end of substantial work, call `project_retrospective`. Write what a future session working
+**this project** would need, and be honest about what failed — that is the most useful part.
 
-- **A crop-level constraint** (`.github/skills/crops/<crop>/SKILL.md`) — the primary output. A
-  physical or biological limit you observed and can evidence: an organ unresolvable below some
-  GSD, a stage only distinguishable in a window. State it as a constraint with its evidence, the
-  way `crop-science` does, and flag it for expert confirmation rather than hardening it.
-- **A trait-semantics question for the breeder** — into that crop's "Needs expert confirmation"
-  ledger; on confirmation it belongs in `crops.yml` / `TraitSpec`, which the expert owns.
-- **A `CLAUDE.md` diff** — for a behavior/invariant that should govern every session. Proposed
-  as a diff; **never applied silently** (CLAUDE.md is governance).
-- **A tool / architecture proposal** — when a capability should be lifted from a web route or a
-  script into a shared `pipelines/` module and an MCP tool the agent can compose. Describe the
-  seam; the owner decides whether it's worth the build.
-- **Dataset evidence stays with its dataset** (`.tcip/`, via `project_retrospective`): measured
-  object scale, capture cadence, class imbalance, where the operating point resolved and why.
-  Machine-local is correct here — it describes one dataset, and the next one re-derives rather
-  than inherits.
+- **What you measured about this dataset** — object scale and elongation from the GT, capture
+  cadence and missing dates, class imbalance, where the operating point resolved and on what
+  reference, what the validation gate said.
+- **What you tried that did not work** — dead ends, approaches abandoned and why. This is what
+  stops the next session repeating them.
+- **Assumptions that turned out wrong.**
+- **Domain questions for the breeder** — anything about what a trait *means* that you could not
+  settle from `crops.yml`. Trait semantics are the expert's to confirm; surface the question,
+  never invent the answer.
+- **Tools that were missing or unusable.**
 
-What must **not** go in a skill: a reusable pipeline shape, or a hand-maintained inventory of
-existing machinery. A pipeline shape recorded here becomes a recipe for a problem it was never
-measured against — the ceiling this platform exists to avoid. An inventory goes stale the first
-time the source moves. Both were how this skill's output grew a ceiling; the destinations above
-are unchanged, the permitted *shape* is what narrowed.
-- **A `CLAUDE.md` diff** — for a behavior/invariant that should govern every session. Proposed
-  as a diff; **never applied silently** (CLAUDE.md is governance).
-- **A tool / architecture proposal** — when a capability should be lifted from a web route or a
-  script into a shared `pipelines/` module and an MCP tool the agent can compose. Describe the
-  seam; the owner decides whether it's worth the build.
-- **An environment / config fix** — a dependency to add, a machine-specific path to relativize.
+### What must not go in a retrospective
 
-Each proposal states: the observation (what happened), the artifact (exactly what to
-create/change), and why it helps the *next* session.
-
-**Gathering tool.** `python scripts/distill_learnings.py` collects the raw material into one
-Markdown worksheet — undistilled journal entries, recurring themes, and the machine-local
-friction reports / retrospectives / session captures that never reach the repo on their own — so
-review is cheap and nothing is dropped. It *gathers*; the drafting judgment above stays yours.
-Run it at the start of a learning review. (A soft `SessionEnd` hook,
-`agent_learning_capture.py`, files a session-boundary record to `.tcip/learning_capture.jsonl` as
-a backstop, so a session is never invisible even if you forgot to journal.)
-
-## Approve — the human gate (the fence, in spirit)
-
-You **propose**; the owner **approves and applies** anything touching governance
-(`CLAUDE.md`) or platform code. Skill files can be applied once approved. This mirrors the
-permission fence: the breeder-lane agent may only *write to the journal* (proposing); the
-dev-lane owner distills and applies. Distillation touches the contract, so it is a dev-lane
-act — not a breeder-facing one.
-
-## Prune — keep the buffer a buffer
-
-The journal is a **capture buffer, not a changelog.** The moment an entry is distilled into an
-**approved** artifact (a skill, a `CLAUDE.md` edit, a tool, a config fix), its knowledge now lives
-in that durable home — so **remove the entry from `journal.md`** and record a one-line note in the
-journal's **Graduated** ledger (`<id> — <what> → <where it landed>`). Move the removed text verbatim
-to `_learning/archive/<YYYY-MM>.md` (create it if absent) so the full narrative is never lost. What
-stays in `journal.md` is only **open, not-yet-distilled friction** — a short list readable at a
-glance. Prune at the end of every distillation pass; a `RESOLVED`/`SHIPPED` entry still sitting in
-the buffer is the signal to move it. An append-only journal that never prunes slowly degrades the
-distill step it exists to serve.
-
-## Close the loop
-
-Approved skills live in `.github/skills/` and are discoverable — CLAUDE.md instructs agents to
-load the relevant skill, and you can `ls .github/skills/` to find new ones (they are **not**
-auto-loaded by the runtime, so a genuinely new capability should also get a one-line pointer in
-CLAUDE.md's skills list). Approved CLAUDE.md edits change behaviour for everyone. Both are
-committed → they reach the whole team. That is the difference between learning and remembering.
+- **A reusable pipeline shape.** A decomposition that worked here becomes a recipe for a problem it
+  was never measured against — the ceiling this platform exists to avoid. Record what you *measured*
+  that led you to a shape, not the shape.
+- **An inventory of existing machinery.** It goes stale the first time the source moves. Read the
+  source, or run `scripts/list_tools.py`.
 
 ## Honesty
 
-Report what you actually did. If you skipped a capture, say so. A learning system that pretends
-to have learned is worse than none — the whole point is that the owner can trust the platform to
-compound its own competence while he's away.
+Report what you actually did. If you skipped a capture, say so. A learning record that pretends to
+have learned is worse than none — its whole value is that the next session, and the owner, can trust
+it.
