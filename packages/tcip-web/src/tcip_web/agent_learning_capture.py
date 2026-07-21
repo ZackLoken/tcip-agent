@@ -1,11 +1,11 @@
 """SessionEnd capture hook — the soft backstop for the self-learning loop (governance Part 2).
 
 Appends a session-boundary record to ``<project>/.tcip/learning_capture.jsonl`` so a session's
-existence is captured even when the agent forgot to journal. It writes to machine-local ``.tcip/``
-(not the committed journal) so there is no git churn; the distill worksheet
-(``scripts/distill_learnings.py``) surfaces these for a human-in-the-loop review, which promotes
-the real signal into the committed journal / skills. The genuine learnings still come from the
-agent following the ``self-improvement`` skill — this only guarantees a record exists.
+existence is captured even when the agent recorded nothing. It sits alongside the project's other
+learning records — ``.tcip/reports/`` and ``.tcip/retrospectives/`` — and the distill worksheet
+(``scripts/distill_learnings.py``) gathers all three for review. Nothing is promoted anywhere: a
+project's record stays with the project. The genuine learnings still come from the agent following
+the ``self-improvement`` skill — this only guarantees a record exists.
 
 NON-blocking + best-effort: any error is swallowed and the hook exits 0. A capture backstop must
 never break the agent's session (a SessionEnd hook that errors would surface as a failure).
