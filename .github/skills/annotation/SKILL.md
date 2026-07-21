@@ -153,7 +153,13 @@ frames → they accept on the canvas → only then does it become GT. See
 
 - **Per-class AP** at IoU 0.5 and 0.5:0.95
 - **Coverage**: fraction of images with labels
-- **Empty files**: valid negative samples — never delete without asking
+- **Negatives**: a training negative is an empty label file (`objects: []`) **plus** a human
+  Complete on that image, recorded as the status token `"negative"` in
+  `.tcip/state/image_status.json`, scoped to the campaign. `to_coco_dataset` silently skips an
+  empty file that is not in that set, treating it as unannotated. You cannot manufacture
+  negatives — writing empty label files does not create them; only the human's Complete does.
+  `python scripts/doctor.py <root>` flags every empty-label/status disagreement. Never delete
+  empty label files without asking.
 - **Cohen's κ**: inter-annotator agreement (if multiple annotators)
 
 ## Active Learning
