@@ -115,7 +115,8 @@ def build_bespoke_detector(*, gt_boxes_wh, num_classes: int = 1, in_chans: int =
     from torchvision.models.detection.rpn import AnchorGenerator
     from torchvision.ops import MultiScaleRoIAlign
 
-    ratios = tuple(gt_aspect_ratios(gt_boxes_wh))   # anchor aspect ratios from the GT box shapes
+    derived = gt_aspect_ratios(gt_boxes_wh)         # anchor aspect ratios from the GT box shapes
+    ratios = tuple(derived) if derived is not None else (0.5, 1.0, 2.0)  # underivable -> stamped
     sizes = gt_anchor_sizes(gt_boxes_wh)            # anchor scales from the GT size distribution
     backbone = _GNBackboneFPN(in_chans, out_channels, gn_groups)
     anchor_generator = AnchorGenerator(sizes=(sizes,), aspect_ratios=(ratios,))  # single fused level
