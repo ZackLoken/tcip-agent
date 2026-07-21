@@ -81,7 +81,9 @@ There must be something to train on. Two paths (see `.github/skills/annotation`)
 - **Agent/MCP path**: `propose_annotations` a starter batch with a chosen `engine` (`'sam'` is the
   built-in reference; the agent can bring another) → review the candidates visually (`visualize` /
   `view_image`) → `accept_proposals` the good ones. Trial engines and keep the one whose high-conf
-  proposals survive review. Empty label files are **valid negatives** — never delete or skip them.
+  proposals survive review. An empty label file is **not** a negative on its own — it trains as one
+  only once the breeder marks that image Complete (`.tcip/state/image_status.json`), so an empty
+  file you write reads as unannotated until then. Never delete or skip them.
 - **Human path**: hand off to the GUI Annotate tab for the breeder to label a seed set.
 
 Never train or evaluate on an unconfirmed format: if `read_annotations` returns
