@@ -22,9 +22,10 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from tcip_annotation.utils import get_image_dimensions
 
-from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
+from tcip_mcp.pipelines.image_utils import (
+    crop_pad_tile, image_dimensions, load_image, pil_to_tensor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,36 @@ def _find_image(images_dir: Path, stem: str) -> Path:
         if p.exists():
             return p
     raise FileNotFoundError(f"No image for stem: {stem}")
+
+
+def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
+                    file_name: str = "") -> tuple[int, int] | None:
+    """``(width, height)`` the labels record, or ``None`` when they record none.
+
+    The frame the boxes were drawn in, straight from the annotation a human produced — the only
+    reference that can catch a reader disagreeing with the authoring tool.
+    """
+    if coco is not None:
+        images = coco.get("images", []) if isinstance(coco, dict) else []
+        for entry in images:
+            if entry.get("file_name") in (file_name, stem) or Path(
+                    str(entry.get("file_name", ""))).stem == stem:
+                w, h = int(entry.get("width", 0) or 0), int(entry.get("height", 0) or 0)
+                return (w, h) if w > 0 and h > 0 else None
+        return None
+    if fmt not in ("", "json"):
+        return None  # only the canonical per-image JSON carries its own frame
+    path = Path(labels_dir) / f"{stem}.json"
+    if not path.exists():
+        return None
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 — an unreadable label file is the reader's problem, not ours
+        return None
+    w, h = int(data.get("width", 0) or 0), int(data.get("height", 0) or 0)
+    return (w, h) if w > 0 and h > 0 else None
 
 
 def _read_det_boxes_format(stem, labels_dir, fmt, coco, w, h, file_name):
@@ -194,10 +225,22 @@ class BaseImageDataset(BaseDataset):
             return img.size
         return int(img.shape[1]), int(img.shape[0])
 
+    _warned_ndarray_transforms = False
+
     def _finalize(self, img, target: dict) -> tuple[torch.Tensor, dict]:
         """Apply PIL transforms (when applicable) or convert straight to a tensor."""
         if self.transforms is not None and isinstance(img, Image.Image):
             return self.transforms(img, target)
+        if self.transforms is not None and not BaseImageDataset._warned_ndarray_transforms:
+            # The augmentation pipeline is PIL-only, so a multi-band raster trains unaugmented
+            # while the run's config records augmentation as applied. Say so once: a silent
+            # divergence between what the config claims and what the model saw is a provenance
+            # break, not a detail.
+            BaseImageDataset._warned_ndarray_transforms = True
+            logger.warning(
+                "augmentation is configured but skipped for multi-band (ndarray) images: the "
+                "transform pipeline is PIL-only. This run trains those images unaugmented."
+            )
         return pil_to_tensor(img), target
 
 
@@ -291,7 +334,7 @@ class DetectionDataset(BaseImageDataset):
 # Tiled Detection (SAHI-style sliding window)
 # ====================================================================
 
-class TiledDetectionDataset(BaseDataset):
+class TiledDetectionDataset(BaseImageDataset):
     """Wrap a ``DetectionDataset`` and expand each source image into native-resolution
     tiles with labels clipped/remapped to tile space (W3).
 
@@ -318,11 +361,19 @@ class TiledDetectionDataset(BaseDataset):
         )
 
         self.base = base
+        # This wrapper does its own channel-aware reads rather than delegating to base. Inherit the
+        # band count from the dataset being wrapped so every construction path carries it —
+        # build_dataset stamps it afterwards, but ctx.tiled_dataset constructs this directly and
+        # would otherwise fall back to the 3-channel class default.
+        self.images_dir = base.images_dir
+        self.expected_channels = getattr(base, "expected_channels", 3)
         self.tile_size = tile_size
         self.overlap = overlap
         self.transforms = transforms
         self.stride = compute_stride(tile_size, overlap)
         self._index: list[dict] = []
+        # (w, h) this index was built against, per stem — asserted again at decode time.
+        self._decoded_frame: dict[str, tuple[int, int]] = {}
 
         # Pass 1: read every image's upright dims + full-image-px boxes, and accumulate GT box sizes
         # so the seam-sliver cutoff is derived from this dataset's class-average object size, not a
@@ -332,7 +383,25 @@ class TiledDetectionDataset(BaseDataset):
         char_sizes: list[float] = []
         for stem in base.stems:
             img_path = _find_image(base.images_dir, stem)
-            w, h = get_image_dimensions(str(img_path))  # EXIF-oriented, shares the label frame
+            # Measured the way __getitem__ will decode it: PIL's header read misreports a
+            # multi-band raster's axes, which would clip labels in a frame the tiles never use.
+            w, h = image_dimensions(img_path, self.expected_channels)
+            # The frame the boxes were actually drawn in, recorded in the label file itself. The
+            # annotation stack measures with PIL, which reports a 40x24x5 GeoTIFF as 5x40 — so on a
+            # multi-band raster the authored frame and the decoded frame genuinely disagree, and
+            # every box would be cropped from somewhere it was never drawn. Comparing the two
+            # decoders instead would prove nothing: they share a branch and agree by construction.
+            authored = _authored_frame(stem, base.labels_dir, base.label_format,
+                                       base._coco, img_path.name)
+            if authored is not None and authored != (w, h):
+                raise ValueError(
+                    f"tiled dataset frame mismatch for stem {stem!r}: the labels record a "
+                    f"{authored[0]}x{authored[1]} image but it decodes as {w}x{h} at "
+                    f"{self.expected_channels} channels. Tiles would be cut from a different frame "
+                    f"than the boxes were drawn in, displacing every box. Re-author the labels "
+                    f"against the multi-band frame, or ingest this raster as {authored[0]}x"
+                    f"{authored[1]}."
+                )
             # Format-aware read: json (canonical) / coco (assembled) / voc / labelme all go through
             # the shared reader; only coco needs the image file name to match its annotations.
             file_name = img_path.name if base.label_format == "coco" else ""
@@ -343,6 +412,7 @@ class TiledDetectionDataset(BaseDataset):
             if len(fb):
                 char_sizes.extend((((fb[:, 2] - fb[:, 0]) * (fb[:, 3] - fb[:, 1])).clip(min=0) ** 0.5).tolist())
             stems_data.append((stem, fb, fl, w, h))
+            self._decoded_frame[stem] = (int(w), int(h))
 
         self.class_avg_size = float(np.mean(char_sizes)) if char_sizes else 0.0
         self.min_box_size = sliver_frac * self.class_avg_size
@@ -377,31 +447,29 @@ class TiledDetectionDataset(BaseDataset):
                 counts[int(lab) - 1] += 1  # 0-indexed cid, matching DetectionDataset
         return dict(counts)
 
-    def _crop_tile(self, img: "Image.Image", tile_x: int, tile_y: int) -> "Image.Image":
-        w, h = img.size
-        crop = img.crop((tile_x, tile_y, min(tile_x + self.tile_size, w), min(tile_y + self.tile_size, h)))
-        if crop.size != (self.tile_size, self.tile_size):
-            padded = Image.new("RGB", (self.tile_size, self.tile_size), (0, 0, 0))
-            padded.paste(crop, (0, 0))  # zero-pad bottom/right
-            crop = padded
-        return crop
-
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         e = self._index[idx]
-        # EXIF-oriented (via load_image) so cropped pixels align with the tile geometry and
-        # labels computed from get_image_dimensions() in __init__.
-        img = load_image(_find_image(self.base.images_dir, e["stem"]), 3)
-        tile = self._crop_tile(img, e["tile_x"], e["tile_y"])
+        stem = e["stem"]
+        # Channel-aware and EXIF-oriented (via load_image) so cropped pixels align with the tile
+        # geometry and the labels clipped in __init__.
+        img = self._open_image(stem)
+        w, h = self._image_size(img)
+        expected = self._decoded_frame.get(stem)
+        if expected is not None and (w, h) != expected:
+            # The index was built against this frame; if the file now decodes differently the tile
+            # would be cut from somewhere the boxes were never clipped to. Refuse, don't reconcile.
+            raise ValueError(
+                f"tiled dataset frame changed for stem {stem!r}: indexed at "
+                f"{expected[0]}x{expected[1]} but now decodes as {w}x{h} at "
+                f"{self.expected_channels} channels. Cropping here would displace every box."
+            )
+        tile = crop_pad_tile(img, e["tile_x"], e["tile_y"], self.tile_size, w, h)
         target = {
             "boxes": torch.tensor(e["boxes"], dtype=torch.float32).reshape(-1, 4),
             "labels": torch.tensor(e["labels"], dtype=torch.int64),
             "image_id": idx,
         }
-        if self.transforms is not None:
-            tile, target = self.transforms(tile, target)
-        else:
-            tile = pil_to_tensor(tile)
-        return tile, target
+        return self._finalize(tile, target)
 
 
 # ====================================================================
@@ -836,6 +904,10 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
     if tiling and tiling.get("enabled", True) and task == "detection":
         transforms = kwargs.pop("transforms", None)
         base = cls(**kwargs)
+        # Before constructing the tiler: its __init__ indexes every image, and that pass must
+        # measure frames at the band count the tiles will be decoded at. Stamping only the wrapper
+        # afterwards left the index built at 3 channels and the tiles read at N.
+        base.expected_channels = num_channels
         tile_kwargs = {k: tiling[k] for k in
                        ("tile_size", "overlap", "sliver_frac", "dedup_iou", "skip_empty")
                        if k in tiling}
