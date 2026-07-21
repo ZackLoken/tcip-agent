@@ -22,7 +22,12 @@ def _setup(tmp_path: Path):
         "imgB.png": {"img_status": "completed", "detections": [
             {"action": "rejected", "class_id": 0, "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
     }}
-    (state_dir / "review_stats.json").write_text(json.dumps(state))
+    # Seed through the engine so the fixture cannot drift from the real shard format.
+    from tcip_annotation.review_engine import ReviewEngine
+
+    engine = ReviewEngine(str(state_dir))
+    engine.raw_state.update(state)
+    engine.save_review_state()
     return state_dir, src
 
 
@@ -66,7 +71,7 @@ def test_materialize_creates_experiment_when_absent(tmp_path, monkeypatch):
 
 def test_materialize_invalid_inputs_error(tmp_path):
     empty = tmp_path / "empty"
-    empty.mkdir()  # no review_stats.json
+    empty.mkdir()  # no review/ shards
     assert "error" in materialize_review_dataset(str(empty), str(tmp_path), str(tmp_path / "o1"))
 
     state_dir, _src = _setup(tmp_path)
