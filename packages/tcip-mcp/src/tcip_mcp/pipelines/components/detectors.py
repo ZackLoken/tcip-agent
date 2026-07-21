@@ -9,6 +9,7 @@ predictions in eval mode.
 
 from __future__ import annotations
 
+import inspect
 from collections import OrderedDict
 from typing import Any
 
@@ -133,11 +134,28 @@ _DETECTOR_BUILDERS = {
 
 
 def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> Any:
-    """Instantiate a detector builder by name. Raises ``KeyError`` for an unknown name."""
+    """Instantiate a detector builder by name.
+
+    Raises ``KeyError`` for an unknown name and ``TypeError`` for an unrecognized kwarg. The
+    ``_build_*`` functions end in ``**_: Any``, so without this check a mistyped or unsupported
+    key is swallowed and the parameter it was meant to set stays at its pinned default — the
+    derived value silently does not apply, with no error and no record.
+    """
     try:
         fn = _DETECTOR_BUILDERS[name]
     except KeyError:
         raise KeyError(
             f"Unknown detector '{name}'. Available: {sorted(_DETECTOR_BUILDERS)}"
         ) from None
+    # Named parameters only — the trailing VAR_KEYWORD is what we are guarding against, so
+    # including it would make the accepted set universal and the check a no-op.
+    params = inspect.signature(fn).parameters
+    accepted = {n for n, p in params.items()
+                if p.kind not in (p.VAR_KEYWORD, p.VAR_POSITIONAL)} - {"adapter", "num_classes"}
+    unknown = sorted(set(kwargs) - accepted)
+    if unknown:
+        raise TypeError(
+            f"build_detector('{name}', ...) got unexpected keyword argument(s) {unknown}. "
+            f"Accepted: {sorted(accepted)}"
+        )
     return fn(adapter, num_classes, **kwargs)
