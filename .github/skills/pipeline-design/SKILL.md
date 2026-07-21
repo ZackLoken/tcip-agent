@@ -77,7 +77,7 @@ no component registry: nothing forces a model to a fixed shape or the default tr
 The building blocks are plain importable symbols, e.g.:
 
 ```python
-from tcip_mcp.pipelines.components.backbones import BackboneWrapper, _build_timm_backbone
+from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 from tcip_mcp.pipelines.components.necks import FPN, PAN
 from tcip_mcp.pipelines.components.heads import ClassificationHead, SemanticSegHead
 from tcip_mcp.pipelines.components.losses import build_loss, compute_class_weights
