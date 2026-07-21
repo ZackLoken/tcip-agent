@@ -48,12 +48,14 @@ def num_classes_from_distribution(class_distribution: dict[int, int]) -> int:
 
 
 def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
-                     quantiles: tuple[float, float] = (0.1, 0.9)) -> list[float]:
+                     quantiles: tuple[float, float] = (0.1, 0.9)) -> list[float] | None:
     """Aspect ratios (h/w) spanning the GT box-shape distribution — for anchor coverage.
 
     Returns a small ratio set covering the p10..p90 of GT box aspect ratios (plus 1.0), so anchors
-    match the actual object shapes in this dataset (e.g. elongated catkins) rather than a fixed
-    (0.5, 1, 2). ``class_distribution_boxes`` is a list of ``(w, h)`` in pixels.
+    match the actual object shapes in this dataset rather than a fixed (0.5, 1, 2).
+    ``class_distribution_boxes`` is a list of ``(w, h)`` in pixels. Returns ``None`` when no valid
+    box gives a ratio — underivable, so the caller stamps an honest default rather than receiving
+    this function's own pinned fallback dressed as a derivation.
 
     Wiring (derive -> pass; the agent's builder path, never auto-injected into build_detector so a
     method isn't re-pinned)::
@@ -61,7 +63,9 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
         from tcip_mcp.pipelines.derivations import gt_aspect_ratios
         from tcip_mcp.pipelines.components.detectors import build_detector
         ratios = gt_aspect_ratios([(b.w, b.h) for b in gt_boxes])   # this dataset's shapes
-        names = ["0", "1", "2", "3"]                                 # your neck's output keys
+        if ratios is None:
+            ratios = [0.5, 1.0, 2.0]                                 # underivable — yours to stamp
+        names = list(adapter(torch.zeros(1, in_chans, h, w)).keys())  # this adapter's actual keys
         model = build_detector("faster_rcnn", adapter, num_classes=n,
                                featmap_names=names, num_levels=len(names),
                                aspect_ratios=tuple(ratios))
@@ -69,7 +73,10 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
     import numpy as np
     ratios = [h / w for (w, h) in class_distribution_boxes if w > 0 and h > 0]
     if not ratios:
-        return [0.5, 1.0, 2.0]
+        # Underivable: no valid boxes. Return None rather than the fixed (0.5, 1, 2) this function
+        # exists to replace — a pinned default returned as if derived is indistinguishable from a
+        # real result. Same contract as derive_cross_tile_nms: the caller stamps an honest default.
+        return None
     lo, hi = np.quantile(ratios, quantiles[0]), np.quantile(ratios, quantiles[1])
     out = sorted({round(float(lo), 2), 1.0, round(float(hi), 2)})
     return [r for r in out if r > 0]
