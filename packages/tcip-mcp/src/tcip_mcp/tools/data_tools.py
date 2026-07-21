@@ -384,7 +384,44 @@ def make_splits(
                     dst_lbl = lbl_dir / src_lbl.name
                     if not dst_lbl.exists():
                         place_fn(str(src_lbl), str(dst_lbl))
+        _carry_confirmed_negatives(label_map, out_dir, parts, image_map)
         result["output_dir"] = str(out_dir)
         result["structure"] = f"{out_dir}/{{train,val,test}}/{{images,labels}}/"
 
     return result
+
+
+def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
+                               image_map: dict) -> None:
+    """Copy the source campaign's confirmed negatives into each split's own status store.
+
+    A split tree cannot name the campaign it came from — it is ``{train,val,test}/labels`` by
+    construction — so it has to carry the confirmations rather than inherit them by accident.
+    Without this, every image a human confirmed as a negative reads as an unconfirmed empty in the
+    split and is dropped from training.
+    """
+    import json as _json
+
+    from tcip_mcp.dataset_layout import DEFAULT_TRAIT, status_bucket
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+
+    src_dirs = {Path(p).parent for p in label_map.values()}
+    if not src_dirs:
+        return
+    negatives: set[str] = set()
+    for d in src_dirs:
+        try:
+            negatives |= confirmed_negative_names(d)
+        except ValueError:
+            continue  # that campaign is unresolvable; its own raise stands where it is read
+    if not negatives:
+        return
+    for split_name, split_stems in parts.items():
+        names = {Path(image_map[s]).name for s in split_stems if s in image_map}
+        carried = {n: "negative" for n in sorted(negatives & names)}
+        if not carried:
+            continue
+        store = out_dir / split_name / ".tcip" / "state" / "image_status.json"
+        store.parent.mkdir(parents=True, exist_ok=True)
+        store.write_text(_json.dumps({status_bucket(DEFAULT_TRAIT, None): carried}, indent=2),
+                         encoding="utf-8")
