@@ -102,6 +102,55 @@ def _neighbor_max_ious(boxes: Sequence[Sequence[float]]) -> list[float]:
     return iou.max(axis=1).tolist()
 
 
+def band_normalization_stats(
+    image_paths: Sequence[str | Path], num_channels: int, *, max_images: int = 50,
+) -> tuple[list[float], list[float]] | None:
+    """Per-band ``(mean, std)`` in [0, 1] over *this* dataset's rasters, or ``None``.
+
+    The statistics a detector normalizes with. torchvision defaults to 3-element ImageNet values,
+    which are wrong on any band set that is not RGB photography: at 1 channel they silently
+    broadcast the image to 3, and at any count other than 3 they raise inside the transform.
+    Sample the training split and pass the result to ``build_detector`` as ``image_mean``/
+    ``image_std``.
+
+    **Derive -> pass, never auto-injected** (the ``gt_aspect_ratios`` rule): the factory never reads
+    the dataset. Pass the derived values through ``model_source.builder_kwargs`` rather than calling
+    this from inside your builder body — torchvision keeps ``image_mean``/``image_std`` as plain
+    lists on the transform, not as buffers, so they are absent from the checkpoint and a builder
+    that re-derives them at load time will normalize differently at inference than at training.
+    Returns ``None`` when no raster could be read — an honest underivable, not a stand-in constant.
+
+    ``max_images`` caps the sample; band statistics converge long before a full orchard is read.
+    """
+    import numpy as np
+
+    from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
+
+    # Accumulate over exactly the tensor the dataset yields — pil_to_tensor decides the [0, 1]
+    # scaling from dtype, so re-deriving a scale here would put the statistics in a different unit
+    # system than the pixels the detector normalizes (a float raster silently off by its own max).
+    # Pixel-weighted, so rasters of different sizes compose into one dataset statistic.
+    sums = np.zeros(num_channels, dtype=np.float64)
+    sqs = np.zeros(num_channels, dtype=np.float64)
+    pixels = 0
+    for path in list(image_paths)[:max_images]:
+        try:
+            arr = pil_to_tensor(load_image(path, num_channels)).numpy().astype(np.float64)
+        except Exception:  # noqa: BLE001 — an unreadable raster is skipped, not fatal
+            continue
+        if arr.shape[0] != num_channels:
+            continue
+        flat = arr.reshape(num_channels, -1)
+        sums += flat.sum(axis=1)
+        sqs += (flat ** 2).sum(axis=1)
+        pixels += flat.shape[1]
+    if not pixels:
+        return None
+    mean = sums / pixels
+    var = np.maximum(sqs / pixels - mean ** 2, 0.0)
+    return [float(m) for m in mean], [float(s) for s in np.sqrt(var)]
+
+
 def derive_cross_tile_nms(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
                           percentile: float = 99.0, margin: float = 0.05,
                           clamp: tuple[float, float] = (0.2, 0.8)) -> float | None:
