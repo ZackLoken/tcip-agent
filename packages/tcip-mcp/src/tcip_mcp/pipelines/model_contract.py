@@ -22,8 +22,8 @@ from typing import Any, Protocol, runtime_checkable
 
 _DETECTION_TASKS = {"detection", "instance_seg"}
 # The tasks ``_synth_batch`` can shape a batch for. A task outside this set is not refused as
-# unsupported -- the platform has no fixed task taxonomy -- but it cannot be SMOKED blind, so
-# the caller supplies ``sample_batch=`` instead of the contract inventing a shape for it.
+# unsupported — the platform has no fixed task taxonomy — but it cannot be smoked blind, so the
+# caller supplies ``sample_batch=`` instead of the contract inventing a shape for it.
 _SYNTHESIZABLE_TASKS = _DETECTION_TASKS | {
     "classification", "ordinal", "regression", "semantic_seg",
 }
