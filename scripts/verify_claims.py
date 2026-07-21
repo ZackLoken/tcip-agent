@@ -1,4 +1,4 @@
-"""List every claim-shaped sentence this change ADDS to comments and docstrings.
+"""List every claim-shaped sentence this change *adds* to comments and docstrings.
 
 `verify_doc_examples.py` checks that code examples run. Nothing checked the prose — and prose is
 where the expensive mistakes went: "Falls back to torchvision when timm is unavailable" (no
@@ -15,7 +15,7 @@ background reasoning. Output empty = the change adds no unverified assertion.
     python scripts/verify_claims.py --strict        # exit 1 if any claim is found
 
 Retire a listed claim by verifying it and leaving it, or by rewriting the sentence to state what
-the code DOES rather than why it exists or what it cannot do.
+the code *does* rather than why it exists or what it cannot do.
 """
 from __future__ import annotations
 
