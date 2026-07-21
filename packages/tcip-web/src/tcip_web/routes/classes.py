@@ -9,10 +9,8 @@ class ``0`` for their own object without colliding. File format::
         "1": {"name": "bud",    "color": "#00FFFF"}
     }
 
-A load with no ``trait`` reads the legacy project-global
-``<project_root>/.tcip/state/classes.json`` (backward compatibility). Both ``name`` and
-``color`` are optional on read; ``name`` falls back to ``f"class_{cid}"``, ``color`` is
-auto-assigned from a high-contrast palette keyed by class id.
+Both ``name`` and ``color`` are optional on read; ``name`` falls back to ``f"class_{cid}"``,
+``color`` is auto-assigned from a high-contrast palette keyed by class id.
 """
 
 from __future__ import annotations
@@ -97,7 +95,7 @@ def _classes_path(project_root: str, trait: str | None = None) -> Path:
     state = Path(project_root) / ".tcip" / "state"
     if trait:
         return state / "classes" / f"{trait}.json"
-    return state / "classes.json"  # legacy project-global map
+    return state / "classes.json"  # unscoped map: what write_class_map emits and review.py reads
 
 
 def _read_registry(path: Path) -> ClassRegistry:
@@ -144,9 +142,9 @@ def load_classes(
     annotations_detect_dir: Optional[str] = None,
     annotations_segment_dir: Optional[str] = None,
 ) -> ClassRegistry:
-    """Load the class map for a trait. Ids are trait-scoped, so ``catkin`` and ``bush`` each keep
-    their own ``0``. Resolution: the trait's saved map → else derived from the trait's labels
-    (provisional ``class_<id>`` names) → else the legacy project-global map → else empty."""
+    """Load the class map for a trait. Ids are trait-scoped, so each campaign keeps its own ``0``.
+    Resolution: the trait's saved map -> else derived from the trait's labels (provisional
+    ``class_<id>`` names) -> else the unscoped map ``write_class_map`` writes -> else empty."""
     if trait and not is_valid_name(trait):
         raise HTTPException(400, f"invalid trait: {trait!r}")
 
@@ -162,12 +160,12 @@ def load_classes(
     if derived:
         return ClassRegistry(classes=derived)
 
-    legacy = _classes_path(project_root, None)
-    if legacy.exists():
+    unscoped = _classes_path(project_root, None)
+    if unscoped.exists():
         try:
-            return _read_registry(legacy)
+            return _read_registry(unscoped)
         except Exception as exc:
-            raise HTTPException(500, f"could not parse {legacy}: {exc}") from exc
+            raise HTTPException(500, f"could not parse {unscoped}: {exc}") from exc
 
     return ClassRegistry(classes=[])
 
@@ -233,15 +231,11 @@ def _bucket(campaign: str | None, date: str | None) -> str:
 @router.get("/image_status")
 def get_image_status(project_root: str, campaign: str | None = None,
                      date: str | None = None) -> dict:
-    """Statuses for one campaign/date, plus the count awaiting re-confirmation."""
-    from tcip_mcp.dataset_layout import LEGACY_BUCKET
-
+    """Statuses for one campaign/date."""
     path = _image_status_path(project_root)
     if not path.exists():
-        return {"statuses": {}, "legacy_pending": 0}
-    store = _load_status_store(path)
-    return {"statuses": store.get(_bucket(campaign, date), {}),
-            "legacy_pending": len(store.get(LEGACY_BUCKET, {}))}
+        return {"statuses": {}}
+    return {"statuses": _load_status_store(path).get(_bucket(campaign, date), {})}
 
 
 @router.post("/image_status")
