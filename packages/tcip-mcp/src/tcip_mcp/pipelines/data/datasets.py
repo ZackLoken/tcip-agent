@@ -40,6 +40,21 @@ def _find_image(images_dir: Path, stem: str) -> Path:
     raise FileNotFoundError(f"No image for stem: {stem}")
 
 
+def image_name_map(images_dir) -> dict[str, str]:
+    """``{stem: real on-disk filename}`` from one directory listing.
+
+    ``_find_image`` probes *constructed* paths, and ``Path.exists()`` is case-insensitive on Windows
+    and macOS, so it returns the name it built rather than the one on disk — ``IMG_0002.jpg`` for an
+    on-disk ``IMG_0002.JPG``. That is harmless for opening the file and wrong for anything that
+    compares names, because ``image_status.json`` and the review store are keyed on the real
+    filename. Comparing a fabricated name against them silently matches nothing.
+    """
+    d = Path(images_dir)
+    if not d.is_dir():
+        return {}
+    return {p.stem: p.name for p in sorted(d.iterdir()) if p.suffix.lower() in IMAGE_EXTS}
+
+
 def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
                     file_name: str = "") -> tuple[int, int] | None:
     """``(width, height)`` the labels record, or ``None`` when they record none.
@@ -124,6 +139,113 @@ def dir_label_format(labels_dir) -> str | None:
     return "yolo" if any(d.glob("*.txt")) else None
 
 
+def trainable_stems(
+    labels_dir, images_dir, stems=None, *, label_format: str = "json", coco: dict | None = None,
+) -> tuple[list[str], dict[str, int]]:
+    """The stems that may train, plus the partition that produced them.
+
+    A sample is admitted only when the label store actually accounts for it:
+
+    - it has a label record with objects, or
+    - it has an *empty* record and a human marked that image negative
+      (``confirmed_negative_names`` — the Complete in ``.tcip/state/image_status.json``).
+
+    An image with no label file, or an empty label file nobody confirmed, is **unannotated**, not a
+    negative. Enumerating samples from ``images_dir`` instead served both as zero-box samples, so a
+    project where the breeder labelled 30 of 400 images trained on 370 images asserted to be empty.
+
+    Returns ``(stems, counts)`` where counts carries ``annotated`` / ``confirmed_negative`` /
+    ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` so a run can record what it dropped.
+    """
+    names = image_name_map(images_dir)
+    candidates = list(stems) if stems is not None else sorted(names)
+    negatives = confirmed_negative_names(labels_dir)
+    counts = {"annotated": 0, "confirmed_negative": 0,
+              "skipped_unannotated": 0, "skipped_unconfirmed_empty": 0}
+
+    coco_names: set[str] | None = None
+    coco_annotated: set[str] = set()
+    if coco is not None:
+        # assemble_coco already applied this rail to build ``images``; intersecting with it *is*
+        # the rail, so the two can never disagree about which samples exist.
+        by_id = {e.get("id"): str(e.get("file_name", "")) for e in coco.get("images", [])}
+        coco_names = set(by_id.values())
+        coco_annotated = {by_id.get(a.get("image_id"), "") for a in coco.get("annotations", [])}
+
+    keep: list[str] = []
+    for stem in candidates:
+        image_name = names.get(stem)
+        if image_name is None:
+            counts["skipped_unannotated"] += 1
+            continue
+        if coco_names is not None:
+            if image_name not in coco_names:
+                # assemble_coco already dropped it, but not why. Read the record so the operator is
+                # told the truth: "annotate this" and "confirm this empty one" are different jobs.
+                has_record, _ = _label_record_state(stem, labels_dir, "json")
+                counts["skipped_unconfirmed_empty" if has_record
+                       else "skipped_unannotated"] += 1
+            elif image_name in coco_annotated:
+                keep.append(stem)
+                counts["annotated"] += 1
+            elif image_name in negatives:
+                # Zero annotations is a negative only with a human Complete. assemble_coco already
+                # enforces that, but an externally supplied coco_json never went through it, so the
+                # confirmation is re-checked here rather than inferred from the file's shape.
+                keep.append(stem)
+                counts["confirmed_negative"] += 1
+            else:
+                counts["skipped_unconfirmed_empty"] += 1
+            continue
+        has_record, has_objects = _label_record_state(stem, labels_dir, label_format)
+        if not has_record:
+            counts["skipped_unannotated"] += 1
+        elif has_objects:
+            keep.append(stem)
+            counts["annotated"] += 1
+        elif image_name in negatives:
+            keep.append(stem)
+            counts["confirmed_negative"] += 1
+        else:
+            counts["skipped_unconfirmed_empty"] += 1
+    return keep, counts
+
+
+def _require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> None:
+    """Refuse an empty sample set, naming why each image was dropped.
+
+    Filtering to the label store can legitimately empty a dataset — an images_dir where nothing is
+    annotated yet. Building it anyway would train on nothing and report success.
+    """
+    if stems:
+        return
+    raise ValueError(
+        f"no trainable samples in {labels_dir}: {counts['skipped_unannotated']} image(s) have no "
+        f"label record and {counts['skipped_unconfirmed_empty']} have an empty one nobody "
+        f"confirmed. An empty label file is a negative only once a human marks that image "
+        f"Complete; until then it reads as unannotated. Annotate some images, or mark the "
+        f"genuinely-empty ones Complete."
+    )
+
+
+def _label_record_state(stem: str, labels_dir, label_format: str) -> tuple[bool, bool]:
+    """``(a record exists, it has objects)`` for one stem in the active on-disk format."""
+    d = Path(labels_dir)
+    suffix = ".xml" if label_format == "voc" else ".json"
+    path = d / f"{stem}{suffix}"
+    if not path.is_file():
+        return False, False
+    try:
+        if label_format == "voc":
+            return True, "<object>" in path.read_text(encoding="utf-8")
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True, False
+    if label_format == "labelme":
+        return True, bool(isinstance(data, dict) and data.get("shapes"))
+    return True, bool(isinstance(data, dict) and data.get("objects"))
+
+
 def confirmed_negative_names(labels_dir) -> set[str]:
     """Image names a human explicitly marked negative (empty + Complete) for this label dir.
 
@@ -158,11 +280,13 @@ def assemble_coco(labels_dir, images_dir, stems=None, categories=None) -> dict:
     images_dir = Path(images_dir)
     if stems is None:
         stems = sorted(p.stem for p in labels_dir.glob("*.json"))
+    # Real on-disk names: to_coco_dataset matches these against the confirmed-negative store, and a
+    # constructed name would silently match nothing for an uppercase extension.
+    names = image_name_map(images_dir)
     entries: list[tuple[str, str]] = []
     for stem in stems:
-        try:
-            file_name = _find_image(images_dir, stem).name
-        except FileNotFoundError:
+        file_name = names.get(stem)
+        if file_name is None:
             continue
         entries.append((str(labels_dir / f"{stem}.json"), file_name))
     return json_io.to_coco_dataset(
@@ -286,13 +410,11 @@ class DetectionDataset(BaseImageDataset):
             if not coco_json:
                 raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
             self._coco = json.loads(Path(coco_json).read_text(encoding="utf-8"))
-        if stems is not None:
-            self.stems = stems
-        else:
-            self.stems = sorted(
-                f.stem for f in self.images_dir.iterdir()
-                if f.suffix.lower() in IMAGE_EXTS
-            )
+        self.stems, self.sample_counts = trainable_stems(
+            self.labels_dir, self.images_dir, stems,
+            label_format=self.label_format, coco=self._coco,
+        )
+        _require_samples(self.stems, self.sample_counts, self.labels_dir)
 
     @property
     def num_classes(self) -> int:
@@ -506,10 +628,11 @@ class InstanceSegDataset(BaseImageDataset):
             if not coco_json:
                 raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
             self._coco = json.loads(Path(coco_json).read_text(encoding="utf-8"))
-        self.stems = stems or sorted(
-            f.stem for f in self.images_dir.iterdir()
-            if f.suffix.lower() in IMAGE_EXTS
+        self.stems, self.sample_counts = trainable_stems(
+            self.labels_dir, self.images_dir, stems,
+            label_format=self.label_format, coco=self._coco,
         )
+        _require_samples(self.stems, self.sample_counts, self.labels_dir)
 
     def _read_polys(self, stem: str, w: int, h: int) -> list[tuple[list[tuple[float, float]], int]]:
         """(pixel polygon points, 1-indexed label) per instance — from the COCO dict or the
@@ -586,10 +709,21 @@ class SemanticSegDataset(BaseImageDataset):
         self.masks_dir = Path(masks_dir)
         self.transforms = transforms
         self._num_classes = num_classes
-        self.stems = stems or sorted(
-            f.stem for f in self.images_dir.iterdir()
-            if f.suffix.lower() in IMAGE_EXTS
-        )
+        # A sample needs a mask. Unlike detection there is no unconfirmed-empty case: an
+        # all-background mask is an explicit annotation, so existence is the whole rail here.
+        # Serving an image with no mask would train it as entirely background — a fabricated
+        # negative by another route.
+        mask_stems = {p.stem for p in self.masks_dir.iterdir()} if self.masks_dir.is_dir() else set()
+        candidates = stems or sorted(image_name_map(self.images_dir))
+        self.stems = [s for s in candidates if s in mask_stems]
+        self.sample_counts = {"annotated": len(self.stems),
+                              "skipped_unannotated": len(candidates) - len(self.stems)}
+        if not self.stems:
+            raise ValueError(
+                f"no trainable samples: none of the {len(candidates)} image(s) in "
+                f"{self.images_dir} have a mask in {self.masks_dir}. An image with no mask would "
+                f"train as entirely background."
+            )
 
     @property
     def num_classes(self) -> int:
