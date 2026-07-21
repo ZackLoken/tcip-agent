@@ -21,6 +21,12 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 _DETECTION_TASKS = {"detection", "instance_seg"}
+# The tasks ``_synth_batch`` can shape a batch for. A task outside this set is not refused as
+# unsupported -- the platform has no fixed task taxonomy -- but it cannot be SMOKED blind, so
+# the caller supplies ``sample_batch=`` instead of the contract inventing a shape for it.
+_SYNTHESIZABLE_TASKS = _DETECTION_TASKS | {
+    "classification", "ordinal", "regression", "semantic_seg",
+}
 
 
 @runtime_checkable
@@ -63,8 +69,14 @@ def _synth_batch(task: str, *, in_chans: int, num_classes: int, img_size: int, d
         targets = {"values": torch.rand(2, device=device)}
     elif task == "semantic_seg":
         targets = {"masks": torch.randint(0, max(num_classes, 2), (2, img_size, img_size), device=device)}
-    else:  # classification (and any dict-target head)
+    elif task == "classification":
         targets = {"labels": torch.randint(0, max(num_classes, 2), (2,), device=device)}
+    else:
+        raise ValueError(
+            f"no synthetic batch schema for task {task!r}. Pass sample_batch= (an (images, "
+            f"targets) pair from this run's dataset) to check_model_contract, overfit_check, or "
+            f"ctx.check_contract. Schemas exist for {sorted(_SYNTHESIZABLE_TASKS)}."
+        )
     return images, targets
 
 
@@ -84,16 +96,32 @@ def _forward_loss(model: Any, images: Any, targets: Any):
 
 def check_model_contract(
     model: TCIPModel, task: str, *, in_chans: int = 3, num_classes: int = 1,
-    img_size: int = 64, device: str = "cpu",
+    img_size: int = 64, device: str = "cpu", sample_batch: Any = None,
 ) -> dict:
     """Behavioral smoke test of the measurement boundary. Returns a report; never raises.
 
     ``{"ok": bool, "issues": [...], "train_loss": float|None, "eval_output_type": str|None}``.
+
+    ``sample_batch`` is an ``(images, targets)`` pair from this run's own dataset. It is required
+    for a task outside ``_SYNTHESIZABLE_TASKS``: the contract will not invent a target shape for a
+    task it does not know, because a green report earned against a guessed shape proves nothing
+    about the model that will actually train.
     """
     import torch
 
     issues: list[str] = []
-    report: dict[str, Any] = {"ok": False, "issues": issues, "train_loss": None, "eval_output_type": None}
+    report: dict[str, Any] = {"ok": False, "issues": issues, "train_loss": None,
+                              "eval_output_type": None, "not_smokeable": None}
+    if sample_batch is None and task not in _SYNTHESIZABLE_TASKS:
+        # Do not invent a target shape for a task we have no schema for: a green report earned
+        # against a guessed shape proves nothing. Say so, and let the caller smoke it with a real
+        # batch (ctx.check_contract(sample_batch=...)) instead.
+        report["not_smokeable"] = (
+            f"no synthetic batch schema for task {task!r}; pass sample_batch= (an (images, targets) "
+            f"pair from this run's dataset) to smoke it. Schemas exist for "
+            f"{sorted(_SYNTHESIZABLE_TASKS)}."
+        )
+        return report
     dev = torch.device(device)
     try:
         model.to(dev)
@@ -103,8 +131,9 @@ def check_model_contract(
     # Train pass — finite loss with a gradient.
     try:
         model.train()
-        images, targets = _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
-                                        img_size=img_size, device=dev)
+        images, targets = (sample_batch if sample_batch is not None else
+                           _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
+                                        img_size=img_size, device=dev))
         loss = _forward_loss(model, images, targets)
         if not (hasattr(loss, "requires_grad") and loss.requires_grad):
             issues.append("train-mode loss does not require grad (no learnable path)")
@@ -124,8 +153,9 @@ def check_model_contract(
     # Eval pass — documented output shape.
     try:
         model.eval()
-        images, _ = _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
-                                 img_size=img_size, device=dev)
+        images, _ = (sample_batch if sample_batch is not None else
+                     _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
+                                  img_size=img_size, device=dev))
         with torch.no_grad():
             out = model(images)
         if task in _DETECTION_TASKS:
@@ -137,6 +167,13 @@ def check_model_contract(
             report["eval_output_type"] = "dict"
             if not isinstance(out, dict):
                 issues.append(f"non-detection eval output is not a dict (got {type(out).__name__})")
+            elif not any(isinstance(v, torch.Tensor) for v in out.values()):
+                # Which keys a task uses is the agent's to choose, so none are named here. But a
+                # dict carrying no tensor is not a prediction, and no scorer can consume it.
+                issues.append(
+                    f"non-detection eval output carries no tensor value (keys: {sorted(out)}) — "
+                    "nothing downstream can read a measurement from it"
+                )
     except Exception as exc:  # noqa: BLE001
         issues.append(f"eval-mode forward failed: {exc}")
 
@@ -147,6 +184,7 @@ def check_model_contract(
 def overfit_check(
     model: TCIPModel, task: str, *, steps: int = 20, in_chans: int = 3, num_classes: int = 1,
     img_size: int = 64, seed: int = 0, lr: float = 1e-2, device: str = "cpu",
+    sample_batch: Any = None,
 ) -> dict:
     """Drive ``steps`` optimizer updates on ONE fixed tiny batch; the loss must fall.
 
@@ -154,6 +192,10 @@ def overfit_check(
     ``{"passed": bool, "losses": [...], "initial": float, "final": float, "issue": str|None}``.
     ``passed`` iff every loss is finite and the final loss is strictly below the initial one —
     the minimal evidence a bespoke model with a real learnable path actually optimizes.
+
+    ``sample_batch`` is an ``(images, targets)`` pair from your own dataset, required for a task
+    outside ``_SYNTHESIZABLE_TASKS``. Without it such a task returns ``passed: False`` with the
+    reason in ``issue`` — it never raises.
     """
     import torch
 
@@ -166,8 +208,12 @@ def overfit_check(
     except Exception:  # noqa: BLE001
         pass
 
-    images, targets = _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
-                                   img_size=img_size, device=dev)
+    try:
+        images, targets = (sample_batch if sample_batch is not None else
+                           _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
+                                        img_size=img_size, device=dev))
+    except ValueError as exc:  # no schema for this task — report, never raise (this returns a dict)
+        return {"passed": False, "losses": [], "initial": None, "final": None, "issue": str(exc)}
     optimizer = torch.optim.Adam((p for p in model.parameters() if p.requires_grad), lr=lr)
 
     losses: list[float] = []
