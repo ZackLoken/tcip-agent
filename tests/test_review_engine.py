@@ -46,7 +46,7 @@ def ctx() -> ReviewContext:
 
 def test_initial_state_is_empty(engine: ReviewEngine, tmp_path: Path) -> None:
     assert engine.raw_state == {}
-    assert engine.review_state_path == tmp_path / "review_stats.json"
+    assert engine.shard_dir == tmp_path / "review"
     assert not engine.is_image_reviewed("IMG_0133.JPG")
     assert engine.get_image_review_status("IMG_0133.JPG") == "not_started"
 
@@ -134,27 +134,6 @@ def test_raw_state_round_trips_through_reload(engine: ReviewEngine, ctx: ReviewC
 
     reloaded = ReviewEngine(state_dir=tmp_path)
     assert reloaded.raw_state == before
-
-
-def test_legacy_single_file_migrates_to_shards_on_load(tmp_path: Path) -> None:
-    import json
-
-    legacy = {"image": {
-        "IMG_A.JPG": {"img_status": "completed", "detections": [
-            {"action": "accepted", "class_id": 0, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
-        "IMG_B.JPG": {"img_status": "started", "detections": []},
-    }}
-    (tmp_path / "review_stats.json").write_text(json.dumps(legacy))
-
-    eng = ReviewEngine(tmp_path)
-    assert not (tmp_path / "review_stats.json").exists()  # legacy file removed
-    assert eng.raw_state == legacy  # content preserved
-    assert (tmp_path / "review" / "IMG_A.JPG.json").is_file()
-    assert (tmp_path / "review" / "IMG_B.JPG.json").is_file()
-    assert eng.is_image_reviewed("IMG_A.JPG")
-    assert not eng.is_image_reviewed("IMG_B.JPG")
-
-
 def test_shard_key_with_separator_round_trips(tmp_path: Path) -> None:
     """A key bearing a path separator survives a save/reload without mutation (the shard filename
     is sanitized, but the true key is read back from the payload)."""
