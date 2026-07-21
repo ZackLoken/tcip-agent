@@ -34,14 +34,10 @@ def bucket_stems(*dirs: Path | str) -> set[str]:
 def verdict_count(review_state_dir: Path | str, names: Iterable[str]) -> int:
     """Review verdicts recorded against ``names`` (image stems). 0 when no review state
     exists yet — no engine is created for a never-reviewed project."""
-    from tcip_annotation.review_engine import (
-        REVIEW_SHARD_DIRNAME,
-        REVIEW_STATE_FILENAME,
-        ReviewEngine,
-    )
+    from tcip_annotation.review_engine import REVIEW_SHARD_DIRNAME, ReviewEngine
 
     d = Path(review_state_dir)
-    if not (d / REVIEW_SHARD_DIRNAME).is_dir() and not (d / REVIEW_STATE_FILENAME).is_file():
+    if not (d / REVIEW_SHARD_DIRNAME).is_dir():
         return 0
     return ReviewEngine(d).verdict_count_for_images(names)
 
