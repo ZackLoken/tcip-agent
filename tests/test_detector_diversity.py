@@ -56,10 +56,14 @@ def test_necks_default_off_unchanged():
 # --------------------------------------------------------------------------
 
 def test_detection_anchor_count_with_p2():
-    from tcip_mcp.pipelines.components.backbones import _build_timm_backbone
+    import timm
+
+    from tcip_mcp.pipelines.components.backbones import BackboneWrapper
     from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter, _build_faster_rcnn
 
-    bb = _build_timm_backbone("resnet18", pretrained=False)
+    _m = timm.create_model("resnet18", pretrained=False, features_only=True,
+                           out_indices=(1, 2, 3, 4))
+    bb = BackboneWrapper(_m, _m.feature_info.channels())
     neck = FPN(bb.out_channels, 256, add_p2=True)  # 5 pyramid levels
     adapter = BackboneNeckAdapter(bb, neck)
     with torch.no_grad():
