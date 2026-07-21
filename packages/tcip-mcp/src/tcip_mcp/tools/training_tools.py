@@ -28,11 +28,14 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     Args:
         config: Full training configuration dict.
-        smoke: When True, actually build the model and run ``check_model_contract`` (a synthetic
-            train+eval forward at the resolved in_chans/num_classes/img_size). A contract failure is
-            a guaranteed real-run failure, so it is appended to ``issues`` and blocks the launch —
-            ``launch_training`` runs this before spawning the training thread. Default False keeps
-            the always-on web ``/validate`` path fast (no torch import, no build).
+        smoke: When True, actually build the model and run ``check_model_contract`` (a train+eval
+            forward at the resolved in_chans/num_classes/img_size). A contract failure is a
+            guaranteed real-run failure, so it is appended to ``issues`` and blocks the launch —
+            ``launch_training`` runs this before spawning the training thread. For a task the
+            contract has no synthetic batch schema for, one real batch is built from ``data`` and
+            used instead; if no batch can be built either, the boundary is unproven and that also
+            blocks. Default False keeps the always-on web ``/validate`` path to structural checks
+            plus a builder import — no model construction and no forward pass.
         overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic and
             report it under ``overfit_check`` — never gating (a noisy-but-valid model can fail it).
     """
@@ -132,8 +135,21 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             dims = resolve_contract_dims(config, task)
             model = build_model(config)
             report = check_model_contract(model, task, **dims)
+            if report.get("not_smokeable"):
+                # The contract has no synthetic batch schema for this task. Rather than enumerate
+                # tasks (a taxonomy) or skip the check (a rail made optional), smoke it against a
+                # real batch from the run's own dataset — a better reference than a synthetic one
+                # for every task, and the only one for a task the platform does not enumerate.
+                batch = _one_real_batch(task, config.get("data") or {})
+                if batch is not None:
+                    report = check_model_contract(model, task, sample_batch=batch, **dims)
             result["smoke"] = {**report, "dims": dims, "task": task}
-            if not report["ok"]:
+            if report.get("not_smokeable"):
+                issues.append(
+                    f"model contract: {report['not_smokeable']} No batch could be built from "
+                    "data config either, so the measurement boundary is unproven for this run."
+                )
+            elif not report["ok"]:
                 issues.extend(f"model contract: {msg}" for msg in report["issues"])
             if overfit:
                 result["overfit_check"] = overfit_check(model, task, **dims)
@@ -631,6 +647,30 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
             record_artifact(experiment_id, "split", str(path))
     except Exception as exc:  # noqa: BLE001
         logger.warning("split manifest persist failed for %s: %s", experiment_id, exc)
+
+
+def _one_real_batch(task: str, data_cfg: dict, n: int = 2):
+    """One collated ``(images, targets)`` batch from the run's own dataset, or ``None``.
+
+    Lets the model contract smoke a task it has no synthetic schema for, without the platform
+    enumerating tasks. Best-effort by design: a config that cannot yield a batch returns ``None``
+    and the caller decides what that means — this function never decides whether a run proceeds.
+    """
+    try:
+        from tcip_mcp.pipelines.data.datasets import build_dataset
+        from tcip_mcp.pipelines.training.generic_trainer import task_collate
+
+        src: dict = {"images_dir": data_cfg.get("images_dir", "")}
+        for key in ("labels_dir", "label_format", "coco_json", "masks_dir", "csv_path",
+                    "dataset_source"):
+            if data_cfg.get(key):
+                src[key] = data_cfg[key]
+        ds = build_dataset(task, **src, transforms=None, tiling=data_cfg.get("tiling"))
+        items = [ds[i] for i in range(min(n, len(ds)))]
+        return task_collate(task)(items) if items else None
+    except Exception as exc:  # noqa: BLE001 — an unbuildable batch is a caller decision, not a crash
+        logger.info("could not build a real batch to smoke task %r: %s", task, exc)
+        return None
 
 
 def _auto_train_val(task: str, data_cfg: dict, transforms):
