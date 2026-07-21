@@ -169,16 +169,22 @@ class RegressionHead(BaseHead):
 # ====================================================================
 
 class SemanticSegHead(BaseHead):
-    """Pixel-wise semantic segmentation (DeepLab-style)."""
+    """Pixel-wise semantic segmentation (DeepLab-style).
+
+    Takes no ``loss`` name, and ``default_loss`` is empty on purpose: this head computes its own
+    CE + multi-class Dice blend in ``compute_loss``, and there is no registry loss to route to.
+    ``build_loss("cross_entropy+dice")`` constructs but raises at forward — the registry's
+    ``DiceLoss`` is binary (sigmoid + flatten) while this head emits multi-class logits.
+    ``class_weights`` *is* honored, applied to the CE term.
+    """
 
     task_type = "semantic_seg"
-    default_loss = "ce+dice"
+    default_loss = ""
 
     def __init__(self, in_channels: int, num_classes: int,
-                 loss: str | None = None, class_weights: list | None = None) -> None:
+                 class_weights: list | None = None) -> None:
         super().__init__()
         self.num_classes = num_classes
-        self._loss_name = loss  # informational; semantic_seg always blends CE + Dice
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, 256, 3, padding=1),
             nn.BatchNorm2d(256),
