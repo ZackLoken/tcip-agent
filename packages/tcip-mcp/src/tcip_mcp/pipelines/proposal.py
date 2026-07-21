@@ -125,7 +125,8 @@ def resolve_proposer(engine: str) -> Proposer:
     """Resolve an engine: a registered built-in name, else a dotted ``module:factory`` the agent brings.
 
     Mirrors ``model_source`` — a bring-your-own engine is imported (never ``exec``'d) and, if the
-    imported target is callable (a class or factory), instantiated.
+    imported target is callable (a class or factory), instantiated. A dotted name that fails to
+    import raises ``ValueError`` like an unknown one, so one ``except`` covers both.
     """
     _ensure_builtins()
     if engine in _ENGINES:
@@ -133,7 +134,10 @@ def resolve_proposer(engine: str) -> Proposer:
     if ":" in engine or "." in engine:
         from tcip_mcp.pipelines.model_build import _import_dotted
 
-        target = _import_dotted(engine)
+        try:
+            target = _import_dotted(engine)
+        except Exception as exc:  # noqa: BLE001 — any import failure is an unresolvable name
+            raise ValueError(f"Could not import proposal engine {engine!r}: {exc}") from exc
         return target() if callable(target) else target
     raise ValueError(
         f"Unknown proposal engine {engine!r}. Use a built-in ({sorted(_ENGINES)}), register one with "
