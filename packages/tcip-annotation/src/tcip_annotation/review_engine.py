@@ -6,8 +6,7 @@ adaptations:
   * Operates on :mod:`tcip_annotation.state` dataclasses (``BBox``,
     ``Polygon``, ``PredBBox``, ``PredPolygon``).
   * Consumes the dict-based match format produced by
-    :func:`tcip_annotation.matching.compute_matches` rather than the legacy
-    tuple format.
+    :func:`tcip_annotation.matching.compute_matches` (a dict, not a tuple).
   * Per-image state (image dims, GT/pred lists) is supplied via
     :class:`ReviewContext` on each call, rather than embedded in a global
     AppState. This makes the engine safe to reuse across images and
@@ -16,7 +15,6 @@ adaptations:
 The only state the engine holds between calls is the persisted review log — one JSON
 shard per image under ``<state_dir>/review/`` (a verdict rewrites only its own image's
 shard, not the whole cross-image log) — and a small spatial-hash cache for fast lookups.
-A legacy single ``review_stats.json`` (pre-sharding) is migrated to shards on first load.
 """
 
 from __future__ import annotations
@@ -80,7 +78,6 @@ class ReviewContext:
 
 # ── Constants ─────────────────────────────────────────────────────────────
 
-REVIEW_STATE_FILENAME = "review_stats.json"  # legacy single-file layout; migrated on load
 REVIEW_SHARD_DIRNAME = "review"
 _LOOKUP_QUANT = 500
 _LOOKUP_TOLERANCE = 0.002
@@ -121,11 +118,6 @@ class ReviewEngine:
     # ── Persistence ───────────────────────────────────────────────────────
 
     @property
-    def review_state_path(self) -> Path:
-        """Legacy single-file location, kept only to detect/migrate a pre-sharding state."""
-        return self.state_dir / REVIEW_STATE_FILENAME
-
-    @property
     def shard_dir(self) -> Path:
         return self.state_dir / REVIEW_SHARD_DIRNAME
 
@@ -139,14 +131,7 @@ class ReviewEngine:
 
     def load_review_state(self) -> None:
         shards = sorted(self.shard_dir.glob("*.json")) if self.shard_dir.is_dir() else []
-        if shards:
-            self._review_state = {"image": self._read_shards(shards)}
-        elif self.review_state_path.exists():
-            self._review_state = self._read_legacy_file()
-            self.save_review_state()  # one-time migration: split into shards...
-            self._delete_legacy_file()  # ...then remove the old single file
-        else:
-            self._review_state = {}
+        self._review_state = {"image": self._read_shards(shards)} if shards else {}
         self._invalidate_reviewed_lookup()
 
     def _read_shards(self, shards: list[Path]) -> dict:
@@ -164,20 +149,6 @@ class ReviewEngine:
                 img_name, state = shard.name[: -len(".json")], payload
             per_image[img_name] = state
         return per_image
-
-    def _read_legacy_file(self) -> dict:
-        path = self.review_state_path
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            logger.exception("Could not load review state from %s", path)
-            return {}
-
-    def _delete_legacy_file(self) -> None:
-        try:
-            self.review_state_path.unlink()
-        except OSError:
-            logger.exception("Could not remove legacy review state file %s", self.review_state_path)
 
     def _atomic_write_json(self, path: Path, obj: dict) -> None:
         """Serialize ``obj`` compactly and swap it into ``path`` atomically (temp file +
