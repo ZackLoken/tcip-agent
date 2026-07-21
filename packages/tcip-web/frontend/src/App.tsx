@@ -197,19 +197,6 @@ function App() {
         // never looked at — then wrote the result back over their original confirmations.
         const saved = await classesApi.loadImageStatus(projectRoot, annotationType, datasetDate);
         const savedMap = saved.statuses ?? {};
-        if (saved.legacy_pending > 0) {
-          // These were confirmed before the project recorded which campaign they belonged to, so
-          // they count for none of them. Say so — otherwise the breeder's work is simply gone from
-          // the UI, and "unannotated" is indistinguishable from "never touched".
-          useStore
-            .getState()
-            .pushToast(
-              `${saved.legacy_pending} image confirmation(s) were recorded before this project ` +
-                `tracked which campaign they belonged to, so they count for none. Open each and ` +
-                `mark it Complete with the right campaign selected.`,
-              "info",
-            );
-        }
         // Reconcile every image against the label files, honoring confirmed reviews via
         // complete_override — so a wrongly-saved "negative" whose files have content heals
         // to partial instead of silently locking the canvas forever.
