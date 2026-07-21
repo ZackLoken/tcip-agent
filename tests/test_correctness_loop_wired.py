@@ -36,6 +36,42 @@ def _broken_builder(**kwargs):
     return _Broken()
 
 
+def _bespoke_task_dataset(**_kwargs):
+    """Agent-authored dataset for a task the platform does not enumerate."""
+    from torch.utils.data import Dataset
+
+    class _DS(Dataset):
+        def __len__(self):
+            return 4
+
+        def __getitem__(self, idx):
+            return torch.zeros(3, 32, 32), {"values": torch.tensor(float(idx))}
+
+    return _DS()
+
+
+def _unbuildable_dataset(**_kwargs):
+    raise RuntimeError("cannot open the source for this task")
+
+
+def _bespoke_task_model(**_kwargs):
+    """Agent-authored model for that same task — trains and emits a scored output."""
+    import torch.nn as nn
+
+    class _Net(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.head = nn.Linear(3 * 32 * 32, 1)
+
+        def forward(self, images, targets=None):
+            pred = self.head(images.flatten(1)).squeeze(-1)
+            if self.training:
+                return {"loss": ((pred - targets["values"]) ** 2).mean()}
+            return {"values": pred}
+
+    return _Net()
+
+
 # --------------------------------------------------------------------------
 # resolve_contract_dims — resolved, not the tiny 64px default (critic G5)
 # --------------------------------------------------------------------------
@@ -100,6 +136,51 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
     assert r["valid"] is True, r["issues"]
     assert r["smoke"]["ok"] is True
     assert "overfit_check" in r  # voluntary diagnostic reported, non-gating
+
+
+# --------------------------------------------------------------------------
+# A task the contract has no synthetic schema for is smoked against a REAL batch —
+# no task taxonomy, and no run launching with the contract silently skipped.
+# --------------------------------------------------------------------------
+
+def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    imgs.mkdir()
+    cfg = {
+        "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
+        "data": {"images_dir": str(imgs),
+                 "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset",
+                                    "task": "bunch_compactness"}},
+        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}]},
+    }
+    r = preflight_config(cfg, smoke=True)
+    assert r["valid"] is True, r["issues"]
+    # The contract actually ran — a real batch stood in for the missing synthetic schema.
+    assert r["smoke"]["not_smokeable"] is None
+    assert r["smoke"]["ok"] is True
+    assert r["smoke"]["train_loss"] is not None
+
+
+def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
+    """Unsmokeable is a blocked launch, not a skipped check — the boundary stays proven."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    imgs.mkdir()
+    cfg = {  # structurally valid, but the dataset cannot produce an item
+        "model_source": {"builder": f"{__name__}:_bespoke_task_model", "task": "bunch_compactness"},
+        "data": {"images_dir": str(imgs),
+                 "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset",
+                                    "task": "bunch_compactness"}},
+        "training": {"batch_size": 2, "stages": [{"freeze_to": 0, "epochs": 1}]},
+    }
+    r = preflight_config(cfg, smoke=True)
+    assert r["valid"] is False
+    assert any("model contract" in i for i in r["issues"])
 
 
 # --------------------------------------------------------------------------
