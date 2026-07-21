@@ -45,7 +45,10 @@ _selected_this_session = False
 class DatasetTree(BaseModel):
     dataset_root: str
     dates_with_images: list[str]
-    annotation_types: list[str]  # every trait present anywhere, e.g. ["catkin", "bush"]
+    # Every trait campaign present anywhere — the child dirs of ``annotations/``, e.g.
+    # ["catkin_50per_date", "efb_presence"]. Despite the name this is the *trait*, not the shape
+    # kind; it is passed as ``annotation_dir``'s ``trait``. See the rename note in the plan.
+    annotation_types: list[str]
     model_names: list[str]       # every model present anywhere, e.g. ["baseline"]
     # Per-date availability: the traits that actually have labels / models that actually
     # have predictions on each date. The GUI's trait/model pickers filter to these so a
