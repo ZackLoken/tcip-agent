@@ -68,6 +68,25 @@ def test_check_model_contract_classification_ok():
     assert report["train_loss"] is not None
 
 
+def test_check_model_contract_rejects_prediction_free_eval_output():
+    """A dict is the shape, not the content — an output with no tensor is not a measurement."""
+    import torch.nn as nn
+
+    class _Empty(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lin = nn.Linear(4, 4)
+
+        def forward(self, images, targets=None):
+            if self.training:
+                return {"loss": self.lin(torch.rand(1, 4)).sum()}
+            return {"note": "done"}
+
+    report = check_model_contract(_Empty(), "classification", num_classes=2)
+    assert report["ok"] is False
+    assert any("no tensor value" in i for i in report["issues"]), report["issues"]
+
+
 def test_check_model_contract_detection_ok():
     model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=128)
     report = check_model_contract(model, "detection", num_classes=1, img_size=64)
