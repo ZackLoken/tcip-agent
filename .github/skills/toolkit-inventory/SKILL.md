@@ -25,7 +25,7 @@ such factory, so this skill is where their names live.
 | `build_loss(name, ...)` | `pipelines.components.losses` | names: `cross_entropy`, `weighted_ce`, `focal`, `smooth_l1`, `huber`, `bce`, `dice`, `giou`, `corn`, `coral`. Compose terms with `+` (e.g. `"bce+dice"` → `CombinedLoss`). A weightable loss (`cross_entropy`/`weighted_ce`/`focal`) auto-injects inverse-frequency weights when given `class_distribution`. `compute_class_weights` is the standalone weigher. |
 | Heads (no factory — import the class) | `pipelines.components.heads` | `ClassificationHead` (task `classification`, default loss `cross_entropy`), `OrdinalHead` (task `ordinal`, `corn`), `RegressionHead` (task `regression`, `smooth_l1`), `SemanticSegHead` (task `semantic_seg`, blends CE+Dice internally). Each implements `forward` / `compute_loss` / `decode`. |
 | Necks (no factory — import the class) | `pipelines.components.necks` | `FPN`, `PAN` (both take `add_p2` for a finer level), `IdentityNeck` (pass-through), `GlobalAvgPoolNeck` (→ flat `[B, C]` vector for classification/ordinal/regression heads). |
-| Backbones | `pipelines.components.backbones` | `BackboneWrapper` (uniform multi-scale interface, stage freezing), `_build_timm_backbone` (timm, `features_only`), `_build_tv_resnet` (torchvision fallback). `in_chans` threads through for N-channel input. |
+| Backbones | `pipelines.components.backbones` | `BackboneWrapper` is the whole surface — wrap **any** module (timm, torchvision, or yours) to get multi-scale features, a declared `out_channels`, and per-stage `freeze_to`. There is no build helper on purpose: `out_indices` decides whether you get a pyramid at all, so it is yours to choose. See the module docstring for the two-line wrap. |
 
 **`task` strings** (the `model_source["task"]` value; also the `build_dataset` task keys and the
 head `task_type`s): `detection`, `instance_seg`, `semantic_seg`, `classification`, `ordinal`,
@@ -38,7 +38,7 @@ head `task_type`s): `detection`, `instance_seg`, `semantic_seg`, `classification
 |------------|-------|---------|
 | `probe_channels(image_path)` | `pipelines.derivations` | band count of *this* raster (RGB→3, N-band GeoTIFF→N) — feed `in_chans`. |
 | `num_classes_from_distribution(dist)` | `pipelines.derivations` | `max class id + 1` from *this* label set. |
-| `gt_aspect_ratios(boxes)` | `pipelines.derivations` | anchor aspect ratios spanning *this* dataset's GT box shapes (elongated organs a default `(0.5,1,2)` can't match). |
+| `gt_aspect_ratios(boxes)` | `pipelines.derivations` | anchor aspect ratios spanning *this* dataset's GT box shapes (elongated organs a default `(0.5,1,2)` can't match), or `None` when the GT gives no basis. |
 | `derive_cross_tile_nms(gt_boxes_per_image)` | `pipelines.derivations` | cross-tile NMS IoU from the GT neighbor-overlap tail, or `None` (underivable → honest placeholder). |
 
 `gt_aspect_ratios` is **derive → pass**, never auto-injected into `build_detector` (that would
@@ -48,7 +48,9 @@ re-pin the method):
 from tcip_mcp.pipelines.derivations import gt_aspect_ratios
 from tcip_mcp.pipelines.components.detectors import build_detector
 ratios = gt_aspect_ratios([(b.w, b.h) for b in gt_boxes])   # this dataset's shapes
-names = ["0", "1", "2", "3"]                                 # your neck's output keys
+if ratios is None:
+    ratios = [0.5, 1.0, 2.0]                                 # underivable — yours to stamp
+names = list(adapter(torch.zeros(1, in_chans, h, w)).keys())  # this adapter's actual keys
 model = build_detector("faster_rcnn", adapter, num_classes=n,
                        featmap_names=names, num_levels=len(names),
                        aspect_ratios=tuple(ratios))
@@ -68,7 +70,10 @@ a derivation label can never again be stamped without a computation behind it.
 
 The `model_contract` (`check_model_contract` / `overfit_check`) states the *only* model-side
 contract — the measurement boundary: the model must train (finite-gradient loss) and emit inference
-output the library scorers consume.
+output the library scorers consume. Both synthesize a batch for the task strings `build_dataset`
+routes; for any other task they take `sample_batch=` — an `(images, targets)` pair from your own
+dataset — and report `not_smokeable` if given neither. `preflight_config(smoke=True)` builds that
+batch from the run's `data` config, so a bespoke task is smoked on real data rather than skipped.
 
 ## The `ctx` craft library (`TrainContext`, `pipelines.training.envelope`)
 
@@ -131,7 +136,7 @@ you can extend rather than a welded `if/elif`.
 |-------|------|
 | `BaseScorer` | `score(image_paths, model, device)` → `(path, score)` pairs, descending. |
 | `SCORER_REGISTRY` / `register_scorer(name, factory)` | built-ins: `uncertainty`, `diversity`, `combined`; register your own (margin, least-confidence, …) under a name. |
-| `resolve_scorer(method, task)` | resolve by name; an unregistered name falls back to `combined`. |
+| `resolve_scorer(method, task)` | resolve a built-in name, a registered one, or a dotted `module:factory` you wrote. An unresolvable name raises `ValueError` listing the built-ins — never silently substituted. |
 
 `require_composed_detector` (`active_learning.helpers`) is the honest guard the logit-reading
 scorers use — it returns an error rather than reading logits off a non-`nn.Module` model, and
