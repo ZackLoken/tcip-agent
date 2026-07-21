@@ -1,4 +1,4 @@
-"""Class registry routes — mirrors yolo-annotator's ``classes.json``.
+"""Class registry routes.
 
 Class ids are **scoped to a trait**: each trait keeps its own map at
 ``<project_root>/.tcip/state/classes/<trait>.json``, so ``catkin`` and ``bush`` can each use
@@ -64,7 +64,7 @@ def _cached_label_json(path: Path) -> object:
     return data
 
 
-# High-contrast default palette (same as yolo-annotator's DEFAULT_CLASS_COLORS)
+# High-contrast default palette, indexed by class id.
 DEFAULT_CLASS_COLORS = [
     "#FF0000",
     "#00FFFF",
@@ -209,22 +209,39 @@ class ImageStatusPayload(BaseModel):
     project_root: str
     image_name: str
     status: str  # "complete" | "partial" | "negative" | "unannotated"
+    campaign: str | None = None  # the annotations/<campaign>/ dir — not necessarily a trait
+    date: str | None = None
 
 
 def _image_status_path(project_root: str) -> Path:
     return Path(project_root) / ".tcip" / "state" / "image_status.json"
 
 
+def _load_status_store(path: Path) -> dict[str, dict[str, str]]:
+    """The status store, normalized. One definition, shared with doctor.py."""
+    from tcip_mcp.dataset_layout import normalize_status_store
+
+    return normalize_status_store(read_json(path, default={}))
+
+
+def _bucket(campaign: str | None, date: str | None) -> str:
+    from tcip_mcp.dataset_layout import status_bucket
+
+    return status_bucket(campaign, date)
+
+
 @router.get("/image_status")
-def get_image_status(project_root: str) -> dict:
+def get_image_status(project_root: str, campaign: str | None = None,
+                     date: str | None = None) -> dict:
+    """Statuses for one campaign/date, plus the count awaiting re-confirmation."""
+    from tcip_mcp.dataset_layout import LEGACY_BUCKET
+
     path = _image_status_path(project_root)
     if not path.exists():
-        return {"statuses": {}}
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"statuses": {}}
-    return {"statuses": raw}
+        return {"statuses": {}, "legacy_pending": 0}
+    store = _load_status_store(path)
+    return {"statuses": store.get(_bucket(campaign, date), {}),
+            "legacy_pending": len(store.get(LEGACY_BUCKET, {}))}
 
 
 @router.post("/image_status")
@@ -232,31 +249,32 @@ def set_image_status(payload: ImageStatusPayload) -> dict:
     if payload.status not in VALID_STATUSES:
         raise HTTPException(400, f"invalid status: {payload.status}")
     path = _image_status_path(payload.project_root)
+    bucket = _bucket(payload.campaign, payload.date)
     with file_transaction(path):
-        raw = read_json(path, default={})
-        if not isinstance(raw, dict):
-            raw = {}
-        raw[payload.image_name] = payload.status
-        atomic_write_json(path, {k: raw[k] for k in sorted(raw)})
+        store = _load_status_store(path)
+        store.setdefault(bucket, {})[payload.image_name] = payload.status
+        atomic_write_json(path, {k: dict(sorted(store[k].items())) for k in sorted(store)})
     return {"status": "ok"}
 
 
 class ImageStatusBulkPayload(BaseModel):
     project_root: str
     statuses: dict[str, str]  # image_name → status
+    campaign: str | None = None
+    date: str | None = None
 
 
 @router.post("/image_status/bulk")
 def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
     path = _image_status_path(payload.project_root)
+    bucket = _bucket(payload.campaign, payload.date)
     with file_transaction(path):
-        raw = read_json(path, default={})
-        if not isinstance(raw, dict):
-            raw = {}
+        store = _load_status_store(path)
+        target = store.setdefault(bucket, {})
         for name, st in payload.statuses.items():
             if st in VALID_STATUSES:
-                raw[name] = st
-        atomic_write_json(path, {k: raw[k] for k in sorted(raw)})
+                target[name] = st
+        atomic_write_json(path, {k: dict(sorted(store[k].items())) for k in sorted(store)})
     return {"status": "ok", "n": len(payload.statuses)}
 
 
