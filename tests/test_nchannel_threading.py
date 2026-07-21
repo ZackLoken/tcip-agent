@@ -8,12 +8,17 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 
-def test_tv_backbone_accepts_in_chans():
-    from tcip_mcp.pipelines.components.backbones import _build_tv_resnet
+def test_backbone_accepts_in_chans():
+    import timm
 
-    bb = _build_tv_resnet("resnet50", pretrained=False, in_chans=4)
+    from tcip_mcp.pipelines.components.backbones import BackboneWrapper
+
+    _m = timm.create_model("resnet50", pretrained=False, features_only=True,
+                           out_indices=(1, 2, 3, 4), in_chans=4)
+    bb = BackboneWrapper(_m, _m.feature_info.channels())
     out = bb(torch.rand(1, 4, 64, 64))
     assert isinstance(out, dict) and len(out) == 4           # 4 feature stages
+    assert bb.out_channels == [256, 512, 1024, 2048]
 
 
 def test_compose_and_forward_4_channel_model():
