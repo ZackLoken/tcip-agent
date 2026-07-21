@@ -207,6 +207,21 @@ def register_scorer(name: str, factory: Callable[[str], BaseScorer]) -> None:
 
 
 def resolve_scorer(method: str, task: str) -> BaseScorer:
-    """Resolve a scorer by method name; an unregistered name falls back to the combined scorer."""
-    factory = SCORER_REGISTRY.get(method, SCORER_REGISTRY["combined"])
-    return factory(task)
+    """Resolve a scorer: a registered built-in name, else a dotted ``module:factory`` you wrote.
+
+    Mirrors ``resolve_proposer``. An unresolvable name raises rather than falling back to the
+    combined scorer — a silent substitution means the queue is ordered by an acquisition function
+    the caller did not choose, while the result still reports the name that was asked for.
+    """
+    factory = SCORER_REGISTRY.get(method)
+    if factory is not None:
+        return factory(task)
+    if ":" in method or "." in method:
+        from tcip_mcp.pipelines.model_build import _import_dotted
+
+        target = _import_dotted(method)
+        return target(task) if callable(target) else target
+    raise ValueError(
+        f"Unknown scorer {method!r}. Use a built-in ({sorted(SCORER_REGISTRY)}), register one with "
+        f"register_scorer, or pass a dotted 'module:factory' you wrote."
+    )
