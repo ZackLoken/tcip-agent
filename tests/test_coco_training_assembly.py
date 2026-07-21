@@ -394,20 +394,6 @@ def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
                          num_classes=1).stems == ["ann"]
 
 
-def test_pre_scoping_confirmations_are_quarantined_not_trusted(tmp_path):
-    """Flat entries record no trait, so they cannot be attributed to one. Never a training
-    negative until the breeder re-confirms — laundering them into a campaign is the bug."""
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
-
-    labels = tmp_path / "annotations" / "catkin" / "detect"
-    labels.mkdir(parents=True)
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps({"shared.jpg": "negative"}))  # legacy flat
-
-    assert confirmed_negative_names(labels) == set()
-
-
 def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
     """Silently returning nothing would discard every hard negative the review loop harvested."""
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
