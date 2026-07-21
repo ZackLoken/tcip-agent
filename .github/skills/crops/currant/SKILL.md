@@ -157,8 +157,9 @@ Mechanics live in the **annotation skill**; currant-specific difficulties:
 - **Uneven ripening** within a strig (top ripens first) blurs a single "ripe" call.
 - **Cryptic disease signal:** early SWD is invisible externally; WPBR pustules are on
   the leaf underside; both demand the right view, not just any frame.
-- **Empty images are valid negatives** (a bush with no open flowers on a date), not
-  noise — see CLAUDE.md.
+- **An image with no open flowers on a date is a real observation**, not noise — but it trains as
+  a negative only once the breeder confirms it Complete; an empty label file alone reads as
+  unannotated (see CLAUDE.md's negative invariant).
 
 ## Measurement integrity
 
