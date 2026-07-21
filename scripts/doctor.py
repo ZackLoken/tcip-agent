@@ -60,6 +60,18 @@ def check_negatives(root: Path, findings: list) -> None:
         if label.stem not in stems:
             findings.append(("warn", f"{label.relative_to(root)}: label has no matching image"))
 
+    # The dominant case under "label a few examples": images with no label record at all. They are
+    # excluded from training, so a breeder who labelled 30 of 400 trains on 30 — worth seeing at a
+    # glance. Reported as one line, not one per image.
+    labelled = {p.stem for p in (root / "annotations").rglob("*.json")
+                if ".original" not in p.parts} if (root / "annotations").is_dir() else set()
+    unannotated = sorted(set(stems) - labelled)
+    if unannotated:
+        shown = ", ".join(unannotated[:5]) + ("…" if len(unannotated) > 5 else "")
+        findings.append(("info", f"{len(unannotated)} of {len(stems)} image(s) have no label "
+                        f"record and are excluded from training ({shown}). Annotate them, or mark "
+                        "the genuinely-empty ones Complete to train them as negatives."))
+
     for name in neg_names:
         stem = Path(name).stem
         det = list((root / "annotations").rglob(f"{stem}.json")) if (root / "annotations").is_dir() else []
