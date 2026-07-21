@@ -612,7 +612,13 @@ export function ReviewTab() {
       // matches snapshot that can belong to the previous image mid-navigation.
       setStoreImageStatus(imgName, res.annotation_status);
       void classesApi
-        .setImageStatus(dataset.project_root, imgName, res.annotation_status)
+        .setImageStatus(
+          dataset.project_root,
+          imgName,
+          res.annotation_status,
+          dataset.annotation_type,
+          dataset.date,
+        )
         .catch(() => {});
     } catch (e) {
       useStore
