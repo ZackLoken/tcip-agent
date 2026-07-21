@@ -17,13 +17,16 @@ Schema::
           "created_by": "sam", "created_at": "...",
           "accepted_by": "user:zack", "accepted_at": "..." } ] }
 
-Negative invariant (unchanged from the YOLO writers this replaces): a present file with
-``"objects": []`` is a **confirmed negative**; a **missing** file is unannotated. ``keep_empty=True``
-writes the empty-objects file; without it an empty write removes the file.
+Negative invariant: a **missing** file is unannotated, and a present file with ``"objects": []`` is
+*still* unannotated until a human marks that image Complete — recorded as the status token
+``"negative"`` in ``.tcip/state/image_status.json``, scoped to the campaign. Only that confirmation
+makes it a training negative; ``to_coco_dataset`` skips an unconfirmed empty. Writing an empty file
+does not create a negative, so the agent cannot manufacture one. ``keep_empty=True`` writes the
+empty-objects file; without it an empty write removes the file.
 
 Readers never raise on malformed input — a bad file / object is skipped and the reader returns what it
 could parse. Writers and readers are symmetric (a shape a writer emits is one a reader accepts), and a
-degenerate polygon (<3 points) is skipped on write so it can never masquerade as a confirmed negative.
+degenerate polygon (<3 points) is skipped on write so it can never masquerade as an empty record.
 """
 
 from __future__ import annotations
@@ -207,7 +210,8 @@ def read_segment_pred(path, img_w: int = 0, img_h: int = 0) -> tuple[list[PredPo
 
 # ── writers ──────────────────────────────────────────────────────────────────
 # A GT shape is a BBox/Polygon; a prediction is PredBBox/PredPolygon (writes `score`). Provenance is
-# written when set. Empty list: keep_empty → write {"objects": []} (confirmed negative), else remove.
+# written when set. Empty list: keep_empty → write {"objects": []} (unannotated until a
+# human confirms it), else remove.
 
 
 def _finish_write(path, img_w: int, img_h: int, objects: list[dict], keep_empty: bool) -> None:
