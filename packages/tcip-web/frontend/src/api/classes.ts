@@ -46,7 +46,7 @@ export const classesApi = {
     const params = new URLSearchParams({ project_root });
     if (campaign) params.set("campaign", campaign);
     if (date) params.set("date", date);
-    return getJson<{ statuses: Record<string, ImageStatus>; legacy_pending: number }>(
+    return getJson<{ statuses: Record<string, ImageStatus> }>(
       `/api/classes/image_status?${params.toString()}`,
     );
   },
