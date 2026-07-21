@@ -39,16 +39,40 @@ export const classesApi = {
   autoColor: (class_id: number) =>
     getJson<{ class_id: number; color: string }>(`/api/classes/auto_color/${class_id}`),
 
-  loadImageStatus: (project_root: string) =>
-    getJson<{ statuses: Record<string, ImageStatus> }>(
-      `/api/classes/image_status?project_root=${encodeURIComponent(project_root)}`,
-    ),
+  // A Complete is a statement about one campaign (the annotations/<campaign>/ dir) on one date.
+  // Every read and write is scoped to it, so confirming an image while annotating catkins cannot
+  // mark it negative for a disease campaign nobody has looked at yet.
+  loadImageStatus: (project_root: string, campaign: string | null, date: string | null) => {
+    const params = new URLSearchParams({ project_root });
+    if (campaign) params.set("campaign", campaign);
+    if (date) params.set("date", date);
+    return getJson<{ statuses: Record<string, ImageStatus>; legacy_pending: number }>(
+      `/api/classes/image_status?${params.toString()}`,
+    );
+  },
 
-  setImageStatus: (project_root: string, image_name: string, status: ImageStatus) =>
-    postJson<unknown>("/api/classes/image_status", { project_root, image_name, status }),
+  setImageStatus: (
+    project_root: string,
+    image_name: string,
+    status: ImageStatus,
+    campaign: string | null,
+    date: string | null,
+  ) =>
+    postJson<unknown>("/api/classes/image_status", {
+      project_root,
+      image_name,
+      status,
+      campaign,
+      date,
+    }),
 
-  setImageStatusBulk: (project_root: string, statuses: Record<string, ImageStatus>) =>
-    postJson<unknown>("/api/classes/image_status/bulk", { project_root, statuses }),
+  setImageStatusBulk: (
+    project_root: string,
+    statuses: Record<string, ImageStatus>,
+    campaign: string | null,
+    date: string | null,
+  ) =>
+    postJson<unknown>("/api/classes/image_status/bulk", { project_root, statuses, campaign, date }),
 
   deriveImageStatus: (body: {
     project_root: string;
