@@ -21,11 +21,11 @@ such factory, so this skill is where their names live.
 
 | Piece | Where | Names / notes |
 |-------|-------|---------------|
-| `build_detector(name, adapter, num_classes, **kw)` | `pipelines.components.detectors` | names: `faster_rcnn`, `fcos`, `retinanet`, `mask_rcnn`. kwargs are per-trait, not pinned: `aspect_ratios`, `anchor_base_size`, `min_size`/`max_size`, `num_levels`, `featmap_names`. Wrap a backbone+neck in `BackboneNeckAdapter` first. Unknown name → `KeyError` listing the available set. |
+| `build_detector(name, adapter, num_classes, **kw)` | `pipelines.components.detectors` | names: `faster_rcnn`, `fcos`, `retinanet`, `mask_rcnn`. kwargs are per-trait, not pinned: `anchor_base_size`, `min_size`/`max_size`, `num_levels`, `featmap_names`, plus `aspect_ratios` for every detector except `fcos`, which is anchor-free and has none. Wrap a backbone+neck in `BackboneNeckAdapter` first. Unknown name → `KeyError`; a kwarg this detector doesn't take → `TypeError` naming the detectors that do. |
 | `build_loss(name, ...)` | `pipelines.components.losses` | names: `cross_entropy`, `weighted_ce`, `focal`, `smooth_l1`, `huber`, `bce`, `dice`, `giou`, `corn`, `coral`. Compose terms with `+` (e.g. `"bce+dice"` → `CombinedLoss`). A weightable loss (`cross_entropy`/`weighted_ce`/`focal`) auto-injects inverse-frequency weights when given `class_distribution`. `compute_class_weights` is the standalone weigher. |
 | Heads (no factory — import the class) | `pipelines.components.heads` | `ClassificationHead` (task `classification`, default loss `cross_entropy`), `OrdinalHead` (task `ordinal`, `corn`), `RegressionHead` (task `regression`, `smooth_l1`), `SemanticSegHead` (task `semantic_seg`, blends CE+Dice internally). Each implements `forward` / `compute_loss` / `decode`. |
 | Necks (no factory — import the class) | `pipelines.components.necks` | `FPN`, `PAN` (both take `add_p2` for a finer level), `IdentityNeck` (pass-through), `GlobalAvgPoolNeck` (→ flat `[B, C]` vector for classification/ordinal/regression heads). |
-| Backbones | `pipelines.components.backbones` | `BackboneWrapper` is the whole surface — wrap **any** module (timm, torchvision, or yours) to get multi-scale features, a declared `out_channels`, and per-stage `freeze_to`. There is no build helper on purpose: `out_indices` decides whether you get a pyramid at all, so it is yours to choose. See the module docstring for the two-line wrap. |
+| Backbones | `pipelines.components.backbones` | `BackboneWrapper` is the whole surface — wrap a module that **already emits** a list/tuple/dict of feature maps (timm `features_only=True`, torchvision `create_feature_extractor`, or your own staged module, finest stage first) to get `s0..sN` naming, a declared `out_channels`, and per-stage `freeze_to`. It does not turn a classifier into a feature extractor. There is no build helper on purpose: `out_indices` decides whether you get a pyramid at all, so it is yours to choose. See the module docstring for the two-line wrap. |
 
 **`task` strings** (the `model_source["task"]` value; also the `build_dataset` task keys and the
 head `task_type`s): `detection`, `instance_seg`, `semantic_seg`, `classification`, `ordinal`,
@@ -72,8 +72,10 @@ The `model_contract` (`check_model_contract` / `overfit_check`) states the *only
 contract — the measurement boundary: the model must train (finite-gradient loss) and emit inference
 output the library scorers consume. Both synthesize a batch for the task strings `build_dataset`
 routes; for any other task they take `sample_batch=` — an `(images, targets)` pair from your own
-dataset — and report `not_smokeable` if given neither. `preflight_config(smoke=True)` builds that
-batch from the run's `data` config, so a bespoke task is smoked on real data rather than skipped.
+dataset. Given neither, `check_model_contract` returns a `not_smokeable` reason and `overfit_check`
+returns `passed: False` with the reason in `issue`. `preflight_config(smoke=True)` builds that batch
+from the run's `data` config and feeds it to both, so a bespoke task is smoked on real data rather
+than skipped; `smoke["batch_source"]` records which reference proved the contract.
 
 ## The `ctx` craft library (`TrainContext`, `pipelines.training.envelope`)
 
