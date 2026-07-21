@@ -280,6 +280,20 @@ _LOSS_CLASSES: dict[str, type[BaseLoss]] = {
 }
 
 
+def _accepted_kwargs(loss_name: str) -> set[str] | None:
+    """Constructor keyword names a loss accepts, or ``None`` if it takes ``**kwargs``."""
+    import inspect
+
+    cls = _LOSS_CLASSES.get(loss_name)
+    if cls is None:
+        return set()
+    params = inspect.signature(cls).parameters
+    if any(p.kind is p.VAR_KEYWORD for p in params.values()):
+        return None
+    return {n for n, p in params.items()
+            if p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD) and n != "self"}
+
+
 def build_loss(
     name: str, *, class_distribution: dict[int, int] | None = None,
     num_classes: int | None = None, weight_scheme: str = "balanced", **kwargs,
@@ -288,10 +302,13 @@ def build_loss(
 
     When ``class_distribution`` is supplied and the loss is weightable
     (``cross_entropy``/``weighted_ce``/``focal``), an inverse-frequency ``weight``
-    tensor is injected unless ``weight`` was passed explicitly. The weighting context is
-    forwarded into a combined loss's terms, and a ``class_distribution`` that no term can
-    consume raises rather than being dropped — imbalance handling that silently vanishes is
-    worse than a build that refuses.
+    tensor is injected unless ``weight`` was passed explicitly. Supplying it for a loss that
+    cannot consume it raises rather than dropping it — imbalance handling that silently vanishes
+    is worse than a build that refuses.
+
+    In a combined loss each keyword goes to the terms whose constructor accepts it, so a per-term
+    hyperparameter (``weight`` for the CE term, ``smooth`` for the dice term) reaches its own term
+    instead of every term. A keyword no term accepts raises.
     """
     if "+" in name:
         parts = [p.strip() for p in name.split("+")]
@@ -301,13 +318,32 @@ def build_loss(
                 f"(weightable: {sorted(_WEIGHTABLE_LOSSES)}) — the weighting would have no effect. "
                 "Compose a weightable term, or drop class_distribution."
             )
+        # Route each hyperparameter to the terms that accept it. Broadcasting every kwarg to every
+        # term makes a per-term argument a TypeError from whichever term lacks it; dropping it
+        # silently builds a loss that is not the one asked for.
+        accepted = {p: _accepted_kwargs(p) for p in parts}
+        takes = lambda p, k: accepted[p] is None or k in accepted[p]  # noqa: E731
+        unusable = sorted(k for k in kwargs if not any(takes(p, k) for p in parts))
+        if unusable:
+            raise ValueError(
+                f"{unusable} not accepted by any term of '{name}'. Each term accepts: "
+                + "; ".join(f"{p}: {'any' if accepted[p] is None else sorted(accepted[p])}"
+                            for p in parts)
+            )
         sub_losses = [
-            build_loss(p, class_distribution=class_distribution, num_classes=num_classes,
-                       weight_scheme=weight_scheme, **kwargs)
+            build_loss(p, num_classes=num_classes, weight_scheme=weight_scheme,
+                       class_distribution=(class_distribution if p in _WEIGHTABLE_LOSSES else None),
+                       **{k: v for k, v in kwargs.items() if takes(p, k)})
             for p in parts
         ]
         return CombinedLoss(sub_losses)
-    if class_distribution is not None and "weight" not in kwargs and name in _WEIGHTABLE_LOSSES:
+    if class_distribution is not None and name not in _WEIGHTABLE_LOSSES:
+        raise ValueError(
+            f"class_distribution was supplied for '{name}', which is not weightable "
+            f"(weightable: {sorted(_WEIGHTABLE_LOSSES)}) — the weighting would have no effect. "
+            "Use a weightable loss, or drop class_distribution."
+        )
+    if class_distribution is not None and "weight" not in kwargs:
         kwargs["weight"] = compute_class_weights(class_distribution, num_classes=num_classes, scheme=weight_scheme)
     try:
         cls = _LOSS_CLASSES[name]
