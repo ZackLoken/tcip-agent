@@ -93,6 +93,25 @@ that silently corrupts results and compounds across sessions. So:
 - **End substantial work** (even if incomplete) with `project_retrospective`.
 - **Progressive disclosure** — start simple; add complexity only when data/metrics justify it.
 
+**Never state a fact about this codebase you have not just executed or read.** Not "this is covered",
+not "this would fail before the fix", not "nothing calls this". Run it, grep it, or say you did not.
+A claim about *purpose* ("X exists as a fallback for Y") is checked by testing its premise, not by
+running the code. This is the single most repeated failure here: every wrong claim shipped felt like
+settled reasoning at the time.
+
+**A test that guards a fix must be observed failing without it.** Extract the baseline and run the
+new test against it (`python scripts/prove_test_fails_before.py <testfile> -k <expr>`) — the baseline
+is the commit immediately before the change, not the phase's start. A test that passes there guards
+nothing; say so rather than counting it.
+
+**Never report the gate before its slowest part finishes.** ruff/mypy/typecheck return in seconds and
+`pytest tests/` takes minutes. Reporting the fast half as green is guessing. Wait, then report — and
+report a green gate as "no detected breakage", never as evidence the work is correct.
+
+**Zack commits; you never do.** No `git commit`, `git push`, or branch operations. Leave finished
+work uncommitted with a per-commit file breakdown. For a frozen snapshot use `git stash create`,
+which touches neither the tree, the index, nor the stash list.
+
 ## Invariants that protect the science (hard rules)
 
 - **Measurement integrity — the highest rule.** This is a computer-vision *and* a
@@ -132,6 +151,23 @@ that silently corrupts results and compounds across sessions. So:
   (config/metrics/artifacts/lineage). New run; don't overwrite history.
 - **Confirm before destructive/outward actions** (deleting labels, overwriting
   weights, exporting deliverables). Approval for one doesn't extend to the next.
+- **No backward compatibility. The platform is pre-release and has no users.** Every migration path,
+  fallback, quarantine or "legacy" shim is dead weight resting on a false premise — that someone's
+  data is at risk. Before writing one, ask whether the data it accommodates can exist yet; the
+  answer is no. Delete such code on sight rather than preserving it. Two different things wear the
+  word: TCIP's own history (delete it) and other tools' formats or browser APIs (interop — keep it,
+  but do not call it legacy). Do not trust a "legacy" label in a docstring — check the callers, since
+  the label is often wrong.
+- **Enumerate the consumers before deleting anything.** Grep the symbol, the filename, the config
+  key. A deletion whose assertion has no new home was a fact, not clutter.
+- **When two code paths must agree, call one from the other.** Never write a second implementation
+  of the agreement — a smoke batch mirroring the training batch, a statistic re-deriving a scale the
+  loader already applies, a reader re-parsing a store another reader normalizes. The copy drifts
+  silently and is the most repeated defect class in this repo. A consistency check whose two sides
+  share an implementation proves nothing.
+- **A rail must admit valid work, not only reject invalid work.** Every refusal ships with a test
+  proving a legitimate call still succeeds. When a change's theme is "stop being permissive", the
+  predictable failure is refusing things that were always fine.
 
 ## Pipelines & models
 
