@@ -111,7 +111,8 @@ narrower slice; this section keeps the two honest.
 segmentation, classification, ordinal, regression — via an agent-written `nn.Module`
 that imports the plain building blocks (necks, heads, losses, backbone wrappers, and
 `build_detector`; `instance_seg` via Mask R-CNN), on **RGB and N-channel imagery** (multi-band
-GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`), with
+GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`, and an `in_chans != 3`
+detector takes per-band `image_mean`/`image_std` from `derivations.band_normalization_stats`), with
 training that loads the native per-image JSON labels directly (YOLO / COCO / PASCAL VOC /
 LabelMe import/export via an explicit format), experiment tracking, annotation/review,
 SAM-assisted labeling, and per-plant CSV export — including the
