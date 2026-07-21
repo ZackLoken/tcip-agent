@@ -154,8 +154,15 @@ describe("AnnotateTab save/load race", () => {
 
     // The stale result must not markClean() the img2 edits...
     expect(useStore.getState().canvas.dirty).toBe(true);
-    // ...but the per-image status for the image actually saved is still recorded.
-    expect(classesApi.setImageStatus).toHaveBeenCalledWith("C:/proj", "img1.jpg", "partial");
+    // ...but the per-image status for the image actually saved is still recorded — scoped to the
+    // selected campaign, so it cannot mark the image negative under another trait.
+    expect(classesApi.setImageStatus).toHaveBeenCalledWith(
+      "C:/proj",
+      "img1.jpg",
+      "partial",
+      "annotations",
+      "2026-01-01",
+    );
 
     // ...and the next save must target img2 with img2's loaded mtimes — not
     // img1's file with the stale save's echoed mtimes.
