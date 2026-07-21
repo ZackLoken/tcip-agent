@@ -51,6 +51,7 @@ function App() {
   const annDetectDir = useStore((s) => s.gui.dataset.annotations_detect_dir);
   const annSegDir = useStore((s) => s.gui.dataset.annotations_segment_dir);
   const annotationType = useStore((s) => s.gui.dataset.annotation_type);
+  const datasetDate = useStore((s) => s.gui.dataset.date);
   const setClasses = useStore((s) => s.setClasses);
   const setImageStatuses = useStore((s) => s.setImageStatuses);
   const endedSessionForRoot = useRef<string | null>(null);
@@ -191,8 +192,24 @@ function App() {
         const reg = await classesApi.load(projectRoot, annotationType, annDetectDir, annSegDir);
         setClasses(reg.classes);
 
-        const saved = await classesApi.loadImageStatus(projectRoot);
+        // Scoped to the selected campaign: a Complete recorded while annotating catkin says
+        // nothing about bush, and reading a global map re-applied it to campaigns the breeder
+        // never looked at — then wrote the result back over their original confirmations.
+        const saved = await classesApi.loadImageStatus(projectRoot, annotationType, datasetDate);
         const savedMap = saved.statuses ?? {};
+        if (saved.legacy_pending > 0) {
+          // These were confirmed before the project recorded which campaign they belonged to, so
+          // they count for none of them. Say so — otherwise the breeder's work is simply gone from
+          // the UI, and "unannotated" is indistinguishable from "never touched".
+          useStore
+            .getState()
+            .pushToast(
+              `${saved.legacy_pending} image confirmation(s) were recorded before this project ` +
+                `tracked which campaign they belonged to, so they count for none. Open each and ` +
+                `mark it Complete with the right campaign selected.`,
+              "info",
+            );
+        }
         // Reconcile every image against the label files, honoring confirmed reviews via
         // complete_override — so a wrongly-saved "negative" whose files have content heals
         // to partial instead of silently locking the canvas forever.
@@ -214,7 +231,7 @@ function App() {
           Object.entries(reconciled).filter(([name, st]) => savedMap[name] !== st),
         ) as Record<string, "complete" | "partial" | "negative" | "unannotated">;
         if (Object.keys(changed).length) {
-          await classesApi.setImageStatusBulk(projectRoot, changed);
+          await classesApi.setImageStatusBulk(projectRoot, changed, annotationType, datasetDate);
         }
         setImageStatuses(reconciled);
       } catch (err) {
@@ -227,6 +244,7 @@ function App() {
     datasetKey,
     imageList,
     annotationType,
+    datasetDate,
     annDetectDir,
     annSegDir,
     setClasses,
