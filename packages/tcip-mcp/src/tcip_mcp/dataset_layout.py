@@ -31,6 +31,8 @@ _ANY_EXTS = (".json", ".txt", ".xml")
 DEFAULT_TRAIT = "default"
 DEFAULT_MODEL = "live"
 TASKS = ("detect", "segment")
+#: Split names ``make_splits(materialize=True)`` emits.
+SPLIT_NAMES = ("train", "val", "test")
 
 
 def label_ext(fmt: Optional[str]) -> str:
@@ -85,6 +87,84 @@ def list_dates(dataset_root: str | Path) -> list[str]:
 def annotation_dir(dataset_root: str | Path, trait: Optional[str], date: Optional[str], task: str) -> Path:
     """``<dataset_root>/annotations/<trait>/[<date>/]<task>`` (ground truth)."""
     return Path(dataset_root, "annotations", trait or DEFAULT_TRAIT, *_date_seg(date), task)
+
+
+def parse_annotation_dir(path: str | Path) -> Optional[tuple[str, Optional[str], str]]:
+    """``(campaign, date, task)`` for an annotation dir — declared inverse of ``annotation_dir``.
+
+    A *campaign* is the object class being isolated. Sometimes that is the trait's own subject
+    (catkins, for ``catkin_50per_date``); often it is an enabling object no trait names — a bush
+    isolated so anything can be aggregated per plant, a leaf isolated before leaf area is measured.
+    So a campaign name is **not** required to be a ``crops.yml`` trait.
+
+    Anchored on the literal ``annotations`` segment, with ``TASKS`` disambiguating the optional
+    ``<date>``. Returns ``None`` for a non-canonical path rather than guessing: a wrong campaign
+    would attribute a human's confirmation to work they never looked at.
+    """
+    parts = Path(path).parts
+    if "annotations" in parts:
+        i = len(parts) - 1 - parts[::-1].index("annotations")  # last, so nested roots resolve
+        rest = parts[i + 1:]
+        if len(rest) == 2 and rest[1] in TASKS:
+            return rest[0], None, rest[1]
+        if len(rest) == 3 and rest[2] in TASKS:
+            return rest[0], rest[1], rest[2]
+        return None
+    # ``labels/<task>`` — the curated single-campaign dataset ``materialize_review_dataset``
+    # emits. Not canonical layout, but a shape this platform produces itself, so resolving it to
+    # the default campaign is a fact rather than a guess. Without it the review loop's own hard
+    # negatives would be unreadable.
+    if len(parts) >= 2 and parts[-2] == "labels" and parts[-1] in TASKS:
+        return DEFAULT_TRAIT, None, parts[-1]
+    # ``<split>/labels`` — the {train,val,test} tree ``make_splits(materialize=True)`` emits, which
+    # carries its own status store (``_carry_confirmed_negatives``) under this same default
+    # campaign. Anchored on the split name: resolving *any* dir called ``labels`` would turn an
+    # unresolvable campaign into a silent empty negative set.
+    if len(parts) >= 2 and parts[-1] == "labels" and parts[-2] in SPLIT_NAMES:
+        return DEFAULT_TRAIT, None, TASKS[0]
+    return None
+
+
+def status_bucket(campaign: Optional[str], date: Optional[str]) -> str:
+    """The ``image_status.json`` key a confirmation belongs under.
+
+    Scoped by campaign and date but **not** task: a Complete covers detect and segment together,
+    which is how ``derive_image_status`` already evaluates them. A store keyed by image name alone
+    re-applies one campaign's confirmations to every other campaign.
+    """
+    return f"{campaign or DEFAULT_TRAIT}/{date}" if date else (campaign or DEFAULT_TRAIT)
+
+
+def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
+    """``{bucket: {image_name: status}}``, quarantining pre-scoping entries.
+
+    The store used to be keyed by image name alone, so a Complete recorded while annotating one
+    campaign was re-applied to every other one. Flat entries record no campaign, so they cannot be
+    attributed to one — they land in ``LEGACY_BUCKET``, which is never read as a training negative
+    and never re-derived into a confirmation.
+
+    Every reader goes through here. A reader that inspected the raw JSON instead would see nothing
+    at all on a store that has not been migrated yet — which is exactly when a legacy entry most
+    needs reporting.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    store: dict[str, dict[str, str]] = {}
+    legacy: dict[str, str] = {}
+    for key, value in raw.items():
+        if isinstance(value, dict):
+            store[key] = {k: v for k, v in value.items() if isinstance(v, str)}
+        elif isinstance(value, str):
+            legacy[key] = value
+    if legacy:
+        store.setdefault(LEGACY_BUCKET, {}).update(legacy)
+    return store
+
+
+#: Where confirmations from before the store was scoped live. They record no campaign, so they
+#: cannot be attributed to one — never trusted as a training negative, never auto-promoted,
+#: surfaced to the breeder for re-confirmation instead.
+LEGACY_BUCKET = "_unscoped_legacy"
 
 
 def prediction_dir(dataset_root: str | Path, model: Optional[str], date: Optional[str], task: str) -> Path:
@@ -144,8 +224,10 @@ def list_models(dataset_root: str | Path) -> list[str]:
 def _dir_has_label_file(d: Path) -> bool:
     """True if ``d`` holds at least one label file (any supported extension).
 
-    An *empty* label file counts: it is a confirmed negative (the trait was
-    annotated on that date, with no objects), not the absence of annotation.
+    An *empty* label file counts as a label file here — this answers "was anything written for
+    this campaign on this date", which is what the GUI's selector needs. It does **not** mean the
+    image is a confirmed negative: that requires a human Complete recorded in
+    ``.tcip/state/image_status.json``, and training reads only that (``confirmed_negative_names``).
     """
     if not d.is_dir():
         return False
