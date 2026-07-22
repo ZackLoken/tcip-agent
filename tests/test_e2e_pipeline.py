@@ -49,7 +49,7 @@ def project_dir(tmp_path: Path) -> Path:
         d.mkdir(parents=True)
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import PredBBox
+    from tcip_annotation.state import BBox, PredBBox
 
     # 5 synthetic images (640x480 grey) with GT labels and predictions
     for i in range(5):
@@ -57,19 +57,15 @@ def project_dir(tmp_path: Path) -> Path:
         img = Image.new("RGB", (640, 480), color=(100 + i * 20, 100, 100))
         img.save(images / f"{name}.jpg")
 
-        # GT: 2 boxes per image. read_annotations / validate_data_quality read GT through
-        # format_io, which understands YOLO .txt (not the json_io per-image schema).
-        gt_lines = [
-            "0 0.5 0.5 0.10 0.10",
-            "0 0.3 0.3 0.05 0.05",
-        ]
-        (labels_det / f"{name}.txt").write_text("\n".join(gt_lines) + "\n")
-
-        # Predictions: 1 matching (TP) + 1 false positive (FP), per-image JSON with a native
-        # score. The file keeps a .txt name because find_prediction resolves it with fmt='yolo';
-        # json_io parses the JSON content.
+        # GT: 2 boxes per image, canonical per-image JSON (pixel xyxy).
         json_io.write_detect(
-            str(preds_det / f"{name}.txt"),
+            str(labels_det / f"{name}.json"),
+            [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)],
+            640, 480,
+        )
+        # Predictions: 1 matching (TP) + 1 false positive (FP), per-image JSON with a native score.
+        json_io.write_detect(
+            str(preds_det / f"{name}.json"),
             [PredBBox(288, 216, 352, 264, 0, confidence=0.92),
              PredBBox(499.2, 374.4, 524.8, 393.6, 0, confidence=0.60)],
             640, 480,
@@ -195,10 +191,12 @@ class TestE2EPipelineEdgeCases:
         labels.mkdir(parents=True)
 
         # 3 images, only 1 label
+        from tcip_annotation import json_io
+        from tcip_annotation.state import BBox
         for i in range(3):
             img = Image.new("RGB", (64, 64))
             img.save(images / f"img_{i:03d}.jpg")
-        (labels / "img_000.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+        json_io.write_detect(str(labels / "img_000.json"), [BBox(28, 28, 36, 36, 0)], 64, 64)
 
         ds = scan_dataset(str(tmp_path))
         assert ds["image_count"] == 3
@@ -212,10 +210,12 @@ class TestE2EPipelineEdgeCases:
         for d in (images, labels):
             d.mkdir(parents=True)
 
+        from tcip_annotation import json_io
+        from tcip_annotation.state import BBox
         img = Image.new("RGB", (640, 480))
         img_path = images / "test.jpg"
         img.save(img_path)
-        (labels / "test.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+        json_io.write_detect(str(labels / "test.json"), [BBox(288, 216, 352, 264, 0)], 640, 480)
 
         # No predictions directory — evaluate should handle gracefully
         result = score_predictions(str(img_path))
