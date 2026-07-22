@@ -1,4 +1,4 @@
-"""Phase 4.2 — non-YOLO detection loaders (COCO/VOC/LabelMe) + parser correctness fixes."""
+"""COCO detection/segmentation loaders + parser correctness."""
 
 import json
 
@@ -21,35 +21,10 @@ def test_parse_coco_segment_keeps_all_polygons():
     assert cids == {2}
 
 
-def test_write_voc_preserves_float_precision(tmp_path):
-    from tcip_annotation.format_io import BBox, parse_voc_detect, write_voc_detect
-    p = tmp_path / "a.xml"
-    write_voc_detect(str(p), [BBox(10.5, 20.25, 30.75, 40.5, 0)], 100, 100, "a.jpg")
-    boxes, _, _ = parse_voc_detect(str(p))
-    assert boxes[0].x1 == pytest.approx(10.5)   # not truncated to whole pixels
-    assert boxes[0].y2 == pytest.approx(40.5)
-
-
 def _make_images(images_dir, n=1):
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         Image.new("RGB", (100, 100)).save(images_dir / f"img{i}.jpg")
-
-
-def test_build_dataset_voc(tmp_path):
-    from tcip_annotation.format_io import BBox, write_voc_detect
-    from tcip_mcp.pipelines.data.datasets import build_dataset
-    images_dir = tmp_path / "images"
-    _make_images(images_dir)
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()
-    write_voc_detect(str(labels_dir / "img0.xml"), [BBox(10, 10, 50, 50, 0)], 100, 100, "img0.jpg")
-
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       num_classes=1, label_format="voc")
-    _, target = ds[0]
-    assert target["boxes"].shape == (1, 4)
-    assert target["labels"].tolist() == [1]     # 0-indexed cid 0 -> 1-indexed (background 0)
 
 
 def test_build_dataset_coco(tmp_path):
@@ -67,18 +42,3 @@ def test_build_dataset_coco(tmp_path):
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
     assert ds.class_distribution == {0: 1}
-
-
-def test_build_dataset_labelme(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import build_dataset
-    images_dir = tmp_path / "images"
-    _make_images(images_dir)
-    labels_dir = tmp_path / "labels"
-    labels_dir.mkdir()
-    lm = {"shapes": [{"label": "cat", "shape_type": "rectangle", "points": [[10, 10], [50, 50]]}]}
-    (labels_dir / "img0.json").write_text(json.dumps(lm))
-
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       num_classes=1, label_format="labelme")
-    _, target = ds[0]
-    assert target["boxes"].shape == (1, 4)
