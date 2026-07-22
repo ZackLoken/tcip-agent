@@ -64,6 +64,7 @@ def test_derive_cross_tile_nms_clamped_to_upper_bound():
 
 def test_write_class_map(tmp_path):
     import json
+
     from tcip_annotation import json_io
     from tcip_annotation.state import BBox
     from tcip_mcp.tools.annotation_tools import write_class_map
@@ -97,3 +98,21 @@ def test_run_inference_dry_run_reports_operating_point(tmp_path):
     assert op["conf"] == 0.5  # DEFAULT_CONF (one shared source)
     assert op["cross_tile_nms"] == 0.3  # DEFAULT_NMS_IOU, tiled
     assert op["tiled"] is True and op["tile_size"] == 640
+
+
+def test_write_class_map_defaults_into_the_dataset(tmp_path):
+    """No output_path: the registry lands in the campaign's dataset home, decoding its own labels."""
+    from pathlib import Path
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    det = tmp_path / "annotations" / "catkin" / "2026-03-02" / "detect"
+    det.mkdir(parents=True)
+    json_io.write_detect(str(det / "a.json"), [BBox(1, 1, 9, 9, 0), BBox(2, 2, 8, 8, 1)], 32, 32)
+
+    res = write_class_map(str(det), class_names="dormant,elongated")
+    assert "error" not in res
+    assert res["classes_path"].endswith(str(Path("classes") / "catkin.json"))
+    assert (tmp_path / "classes" / "catkin.json").is_file()
