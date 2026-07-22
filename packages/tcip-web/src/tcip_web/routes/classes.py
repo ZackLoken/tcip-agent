@@ -1,8 +1,9 @@
 """Class registry routes.
 
-Class ids are **scoped to a trait**: each trait keeps its own map at
-``<project_root>/.tcip/state/classes/<trait>.json``, so ``catkin`` and ``bush`` can each use
-class ``0`` for their own object without colliding. File format::
+Class ids are **campaign-scoped and live in the dataset**: each campaign keeps its own map at
+``<dataset_root>/classes/<campaign>.json``, so ``catkin`` and ``bush`` can each use class ``0``
+for their own object, and the registry travels with the image set (``category_id: 0`` is
+undecodable without it). File format::
 
     {
         "0": {"name": "catkin", "color": "#FF0000"},
@@ -91,11 +92,17 @@ class ClassRegistry(BaseModel):
     classes: list[ClassEntry]
 
 
-def _classes_path(project_root: str, trait: str | None = None) -> Path:
-    state = Path(project_root) / ".tcip" / "state"
-    if trait:
-        return state / "classes" / f"{trait}.json"
-    return state / "classes.json"  # unscoped map: what write_class_map emits and review.py reads
+def _resolve_dataset_root(dataset_root: str | None, detect_dir: str | None,
+                          segment_dir: str | None) -> str | None:
+    """The dataset root, taken from ``dataset_root`` or derived from a label dir path."""
+    if dataset_root:
+        return dataset_root
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    for d in (detect_dir, segment_dir):
+        if d and (root := dataset_root_of(d)) is not None:
+            return str(root)
+    return None
 
 
 def _read_registry(path: Path) -> ClassRegistry:
@@ -139,17 +146,21 @@ def _derive_from_labels(detect_dir: str | None, segment_dir: str | None) -> list
 def load_classes(
     project_root: str,
     trait: Optional[str] = None,
+    dataset_root: Optional[str] = None,
     annotations_detect_dir: Optional[str] = None,
     annotations_segment_dir: Optional[str] = None,
 ) -> ClassRegistry:
-    """Load the class map for a trait. Ids are trait-scoped, so each campaign keeps its own ``0``.
-    Resolution: the trait's saved map -> else derived from the trait's labels (provisional
-    ``class_<id>`` names) -> else the unscoped map ``write_class_map`` writes -> else empty."""
+    """Load a campaign's class map. Ids are campaign-scoped, so each campaign keeps its own ``0``.
+    Resolution: the campaign's saved registry in the dataset (``<dataset_root>/classes/<campaign>``)
+    -> else derived from its labels (provisional ``class_<id>`` names) -> else empty."""
     if trait and not is_valid_name(trait):
         raise HTTPException(400, f"invalid trait: {trait!r}")
 
-    if trait:
-        p = _classes_path(project_root, trait)
+    from tcip_mcp.dataset_layout import classes_path
+
+    root = _resolve_dataset_root(dataset_root, annotations_detect_dir, annotations_segment_dir)
+    if trait and root:
+        p = classes_path(root, trait)
         if p.exists():
             try:
                 return _read_registry(p)
@@ -160,13 +171,6 @@ def load_classes(
     if derived:
         return ClassRegistry(classes=derived)
 
-    unscoped = _classes_path(project_root, None)
-    if unscoped.exists():
-        try:
-            return _read_registry(unscoped)
-        except Exception as exc:
-            raise HTTPException(500, f"could not parse {unscoped}: {exc}") from exc
-
     return ClassRegistry(classes=[])
 
 
@@ -174,13 +178,24 @@ class SaveClassesPayload(BaseModel):
     project_root: str
     trait: Optional[str] = None
     classes: list[ClassEntry]
+    dataset_root: Optional[str] = None
+    annotations_detect_dir: Optional[str] = None
+    annotations_segment_dir: Optional[str] = None
 
 
 @router.post("/save")
 def save_classes(payload: SaveClassesPayload) -> dict:
-    if payload.trait and not is_valid_name(payload.trait):
-        raise HTTPException(400, f"invalid trait: {payload.trait!r}")
-    path = _classes_path(payload.project_root, payload.trait)
+    if not payload.trait or not is_valid_name(payload.trait):
+        raise HTTPException(400, f"a campaign name is required to save classes: {payload.trait!r}")
+
+    from tcip_mcp.dataset_layout import classes_path
+
+    root = _resolve_dataset_root(payload.dataset_root, payload.annotations_detect_dir,
+                                 payload.annotations_segment_dir)
+    if not root:
+        raise HTTPException(400, "cannot locate the dataset to save the class registry into; "
+                                 "pass dataset_root or an annotations dir")
+    path = classes_path(root, payload.trait)
     path.parent.mkdir(parents=True, exist_ok=True)
     data: dict[str, dict] = {}
     for entry in payload.classes:
