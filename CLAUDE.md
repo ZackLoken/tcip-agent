@@ -210,7 +210,8 @@ conda activate tcip-agent          # Python 3.11; torch installs CPU by default 
 pytest tests/ -v --tb=short
 ruff check .
 python scripts/list_tools.py       # current MCP tool list/count (don't hardcode counts in docs)
-cd packages/tcip-web/frontend && npm run typecheck && npm run build   # build → ../static/
+# the full frontend gate, in CI order (.github/workflows/ci.yml) — a partial run misses format:check/lint
+cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build   # build → ../static/
 python -m tcip_web                 # backend + built UI → http://127.0.0.1:8765
 ```
 
