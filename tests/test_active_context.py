@@ -20,7 +20,7 @@ def _setup(tmp_path, monkeypatch, *, with_gui=True):
             "dataset": {
                 "project_root": str(proj),
                 "dataset_root": str(proj),
-                "annotation_type": "catkin",
+                "subject": "catkin",
                 "date": "2026-02-11",
                 "image_list": ["IMG_0132.JPG", "IMG_0133.JPG"],
                 "current_image_index": 1,
@@ -43,7 +43,7 @@ def test_view_gui_state_reads_gui(tmp_path, monkeypatch):
     from tcip_mcp.tools.project_tools import view_gui_state
     ctx = view_gui_state()
     assert ctx["active_project"] == "hazelnut_catkin_valley"
-    assert ctx["annotation_type"] == "catkin"
+    assert ctx["subject"] == "catkin"
     assert ctx["date"] == "2026-02-11"
     assert ctx["active_tab"] == "annotate"
     assert ctx["current_image_index"] == 1
