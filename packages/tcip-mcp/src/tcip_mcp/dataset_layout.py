@@ -24,10 +24,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-# Per-image COCO/JSON is the canonical on-disk label format; YOLO/VOC survive only for explicit
-# import/export. ``json`` is the default, and ``.json`` is preferred when resolving an existing label.
-LABEL_EXT = {"json": ".json", "yolo": ".txt", "voc": ".xml", "coco": ".json", "labelme": ".json"}
-_ANY_EXTS = (".json", ".txt", ".xml")
+# Per-image JSON is the canonical on-disk label format; ``coco`` is the assembled dataset view of it.
+LABEL_EXT = {"json": ".json", "coco": ".json"}
+_ANY_EXTS = (".json",)
 DEFAULT_TRAIT = "default"
 DEFAULT_MODEL = "live"
 TASKS = ("detect", "segment")
@@ -36,8 +35,7 @@ SPLIT_NAMES = ("train", "val", "test")
 
 
 def label_ext(fmt: Optional[str]) -> str:
-    """File extension for a label format. The canonical on-disk format is per-image JSON, so an
-    unspecified format resolves to ``.json`` (YOLO/VOC only via an explicit ``fmt``)."""
+    """File extension for a label format — always ``.json``; both formats are JSON on disk."""
     return LABEL_EXT.get((fmt or "json").lower(), ".json")
 
 
@@ -161,7 +159,7 @@ def annotation_path(
     date: Optional[str],
     task: str,
     stem: str,
-    fmt: str = "yolo",
+    fmt: str = "json",
 ) -> Path:
     return annotation_dir(dataset_root, trait, date, task) / f"{stem}{label_ext(fmt)}"
 
@@ -169,7 +167,7 @@ def annotation_path(
 def annotation_path_for_image(
     image_path: str | Path,
     task: str,
-    fmt: str = "yolo",
+    fmt: str = "json",
     *,
     trait: str = DEFAULT_TRAIT,
     date: Optional[str] = None,
@@ -185,7 +183,7 @@ def prediction_path(
     date: Optional[str],
     task: str,
     stem: str,
-    fmt: str = "yolo",
+    fmt: str = "json",
 ) -> Path:
     return prediction_dir(dataset_root, model, date, task) / f"{stem}{label_ext(fmt)}"
 
