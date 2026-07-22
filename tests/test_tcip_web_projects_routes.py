@@ -24,7 +24,7 @@ def workspace_dir(tmp_path: Path, monkeypatch) -> Path:
     return ws
 
 
-def _make_project(ws: Path, name: str, *, dates=(), traits=(), models=()) -> Path:
+def _make_project(ws: Path, name: str, *, dates=(), subjects=(), models=()) -> Path:
     proj = ws / name
     (proj / ".tcip").mkdir(parents=True)
     from PIL import Image
@@ -33,7 +33,7 @@ def _make_project(ws: Path, name: str, *, dates=(), traits=(), models=()) -> Pat
         ddir = proj / "images" / d
         ddir.mkdir(parents=True)
         Image.new("RGB", (8, 8), (0, 0, 0)).save(ddir / "img.png")
-    for t in traits:
+    for t in subjects:
         (proj / "annotations" / t).mkdir(parents=True)
     for m in models:
         (proj / "predictions" / m).mkdir(parents=True)
@@ -41,7 +41,7 @@ def _make_project(ws: Path, name: str, *, dates=(), traits=(), models=()) -> Pat
 
 
 def test_list_projects_lists_workspace_projects(client, workspace_dir):
-    _make_project(workspace_dir, "hazelnut_catkin_valley-farm", dates=["2026-02-11"], traits=["catkin", "bush"], models=["baseline"])
+    _make_project(workspace_dir, "hazelnut_catkin_valley-farm", dates=["2026-02-11"], subjects=["catkin", "bush"], models=["baseline"])
     _make_project(workspace_dir, "chestnut_burr_site-b", dates=["2026-03-01"])
 
     resp = client.get("/api/projects")
@@ -53,12 +53,12 @@ def test_list_projects_lists_workspace_projects(client, workspace_dir):
 
     hz = next(p for p in body["projects"] if p["name"] == "hazelnut_catkin_valley-farm")
     assert hz["dates"] == ["2026-02-11"]
-    assert hz["traits"] == ["bush", "catkin"]  # sorted
+    assert hz["subjects"] == ["bush", "catkin"]  # sorted
     assert hz["models"] == ["baseline"]
     assert hz["image_count"] == 1
 
 
-def test_projects_report_per_date_trait_model_availability(client, workspace_dir):
+def test_projects_report_per_date_subject_model_availability(client, workspace_dir):
     # catkin labelled on 02-11 (+ baseline predictions there); bush labelled on 03-02;
     # 03-24 has images but nothing labelled.
     from tcip_mcp.dataset_layout import annotation_dir, prediction_dir
@@ -67,7 +67,7 @@ def test_projects_report_per_date_trait_model_availability(client, workspace_dir
         workspace_dir,
         "hazelnut_catkin_valley-farm",
         dates=["2026-02-11", "2026-03-02", "2026-03-24"],
-        traits=["catkin", "bush"],
+        subjects=["catkin", "bush"],
         models=["baseline"],
     )
     (annotation_dir(proj, "catkin", "2026-02-11", "detect")).mkdir(parents=True, exist_ok=True)
@@ -89,11 +89,11 @@ def test_projects_report_per_date_trait_model_availability(client, workspace_dir
         if p["name"] == "hazelnut_catkin_valley-farm"
     )
     # Flat lists still list everything present anywhere.
-    assert hz["traits"] == ["bush", "catkin"]
+    assert hz["subjects"] == ["bush", "catkin"]
     # Per-date maps reflect where labels/predictions actually are.
-    assert hz["traits_by_date"]["2026-02-11"] == ["catkin"]
-    assert hz["traits_by_date"]["2026-03-02"] == ["bush"]
-    assert hz["traits_by_date"]["2026-03-24"] == []  # images but no labels
+    assert hz["subjects_by_date"]["2026-02-11"] == ["catkin"]
+    assert hz["subjects_by_date"]["2026-03-02"] == ["bush"]
+    assert hz["subjects_by_date"]["2026-03-24"] == []  # images but no labels
     assert hz["models_by_date"]["2026-02-11"] == ["baseline"]
     assert hz["models_by_date"]["2026-03-02"] == []
     assert hz["models_by_date"]["2026-03-24"] == []
