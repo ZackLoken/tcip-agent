@@ -1,5 +1,5 @@
 /**
- * Drive the Annotate tab to a specific (trait, date, image, mode) in response to the agent's
+ * Drive the Annotate tab to a specific (subject, date, image, mode) in response to the agent's
  * `annotate_focus` event. Uses LOCAL store setters (the exact path the Review→Edit button
  * uses), never the state snapshot: `mergeSnapshot` deliberately keeps `mode` and
  * `current_image_index` browser-local so a passive re-broadcast can't yank the user mid-edit.
@@ -13,7 +13,7 @@ import { useStore } from "@/store";
 export interface AnnotateFocusData {
   project_root?: string;
   dataset_root?: string;
-  trait?: string | null;
+  subject?: string | null;
   date?: string | null;
   image_index?: number;
   mode?: "box" | "polygon";
@@ -25,13 +25,13 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
   const needsSwitch =
     !!d.dataset_root &&
     (d.dataset_root !== cur.dataset_root ||
-      (d.trait ?? null) !== cur.annotation_type ||
+      (d.subject ?? null) !== cur.subject ||
       (d.date ?? null) !== cur.date);
   if (needsSwitch) {
     const res = await api.dataset.select({
       project_root: d.project_root ?? d.dataset_root!,
       dataset_root: d.dataset_root!,
-      annotation_type: d.trait ?? null,
+      subject: d.subject ?? null,
       date: d.date ?? null,
       model_name: null,
     });
