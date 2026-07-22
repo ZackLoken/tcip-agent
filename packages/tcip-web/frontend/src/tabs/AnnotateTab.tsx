@@ -415,7 +415,7 @@ export function AnnotateTab() {
           setImageStatus(name, newStatus);
           // Best-effort status write; the labels are already saved.
           void classesApi
-            .setImageStatus(projectRoot, name, newStatus, dataset.annotation_type, dataset.date)
+            .setImageStatus(projectRoot, name, newStatus, dataset.subject, dataset.date)
             .catch(() => {});
         }
       }
