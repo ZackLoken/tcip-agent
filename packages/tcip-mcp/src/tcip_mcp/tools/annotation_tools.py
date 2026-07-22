@@ -14,7 +14,7 @@ from tcip_annotation import (
     Polygon,
 )
 from tcip_annotation.format_io import (
-    detect_format_confident,
+    detect_format,
     load_annotations as format_load,
     save_annotations as format_save,
 )
@@ -36,13 +36,14 @@ from tcip_mcp.audit import audited
 def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     """Load labels and predictions for a single image.
 
-    Supports the canonical per-image COCO/JSON (.json), plus YOLO (.txt), PASCAL VOC (.xml),
-    COCO (.json), and LabelMe (.json). Format is auto-detected from file extension and content
-    unless fmt is specified.
+    Reads the canonical per-image JSON (an ``objects`` key) or an assembled dataset-level COCO (an
+    ``images``/``annotations`` key), detected from the file's own keys unless ``fmt`` is given. An
+    unrecognized store returns an ``error`` rather than a guess — a misdetected format would read
+    real annotations as empty.
 
     Args:
         image_path: Absolute path to the image file.
-        fmt: Force annotation format ('json', 'yolo', 'voc', 'coco', 'labelme'). Auto-detects if omitted.
+        fmt: Force annotation format ('json' or 'coco'). Detected from the file's keys if omitted.
     """
     img = Path(image_path)
     if not img.is_file():
@@ -55,15 +56,14 @@ def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     # Find and load detection labels
     det_path = find_gt_label(image_path, "detect", fmt=fmt)
     if det_path is not None:
-        if fmt:
-            file_fmt, confident = fmt, True
-        else:
-            file_fmt, confident = detect_format_confident(str(det_path))
+        try:
+            file_fmt = fmt or detect_format(str(det_path))
+        except ValueError as exc:
+            return {"error": str(exc)}
         boxes, class_ids = format_load(str(det_path), w, h, task="detect", fmt=file_fmt)
         result["detect_labels"] = {
             "path": str(det_path),
             "format": file_fmt,
-            "format_confident": confident,
             "count": len(boxes),
             "class_ids": sorted(class_ids),
             "boxes": [
@@ -71,32 +71,21 @@ def read_annotations(image_path: str, fmt: str | None = None) -> dict:
                 for b in boxes
             ],
         }
-        if not confident:
-            result["warning"] = (
-                f"Annotation format could not be confidently detected for {det_path.name}; "
-                "defaulted to YOLO. If this is wrong, re-call with fmt='coco', 'voc', or 'labelme'."
-            )
 
     # Find and load segment labels
     seg_path = find_gt_label(image_path, "segment", fmt=fmt)
     if seg_path is not None:
-        if fmt:
-            file_fmt, confident = fmt, True
-        else:
-            file_fmt, confident = detect_format_confident(str(seg_path))
+        try:
+            file_fmt = fmt or detect_format(str(seg_path))
+        except ValueError as exc:
+            return {"error": str(exc)}
         polys, class_ids = format_load(str(seg_path), w, h, task="segment", fmt=file_fmt)
         result["segment_labels"] = {
             "path": str(seg_path),
             "format": file_fmt,
-            "format_confident": confident,
             "count": len(polys),
             "class_ids": sorted(class_ids),
         }
-        if not confident and "warning" not in result:
-            result["warning"] = (
-                f"Annotation format could not be confidently detected for {seg_path.name}; "
-                "defaulted to YOLO. If this is wrong, re-call with fmt='coco', 'voc', or 'labelme'."
-            )
 
     # Look for predictions (per-image COCO/JSON, parsed by json_io)
     pred_det = find_prediction(image_path, "detect")
@@ -145,14 +134,14 @@ def save_annotations(
     Labels go to ``<dataset_root>/annotations/<trait>/<date>/<task>/<stem>.<ext>``
     (see :mod:`tcip_mcp.dataset_layout`); ``date`` is derived from the image path
     (``images/<date>/<stem>``) when not given. Pass ``detect_path`` / ``segment_path``
-    to write to an explicit location instead. Supports the canonical per-image COCO/JSON
-    (.json), plus YOLO (.txt), PASCAL VOC (.xml), and LabelMe (.json).
+    to write to an explicit location instead. Writes the canonical per-image JSON (default) or an
+    assembled dataset-level COCO.
 
     Args:
         image_path: Absolute path to the image file.
         boxes: List of dicts with x1, y1, x2, y2, class_id (pixel coords).
         polygons: List of dicts with points and class_id (pixel coords).
-        fmt: Output format — 'json' (canonical per-image, default), 'yolo', 'voc', 'labelme', 'coco'.
+        fmt: Output format — 'json' (canonical per-image, default) or 'coco'.
         trait: Annotation campaign (e.g. 'catkin') — the layout's ``<trait>`` segment.
         date: Capture date; derived from the image path when omitted.
         detect_path: Explicit detect label path (overrides the canonical location).
