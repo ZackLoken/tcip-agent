@@ -26,10 +26,13 @@ def test_load_empty_registry(client: TestClient, tmp_path: Path) -> None:
 
 
 def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
+    # The registry lives in the DATASET, campaign-scoped, and travels with the image set.
     save = client.post(
         "/api/classes/save",
         json={
             "project_root": str(tmp_path),
+            "trait": "catkin",
+            "dataset_root": str(tmp_path),
             "classes": [
                 {"id": 0, "name": "catkin", "color": "#FF0000"},
                 {"id": 1, "name": "bud", "color": "#00FFFF"},
@@ -39,38 +42,68 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
     assert save.status_code == 200
     assert save.json()["n_classes"] == 2
 
-    load = client.get("/api/classes/load", params={"project_root": str(tmp_path)}).json()
+    load = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "trait": "catkin", "dataset_root": str(tmp_path)},
+    ).json()
     assert len(load["classes"]) == 2
     assert load["classes"][0] == {"id": 0, "name": "catkin", "color": "#FF0000"}
-    # File on disk matches
-    on_disk = json.loads((tmp_path / ".tcip" / "state" / "classes.json").read_text())
+    # Lands in the dataset, not project state.
+    on_disk = json.loads((tmp_path / "classes" / "catkin.json").read_text())
     assert on_disk["0"]["name"] == "catkin"
 
 
-def test_per_trait_maps_are_scoped(client: TestClient, tmp_path: Path) -> None:
-    # catkin and bush each use class 0 for their own object — trait-scoped maps keep them apart.
+def test_save_without_campaign_is_refused(client: TestClient, tmp_path: Path) -> None:
+    """A registry belongs to a campaign; a campaign-less save has no home and no meaning."""
+    r = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "classes": [{"id": 0, "name": "x", "color": "#FF0000"}]},
+    )
+    assert r.status_code == 400
+
+
+def test_per_campaign_maps_are_scoped(client: TestClient, tmp_path: Path) -> None:
+    # catkin and bush each use class 0 for their own object — campaign-scoped maps keep them apart.
     for trait, name in (("catkin", "catkin"), ("bush", "bush")):
         r = client.post(
             "/api/classes/save",
             json={
                 "project_root": str(tmp_path),
                 "trait": trait,
+                "dataset_root": str(tmp_path),
                 "classes": [{"id": 0, "name": name, "color": "#FF0000"}],
             },
         )
         assert r.status_code == 200
 
     cat = client.get(
-        "/api/classes/load", params={"project_root": str(tmp_path), "trait": "catkin"}
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "trait": "catkin", "dataset_root": str(tmp_path)},
     ).json()
     bush = client.get(
-        "/api/classes/load", params={"project_root": str(tmp_path), "trait": "bush"}
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "trait": "bush", "dataset_root": str(tmp_path)},
     ).json()
     assert cat["classes"][0]["name"] == "catkin"
     assert bush["classes"][0]["name"] == "bush"
-    # each map lands under its own per-trait path
-    assert (tmp_path / ".tcip" / "state" / "classes" / "catkin.json").is_file()
-    assert (tmp_path / ".tcip" / "state" / "classes" / "bush.json").is_file()
+    # each map lands under its own campaign file in the dataset
+    assert (tmp_path / "classes" / "catkin.json").is_file()
+    assert (tmp_path / "classes" / "bush.json").is_file()
+
+
+def test_dataset_root_derived_from_annotation_dir(client: TestClient, tmp_path: Path) -> None:
+    """A caller that passes only an annotations dir still lands the registry in the dataset."""
+    det = tmp_path / "annotations" / "catkin" / "2026-03-02" / "detect"
+    det.mkdir(parents=True)
+    r = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "trait": "catkin",
+              "annotations_detect_dir": str(det),
+              "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}]},
+    )
+    assert r.status_code == 200
+    assert (tmp_path / "classes" / "catkin.json").is_file()
 
 
 def test_load_derives_from_labels_when_map_absent(client: TestClient, tmp_path: Path) -> None:
