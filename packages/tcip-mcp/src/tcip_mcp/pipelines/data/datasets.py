@@ -89,9 +89,7 @@ def _read_det_boxes_format(stem, labels_dir, fmt, coco, w, h, file_name):
     """Pixel-xyxy boxes + 1-indexed labels for ``stem``.
 
     The canonical on-disk format is per-image ``json`` (json_io); ``coco`` is the assembled
-    dataset view of that JSON used for training; ``voc`` / ``labelme`` are external formats parsed
-    via tcip_annotation.format_io (all pixel-space). YOLO is not a dataset read format — it is
-    import-only, converted to JSON at ingest.
+    dataset view of that JSON used for training. Both are pixel-space.
     """
     fmt = (fmt or "json").lower()
     if fmt == "json":
@@ -100,31 +98,24 @@ def _read_det_boxes_format(stem, labels_dir, fmt, coco, w, h, file_name):
     else:
         from tcip_annotation import format_io
         bboxes = []
-        if fmt == "voc":
-            p = labels_dir / f"{stem}.xml"
-            if p.is_file():
-                bboxes = format_io.parse_voc_detect(str(p))[0]
-        elif fmt == "labelme":
-            p = labels_dir / f"{stem}.json"
-            if p.is_file():
-                bboxes = format_io.parse_labelme_detect(str(p))[0]
-        elif fmt == "coco":
+        if fmt == "coco":
             if coco is not None:
                 bboxes = format_io.parse_coco_detect(coco, file_name=file_name)[0]
         else:
             raise ValueError(
-                f"Unknown detection label_format {fmt!r} (use json/coco/voc/labelme); "
-                "YOLO .txt is import-only — convert it to JSON first "
-                "(scripts/migrate_labels_to_json.py)")
+                f"Unknown detection label_format {fmt!r} — use 'json' (canonical per-image) or "
+                "'coco' (the assembled dataset view).")
     boxes = [[b.x1, b.y1, b.x2, b.y2] for b in bboxes]
     labels = [b.class_id + 1 for b in bboxes]  # 0-indexed cid -> 1-indexed (background 0)
     return boxes, labels
 
 
 def dir_label_format(labels_dir) -> str | None:
-    """Best-effort on-disk format of a per-image label dir: ``"json"`` (canonical json_io
-    schema), ``"yolo"``, or ``None`` (empty / unrecognized). Used to route a JSON label store
-    onto the COCO training path; a ``.json`` that isn't our schema (e.g. LabelMe) is not claimed."""
+    """``"json"`` if this dir holds canonical per-image labels, else ``None``.
+
+    Used to route a JSON label store onto the COCO training path. A ``.json`` that is not our
+    schema is not claimed — an unrecognized store must not be read as an all-empty one.
+    """
     d = Path(labels_dir)
     if not d.is_dir():
         return None
@@ -133,10 +124,8 @@ def dir_label_format(labels_dir) -> str | None:
             data = json.loads(jp.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if isinstance(data, dict) and "objects" in data:
-            return "json"
-        break
-    return "yolo" if any(d.glob("*.txt")) else None
+        return "json" if isinstance(data, dict) and "objects" in data else None
+    return None
 
 
 def trainable_stems(
@@ -230,19 +219,13 @@ def _require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> No
 
 def _label_record_state(stem: str, labels_dir, label_format: str) -> tuple[bool, bool]:
     """``(a record exists, it has objects)`` for one stem in the active on-disk format."""
-    d = Path(labels_dir)
-    suffix = ".xml" if label_format == "voc" else ".json"
-    path = d / f"{stem}{suffix}"
+    path = Path(labels_dir) / f"{stem}.json"
     if not path.is_file():
         return False, False
     try:
-        if label_format == "voc":
-            return True, "<object>" in path.read_text(encoding="utf-8")
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return True, False
-    if label_format == "labelme":
-        return True, bool(isinstance(data, dict) and data.get("shapes"))
     return True, bool(isinstance(data, dict) and data.get("objects"))
 
 
@@ -411,10 +394,6 @@ class DetectionDataset(BaseImageDataset):
     - ``json`` (default): canonical per-image ``<labels_dir>/<stem>.json`` (json_io schema)
     - ``coco``: a single COCO JSON at ``coco_json`` — the assembled dataset view of the per-image
       JSON, used for training (annotations matched by file name)
-    - ``voc``: one PASCAL VOC ``<stem>.xml`` per image (external import format)
-    - ``labelme``: one LabelMe ``<stem>.json`` per image (external import format)
-
-    YOLO ``.txt`` is not a read format — import it to JSON first (migrate_labels_to_json).
     """
 
     task_type = "detection"
@@ -463,7 +442,7 @@ class DetectionDataset(BaseImageDataset):
         if self.label_format == "coco" and self._coco:
             for ann in self._coco.get("annotations", []):
                 counts[ann.get("category_id", 0)] += 1
-        else:  # json / voc / labelme: parse each image's annotation
+        else:  # json: parse each image's annotation
             for stem in self.stems:
                 _, labels = _read_det_boxes_format(stem, self.labels_dir, self.label_format, None, 0, 0, "")
                 for lab in labels:
@@ -557,7 +536,7 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"against the multi-band frame, or ingest this raster as {authored[0]}x"
                     f"{authored[1]}."
                 )
-            # Format-aware read: json (canonical) / coco (assembled) / voc / labelme all go through
+            # Format-aware read: json (canonical) and coco (assembled) both go through
             # the shared reader; only coco needs the image file name to match its annotations.
             file_name = img_path.name if base.label_format == "coco" else ""
             full_boxes, full_labels = _read_det_boxes_format(
@@ -985,22 +964,16 @@ def build_from_dataset_source(dataset_source: dict, **kwargs: Any) -> Dataset:
 
 def _autoresolve_json_labels(kwargs: dict) -> None:
     """Route a canonical per-image-JSON label dir onto the assembled-COCO path for training/eval.
-    No-op when the caller pinned a format or already supplied COCO data. A legacy YOLO ``.txt`` dir
-    is rejected loudly (it is import-only) so it can never be read as all-empty negatives."""
+    No-op when the caller pinned a format or already supplied COCO data."""
     if kwargs.get("coco_data") is not None or kwargs.get("coco_json") or kwargs.get("label_format"):
         return
     labels_dir = kwargs.get("labels_dir", "")
     images_dir = kwargs.get("images_dir", "")
     if not labels_dir:
         return
-    fmt = dir_label_format(labels_dir)
-    if fmt == "json" and images_dir:
+    if dir_label_format(labels_dir) == "json" and images_dir:
         kwargs["coco_data"] = assemble_coco(labels_dir, images_dir, stems=kwargs.get("stems"))
         kwargs["label_format"] = "coco"
-    elif fmt == "yolo":
-        raise ValueError(
-            f"{labels_dir} holds legacy YOLO .txt labels — convert them to canonical per-image "
-            "JSON first (scripts/migrate_labels_to_json.py). YOLO is import-only.")
 
 
 def _probe_num_channels(images_dir: str | Path | None, stems: list[str] | None,
