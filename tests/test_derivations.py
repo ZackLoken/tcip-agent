@@ -101,7 +101,7 @@ def test_run_inference_dry_run_reports_operating_point(tmp_path):
 
 
 def test_write_class_map_defaults_into_the_dataset(tmp_path):
-    """No output_path: the registry lands in the campaign's dataset home, decoding its own labels."""
+    """No output_path: the registry lands in the subject's dataset home, decoding its own labels."""
     from pathlib import Path
 
     from tcip_annotation import json_io
