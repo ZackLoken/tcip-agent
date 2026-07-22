@@ -29,7 +29,7 @@ const DEFAULT_REVIEW: ReviewFilters = {
 const DEFAULT_DATASET: DatasetSelection = {
   project_root: null,
   dataset_root: null,
-  annotation_type: null,
+  subject: null,
   date: null,
   image_list: [],
   current_image_index: 0,
@@ -431,7 +431,7 @@ export const useStore = create<AppState>()((set, get) => ({
       const identityChanged =
         inDs.dataset_root !== local.dataset.dataset_root ||
         inDs.date !== local.dataset.date ||
-        inDs.annotation_type !== local.dataset.annotation_type;
+        inDs.subject !== local.dataset.subject;
 
       // Boot hydration: the browser has no dataset yet (fresh load / project open), so
       // there is no local state to protect — adopt the persisted tab/mode/filters too,
