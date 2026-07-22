@@ -12,7 +12,7 @@ import { useStore } from "@/store";
 export interface ReviewFocusData {
   project_root?: string;
   dataset_root?: string;
-  trait?: string | null;
+  subject?: string | null;
   date?: string | null;
   model_name?: string | null;
   image_index?: number;
@@ -33,14 +33,14 @@ export async function applyReviewFocus(d: ReviewFocusData): Promise<void> {
   const needsSwitch =
     !!d.dataset_root &&
     (d.dataset_root !== cur.dataset_root ||
-      (d.trait ?? null) !== cur.annotation_type ||
+      (d.subject ?? null) !== cur.subject ||
       (d.date ?? null) !== cur.date ||
       (!!d.model_name && !predictionsMatchModel(cur.predictions_detect_dir, d.model_name)));
   if (needsSwitch) {
     const res = await api.dataset.select({
       project_root: d.project_root ?? d.dataset_root!,
       dataset_root: d.dataset_root!,
-      annotation_type: d.trait ?? null,
+      subject: d.subject ?? null,
       date: d.date ?? null,
       model_name: d.model_name ?? null,
     });
