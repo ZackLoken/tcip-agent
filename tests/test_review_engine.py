@@ -285,21 +285,23 @@ def test_check_image_review_complete(engine: ReviewEngine, ctx: ReviewContext) -
 def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -> None:
     detect_dir = tmp_path / "detect"
     detect_dir.mkdir()
-    (detect_dir / "IMG_0001.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+    orig = '{"objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}'
+    (detect_dir / "IMG_0001.json").write_text(orig)
     assert engine.backup_original_labels(detect_dir) == 1
-    backup = detect_dir / ".original" / "IMG_0001.txt"
-    assert backup.read_text() == "0 0.5 0.5 0.1 0.1\n"
+    backup = detect_dir / ".original" / "IMG_0001.json"
+    assert backup.read_text() == orig
 
     # Mutate the label on disk; a later backup must not overwrite its baseline
-    (detect_dir / "IMG_0001.txt").write_text("1 0.5 0.5 0.1 0.1\n")
+    (detect_dir / "IMG_0001.json").write_text('{"objects": []}')
     assert engine.backup_original_labels(detect_dir) == 0
-    assert backup.read_text() == "0 0.5 0.5 0.1 0.1\n"  # still original
+    assert backup.read_text() == orig  # still original
 
     # A label added after the first backup still gets its own baseline captured
-    (detect_dir / "IMG_0002.txt").write_text("0 0.3 0.3 0.1 0.1\n")
+    second = '{"objects": [{"category_id": 0, "bbox": [3, 3, 7, 7]}]}'
+    (detect_dir / "IMG_0002.json").write_text(second)
     assert engine.backup_original_labels(detect_dir) == 1
-    assert (detect_dir / ".original" / "IMG_0002.txt").read_text() == "0 0.3 0.3 0.1 0.1\n"
-    assert backup.read_text() == "0 0.5 0.5 0.1 0.1\n"
+    assert (detect_dir / ".original" / "IMG_0002.json").read_text() == second
+    assert backup.read_text() == orig
 
 
 def test_save_gt_writes_both_files(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
