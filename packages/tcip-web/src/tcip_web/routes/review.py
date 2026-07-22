@@ -47,17 +47,17 @@ router = APIRouter(prefix="/api/review", tags=["review"])
 _engines: dict[str, ReviewEngine] = {}
 
 # Class-name memo keyed by (registry path, mtime_ns): _get_engine resolves names per request from
-# the reviewed label's own campaign registry, so an unchanged map isn't re-parsed each call; a save
+# the reviewed label's own subject registry, so an unchanged map isn't re-parsed each call; a save
 # bumps mtime_ns and invalidates just that entry. Bounded.
 _CLASS_NAMES_CACHE_MAX = 256
 _class_names_cache: dict[str, tuple[int, dict[int, str]]] = {}
 
 
 def _load_class_names(gt_path: str | None) -> dict[int, str]:
-    """Read id→name for the campaign a GT label path belongs to, from its dataset registry.
+    """Read id→name for the subject a GT label path belongs to, from its dataset registry.
 
-    The registry is campaign-scoped and lives in the dataset (``<dataset_root>/classes/<campaign>``),
-    so names are resolved per request from the label being reviewed — a project with two campaigns
+    The registry is subject-scoped and lives in the dataset (``<dataset_root>/classes/<subject>``),
+    so names are resolved per request from the label being reviewed — a project with two subjects
     never shows one's names for the other. Without a resolvable registry the engine records
     ``class_{id}`` placeholders (display only; the negative rail does not depend on names).
     """
@@ -861,7 +861,7 @@ def image_statuses(
     gt_dir: Optional[str] = None,
     pred_dir: Optional[str] = None,
 ) -> ImageStatusesResponse:
-    """Batch review status + detection presence for a whole (trait, date) — one call the Review
+    """Batch review status + detection presence for a whole (subject, date) — one call the Review
     tab makes on dataset entry to drive the image-level Reviewed/Unreviewed filter and to skip
     images with nothing to review. ``gt_dir``/``pred_dir`` are the reviewed-kind label dirs
     (detect *or* segment, whichever the tab is reviewing)."""
