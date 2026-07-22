@@ -34,8 +34,7 @@ def _exif_iso_date(path: Path) -> str | None:
     """EXIF ``DateTimeOriginal`` → ISO ``YYYY-MM-DD``, or ``None``.
 
     EXIF stores the colon-date ``YYYY:MM:DD HH:MM:SS`` form. Reads via the public
-    ``Image.getexif()`` + Exif sub-IFD so it works across formats (JPEG **and** TIFF /
-    HEIC), falling back to the legacy flattened dict for plugins that populate it. PIL is
+    ``Image.getexif()`` + Exif sub-IFD so it works across formats (JPEG, TIFF, HEIC). PIL is
     lazy-imported so tool startup stays fast; any read failure degrades to ``None`` (→ the
     ``undated/`` bucket) rather than raising.
     """
@@ -52,9 +51,6 @@ def _exif_iso_date(path: Path) -> str | None:
             except Exception:
                 sub = {}
             raw = sub.get(_DT_ORIGINAL)
-            if raw is None:
-                legacy = getattr(im, "_getexif", lambda: None)() or {}
-                raw = legacy.get(_DT_ORIGINAL)
     except Exception:
         return None
     if raw is None:
