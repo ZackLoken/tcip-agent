@@ -1,37 +1,27 @@
-"""Format-agnostic annotation I/O — auto-detect and dispatch across formats.
+"""Annotation I/O for the two on-disk formats — the canonical per-image JSON and the COCO
+assembled from it.
 
-The internal representation (BBox, Polygon, PredBBox, PredPolygon) is always
-pixel-coordinate.  Format only matters at file I/O boundaries.
+The internal representation (BBox, Polygon, PredBBox, PredPolygon) is always pixel-coordinate;
+format only matters at file I/O boundaries.
 
-Supported formats:
-  - yolo      — one .txt per image, normalized coords
-  - coco      — single .json for entire dataset, pixel coords
-  - voc       — one .xml per image (PASCAL VOC), pixel coords
-  - labelme   — one .json per image (LabelMe), pixel coords
+  - json  — one ``.json`` per image (the canonical json_io schema, an ``objects`` key)
+  - coco  — a single dataset-level ``.json`` (an ``images``/``annotations`` key)
 
 Usage:
     boxes, class_ids = load_annotations(path, img_w, img_h, task="detect")
-    save_annotations(path, boxes, img_w, img_h, task="detect", fmt="yolo")
+    save_annotations(path, boxes, img_w, img_h, task="detect", fmt="json")
 """
 
 from __future__ import annotations
 
 import json
 import os
-import warnings
 from pathlib import Path
 from typing import Literal
-from xml.etree import ElementTree as ET
 
 from tcip_annotation.state import BBox, Polygon
-from tcip_annotation.label_io import (
-    parse_detect_labels,
-    parse_segment_labels,
-    write_detect_labels,
-    write_segment_labels,
-)
 
-AnnotFormat = Literal["yolo", "coco", "voc", "labelme", "json"]
+AnnotFormat = Literal["coco", "json"]
 Task = Literal["detect", "segment"]
 
 
@@ -39,65 +29,33 @@ Task = Literal["detect", "segment"]
 
 
 def detect_format(path: str) -> AnnotFormat:
-    """Infer annotation format from file extension and content. Returns yolo as fallback."""
-    fmt, _ = detect_format_confident(path)
-    return fmt
+    """The annotation format of a file or directory, from its own contents.
 
-
-def detect_format_confident(path: str) -> tuple[AnnotFormat, bool]:
-    """Infer annotation format and whether the result was a confident match.
-
-    Returns (format, confident) where confident=False means the format is a
-    best-guess fallback (YOLO) rather than a definitive detection. Callers that
-    need to surface uncertainty to a user or agent should check this flag.
-
-    Rules:
-      - .xml  → ("voc", True)
-      - .txt  → ("yolo", True)
-      - .json with recognized keys → (format, True)
-      - .json without recognized keys → ("yolo", False)
-      - directory: xml wins (True); recognized JSON wins (True);
-                   txt → ("yolo", True); nothing matches → ("yolo", False)
+    ``"json"`` is the canonical per-image label file (``json_io`` schema, keyed on ``objects``);
+    ``"coco"`` is an assembled dataset-level COCO (keyed on ``images``/``annotations``). Raises for
+    anything else rather than guessing — a misdetected format reads real annotations as empty
+    negatives, so a wrong answer here is worse than no answer.
     """
     p = Path(path)
-
-    if p.suffix == ".xml":
-        return "voc", True
-
-    if p.suffix == ".txt":
-        return "yolo", True
-
-    if p.suffix == ".json":
-        fmt = _detect_json_format(p)
-        return (fmt, True) if fmt is not None else ("yolo", False)
-
-    if p.is_dir():
-        if any(p.glob("*.xml")):
-            return "voc", True
-        for json_path in sorted(p.glob("*.json")):
-            fmt = _detect_json_format(json_path)
-            if fmt is not None:
-                return fmt, True
-        if any(p.glob("*.txt")):
-            return "yolo", True
-
-    return "yolo", False
+    candidates = sorted(p.glob("*.json")) if p.is_dir() else [p]
+    for candidate in candidates:
+        fmt = _detect_json_format(candidate)
+        if fmt is not None:
+            return fmt
+    raise ValueError(
+        f"Cannot determine the annotation format of {path}: expected the canonical per-image JSON "
+        f"(an 'objects' key) or an assembled COCO (an 'images'/'annotations' key)."
+    )
 
 
 def _detect_json_format(path: Path) -> AnnotFormat | None:
-    """Inspect JSON keys to distinguish COCO from LabelMe.
-
-    Returns None if the file does not look like a known annotation format,
-    so the caller can fall through to the next candidate.
-    """
+    """``"json"`` / ``"coco"`` from a file's keys, or ``None`` if it is neither."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             if "objects" in data:
                 return "json"  # the canonical per-image label file (json_io schema)
-            if "shapes" in data:
-                return "labelme"
             if "images" in data or "annotations" in data:
                 return "coco"
     except (json.JSONDecodeError, OSError):
@@ -305,205 +263,6 @@ def write_coco_segment(
     with open(path, "w", encoding="utf-8") as f:
         json.dump(coco, f, indent=2)
 
-# ── PASCAL VOC XML parsing ──────────────────────────────────────────────────
-
-
-def parse_voc_detect(path: str) -> tuple[list[BBox], set[int], dict[str, int]]:
-    """Parse PASCAL VOC XML file into BBox objects.
-
-    VOC stores class names as strings. Returns a name→id mapping built
-    on the fly (alphabetical order).
-
-    Returns (boxes, class_ids, name_to_id).
-    """
-    tree = ET.parse(path)
-    root = tree.getroot()
-
-    names: list[str] = []
-    for obj in root.iter("object"):
-        name = obj.findtext("name", "")
-        if name and name not in names:
-            names.append(name)
-    names.sort()
-    name_to_id = {n: i for i, n in enumerate(names)}
-
-    boxes: list[BBox] = []
-    class_ids: set[int] = set()
-    for obj in root.iter("object"):
-        name = obj.findtext("name", "")
-        bndbox = obj.find("bndbox")
-        if bndbox is None:
-            continue
-        try:
-            x1 = float(bndbox.findtext("xmin", "0"))
-            y1 = float(bndbox.findtext("ymin", "0"))
-            x2 = float(bndbox.findtext("xmax", "0"))
-            y2 = float(bndbox.findtext("ymax", "0"))
-        except ValueError:
-            continue
-        cid = name_to_id.get(name, 0)
-        boxes.append(BBox(x1, y1, x2, y2, cid))
-        class_ids.add(cid)
-
-    return boxes, class_ids, name_to_id
-
-
-def write_voc_detect(
-    path: str,
-    boxes: list[BBox],
-    img_w: int,
-    img_h: int,
-    file_name: str = "",
-    id_to_name: dict[int, str] | None = None,
-) -> None:
-    """Write detection boxes to a PASCAL VOC XML file.
-
-    Args:
-        path: Output XML file path.
-        boxes: List of BBox objects in pixel coordinates.
-        img_w: Image width.
-        img_h: Image height.
-        file_name: Image filename to embed in the XML.
-        id_to_name: Optional mapping from class_id to class name.
-    """
-    id_to_name = id_to_name or {}
-
-    annotation = ET.Element("annotation")
-    ET.SubElement(annotation, "filename").text = file_name or Path(path).stem + ".jpg"
-    size = ET.SubElement(annotation, "size")
-    ET.SubElement(size, "width").text = str(img_w)
-    ET.SubElement(size, "height").text = str(img_h)
-    ET.SubElement(size, "depth").text = "3"
-
-    for box in boxes:
-        obj = ET.SubElement(annotation, "object")
-        ET.SubElement(obj, "name").text = id_to_name.get(box.class_id, str(box.class_id))
-        bndbox = ET.SubElement(obj, "bndbox")
-        # ``:g`` keeps integer coords clean ("123") while preserving sub-pixel precision
-        # ("123.45") — the old ``round()`` silently truncated float boxes to whole pixels.
-        ET.SubElement(bndbox, "xmin").text = f"{box.x1:g}"
-        ET.SubElement(bndbox, "ymin").text = f"{box.y1:g}"
-        ET.SubElement(bndbox, "xmax").text = f"{box.x2:g}"
-        ET.SubElement(bndbox, "ymax").text = f"{box.y2:g}"
-
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tree_out = ET.ElementTree(annotation)
-    tree_out.write(path, encoding="UTF-8", xml_declaration=True)
-
-
-# ── LabelMe JSON parsing ───────────────────────────────────────────────────
-
-
-def parse_labelme_detect(path: str) -> tuple[list[BBox], set[int], dict[str, int]]:
-    """Parse a LabelMe JSON file's rectangle shapes into BBox objects.
-
-    LabelMe stores class names as strings. Returns a name→id mapping.
-
-    Returns (boxes, class_ids, name_to_id).
-    """
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    names: list[str] = sorted({
-        s.get("label", "") for s in data.get("shapes", [])
-        if s.get("label")
-    })
-    name_to_id = {n: i for i, n in enumerate(names)}
-
-    boxes: list[BBox] = []
-    class_ids: set[int] = set()
-    for shape in data.get("shapes", []):
-        label = shape.get("label", "")
-        points = shape.get("points", [])
-        shape_type = shape.get("shape_type", "")
-
-        if shape_type == "rectangle" and len(points) == 2:
-            (x1, y1), (x2, y2) = points
-            cid = name_to_id.get(label, 0)
-            boxes.append(BBox(min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2), cid))
-            class_ids.add(cid)
-
-    return boxes, class_ids, name_to_id
-
-
-def parse_labelme_segment(path: str) -> tuple[list[Polygon], set[int], dict[str, int]]:
-    """Parse a LabelMe JSON file's polygon shapes into Polygon objects.
-
-    Returns (polygons, class_ids, name_to_id).
-    """
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    names: list[str] = sorted({
-        s.get("label", "") for s in data.get("shapes", [])
-        if s.get("label")
-    })
-    name_to_id = {n: i for i, n in enumerate(names)}
-
-    polygons: list[Polygon] = []
-    class_ids: set[int] = set()
-    for shape in data.get("shapes", []):
-        label = shape.get("label", "")
-        points = shape.get("points", [])
-        shape_type = shape.get("shape_type", "")
-
-        if shape_type == "polygon" and len(points) >= 3:
-            cid = name_to_id.get(label, 0)
-            pixel_points = [(float(p[0]), float(p[1])) for p in points]
-            polygons.append(Polygon(pixel_points, cid))
-            class_ids.add(cid)
-
-    return polygons, class_ids, name_to_id
-
-
-def write_labelme(
-    path: str,
-    annotations: list[BBox] | list[Polygon],
-    img_w: int,
-    img_h: int,
-    file_name: str = "",
-    id_to_name: dict[int, str] | None = None,
-) -> None:
-    """Write annotations to a LabelMe JSON file.
-
-    Handles both BBox (→ rectangle) and Polygon (→ polygon) shapes.
-    """
-    id_to_name = id_to_name or {}
-    shapes = []
-
-    for ann in annotations:
-        label = id_to_name.get(ann.class_id, str(ann.class_id))
-        if isinstance(ann, BBox):
-            shapes.append({
-                "label": label,
-                "points": [[ann.x1, ann.y1], [ann.x2, ann.y2]],
-                "shape_type": "rectangle",
-                "flags": {},
-            })
-        elif isinstance(ann, Polygon):
-            shapes.append({
-                "label": label,
-                "points": [[x, y] for x, y in ann.points],
-                "shape_type": "polygon",
-                "flags": {},
-            })
-
-    data = {
-        "version": "5.0.0",
-        "flags": {},
-        "shapes": shapes,
-        "imagePath": file_name or Path(path).stem + ".jpg",
-        "imageHeight": img_h,
-        "imageWidth": img_w,
-        "imageData": None,
-    }
-
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-
-# ── Unified dispatch API ───────────────────────────────────────────────────
 
 
 def load_annotations(
@@ -515,51 +274,25 @@ def load_annotations(
     image_id: int | None = None,
     file_name: str | None = None,
 ) -> tuple[list[BBox] | list[Polygon], set[int]]:
-    """Load annotations from any supported format.
+    """Load annotations. ``fmt`` of ``None`` detects it from the file's own keys.
 
-    If fmt is None, auto-detects from file extension/content.
-    For COCO, either image_id or file_name must identify the target image.
-    For VOC/LabelMe, the name→id mapping is built automatically.
+    For COCO, either ``image_id`` or ``file_name`` must identify the target image.
     """
     if fmt is None:
         fmt = detect_format(path)
 
-    if fmt == "yolo":
-        if task == "detect":
-            return parse_detect_labels(path, img_w, img_h)
-        else:
-            return parse_segment_labels(path, img_w, img_h)
-    elif fmt == "json":  # canonical per-image COCO/JSON
+    if fmt == "json":  # the canonical per-image label file
         from tcip_annotation import json_io
 
         if task == "detect":
             return json_io.read_detect(path, img_w, img_h)
         return json_io.read_segment(path, img_w, img_h)
-    elif fmt == "coco":
+    if fmt == "coco":
         coco = _parse_coco_json(path)
         if task == "detect":
             return parse_coco_detect(coco, image_id, file_name)
-        else:
-            return parse_coco_segment(coco, image_id, file_name)
-    elif fmt == "voc":
-        if task == "detect":
-            boxes, class_ids, _ = parse_voc_detect(path)
-            return boxes, class_ids
-        else:
-            warnings.warn(
-                "PASCAL VOC format has no segmentation support; returning empty annotations.",
-                stacklevel=2,
-            )
-            return [], set()
-    elif fmt == "labelme":
-        if task == "detect":
-            boxes, class_ids, _ = parse_labelme_detect(path)
-            return boxes, class_ids
-        else:
-            polygons, class_ids, _ = parse_labelme_segment(path)
-            return polygons, class_ids
-    else:
-        raise ValueError(f"Unsupported annotation format: {fmt}")
+        return parse_coco_segment(coco, image_id, file_name)
+    raise ValueError(f"Unsupported annotation format: {fmt}")
 
 
 def save_annotations(
@@ -568,26 +301,19 @@ def save_annotations(
     img_w: int,
     img_h: int,
     task: Task = "detect",
-    fmt: AnnotFormat = "yolo",
+    fmt: AnnotFormat = "json",
     file_name: str | None = None,
     id_to_name: dict[int, str] | None = None,
     keep_empty: bool = False,
 ) -> None:
-    """Save annotations to the specified format.
+    """Save annotations.
 
-    For YOLO: writes a single .txt file (one per image).
-    For COCO: writes/updates a .json file (pass file_name for image identification).
-    For VOC: writes a single .xml file (detection only).
-    For LabelMe: writes a single .json file (rectangles or polygons).
-    ``keep_empty`` (json format): an empty list writes a confirmed-negative ``objects: []``
-    file instead of deleting the label — without it a save of zero shapes erases GT.
+    ``json`` writes the canonical per-image label file; ``coco`` writes/updates a dataset-level
+    COCO (pass ``file_name`` to identify the image). ``keep_empty`` (json only): an empty list
+    writes an ``objects: []`` record instead of deleting the label — without it a save of zero
+    shapes erases the GT. An empty record is not a negative until a human confirms it.
     """
-    if fmt == "yolo":
-        if task == "detect":
-            write_detect_labels(path, annotations, img_w, img_h)  # type: ignore[arg-type]
-        else:
-            write_segment_labels(path, annotations, img_w, img_h)  # type: ignore[arg-type]
-    elif fmt == "json":  # canonical per-image COCO/JSON
+    if fmt == "json":  # the canonical per-image label file
         from tcip_annotation import json_io
 
         if task == "detect":
@@ -601,15 +327,5 @@ def save_annotations(
             write_coco_detect(path, images_dict)  # type: ignore[arg-type]
         else:
             write_coco_segment(path, images_dict)  # type: ignore[arg-type]
-    elif fmt == "voc":
-        write_voc_detect(
-            path, annotations, img_w, img_h,  # type: ignore[arg-type]
-            file_name=file_name or "", id_to_name=id_to_name,
-        )
-    elif fmt == "labelme":
-        write_labelme(
-            path, annotations, img_w, img_h,
-            file_name=file_name or "", id_to_name=id_to_name,
-        )
     else:
         raise ValueError(f"Unsupported annotation format: {fmt}")
