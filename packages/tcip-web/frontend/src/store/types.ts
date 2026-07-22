@@ -11,7 +11,7 @@ export type Mode = "box" | "polygon";
 export interface DatasetSelection {
   project_root: string | null;
   dataset_root: string | null;
-  annotation_type: string | null;
+  subject: string | null;
   date: string | null;
   image_list: string[];
   current_image_index: number;
