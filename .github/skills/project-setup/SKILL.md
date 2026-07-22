@@ -115,7 +115,7 @@ project so the GUI opens what you built, closing the loop for the human.
 The GUI (a separate process) and you share the workspace, not memory. `view_gui_state`
 is the bridge: it reads the active-project marker (`<workspace>/.active`) plus that
 project's `<project_root>/.tcip/state/gui.json` and returns what the human is looking at
-right now — `active_project`, `project_root`, `annotation_type`, `date`, `active_tab`, and
+right now — `active_project`, `project_root`, `subject`, `date`, `active_tab`, and
 `current_image_index` / `current_image`. Call it when the human says "this image" or "the
 one I'm on" without a path. The nav index is persisted debounced as they page through
 frames, so it lags a beat — treat it as "roughly where they are," not a frame-exact cursor.
