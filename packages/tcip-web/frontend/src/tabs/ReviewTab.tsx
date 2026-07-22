@@ -193,7 +193,7 @@ export function ReviewTab() {
 
   const [showGT, setShowGT] = useState(true);
   const [showPred, setShowPred] = useState(true);
-  // GT/Pred visibility is remembered per (project, date, trait/model): restore on dataset change,
+  // GT/Pred visibility is remembered per (project, date, subject/model): restore on dataset change,
   // save on toggle. (Position + filters are persisted centrally in the open path.)
   const visKey = datasetKey(dataset);
   useEffect(() => {
@@ -422,7 +422,7 @@ export function ReviewTab() {
     refetchNonce,
   ]);
 
-  // Batch-fetch image-level review status + detection presence for the whole (trait, date), so nav
+  // Batch-fetch image-level review status + detection presence for the whole (subject, date), so nav
   // can filter Reviewed/Unreviewed and skip images with nothing to review. Re-runs when the dataset
   // or its reviewed-kind dirs change; live per-image updates ride on verdicts (setReviewImageStatus).
   useEffect(() => {
@@ -616,7 +616,7 @@ export function ReviewTab() {
           dataset.project_root,
           imgName,
           res.annotation_status,
-          dataset.annotation_type,
+          dataset.subject,
           dataset.date,
         )
         .catch(() => {});
@@ -630,8 +630,8 @@ export function ReviewTab() {
   // Promote the current dataset's completed review into a validation reference. Runs the platform's
   // own validation gate server-side; the honest validated / not-yet result is surfaced (never forced).
   async function promoteReviewToValidationReference() {
-    if (!dataset.project_root || !dataset.annotation_type) {
-      useStore.getState().pushToast("Select a dataset with a trait and predictions first.");
+    if (!dataset.project_root || !dataset.subject) {
+      useStore.getState().pushToast("Select a dataset with a subject and predictions first.");
       return;
     }
     if (!dataset.predictions_detect_dir && !dataset.predictions_segment_dir) {
@@ -644,7 +644,7 @@ export function ReviewTab() {
     try {
       const res = await api.review.validateReference({
         project_root: dataset.project_root,
-        trait: dataset.annotation_type,
+        trait: dataset.subject,
         pred_detect_dir: dataset.predictions_detect_dir,
         pred_segment_dir: dataset.predictions_segment_dir,
       });
