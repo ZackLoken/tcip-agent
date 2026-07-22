@@ -49,16 +49,16 @@ def check_negatives(root: Path, findings: list) -> None:
     stems = _image_stems(root)
 
     def _negatives_for(label_path: Path) -> set[str]:
-        """Negatives confirmed for *this* label file's own campaign.
+        """Negatives confirmed for *this* label file's own subject.
 
-        A negative in one campaign says nothing about another — that is what scoping means — so
-        comparing against every bucket would resurrect the cross-campaign leak as a false alarm.
+        A negative in one subject says nothing about another — that is what scoping means — so
+        comparing against every bucket would resurrect the cross-subject leak as a false alarm.
         """
         parsed = parse_annotation_dir(label_path.parent)
         if parsed is None:
             return set()
-        campaign, date, _task = parsed
-        bucket = by_bucket.get(status_bucket(campaign, date), {})
+        subject, date, _task = parsed
+        bucket = by_bucket.get(status_bucket(subject, date), {})
         return {n for n, s in bucket.items() if s == "negative"}
 
     neg_names = {n for b in by_bucket.values() for n, s in b.items() if s == "negative"}
