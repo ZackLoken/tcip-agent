@@ -63,7 +63,7 @@ function setupDataset() {
         ...s.gui.dataset,
         project_root: "C:/proj",
         dataset_root: "C:/data",
-        annotation_type: "annotations",
+        subject: "annotations",
         date: "2026-01-01",
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
@@ -155,7 +155,7 @@ describe("AnnotateTab save/load race", () => {
     // The stale result must not markClean() the img2 edits...
     expect(useStore.getState().canvas.dirty).toBe(true);
     // ...but the per-image status for the image actually saved is still recorded — scoped to the
-    // selected campaign, so it cannot mark the image negative under another trait.
+    // selected subject, so it cannot mark the image negative under another subject.
     expect(classesApi.setImageStatus).toHaveBeenCalledWith(
       "C:/proj",
       "img1.jpg",
