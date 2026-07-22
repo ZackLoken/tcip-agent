@@ -665,9 +665,7 @@ def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
     if task in ("detection", "instance_seg"):
         kw = {"images_dir": data_cfg.get("images_dir", ""),
               "labels_dir": data_cfg.get("labels_dir", "")}
-        # Thread the on-disk label format through to the dataset. Dropping it here
-        # silently defaults to YOLO parsing, so a VOC/LabelMe/COCO dataset reads as
-        # all-empty negatives — the undetected-format mismatch CLAUDE.md warns about.
+        # Thread the on-disk label format through to the dataset (json | coco).
         if data_cfg.get("label_format"):
             kw["label_format"] = data_cfg["label_format"]
         if data_cfg.get("coco_json"):
