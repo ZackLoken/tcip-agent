@@ -204,7 +204,8 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     Scans the canonical dataset layout (see :mod:`tcip_mcp.dataset_layout`): images under
     ``<root>/images/<date>/`` and ground truth under
     ``<root>/annotations/<trait>/<date>/<task>/``, plus the ``.tcip`` config
-    and the class map (``.tcip/state/classes.json``). Optionally includes trained checkpoints.
+    Optionally includes trained checkpoints. (Class registries and labels live in the
+    dataset, not the project, and travel with it.)
 
     Args:
         project_path: Root directory of the project.
@@ -226,16 +227,18 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     files_added = 0
 
     with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
-        # Canonical trees (images/<date>/, annotations/<trait>/<date>/<task>/) — the old root/data
-        # scan silently dropped everything for an ingested project.
-        for tree, exts in ((root / "images", image_exts), (root / "annotations", label_exts)):
+        # Canonical dataset trees. classes/ carries the campaign registries that decode the labels'
+        # category_ids — without them the archived annotations are undecodable, so a self-contained
+        # bundle must include them.
+        for tree, exts in ((root / "images", image_exts), (root / "annotations", label_exts),
+                           (root / "classes", {".json"})):
             if tree.is_dir():
                 for sub in tree.rglob("*"):
                     if sub.is_file() and sub.suffix.lower() in exts:
                         zf.write(sub, sub.relative_to(root))
                         files_added += 1
 
-        # .tcip config + the class map at .tcip/state/classes.json
+        # .tcip config, experiments, audit — the project's working state
         tcip_dir = root / ".tcip"
         if tcip_dir.is_dir():
             for f in tcip_dir.rglob("*"):
