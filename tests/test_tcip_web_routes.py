@@ -778,17 +778,20 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
 def test_review_action_records_real_class_name_and_reviewer(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    # With classes.json present the engine records the real class name + a reviewer,
-    # instead of the "class_{id}" placeholder / empty reviewer the audit flagged.
+    # The engine resolves the class name from the reviewed label's own campaign registry in the
+    # dataset — so it records "catkin", not the "class_{id}" placeholder.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt.json"
+    det_gt = dataset_root / "annotations" / "catkin" / "2-11-26" / "detect" / "IMG_0000.json"
+    det_gt.parent.mkdir(parents=True, exist_ok=True)
     _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
     pred = tmp_path / "pred.json"
     _write_pred_detect(pred, [(40, 32, 60, 48, 0, 0.9)])
+    (dataset_root / "classes").mkdir(exist_ok=True)
+    (dataset_root / "classes" / "catkin.json").write_text(
+        json.dumps({"0": {"name": "catkin", "color": "#FF0000"}}))
     project_root = tmp_path / "proj"
     state = project_root / ".tcip" / "state"
     state.mkdir(parents=True)
-    (state / "classes.json").write_text(json.dumps({"0": {"name": "catkin", "color": "#FF0000"}}))
 
     resp = client.post(
         "/api/review/action",
@@ -1061,3 +1064,45 @@ def test_annotate_derived_boxes_inherit_polygon_provenance(client, dataset_root,
     det_objs = json.loads(det_path.read_text())["objects"]
     assert det_objs[0]["created_by"] == "user:emily"   # derived box keeps its polygon's author
     assert det_objs[1]["created_by"] == "user:zack"    # new polygon -> stamped -> box inherits
+
+
+def test_review_class_names_do_not_bleed_across_campaigns(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """Class names are resolved per request from the reviewed label's own campaign registry, so
+    class 0 shows 'catkin' when reviewing catkin and 'bud_mite' when reviewing efb — never one
+    campaign's name for the other's labels (the bug a project-cached engine would have)."""
+    import json
+
+    (dataset_root / "classes").mkdir(exist_ok=True)
+    (dataset_root / "classes" / "catkin.json").write_text(
+        json.dumps({"0": {"name": "catkin", "color": "#FF0000"}}))
+    (dataset_root / "classes" / "efb.json").write_text(
+        json.dumps({"0": {"name": "efb_canker", "color": "#00FF00"}}))
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    def _class_name_for(campaign: str) -> str:
+        gt = dataset_root / "annotations" / campaign / "2-11-26" / "detect" / "IMG_0000.json"
+        gt.parent.mkdir(parents=True, exist_ok=True)
+        _write_gt_detect(gt, [(40, 32, 60, 48, 0)])
+        pred = tmp_path / f"pred_{campaign}.json"
+        _write_pred_detect(pred, [(40, 32, 60, 48, 0, 0.9)])
+        resp = client.post(
+            "/api/review/action",
+            json={
+                "project_root": str(project_root), "image_name": "IMG_0000.JPG",
+                "image_path": str(img_path), "gt_detect_path": str(gt),
+                "pred_detect_path": str(pred), "det_type": "tp", "class_id": 0, "conf": 0.9,
+                "iou": 0.95, "gt_type": "box", "gt_idx": 0, "pred_type": "box", "pred_idx": 0,
+                "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
+                "iou_threshold": 0.3, "conf_threshold": 0.1,
+            },
+        )
+        assert resp.status_code == 200
+        shard = json.loads((project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json").read_text())
+        return shard["state"]["detections"][0]["class_name"]
+
+    assert _class_name_for("catkin") == "catkin"
+    assert _class_name_for("efb") == "efb_canker"  # same class 0, different campaign, different name
