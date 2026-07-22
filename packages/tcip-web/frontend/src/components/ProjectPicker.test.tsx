@@ -30,10 +30,10 @@ const PROJECTS: ProjectSummary[] = [
     created: 1_700_000_000,
     modified: 1_700_000_500,
     dates: ["2026-02-11", "2026-03-01"],
-    traits: ["catkin", "bush"],
+    subjects: ["catkin", "bush"],
     models: ["baseline"],
     // catkin labelled (+ baseline predicted) on 02-11; bush labelled on 03-01.
-    traits_by_date: { "2026-02-11": ["catkin"], "2026-03-01": ["bush"] },
+    subjects_by_date: { "2026-02-11": ["catkin"], "2026-03-01": ["bush"] },
     models_by_date: { "2026-02-11": ["baseline"], "2026-03-01": [] },
     image_count: 42,
     is_active: false,
@@ -44,9 +44,9 @@ const PROJECTS: ProjectSummary[] = [
     created: 1_700_000_000,
     modified: 1_700_000_100,
     dates: ["2026-03-05"],
-    traits: [],
+    subjects: [],
     models: [],
-    traits_by_date: { "2026-03-05": [] },
+    subjects_by_date: { "2026-03-05": [] },
     models_by_date: { "2026-03-05": [] },
     image_count: 7,
     is_active: false,
@@ -97,7 +97,7 @@ describe("ProjectPicker", () => {
       selection: {
         project_root: "/ws/hazelnut_catkin_valley-farm",
         dataset_root: "/ws/hazelnut_catkin_valley-farm",
-        annotation_type: "catkin",
+        subject: "catkin",
         date: "2026-03-01",
         image_list: [],
         current_image_index: 0,
@@ -125,7 +125,7 @@ describe("ProjectPicker", () => {
     );
   });
 
-  it("filters the trait options to the selected date's labelled traits", async () => {
+  it("filters the subject options to the selected date's labelled subjects", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
@@ -135,14 +135,14 @@ describe("ProjectPicker", () => {
     fireEvent.click(await screen.findByText("hazelnut_catkin_valley-farm"));
 
     // Default date is the most recent ISO date (2026-03-01), where only 'bush' is labelled.
-    const traitSelect = screen.getByLabelText("Trait") as HTMLSelectElement;
-    let opts = Array.from(traitSelect.options).map((o) => o.value);
+    const subjectSelect = screen.getByLabelText("Subject") as HTMLSelectElement;
+    let opts = Array.from(subjectSelect.options).map((o) => o.value);
     expect(opts).toContain("bush");
     expect(opts).not.toContain("catkin");
 
     // Switch to 2026-02-11, where only 'catkin' is labelled.
     fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-02-11" } });
-    opts = Array.from(traitSelect.options).map((o) => o.value);
+    opts = Array.from(subjectSelect.options).map((o) => o.value);
     expect(opts).toContain("catkin");
     expect(opts).not.toContain("bush");
   });
