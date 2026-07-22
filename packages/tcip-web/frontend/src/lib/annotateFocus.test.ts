@@ -26,13 +26,13 @@ afterEach(() => vi.clearAllMocks());
 
 describe("applyAnnotateFocus", () => {
   it("switches the dataset, then applies mode + index + tab locally", async () => {
-    seedDataset({ dataset_root: "/ws/proj", annotation_type: "catkin", date: "2026-02-11" });
+    seedDataset({ dataset_root: "/ws/proj", subject: "catkin", date: "2026-02-11" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
       selection: {
         project_root: "/ws/proj",
         dataset_root: "/ws/proj",
-        annotation_type: "bush",
+        subject: "bush",
         date: "2026-03-02",
         image_list: [],
         current_image_index: 0, // backend always resets to 0
@@ -47,7 +47,7 @@ describe("applyAnnotateFocus", () => {
     await applyAnnotateFocus({
       project_root: "/ws/proj",
       dataset_root: "/ws/proj",
-      trait: "bush",
+      subject: "bush",
       date: "2026-03-02",
       image_index: 47,
       mode: "polygon",
@@ -57,7 +57,7 @@ describe("applyAnnotateFocus", () => {
     expect(api.dataset.select).toHaveBeenCalledTimes(1);
     expect(vi.mocked(api.dataset.select).mock.calls[0][0]).toMatchObject({
       dataset_root: "/ws/proj",
-      annotation_type: "bush",
+      subject: "bush",
       date: "2026-03-02",
     });
     // The local view controls win over the backend's index=0 reset.
@@ -68,11 +68,11 @@ describe("applyAnnotateFocus", () => {
   });
 
   it("keeps the focus index even if the /select WS snapshot (index 0) arrives afterward", async () => {
-    seedDataset({ dataset_root: "/ws/proj", annotation_type: "catkin", date: "2026-02-11" });
+    seedDataset({ dataset_root: "/ws/proj", subject: "catkin", date: "2026-02-11" });
     const newIdentity = {
       project_root: "/ws/proj",
       dataset_root: "/ws/proj",
-      annotation_type: "bush",
+      subject: "bush",
       date: "2026-03-02",
       image_list: [],
       current_image_index: 0,
@@ -89,7 +89,7 @@ describe("applyAnnotateFocus", () => {
 
     await applyAnnotateFocus({
       dataset_root: "/ws/proj",
-      trait: "bush",
+      subject: "bush",
       date: "2026-03-02",
       image_index: 47,
       mode: "polygon",
@@ -107,14 +107,14 @@ describe("applyAnnotateFocus", () => {
   it("does not re-select when the dataset identity already matches, but still applies view", async () => {
     seedDataset({
       dataset_root: "/ws/proj",
-      annotation_type: "bush",
+      subject: "bush",
       date: "2026-03-02",
       current_image_index: 0,
     });
 
     await applyAnnotateFocus({
       dataset_root: "/ws/proj",
-      trait: "bush",
+      subject: "bush",
       date: "2026-03-02",
       image_index: 12,
       mode: "polygon",
