@@ -118,12 +118,8 @@ def load_multiband(path: str | Path, num_channels: int) -> np.ndarray:
         npz = np.load(str(path))
         arr = npz[npz.files[0]]
     elif ext in (".tif", ".tiff"):
-        try:
-            import tifffile
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise ImportError(
-                "Reading multi-band GeoTIFF needs tifffile (pip install tifffile)."
-            ) from exc
+        import tifffile
+
         arr = tifffile.imread(str(path))
     else:
         raise ValueError(
