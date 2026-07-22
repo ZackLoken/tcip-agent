@@ -22,7 +22,7 @@ export function defaultDate(dates: string[]): string {
 export async function openWorkspaceProject(
   p: ProjectSummary,
   date: string,
-  annotationType: string | null,
+  subject: string | null,
   modelName: string | null,
 ): Promise<DatasetSelection> {
   // Snapshot the outgoing dataset's UI state before the select's broadcast can move it, then
@@ -32,7 +32,7 @@ export async function openWorkspaceProject(
   const res = await api.dataset.select({
     project_root: p.path,
     dataset_root: p.path,
-    annotation_type: annotationType || null,
+    subject: subject || null,
     date: date || null,
     model_name: modelName || null,
   });
@@ -41,9 +41,9 @@ export async function openWorkspaceProject(
   return res.selection;
 }
 
-/** The most-recent date that actually has a labelled trait, or null if none do. */
+/** The most-recent date that actually has a labelled subject, or null if none do. */
 function newestLabelledDate(p: ProjectSummary): string | null {
-  const labelled = p.dates.filter((d) => (p.traits_by_date[d] ?? []).length > 0);
+  const labelled = p.dates.filter((d) => (p.subjects_by_date[d] ?? []).length > 0);
   return labelled.length ? defaultDate(labelled) : null;
 }
 
@@ -53,12 +53,12 @@ export async function openProjectByName(name: string): Promise<DatasetSelection 
   const p = projects.find((x) => x.name === name);
   if (!p) return null;
   // Open on the most-recent date that actually has labels (not merely the newest date), and
-  // scope trait/model to that date's per-date availability — otherwise an agent that just
+  // scope subject/model to that date's per-date availability — otherwise an agent that just
   // ingested a still-unlabelled newer date would jump the human past their annotations onto a
   // blank canvas (there's no date selector inside the Annotate tab to recover). Falls back to
   // the newest date only when nothing is labelled yet (a genuinely empty project).
   const date = newestLabelledDate(p) ?? defaultDate(p.dates);
-  const trait = (p.traits_by_date[date] ?? [])[0] ?? null;
+  const subject = (p.subjects_by_date[date] ?? [])[0] ?? null;
   const model = (p.models_by_date[date] ?? [])[0] ?? null;
-  return openWorkspaceProject(p, date, trait, model);
+  return openWorkspaceProject(p, date, subject, model);
 }
