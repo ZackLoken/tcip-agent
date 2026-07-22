@@ -70,19 +70,17 @@ def test_projects_report_per_date_trait_model_availability(client, workspace_dir
         traits=["catkin", "bush"],
         models=["baseline"],
     )
-    (annotation_dir(proj, "catkin", "2026-02-11", "detect") / "img.txt").parent.mkdir(
-        parents=True, exist_ok=True
-    )
-    (annotation_dir(proj, "catkin", "2026-02-11", "detect") / "img.txt").write_text(
-        "0 0.5 0.5 0.1 0.1\n", encoding="utf-8"
+    (annotation_dir(proj, "catkin", "2026-02-11", "detect")).mkdir(parents=True, exist_ok=True)
+    (annotation_dir(proj, "catkin", "2026-02-11", "detect") / "img.json").write_text(
+        '{"objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}', encoding="utf-8"
     )
     (annotation_dir(proj, "bush", "2026-03-02", "detect")).mkdir(parents=True, exist_ok=True)
-    (annotation_dir(proj, "bush", "2026-03-02", "detect") / "img.txt").write_text(
-        "0 0.4 0.4 0.2 0.2\n", encoding="utf-8"
+    (annotation_dir(proj, "bush", "2026-03-02", "detect") / "img.json").write_text(
+        '{"objects": [{"category_id": 0, "bbox": [2, 2, 8, 8]}]}', encoding="utf-8"
     )
     (prediction_dir(proj, "baseline", "2026-02-11", "detect")).mkdir(parents=True, exist_ok=True)
-    (prediction_dir(proj, "baseline", "2026-02-11", "detect") / "img.txt").write_text(
-        "0 0.9 0.5 0.5 0.1 0.1\n", encoding="utf-8"
+    (prediction_dir(proj, "baseline", "2026-02-11", "detect") / "img.json").write_text(
+        '{"objects": [{"category_id": 0, "bbox": [1, 1, 9, 9], "score": 0.9}]}', encoding="utf-8"
     )
 
     hz = next(
