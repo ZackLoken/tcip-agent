@@ -68,9 +68,9 @@ def test_backup_original_labels_captures_json(tmp_path):
     d = tmp_path / "detect"
     d.mkdir()
     json_io.write_detect(d / "a.json", [BBox(1, 1, 9, 9, 0)], 100, 80)
-    (d / "b.txt").write_text("0 0.5 0.5 0.1 0.1\n")
+    json_io.write_detect(d / "b.json", [BBox(2, 2, 8, 8, 0)], 100, 80)
     captured = eng.backup_original_labels(str(d))
-    assert captured == 2                                        # canonical .json AND legacy .txt
+    assert captured == 2                                        # both canonical .json labels
     assert (d / ".original" / "a.json").is_file()
 
 
