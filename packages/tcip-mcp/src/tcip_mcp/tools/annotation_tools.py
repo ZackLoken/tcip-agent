@@ -1041,18 +1041,18 @@ def stage_proposals(
 @mcp.tool()
 @audited
 def write_class_map(labels_dir: str, class_names: str = "", output_path: str = "") -> dict:
-    """Persist the class map (id -> name/color) derived from a label set to ``classes.json``.
+    """Persist the class map (id -> name/color) derived from a label set, in the dataset.
 
     Enumerates the class ids actually present in ``<labels_dir>/*.json`` (per-image COCO/JSON,
-    each object's ``category_id``) and writes the canonical ``<project>/.tcip/state/classes.json``
-    the GUI and pipeline read — so
-    class identity and ``num_classes`` have one durable, audited source (derived from the labels in
-    hand) instead of a pinned integer. ``class_names`` is an optional comma-separated list indexed by
-    class id; unnamed ids fall back to ``class_<id>``.
+    each object's ``category_id``) and writes ``<dataset_root>/classes/<campaign>.json`` — the
+    registry that decodes those labels, campaign-scoped and travelling with the dataset — so class
+    identity and ``num_classes`` have one durable, audited source (derived from the labels in hand)
+    instead of a pinned integer. ``class_names`` is an optional comma-separated list indexed by
+    class id; unnamed ids fall back to ``class_<id>``. Pass ``output_path`` to override the location.
     """
     import json as _json
 
-    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.dataset_layout import classes_path, dataset_root_of, parse_annotation_dir
 
     ld = Path(labels_dir)
     if not ld.is_dir():
@@ -1080,7 +1080,16 @@ def write_class_map(labels_dir: str, class_names: str = "", output_path: str = "
                    "color": palette[cid % len(palette)]}
         for cid in sorted(ids)
     }
-    out = Path(output_path) if output_path else resolve_state(Path(".tcip") / "state" / "classes.json")
+    if output_path:
+        out = Path(output_path)
+    else:
+        root = dataset_root_of(ld)
+        parsed = parse_annotation_dir(ld)
+        if root is None or parsed is None:
+            return {"error": f"cannot locate the dataset/campaign for {labels_dir}; expected a "
+                             "canonical <root>/annotations/<campaign>/[<date>/]<task> label dir, "
+                             "or pass output_path"}
+        out = classes_path(root, parsed[0])
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(_json.dumps(class_map, indent=2), encoding="utf-8")
     return {"classes_path": str(out), "num_classes": max(ids) + 1,
