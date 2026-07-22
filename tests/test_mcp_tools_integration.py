@@ -1,13 +1,12 @@
 """Integration tests for MCP tool functions.
 
 Tests tool functions directly (not through MCP server protocol) to verify
-end-to-end behavior with actual file I/O, annotation parsing, and format
-detection across YOLO, VOC, and LabelMe formats.
+end-to-end behavior with actual file I/O and annotation parsing on the canonical
+per-image JSON labels.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -18,8 +17,11 @@ from PIL import Image
 
 
 @pytest.fixture
-def yolo_dataset(tmp_path: Path) -> Path:
-    """Create a minimal YOLO-format dataset."""
+def json_dataset(tmp_path: Path) -> Path:
+    """A minimal dataset in the canonical per-image JSON layout."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import BBox, PredBBox
+
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     labels_dir = tmp_path / "annotations" / "default" / "detect"
@@ -28,237 +30,24 @@ def yolo_dataset(tmp_path: Path) -> Path:
     preds_dir.mkdir(parents=True)
 
     for name in ("img_001", "img_002", "img_003"):
-        img = Image.new("RGB", (640, 480), color=(128, 128, 128))
-        img.save(images_dir / f"{name}.jpg")
-        (labels_dir / f"{name}.txt").write_text("0 0.5 0.5 0.1 0.1\n0 0.3 0.3 0.05 0.05\n")
-        (preds_dir / f"{name}.txt").write_text("0 0.9 0.5 0.5 0.1 0.1\n0 0.7 0.8 0.8 0.05 0.05\n")
-
+        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
+        json_io.write_detect(str(labels_dir / f"{name}.json"),
+                             [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)], 640, 480)
+        json_io.write_detect(str(preds_dir / f"{name}.json"),
+                             [PredBBox(288, 216, 352, 264, 0, confidence=0.9),
+                              PredBBox(496, 372, 528, 396, 0, confidence=0.7)], 640, 480)
     return tmp_path
-
-
-@pytest.fixture
-def voc_dataset(tmp_path: Path) -> Path:
-    """Create a minimal PASCAL VOC-format dataset."""
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    labels_dir = tmp_path / "annotations" / "default" / "detect"
-    labels_dir.mkdir(parents=True)
-
-    for name in ("img_001", "img_002"):
-        img = Image.new("RGB", (640, 480), color=(128, 128, 128))
-        img.save(images_dir / f"{name}.jpg")
-
-        xml_content = f"""<annotation>
-  <filename>{name}.jpg</filename>
-  <size><width>640</width><height>480</height><depth>3</depth></size>
-  <object>
-    <name>catkin</name>
-    <bndbox><xmin>100</xmin><ymin>100</ymin><xmax>200</xmax><ymax>200</ymax></bndbox>
-  </object>
-  <object>
-    <name>bud</name>
-    <bndbox><xmin>300</xmin><ymin>300</ymin><xmax>400</xmax><ymax>400</ymax></bndbox>
-  </object>
-</annotation>"""
-        (labels_dir / f"{name}.xml").write_text(xml_content)
-
-    return tmp_path
-
-
-@pytest.fixture
-def labelme_dataset(tmp_path: Path) -> Path:
-    """Create a minimal LabelMe-format dataset."""
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    labels_dir = tmp_path / "annotations" / "default" / "detect"
-    labels_dir.mkdir(parents=True)
-
-    for name in ("img_001", "img_002"):
-        img = Image.new("RGB", (640, 480), color=(128, 128, 128))
-        img.save(images_dir / f"{name}.jpg")
-
-        labelme_data = {
-            "version": "5.0.0",
-            "flags": {},
-            "shapes": [
-                {
-                    "label": "catkin",
-                    "points": [[100, 100], [200, 200]],
-                    "shape_type": "rectangle",
-                    "flags": {},
-                },
-                {
-                    "label": "bud",
-                    "points": [[300, 300], [400, 400]],
-                    "shape_type": "rectangle",
-                    "flags": {},
-                },
-            ],
-            "imagePath": f"{name}.jpg",
-            "imageHeight": 480,
-            "imageWidth": 640,
-            "imageData": None,
-        }
-        (labels_dir / f"{name}.json").write_text(json.dumps(labelme_data))
-
-    return tmp_path
-
-
-# ── Data tool integration tests ─────────────────────────────────────────────
-
-
-class TestLoadDatasetMultiFormat:
-    """Test scan_dataset across annotation formats."""
-
-    def test_load_yolo_dataset(self, yolo_dataset: Path):
-        from tcip_mcp.tools.data_tools import scan_dataset
-
-        result = scan_dataset(str(yolo_dataset))
-        assert result["image_count"] == 3
-        assert result["labels_detect_count"] == 3
-        assert result["format"] == "yolo"
-        assert result["paired_images"] == 3
-
-    def test_load_voc_dataset(self, voc_dataset: Path):
-        from tcip_mcp.tools.data_tools import scan_dataset
-
-        result = scan_dataset(str(voc_dataset))
-        assert result["image_count"] == 2
-        assert result["labels_detect_count"] == 2
-        assert result["format"] == "voc"
-
-    def test_load_labelme_dataset(self, labelme_dataset: Path):
-        from tcip_mcp.tools.data_tools import scan_dataset
-
-        result = scan_dataset(str(labelme_dataset))
-        assert result["image_count"] == 2
-        assert result["labels_detect_count"] == 2
-        assert result["format"] == "labelme"
-
-
-class TestValidateDataQualityMultiFormat:
-    """Test validate_data_quality across formats."""
-
-    def test_validate_yolo(self, yolo_dataset: Path):
-        from tcip_mcp.tools.data_tools import validate_data_quality
-
-        result = validate_data_quality(str(yolo_dataset))
-        assert result["is_valid"] is True
-        assert result["format"] == "yolo"
-        assert 0 in result["class_ids"]
-
-    def test_validate_voc(self, voc_dataset: Path):
-        from tcip_mcp.tools.data_tools import validate_data_quality
-
-        result = validate_data_quality(str(voc_dataset))
-        assert result["is_valid"] is True
-        assert result["format"] == "voc"
-        assert len(result["class_ids"]) == 2  # catkin=0, bud=1 (alphabetical)
-
-    def test_validate_labelme(self, labelme_dataset: Path):
-        from tcip_mcp.tools.data_tools import validate_data_quality
-
-        result = validate_data_quality(str(labelme_dataset))
-        assert result["is_valid"] is True
-        assert result["format"] == "labelme"
-        assert len(result["class_ids"]) == 2
 
 
 # ── Annotation tool integration tests ───────────────────────────────────────
 
 
-class TestLoadAnnotationsMultiFormat:
-    """Test read_annotations across formats."""
-
-    def test_load_yolo_annotations(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import read_annotations
-
-        img = str(yolo_dataset / "images" / "img_001.jpg")
-        result = read_annotations(img)
-        assert "detect_labels" in result
-        assert result["detect_labels"]["count"] == 2
-        assert result["detect_labels"]["format"] == "yolo"
-
-    def test_load_voc_annotations(self, voc_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import read_annotations
-
-        img = str(voc_dataset / "images" / "img_001.jpg")
-        result = read_annotations(img)
-        assert "detect_labels" in result
-        assert result["detect_labels"]["count"] == 2
-        assert result["detect_labels"]["format"] == "voc"
-
-    def test_load_labelme_annotations(self, labelme_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import read_annotations
-
-        img = str(labelme_dataset / "images" / "img_001.jpg")
-        result = read_annotations(img)
-        assert "detect_labels" in result
-        assert result["detect_labels"]["count"] == 2
-        assert result["detect_labels"]["format"] == "labelme"
-
+class TestReadAnnotations:
     def test_load_missing_image(self):
         from tcip_mcp.tools.annotation_tools import read_annotations
 
         result = read_annotations("/nonexistent/image.jpg")
         assert "error" in result
-
-
-class TestSaveAnnotationsMultiFormat:
-    """Test save_annotations across formats."""
-
-    def test_save_yolo(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import save_annotations
-
-        img = str(yolo_dataset / "images" / "img_001.jpg")
-        boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
-        result = save_annotations(img, boxes=boxes, fmt="yolo")
-        assert result["count"] == 1
-        assert result["format"] == "yolo"
-        assert result["written"][0].endswith(".txt")
-
-    def test_save_voc(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import save_annotations
-
-        img = str(yolo_dataset / "images" / "img_001.jpg")
-        boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
-        result = save_annotations(img, boxes=boxes, fmt="voc")
-        assert result["count"] == 1
-        assert result["format"] == "voc"
-        assert result["written"][0].endswith(".xml")
-        # Verify the XML is valid
-        import xml.etree.ElementTree as ET
-        tree = ET.parse(result["written"][0])
-        assert tree.getroot().tag == "annotation"
-
-    def test_save_labelme(self, yolo_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import save_annotations
-
-        img = str(yolo_dataset / "images" / "img_001.jpg")
-        boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
-        result = save_annotations(img, boxes=boxes, fmt="labelme")
-        assert result["count"] == 1
-        assert result["format"] == "labelme"
-        assert result["written"][0].endswith(".json")
-        # Verify the JSON is valid LabelMe
-        data = json.loads(Path(result["written"][0]).read_text())
-        assert "shapes" in data
-        assert len(data["shapes"]) == 1
-
-    def test_save_roundtrip_voc(self, yolo_dataset: Path):
-        """Save as VOC, then load back and verify."""
-        from tcip_mcp.tools.annotation_tools import save_annotations, read_annotations
-
-        img_path = str(yolo_dataset / "images" / "img_001.jpg")
-        boxes = [
-            {"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0},
-            {"x1": 300, "y1": 300, "x2": 400, "y2": 400, "class_id": 1},
-        ]
-        save_result = save_annotations(img_path, boxes=boxes, fmt="voc")
-        assert save_result["count"] == 1
-
-        load_result = read_annotations(img_path, fmt="voc")
-        assert load_result["detect_labels"]["count"] == 2
 
 
 # ── Evaluate predictions integration test ───────────────────────────────────
@@ -267,10 +56,10 @@ class TestSaveAnnotationsMultiFormat:
 class TestEvaluatePredictions:
     """Test score_predictions with actual file I/O."""
 
-    def test_evaluate_single_image(self, yolo_dataset: Path):
+    def test_evaluate_single_image(self, json_dataset: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        img = str(yolo_dataset / "images" / "img_001.jpg")
+        img = str(json_dataset / "images" / "img_001.jpg")
         result = score_predictions(img, iou_threshold=0.5, conf_threshold=0.25)
         assert "error" not in result
         assert result["tp"] >= 0
@@ -279,10 +68,10 @@ class TestEvaluatePredictions:
         assert 0.0 <= result["precision"] <= 1.0
         assert 0.0 <= result["recall"] <= 1.0
 
-    def test_evaluate_folder(self, yolo_dataset: Path):
+    def test_evaluate_folder(self, json_dataset: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        result = score_predictions(str(yolo_dataset), iou_threshold=0.5)
+        result = score_predictions(str(json_dataset), iou_threshold=0.5)
         assert result["image_count"] == 3
         assert "precision" in result
         assert "recall" in result
@@ -294,10 +83,10 @@ class TestEvaluatePredictions:
 class TestEvaluatePredictionsDetail:
     """Test score_predictions(detail=True) per-detection breakdown with actual file I/O."""
 
-    def test_detail_breakdown(self, yolo_dataset: Path):
+    def test_detail_breakdown(self, json_dataset: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        img = str(yolo_dataset / "images" / "img_001.jpg")
+        img = str(json_dataset / "images" / "img_001.jpg")
         result = score_predictions(img, iou_threshold=0.5, detail=True)
         assert "error" not in result
         assert "detections" in result
@@ -360,3 +149,22 @@ class TestAugmentations:
         out_img, out_target = transforms(img, target)
         assert isinstance(out_img, torch.Tensor)
         assert out_target["labels"] == 3
+
+
+class TestReadAnnotationsUnknownFormat:
+    def test_unrecognized_store_returns_error_not_raise(self, tmp_path):
+        """detect_format refuses an unknown store; read_annotations must surface that as an error
+        dict, matching its own convention and the docs — not propagate an uncaught ValueError."""
+        from PIL import Image
+
+        from tcip_mcp.tools.annotation_tools import read_annotations
+
+        det = tmp_path / "annotations" / "default" / "detect"
+        det.mkdir(parents=True)
+        (tmp_path / "images").mkdir()
+        Image.new("RGB", (32, 32)).save(tmp_path / "images" / "a.jpg")
+        (det / "a.json").write_text('{"regions": []}')  # a schema we do not recognize
+
+        result = read_annotations(str(tmp_path / "images" / "a.jpg"))
+        assert "error" in result
+        assert "Cannot determine the annotation format" in result["error"]
