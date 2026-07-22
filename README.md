@@ -31,7 +31,7 @@ Status: the browser GUI is built out across all tabs (Annotate / Review / Traini
 
 All three processes share `.tcip/` on disk (experiment state, model registry, audit log, GUI state).
 
-Supporting library: `packages/tcip-annotation` — headless annotation engine (label I/O, format conversion, IoU matching, SAM wrapper). No dependency on the other packages.
+Supporting library: `packages/tcip-annotation` — headless annotation engine (label I/O, IoU matching, SAM wrapper). No dependency on the other packages.
 
 ## Repository layout
 
@@ -96,7 +96,7 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 
 ## Conventions
 
-- **Annotations**: canonical on-disk format is per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance). Also imports/exports YOLO / COCO (dataset-level) / PASCAL VOC / LabelMe via an explicit format. A negative is an empty label set **plus** an explicit human "Complete" — an empty label file alone is not a negative.
+- **Annotations**: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), plus the dataset-level COCO assembled from it for training. A negative is an empty label set **plus** an explicit human "Complete" — an empty label file alone is not a negative.
 - **Experiments**: tracked in `.tcip/experiments/<id>/` with config, metrics JSONL, artifacts, lineage.
 - **Audit log**: all MCP tool calls logged to `.tcip/audit.jsonl` via `@audited` decorator.
 - **Lazy imports**: heavy deps (torch, torchvision) imported inside function bodies for fast MCP startup.
@@ -113,9 +113,8 @@ that imports the plain building blocks (necks, heads, losses, backbone wrappers,
 `build_detector`; `instance_seg` via Mask R-CNN), on **RGB and N-channel imagery** (multi-band
 GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`, and an `in_chans != 3`
 detector takes per-band `image_mean`/`image_std` from `derivations.band_normalization_stats`), with
-training that loads the native per-image JSON labels directly (YOLO / COCO / PASCAL VOC /
-LabelMe import/export via an explicit format), experiment tracking, annotation/review,
-SAM-assisted labeling, and per-plant CSV export — including the
+training that loads the native per-image JSON labels directly, experiment tracking,
+annotation/review, SAM-assisted labeling, and per-plant CSV export — including the
 Phase 1 **catkin bloom phenology** deliverable (per-plant `catkin_05/50/95per_date` = the
 dates a plant's *elongated fraction* of detected catkins crosses 5/50/95%; elongation is a
 validated per-catkin call, never a geometric proxy). The agent composes it end to end via
