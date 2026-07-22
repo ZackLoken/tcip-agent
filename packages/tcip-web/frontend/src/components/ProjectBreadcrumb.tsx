@@ -3,7 +3,7 @@
  *   project name → a dropdown of recent projects (jump straight in),
  *   date        → a dropdown of this project's dates (switch without the workspace),
  *   Switch Project → the full workspace (all projects).
- * The date switch re-opens the same project on another date, keeping the current trait/model
+ * The date switch re-opens the same project on another date, keeping the current subject/model
  * when that date has them. (Per-date view/position restore is layered on separately.)
  */
 
@@ -14,7 +14,7 @@ import { openProjectByName, openWorkspaceProject } from "@/lib/openProject";
 import { loadRecentProjects } from "@/lib/recentProjects";
 import { useStore } from "@/store";
 
-const traitsForDate = (p: ProjectSummary, d: string): string[] => p.traits_by_date[d] ?? [];
+const subjectsForDate = (p: ProjectSummary, d: string): string[] => p.subjects_by_date[d] ?? [];
 const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
 
 /** The model bucket the current predictions dir points at (predictions/<model>/<date>/…), or null. */
@@ -93,20 +93,20 @@ export function ProjectBreadcrumb() {
     if (newDate === dataset.date) return;
     setBusy(true);
     try {
-      // Keep the current trait/model when the new date has them, else fall to that date's first.
-      const traits = traitsForDate(current, newDate);
+      // Keep the current subject/model when the new date has them, else fall to that date's first.
+      const subjects = subjectsForDate(current, newDate);
       const models = modelsForDate(current, newDate);
-      const trait =
-        dataset.annotation_type && traits.includes(dataset.annotation_type)
-          ? dataset.annotation_type
-          : (traits[0] ?? null);
+      const subject =
+        dataset.subject && subjects.includes(dataset.subject)
+          ? dataset.subject
+          : (subjects[0] ?? null);
       const curModel = currentModel(
         dataset.predictions_detect_dir,
         dataset.predictions_segment_dir,
       );
       const model = curModel && models.includes(curModel) ? curModel : (models[0] ?? null);
       // openWorkspaceProject saves the outgoing date's UI state and restores the new date's.
-      await openWorkspaceProject(current, newDate, trait, model);
+      await openWorkspaceProject(current, newDate, subject, model);
     } catch (e) {
       pushToast(`Could not switch date: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
