@@ -100,7 +100,7 @@ def test_only_completed_and_select_unreviewed():
 def test_hard_negatives_survive_into_training(tmp_path):
     """A rejected-only image is a human-confirmed negative and must train as one.
 
-    The status store is campaign-scoped, so materialize has to write the bucket its emitted label
+    The status store is subject-scoped, so materialize has to write the bucket its emitted label
     dir resolves to. An unbucketed write is quarantined as unattributable, which would silently
     discard every rejection verdict the review loop exists to harvest.
     """
