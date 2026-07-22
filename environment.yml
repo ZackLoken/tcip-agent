@@ -30,6 +30,7 @@ dependencies:
       - mcp>=1.0
       - numpy
       - pillow>=9.0
+      - tifffile>=2023.1
       - shapely>=2.0
       - pyyaml>=6.0
       - torch>=2.2
