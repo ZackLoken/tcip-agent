@@ -51,6 +51,7 @@ function App() {
   const annDetectDir = useStore((s) => s.gui.dataset.annotations_detect_dir);
   const annSegDir = useStore((s) => s.gui.dataset.annotations_segment_dir);
   const annotationType = useStore((s) => s.gui.dataset.annotation_type);
+  const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const datasetDate = useStore((s) => s.gui.dataset.date);
   const setClasses = useStore((s) => s.setClasses);
   const setImageStatuses = useStore((s) => s.setImageStatuses);
@@ -189,7 +190,8 @@ function App() {
     if (!projectRoot || imageList.length === 0) return;
     void (async () => {
       try {
-        const reg = await classesApi.load(projectRoot, annotationType, annDetectDir, annSegDir);
+        const reg = await classesApi.load(
+          projectRoot, annotationType, datasetRoot, annDetectDir, annSegDir);
         setClasses(reg.classes);
 
         // Scoped to the selected campaign: a Complete recorded while annotating catkin says
@@ -231,6 +233,7 @@ function App() {
     datasetKey,
     imageList,
     annotationType,
+    datasetRoot,
     datasetDate,
     annDetectDir,
     annSegDir,
