@@ -107,7 +107,10 @@ def _viz_annotations(
     if label_path is None:
         return {"error": f"No {task} labels found for {stem}"}
 
-    fmt = detect_format(str(label_path))
+    try:
+        fmt = detect_format(str(label_path))
+    except ValueError as exc:
+        return {"error": str(exc)}
 
     if task == "detect":
         boxes, class_ids = format_load(str(label_path), w, h, task="detect", fmt=fmt)
@@ -232,7 +235,10 @@ def _viz_comparison(
     if label_path is None:
         return {"error": f"No {task} labels found for {stem}"}
 
-    fmt = detect_format(str(label_path))
+    try:
+        fmt = detect_format(str(label_path))
+    except ValueError as exc:
+        return {"error": str(exc)}
     gt_boxes_raw, _ = format_load(str(label_path), w, h, task="detect", fmt=fmt)
     gt_dicts = [
         {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
@@ -426,7 +432,11 @@ def _viz_dataset_sample(
         label_path = find_gt_label(str(img_path), task)
 
         if label_path is not None:
-            fmt = detect_format(str(label_path))
+            try:
+                fmt = detect_format(str(label_path))
+            except ValueError:
+                label_path = None  # unrecognized store: render the image without labels
+        if label_path is not None:
             if task == "detect":
                 boxes, _ = format_load(str(label_path), w, h, task="detect", fmt=fmt)
                 box_dicts = [
