@@ -76,7 +76,7 @@ class TestPostPanelEventRoute:
             json={
                 "event_type": "review_focus",
                 "data": {
-                    "trait": "catkin",
+                    "subject": "catkin",
                     "date": "2-11-26",
                     "model_name": "m1",
                     "image_index": 3,
@@ -100,7 +100,7 @@ class TestPostPanelEventRoute:
             "/api/events/app",
             json={
                 "event_type": "annotate_focus",
-                "data": {"trait": "bush", "date": "2-11-26", "mode": "polygon", "active_class": 2},
+                "data": {"subject": "bush", "date": "2-11-26", "mode": "polygon", "active_class": 2},
             },
         )
         assert resp.status_code == 200
