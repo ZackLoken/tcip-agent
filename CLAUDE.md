@@ -64,7 +64,7 @@ Claude ──MCP(stdio)──▶ tcip-mcp ──HTTP/WS──▶ tcip-web (FastA
 ```
 
 - `packages/tcip-mcp/` — MCP server: domain tools (`tools/`) + composable ML (`pipelines/`). Your primary surface.
-- `packages/tcip-annotation/` — headless annotation/review engine (label & format I/O, IoU matching, SAM).
+- `packages/tcip-annotation/` — headless annotation/review engine (label I/O, IoU matching, SAM).
 - `packages/tcip-web/` — FastAPI backend + Vite/React/TS/Tailwind/Konva frontend. The human's UI.
 - `scripts/` — one-off scripts you write (see "Scripts vs tools").
 - `.github/skills/` — domain knowledge. **Read the relevant `SKILL.md` before acting** in its
@@ -150,7 +150,7 @@ which touches neither the tree, the index, nor the stash list.
   an empty label file alone is never a negative (it may be emptied mid-work) and never trains
   as one. Don't delete empty label files without asking.
 - **Never train or evaluate on an unconfirmed format.** If `read_annotations`
-  returns `"format_confident": false`, stop and confirm the format — an undetected
+  cannot determine the format it refuses rather than guessing — an undetected
   mismatch makes real annotations read as empty negatives.
 - **State changes go through `@audited` MCP tools.** `.tcip/audit.jsonl` is the
   append-only record; don't route mutations around it.
