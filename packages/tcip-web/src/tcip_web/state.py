@@ -29,7 +29,7 @@ class DatasetSelection(BaseModel):
 
     project_root: Optional[str] = None
     dataset_root: Optional[str] = None
-    annotation_type: Optional[str] = None  # e.g. "catkin"
+    subject: Optional[str] = None          # e.g. "catkin"
     date: Optional[str] = None             # e.g. "2-11-26"
     image_list: list[str] = Field(default_factory=list)
     current_image_index: int = 0
