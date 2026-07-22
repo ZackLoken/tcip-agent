@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from tcip_annotation import json_io
+from tcip_annotation.state import BBox
+
 from pathlib import Path
 
 from tcip_mcp.tools.data_tools import (
@@ -76,7 +79,8 @@ def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"),
         for t in range(tiles):
             stem = f"{pref}_{t}_0"
             Image.new("RGB", (64, 64), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-            (labels_dir / f"{stem}.txt").write_text("0 0.5 0.5 0.2 0.2\n")
+            json_io.write_detect(str(labels_dir / f"{stem}.json"),
+                                 [BBox(19, 13, 45, 51, 0)], 64, 64)
     return root
 
 
