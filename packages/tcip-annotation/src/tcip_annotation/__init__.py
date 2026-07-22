@@ -1,4 +1,4 @@
-"""Headless annotation library — canonical per-image COCO/JSON, plus YOLO, COCO, PASCAL VOC, and LabelMe I/O."""
+"""Headless annotation library — canonical per-image JSON labels + the assembled dataset COCO."""
 
 from tcip_annotation.state import (
     AnnotationState,
@@ -8,8 +8,7 @@ from tcip_annotation.state import (
     PredPolygon,
     boxes_from_polygons,
 )
-# Canonical label I/O is now per-image COCO/JSON (json_io). The YOLO functions in label_io survive
-# only behind format_io for explicit import/export; these public names intentionally bind to JSON.
+# Label I/O is the canonical per-image JSON (json_io); the dataset-level COCO is assembled from it.
 from tcip_annotation.json_io import (
     read_detect as parse_detect_labels,
     read_segment as parse_segment_labels,
@@ -26,11 +25,6 @@ from tcip_annotation.format_io import (
     parse_coco_segment,
     write_coco_detect,
     write_coco_segment,
-    parse_voc_detect,
-    write_voc_detect,
-    parse_labelme_detect,
-    parse_labelme_segment,
-    write_labelme,
 )
 from tcip_annotation.matching import compute_matches, box_iou, polygon_iou, point_in_polygon
 from tcip_annotation.annotation_engine import AnnotationEngine
@@ -65,13 +59,6 @@ __all__ = [
     "parse_coco_segment",
     "write_coco_detect",
     "write_coco_segment",
-    # PASCAL VOC
-    "parse_voc_detect",
-    "write_voc_detect",
-    # LabelMe
-    "parse_labelme_detect",
-    "parse_labelme_segment",
-    "write_labelme",
     # Matching
     "compute_matches",
     "box_iou",
