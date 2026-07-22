@@ -66,18 +66,19 @@ def count_lines(label_path: str | Path) -> int:
 
 
 def count_label_lines(labels_dir: str | Path, stem: str) -> int:
-    """Annotation count for ``stem`` — objects in the canonical per-image ``<stem>.json``, else
-    non-empty lines of the legacy ``<stem>.txt``. Reading only the YOLO name would score every
-    JSON-labelled stem as 0 foreground and silently defeat stratified splitting."""
+    """Object count for ``stem`` from its canonical per-image ``<stem>.json``.
+
+    Drives stratified splitting, so a stem whose labels cannot be read scores 0 foreground.
+    """
     jp = Path(labels_dir) / f"{stem}.json"
-    if jp.is_file():
-        try:
-            data = json.loads(jp.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return 0
-        objs = data.get("objects") if isinstance(data, dict) else None
-        return len(objs) if isinstance(objs, list) else 0
-    return count_lines(Path(labels_dir) / f"{stem}.txt")
+    if not jp.is_file():
+        return 0
+    try:
+        data = json.loads(jp.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    objs = data.get("objects") if isinstance(data, dict) else None
+    return len(objs) if isinstance(objs, list) else 0
 
 
 def group_balanced_split(
