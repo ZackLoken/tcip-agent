@@ -1,6 +1,6 @@
 ---
 name: annotation
-description: "Annotation and review workflows for TCIP's native per-image JSON labels, with import/export to YOLO, COCO, PASCAL VOC, and LabelMe. Covers engine-assisted auto-labeling (a method-neutral proposal seam; SAM is the built-in reference engine), review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data."
+description: "Annotation and review workflows for TCIP's native per-image JSON labels, and the dataset-level COCO assembled from them. Covers engine-assisted auto-labeling (a method-neutral proposal seam; SAM is the built-in reference engine), review cycles with IoU matching, active learning scoring, and quality metrics. Load when labeling or reviewing image annotations, scoring unlabeled images for active learning, running engine-assisted auto-labeling, or preparing/QCing training data."
 ---
 
 # Annotation Workflow
@@ -16,17 +16,19 @@ directly. An unspecified format resolves to `.json` (`dataset_layout.py`'s `labe
 
 ## Import/export formats
 
-| Format | Files | Coordinates | Auto-detected by |
-|--------|-------|------------|------------------|
-| **YOLO** | One `.txt` per image | Normalized [0,1] | `.txt` extension |
-| **COCO** | Single `.json` for dataset | Pixel coordinates | `.json` + content keys |
-| **PASCAL VOC** | One `.xml` per image | Pixel coordinates | `.xml` extension |
-| **LabelMe** | One `.json` per image | Pixel coordinates | `.json` + `"shapes"` key |
+| Format | Files | Coordinates | Recognized by |
+|--------|-------|------------|---------------|
+| **json** | One `.json` per image (canonical) | Pixel coordinates | an `objects` key |
+| **coco** | Single `.json` for the dataset | Pixel coordinates | an `images`/`annotations` key |
 
-These are explicit import/export paths via `tcip_annotation.format_io`, not the default
-write path. Use `detect_format()` from `format_io` to auto-detect. For format-agnostic I/O
-call the library functions `format_io.load_annotations` / `format_io.save_annotations`; the
-agent-facing MCP tool that wraps the read side is `read_annotations` (see Tools below).
+Both are read by `format_io.load_annotations` / written by `save_annotations`; the agent-facing
+MCP tool wrapping the read side is `read_annotations` (see Tools below). `format_io.detect_format`
+reads the format off the file's own keys and **raises** on anything else rather than guessing — a
+misdetected format reads real annotations as empty, so no answer beats a wrong one.
+
+A collaborator's delivery in some other schema is yours to convert: read a sample, write a
+converter in `scripts/`, and emit the canonical per-image JSON. The platform carries no built-in
+importers, so nothing constrains you to a format someone else's tool happened to use.
 
 ## Coordinate frame — upright, EXIF applied once
 
