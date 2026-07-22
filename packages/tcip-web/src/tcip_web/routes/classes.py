@@ -145,22 +145,22 @@ def _derive_from_labels(detect_dir: str | None, segment_dir: str | None) -> list
 @router.get("/load")
 def load_classes(
     project_root: str,
-    trait: Optional[str] = None,
+    subject: Optional[str] = None,
     dataset_root: Optional[str] = None,
     annotations_detect_dir: Optional[str] = None,
     annotations_segment_dir: Optional[str] = None,
 ) -> ClassRegistry:
-    """Load a campaign's class map. Ids are campaign-scoped, so each campaign keeps its own ``0``.
-    Resolution: the campaign's saved registry in the dataset (``<dataset_root>/classes/<campaign>``)
+    """Load a subject's class map. Ids are subject-scoped, so each subject keeps its own ``0``.
+    Resolution: the subject's saved registry in the dataset (``<dataset_root>/classes/<subject>``)
     -> else derived from its labels (provisional ``class_<id>`` names) -> else empty."""
-    if trait and not is_valid_name(trait):
-        raise HTTPException(400, f"invalid trait: {trait!r}")
+    if subject and not is_valid_name(subject):
+        raise HTTPException(400, f"invalid subject: {subject!r}")
 
     from tcip_mcp.dataset_layout import classes_path
 
     root = _resolve_dataset_root(dataset_root, annotations_detect_dir, annotations_segment_dir)
-    if trait and root:
-        p = classes_path(root, trait)
+    if subject and root:
+        p = classes_path(root, subject)
         if p.exists():
             try:
                 return _read_registry(p)
@@ -176,7 +176,7 @@ def load_classes(
 
 class SaveClassesPayload(BaseModel):
     project_root: str
-    trait: Optional[str] = None
+    subject: Optional[str] = None
     classes: list[ClassEntry]
     dataset_root: Optional[str] = None
     annotations_detect_dir: Optional[str] = None
@@ -185,8 +185,8 @@ class SaveClassesPayload(BaseModel):
 
 @router.post("/save")
 def save_classes(payload: SaveClassesPayload) -> dict:
-    if not payload.trait or not is_valid_name(payload.trait):
-        raise HTTPException(400, f"a campaign name is required to save classes: {payload.trait!r}")
+    if not payload.subject or not is_valid_name(payload.subject):
+        raise HTTPException(400, f"a subject name is required to save classes: {payload.subject!r}")
 
     from tcip_mcp.dataset_layout import classes_path
 
@@ -195,7 +195,7 @@ def save_classes(payload: SaveClassesPayload) -> dict:
     if not root:
         raise HTTPException(400, "cannot locate the dataset to save the class registry into; "
                                  "pass dataset_root or an annotations dir")
-    path = classes_path(root, payload.trait)
+    path = classes_path(root, payload.subject)
     path.parent.mkdir(parents=True, exist_ok=True)
     data: dict[str, dict] = {}
     for entry in payload.classes:
@@ -222,7 +222,7 @@ class ImageStatusPayload(BaseModel):
     project_root: str
     image_name: str
     status: str  # "complete" | "partial" | "negative" | "unannotated"
-    campaign: str | None = None  # the annotations/<campaign>/ dir — not necessarily a trait
+    subject: str | None = None  # the annotations/<subject>/ dir — not necessarily a trait
     date: str | None = None
 
 
@@ -237,20 +237,20 @@ def _load_status_store(path: Path) -> dict[str, dict[str, str]]:
     return normalize_status_store(read_json(path, default={}))
 
 
-def _bucket(campaign: str | None, date: str | None) -> str:
+def _bucket(subject: str | None, date: str | None) -> str:
     from tcip_mcp.dataset_layout import status_bucket
 
-    return status_bucket(campaign, date)
+    return status_bucket(subject, date)
 
 
 @router.get("/image_status")
-def get_image_status(project_root: str, campaign: str | None = None,
+def get_image_status(project_root: str, subject: str | None = None,
                      date: str | None = None) -> dict:
-    """Statuses for one campaign/date."""
+    """Statuses for one subject/date."""
     path = _image_status_path(project_root)
     if not path.exists():
         return {"statuses": {}}
-    return {"statuses": _load_status_store(path).get(_bucket(campaign, date), {})}
+    return {"statuses": _load_status_store(path).get(_bucket(subject, date), {})}
 
 
 @router.post("/image_status")
@@ -258,7 +258,7 @@ def set_image_status(payload: ImageStatusPayload) -> dict:
     if payload.status not in VALID_STATUSES:
         raise HTTPException(400, f"invalid status: {payload.status}")
     path = _image_status_path(payload.project_root)
-    bucket = _bucket(payload.campaign, payload.date)
+    bucket = _bucket(payload.subject, payload.date)
     with file_transaction(path):
         store = _load_status_store(path)
         store.setdefault(bucket, {})[payload.image_name] = payload.status
@@ -269,14 +269,14 @@ def set_image_status(payload: ImageStatusPayload) -> dict:
 class ImageStatusBulkPayload(BaseModel):
     project_root: str
     statuses: dict[str, str]  # image_name → status
-    campaign: str | None = None
+    subject: str | None = None
     date: str | None = None
 
 
 @router.post("/image_status/bulk")
 def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
     path = _image_status_path(payload.project_root)
-    bucket = _bucket(payload.campaign, payload.date)
+    bucket = _bucket(payload.subject, payload.date)
     with file_transaction(path):
         store = _load_status_store(path)
         target = store.setdefault(bucket, {})
