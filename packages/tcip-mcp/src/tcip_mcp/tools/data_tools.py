@@ -348,14 +348,14 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
                                image_map: dict) -> None:
     """Copy the source campaign's confirmed negatives into each split's own status store.
 
-    A split tree cannot name the campaign it came from — it is ``{train,val,test}/labels`` by
+    A split tree cannot name the subject it came from — it is ``{train,val,test}/labels`` by
     construction — so it has to carry the confirmations rather than inherit them by accident.
     Without this, every image a human confirmed as a negative reads as an unconfirmed empty in the
     split and is dropped from training.
     """
     import json as _json
 
-    from tcip_mcp.dataset_layout import DEFAULT_TRAIT, status_bucket
+    from tcip_mcp.dataset_layout import DEFAULT_SUBJECT, status_bucket
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
     src_dirs = {Path(p).parent for p in label_map.values()}
@@ -366,7 +366,7 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
         try:
             negatives |= confirmed_negative_names(d)
         except ValueError:
-            continue  # that campaign is unresolvable; its own raise stands where it is read
+            continue  # that subject is unresolvable; its own raise stands where it is read
     if not negatives:
         return
     for split_name, split_stems in parts.items():
@@ -376,5 +376,5 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
             continue
         store = out_dir / split_name / ".tcip" / "state" / "image_status.json"
         store.parent.mkdir(parents=True, exist_ok=True)
-        store.write_text(_json.dumps({status_bucket(DEFAULT_TRAIT, None): carried}, indent=2),
+        store.write_text(_json.dumps({status_bucket(DEFAULT_SUBJECT, None): carried}, indent=2),
                          encoding="utf-8")
