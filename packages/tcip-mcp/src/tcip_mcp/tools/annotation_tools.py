@@ -21,7 +21,7 @@ from tcip_annotation.format_io import (
 from tcip_annotation.utils import get_image_dimensions
 
 from tcip_mcp.dataset_layout import (
-    DEFAULT_TRAIT,
+    DEFAULT_SUBJECT,
     annotation_path_for_image,
     find_gt_label,
     find_prediction,
@@ -123,7 +123,7 @@ def save_annotations(
     boxes: list[dict] | None = None,
     polygons: list[dict] | None = None,
     fmt: str = "json",
-    trait: str = DEFAULT_TRAIT,
+    subject: str = DEFAULT_SUBJECT,
     date: str | None = None,
     detect_path: str | None = None,
     segment_path: str | None = None,
@@ -131,7 +131,7 @@ def save_annotations(
 ) -> dict:
     """Write annotation label files for an image into the canonical dataset layout.
 
-    Labels go to ``<dataset_root>/annotations/<trait>/<date>/<task>/<stem>.<ext>``
+    Labels go to ``<dataset_root>/annotations/<subject>/<date>/<task>/<stem>.<ext>``
     (see :mod:`tcip_mcp.dataset_layout`); ``date`` is derived from the image path
     (``images/<date>/<stem>``) when not given. Pass ``detect_path`` / ``segment_path``
     to write to an explicit location instead. Writes the canonical per-image JSON (default) or an
@@ -142,7 +142,7 @@ def save_annotations(
         boxes: List of dicts with x1, y1, x2, y2, class_id (pixel coords).
         polygons: List of dicts with points and class_id (pixel coords).
         fmt: Output format — 'json' (canonical per-image, default) or 'coco'.
-        trait: Annotation campaign (e.g. 'catkin') — the layout's ``<trait>`` segment.
+        subject: Annotation subject (e.g. 'catkin') — the layout's ``<subject>`` segment.
         date: Capture date; derived from the image path when omitted.
         detect_path: Explicit detect label path (overrides the canonical location).
         segment_path: Explicit segment label path (overrides the canonical location).
@@ -154,14 +154,14 @@ def save_annotations(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    # trait/date become path segments under annotations/, so confine them (like stage_proposals)
+    # subject/date become path segments under annotations/, so confine them (like stage_proposals)
     # when the canonical layout is used — the explicit *_path args bypass it.
     from tcip_mcp.workspace import is_valid_name
 
     canonical_used = (boxes is not None and not detect_path) or (polygons is not None and not segment_path)
     if canonical_used:
-        if not is_valid_name(trait):
-            return {"error": f"trait must be a single safe path segment (no separators/'..'), got {trait!r}"}
+        if not is_valid_name(subject):
+            return {"error": f"subject must be a single safe path segment (no separators/'..'), got {subject!r}"}
         if date is not None and not is_valid_name(date):
             return {"error": f"date must be a single safe path segment (no separators/'..'), got {date!r}"}
 
@@ -185,7 +185,7 @@ def save_annotations(
         out_path = (
             Path(detect_path)
             if detect_path
-            else annotation_path_for_image(image_path, "detect", fmt, trait=trait, date=date)
+            else annotation_path_for_image(image_path, "detect", fmt, subject=subject, date=date)
         )
         out_path.parent.mkdir(parents=True, exist_ok=True)
         format_save(str(out_path), typed_boxes, w, h, task="detect", fmt=fmt, file_name=img.name,
@@ -201,7 +201,7 @@ def save_annotations(
         out_path = (
             Path(segment_path)
             if segment_path
-            else annotation_path_for_image(image_path, "segment", fmt, trait=trait, date=date)
+            else annotation_path_for_image(image_path, "segment", fmt, subject=subject, date=date)
         )
         out_path.parent.mkdir(parents=True, exist_ok=True)
         format_save(str(out_path), typed_polys, w, h, task="segment", fmt=fmt, file_name=img.name,
@@ -220,7 +220,7 @@ def save_annotations(
                 {
                     "image_path": image_path,
                     "stem": stem,
-                    "trait": trait,
+                    "subject": subject,
                     "written": written,
                     "count": len(written),
                 },
@@ -618,7 +618,7 @@ def focus(
     tab: str,
     project_root: str,
     dataset_root: str,
-    trait: str,
+    subject: str,
     date: str,
     image_index: int | None = None,
     mode: str | None = None,
@@ -628,7 +628,7 @@ def focus(
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
 ) -> dict:
-    """Drive the live GUI to a (trait, date) frame — the Annotate tab or the Review tab.
+    """Drive the live GUI to a (subject, date) frame — the Annotate tab or the Review tab.
 
     ``tab='annotate'`` lands the Annotate tab on the first annotated frame in the right mode
     (emits ``annotate_focus``); ``tab='review'`` lands the Review tab on a model's predictions
@@ -639,7 +639,7 @@ def focus(
         project_root: Project root (== dataset_root for workspace projects).
         dataset_root: Dataset root holding ``images/`` and ``annotations/`` (plus ``predictions/``
             for review).
-        trait: Annotation campaign (e.g. "catkin", "bush").
+        subject: Annotation subject (e.g. "catkin", "bush").
         date: Capture-date bucket (e.g. "2026-03-02").
         image_index: Index into the date's sorted image list. Default: annotate → first frame with a
             non-empty label; review → first frame with a non-empty prediction for the model.
@@ -652,12 +652,12 @@ def focus(
         conf_threshold: Review only — confidence cutoff for showing predictions.
     """
     if tab == "annotate":
-        return _focus_annotate(project_root, dataset_root, trait, date, mode=mode, image_index=image_index)
+        return _focus_annotate(project_root, dataset_root, subject, date, mode=mode, image_index=image_index)
     if tab == "review":
         if not model_name:
             return {"error": "tab='review' requires model_name"}
         return _focus_review(
-            project_root, dataset_root, trait, date, model_name,
+            project_root, dataset_root, subject, date, model_name,
             image_index=image_index, detection_idx=detection_idx, filter_type=filter_type,
             iou_threshold=iou_threshold, conf_threshold=conf_threshold,
         )
@@ -667,12 +667,12 @@ def focus(
 def _focus_annotate(
     project_root: str,
     dataset_root: str,
-    trait: str,
+    subject: str,
     date: str,
     mode: str | None = None,
     image_index: int | None = None,
 ) -> dict:
-    """Drive the live Annotate tab to a (trait, date), in the right mode, on an annotated frame.
+    """Drive the live Annotate tab to a (subject, date), in the right mode, on an annotated frame.
 
     Switching *only* the dataset selection lands the browser at image 0 in **box** mode — which
     hides polygons and usually shows an unannotated frame, so the human sees a blank canvas
@@ -684,7 +684,7 @@ def _focus_annotate(
     Args:
         project_root: Project root (== dataset_root for workspace projects).
         dataset_root: Dataset root holding ``images/`` and ``annotations/``.
-        trait: Annotation campaign (e.g. "catkin", "bush").
+        subject: Annotation subject (e.g. "catkin", "bush").
         date: Capture-date bucket (e.g. "2026-03-02").
         mode: "box" or "polygon". Default: inferred from the labels present on that frame
             (segment → polygon, detect → box).
@@ -706,8 +706,8 @@ def _focus_annotate(
     if not images:
         return {"error": f"no images on {date}"}
 
-    seg_dir = Path(annotation_dir(dataset_root, trait, date, "segment"))
-    det_dir = Path(annotation_dir(dataset_root, trait, date, "detect"))
+    seg_dir = Path(annotation_dir(dataset_root, subject, date, "segment"))
+    det_dir = Path(annotation_dir(dataset_root, subject, date, "detect"))
 
     def _label_task(stem: str) -> str | None:
         # "segment"/"detect" if a label with objects exists (something to show), else None. A
@@ -753,7 +753,7 @@ def _focus_annotate(
     payload = {
         "project_root": project_root,
         "dataset_root": dataset_root,
-        "trait": trait,
+        "subject": subject,
         "date": date,
         "image_index": image_index,
         "mode": mode,
@@ -765,7 +765,7 @@ def _focus_annotate(
     return {
         "delivered": result.get("delivered", False),
         "status": result.get("status"),
-        "trait": trait,
+        "subject": subject,
         "date": date,
         "image_index": image_index,
         "mode": mode,
@@ -779,7 +779,7 @@ def _focus_annotate(
 def _focus_review(
     project_root: str,
     dataset_root: str,
-    trait: str,
+    subject: str,
     date: str,
     model_name: str,
     image_index: int | None = None,
@@ -792,7 +792,7 @@ def _focus_review(
     what the agent flagged (a false positive, a missed catkin) without hunting for it.
 
     Posts a ``review_focus`` event the GUI honors with local setters — the Review analog of
-    ``focus(tab='annotate')`` — landing on the (trait, date) with ``model_name``'s predictions loaded,
+    ``focus(tab='annotate')`` — landing on the (subject, date) with ``model_name``'s predictions loaded,
     on ``image_index`` (default: the first frame that has predictions for this model, so the
     canvas isn't empty), at ``detection_idx`` under the given filter. Requires the GUI to be
     running; returns ``delivered: false`` if not.
@@ -800,7 +800,7 @@ def _focus_review(
     Args:
         project_root: Project root (== dataset_root for workspace projects).
         dataset_root: Dataset root holding ``images/``, ``annotations/``, ``predictions/``.
-        trait: Annotation campaign (e.g. "catkin").
+        subject: Annotation subject (e.g. "catkin").
         date: Capture-date bucket (e.g. "2026-02-11").
         model_name: The model whose ``predictions/<model>/<date>/`` to review.
         image_index: Index into the date's sorted image list. Default: the first image that has
@@ -853,7 +853,7 @@ def _focus_review(
     payload = {
         "project_root": project_root,
         "dataset_root": dataset_root,
-        "trait": trait,
+        "subject": subject,
         "date": date,
         "model_name": model_name,
         "image_index": image_index,
@@ -866,7 +866,7 @@ def _focus_review(
     return {
         "delivered": result.get("delivered", False),
         "status": result.get("status"),
-        "trait": trait,
+        "subject": subject,
         "date": date,
         "model_name": model_name,
         "image_index": image_index,
@@ -1044,8 +1044,8 @@ def write_class_map(labels_dir: str, class_names: str = "", output_path: str = "
     """Persist the class map (id -> name/color) derived from a label set, in the dataset.
 
     Enumerates the class ids actually present in ``<labels_dir>/*.json`` (per-image COCO/JSON,
-    each object's ``category_id``) and writes ``<dataset_root>/classes/<campaign>.json`` — the
-    registry that decodes those labels, campaign-scoped and travelling with the dataset — so class
+    each object's ``category_id``) and writes ``<dataset_root>/classes/<subject>.json`` — the
+    registry that decodes those labels, subject-scoped and travelling with the dataset — so class
     identity and ``num_classes`` have one durable, audited source (derived from the labels in hand)
     instead of a pinned integer. ``class_names`` is an optional comma-separated list indexed by
     class id; unnamed ids fall back to ``class_<id>``. Pass ``output_path`` to override the location.
@@ -1086,8 +1086,8 @@ def write_class_map(labels_dir: str, class_names: str = "", output_path: str = "
         root = dataset_root_of(ld)
         parsed = parse_annotation_dir(ld)
         if root is None or parsed is None:
-            return {"error": f"cannot locate the dataset/campaign for {labels_dir}; expected a "
-                             "canonical <root>/annotations/<campaign>/[<date>/]<task> label dir, "
+            return {"error": f"cannot locate the dataset/subject for {labels_dir}; expected a "
+                             "canonical <root>/annotations/<subject>/[<date>/]<task> label dir, "
                              "or pass output_path"}
         out = classes_path(root, parsed[0])
     out.parent.mkdir(parents=True, exist_ok=True)
