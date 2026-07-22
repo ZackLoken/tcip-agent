@@ -88,12 +88,12 @@ export interface ProjectSummary {
   created: number;
   modified: number;
   dates: string[];
-  traits: string[];
+  subjects: string[];
   models: string[];
-  // Per-date availability: traits with labels / models with predictions on each date.
-  // The trait/model pickers filter to these so a date with no catkin labels doesn't
+  // Per-date availability: subjects with labels / models with predictions on each date.
+  // The subject/model pickers filter to these so a date with no catkin labels doesn't
   // offer "catkin" (which would open an empty canvas).
-  traits_by_date: Record<string, string[]>;
+  subjects_by_date: Record<string, string[]>;
   models_by_date: Record<string, string[]>;
   image_count: number;
   is_active: boolean;
@@ -118,9 +118,9 @@ export const api = {
       call<{
         dataset_root: string;
         dates_with_images: string[];
-        annotation_types: string[];
+        subjects: string[];
         model_names: string[];
-        traits_by_date: Record<string, string[]>;
+        subjects_by_date: Record<string, string[]>;
         models_by_date: Record<string, string[]>;
       }>(`/api/dataset/tree?${q({ dataset_root })}`),
 
@@ -132,14 +132,14 @@ export const api = {
     select: (body: {
       project_root: string;
       dataset_root: string;
-      annotation_type?: string | null;
+      subject?: string | null;
       date?: string | null;
       model_name?: string | null;
     }) =>
       call<{
         status: string;
         selection: DatasetSelection;
-        // Advisory: whether the resolved (trait,date) has labels / (model,date) has
+        // Advisory: whether the resolved (subject,date) has labels / (model,date) has
         // predictions. False → the canvas will start empty (not an error).
         annotations_present?: boolean;
         predictions_present?: boolean;
@@ -321,7 +321,7 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    // Batch review status + detection presence for a whole (trait, date): drives the image-level
+    // Batch review status + detection presence for a whole (subject, date): drives the image-level
     // Reviewed/Unreviewed nav filter and lets the tab skip images with nothing to review.
     imageStatuses: (params: {
       project_root: string;
