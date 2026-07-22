@@ -73,7 +73,7 @@ class TestBoxRoundtrip:
         assert len(state.boxes) == 2
 
         # Save
-        label_path = str(img_dir / "labels" / "detect" / "test_001.txt")
+        label_path = str(img_dir / "labels" / "detect" / "test_001.json")
         write_detect_labels(label_path, state.boxes, 640, 480)
 
         # Read back
@@ -98,7 +98,7 @@ class TestBoxRoundtrip:
         state.boxes.append(BBox(x1=200, y1=200, x2=300, y2=300, class_id=1))
         assert len(state.boxes) == 2
 
-        label_path = str(img_dir / "labels" / "detect" / "test_001.txt")
+        label_path = str(img_dir / "labels" / "detect" / "test_001.json")
         write_detect_labels(label_path, state.boxes, 640, 480)
 
         boxes, _ = parse_detect_labels(label_path, 640, 480)
@@ -128,7 +128,7 @@ class TestPolygonRoundtrip:
         assert len(state.polygons) == 1
 
         # Save
-        label_path = str(img_dir / "labels" / "segment" / "test_001.txt")
+        label_path = str(img_dir / "labels" / "segment" / "test_001.json")
         write_segment_labels(label_path, state.polygons, 640, 480)
 
         # Read back
@@ -155,7 +155,7 @@ class TestPolygonRoundtrip:
             class_id=2,
         ))
 
-        label_path = str(img_dir / "labels" / "segment" / "test_001.txt")
+        label_path = str(img_dir / "labels" / "segment" / "test_001.json")
         write_segment_labels(label_path, state.polygons, 640, 480)
 
         polygons, class_ids = parse_segment_labels(label_path, 640, 480)
@@ -179,8 +179,8 @@ class TestDualFormatSave:
             class_id=1,
         ))
 
-        detect_path = str(img_dir / "labels" / "detect" / "test_001.txt")
-        segment_path = str(img_dir / "labels" / "segment" / "test_001.txt")
+        detect_path = str(img_dir / "labels" / "detect" / "test_001.json")
+        segment_path = str(img_dir / "labels" / "segment" / "test_001.json")
 
         write_detect_labels(detect_path, state.boxes, 640, 480)
         write_segment_labels(segment_path, state.polygons, 640, 480)
@@ -207,7 +207,7 @@ class TestPredictionOverlay:
             BBox(x1=100, y1=50, x2=250, y2=200, class_id=0),
             BBox(x1=400, y1=300, x2=550, y2=420, class_id=0),
         ]
-        gt_path = str(img_dir / "labels" / "detect" / "test_001.txt")
+        gt_path = str(img_dir / "labels" / "detect" / "test_001.json")
         write_detect_labels(gt_path, gt_boxes, 640, 480)
 
         # Write predictions (one matching, one FP)
@@ -215,20 +215,13 @@ class TestPredictionOverlay:
             PredBBox(x1=105, y1=55, x2=245, y2=195, class_id=0, confidence=0.92),
             PredBBox(x1=10, y1=10, x2=50, y2=50, class_id=0, confidence=0.75),
         ]
-        pred_path = str(img_dir / "predictions" / "detect" / "test_001.txt")
-        # Write predictions manually (YOLO format: class conf cx cy w h)
-        lines = []
-        for p in pred_boxes:
-            cx = (p.x1 + p.x2) / 2 / 640
-            cy = (p.y1 + p.y2) / 2 / 480
-            w = (p.x2 - p.x1) / 640
-            h = (p.y2 - p.y1) / 480
-            lines.append(f"{p.class_id} {p.confidence:.4f} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
-        Path(pred_path).write_text("\n".join(lines) + "\n")
+        pred_path = str(img_dir / "predictions" / "detect" / "test_001.json")
+        from tcip_annotation.json_io import write_detect
+        write_detect(pred_path, pred_boxes, 640, 480)
 
         # Now load and match
         loaded_gt, _ = parse_detect_labels(gt_path, 640, 480)
-        from tcip_annotation.label_io import parse_detect_predictions
+        from tcip_annotation.json_io import read_detect_pred as parse_detect_predictions
         loaded_preds, _ = parse_detect_predictions(pred_path, 640, 480)
 
         matches = compute_matches(
