@@ -147,7 +147,7 @@ export function AnnotateToolbar({
       setActiveClass(nextId);
       if (dataset.project_root) {
         await classesApi.save(
-          dataset.project_root, dataset.annotation_type, [...classes, entry],
+          dataset.project_root, dataset.subject, [...classes, entry],
           dataset.dataset_root, dataset.annotations_detect_dir, dataset.annotations_segment_dir);
       }
     } catch (e) {
@@ -168,7 +168,7 @@ export function AnnotateToolbar({
       const next = classes.map((c) => (c.id === entry.id ? updated : c));
       try {
         await classesApi.save(
-          dataset.project_root, dataset.annotation_type, next,
+          dataset.project_root, dataset.subject, next,
           dataset.dataset_root, dataset.annotations_detect_dir, dataset.annotations_segment_dir);
       } catch (e) {
         useStore
@@ -194,7 +194,7 @@ export function AnnotateToolbar({
         dataset.project_root,
         currentImage,
         newStatus,
-        dataset.annotation_type,
+        dataset.subject,
         dataset.date,
       );
     } catch (e) {
