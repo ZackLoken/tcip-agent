@@ -9,7 +9,7 @@ function dataset(over: Partial<DatasetSelection> = {}): DatasetSelection {
   return {
     project_root: "/proj",
     dataset_root: "/proj/ds",
-    annotation_type: "catkin",
+    subject: "catkin",
     date: "2-11-26",
     image_list: ["a.jpg", "b.jpg", "c.jpg"],
     current_image_index: 0,
@@ -110,7 +110,7 @@ describe("mergeSnapshot ownership model", () => {
         dataset: dataset({
           project_root: null,
           dataset_root: null,
-          annotation_type: null,
+          subject: null,
           date: null,
           image_list: [],
           current_image_index: 0,
