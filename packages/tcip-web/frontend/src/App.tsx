@@ -45,12 +45,12 @@ function App() {
   const projectRoot = useStore((s) => s.gui.dataset.project_root);
   const datasetKey = useStore(
     (s) =>
-      `${s.gui.dataset.dataset_root ?? ""}::${s.gui.dataset.annotation_type ?? ""}::${s.gui.dataset.date ?? ""}`,
+      `${s.gui.dataset.dataset_root ?? ""}::${s.gui.dataset.subject ?? ""}::${s.gui.dataset.date ?? ""}`,
   );
   const imageList = useStore((s) => s.gui.dataset.image_list);
   const annDetectDir = useStore((s) => s.gui.dataset.annotations_detect_dir);
   const annSegDir = useStore((s) => s.gui.dataset.annotations_segment_dir);
-  const annotationType = useStore((s) => s.gui.dataset.annotation_type);
+  const subject = useStore((s) => s.gui.dataset.subject);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const datasetDate = useStore((s) => s.gui.dataset.date);
   const setClasses = useStore((s) => s.setClasses);
@@ -97,7 +97,7 @@ function App() {
         return;
       }
 
-      // Agent → GUI "focus the Annotate tab": land on a (trait, date) in the right mode on an
+      // Agent → GUI "focus the Annotate tab": land on a (subject, date) in the right mode on an
       // annotated frame (see applyAnnotateFocus — uses local setters like Review→Edit so the
       // deliberate "mode/index stay local" behavior of mergeSnapshot is preserved).
       if (ev.event_type === "annotate_focus") {
@@ -191,13 +191,13 @@ function App() {
     void (async () => {
       try {
         const reg = await classesApi.load(
-          projectRoot, annotationType, datasetRoot, annDetectDir, annSegDir);
+          projectRoot, subject, datasetRoot, annDetectDir, annSegDir);
         setClasses(reg.classes);
 
-        // Scoped to the selected campaign: a Complete recorded while annotating catkin says
-        // nothing about bush, and reading a global map re-applied it to campaigns the breeder
+        // Scoped to the selected subject: a Complete recorded while annotating catkin says
+        // nothing about bush, and reading a global map re-applied it to subjects the breeder
         // never looked at — then wrote the result back over their original confirmations.
-        const saved = await classesApi.loadImageStatus(projectRoot, annotationType, datasetDate);
+        const saved = await classesApi.loadImageStatus(projectRoot, subject, datasetDate);
         const savedMap = saved.statuses ?? {};
         // Reconcile every image against the label files, honoring confirmed reviews via
         // complete_override — so a wrongly-saved "negative" whose files have content heals
@@ -220,7 +220,7 @@ function App() {
           Object.entries(reconciled).filter(([name, st]) => savedMap[name] !== st),
         ) as Record<string, "complete" | "partial" | "negative" | "unannotated">;
         if (Object.keys(changed).length) {
-          await classesApi.setImageStatusBulk(projectRoot, changed, annotationType, datasetDate);
+          await classesApi.setImageStatusBulk(projectRoot, changed, subject, datasetDate);
         }
         setImageStatuses(reconciled);
       } catch (err) {
@@ -232,7 +232,7 @@ function App() {
     projectRoot,
     datasetKey,
     imageList,
-    annotationType,
+    subject,
     datasetRoot,
     datasetDate,
     annDetectDir,
