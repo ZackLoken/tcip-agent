@@ -74,10 +74,8 @@ def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def data_dir(tmp_path: Path) -> Path:
     """Create a minimal dataset in the canonical layout, with per-image JSON labels/predictions.
 
-    Per-image JSON (``tcip_annotation.json_io``) is the canonical on-disk label format — not
-    YOLO ``.txt``; see ``json_io``'s module docstring. Geometry mirrors the format's old YOLO
-    normalized values (0.5,0.5,0.1,0.1 and 0.3,0.3,0.05,0.05 on a 640x480 image) so existing
-    count/geometry expectations hold.
+    Per-image JSON (``tcip_annotation.json_io``) is the canonical on-disk label format. Geometry
+    is two boxes per image on a 640x480 frame, matching the count/geometry expectations downstream.
     """
     from PIL import Image
 
