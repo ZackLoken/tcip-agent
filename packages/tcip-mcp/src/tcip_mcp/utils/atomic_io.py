@@ -1,7 +1,7 @@
 """Atomic, lock-guarded filesystem writes for ``.tcip/`` state.
 
 Generalizes the ``tempfile.mkstemp`` + ``os.replace`` pattern already used in
-``tcip_annotation.label_io``. ``os.replace`` is atomic on POSIX and Windows, so a
+``tcip_annotation.json_io``. ``os.replace`` is atomic on POSIX and Windows, so a
 reader never observes a half-written file (no more corrupt JSON on crash / torn read).
 
 For read-modify-write sequences (lineage / artifacts / registry index) wrap the whole
