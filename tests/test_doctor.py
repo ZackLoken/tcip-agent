@@ -30,7 +30,7 @@ def _project(tmp_path: Path) -> Path:
     json_io.write_detect(det / "IMG_A.json", [], 32, 32, keep_empty=True)
     json_io.write_detect(det / "IMG_B.json", [], 32, 32, keep_empty=True)
     json_io.write_detect(det / "IMG_C.json", [BBox(1, 1, 9, 9, 0)], 32, 32)
-    # Scoped by campaign/date — a confirmation belongs to the campaign it was made in.
+    # Scoped by subject/date — a confirmation belongs to the subject it was made in.
     (state / "image_status.json").write_text(json.dumps(
         {"catkin/2026-02-11": {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated",
                                "IMG_C.JPG": "negative"}}))
