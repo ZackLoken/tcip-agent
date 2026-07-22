@@ -50,7 +50,7 @@ function setupDataset(opts: { predDetectDir?: string | null } = {}) {
         ...s.gui.dataset,
         project_root: "C:/proj",
         dataset_root: "C:/data",
-        annotation_type: "annotations",
+        subject: "annotations",
         date: "2026-01-01",
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
@@ -350,7 +350,7 @@ describe("ReviewTab matches-recompute effect", () => {
     await act(async () => {
       await applyReviewFocus({
         dataset_root: "C:/data",
-        trait: "annotations",
+        subject: "annotations",
         date: "2026-01-01",
         image_index: 0,
       });
