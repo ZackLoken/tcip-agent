@@ -14,26 +14,40 @@ export interface ClassEntry {
 export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
 export const classesApi = {
-  // Class ids are trait-scoped (catkin=0, bush=0 coexist). Pass the active trait; the label dirs
-  // let the server derive a provisional map from labels when a trait has no saved one yet.
+  // Class ids are campaign-scoped (catkin=0, bush=0 coexist), and the registry lives in the
+  // dataset, not the project — so a shared image set carries its own names. Pass the active
+  // campaign and the dataset_root; the label dirs let the server derive a provisional map when a
+  // campaign has no saved one yet.
   load: (
     project_root: string,
     trait?: string | null,
+    dataset_root?: string | null,
     annotations_detect_dir?: string | null,
     annotations_segment_dir?: string | null,
   ) => {
     const params = new URLSearchParams({ project_root });
     if (trait) params.set("trait", trait);
+    if (dataset_root) params.set("dataset_root", dataset_root);
     if (annotations_detect_dir) params.set("annotations_detect_dir", annotations_detect_dir);
     if (annotations_segment_dir) params.set("annotations_segment_dir", annotations_segment_dir);
     return getJson<{ classes: ClassEntry[] }>(`/api/classes/load?${params.toString()}`);
   },
 
-  save: (project_root: string, trait: string | null, classes: ClassEntry[]) =>
+  save: (
+    project_root: string,
+    trait: string | null,
+    classes: ClassEntry[],
+    dataset_root?: string | null,
+    annotations_detect_dir?: string | null,
+    annotations_segment_dir?: string | null,
+  ) =>
     postJson<{ status: string; n_classes: number }>("/api/classes/save", {
       project_root,
       trait,
       classes,
+      dataset_root,
+      annotations_detect_dir,
+      annotations_segment_dir,
     }),
 
   autoColor: (class_id: number) =>
