@@ -238,8 +238,8 @@ def confirmed_negative_names(labels_dir) -> set[str]:
     looked at, so an image full of bushes trains as "contains no bushes".
 
     An empty label file alone is never a negative — someone may have just emptied it mid-work — so
-    training trusts only this confirmation. No store, or a store with no entries for this campaign,
-    yields an empty set. A ``labels_dir`` whose campaign cannot be resolved raises: silently
+    training trusts only this confirmation. No store, or a store with no entries for this subject,
+    yields an empty set. A ``labels_dir`` whose subject cannot be resolved raises: silently
     returning nothing would drop every hard negative the review loop harvested.
     """
     from tcip_mcp.dataset_layout import parse_annotation_dir, status_bucket
@@ -256,7 +256,7 @@ def confirmed_negative_names(labels_dir) -> set[str]:
         parsed = parse_annotation_dir(d)
         if parsed is None:
             # Refuse only when there is something to lose. A derived tree — a
-            # ``{train,val,test}/labels`` split, a curated export — cannot name its campaign, and
+            # ``{train,val,test}/labels`` split, a curated export — cannot name its subject, and
             # raising there would block the platform's own documented split -> train path. But if
             # the store holds confirmed negatives this dir might have been entitled to, silently
             # returning none of them would drop the human's work invisibly, which is worse.
@@ -267,16 +267,16 @@ def confirmed_negative_names(labels_dir) -> set[str]:
             if not has_negatives:
                 return set()
             raise ValueError(
-                f"cannot tell which campaign {labels_dir} belongs to, and this project has "
+                f"cannot tell which subject {labels_dir} belongs to, and this project has "
                 f"human-confirmed negatives that would be silently dropped. Expected the canonical "
-                f"<root>/annotations/<campaign>/[<date>/]<task> layout. A derived tree (a split, a "
+                f"<root>/annotations/<subject>/[<date>/]<task> layout. A derived tree (a split, a "
                 f"curated export) should carry its own .tcip/state/image_status.json — see "
                 f"materialize_review_dataset."
             )
-        campaign, date, _task = parsed
-        bucket = statuses.get(status_bucket(campaign, date))
+        subject, date, _task = parsed
+        bucket = statuses.get(status_bucket(subject, date))
         if not isinstance(bucket, dict):
-            return set()  # this campaign has no confirmations yet
+            return set()  # this subject has no confirmations yet
         return {name for name, s in bucket.items() if s == "negative"}
     return set()
 
