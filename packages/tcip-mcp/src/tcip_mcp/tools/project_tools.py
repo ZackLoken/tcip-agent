@@ -139,7 +139,7 @@ def view_gui_state() -> dict:
         current_image = str(Path(dataset_root) / "images" / date / image_list[idx])
     ctx.update({
         "dataset_root": dataset_root,
-        "annotation_type": ds.get("annotation_type"),
+        "subject": ds.get("subject"),
         "date": date,
         "active_tab": gui.get("active_tab"),
         "mode": gui.get("mode"),
@@ -227,7 +227,7 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     files_added = 0
 
     with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
-        # Canonical dataset trees. classes/ carries the campaign registries that decode the labels'
+        # Canonical dataset trees. classes/ carries the subject registries that decode the labels'
         # category_ids — without them the archived annotations are undecodable, so a self-contained
         # bundle must include them.
         for tree, exts in ((root / "images", image_exts), (root / "annotations", label_exts),
