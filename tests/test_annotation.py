@@ -23,8 +23,7 @@ def data_dir(tmp_path: Path) -> Path:
 
     Overrides the conftest fixture: score_predictions reads GT and
     predictions through the json_io per-image schema (pixel COCO xywh + native ``score``).
-    The files keep a ``.txt`` name because the tools resolve them with ``fmt='yolo'`` — the
-    JSON *content* is what json_io parses.
+    Canonical per-image JSON, resolved by the tools without a format hint.
     """
     from PIL import Image
 
@@ -43,13 +42,13 @@ def data_dir(tmp_path: Path) -> Path:
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
         # 2 GT boxes per image (pixel xyxy).
         json_io.write_detect(
-            str(labels_dir / f"{name}.txt"),
+            str(labels_dir / f"{name}.json"),
             [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)],
             640, 480,
         )
         # Predictions: 1 matching (TP) + 1 elsewhere (FP), confidence in the JSON score.
         json_io.write_detect(
-            str(preds_dir / f"{name}.txt"),
+            str(preds_dir / f"{name}.json"),
             [PredBBox(288, 216, 352, 264, 0, confidence=0.9),
              PredBBox(496, 372, 528, 396, 0, confidence=0.7)],
             640, 480,
