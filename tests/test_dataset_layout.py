@@ -11,7 +11,7 @@ from tcip_mcp.dataset_layout import (
     models_with_predictions,
     parse_image_path,
     prediction_dir,
-    traits_with_labels,
+    subjects_with_labels,
 )
 
 
@@ -43,7 +43,7 @@ def test_prediction_dir_date_nested() -> None:
 
 
 def test_annotation_path_for_image_derives_date() -> None:
-    p = annotation_path_for_image("/ds/images/2-11-26/IMG_1.JPG", "detect", "yolo", trait="catkin")
+    p = annotation_path_for_image("/ds/images/2-11-26/IMG_1.JPG", "detect", "yolo", subject="catkin")
     assert p == Path("/ds/annotations/catkin/2-11-26/detect/IMG_1.json")
 
 
@@ -69,7 +69,7 @@ def _touch(path: Path, text: str = "") -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_traits_with_labels_is_per_date(tmp_path: Path) -> None:
+def test_subjects_with_labels_is_per_date(tmp_path: Path) -> None:
     root = tmp_path
     # catkin labelled on 2026-02-11 only; bush labelled on 2026-03-02 only.
     _touch(annotation_dir(root, "catkin", "2026-02-11", "detect") / "IMG_1.json", "0 0.5 0.5 0.1 0.1\n")
@@ -77,11 +77,11 @@ def test_traits_with_labels_is_per_date(tmp_path: Path) -> None:
     # An empty label file is a confirmed negative — still counts as "labelled".
     _touch(annotation_dir(root, "catkin", "2026-03-02", "segment") / "IMG_5.json", "")
 
-    assert traits_with_labels(root, "2026-02-11") == ["catkin"]
+    assert subjects_with_labels(root, "2026-02-11") == ["catkin"]
     # 2026-03-02 has bush (detect) and catkin (empty negative in segment) → both, sorted.
-    assert traits_with_labels(root, "2026-03-02") == ["bush", "catkin"]
-    # A date with images but no labels for any trait → nothing to offer.
-    assert traits_with_labels(root, "2026-03-24") == []
+    assert subjects_with_labels(root, "2026-03-02") == ["bush", "catkin"]
+    # A date with images but no labels for any subject → nothing to offer.
+    assert subjects_with_labels(root, "2026-03-24") == []
 
 
 def test_models_with_predictions_is_per_date(tmp_path: Path) -> None:
@@ -95,12 +95,12 @@ def test_models_with_predictions_is_per_date(tmp_path: Path) -> None:
     assert models_with_predictions(root, "2026-03-02") == []
 
 
-def test_classes_path_is_campaign_scoped_in_the_dataset():
+def test_classes_path_is_subject_scoped_in_the_dataset():
     from tcip_mcp.dataset_layout import classes_path
 
     assert classes_path("/ds", "catkin") == Path("/ds/classes/catkin.json")
     assert classes_path("/ds", "bush") == Path("/ds/classes/bush.json")
-    assert classes_path("/ds", None) == Path("/ds/classes/default.json")  # DEFAULT_TRAIT
+    assert classes_path("/ds", None) == Path("/ds/classes/default.json")  # DEFAULT_SUBJECT
 
 
 def test_dataset_root_of_recovers_the_root_from_any_layout_dir():
