@@ -26,12 +26,12 @@ def test_load_empty_registry(client: TestClient, tmp_path: Path) -> None:
 
 
 def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
-    # The registry lives in the DATASET, campaign-scoped, and travels with the image set.
+    # The registry lives in the DATASET, subject-scoped, and travels with the image set.
     save = client.post(
         "/api/classes/save",
         json={
             "project_root": str(tmp_path),
-            "trait": "catkin",
+            "subject": "catkin",
             "dataset_root": str(tmp_path),
             "classes": [
                 {"id": 0, "name": "catkin", "color": "#FF0000"},
@@ -44,7 +44,7 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
 
     load = client.get(
         "/api/classes/load",
-        params={"project_root": str(tmp_path), "trait": "catkin", "dataset_root": str(tmp_path)},
+        params={"project_root": str(tmp_path), "subject": "catkin", "dataset_root": str(tmp_path)},
     ).json()
     assert len(load["classes"]) == 2
     assert load["classes"][0] == {"id": 0, "name": "catkin", "color": "#FF0000"}
@@ -53,8 +53,8 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
     assert on_disk["0"]["name"] == "catkin"
 
 
-def test_save_without_campaign_is_refused(client: TestClient, tmp_path: Path) -> None:
-    """A registry belongs to a campaign; a campaign-less save has no home and no meaning."""
+def test_save_without_subject_is_refused(client: TestClient, tmp_path: Path) -> None:
+    """A registry belongs to a subject; a subject-less save has no home and no meaning."""
     r = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
@@ -63,14 +63,14 @@ def test_save_without_campaign_is_refused(client: TestClient, tmp_path: Path) ->
     assert r.status_code == 400
 
 
-def test_per_campaign_maps_are_scoped(client: TestClient, tmp_path: Path) -> None:
-    # catkin and bush each use class 0 for their own object — campaign-scoped maps keep them apart.
-    for trait, name in (("catkin", "catkin"), ("bush", "bush")):
+def test_per_subject_maps_are_scoped(client: TestClient, tmp_path: Path) -> None:
+    # catkin and bush each use class 0 for their own object — subject-scoped maps keep them apart.
+    for subject, name in (("catkin", "catkin"), ("bush", "bush")):
         r = client.post(
             "/api/classes/save",
             json={
                 "project_root": str(tmp_path),
-                "trait": trait,
+                "subject": subject,
                 "dataset_root": str(tmp_path),
                 "classes": [{"id": 0, "name": name, "color": "#FF0000"}],
             },
@@ -79,15 +79,15 @@ def test_per_campaign_maps_are_scoped(client: TestClient, tmp_path: Path) -> Non
 
     cat = client.get(
         "/api/classes/load",
-        params={"project_root": str(tmp_path), "trait": "catkin", "dataset_root": str(tmp_path)},
+        params={"project_root": str(tmp_path), "subject": "catkin", "dataset_root": str(tmp_path)},
     ).json()
     bush = client.get(
         "/api/classes/load",
-        params={"project_root": str(tmp_path), "trait": "bush", "dataset_root": str(tmp_path)},
+        params={"project_root": str(tmp_path), "subject": "bush", "dataset_root": str(tmp_path)},
     ).json()
     assert cat["classes"][0]["name"] == "catkin"
     assert bush["classes"][0]["name"] == "bush"
-    # each map lands under its own campaign file in the dataset
+    # each map lands under its own subject file in the dataset
     assert (tmp_path / "classes" / "catkin.json").is_file()
     assert (tmp_path / "classes" / "bush.json").is_file()
 
@@ -98,7 +98,7 @@ def test_dataset_root_derived_from_annotation_dir(client: TestClient, tmp_path: 
     det.mkdir(parents=True)
     r = client.post(
         "/api/classes/save",
-        json={"project_root": str(tmp_path), "trait": "catkin",
+        json={"project_root": str(tmp_path), "subject": "catkin",
               "annotations_detect_dir": str(det),
               "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}]},
     )
@@ -107,7 +107,7 @@ def test_dataset_root_derived_from_annotation_dir(client: TestClient, tmp_path: 
 
 
 def test_load_derives_from_labels_when_map_absent(client: TestClient, tmp_path: Path) -> None:
-    # No saved map for this trait, but its labels exist → derive a provisional registry so the
+    # No saved map for this subject, but its labels exist → derive a provisional registry so the
     # canvas never loads empty (names default to class_<id>).
     det = tmp_path / "annotations" / "catkin" / "d" / "detect"
     det.mkdir(parents=True)
@@ -119,15 +119,15 @@ def test_load_derives_from_labels_when_map_absent(client: TestClient, tmp_path: 
     )
     load = client.get(
         "/api/classes/load",
-        params={"project_root": str(tmp_path), "trait": "catkin", "annotations_detect_dir": str(det)},
+        params={"project_root": str(tmp_path), "subject": "catkin", "annotations_detect_dir": str(det)},
     ).json()
     assert [c["id"] for c in load["classes"]] == [0, 2]
     assert load["classes"][0]["name"] == "class_0"
 
 
-def test_load_rejects_invalid_trait(client: TestClient, tmp_path: Path) -> None:
+def test_load_rejects_invalid_subject(client: TestClient, tmp_path: Path) -> None:
     resp = client.get(
-        "/api/classes/load", params={"project_root": str(tmp_path), "trait": "../evil"}
+        "/api/classes/load", params={"project_root": str(tmp_path), "subject": "../evil"}
     )
     assert resp.status_code == 400
 
@@ -221,7 +221,7 @@ def test_load_derived_registry_cache_invalidates_on_label_write(
     json_io.write_detect(str(label), [BBox(50.0, 50.0, 60.0, 60.0, 0)], 100, 100)
     os.utime(label, (1_000_000, 1_000_000))
 
-    params = {"project_root": str(tmp_path), "trait": "catkin", "annotations_detect_dir": str(det)}
+    params = {"project_root": str(tmp_path), "subject": "catkin", "annotations_detect_dir": str(det)}
     first = client.get("/api/classes/load", params=params).json()
     assert [c["id"] for c in first["classes"]] == [0]
 
