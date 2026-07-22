@@ -93,3 +93,27 @@ def test_models_with_predictions_is_per_date(tmp_path: Path) -> None:
     assert models_with_predictions(root, "2026-02-11") == ["baseline"]
     assert models_with_predictions(root, "2026-03-24") == []
     assert models_with_predictions(root, "2026-03-02") == []
+
+
+def test_classes_path_is_campaign_scoped_in_the_dataset():
+    from tcip_mcp.dataset_layout import classes_path
+
+    assert classes_path("/ds", "catkin") == Path("/ds/classes/catkin.json")
+    assert classes_path("/ds", "bush") == Path("/ds/classes/bush.json")
+    assert classes_path("/ds", None) == Path("/ds/classes/default.json")  # DEFAULT_TRAIT
+
+
+def test_dataset_root_of_recovers_the_root_from_any_layout_dir():
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    assert dataset_root_of("/ds/annotations/catkin/2026-03-02/detect") == Path("/ds")
+    assert dataset_root_of("/ds/predictions/live/2026-03-02/detect") == Path("/ds")
+    assert dataset_root_of("/ds/images/2026-03-02") == Path("/ds")
+    assert dataset_root_of("/ds/classes") == Path("/ds")
+    assert dataset_root_of("/some/where/else") is None
+    # Anchors on the LAST dataset segment: a dataset nested under an ancestor named 'annotations'
+    # (or any other segment) still resolves to the real root, not the ancestor.
+    assert dataset_root_of("/data/annotations/proj/predictions/live/detect") == Path("/data/annotations/proj")
+    assert dataset_root_of("/data/images/proj/annotations/catkin/detect") == Path("/data/images/proj")
+    # A bare segment with nothing above it is not inside a dataset.
+    assert dataset_root_of("annotations/catkin/detect") is None
