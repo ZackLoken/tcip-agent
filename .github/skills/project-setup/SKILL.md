@@ -87,7 +87,7 @@ There must be something to train on. Two paths (see `.github/skills/annotation`)
 - **Human path**: hand off to the GUI Annotate tab for the breeder to label a seed set.
 
 Never train or evaluate on an unconfirmed format: if `read_annotations` returns
-`format_confident: false`, stop and confirm.
+the format cannot be determined, `read_annotations` returns an error rather than a guess.
 
 ## 5. Split — `make_splits`
 
