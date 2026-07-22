@@ -8,9 +8,9 @@ export interface ClassEntry {
   color: string;
 }
 
-// "negative" = the annotator reviewed the image and recorded no objects (an empty
-// label file exists on disk = a valid negative), distinct from "unannotated" (no
-// label file — never looked at).
+// "negative" = the breeder marked the image Complete with no objects — a confirmed negative,
+// recorded in image_status.json. An empty label file alone is NOT this: it reads as
+// "unannotated" until that Complete, which is the whole negative-sample rail.
 export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
 export const classesApi = {
