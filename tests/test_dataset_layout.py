@@ -44,7 +44,7 @@ def test_prediction_dir_date_nested() -> None:
 
 def test_annotation_path_for_image_derives_date() -> None:
     p = annotation_path_for_image("/ds/images/2-11-26/IMG_1.JPG", "detect", "yolo", trait="catkin")
-    assert p == Path("/ds/annotations/catkin/2-11-26/detect/IMG_1.txt")
+    assert p == Path("/ds/annotations/catkin/2-11-26/detect/IMG_1.json")
 
 
 def test_find_gt_label_prefers_canonical(tmp_path: Path) -> None:
@@ -53,8 +53,8 @@ def test_find_gt_label_prefers_canonical(tmp_path: Path) -> None:
     img.write_bytes(b"x")
     ann = tmp_path / "annotations" / "catkin" / "2-11-26" / "detect"
     ann.mkdir(parents=True)
-    (ann / "IMG_1.txt").write_text("0 0.5 0.5 0.1 0.1\n")
-    assert find_gt_label(str(img), "detect") == ann / "IMG_1.txt"
+    (ann / "IMG_1.json").write_text("0 0.5 0.5 0.1 0.1\n")
+    assert find_gt_label(str(img), "detect") == ann / "IMG_1.json"
 
 
 def test_find_gt_label_missing_returns_none(tmp_path: Path) -> None:
@@ -72,10 +72,10 @@ def _touch(path: Path, text: str = "") -> None:
 def test_traits_with_labels_is_per_date(tmp_path: Path) -> None:
     root = tmp_path
     # catkin labelled on 2026-02-11 only; bush labelled on 2026-03-02 only.
-    _touch(annotation_dir(root, "catkin", "2026-02-11", "detect") / "IMG_1.txt", "0 0.5 0.5 0.1 0.1\n")
-    _touch(annotation_dir(root, "bush", "2026-03-02", "detect") / "IMG_9.txt", "0 0.5 0.5 0.2 0.2\n")
+    _touch(annotation_dir(root, "catkin", "2026-02-11", "detect") / "IMG_1.json", "0 0.5 0.5 0.1 0.1\n")
+    _touch(annotation_dir(root, "bush", "2026-03-02", "detect") / "IMG_9.json", "0 0.5 0.5 0.2 0.2\n")
     # An empty label file is a confirmed negative — still counts as "labelled".
-    _touch(annotation_dir(root, "catkin", "2026-03-02", "segment") / "IMG_5.txt", "")
+    _touch(annotation_dir(root, "catkin", "2026-03-02", "segment") / "IMG_5.json", "")
 
     assert traits_with_labels(root, "2026-02-11") == ["catkin"]
     # 2026-03-02 has bush (detect) and catkin (empty negative in segment) → both, sorted.
@@ -86,7 +86,7 @@ def test_traits_with_labels_is_per_date(tmp_path: Path) -> None:
 
 def test_models_with_predictions_is_per_date(tmp_path: Path) -> None:
     root = tmp_path
-    _touch(prediction_dir(root, "baseline", "2026-02-11", "detect") / "IMG_1.txt", "0 0.9 0.5 0.5 0.1 0.1\n")
+    _touch(prediction_dir(root, "baseline", "2026-02-11", "detect") / "IMG_1.json", "0 0.9 0.5 0.5 0.1 0.1\n")
     # 'baseline' has a predictions dir on 03-24 but no files in it → not offered.
     (prediction_dir(root, "baseline", "2026-03-24", "detect")).mkdir(parents=True)
 
