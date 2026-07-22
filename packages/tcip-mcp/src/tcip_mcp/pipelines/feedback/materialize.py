@@ -146,11 +146,11 @@ def materialize_dataset(
         # Written into the bucket the emitted label dir resolves to, so training reads these back
         # as confirmed negatives. An unbucketed write would be quarantined as unattributable and
         # every human rejection verdict would be silently dropped from the retrain.
-        campaign, date, _task = parse_annotation_dir(labels_out) or (None, None, "detect")
+        subject, date, _task = parse_annotation_dir(labels_out) or (None, None, "detect")
         status_file = out / ".tcip" / "state" / "image_status.json"
         status_file.parent.mkdir(parents=True, exist_ok=True)
         status_file.write_text(
-            json.dumps({status_bucket(campaign, date): negatives}, indent=2))
+            json.dumps({status_bucket(subject, date): negatives}, indent=2))
 
     manifest = {
         "created": datetime.now(timezone.utc).isoformat(),
