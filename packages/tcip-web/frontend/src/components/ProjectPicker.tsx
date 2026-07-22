@@ -1,7 +1,7 @@
 /**
  * The front door. Lists the projects the agent built under the workspace and opens one —
  * the human never browses the filesystem for two roots. Opening a project points the GUI
- * at it (project root = dataset root); a date/trait/model can be picked per project. The
+ * at it (project root = dataset root); a date/subject/model can be picked per project. The
  * active project (set by the agent after ingesting, or by the human here) auto-opens on
  * first load. Project creation is agent-driven (ingest_images) — the user hands the agent
  * data paths rather than hand-structuring a folder here.
@@ -18,10 +18,10 @@ import { useStore } from "@/store";
 // "Switch project" (which returns here) doesn't immediately re-open the same project.
 let autoOpenAttempted = false;
 
-// The traits/models that actually have data on a given date. Empty when nothing is
+// The subjects/models that actually have data on a given date. Empty when nothing is
 // labelled/predicted there — the selectors show only these, so a date with no catkin
 // labels won't offer "catkin" (which would open a blank canvas).
-const traitsForDate = (p: ProjectSummary, d: string): string[] => p.traits_by_date[d] ?? [];
+const subjectsForDate = (p: ProjectSummary, d: string): string[] => p.subjects_by_date[d] ?? [];
 const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
 
 function relativeTime(epochSeconds: number): string {
@@ -42,7 +42,7 @@ export function ProjectPicker() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [date, setDate] = useState("");
-  const [annType, setAnnType] = useState("");
+  const [subject, setSubject] = useState("");
   const [model, setModel] = useState("");
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -52,26 +52,26 @@ export function ProjectPicker() {
     setSelected(p.name);
     const d = defaultDate(p.dates);
     setDate(d);
-    setAnnType(traitsForDate(p, d)[0] ?? "");
+    setSubject(subjectsForDate(p, d)[0] ?? "");
     setModel(modelsForDate(p, d)[0] ?? "");
     setOpenError(null);
   }
 
-  // Changing date re-scopes the trait/model choices to that date's available data:
+  // Changing date re-scopes the subject/model choices to that date's available data:
   // keep the current pick if it's still valid there, else fall to the first available
   // (or none, which the "Open project" flow handles as no-annotations).
   function chooseDate(p: ProjectSummary, newDate: string) {
     setDate(newDate);
-    const traits = traitsForDate(p, newDate);
+    const subjects = subjectsForDate(p, newDate);
     const models = modelsForDate(p, newDate);
-    setAnnType((prev) => (traits.includes(prev) ? prev : (traits[0] ?? "")));
+    setSubject((prev) => (subjects.includes(prev) ? prev : (subjects[0] ?? "")));
     setModel((prev) => (models.includes(prev) ? prev : (models[0] ?? "")));
   }
 
   async function openProject(
     p: ProjectSummary,
     chosenDate: string,
-    chosenType: string,
+    chosenSubject: string,
     chosenModel: string,
   ) {
     if (openedRef.current) return;
@@ -85,7 +85,7 @@ export function ProjectPicker() {
     setOpening(true);
     setOpenError(null);
     try {
-      await openWorkspaceProject(p, chosenDate, chosenType, chosenModel);
+      await openWorkspaceProject(p, chosenDate, chosenSubject, chosenModel);
       // Mark it active so it auto-opens next time and other clients agree.
       void api.projects.setActive(p.name).catch(() => {});
     } catch (e) {
@@ -108,16 +108,16 @@ export function ProjectPicker() {
           autoOpenAttempted = true;
           const active = res.projects.find((p) => p.name === res.active);
           const d = active ? defaultDate(active.dates) : "";
-          // Auto-open only when the default (newest) date actually has labelled traits —
+          // Auto-open only when the default (newest) date actually has labelled subjects —
           // otherwise skipping straight into the app would land on a blank canvas with no
           // way to change date. Instead preselect the card so the human lands on the picker
           // (honest-empty dropdowns + the date selector) and picks a date with labels.
-          if (active && d && traitsForDate(active, d).length > 0) {
+          if (active && d && subjectsForDate(active, d).length > 0) {
             selectCard(active);
             void openProject(
               active,
               d,
-              traitsForDate(active, d)[0] ?? "",
+              subjectsForDate(active, d)[0] ?? "",
               modelsForDate(active, d)[0] ?? "",
             );
           } else if (active) {
@@ -208,7 +208,7 @@ export function ProjectPicker() {
                       {p.dates.length} date{p.dates.length === 1 ? "" : "s"}
                     </span>
                     <span>
-                      {p.traits.length} trait{p.traits.length === 1 ? "" : "s"}
+                      {p.subjects.length} subject{p.subjects.length === 1 ? "" : "s"}
                     </span>
                     <span>
                       {p.models.length} model{p.models.length === 1 ? "" : "s"}
@@ -240,16 +240,16 @@ export function ProjectPicker() {
                           </select>
                         </label>
                         <label className="flex flex-col gap-1">
-                          <span className="tcip-label">Trait</span>
+                          <span className="tcip-label">Subject</span>
                           <select
                             className="tcip-select"
-                            value={annType}
-                            onChange={(e) => setAnnType(e.target.value)}
+                            value={subject}
+                            onChange={(e) => setSubject(e.target.value)}
                           >
                             <option value="">
-                              {traitsForDate(p, date).length ? "—" : "no labels"}
+                              {subjectsForDate(p, date).length ? "—" : "no labels"}
                             </option>
-                            {traitsForDate(p, date).map((t) => (
+                            {subjectsForDate(p, date).map((t) => (
                               <option key={t} value={t}>
                                 {t}
                               </option>
@@ -278,7 +278,7 @@ export function ProjectPicker() {
                       <button
                         className="tcip-btn-primary"
                         disabled={opening || !date}
-                        onClick={() => openProject(p, date, annType, model)}
+                        onClick={() => openProject(p, date, subject, model)}
                       >
                         {opening
                           ? "Opening…"
