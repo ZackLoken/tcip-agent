@@ -14,19 +14,19 @@ export interface ClassEntry {
 export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
 export const classesApi = {
-  // Class ids are campaign-scoped (catkin=0, bush=0 coexist), and the registry lives in the
+  // Class ids are subject-scoped (catkin=0, bush=0 coexist), and the registry lives in the
   // dataset, not the project — so a shared image set carries its own names. Pass the active
-  // campaign and the dataset_root; the label dirs let the server derive a provisional map when a
-  // campaign has no saved one yet.
+  // subject and the dataset_root; the label dirs let the server derive a provisional map when a
+  // subject has no saved one yet.
   load: (
     project_root: string,
-    trait?: string | null,
+    subject?: string | null,
     dataset_root?: string | null,
     annotations_detect_dir?: string | null,
     annotations_segment_dir?: string | null,
   ) => {
     const params = new URLSearchParams({ project_root });
-    if (trait) params.set("trait", trait);
+    if (subject) params.set("subject", subject);
     if (dataset_root) params.set("dataset_root", dataset_root);
     if (annotations_detect_dir) params.set("annotations_detect_dir", annotations_detect_dir);
     if (annotations_segment_dir) params.set("annotations_segment_dir", annotations_segment_dir);
@@ -35,7 +35,7 @@ export const classesApi = {
 
   save: (
     project_root: string,
-    trait: string | null,
+    subject: string | null,
     classes: ClassEntry[],
     dataset_root?: string | null,
     annotations_detect_dir?: string | null,
@@ -43,7 +43,7 @@ export const classesApi = {
   ) =>
     postJson<{ status: string; n_classes: number }>("/api/classes/save", {
       project_root,
-      trait,
+      subject,
       classes,
       dataset_root,
       annotations_detect_dir,
@@ -53,12 +53,12 @@ export const classesApi = {
   autoColor: (class_id: number) =>
     getJson<{ class_id: number; color: string }>(`/api/classes/auto_color/${class_id}`),
 
-  // A Complete is a statement about one campaign (the annotations/<campaign>/ dir) on one date.
+  // A Complete is a statement about one subject (the annotations/<subject>/ dir) on one date.
   // Every read and write is scoped to it, so confirming an image while annotating catkins cannot
-  // mark it negative for a disease campaign nobody has looked at yet.
-  loadImageStatus: (project_root: string, campaign: string | null, date: string | null) => {
+  // mark it negative for a disease subject nobody has looked at yet.
+  loadImageStatus: (project_root: string, subject: string | null, date: string | null) => {
     const params = new URLSearchParams({ project_root });
-    if (campaign) params.set("campaign", campaign);
+    if (subject) params.set("subject", subject);
     if (date) params.set("date", date);
     return getJson<{ statuses: Record<string, ImageStatus> }>(
       `/api/classes/image_status?${params.toString()}`,
@@ -69,24 +69,24 @@ export const classesApi = {
     project_root: string,
     image_name: string,
     status: ImageStatus,
-    campaign: string | null,
+    subject: string | null,
     date: string | null,
   ) =>
     postJson<unknown>("/api/classes/image_status", {
       project_root,
       image_name,
       status,
-      campaign,
+      subject,
       date,
     }),
 
   setImageStatusBulk: (
     project_root: string,
     statuses: Record<string, ImageStatus>,
-    campaign: string | null,
+    subject: string | null,
     date: string | null,
   ) =>
-    postJson<unknown>("/api/classes/image_status/bulk", { project_root, statuses, campaign, date }),
+    postJson<unknown>("/api/classes/image_status/bulk", { project_root, statuses, subject, date }),
 
   deriveImageStatus: (body: {
     project_root: string;
