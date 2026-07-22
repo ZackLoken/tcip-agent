@@ -14,7 +14,7 @@ from tcip_mcp.audit import audited
 def _scan_dataset(root: str) -> dict:
     """Scan a directory tree for images and labels in any supported format.
 
-    Detects YOLO (.txt), PASCAL VOC (.xml), COCO (.json), and LabelMe (.json).
+    Reads the canonical per-image JSON labels, or an assembled dataset-level COCO.
     """
     root_path = Path(root)
     image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
@@ -24,7 +24,7 @@ def _scan_dataset(root: str) -> dict:
     labels_segment: list[str] = []
     preds_detect: list[str] = []
     preds_segment: list[str] = []
-    detected_format: str = "yolo"
+    detected_format: str | None = None
 
     # Find images (recurse to catch the canonical images/<date>/ layout).
     images_dir = root_path / "images"
@@ -48,8 +48,8 @@ def _scan_dataset(root: str) -> dict:
             try:
                 from tcip_annotation.format_io import detect_format
                 detected_format = detect_format(labels_detect[0])
-            except Exception:
-                pass
+            except ValueError:
+                detected_format = None  # unrecognized: report nothing rather than a guess
 
     # A single COCO JSON at the dataset root
     for candidate in ("annotations.json", "labels.json", "instances.json"):
@@ -60,7 +60,7 @@ def _scan_dataset(root: str) -> dict:
                 if detect_format(str(coco_path)) == "coco":
                     labels_detect = [str(coco_path)]
                     detected_format = "coco"
-            except Exception:
+            except ValueError:
                 pass
             break
 
@@ -90,8 +90,7 @@ def _scan_dataset(root: str) -> dict:
 def scan_dataset(folder_path: str) -> dict:
     """Scan a folder for images, labels, and predictions.
 
-    Supports YOLO (.txt), PASCAL VOC (.xml), COCO (.json), and LabelMe (.json).
-    Format is auto-detected from file extensions and content.
+    Reads the canonical per-image JSON labels, or an assembled dataset-level COCO.
 
     Expects the canonical layout (see tcip_mcp.dataset_layout):
         images/<date>/  annotations/<trait>/<date>/{detect,segment}/
@@ -119,7 +118,7 @@ def scan_dataset(folder_path: str) -> dict:
 
     return {
         "path": folder_path,
-        "format": scan.get("format", "yolo"),
+        "format": scan.get("format"),
         "image_count": len(scan["images"]),
         "labels_detect_count": len(scan["labels_detect"]),
         "labels_segment_count": len(scan["labels_segment"]),
@@ -137,7 +136,6 @@ def validate_data_quality(folder_path: str) -> dict:
     """Run quality checks on a dataset (any supported annotation format).
 
     Checks: empty labels, missing images, class consistency, coordinate ranges.
-    Auto-detects format (YOLO, COCO, PASCAL VOC, LabelMe).
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -147,11 +145,11 @@ def validate_data_quality(folder_path: str) -> dict:
 
     scan = _scan_dataset(folder_path)
     issues: list[dict] = []
-    fmt = scan.get("format", "yolo")
+    fmt = scan.get("format")
 
     image_stems = {Path(p).stem for p in scan["images"]}
 
-    # For per-file formats (yolo, voc, labelme), check stem matching
+    # Per-image labels: check stem matching (a dataset-level COCO has no per-stem file)
     if fmt != "coco":
         for label_path in scan["labels_detect"]:
             stem = Path(label_path).stem
@@ -161,35 +159,7 @@ def validate_data_quality(folder_path: str) -> dict:
     # Format-specific validation
     class_ids: set[int] = set()
 
-    if fmt == "yolo":
-        for label_path in scan["labels_detect"]:
-            with open(label_path, "r") as f:
-                for line_no, line in enumerate(f, 1):
-                    parts = line.strip().split()
-                    if len(parts) == 0:
-                        continue
-                    if len(parts) != 5:
-                        issues.append(
-                            {"level": "error", "file": label_path, "line": line_no,
-                             "message": f"Expected 5 fields, got {len(parts)}"}
-                        )
-                        continue
-                    try:
-                        cid = int(parts[0])
-                        vals = [float(v) for v in parts[1:]]
-                        class_ids.add(cid)
-                        for v in vals:
-                            if v < 0 or v > 1:
-                                issues.append(
-                                    {"level": "warning", "file": label_path, "line": line_no,
-                                     "message": f"Coordinate out of [0,1] range: {v:.4f}"}
-                                )
-                    except ValueError:
-                        issues.append(
-                            {"level": "error", "file": label_path, "line": line_no,
-                             "message": "Non-numeric field"}
-                        )
-    elif fmt == "json":  # canonical per-image COCO/JSON (tcip_annotation.json_io)
+    if fmt == "json":  # the canonical per-image label file
         from tcip_annotation import json_io
         for label_path in scan["labels_detect"]:
             try:
@@ -197,14 +167,6 @@ def validate_data_quality(folder_path: str) -> dict:
                 class_ids.update(cids)
             except Exception as e:
                 issues.append({"level": "error", "file": label_path, "message": f"JSON parse error: {e}"})
-    elif fmt == "voc":
-        from tcip_annotation.format_io import parse_voc_detect
-        for label_path in scan["labels_detect"]:
-            try:
-                boxes, cids, _ = parse_voc_detect(label_path)
-                class_ids.update(cids)
-            except Exception as e:
-                issues.append({"level": "error", "file": label_path, "message": f"VOC parse error: {e}"})
     elif fmt == "coco":
         from tcip_annotation.format_io import _parse_coco_json
         for label_path in scan["labels_detect"]:
@@ -221,15 +183,6 @@ def validate_data_quality(folder_path: str) -> dict:
                         issues.append({"level": "warning", "file": label_path, "message": f"COCO image '{fn}' not found in images dir"})
             except Exception as e:
                 issues.append({"level": "error", "file": label_path, "message": f"COCO parse error: {e}"})
-    elif fmt == "labelme":
-        from tcip_annotation.format_io import parse_labelme_detect
-        for label_path in scan["labels_detect"]:
-            try:
-                boxes, cids, _ = parse_labelme_detect(label_path)
-                class_ids.update(cids)
-            except Exception as e:
-                issues.append({"level": "error", "file": label_path, "message": f"LabelMe parse error: {e}"})
-
     # Check for empty label files (per-file formats only)
     if fmt != "coco":
         for label_path in scan["labels_detect"]:
@@ -269,7 +222,7 @@ def make_splits(
     leakage), and — when ``stratify_foreground`` is set — splits are balanced by annotation
     count so dense and sparse sources are proportionally represented.
 
-    With ``materialize=True`` it additionally lays out a YOLO
+    With ``materialize=True`` it additionally lays out a
     ``{train,val,test}/{images,labels}/`` tree under ``output_path`` (defaulting to
     ``folder_path/splits``), copying (or symlinking, ``copy_files=False``) each stem's image and
     label — and adds ``output_dir`` / ``structure`` to the return.
@@ -286,7 +239,7 @@ def make_splits(
         output_path: Where to write manifests (and, when materializing, the file tree).
             Defaults to ``folder_path/splits`` when materializing, else manifests are
             written only if this is set.
-        materialize: Also copy/symlink files into a YOLO directory tree.
+        materialize: Also copy/symlink files into a {train,val,test}/{images,labels}/ tree.
         copy_files: Copy files (True) or create symlinks (False) when materializing.
     """
     if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
