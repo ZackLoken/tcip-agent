@@ -201,9 +201,10 @@ def load_labels(
 def save_labels(payload: SavePayload) -> dict:
     """Write labels for an image. Either detect_path or segment_path may be omitted.
 
-    Empty box/polygon lists are written as 0-byte files (``keep_empty=True``) rather than
-    deleted: an annotator who clears all annotations is recording a *confirmed negative*,
-    and empty label files are valid negatives (CLAUDE.md invariant), not noise to prune.
+    Empty box/polygon lists are written as ``objects: []`` records (``keep_empty=True``) rather
+    than deleted, so clearing all annotations keeps the record instead of erasing it. That record
+    is not a negative on its own — it trains as one only once the breeder marks the image Complete
+    (``image_status.json``); until then it reads as unannotated (CLAUDE.md's negative invariant).
     """
     w, h = _image_dims(payload.image_path)
     _guard_label_path(payload.detect_path)
