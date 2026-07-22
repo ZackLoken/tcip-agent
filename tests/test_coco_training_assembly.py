@@ -355,14 +355,14 @@ def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
     state.mkdir(parents=True)
     (state / "image_status.json").write_text(json.dumps({"catkin": {"a.jpg": "negative"}}))
 
-    with pytest.raises(ValueError, match="cannot tell which campaign"):
+    with pytest.raises(ValueError, match="cannot tell which subject"):
         confirmed_negative_names(labels)
 
 
 def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
     """Refuse only when there is something to lose.
 
-    A split or curated export cannot name its campaign. Raising there would block the platform's
+    A split or curated export cannot name its subject. Raising there would block the platform's
     own documented split -> train path; with no confirmed negatives in the project there is nothing
     to drop, so it must proceed.
     """
@@ -378,7 +378,7 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
 
 
 def test_split_tree_carries_its_confirmed_negatives(tmp_path):
-    """make_splits(materialize=True) emits {train,val,test}/labels, which cannot name its campaign,
+    """make_splits(materialize=True) emits {train,val,test}/labels, which cannot name its subject,
     so it must carry the confirmations rather than inherit them by accident."""
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
     from tcip_mcp.tools.data_tools import make_splits
