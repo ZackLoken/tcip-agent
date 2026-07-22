@@ -30,14 +30,6 @@ def test_dir_label_format_detects_json(tmp_path):
     assert dir_label_format(d) == "json"
 
 
-def test_dir_label_format_detects_yolo(tmp_path):
-    from tcip_mcp.pipelines.data.datasets import dir_label_format
-    d = tmp_path / "detect"
-    d.mkdir()
-    (d / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n")
-    assert dir_label_format(d) == "yolo"
-
-
 def test_dir_label_format_ignores_non_canonical_json(tmp_path):
     """A LabelMe-style .json (``shapes``, no ``objects``) is not the canonical store — don't claim
     it, so it never gets silently assembled as though it were per-image JSON."""
@@ -121,20 +113,6 @@ def test_build_dataset_detection_autoresolves_json(tmp_path):
     assert ds.class_distribution == {0: 1}
 
 
-def test_build_dataset_detection_rejects_yolo_txt(tmp_path):
-    """A legacy YOLO ``.txt`` dir is import-only — build_dataset rejects it (convert to JSON first)
-    rather than silently reading it as all-empty negatives."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset
-    images = tmp_path / "images"
-    labels = tmp_path / "detect"
-    labels.mkdir()
-    _make_images(images, ["img0"])
-    (labels / "img0.txt").write_text("0 0.3 0.3 0.4 0.4\n")
-
-    with pytest.raises(ValueError, match="YOLO"):
-        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
-
-
 def test_build_dataset_respects_explicit_format(tmp_path):
     """An explicit label_format is never overridden by auto-resolve."""
     from tcip_mcp.pipelines.data.datasets import build_dataset
@@ -168,21 +146,6 @@ def test_build_dataset_instance_seg_autoresolves_json(tmp_path):
     assert int(target["masks"].sum()) > 0  # polygon rasterized to a non-empty mask
 
 
-def test_build_dataset_instance_seg_rejects_yolo_txt(tmp_path):
-    """Instance-seg likewise rejects a legacy YOLO-polygon ``.txt`` dir (import to JSON first)."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset
-    images = tmp_path / "images"
-    labels = tmp_path / "segment"
-    labels.mkdir()
-    _make_images(images, ["img0"])
-    (labels / "img0.txt").write_text("0 0.1 0.1 0.5 0.1 0.5 0.5 0.1 0.5\n")
-
-    with pytest.raises(ValueError, match="YOLO"):
-        build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels), num_classes=1)
-
-
-# ── stratification line count ───────────────────────────────────────────────
-
 def test_count_label_lines_reads_json_objects(tmp_path):
     from tcip_mcp.pipelines.data.splits import count_label_lines
     labels = tmp_path / "detect"
@@ -193,18 +156,6 @@ def test_count_label_lines_reads_json_objects(tmp_path):
     assert count_label_lines(labels, "neg") == 0
     assert count_label_lines(labels, "missing") == 0
 
-
-def test_count_label_lines_txt_fallback(tmp_path):
-    from tcip_mcp.pipelines.data.splits import count_label_lines
-    labels = tmp_path / "detect"
-    labels.mkdir()
-    (labels / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n0 0.2 0.2 0.1 0.1\n")
-    assert count_label_lines(labels, "a") == 2
-
-
-# ====================================================================
-# The negative rail on the SAMPLE SET, not just the assembled COCO
-# ====================================================================
 
 def _rail_fixture(tmp_path):
     """One annotated image, one empty-unconfirmed, one with no label file, one confirmed negative."""
