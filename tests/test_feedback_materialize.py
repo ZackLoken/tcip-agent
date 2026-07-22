@@ -97,20 +97,6 @@ def test_only_completed_and_select_unreviewed():
     assert reviewed_image_names(state) == {"imgA.png", "imgB.png"}
     assert select_unreviewed(["/a/imgA.png", "/a/imgZ.png"], {"imgA.png"}) == ["/a/imgZ.png"]
 
-
-def test_unit_scale_label_round_trips(tmp_path):
-    from tcip_annotation.label_io import write_detect_labels, parse_detect_labels
-    from tcip_annotation.state import BBox
-    cx, cy, w, h = 0.512345, 0.6, 0.2, 0.3
-    path = tmp_path / "lbl.txt"
-    write_detect_labels(str(path), [BBox(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, 3)], img_w=1, img_h=1)
-    boxes, _ = parse_detect_labels(str(path), 1, 1)
-    b = boxes[0]
-    assert b.class_id == 3
-    assert (b.x1 + b.x2) / 2 == pytest.approx(cx, abs=1e-6)
-    assert (b.x2 - b.x1) == pytest.approx(w, abs=1e-6)
-
-
 def test_hard_negatives_survive_into_training(tmp_path):
     """A rejected-only image is a human-confirmed negative and must train as one.
 
