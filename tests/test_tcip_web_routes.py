@@ -90,12 +90,12 @@ def test_dataset_tree(client: TestClient, dataset_root: Path) -> None:
     body = resp.json()
     assert "2-11-26" in body["dates_with_images"]
     assert "3-2-26" in body["dates_with_images"]
-    assert sorted(body["annotation_types"]) == ["bush", "catkin"]
+    assert sorted(body["subjects"]) == ["bush", "catkin"]
     assert "baseline" in body["model_names"]
-    # Per-date maps present for every image date (empty here — the fixture makes trait
+    # Per-date maps present for every image date (empty here — the fixture makes subject
     # dirs but no label files).
-    assert set(body["traits_by_date"]) == {"2-11-26", "3-2-26"}
-    assert body["traits_by_date"]["2-11-26"] == []
+    assert set(body["subjects_by_date"]) == {"2-11-26", "3-2-26"}
+    assert body["subjects_by_date"]["2-11-26"] == []
 
 
 def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_path: Path) -> None:
@@ -113,8 +113,8 @@ def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_pa
     _write_pred_detect(pdet / "IMG_1.json", [(1, 1, 3, 3, 0, 0.9)], w=8, h=8)
 
     body = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
-    assert body["traits_by_date"]["2026-02-11"] == ["catkin"]
-    assert body["traits_by_date"]["2026-03-24"] == []
+    assert body["subjects_by_date"]["2026-02-11"] == ["catkin"]
+    assert body["subjects_by_date"]["2026-03-24"] == []
     assert body["models_by_date"]["2026-02-11"] == ["baseline"]
     assert body["models_by_date"]["2026-03-24"] == []
 
@@ -137,14 +137,14 @@ def test_dataset_select_populates_state(client: TestClient, dataset_root: Path, 
         json={
             "project_root": str(project),
             "dataset_root": str(dataset_root),
-            "annotation_type": "catkin",
+            "subject": "catkin",
             "date": "2-11-26",
             "model_name": "baseline",
         },
     )
     assert resp.status_code == 200
     sel = resp.json()["selection"]
-    assert sel["annotation_type"] == "catkin"
+    assert sel["subject"] == "catkin"
     assert sel["date"] == "2-11-26"
     assert len(sel["image_list"]) == 3
     assert sel["annotations_detect_dir"].endswith("catkin/2-11-26/detect") or sel[
@@ -160,7 +160,7 @@ def test_dataset_select_advisory_reflects_actual_labels(
     body = {
         "project_root": str(project),
         "dataset_root": str(dataset_root),
-        "annotation_type": "catkin",
+        "subject": "catkin",
         "date": "2-11-26",
         "model_name": "baseline",
     }
@@ -192,7 +192,7 @@ def test_dataset_nav_persists_current_index(
         json={
             "project_root": str(project),
             "dataset_root": str(dataset_root),
-            "annotation_type": "catkin",
+            "subject": "catkin",
             "date": "2-11-26",
         },
     )
@@ -778,7 +778,7 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
 def test_review_action_records_real_class_name_and_reviewer(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    # The engine resolves the class name from the reviewed label's own campaign registry in the
+    # The engine resolves the class name from the reviewed label's own subject registry in the
     # dataset — so it records "catkin", not the "class_{id}" placeholder.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     det_gt = dataset_root / "annotations" / "catkin" / "2-11-26" / "detect" / "IMG_0000.json"
@@ -1066,12 +1066,12 @@ def test_annotate_derived_boxes_inherit_polygon_provenance(client, dataset_root,
     assert det_objs[1]["created_by"] == "user:zack"    # new polygon -> stamped -> box inherits
 
 
-def test_review_class_names_do_not_bleed_across_campaigns(
+def test_review_class_names_do_not_bleed_across_subjects(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    """Class names are resolved per request from the reviewed label's own campaign registry, so
+    """Class names are resolved per request from the reviewed label's own subject registry, so
     class 0 shows 'catkin' when reviewing catkin and 'bud_mite' when reviewing efb — never one
-    campaign's name for the other's labels (the bug a project-cached engine would have)."""
+    subject's name for the other's labels (the bug a project-cached engine would have)."""
     import json
 
     (dataset_root / "classes").mkdir(exist_ok=True)
@@ -1083,11 +1083,11 @@ def test_review_class_names_do_not_bleed_across_campaigns(
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
-    def _class_name_for(campaign: str) -> str:
-        gt = dataset_root / "annotations" / campaign / "2-11-26" / "detect" / "IMG_0000.json"
+    def _class_name_for(subject: str) -> str:
+        gt = dataset_root / "annotations" / subject / "2-11-26" / "detect" / "IMG_0000.json"
         gt.parent.mkdir(parents=True, exist_ok=True)
         _write_gt_detect(gt, [(40, 32, 60, 48, 0)])
-        pred = tmp_path / f"pred_{campaign}.json"
+        pred = tmp_path / f"pred_{subject}.json"
         _write_pred_detect(pred, [(40, 32, 60, 48, 0, 0.9)])
         resp = client.post(
             "/api/review/action",
@@ -1105,4 +1105,4 @@ def test_review_class_names_do_not_bleed_across_campaigns(
         return shard["state"]["detections"][0]["class_name"]
 
     assert _class_name_for("catkin") == "catkin"
-    assert _class_name_for("efb") == "efb_canker"  # same class 0, different campaign, different name
+    assert _class_name_for("efb") == "efb_canker"  # same class 0, different subject, different name
