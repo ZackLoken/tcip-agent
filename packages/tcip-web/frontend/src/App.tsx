@@ -191,7 +191,12 @@ function App() {
     void (async () => {
       try {
         const reg = await classesApi.load(
-          projectRoot, subject, datasetRoot, annDetectDir, annSegDir);
+          projectRoot,
+          subject,
+          datasetRoot,
+          annDetectDir,
+          annSegDir,
+        );
         setClasses(reg.classes);
 
         // Scoped to the selected subject: a Complete recorded while annotating catkin says
