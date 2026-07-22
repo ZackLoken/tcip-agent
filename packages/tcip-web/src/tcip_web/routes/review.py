@@ -46,20 +46,31 @@ router = APIRouter(prefix="/api/review", tags=["review"])
 
 _engines: dict[str, ReviewEngine] = {}
 
-# classes.json memo, keyed by (path, mtime_ns): _get_engine re-reads it on every /matches and
-# /action call, so an unwritten map shouldn't be re-parsed each request; a save bumps mtime_ns
-# and invalidates just that entry. Bounded — one entry per distinct project.
+# Class-name memo keyed by (registry path, mtime_ns): _get_engine resolves names per request from
+# the reviewed label's own campaign registry, so an unchanged map isn't re-parsed each call; a save
+# bumps mtime_ns and invalidates just that entry. Bounded.
 _CLASS_NAMES_CACHE_MAX = 256
 _class_names_cache: dict[str, tuple[int, dict[int, str]]] = {}
 
 
-def _load_class_names(project_root: str) -> dict[int, str]:
-    """Read id→name from ``<project_root>/.tcip/state/classes.json``.
+def _load_class_names(gt_path: str | None) -> dict[int, str]:
+    """Read id→name for the campaign a GT label path belongs to, from its dataset registry.
 
-    Without this the engine records ``class_{id}`` placeholders; loading the real
-    names makes review_stats human-auditable (and refreshes when classes are added).
+    The registry is campaign-scoped and lives in the dataset (``<dataset_root>/classes/<campaign>``),
+    so names are resolved per request from the label being reviewed — a project with two campaigns
+    never shows one's names for the other. Without a resolvable registry the engine records
+    ``class_{id}`` placeholders (display only; the negative rail does not depend on names).
     """
-    path = Path(project_root) / ".tcip" / "state" / "classes.json"
+    if not gt_path:
+        return {}
+    from tcip_mcp.dataset_layout import classes_path, dataset_root_of, parse_annotation_dir
+
+    label_dir = Path(gt_path).parent
+    root = dataset_root_of(label_dir)
+    parsed = parse_annotation_dir(label_dir)
+    if root is None or parsed is None:
+        return {}
+    path = classes_path(root, parsed[0])
     try:
         mtime_ns = path.stat().st_mtime_ns
     except OSError:
@@ -93,9 +104,9 @@ def _current_user() -> str:
     return current_user()
 
 
-def _get_engine(project_root: str) -> ReviewEngine:
+def _get_engine(project_root: str, gt_path: str | None = None) -> ReviewEngine:
     key = str(Path(project_root).resolve())
-    class_names = _load_class_names(project_root)
+    class_names = _load_class_names(gt_path)
     if key not in _engines:
         state_dir = Path(project_root) / ".tcip" / "state"
         _engines[key] = ReviewEngine(
@@ -322,7 +333,7 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
         pred_detect_path=req.pred_detect_path,
         pred_segment_path=req.pred_segment_path,
     )
-    engine = _get_engine(req.project_root)
+    engine = _get_engine(req.project_root, req.gt_detect_path or req.gt_segment_path)
 
     matches = compute_matches(
         gt_boxes=ctx.gt_boxes,
@@ -447,7 +458,8 @@ def record_action(payload: ActionPayload) -> dict:
         pred_detect_path=payload.pred_detect_path,
         pred_segment_path=payload.pred_segment_path,
     )
-    engine = _get_engine(payload.project_root)
+    engine = _get_engine(payload.project_root,
+                         payload.gt_detect_path or payload.gt_segment_path)
     # GUI-set reviewer drives both the verdict log (reviewed_by, bare) and the GT provenance
     # (accepted_by/created_by, "user:<name>") so the two never disagree on who acted.
     reviewer_name = resolve_user(payload.user)
