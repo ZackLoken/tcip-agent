@@ -100,15 +100,16 @@ def build_plant_mapping(
     }
 
 
-def _resolve_positive_class_id(trait_name: str, classes_json_path: str | None) -> tuple[int | None, str]:
-    """Resolve the trait's positive (elongated) class id from ``classes.json`` BY NAME.
+def _resolve_positive_class_id(trait_name: str, classes_json_path: str | None,
+                               dataset_root: str | Path | None = None) -> tuple[int | None, str]:
+    """Resolve the trait's positive (elongated) class id from its dataset class registry BY NAME.
 
     The id is a mapping fact read from the labels' class map, never a pinned magic default. Returns
     ``(class_id, message)``; ``class_id`` is ``None`` when it cannot be resolved honestly (no class
     map, or the trait's ``positive_class_name`` is absent from it) so the caller refuses rather than
     silently falling back to a guessed id.
     """
-    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.dataset_layout import classes_path
     from tcip_mcp.traits import get_trait
 
     name = get_trait(trait_name).positive_class_name
@@ -116,10 +117,10 @@ def _resolve_positive_class_id(trait_name: str, classes_json_path: str | None) -
         return None, f"trait {trait_name!r} defines no positive_class_name"
     if classes_json_path:
         candidates = [Path(classes_json_path)]
+    elif dataset_root is not None:
+        candidates = [classes_path(dataset_root, trait_name)]
     else:
-        state = Path(".tcip") / "state"
-        candidates = [resolve_state(state / "classes" / f"{trait_name}.json"),
-                      resolve_state(state / "classes.json")]
+        candidates = []
     for path in candidates:
         if not path.is_file():
             continue
@@ -206,12 +207,13 @@ def compute_phenology(
             prediction files (``<stem>.json``) from the state classifier.
         output_csv_path: Where to write the delivered per-plant CSV (e.g. ``catkin_phenology.csv``).
         positive_class_id: Class id the classifier assigns to the trait's positive/measured state
-            (for catkin, "elongated"). ``None`` (default) derives it from ``classes.json`` by the
+            (for catkin, "elongated"). ``None`` (default) derives it from the dataset class registry by the
             trait's positive class name (a mapping fact from the labels, never a pinned default) —
             the tool refuses if that name is absent rather than guessing an id. An explicit id is
             honored as-is.
         classes_json_path: Optional explicit path to the class map used to resolve the positive
-            class id; ``None`` uses the trait's canonical ``.tcip/state/classes`` map.
+            class id; ``None`` uses the campaign registry in the predictions' dataset
+            (``<dataset_root>/classes/<trait>.json``).
         classifier_validated: The state classifier's ``validated_vs_gt`` state; a CSV
             is only written unacknowledged when this is ``validated_held_out``.
         operating_point_conf: The count operating point (conf) the predictions were produced
@@ -247,7 +249,13 @@ def compute_phenology(
     spec = get_trait(trait_name)
     pos = spec.positive_class_name or "positive"
     if positive_class_id is None:
-        positive_class_id, msg = _resolve_positive_class_id(trait_name, classes_json_path)
+        from tcip_mcp.dataset_layout import dataset_root_of
+
+        # The registry lives in the dataset the predictions came from; every prediction dir is
+        # <dataset_root>/predictions/<model>/<date>/<task>.
+        ds_root = next((dataset_root_of(d) for d in predictions_by_date.values()
+                        if dataset_root_of(d) is not None), None)
+        positive_class_id, msg = _resolve_positive_class_id(trait_name, classes_json_path, ds_root)
         if positive_class_id is None:
             return {"error": (f"could not resolve the {pos} class id from the class map by name "
                               f"({msg}). Name the {pos} class so the id is derived from the "
