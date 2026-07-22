@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from tcip_mcp.tools.project_tools import (
@@ -47,6 +48,10 @@ def test_export_import_roundtrip(tmp_path: Path):
 
     Image.new("RGB", (64, 64)).save(images / "img_000.jpg")
     json_io.write_detect(str(labels / "img_000.json"), [BBox(10, 10, 30, 30, 0)], 64, 64)
+    # The campaign class registry decodes the labels' category_ids — a self-contained bundle must
+    # carry it, or the archived annotations are unreadable on the other end.
+    (src / "classes").mkdir()
+    (src / "classes" / "default.json").write_text('{"0": {"name": "catkin", "color": "#FF0000"}}')
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
@@ -63,3 +68,6 @@ def test_export_import_roundtrip(tmp_path: Path):
     assert status["has_config"] is True
     assert status["image_count"] == 1
     assert (dest / "annotations" / "default" / date / "detect" / "img_000.json").is_file()
+    # The registry survived, so the restored labels are still decodable.
+    restored_map = json.loads((dest / "classes" / "default.json").read_text())
+    assert restored_map["0"]["name"] == "catkin"
