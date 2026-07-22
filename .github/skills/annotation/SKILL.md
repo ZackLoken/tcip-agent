@@ -141,7 +141,7 @@ The agent must **never write ground truth the human hasn't seen**. Stage proposa
   fresh `<model>@r2` bucket (the response's `bucket` field is the one actually written), so a
   re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place, which is
   still refused when verdicts exist.
-- **`focus(tab='review', project_root, dataset_root, trait, date, model_name, image_index,
+- **`focus(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
   detection_idx, filter_type, iou, conf)`** drives the live Review tab straight to a model's
   predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a
   missed catkin) without hunting. The Review analog of `focus(tab='annotate')`; a soft no-op if no
