@@ -48,7 +48,7 @@ def test_export_import_roundtrip(tmp_path: Path):
 
     Image.new("RGB", (64, 64)).save(images / "img_000.jpg")
     json_io.write_detect(str(labels / "img_000.json"), [BBox(10, 10, 30, 30, 0)], 64, 64)
-    # The campaign class registry decodes the labels' category_ids — a self-contained bundle must
+    # The subject class registry decodes the labels' category_ids — a self-contained bundle must
     # carry it, or the archived annotations are unreadable on the other end.
     (src / "classes").mkdir()
     (src / "classes" / "default.json").write_text('{"0": {"name": "catkin", "color": "#FF0000"}}')
