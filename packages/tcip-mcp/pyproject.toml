@@ -11,6 +11,7 @@ dependencies = [
     "timm>=1.0",
     "numpy",
     "pillow>=9.0",
+    "tifffile>=2023.1",
     "shapely>=2.0",
     "pycocotools>=2.0.7",
     "pydantic>=2",
