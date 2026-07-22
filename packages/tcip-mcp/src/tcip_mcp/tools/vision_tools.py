@@ -525,7 +525,7 @@ def propose_annotations(
 
     out = render_candidates(image_path, candidates)
 
-    # Resolve state via the platform root (like write_class_map), not a CWD-relative path, so the
+    # Resolve state via the platform root, not a CWD-relative path, so the
     # handoff to accept_proposals survives CWD != project root. The envelope records the engine so
     # accept_proposals stamps the right producer and stages into the matching bucket.
     from tcip_mcp.project_paths import resolve_state
