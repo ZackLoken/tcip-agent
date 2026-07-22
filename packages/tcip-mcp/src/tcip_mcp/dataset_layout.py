@@ -3,13 +3,17 @@ image's ground-truth labels and model predictions live on disk.
 
 Canonical layout (the label tree mirrors ``images/<date>/`` so stem-pairing is
 trivial and capture dates never collide; role / trait / date / task are orthogonal
-path segments and *class semantics live in ``classes.json``, never in filenames*)::
+path segments and *class semantics live in the campaign class registry, never in filenames*)::
 
     <dataset_root>/
         images/<date>/<stem>.<imgext>
-        annotations/<trait>/<date>/<task>/<stem>.<labelext>     # ground truth
+        annotations/<campaign>/<date>/<task>/<stem>.<labelext>  # ground truth
         predictions/<model>/<date>/<task>/<stem>.<labelext>     # model outputs
-        classes.json
+        classes/<campaign>.json                                 # what its category_ids mean
+
+The class registry lives **in the dataset**, campaign-scoped: ``category_id: 0`` is undecodable
+without it, so it must travel with the labels rather than sit in a project's private state. A second
+project opening the same image set reads the same names.
 
 ``<trait>`` is the annotation campaign (the GUI's ``annotation_type``); ``<task>`` is
 ``detect`` | ``segment``. A ``<date>`` of ``None`` (non-dated datasets) simply omits
@@ -121,6 +125,37 @@ def parse_annotation_dir(path: str | Path) -> Optional[tuple[str, Optional[str],
     if len(parts) >= 2 and parts[-1] == "labels" and parts[-2] in SPLIT_NAMES:
         return DEFAULT_TRAIT, None, TASKS[0]
     return None
+
+
+#: The top-level segments under a dataset root; a path under any of them locates the root.
+_DATASET_SEGMENTS = ("annotations", "predictions", "images", "classes")
+
+
+def dataset_root_of(path: str | Path) -> Optional[Path]:
+    """The ``<dataset_root>`` a canonical sub-path lives under, or ``None`` if it is not one.
+
+    ``<dataset_root>/{annotations|predictions|images|classes}/...`` -> ``<dataset_root>``. Lets a
+    consumer that holds only a label or prediction dir locate the dataset-level class registry that
+    decodes those ids. Anchors on the *last* dataset segment in the path, so a dataset physically
+    nested under an ancestor named ``images`` (or another segment) still resolves to the real root
+    rather than the ancestor. A bare segment with nothing above it is not inside a dataset -> ``None``.
+    """
+    parts = Path(path).parts
+    idxs = [k for k, p in enumerate(parts) if p in _DATASET_SEGMENTS]
+    if not idxs:
+        return None
+    i = max(idxs)
+    return Path(*parts[:i]) if i > 0 else None
+
+
+def classes_path(dataset_root: str | Path, campaign: Optional[str]) -> Path:
+    """``<dataset_root>/classes/<campaign>.json`` — the registry that decodes a campaign's labels.
+
+    In the dataset (not a project's private state) and campaign-scoped, so ``catkin`` and ``bush``
+    each keep their own id ``0`` and both travel with the image set. ``category_id`` in a label file
+    is meaningless without this map, so it is part of the data, not project working state.
+    """
+    return Path(dataset_root, "classes", f"{campaign or DEFAULT_TRAIT}.json")
 
 
 def status_bucket(campaign: Optional[str], date: Optional[str]) -> str:
