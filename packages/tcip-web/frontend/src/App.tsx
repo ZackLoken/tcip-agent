@@ -48,12 +48,11 @@ function App() {
       `${s.gui.dataset.dataset_root ?? ""}::${s.gui.dataset.subject ?? ""}::${s.gui.dataset.date ?? ""}`,
   );
   const imageList = useStore((s) => s.gui.dataset.image_list);
-  const annDetectDir = useStore((s) => s.gui.dataset.annotations_detect_dir);
-  const annSegDir = useStore((s) => s.gui.dataset.annotations_segment_dir);
+  const annotationsDir = useStore((s) => s.gui.dataset.annotations_dir);
   const subject = useStore((s) => s.gui.dataset.subject);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const datasetDate = useStore((s) => s.gui.dataset.date);
-  const setClasses = useStore((s) => s.setClasses);
+  const setRegistry = useStore((s) => s.setRegistry);
   const setImageStatuses = useStore((s) => s.setImageStatuses);
   const endedSessionForRoot = useRef<string | null>(null);
 
@@ -185,19 +184,22 @@ function App() {
     return () => window.removeEventListener("beforeunload", guardUnload);
   }, []);
 
-  // Hydrate classes + per-image status whenever the dataset selection changes.
+  // Hydrate the subject registry + per-image status whenever the dataset selection changes.
   useEffect(() => {
     if (!projectRoot || imageList.length === 0) return;
     void (async () => {
       try {
-        const reg = await classesApi.load(
-          projectRoot,
-          subject,
-          datasetRoot,
-          annDetectDir,
-          annSegDir,
-        );
-        setClasses(reg.classes);
+        const reg = await classesApi.load(projectRoot, datasetRoot, annotationsDir);
+        setRegistry(reg.subjects);
+        // Default the active authoring subject to the selection's subject when it exists in the
+        // registry, else the first declared subject — a shape can't be authored with none set.
+        const names = Object.keys(reg.subjects);
+        const active = useStore.getState().gui.active_subject;
+        if (!active || !names.includes(active)) {
+          useStore
+            .getState()
+            .setActiveSubject(subject && names.includes(subject) ? subject : (names[0] ?? null));
+        }
 
         // Scoped to the selected subject: a Complete recorded while annotating catkin says
         // nothing about bush, and reading a global map re-applied it to subjects the breeder
@@ -212,8 +214,8 @@ function App() {
         );
         const derivedRes = await classesApi.deriveImageStatus({
           project_root: projectRoot,
-          annotations_detect_dir: annDetectDir,
-          annotations_segment_dir: annSegDir,
+          annotations_dir: annotationsDir,
+          subject,
           image_list: imageList,
           complete_override: confirmed,
         });
@@ -229,8 +231,10 @@ function App() {
         }
         setImageStatuses(reconciled);
       } catch (err) {
-        console.warn("class / image-status hydrate failed", err);
-        useStore.getState().pushToast("Could not load classes / image status for this project.");
+        console.warn("registry / image-status hydrate failed", err);
+        useStore
+          .getState()
+          .pushToast("Could not load the registry / image status for this project.");
       }
     })();
   }, [
@@ -240,9 +244,8 @@ function App() {
     subject,
     datasetRoot,
     datasetDate,
-    annDetectDir,
-    annSegDir,
-    setClasses,
+    annotationsDir,
+    setRegistry,
     setImageStatuses,
   ]);
 
