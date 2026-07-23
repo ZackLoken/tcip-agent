@@ -39,17 +39,23 @@ from tcip_mcp.tools.annotation_tools import (
 
 @pytest.fixture()
 def project_dir(tmp_path: Path) -> Path:
-    """Fully populated TCIP project with images, labels, and predictions."""
+    """Fully populated TCIP project with images, labels, predictions, and a nested registry."""
     root = tmp_path / "my_project"
     date = "2-11-26"
     images = root / "images" / date
-    labels_det = root / "annotations" / "default" / date / "detect"
-    preds_det = root / "predictions" / "live" / date / "detect"
-    for d in (images, labels_det, preds_det):
+    labels_dir = root / "annotations" / date
+    preds_dir = root / "predictions" / "live" / date
+    for d in (images, labels_dir, preds_dir):
         d.mkdir(parents=True)
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox, PredBBox
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import ClassRegistry, Subject
+
+    class_registry.write_registry(
+        root / "classes.json",
+        ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)))
 
     # 5 synthetic images (640x480 grey) with GT labels and predictions
     for i in range(5):
@@ -57,17 +63,18 @@ def project_dir(tmp_path: Path) -> Path:
         img = Image.new("RGB", (640, 480), color=(100 + i * 20, 100, 100))
         img.save(images / f"{name}.jpg")
 
-        # GT: 2 boxes per image, canonical per-image JSON (pixel xyxy).
-        json_io.write_detect(
-            str(labels_det / f"{name}.json"),
-            [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)],
+        # GT: 2 boxes per image, name-based per-image JSON (pixel xyxy).
+        json_io.write_annotations(
+            str(labels_dir / f"{name}.json"),
+            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264)),
+             Annotation(subject="catkin", geometry=BBox(176, 132, 208, 156))],
             640, 480,
         )
-        # Predictions: 1 matching (TP) + 1 false positive (FP), per-image JSON with a native score.
-        json_io.write_detect(
-            str(preds_det / f"{name}.json"),
-            [PredBBox(288, 216, 352, 264, 0, confidence=0.92),
-             PredBBox(499.2, 374.4, 524.8, 393.6, 0, confidence=0.60)],
+        # Predictions: 1 matching (TP) + 1 false positive (FP), the confidence in each score.
+        json_io.write_annotations(
+            str(preds_dir / f"{name}.json"),
+            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264), score=0.92),
+             Annotation(subject="catkin", geometry=BBox(499.2, 374.4, 524.8, 393.6), score=0.60)],
             640, 480,
         )
 
@@ -95,8 +102,8 @@ class TestE2EPipeline:
         # ── Step 3: Load dataset ─────────────────────────────────────
         ds = scan_dataset(root)
         assert ds["image_count"] == 5
-        assert ds["labels_detect_count"] == 5
-        assert ds["predictions_detect_count"] == 5
+        assert ds["labels_count"] == 5
+        assert ds["predictions_count"] == 5
         assert ds["paired_images"] == 5
         assert ds["unlabelled_images"] == 0
 
@@ -104,31 +111,31 @@ class TestE2EPipeline:
         quality = validate_data_quality(root)
         assert quality["total_images"] == 5
         assert quality["is_valid"] is True
-        assert 0 in quality["class_ids"]
+        assert "catkin" in quality["subjects"]
 
         # ── Step 5: Load annotations for one image ───────────────────
         img_path = str(project_dir / "images" / "2-11-26" / "img_000.jpg")
         ann = read_annotations(img_path)
         assert "error" not in ann
-        assert ann["detect_labels"]["count"] >= 2
-        assert ann["detect_predictions"]["count"] >= 2
+        assert ann["labels"]["count"] >= 2
+        assert ann["predictions"]["count"] >= 2
 
-        # ── Step 6: Modify annotations — add a box and save ─────────
-        new_boxes = [
-            {"x1": 200, "y1": 200, "x2": 264, "y2": 248, "class_id": 0},
-            {"x1": 128, "y1": 112, "x2": 160, "y2": 136, "class_id": 0},
-            {"x1": 400, "y1": 300, "x2": 440, "y2": 340, "class_id": 1},
+        # ── Step 6: Modify annotations — add boxes and save ─────────
+        new_anns = [
+            {"subject": "catkin", "bbox": [200, 200, 264, 248]},
+            {"subject": "catkin", "bbox": [128, 112, 160, 136]},
+            {"subject": "catkin", "bbox": [400, 300, 440, 340]},
         ]
-        save_result = save_annotations(img_path, boxes=new_boxes)
-        assert save_result["count"] == 1
+        save_result = save_annotations(img_path, annotations=new_anns)
+        assert save_result["count"] == 3  # 3 annotations written
         assert len(save_result["written"]) == 1
 
-        # Verify file was updated (canonical per-image JSON)
+        # Verify file was updated (name-based per-image JSON)
         from tcip_annotation import json_io
 
-        label_path = project_dir / "annotations" / "default" / "2-11-26" / "detect" / "img_000.json"
-        boxes, _ = json_io.read_detect(str(label_path))
-        assert len(boxes) == 3  # we wrote 3 boxes
+        label_path = project_dir / "annotations" / "2-11-26" / "img_000.json"
+        anns = json_io.read_annotations(str(label_path))
+        assert len(anns) == 3  # we wrote 3 boxes
 
         # ── Step 7: Evaluate single image detections ─────────────────
         eval_result = score_predictions(img_path, iou_threshold=0.5, conf_threshold=0.25)
@@ -187,35 +194,37 @@ class TestE2EPipelineEdgeCases:
         """scan_dataset reports unlabelled images correctly."""
         images = tmp_path / "images"
         images.mkdir()
-        labels = tmp_path / "annotations" / "default" / "detect"
+        labels = tmp_path / "annotations"
         labels.mkdir(parents=True)
 
         # 3 images, only 1 label
         from tcip_annotation import json_io
-        from tcip_annotation.state import BBox
+        from tcip_annotation.state import Annotation, BBox
         for i in range(3):
             img = Image.new("RGB", (64, 64))
             img.save(images / f"img_{i:03d}.jpg")
-        json_io.write_detect(str(labels / "img_000.json"), [BBox(28, 28, 36, 36, 0)], 64, 64)
+        json_io.write_annotations(str(labels / "img_000.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(28, 28, 36, 36))], 64, 64)
 
         ds = scan_dataset(str(tmp_path))
         assert ds["image_count"] == 3
-        assert ds["labels_detect_count"] == 1
+        assert ds["labels_count"] == 1
         assert ds["unlabelled_images"] == 2
 
     def test_evaluate_no_predictions(self, tmp_path: Path):
         """score_predictions handles images with no predictions."""
         images = tmp_path / "images"
-        labels = tmp_path / "annotations" / "default" / "detect"
+        labels = tmp_path / "annotations"
         for d in (images, labels):
             d.mkdir(parents=True)
 
         from tcip_annotation import json_io
-        from tcip_annotation.state import BBox
+        from tcip_annotation.state import Annotation, BBox
         img = Image.new("RGB", (640, 480))
         img_path = images / "test.jpg"
         img.save(img_path)
-        json_io.write_detect(str(labels / "test.json"), [BBox(288, 216, 352, 264, 0)], 640, 480)
+        json_io.write_annotations(str(labels / "test.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264))], 640, 480)
 
         # No predictions directory — evaluate should handle gracefully
         result = score_predictions(str(img_path))
@@ -231,8 +240,8 @@ class TestE2EPipelineEdgeCases:
         img.save(img_path)
 
         # No labels dir exists yet
-        result = save_annotations(str(img_path), boxes=[
-            {"x1": 10, "y1": 10, "x2": 50, "y2": 50, "class_id": 0},
+        result = save_annotations(str(img_path), annotations=[
+            {"subject": "catkin", "bbox": [10, 10, 50, 50]},
         ])
         assert result["count"] == 1
-        assert (tmp_path / "annotations" / "default" / "detect" / "new_img.json").is_file()
+        assert (tmp_path / "annotations" / "new_img.json").is_file()
