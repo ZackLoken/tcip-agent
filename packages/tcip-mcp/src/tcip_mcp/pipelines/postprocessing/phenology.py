@@ -175,19 +175,18 @@ def plant_milestones(series: list[tuple[str, float]], spec=None) -> dict:
 
 
 def count_by_class(json_path: Path, elongated_class_id: int) -> tuple[int, int, set[int]]:
-    """``(total_detections, n_elongated, classes_seen)`` from a per-image JSON prediction file.
+    """``(total_detections, n_elongated, classes_seen)`` from a name-based prediction file.
 
-    A detection is elongated when its class id equals ``elongated_class_id`` — the class the
-    validated classifier writes. Never inferred from geometry. ``classes_seen`` lets callers
-    tell whether the predictions carry any elongation classification at all. A missing file is
-    unannotated → ``(0, 0, set())``.
+    Deferred to K4/K5: elongation is now an *attribute* of a name-based prediction, not an integer
+    class id, and the attribute→fraction bridge is not wired in this slice. Until it is, this reports
+    the raw detection total and no elongation split — the ``elongated_class_id`` int is the seam K4/K5
+    replaces — so nothing here fabricates a phenology fraction from unwired predictions. A missing
+    file is unannotated → ``(0, 0, set())``.
     """
     from tcip_annotation import json_io
 
-    preds, classes_seen = json_io.read_detect_pred(json_path)
-    total = len(preds)
-    elongated = sum(1 for p in preds if p.class_id == elongated_class_id)
-    return total, elongated, classes_seen
+    total = sum(1 for a in json_io.read_annotations(str(json_path)) if a.geometry is not None)
+    return total, 0, set()
 
 
 def per_plant_series(
