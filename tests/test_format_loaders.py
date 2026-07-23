@@ -8,17 +8,20 @@ torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 
 
-def test_parse_coco_segment_keeps_all_polygons():
-    from tcip_annotation.format_io import parse_coco_segment
+def test_parse_coco_annotations_decodes_names():
+    """A single-file COCO parses to name-based Annotations, the subject decoded from categories."""
+    from tcip_annotation.format_io import parse_coco_annotations
+    from tcip_annotation.state import Polygon
     coco = {
         "images": [{"id": 1, "file_name": "a.jpg", "width": 100, "height": 100}],
         "annotations": [{"id": 1, "image_id": 1, "category_id": 2,
-                         "segmentation": [[0, 0, 10, 0, 10, 10], [20, 20, 30, 20, 30, 30]]}],
-        "categories": [],
+                         "segmentation": [[0, 0, 10, 0, 10, 10, 0, 10]]}],
+        "categories": [{"id": 2, "name": "catkin"}],
     }
-    polys, cids = parse_coco_segment(coco, file_name="a.jpg")
-    assert len(polys) == 2          # both polygon parts kept (was 1)
-    assert cids == {2}
+    anns = parse_coco_annotations(coco, file_name="a.jpg")
+    assert len(anns) == 1
+    assert anns[0].subject == "catkin"       # id 2 -> name, from the file's own categories
+    assert isinstance(anns[0].geometry, Polygon)
 
 
 def _make_images(images_dir, n=1):
