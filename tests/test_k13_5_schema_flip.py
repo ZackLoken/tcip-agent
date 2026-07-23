@@ -15,7 +15,7 @@ import pytest
 from PIL import Image
 
 from tcip_annotation import json_io
-from tcip_annotation.state import Annotation, BBox
+from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp import class_registry
 from tcip_mcp.class_registry import ClassRegistry, Subject
 
@@ -191,6 +191,48 @@ def test_save_annotations_refuses_missing_subject(tmp_path):
     ok = save_annotations(img, annotations=[{"subject": "catkin", "bbox": [10, 10, 40, 40]}],
                           path=str(tmp_path / "y.json"))
     assert ok.get("count") == 1 and (tmp_path / "y.json").is_file()
+
+
+# (g2) save_annotations prefers points over bbox (aligned with the web converters), so a payload
+# carrying BOTH geometries writes the polygon — never collapsing it to a box-only record (which
+# would double-count against the polygon's own derived box on the next load).
+def test_save_annotations_prefers_points_over_bbox(tmp_path):
+    import json
+
+    from tcip_mcp.tools.annotation_tools import save_annotations
+
+    images_dir = tmp_path / "images"
+    _write_image(images_dir, "img_001")
+    img = str(images_dir / "img_001.jpg")
+    out = tmp_path / "both.json"
+
+    res = save_annotations(
+        img,
+        annotations=[{
+            "subject": "catkin",
+            "points": [[10, 20], [110, 20], [110, 220]],
+            "bbox": [10, 20, 110, 220],
+        }],
+        path=str(out),
+    )
+    assert res.get("count") == 1
+
+    (ann,) = json_io.read_annotations(str(out))
+    assert isinstance(ann.geometry, Polygon)  # the polygon won; not collapsed to a box
+    obj = json.loads(out.read_text())["annotations"][0]
+    assert "segmentation" in obj  # written as a polygon (its derived bbox rides along)
+
+    # An EMPTY points list must fall through to bbox (truthy check, matching the web converters), so
+    # a box payload is not silently lost to a degenerate Polygon([]) while the tool reports success.
+    box_out = tmp_path / "emptypts.json"
+    res2 = save_annotations(
+        img,
+        annotations=[{"subject": "catkin", "points": [], "bbox": [10, 20, 110, 220]}],
+        path=str(box_out),
+    )
+    assert res2.get("count") == 1
+    (box_ann,) = json_io.read_annotations(str(box_out))
+    assert isinstance(box_ann.geometry, BBox)  # empty points -> saved as the box, not dropped
 
 
 # (h) the direct-json and COCO loader paths agree: a geometry-less-only image is a target on neither,
