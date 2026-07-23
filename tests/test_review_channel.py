@@ -14,7 +14,7 @@ import pytest
 from PIL import Image
 
 from tcip_annotation import json_io
-from tcip_annotation.state import PredBBox
+from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import image_dir, prediction_dir
 from tcip_mcp.tools.annotation_tools import focus, stage_proposals
 
@@ -34,12 +34,14 @@ def _images(root: Path, date: str, names: list[str]) -> None:
         (idir / name).write_bytes(b"x")
 
 
-def _pred(root: Path, model: str, date: str, stem: str, preds: list[tuple[int, float]]) -> None:
-    # Write a per-image JSON prediction file. An empty `preds` writes a present {"objects": []}
-    # (a prediction file with no detections); a non-empty list writes one scored box per (class, score).
-    d = Path(prediction_dir(root, model, date, "detect"))
-    boxes = [PredBBox(10.0, 10.0, 20.0, 20.0, c, confidence=s) for c, s in preds]
-    json_io.write_detect(str(d / f"{stem}.json"), boxes, 100, 100, keep_empty=True)
+def _pred(root: Path, model: str, date: str, stem: str, preds: list[tuple[str, float]]) -> None:
+    # Write the one per-image JSON prediction file (all subjects, name-based). An empty `preds` writes
+    # a present {"annotations": []} (a prediction file with no detections); a non-empty list writes one
+    # scored box per (subject, score), the confidence carried as the annotation's score.
+    d = Path(prediction_dir(root, model, date))
+    anns = [Annotation(subject=subject, geometry=BBox(10.0, 10.0, 20.0, 20.0), score=score)
+            for subject, score in preds]
+    json_io.write_annotations(str(d / f"{stem}.json"), anns, 100, 100, keep_empty=True)
 
 
 def _image(root: Path, date: str, stem: str, size: tuple[int, int] = (640, 480)) -> None:
@@ -54,8 +56,8 @@ def test_focus_review_lands_on_first_frame_with_predictions(tmp_path: Path) -> N
     date = "2026-02-11"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(5)]
     _images(root, date, imgs)
-    _pred(root, "baseline", date, "IMG_0002", [(0, 0.9)])
-    _pred(root, "baseline", date, "IMG_0003", [(0, 0.8)])
+    _pred(root, "baseline", date, "IMG_0002", [("catkin", 0.9)])
+    _pred(root, "baseline", date, "IMG_0003", [("catkin", 0.8)])
 
     res = focus("review", str(root), str(root), "catkin", date, model_name="baseline")
     assert "error" not in res
@@ -71,7 +73,7 @@ def test_focus_review_empty_prediction_file_is_not_a_target(tmp_path: Path) -> N
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
     _pred(root, "baseline", date, "IMG_0000", [])  # empty (no detections) — skip
-    _pred(root, "baseline", date, "IMG_0002", [(0, 0.9)])
+    _pred(root, "baseline", date, "IMG_0002", [("catkin", 0.9)])
 
     res = focus("review", str(root), str(root), "catkin", date, model_name="baseline")
     assert res["image_index"] == 2
@@ -82,7 +84,7 @@ def test_focus_review_explicit_index_and_filter(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(4)])
-    _pred(root, "baseline", date, "IMG_0000", [(0, 0.9)])
+    _pred(root, "baseline", date, "IMG_0000", [("catkin", 0.9)])
 
     res = focus("review", str(root), str(root), "catkin", date, model_name="baseline",
                        image_index=3, detection_idx=2, filter_type="fp")
@@ -102,27 +104,31 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
+    # Two distinct subject NAMES (the name-based replacement for two numeric class ids).
     boxes = [
-        {"class_id": 0, "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1},
-        {"class_id": 1, "conf": 0.6, "cx": 0.25, "cy": 0.25, "w": 0.05, "h": 0.05},
+        {"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1},
+        {"subject": "leaf", "conf": 0.6, "cx": 0.25, "cy": 0.25, "w": 0.05, "h": 0.05},
     ]
     res = stage_proposals(str(root), "claude", date, "IMG_0001", boxes)
     assert res["staged"] == 2
 
-    out = Path(prediction_dir(root, "claude", date, "detect")) / "IMG_0001.json"
+    out = Path(prediction_dir(root, "claude", date)) / "IMG_0001.json"
     assert out.is_file()
-    assert res["detect_path"] == str(out)
-    preds, _ = json_io.read_detect_pred(out)
+    assert res["path"] == str(out)
+    preds = json_io.read_annotations(out)
     # Normalized cx/cy/w/h denormalized against a 640x480 image, carrying per-object confidence.
     assert len(preds) == 2
     b0 = preds[0]
-    assert b0.class_id == 0
-    assert b0.confidence == pytest.approx(0.8)
-    assert (b0.x1, b0.y1, b0.x2, b0.y2) == pytest.approx((288.0, 216.0, 352.0, 264.0))
+    assert b0.subject == "catkin"
+    assert b0.score == pytest.approx(0.8)
+    assert isinstance(b0.geometry, BBox)
+    assert (b0.geometry.x1, b0.geometry.y1, b0.geometry.x2, b0.geometry.y2) == pytest.approx(
+        (288.0, 216.0, 352.0, 264.0)
+    )
     # Every staged object stamps the producer (model_name) as created_by + a created_at.
     data = json.loads(out.read_text())
-    assert len(data["objects"]) == 2
-    for obj in data["objects"]:
+    assert len(data["annotations"]) == 2
+    for obj in data["annotations"]:
         assert obj["created_by"] == "claude"
         assert obj["created_at"]
     # It must not have written into annotations/ (GT).
@@ -132,14 +138,14 @@ def test_stage_proposals_writes_prediction_format_not_gt(tmp_path: Path) -> None
 def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     # pixel coords (>1) must be caught, not written off-canvas.
-    boxes = [{"class_id": 0, "conf": 0.9, "cx": 320.0, "cy": 240.0, "w": 40.0, "h": 40.0}]
+    boxes = [{"subject": "catkin", "conf": 0.9, "cx": 320.0, "cy": 240.0, "w": 40.0, "h": 40.0}]
     res = stage_proposals(str(root), "agent_proposals", "2026-02-11", "IMG_0001", boxes)
     assert "error" in res and "normal" in res["error"].lower()
 
 
 def test_stage_proposals_rejects_path_traversal_into_gt(tmp_path: Path) -> None:
     root = tmp_path / "proj"
-    good = [{"class_id": 0, "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    good = [{"subject": "catkin", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
     # A malformed model_name/date/stem must never escape predictions/ into the GT tree. Include a
     # backslash segment (a Windows separator — "predictions\..\annotations" would escape) and a
     # whitespace/empty segment, both of which is_valid_name rejects.
@@ -164,62 +170,67 @@ def test_focus_review_rejects_path_traversal(tmp_path: Path) -> None:
     assert "error" in res
 
 
-def test_stage_proposals_rejects_non_numeric_class(tmp_path: Path) -> None:
+def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
     root = tmp_path / "proj"
-    boxes = [{"class_id": "cat", "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]  # bad class_id
+    boxes = [{"conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]  # no subject name
     res = stage_proposals(str(root), "agent_proposals", "2026-02-11", "IMG_0001", boxes)
     assert "error" in res  # returns cleanly, doesn't crash the audited tool
 
 
-def test_stage_proposals_writes_polygons_to_segment(tmp_path: Path) -> None:
+def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0132", size=(640, 480))
     # A SAM-style mask staged as a prediction, with the mask-quality score carried as conf.
     polygons = [
-        {"class_id": 1, "conf": 0.91, "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4], [0.1, 0.4]]},
+        {"subject": "leaf", "conf": 0.91, "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4], [0.1, 0.4]]},
     ]
     res = stage_proposals(str(root), "sam", date, "IMG_0132", polygons=polygons)
     assert res["staged"] == 1 and res["n_segment"] == 1 and res["n_detect"] == 0
 
-    out = Path(prediction_dir(root, "sam", date, "segment")) / "IMG_0132.json"
+    out = Path(prediction_dir(root, "sam", date)) / "IMG_0132.json"
     assert out.is_file()
-    polys, _ = json_io.read_segment_pred(out)
+    assert res["path"] == str(out)
+    polys = json_io.read_annotations(out)
     # Polygon denormalized to pixel space, mask-quality score carried as confidence.
     assert len(polys) == 1
     p0 = polys[0]
-    assert p0.class_id == 1
-    assert p0.confidence == pytest.approx(0.91)
-    assert len(p0.points) == 4
-    assert p0.points[0] == pytest.approx((64.0, 48.0))
+    assert p0.subject == "leaf"
+    assert p0.score == pytest.approx(0.91)
+    assert isinstance(p0.geometry, Polygon)
+    assert len(p0.geometry.points) == 4
+    assert p0.geometry.points[0] == pytest.approx((64.0, 48.0))
     # Each staged polygon stamps the producer (model_name) as created_by + a created_at.
     data = json.loads(out.read_text())
-    assert len(data["objects"]) == 1
-    assert data["objects"][0]["created_by"] == "sam"
-    assert data["objects"][0]["created_at"]
-    # It must not touch GT, nor write a detect prediction for a polygon.
+    assert len(data["annotations"]) == 1
+    assert data["annotations"][0]["created_by"] == "sam"
+    assert data["annotations"][0]["created_at"]
+    # It must not touch GT; the polygon is stored as a polygon (segmentation), not a box.
     assert not (root / "annotations").exists()
-    assert not (Path(prediction_dir(root, "sam", date, "detect")) / "IMG_0132.json").exists()
+    assert "segmentation" in data["annotations"][0] and "bbox" not in data["annotations"][0]
 
 
 def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
-    boxes = [{"class_id": 0, "conf": 0.7, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
-    polygons = [{"class_id": 1, "conf": 0.8, "points": [[0.1, 0.1], [0.2, 0.1], [0.15, 0.2]]}]
+    boxes = [{"subject": "catkin", "conf": 0.7, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    polygons = [{"subject": "leaf", "conf": 0.8, "points": [[0.1, 0.1], [0.2, 0.1], [0.15, 0.2]]}]
     res = stage_proposals(str(root), "claude", date, "IMG_0001", boxes, polygons)
     assert res["n_detect"] == 1 and res["n_segment"] == 1 and res["staged"] == 2
-    detect_out = Path(prediction_dir(root, "claude", date, "detect")) / "IMG_0001.json"
-    segment_out = Path(prediction_dir(root, "claude", date, "segment")) / "IMG_0001.json"
-    assert detect_out.is_file()
-    assert segment_out.is_file()
+    # Boxes and polygons alike land in the one per-image prediction file now.
+    out = Path(prediction_dir(root, "claude", date)) / "IMG_0001.json"
+    assert out.is_file()
+    assert res["path"] == str(out)
+    objs = json.loads(out.read_text())["annotations"]
+    assert len(objs) == 2
     # Both the box and the polygon stamp the producer (model_name) as created_by + a created_at.
-    for out in (detect_out, segment_out):
-        objs = json.loads(out.read_text())["objects"]
-        assert len(objs) == 1
-        assert objs[0]["created_by"] == "claude"
-        assert objs[0]["created_at"]
+    for obj in objs:
+        assert obj["created_by"] == "claude"
+        assert obj["created_at"]
+    # One box + one polygon in the single file (the old detect/segment split is gone).
+    kinds = sorted("segmentation" if "segmentation" in o else "bbox" for o in objs)
+    assert kinds == ["bbox", "segmentation"]
     assert not (root / "annotations").exists()
 
 
@@ -229,13 +240,13 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
     # Fewer than 3 points is not a polygon.
     res = stage_proposals(
         str(root), "sam", date, "IMG_0001",
-        polygons=[{"class_id": 0, "conf": 0.9, "points": [[0.1, 0.1], [0.2, 0.2]]}],
+        polygons=[{"subject": "leaf", "conf": 0.9, "points": [[0.1, 0.1], [0.2, 0.2]]}],
     )
     assert "error" in res and "3 points" in res["error"]
     # Un-normalized (pixel) points must be caught.
     res = stage_proposals(
         str(root), "sam", date, "IMG_0001",
-        polygons=[{"class_id": 0, "conf": 0.9, "points": [[100, 100], [200, 100], [150, 200]]}],
+        polygons=[{"subject": "leaf", "conf": 0.9, "points": [[100, 100], [200, 100], [150, 200]]}],
     )
     assert "error" in res and "normal" in res["error"].lower()
     # A rejected shape must leave no partial stage.
@@ -258,16 +269,16 @@ def _record_verdict(root: Path, img_name: str) -> None:
     engine = ReviewEngine(root / ".tcip" / "state")
     ctx = ReviewContext(
         img_name=img_name, img_width=640, img_height=480,
-        pred_boxes=[PredBBox(288.0, 216.0, 352.0, 264.0, 0, confidence=0.8)],
+        preds=[Annotation(subject="catkin", geometry=BBox(288.0, 216.0, 352.0, 264.0), score=0.8)],
     )
     det = ReviewDetection(
-        det_type="fp", class_id=0, conf=0.8, iou=None, gt_type=None, gt_idx=None,
-        pred_type="box", pred_idx=0, bbox=(288.0, 216.0, 352.0, 264.0),
+        det_type="fp", class_name="catkin", conf=0.8, iou=None, gt_idx=None,
+        pred_idx=0, bbox=(288.0, 216.0, 352.0, 264.0),
     )
     engine.record_detection_action(det, ctx, action="accepted")
 
 
-_BOX = [{"class_id": 0, "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+_BOX = [{"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
 
 
 def test_stage_proposals_redirects_when_bucket_has_verdicts(tmp_path: Path) -> None:
@@ -284,14 +295,14 @@ def test_stage_proposals_redirects_when_bucket_has_verdicts(tmp_path: Path) -> N
     second = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
     assert second["bucket"] == "claude@r2"
     assert second["bucket_redirected"] is True
-    assert second["detect_path"] == str(
-        Path(prediction_dir(root, "claude@r2", date, "detect")) / "IMG_0001.json"
+    assert second["path"] == str(
+        Path(prediction_dir(root, "claude@r2", date)) / "IMG_0001.json"
     )
     assert "verdict" in second["note"].lower()
     # The original reviewed bucket's file is untouched.
-    assert (Path(prediction_dir(root, "claude", date, "detect")) / "IMG_0001.json").is_file()
-    assert not (Path(prediction_dir(root, "claude", date, "detect")) / "IMG_0001.json").samefile(
-        Path(prediction_dir(root, "claude@r2", date, "detect")) / "IMG_0001.json"
+    assert (Path(prediction_dir(root, "claude", date)) / "IMG_0001.json").is_file()
+    assert not (Path(prediction_dir(root, "claude", date)) / "IMG_0001.json").samefile(
+        Path(prediction_dir(root, "claude@r2", date)) / "IMG_0001.json"
     )
 
 
