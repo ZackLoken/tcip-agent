@@ -1,8 +1,9 @@
 import { create } from "zustand";
 
-import { autoColor, type ClassEntry, type ImageStatus } from "@/api/classes";
+import { subjectColor, type AttributeDef, type ImageStatus, type Registry } from "@/api/classes";
 import { datasetKey, loadDatasetUi, saveDatasetUi } from "@/lib/datasetUiState";
 import type {
+  Annotation,
   Box,
   DatasetSelection,
   Detection,
@@ -33,10 +34,8 @@ const DEFAULT_DATASET: DatasetSelection = {
   date: null,
   image_list: [],
   current_image_index: 0,
-  annotations_detect_dir: null,
-  annotations_segment_dir: null,
-  predictions_detect_dir: null,
-  predictions_segment_dir: null,
+  annotations_dir: null,
+  predictions_dir: null,
 };
 
 const DEFAULT_STATE: GuiState = {
@@ -44,7 +43,7 @@ const DEFAULT_STATE: GuiState = {
   dataset: DEFAULT_DATASET,
   view: { scale: 1, offset_x: 0, offset_y: 0 },
   mode: "box",
-  active_class: 0,
+  active_subject: null,
   review: DEFAULT_REVIEW,
   pred_reference: null,
 };
@@ -58,14 +57,23 @@ export interface CanvasState {
   imgHeight: number;
   boxes: Box[];
   polygons: PolygonShape[];
+  // Geometry-less (image/plant-level) ratings; kept so they round-trip losslessly on save.
+  imageAnnotations: Annotation[];
   currentPolygon: [number, number][];
   selectedPolygonIdx: number | null;
-  undoStack: { boxes: Box[]; polygons: PolygonShape[]; selectedPolygonIdx: number | null }[];
-  redoStack: { boxes: Box[]; polygons: PolygonShape[]; selectedPolygonIdx: number | null }[];
+  undoStack: CanvasSnapshot[];
+  redoStack: CanvasSnapshot[];
   dirty: boolean;
   // Which image's labels the canvas holds — status writes must not read shapes that
   // still belong to the previous image (or a failed load) mid-flip.
   loadedImagePath: string | null;
+}
+
+interface CanvasSnapshot {
+  boxes: Box[];
+  polygons: PolygonShape[];
+  imageAnnotations: Annotation[];
+  selectedPolygonIdx: number | null;
 }
 
 const EMPTY_CANVAS: CanvasState = {
@@ -73,6 +81,7 @@ const EMPTY_CANVAS: CanvasState = {
   imgHeight: 0,
   boxes: [],
   polygons: [],
+  imageAnnotations: [],
   currentPolygon: [],
   selectedPolygonIdx: null,
   undoStack: [],
@@ -100,10 +109,12 @@ interface ReviewTabState {
   refetchNonce: number;
 }
 
-interface ClassesState {
-  /** Ordered list of classes (id, name, color). Source of truth for class colors. */
-  list: ClassEntry[];
-  /** Set after first successful load for the current project (prevents double-save on hydrate). */
+interface RegistryState {
+  /** The dataset's nested subject registry (subject -> {description?, attributes?}). No integer
+   *  ids, no colours — colour is GUI-local (see subjectColor). Source of truth for the subject
+   *  picker and per-instance attribute editing. */
+  subjects: Registry;
+  /** Set after the first successful load for the current dataset. */
   loaded: boolean;
 }
 
@@ -144,9 +155,9 @@ interface ReviewImageStatusState {
   /** Per-image review completion status, batch-fetched from the ReviewEngine on dataset entry
    *  and kept live as verdicts land (untouched images default to "not_started"). */
   byImage: Record<string, ReviewImageStatus>;
-  /** Whether each image has anything to review (any GT or prediction of the reviewed kind).
-   *  Images with no entry (before the batch fetch resolves) are treated as reviewable; images
-   *  explicitly false have zero detections and are skipped by Review navigation. */
+  /** Whether each image has anything to review (any GT or prediction annotation). Images with no
+   *  entry (before the batch fetch resolves) are treated as reviewable; images explicitly false
+   *  have zero detections and are skipped by Review navigation. */
   hasDetections: Record<string, boolean>;
   /** Image-level Reviewed/Unreviewed navigation filter for the Review tab. */
   activeFilter: ReviewStatusFilter;
@@ -179,8 +190,8 @@ export interface AppState {
   /** Review tab derived state. */
   review: ReviewTabState;
 
-  /** Class registry + per-image status + annotate ui. */
-  classes: ClassesState;
+  /** Dataset subject registry + per-image status + annotate ui. */
+  registry: RegistryState;
   imageStatus: PerImageStatusState;
   reviewStatus: ReviewImageStatusState;
   annotateUi: AnnotateUiState;
@@ -220,22 +231,20 @@ export interface AppState {
    * Apply a backend state snapshot with ownership-aware merge (not a wholesale
    * replace, which used to clobber unsaved edits, the active tab, and the scroll
    * position). Backend owns the dataset selection; the browser owns
-   * navigation/view/mode/class/review-filter state and keeps its own copy.
+   * navigation/view/mode/subject/review-filter state and keeps its own copy.
    */
   mergeSnapshot: (state: GuiState, version: number | null) => void;
   setWsStatus: (s: AppState["wsStatus"]) => void;
   setActiveTab: (tab: TabName) => void;
   setView: (view: ViewState) => void;
   setMode: (mode: "box" | "polygon") => void;
-  setActiveClass: (cid: number) => void;
+  setActiveSubject: (subject: string | null) => void;
   setPredReference: (p: PredictionReference | null) => void;
 
-  /** Class helpers. */
-  setClasses: (list: ClassEntry[]) => void;
-  upsertClass: (entry: ClassEntry) => void;
-  removeClass: (id: number) => void;
-  classColor: (cid: number) => string;
-  className: (cid: number) => string;
+  /** Registry helpers. */
+  setRegistry: (subjects: Registry) => void;
+  subjectNames: () => string[];
+  subjectAttributes: (subject: string | null) => Record<string, AttributeDef>;
 
   /** Per-image status helpers. */
   setImageStatuses: (byImage: Record<string, ImageStatus>) => void;
@@ -289,6 +298,10 @@ export interface AppState {
   selectPolygon: (idx: number | null) => void;
   setCurrentPolygon: (pts: [number, number][]) => void;
   commitCurrentPolygon: () => boolean;
+  /** Geometry-less (image/plant-level) rating helpers. */
+  addImageAnnotation: (subject: string) => void;
+  updateImageAnnotation: (idx: number, ann: Annotation) => void;
+  deleteImageAnnotation: (idx: number) => void;
   markClean: () => void;
 
   /** Review helpers. */
@@ -301,10 +314,11 @@ export interface AppState {
   markDetectionReviewed: (idx: number, action: string) => void;
 }
 
-function snapshot(c: CanvasState) {
+function snapshot(c: CanvasState): CanvasSnapshot {
   return {
     boxes: c.boxes.slice(),
     polygons: c.polygons.slice(),
+    imageAnnotations: c.imageAnnotations.slice(),
     selectedPolygonIdx: c.selectedPolygonIdx,
   };
 }
@@ -315,7 +329,7 @@ export const useStore = create<AppState>()((set, get) => ({
   wsVersion: 0,
   canvas: EMPTY_CANVAS,
   review: { matches: null, loading: false, focusDetectionIdx: null, refetchNonce: 0 },
-  classes: { list: [], loaded: false },
+  registry: { subjects: {}, loaded: false },
   imageStatus: { byImage: {}, activeFilter: "all" },
   reviewStatus: { byImage: {}, hasDetections: {}, activeFilter: "all" },
   annotateUi: {
@@ -436,8 +450,16 @@ export const useStore = create<AppState>()((set, get) => ({
       // Boot hydration: the browser has no dataset yet (fresh load / project open), so
       // there is no local state to protect — adopt the persisted tab/mode/filters too,
       // so a refresh resumes where the session left off instead of resetting to Annotate.
+      // active_subject is client-owned and absent from the backend snapshot; default it null.
       if (!local.dataset.dataset_root) {
-        return { gui: { ...incoming, pred_reference: null }, wsVersion: nextVersion };
+        return {
+          gui: {
+            ...incoming,
+            active_subject: incoming.active_subject ?? null,
+            pred_reference: null,
+          },
+          wsVersion: nextVersion,
+        };
       }
 
       if (identityChanged) {
@@ -446,10 +468,10 @@ export const useStore = create<AppState>()((set, get) => ({
         return { gui: { ...local, dataset: inDs, pred_reference: null }, wsVersion: nextVersion };
       }
       // Same dataset: accept backend-owned dataset fields (e.g. a changed model's
-      // prediction dirs) but keep the user's navigation position AND the local
+      // prediction dir) but keep the user's navigation position AND the local
       // image_list reference (same identity => same list; reusing the ref avoids
-      // spuriously re-firing effects keyed on it, like class/status hydration).
-      // Everything else (active_tab / mode / active_class / view / review /
+      // spuriously re-firing effects keyed on it, like registry/status hydration).
+      // Everything else (active_tab / mode / active_subject / view / review /
       // pred_reference) is client-owned — keep local.
       return {
         gui: {
@@ -468,38 +490,16 @@ export const useStore = create<AppState>()((set, get) => ({
   setActiveTab: (active_tab) => set((s) => ({ gui: { ...s.gui, active_tab } })),
   setView: (view) => set((s) => ({ gui: { ...s.gui, view } })),
   setMode: (mode) => set((s) => ({ gui: { ...s.gui, mode } })),
-  setActiveClass: (active_class) => set((s) => ({ gui: { ...s.gui, active_class } })),
+  setActiveSubject: (active_subject) => set((s) => ({ gui: { ...s.gui, active_subject } })),
   setPredReference: (pred_reference) => set((s) => ({ gui: { ...s.gui, pred_reference } })),
 
-  setClasses: (list) =>
-    set(() => ({
-      classes: { list: list.slice().sort((a, b) => a.id - b.id), loaded: true },
-    })),
+  setRegistry: (subjects) => set(() => ({ registry: { subjects, loaded: true } })),
 
-  upsertClass: (entry) =>
-    set((s) => {
-      const map = new Map(s.classes.list.map((c) => [c.id, c]));
-      map.set(entry.id, entry);
-      const list = Array.from(map.values()).sort((a, b) => a.id - b.id);
-      return { classes: { list, loaded: true } };
-    }),
+  subjectNames: () => Object.keys(get().registry.subjects),
 
-  removeClass: (id) =>
-    set((s) => ({
-      classes: {
-        list: s.classes.list.filter((c) => c.id !== id),
-        loaded: true,
-      },
-    })),
-
-  classColor: (cid) => {
-    const entry = get().classes.list.find((c) => c.id === cid);
-    return entry?.color ?? autoColor(cid);
-  },
-
-  className: (cid) => {
-    const entry = get().classes.list.find((c) => c.id === cid);
-    return entry?.name ?? `class_${cid}`;
+  subjectAttributes: (subject) => {
+    if (!subject) return {};
+    return get().registry.subjects[subject]?.attributes ?? {};
   },
 
   setImageStatuses: (byImage) => set(() => ({ imageStatus: { byImage, activeFilter: "all" } })),
@@ -582,6 +582,7 @@ export const useStore = create<AppState>()((set, get) => ({
         imgHeight: labels.img_height,
         boxes: labels.boxes.slice(),
         polygons: labels.polygons.slice(),
+        imageAnnotations: labels.imageAnnotations.slice(),
         currentPolygon: [],
         selectedPolygonIdx: null,
         undoStack: [],
@@ -621,6 +622,7 @@ export const useStore = create<AppState>()((set, get) => ({
           redoStack: [...s.canvas.redoStack, snapshot(s.canvas)],
           boxes: last.boxes,
           polygons: last.polygons,
+          imageAnnotations: last.imageAnnotations,
           selectedPolygonIdx: last.selectedPolygonIdx,
           dirty: true,
         },
@@ -638,6 +640,7 @@ export const useStore = create<AppState>()((set, get) => ({
           redoStack: s.canvas.redoStack.slice(0, -1),
           boxes: last.boxes,
           polygons: last.polygons,
+          imageAnnotations: last.imageAnnotations,
           selectedPolygonIdx: last.selectedPolygonIdx,
           dirty: true,
         },
@@ -726,7 +729,12 @@ export const useStore = create<AppState>()((set, get) => ({
       set((s) => ({ canvas: { ...s.canvas, currentPolygon: [] } }));
       return false;
     }
-    const active_class = get().gui.active_class;
+    const subject = get().gui.active_subject;
+    if (!subject) {
+      // No subject selected: refuse to author a subjectless shape (the backend save rejects it).
+      set((s) => ({ canvas: { ...s.canvas, currentPolygon: [] } }));
+      return false;
+    }
     const { imgWidth, imgHeight } = get().canvas;
     const clamped: [number, number][] = cur.map(([x, y]) => [
       imgWidth ? Math.max(0, Math.min(imgWidth, x)) : x,
@@ -737,11 +745,42 @@ export const useStore = create<AppState>()((set, get) => ({
       canvas: {
         ...s.canvas,
         currentPolygon: [],
-        polygons: [...s.canvas.polygons, { points: clamped, class_id: active_class }],
+        polygons: [...s.canvas.polygons, { points: clamped, subject, attributes: {} }],
         dirty: true,
       },
     }));
     return true;
+  },
+
+  addImageAnnotation: (subject) => {
+    get().pushUndo();
+    set((s) => ({
+      canvas: {
+        ...s.canvas,
+        imageAnnotations: [...s.canvas.imageAnnotations, { subject, attributes: {} }],
+        dirty: true,
+      },
+    }));
+  },
+
+  updateImageAnnotation: (idx, ann) => {
+    get().pushUndo();
+    set((s) => {
+      const next = s.canvas.imageAnnotations.slice();
+      next[idx] = ann;
+      return { canvas: { ...s.canvas, imageAnnotations: next, dirty: true } };
+    });
+  },
+
+  deleteImageAnnotation: (idx) => {
+    get().pushUndo();
+    set((s) => ({
+      canvas: {
+        ...s.canvas,
+        imageAnnotations: s.canvas.imageAnnotations.filter((_, i) => i !== idx),
+        dirty: true,
+      },
+    }));
   },
 
   markClean: () => set((s) => ({ canvas: { ...s.canvas, dirty: false } })),
@@ -771,3 +810,6 @@ export const useStore = create<AppState>()((set, get) => ({
       };
     }),
 }));
+
+// Re-export so callers derive a subject's colour from one source (GUI-local, name-hashed).
+export { subjectColor };
