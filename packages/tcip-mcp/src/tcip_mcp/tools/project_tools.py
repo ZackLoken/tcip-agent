@@ -202,10 +202,9 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     """Export an annotation project as a portable ZIP archive.
 
     Scans the canonical dataset layout (see :mod:`tcip_mcp.dataset_layout`): images under
-    ``<root>/images/<date>/`` and ground truth under
-    ``<root>/annotations/<trait>/<date>/<task>/``, plus the ``.tcip`` config
-    Optionally includes trained checkpoints. (Class registries and labels live in the
-    dataset, not the project, and travel with it.)
+    ``<root>/images/<date>/``, ground truth under ``<root>/annotations/<date>/<stem>.json``
+    (one file per image, all subjects), and the single nested registry ``<root>/classes.json``,
+    plus the ``.tcip`` config. Optionally includes trained checkpoints.
 
     Args:
         project_path: Root directory of the project.
@@ -227,16 +226,22 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     files_added = 0
 
     with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
-        # Canonical dataset trees. classes/ carries the subject registries that decode the labels'
-        # category_ids — without them the archived annotations are undecodable, so a self-contained
-        # bundle must include them.
-        for tree, exts in ((root / "images", image_exts), (root / "annotations", label_exts),
-                           (root / "classes", {".json"})):
+        # Canonical dataset trees.
+        for tree, exts in ((root / "images", image_exts), (root / "annotations", label_exts)):
             if tree.is_dir():
                 for sub in tree.rglob("*"):
                     if sub.is_file() and sub.suffix.lower() in exts:
                         zf.write(sub, sub.relative_to(root))
                         files_added += 1
+
+        # The single nested registry decodes the labels' subject/attribute names — without it the
+        # archived annotations are undecodable, so a self-contained bundle must carry it.
+        from tcip_mcp.dataset_layout import classes_path
+
+        registry = classes_path(root)
+        if registry.is_file():
+            zf.write(registry, registry.relative_to(root))
+            files_added += 1
 
         # .tcip config, experiments, audit — the project's working state
         tcip_dir = root / ".tcip"
