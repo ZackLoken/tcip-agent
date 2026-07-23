@@ -135,11 +135,16 @@ def save_annotations(
     typed: list[Annotation] = []
     for a in anns_in:
         geometry: BBox | Polygon | None = None
-        if a.get("bbox") is not None:
+        # Non-empty points first, matching the web converters (labelSerde `a.points && a.points.length`,
+        # routes/annotate `if ap.points`): a payload carrying both never drops the polygon (bbox winning
+        # would collapse a polygon to a box-only record — the polygon is the source of truth, its box is
+        # derived on write). An empty points list falls through to bbox, so a box payload is not silently
+        # lost to a degenerate Polygon([]).
+        if a.get("points"):
+            geometry = Polygon([(float(pt[0]), float(pt[1])) for pt in a["points"]])
+        elif a.get("bbox") is not None:
             x1, y1, x2, y2 = (float(v) for v in a["bbox"])
             geometry = BBox(x1, y1, x2, y2)
-        elif a.get("points") is not None:
-            geometry = Polygon([(float(pt[0]), float(pt[1])) for pt in a["points"]])
         cb = a.get("created_by", created_by)
         typed.append(Annotation(
             subject=str(a["subject"]), geometry=geometry,
