@@ -9,25 +9,28 @@ when the predictions carry no elongation class.
 
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
 from PIL import Image
 
 from tcip_annotation import json_io
-from tcip_annotation.state import PredBBox
-from tcip_mcp.pipelines.postprocessing import phenology
+from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.tools.phenology_tools import build_plant_mapping, compute_phenology
 
 
-def _pred_boxes(lines: list[str]) -> list[PredBBox]:
-    """Per-image JSON prediction boxes from 'cls conf ...' YOLO-ish lines (class + conf only)."""
-    boxes = []
+def _pred_annotations(lines: list[str]) -> list[Annotation]:
+    """Name-based prediction annotations from 'cls conf ...' YOLO-ish lines.
+
+    Elongation is deferred (K4/K5): the class id no longer maps to a name, so only geometry +
+    confidence are kept; the detection count is what still carries meaning.
+    """
+    anns = []
     for line in lines:
         parts = line.split()
-        boxes.append(PredBBox(1.0, 1.0, 3.0, 3.0, int(float(parts[0])), confidence=float(parts[1])))
-    return boxes
+        anns.append(Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0),
+                               score=float(parts[1])))
+    return anns
 
 
 def _plant_csv(path: Path) -> None:
@@ -99,7 +102,7 @@ def _write_mapping(path: Path, mapping: dict) -> None:
 
 def _write_preds(dir_path: Path, stem: str, lines: list[str]) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
-    json_io.write_detect(dir_path / f"{stem}.json", _pred_boxes(lines), 8, 8)
+    json_io.write_annotations(dir_path / f"{stem}.json", _pred_annotations(lines), 8, 8)
 
 
 def _write_op_sidecar(dir_path: Path, *, validated: bool, conf: float = 0.4) -> None:
@@ -145,26 +148,11 @@ def test_compute_phenology_writes_canonical_csv(tmp_path: Path) -> None:
         operating_point_validated="validated_held_out",
     )
 
-    assert "error" not in res
-    assert res["elongation_classified"] is True
-    assert res["elongation_classifier_validated"] == "validated_held_out"
-    assert res["n_plants"] == 1
-    assert res["columns"] == phenology.PHENOLOGY_CSV_COLUMNS
-    assert out_csv.is_file()
-
-    with out_csv.open(newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    assert list(rows[0].keys()) == phenology.PHENOLOGY_CSV_COLUMNS
-    assert rows[0]["plant_id"] == "P1"
-    assert rows[0]["accession"] == "acc-9"
-    # catkin_elongation_date = "most catkins elongated" (crops.yml) = the 95% crossing; the CSV
-    # must not carry the internal 'series' column.
-    assert rows[0]["catkin_elongation_date"] == rows[0]["catkin_95per_date"]
-    assert "series" not in rows[0]
-    # the provenance stamp is written into every row
-    assert rows[0]["operating_point_conf"] == "0.4"
-    assert rows[0]["operating_point_validated"] == "validated_held_out"
-    assert rows[0]["elongation_classifier_validated"] == "validated_held_out"
+    # Deferred (K4/K5): the elongated fraction is not produced, so the measurement-integrity guard
+    # refuses to deliver a bloom CSV even for a fully-validated call. Re-flips to a delivery at K4/K5.
+    assert "error" in res
+    assert res["elongation_classified"] is False
+    assert not out_csv.exists()
 
 
 def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> None:
@@ -184,7 +172,10 @@ def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> Non
         output_csv_path=str(out_csv),
         positive_class_id=1,  # classifier_validated defaults to None -> unvalidated
     )
-    assert "error" in res and "requires BOTH" in res["error"]  # gate refuses on the unvalidated classifier
+    # Deferred (K4/K5): elongation not produced -> refuses at the elongation guard (before the
+    # validation gate the unvalidated classifier would trip). Either way nothing is delivered.
+    assert "error" in res
+    assert res["elongation_classified"] is False
     assert not out_csv.exists()  # nothing delivered
 
 
@@ -205,11 +196,11 @@ def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) 
         positive_class_id=1,
         acknowledge_unvalidated=True,  # provisional delivery, clearly flagged
     )
-    assert "error" not in res
-    assert res["elongation_classifier_validated"] == "false"
-    with out_csv.open(newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    assert rows[0]["elongation_classifier_validated"] == "false"
+    # Deferred (K4/K5): the elongation guard has no acknowledge escape, so an unproduced fraction
+    # refuses even with acknowledge_unvalidated=True — no provisional CSV either.
+    assert "error" in res
+    assert res["elongation_classified"] is False
+    assert not out_csv.exists()
 
 
 def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None:
@@ -232,7 +223,10 @@ def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None
         classifier_validated="validated_held_out",
         operating_point_validated=None,  # op point not validated → still refuse
     )
-    assert "error" in res and "requires BOTH" in res["error"]
+    # Deferred (K4/K5): elongation not produced -> refuses at the elongation guard (before the
+    # asymmetric-validation gate). A half-validated bloom still never slips through.
+    assert "error" in res
+    assert res["elongation_classified"] is False
     assert not out_csv.exists()
 
 
@@ -261,13 +255,11 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
         operating_point_validated="validated_held_out",  # op point validated (backed on disk)
         acknowledge_unvalidated=True,
     )
-    assert "error" not in res
-    assert res["elongation_classifier_validated"] == "false"          # unvalidated half → false
-    assert res["operating_point_validated"] == "validated_held_out"   # validated half preserved
-    with out_csv.open(newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    assert rows[0]["elongation_classifier_validated"] == "false"
-    assert rows[0]["operating_point_validated"] == "validated_held_out"
+    # Deferred (K4/K5): the elongation guard fires before the per-dimension stamping, so even an
+    # acknowledged asymmetric call refuses — no CSV to stamp.
+    assert "error" in res
+    assert res["elongation_classified"] is False
+    assert not out_csv.exists()
 
 
 def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> None:
@@ -291,7 +283,7 @@ def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> N
 
     assert "error" in res
     assert res["elongation_classified"] is False
-    assert res["classes_seen"] == [0]
+    assert res["classes_seen"] == []  # deferred (K4/K5): no class split produced
     assert not out_csv.exists()  # nothing delivered
 
 
