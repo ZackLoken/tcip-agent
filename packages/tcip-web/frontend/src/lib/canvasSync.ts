@@ -15,8 +15,13 @@
  * rule) — so the server-side render (capture_live_canvas) is faithful by construction.
  */
 
-import { polygonBbox } from "@/lib/polygonGeometry";
 import type { ReviewColors } from "@/lib/reviewColors";
+import {
+  annotationGeometry,
+  detGtAnnotation,
+  detPredAnnotation,
+  type ReviewGeom,
+} from "@/lib/reviewGeometry";
 import type { Box, MatchesResponse, PolygonShape } from "@/store/types";
 
 export interface CanvasViewport {
@@ -50,10 +55,12 @@ export interface CanvasStateBody {
   img_height: number;
   viewport: CanvasViewport | null;
   mode?: string;
-  active_class?: number;
+  active_subject?: string;
   dirty?: boolean;
   user?: string;
-  classes: { id: number; name: string; color: string }[];
+  // The dataset's subjects with their GUI-local colours (the registry stores no colour). Sent
+  // under the backend's ``classes`` key, which stores the list verbatim for capture_live_canvas.
+  classes: { name: string; color: string }[];
   legend?: Record<string, string> | null;
   counts?: Record<string, number>;
   /** null = heartbeat (backend keeps the last pushed geometry for this image). */
@@ -92,9 +99,9 @@ export function measureCanvasHost(): { w: number; h: number } | null {
 }
 
 /** Annotate-tab shapes, mirroring the canvas render rules exactly: the labels toggle hides
- *  everything; polygon mode shows polygons of the active class plus the selection (outline
- *  only, like the GUI); box mode shows the active-class boxes — the polygon-DERIVED boxes when
- *  polygons exist — plus the selected polygon and the in-flight rubber-band box. */
+ *  everything; polygon mode shows polygons of the active subject plus the selection (outline
+ *  only, like the GUI); box mode shows the active-subject boxes plus the selected polygon and the
+ *  in-flight rubber-band box. Each shape's label is its subject name; its colour is GUI-local. */
 export function buildAnnotateShapes(args: {
   boxes: Box[];
   polygons: PolygonShape[];
@@ -103,10 +110,9 @@ export function buildAnnotateShapes(args: {
   selectedPolygonIdx: number | null;
   selectedBoxIdx?: number | null;
   mode: string;
-  activeClass: number;
+  activeSubject: string;
   visible: boolean;
-  colorFor: (classId: number) => string;
-  nameFor: (classId: number) => string;
+  colorFor: (subject: string) => string;
 }): CanvasShape[] {
   if (!args.visible) return []; // the GUI's labels toggle hides every committed shape
 
@@ -115,8 +121,8 @@ export function buildAnnotateShapes(args: {
     shapes.push({
       kind: "polygon",
       points: rPts(p.points),
-      color: selected ? "#00BFFF" : args.colorFor(p.class_id),
-      label: args.nameFor(p.class_id),
+      color: selected ? "#00BFFF" : args.colorFor(p.subject),
+      label: p.subject,
       tag: "gt",
       created_by: p.created_by ?? null,
       accepted_by: p.accepted_by ?? null,
@@ -126,7 +132,7 @@ export function buildAnnotateShapes(args: {
   if (args.mode === "polygon") {
     args.polygons.forEach((p, i) => {
       const selected = i === args.selectedPolygonIdx;
-      if (!selected && p.class_id !== args.activeClass) return;
+      if (!selected && p.subject !== args.activeSubject) return;
       pushPolygon(p, selected);
     });
     if (args.currentPolygon.length > 0) {
@@ -142,23 +148,16 @@ export function buildAnnotateShapes(args: {
     return shapes;
   }
 
-  // Box mode: the detect layer is derived from polygons whenever any exist (read-only,
-  // recomputed live), else the real boxes. Only the active class renders.
-  const derived = args.polygons.length > 0;
-  const boxesToRender: Box[] = derived
-    ? args.polygons.map((p) => {
-        const [x1, y1, x2, y2] = polygonBbox(p.points);
-        return { x1, y1, x2, y2, class_id: p.class_id };
-      })
-    : args.boxes;
-  boxesToRender.forEach((b, i) => {
-    if (b.class_id !== args.activeClass) return;
-    const selected = !derived && i === (args.selectedBoxIdx ?? null);
+  // Box mode: the active subject's boxes render (a box and a polygon are now distinct annotations
+  // in the one file, so there is no derived-box layer to reconcile).
+  args.boxes.forEach((b, i) => {
+    if (b.subject !== args.activeSubject) return;
+    const selected = i === (args.selectedBoxIdx ?? null);
     shapes.push({
       kind: "box",
       xyxy: [r1(b.x1), r1(b.y1), r1(b.x2), r1(b.y2)],
-      color: selected ? "#00BFFF" : args.colorFor(b.class_id),
-      label: args.nameFor(b.class_id),
+      color: selected ? "#00BFFF" : args.colorFor(b.subject),
+      label: b.subject,
       tag: "gt",
       created_by: b.created_by ?? null,
       accepted_by: b.accepted_by ?? null,
@@ -177,7 +176,7 @@ export function buildAnnotateShapes(args: {
         r1(Math.max(d.x1, d.x2)),
         r1(Math.max(d.y1, d.y2)),
       ],
-      color: args.colorFor(args.activeClass),
+      color: args.colorFor(args.activeSubject),
       dashed: true,
       tag: "in_progress",
     });
@@ -185,60 +184,51 @@ export function buildAnnotateShapes(args: {
   return shapes;
 }
 
-/** Review-tab shapes, mirroring the Review canvas rules: only the kind under review renders
- *  (preds decide, GT breaks the tie — an image's derived box twins must not double-render),
- *  FP = its prediction (dashed blue when focused), TP/FN = the ground truth (focused FN goes
- *  active-blue; reviewed shapes washed), the focused TP overlays its prediction dashed, and
+/** Review-tab shapes, mirroring the Review canvas rules: EACH detection draws by its own
+ *  annotation's geometry (a box stays a box, a polygon stays a polygon — no geometry kind is
+ *  hidden), FP = its prediction (dashed blue when focused), TP/FN = the ground truth (focused FN
+ *  goes active-blue; reviewed shapes washed), the focused TP overlays its prediction dashed, and
  *  the focused detection draws last so neighbours never bury it. */
 export function buildReviewShapes(
   matches: MatchesResponse,
   colors: ReviewColors,
   focusedIdx: number,
-  nameFor: (classId: number) => string,
   vis: { showGT?: boolean; showPred?: boolean } = {},
 ): CanvasShape[] {
   const showGT = vis.showGT ?? true;
   const showPred = vis.showPred ?? true;
-  const reviewKind: "box" | "polygon" = (() => {
-    if (matches.pred_boxes.length || matches.pred_polygons.length) {
-      return matches.pred_polygons.length && !matches.pred_boxes.length ? "polygon" : "box";
-    }
-    return matches.gt_polygons.length && !matches.gt_boxes.length ? "polygon" : "box";
-  })();
 
   const rest: CanvasShape[] = [];
   const focused: CanvasShape[] = [];
   matches.detections.forEach((d, i) => {
-    if ((d.gt_type ?? d.pred_type) !== reviewKind) return; // one annotation kind at a time
     const active = i === focusedIdx;
     const out = active ? focused : rest;
-    const outcome = colors[d.det_type as "tp" | "fp" | "fn"] ?? "#ffffff";
+    const outcome = colors[d.det_type] ?? "#ffffff";
     const label = active
-      ? `${nameFor(d.class_id)}${d.conf != null ? ` ${d.conf.toFixed(2)}` : ""}`
+      ? `${d.class_name}${d.conf != null ? ` ${d.conf.toFixed(2)}` : ""}`
       : undefined;
 
     const push = (
-      geom: {
-        box?: Box | { x1: number; y1: number; x2: number; y2: number };
-        poly?: PolygonShape | { points: [number, number][] };
-      },
+      geom: ReviewGeom | null,
       color: string,
       opts: { dashed?: boolean; fill?: boolean; tag: string },
     ) => {
-      if (geom.box) {
+      if (!geom) return;
+      if (geom.kind === "box") {
+        const [x1, y1, x2, y2] = geom.box;
         out.push({
           kind: "box",
-          xyxy: [r1(geom.box.x1), r1(geom.box.y1), r1(geom.box.x2), r1(geom.box.y2)],
+          xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
           color,
           dashed: opts.dashed,
           fill: opts.fill,
           label,
           tag: opts.tag,
         });
-      } else if (geom.poly) {
+      } else {
         out.push({
           kind: "polygon",
-          points: rPts(geom.poly.points),
+          points: rPts(geom.points),
           color,
           dashed: opts.dashed,
           fill: opts.fill,
@@ -250,13 +240,7 @@ export function buildReviewShapes(
 
     if (d.det_type === "fp") {
       if (!showPred) return;
-      const b =
-        d.pred_type === "box" && d.pred_idx != null ? matches.pred_boxes[d.pred_idx] : undefined;
-      const p =
-        d.pred_type === "polygon" && d.pred_idx != null
-          ? matches.pred_polygons[d.pred_idx]
-          : undefined;
-      push({ box: b, poly: p }, active ? colors.active : outcome, {
+      push(annotationGeometry(detPredAnnotation(d, matches)), active ? colors.active : outcome, {
         dashed: active,
         fill: true,
         tag: "fp",
@@ -264,22 +248,18 @@ export function buildReviewShapes(
     } else {
       const activeFn = active && d.det_type === "fn";
       if (showGT) {
-        const b = d.gt_type === "box" && d.gt_idx != null ? matches.gt_boxes[d.gt_idx] : undefined;
-        const p =
-          d.gt_type === "polygon" && d.gt_idx != null ? matches.gt_polygons[d.gt_idx] : undefined;
-        push({ box: b, poly: p }, activeFn ? colors.active : outcome, {
+        push(annotationGeometry(detGtAnnotation(d, matches)), activeFn ? colors.active : outcome, {
+          dashed: activeFn,
           fill: activeFn || d.reviewed,
           tag: d.det_type,
         });
       }
       if (active && d.det_type === "tp" && showPred) {
-        const pb =
-          d.pred_type === "box" && d.pred_idx != null ? matches.pred_boxes[d.pred_idx] : undefined;
-        const pp =
-          d.pred_type === "polygon" && d.pred_idx != null
-            ? matches.pred_polygons[d.pred_idx]
-            : undefined;
-        push({ box: pb, poly: pp }, colors.active, { dashed: true, fill: true, tag: "pred" });
+        push(annotationGeometry(detPredAnnotation(d, matches)), colors.active, {
+          dashed: true,
+          fill: true,
+          tag: "pred",
+        });
       }
     }
   });
