@@ -145,12 +145,15 @@ def test_resolve_positive_class_id_no_map_is_none(tmp_path: Path):
 
 def _pheno_fixture(tmp_path: Path, *, elongated_id: int):
     from tcip_annotation import json_io
-    from tcip_annotation.state import PredBBox
+    from tcip_annotation.state import Annotation, BBox
 
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
-    for d, cid in ((d1, 0), (d2, elongated_id)):
+    for d in (d1, d2):
         d.mkdir(parents=True, exist_ok=True)
-        json_io.write_detect(d / "P1.json", [PredBBox(1.0, 1.0, 3.0, 3.0, cid, confidence=0.9)], 8, 8)
+        # Elongation is deferred (K4/K5): a prediction carries a subject + geometry, not a class id.
+        json_io.write_annotations(
+            d / "P1.json",
+            [Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
         (d / "operating_point.json").write_text(json.dumps({
             "validated": True,
             "operating_point": {"conf": {"value": 0.4, "validated_vs_gt": "validated_held_out"}},
@@ -164,8 +167,6 @@ def _pheno_fixture(tmp_path: Path, *, elongated_id: int):
 
 
 def test_compute_phenology_derives_class_id_and_stamps_provisional(tmp_path: Path):
-    import csv
-
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
@@ -182,11 +183,13 @@ def test_compute_phenology_derives_class_id_and_stamps_provisional(tmp_path: Pat
         classifier_validated="validated_held_out",
         operating_point_validated="validated_held_out",
     )
-    assert "error" not in res
-    with out_csv.open(newline="", encoding="utf-8") as f:
-        row = next(csv.DictReader(f))
+    # The positive class id still resolves by name from the flat classes.json, but elongation is
+    # deferred (K4/K5): the fraction is not produced, so delivery is refused — no CSV, no stamp yet.
+    assert "error" in res
+    assert res["elongation_classified"] is False
+    assert not out_csv.exists()
+    # The provisional-read marker still belongs to the trait's delivery schema (asserted directly).
     assert "catkin_elongation_provisional" in phenology.PHENOLOGY_CSV_COLUMNS
-    assert row["catkin_elongation_provisional"] == "true"  # provisional reading marked in the delivery
 
 
 def test_compute_phenology_refuses_when_class_id_unresolvable(tmp_path: Path):
