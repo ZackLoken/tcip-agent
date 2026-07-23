@@ -18,24 +18,27 @@ from PIL import Image
 
 @pytest.fixture
 def json_dataset(tmp_path: Path) -> Path:
-    """A minimal dataset in the canonical per-image JSON layout."""
+    """A minimal dataset in the canonical (K13.5) name-based per-image JSON layout."""
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox, PredBBox
+    from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    labels_dir = tmp_path / "annotations" / "default" / "detect"
+    labels_dir = tmp_path / "annotations"
     labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "live" / "detect"
+    preds_dir = tmp_path / "predictions" / "live"
     preds_dir.mkdir(parents=True)
 
     for name in ("img_001", "img_002", "img_003"):
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
-        json_io.write_detect(str(labels_dir / f"{name}.json"),
-                             [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)], 640, 480)
-        json_io.write_detect(str(preds_dir / f"{name}.json"),
-                             [PredBBox(288, 216, 352, 264, 0, confidence=0.9),
-                              PredBBox(496, 372, 528, 396, 0, confidence=0.7)], 640, 480)
+        json_io.write_annotations(
+            str(labels_dir / f"{name}.json"),
+            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264)),
+             Annotation(subject="catkin", geometry=BBox(176, 132, 208, 156))], 640, 480)
+        json_io.write_annotations(
+            str(preds_dir / f"{name}.json"),
+            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264), score=0.9),
+             Annotation(subject="catkin", geometry=BBox(496, 372, 528, 396), score=0.7)], 640, 480)
     return tmp_path
 
 
@@ -159,7 +162,7 @@ class TestReadAnnotationsUnknownFormat:
 
         from tcip_mcp.tools.annotation_tools import read_annotations
 
-        det = tmp_path / "annotations" / "default" / "detect"
+        det = tmp_path / "annotations"
         det.mkdir(parents=True)
         (tmp_path / "images").mkdir()
         Image.new("RGB", (32, 32)).save(tmp_path / "images" / "a.jpg")
