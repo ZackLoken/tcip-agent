@@ -1,15 +1,19 @@
-"""Annotation I/O for the two on-disk formats — the canonical per-image JSON and the COCO
-assembled from it.
+"""Annotation I/O for the two on-disk formats — the canonical per-image JSON and a single-file COCO.
 
-The internal representation (BBox, Polygon, PredBBox, PredPolygon) is always pixel-coordinate;
-format only matters at file I/O boundaries.
+The internal representation is always the name-based :class:`~tcip_annotation.state.Annotation`
+(pixel-coordinate geometry, ``subject`` + attribute values by name); format only matters at the file
+I/O boundary.
 
-  - json  — one ``.json`` per image (the canonical json_io schema, an ``objects`` key)
-  - coco  — a single dataset-level ``.json`` (an ``images``/``annotations`` key)
+  - json  — one ``.json`` per image (the canonical ``json_io`` schema, an ``"annotations"`` key of
+    name-based records)
+  - coco  — a single dataset-level ``.json`` (an ``"images"`` / ``"annotations"`` / ``"categories"``
+    key); a genuine interop format, so its numeric ``category_id`` is decoded through the file's own
+    ``categories`` back to names on read and encoded from a name→id map on write.
 
-Usage:
-    boxes, class_ids = load_annotations(path, img_w, img_h, task="detect")
-    save_annotations(path, boxes, img_w, img_h, task="detect", fmt="json")
+Usage::
+
+    annotations = load_annotations(path)                     # -> list[Annotation]
+    save_annotations(path, annotations, img_w, img_h)        # canonical per-image JSON
 """
 
 from __future__ import annotations
@@ -19,10 +23,12 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from tcip_annotation.state import BBox, Polygon
+from tcip_annotation.json_io import ANNOTATIONS_KEY, read_annotations, write_annotations
+from tcip_annotation.state import Annotation, BBox, Polygon, bbox_of
 
 AnnotFormat = Literal["coco", "json"]
-Task = Literal["detect", "segment"]
+
+_PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
 
 
 # ── Format detection ────────────────────────────────────────────────────────
@@ -31,10 +37,11 @@ Task = Literal["detect", "segment"]
 def detect_format(path: str) -> AnnotFormat:
     """The annotation format of a file or directory, from its own contents.
 
-    ``"json"`` is the canonical per-image label file (``json_io`` schema, keyed on ``objects``);
-    ``"coco"`` is an assembled dataset-level COCO (keyed on ``images``/``annotations``). Raises for
-    anything else rather than guessing — a misdetected format reads real annotations as empty
-    negatives, so a wrong answer here is worse than no answer.
+    ``"json"`` is the canonical per-image label file (``json_io`` schema, keyed on
+    :data:`~tcip_annotation.json_io.ANNOTATIONS_KEY`); ``"coco"`` is an assembled dataset-level COCO
+    (keyed on ``images`` / ``categories``). The pre-K13.5 ``objects`` schema is **not** sniffed — it
+    raises. Old files are converted once, never read in place: reading an unconverted file as the new
+    schema would silently yield zero annotations and train on fabricated empty negatives.
     """
     p = Path(path)
     candidates = sorted(p.glob("*.json")) if p.is_dir() else [p]
@@ -44,26 +51,36 @@ def detect_format(path: str) -> AnnotFormat:
             return fmt
     raise ValueError(
         f"Cannot determine the annotation format of {path}: expected the canonical per-image JSON "
-        f"(an 'objects' key) or an assembled COCO (an 'images'/'annotations' key)."
+        f"(an '{ANNOTATIONS_KEY}' key) or an assembled COCO (an 'images'/'categories' key)."
     )
 
 
 def _detect_json_format(path: Path) -> AnnotFormat | None:
-    """``"json"`` / ``"coco"`` from a file's keys, or ``None`` if it is neither."""
+    """``"json"`` / ``"coco"`` from a file's keys, or ``None`` if it is neither. Raises on the
+    pre-K13.5 ``objects`` shape rather than sniffing it (it is converted, not read)."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if isinstance(data, dict):
-            if "objects" in data:
-                return "json"  # the canonical per-image label file (json_io schema)
-            if "images" in data or "annotations" in data:
-                return "coco"
     except (json.JSONDecodeError, OSError):
-        pass
+        return None
+    if not isinstance(data, dict):
+        return None
+    if "objects" in data:
+        raise ValueError(
+            f"{path} is the pre-K13.5 'objects' label schema. It is not read in place — convert it "
+            f"to the name-based per-image schema first; reading it as-is would yield zero "
+            f"annotations and train on fabricated empty negatives."
+        )
+    # A dataset-level COCO carries an ``images`` list and/or ``categories``; a per-image file carries
+    # a singular ``image`` string. Both use ``annotations``, so the COCO markers are checked first.
+    if "images" in data or "categories" in data:
+        return "coco"
+    if ANNOTATIONS_KEY in data:
+        return "json"
     return None
 
 
-# ── COCO JSON parsing ──────────────────────────────────────────────────────
+# ── COCO JSON parsing (names) ───────────────────────────────────────────────
 
 
 def _parse_coco_json(path: str) -> dict:
@@ -72,17 +89,25 @@ def _parse_coco_json(path: str) -> dict:
         return json.load(f)
 
 
+def _coco_categories(coco: dict) -> dict[int, str]:
+    """``{category_id: name}`` from a COCO ``categories`` list — the file's own name map."""
+    out: dict[int, str] = {}
+    for c in coco.get("categories", []) if isinstance(coco, dict) else []:
+        if isinstance(c, dict) and "id" in c and c.get("name"):
+            try:
+                out[int(c["id"])] = str(c["name"])
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 def _coco_image_annotations(
     coco: dict, image_id: int | None = None, file_name: str | None = None,
 ) -> tuple[list[dict], int, int]:
-    """Extract annotations for a single image from COCO dict.
-
-    Returns (annotations_list, img_width, img_height).
-    """
-    # Find image record
+    """Annotations for a single image from a COCO dict, plus ``(img_w, img_h)``."""
     img_record = None
     for img in coco.get("images", []):
-        if image_id is not None and img["id"] == image_id:
+        if image_id is not None and img.get("id") == image_id:
             img_record = img
             break
         if file_name is not None and img.get("file_name") == file_name:
@@ -90,242 +115,157 @@ def _coco_image_annotations(
             break
     if img_record is None:
         return [], 0, 0
-
     img_id = img_record["id"]
-    w = img_record.get("width", 0)
-    h = img_record.get("height", 0)
-
+    w = int(img_record.get("width", 0) or 0)
+    h = int(img_record.get("height", 0) or 0)
     anns = [a for a in coco.get("annotations", []) if a.get("image_id") == img_id]
     return anns, w, h
 
 
-def parse_coco_detect(
-    coco: dict, image_id: int | None = None, file_name: str | None = None,
-) -> tuple[list[BBox], set[int]]:
-    """Parse COCO detection annotations for one image into BBox objects.
-
-    COCO bbox format: [x, y, width, height] in pixel coordinates.
-    """
-    anns, _, _ = _coco_image_annotations(coco, image_id, file_name)
-    boxes: list[BBox] = []
-    class_ids: set[int] = set()
-    for ann in anns:
-        bbox = ann.get("bbox")
-        if bbox is None or len(bbox) != 4:
-            continue
-        x, y, bw, bh = bbox
-        cid = ann.get("category_id", 0)
-        boxes.append(BBox(x, y, x + bw, y + bh, cid, **_coco_prov(ann)))
-        class_ids.add(cid)
-    return boxes, class_ids
-
-
 def _coco_prov(ann: dict) -> dict:
-    """Provenance extension keys of a COCO annotation record, when present."""
-    return {k: ann[k] for k in ("created_by", "created_at", "accepted_by", "accepted_at")
-            if ann.get(k)}
+    """Provenance (and, for a prediction, ``score``) extension keys of a COCO annotation record."""
+    out = {k: ann[k] for k in _PROV_KEYS if ann.get(k)}
+    s = ann.get("score")
+    if isinstance(s, (int, float)) and not isinstance(s, bool):
+        out["score"] = float(s)
+    return out
 
 
-def parse_coco_segment(
+def parse_coco_annotations(
     coco: dict, image_id: int | None = None, file_name: str | None = None,
-) -> tuple[list[Polygon], set[int]]:
-    """Parse COCO segmentation annotations for one image into Polygon objects.
+) -> list[Annotation]:
+    """Parse one image's COCO annotations into name-based :class:`Annotation` records.
 
-    COCO segmentation format: list of [x1,y1,x2,y2,...] polygon arrays (pixel coords).
-    All polygon parts of an annotation are kept (multi-part / disjoint masks); RLE
-    segmentations (a dict, not a list) are skipped (no RLE support yet).
+    ``subject`` is the ``category_id``'s name from the file's own ``categories``. An annotation whose
+    ``category_id`` has no category name is skipped — a name-based label is undecodable without it. A
+    polygon geometry wins over a box when both are present (the polygon is the source of truth).
     """
     anns, _, _ = _coco_image_annotations(coco, image_id, file_name)
-    polygons: list[Polygon] = []
-    class_ids: set[int] = set()
+    id2name = _coco_categories(coco)
+    out: list[Annotation] = []
     for ann in anns:
+        try:
+            cid = int(ann.get("category_id"))
+        except (TypeError, ValueError):
+            continue
+        subject = id2name.get(cid)
+        if not subject:
+            continue
+        geometry: BBox | Polygon | None = None
         segs = ann.get("segmentation")
-        if not segs or not isinstance(segs, list):
-            continue  # missing, or RLE (dict)
-        cid = ann.get("category_id", 0)
-        for coords in segs:  # every polygon part, not just the first
-            if not isinstance(coords, list) or len(coords) < 6:
-                continue
-            points = [(coords[i], coords[i + 1]) for i in range(0, len(coords), 2)]
-            polygons.append(Polygon(points, cid, **_coco_prov(ann)))
-            class_ids.add(cid)
-    return polygons, class_ids
+        if isinstance(segs, list) and segs and isinstance(segs[0], list) and len(segs[0]) >= 6:
+            coords = segs[0]
+            geometry = Polygon([(float(coords[i]), float(coords[i + 1]))
+                                for i in range(0, len(coords) - 1, 2)])
+        else:
+            bb = ann.get("bbox")
+            if isinstance(bb, list) and len(bb) == 4:
+                x, y, bw, bh = (float(v) for v in bb)
+                geometry = BBox(x, y, x + bw, y + bh)
+        out.append(Annotation(subject=subject, geometry=geometry, **_coco_prov(ann)))
+    return out
 
 
-# ── COCO JSON writing ──────────────────────────────────────────────────────
+# ── COCO JSON writing (names → ids via a supplied map) ──────────────────────
 
 
-def _emit_coco_extras(rec: dict, shape) -> None:
-    """Carry provenance (and a Pred shape's score) into a COCO annotation record.
-
-    Extension keys, same names as the canonical per-image JSON — without them a GT
-    round-trip through dataset-COCO export silently strips created_by/accepted_by.
-    """
-    for key in ("created_by", "created_at", "accepted_by", "accepted_at"):
-        val = getattr(shape, key, None)
-        if val:
-            rec[key] = val
-    conf = getattr(shape, "confidence", None)
-    if conf is not None:
-        rec["score"] = float(conf)
-
-
-def write_coco_detect(
+def write_coco(
     path: str,
-    images_annotations: dict[str, tuple[list[BBox], int, int]],
-    categories: list[dict] | None = None,
+    images_annotations: dict[str, tuple[list[Annotation], int, int]],
+    *,
+    id_map: dict[str, int] | None = None,
 ) -> None:
-    """Write detection annotations to a COCO JSON file.
+    """Write name-based annotations to a single-file COCO JSON.
 
-    Args:
-        path: Output JSON file path.
-        images_annotations: Dict mapping file_name → (boxes, img_w, img_h).
-        categories: Optional list of {"id": int, "name": str} dicts.
+    ``images_annotations`` maps ``file_name -> (annotations, img_w, img_h)``. ``id_map`` is a
+    ``subject -> category_id`` map; when omitted it is enumerated from the distinct subjects present
+    (COCO carries its category names in the file, so the enumeration travels with the data — this is
+    interop export, not the training id assignment, which is ``class_registry.assign_class_ids``).
     """
-    coco: dict = {"images": [], "annotations": [], "categories": categories or []}
+    if id_map is None:
+        subjects: list[str] = []
+        for anns, _, _ in images_annotations.values():
+            for a in anns:
+                if a.subject not in subjects:
+                    subjects.append(a.subject)
+        id_map = {name: i for i, name in enumerate(subjects)}
+    categories = [{"id": cid, "name": name} for name, cid in sorted(id_map.items(), key=lambda kv: kv[1])]
+    coco: dict = {"images": [], "annotations": [], "categories": categories}
     ann_id = 1
-    for img_id, (file_name, (boxes, img_w, img_h)) in enumerate(
-        images_annotations.items(), start=1
-    ):
-        coco["images"].append({
-            "id": img_id,
-            "file_name": file_name,
-            "width": img_w,
-            "height": img_h,
-        })
-        for box in boxes:
-            bw = box.x2 - box.x1
-            bh = box.y2 - box.y1
-            rec = {
-                "id": ann_id,
-                "image_id": img_id,
-                "category_id": box.class_id,
+    for img_id, (file_name, (anns, img_w, img_h)) in enumerate(images_annotations.items(), start=1):
+        coco["images"].append({"id": img_id, "file_name": file_name, "width": img_w, "height": img_h})
+        for a in anns:
+            if a.geometry is None or a.subject not in id_map:
+                continue
+            box = bbox_of(a.geometry)
+            bw, bh = box.x2 - box.x1, box.y2 - box.y1
+            rec: dict = {
+                "id": ann_id, "image_id": img_id, "category_id": id_map[a.subject], "iscrowd": 0,
                 "bbox": [round(box.x1, 2), round(box.y1, 2), round(bw, 2), round(bh, 2)],
                 "area": round(bw * bh, 2),
-                "iscrowd": 0,
             }
-            _emit_coco_extras(rec, box)
+            if isinstance(a.geometry, Polygon):
+                rec["segmentation"] = [[round(float(c), 2) for xy in a.geometry.points for c in xy]]
+            if a.attributes:
+                rec["attributes"] = dict(a.attributes)
+            if a.score is not None:
+                rec["score"] = float(a.score)
+            for k in _PROV_KEYS:
+                v = getattr(a, k, None)
+                if v is not None:
+                    rec[k] = v
             coco["annotations"].append(rec)
             ann_id += 1
-
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(coco, f, indent=2)
 
 
-def write_coco_segment(
-    path: str,
-    images_annotations: dict[str, tuple[list[Polygon], int, int]],
-    categories: list[dict] | None = None,
-) -> None:
-    """Write segmentation annotations to a COCO JSON file.
-
-    Args:
-        path: Output JSON file path.
-        images_annotations: Dict mapping file_name → (polygons, img_w, img_h).
-        categories: Optional list of {"id": int, "name": str} dicts.
-    """
-    coco: dict = {"images": [], "annotations": [], "categories": categories or []}
-    ann_id = 1
-    for img_id, (file_name, (polygons, img_w, img_h)) in enumerate(
-        images_annotations.items(), start=1
-    ):
-        coco["images"].append({
-            "id": img_id,
-            "file_name": file_name,
-            "width": img_w,
-            "height": img_h,
-        })
-        for poly in polygons:
-            flat = []
-            for x, y in poly.points:
-                flat.extend([round(x, 2), round(y, 2)])
-            xs = [p[0] for p in poly.points]
-            ys = [p[1] for p in poly.points]
-            x_min, x_max = min(xs), max(xs)
-            y_min, y_max = min(ys), max(ys)
-            bw = x_max - x_min
-            bh = y_max - y_min
-            rec = {
-                "id": ann_id,
-                "image_id": img_id,
-                "category_id": poly.class_id,
-                "segmentation": [flat],
-                "bbox": [round(x_min, 2), round(y_min, 2), round(bw, 2), round(bh, 2)],
-                "area": round(bw * bh, 2),
-                "iscrowd": 0,
-            }
-            _emit_coco_extras(rec, poly)
-            coco["annotations"].append(rec)
-            ann_id += 1
-
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(coco, f, indent=2)
-
+# ── dispatch ────────────────────────────────────────────────────────────────
 
 
 def load_annotations(
     path: str,
-    img_w: int,
-    img_h: int,
-    task: Task = "detect",
+    *,
     fmt: AnnotFormat | None = None,
     image_id: int | None = None,
     file_name: str | None = None,
-) -> tuple[list[BBox] | list[Polygon], set[int]]:
-    """Load annotations. ``fmt`` of ``None`` detects it from the file's own keys.
+) -> list[Annotation]:
+    """Load an image's annotations as name-based records. ``fmt`` of ``None`` detects it.
 
     For COCO, either ``image_id`` or ``file_name`` must identify the target image.
     """
     if fmt is None:
         fmt = detect_format(path)
-
-    if fmt == "json":  # the canonical per-image label file
-        from tcip_annotation import json_io
-
-        if task == "detect":
-            return json_io.read_detect(path, img_w, img_h)
-        return json_io.read_segment(path, img_w, img_h)
+    if fmt == "json":
+        return read_annotations(path)
     if fmt == "coco":
-        coco = _parse_coco_json(path)
-        if task == "detect":
-            return parse_coco_detect(coco, image_id, file_name)
-        return parse_coco_segment(coco, image_id, file_name)
+        return parse_coco_annotations(_parse_coco_json(path), image_id=image_id, file_name=file_name)
     raise ValueError(f"Unsupported annotation format: {fmt}")
 
 
 def save_annotations(
     path: str,
-    annotations: list[BBox] | list[Polygon],
+    annotations: list[Annotation],
     img_w: int,
     img_h: int,
-    task: Task = "detect",
+    *,
     fmt: AnnotFormat = "json",
     file_name: str | None = None,
-    id_to_name: dict[int, str] | None = None,
     keep_empty: bool = False,
+    id_map: dict[str, int] | None = None,
 ) -> None:
-    """Save annotations.
+    """Save name-based annotations.
 
-    ``json`` writes the canonical per-image label file; ``coco`` writes/updates a dataset-level
-    COCO (pass ``file_name`` to identify the image). ``keep_empty`` (json only): an empty list
-    writes an ``objects: []`` record instead of deleting the label — without it a save of zero
-    shapes erases the GT. An empty record is not a negative until a human confirms it.
+    ``json`` writes the canonical per-image label file; ``coco`` writes a single-file COCO for the
+    image (pass ``file_name`` to key it). ``keep_empty`` (json only): an empty list writes an
+    ``"annotations": []`` record instead of deleting the label — an empty record is not a negative
+    until a human confirms it.
     """
-    if fmt == "json":  # the canonical per-image label file
-        from tcip_annotation import json_io
-
-        if task == "detect":
-            json_io.write_detect(path, annotations, img_w, img_h, keep_empty=keep_empty)  # type: ignore[arg-type]
-        else:
-            json_io.write_segment(path, annotations, img_w, img_h, keep_empty=keep_empty)  # type: ignore[arg-type]
+    if fmt == "json":
+        write_annotations(path, annotations, img_w, img_h, keep_empty=keep_empty)
     elif fmt == "coco":
         fname = file_name or Path(path).stem
-        images_dict = {fname: (annotations, img_w, img_h)}
-        if task == "detect":
-            write_coco_detect(path, images_dict)  # type: ignore[arg-type]
-        else:
-            write_coco_segment(path, images_dict)  # type: ignore[arg-type]
+        write_coco(path, {fname: (annotations, img_w, img_h)}, id_map=id_map)
     else:
         raise ValueError(f"Unsupported annotation format: {fmt}")
