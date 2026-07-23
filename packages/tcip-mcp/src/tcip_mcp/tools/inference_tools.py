@@ -29,8 +29,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     of the labeled dir, at a floor conf so hesitant detections survive to be swept — so the resolved
     conf is validated in the regime it ships through, not an untiled full-frame model pass.
     """
-    from tcip_annotation import json_io
-
+    from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
     from tcip_mcp.pipelines.operating_point import (
         resolve_operating_point, set_detector_operating_point,
     )
@@ -38,6 +37,16 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     from tcip_mcp.pipelines.training.evaluation import build_coco_image_record
 
     labels_p, images_p = Path(labels_dir), Path(images_dir)
+    # The run's subject + single id map (from predictor.config): calibration GT reads through the
+    # same loader-side reader the training targets use, so the swept count can't diverge from training.
+    _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
+    _subject, _attribute = _data_cfg.get("subject"), _data_cfg.get("attribute")
+    _cal_id_map = None
+    if _subject:
+        try:
+            _reg, _cal_id_map = _resolve_registry_id_map(labels_dir, _subject, _attribute)
+        except Exception:  # noqa: BLE001 — fall back to a single-class GT read below
+            _cal_id_map = None
     image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
     label_stems = {p.stem for p in labels_p.glob("*.json")}
     stem_to_image = {p.stem: p for p in images_p.iterdir()
@@ -62,10 +71,23 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         for s, r in zip(sub_stems, results):
             dt = [{"category_id": int(lab), "bbox": [x1, y1, x2 - x1, y2 - y1], "score": float(sc)}
                   for (x1, y1, x2, y2), sc, lab in zip(r["boxes"], r["scores"], r["labels"])]
-            # lift GT to the predictor's 1-indexed labels so the record shape matches the model pass
-            gt = [{"category_id": int(b.class_id) + 1,
-                   "bbox": [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1], "iscrowd": 0}
-                  for b in json_io.read_detect(str(labels_p / f"{s}.json"))[0]]
+            # GT lifted to the predictor's 1-indexed labels via the loader-side reader (subject +
+            # id map); with no run subject in scope, fall back to a single-class read of every box.
+            gt_path = str(labels_p / f"{s}.json")
+            if _subject and _cal_id_map is not None:
+                gboxes, glabels = _json_det_targets(gt_path, _subject, _attribute, _cal_id_map)
+                gt = [{"category_id": int(lab), "bbox": [x1, y1, x2 - x1, y2 - y1], "iscrowd": 0}
+                      for (x1, y1, x2, y2), lab in zip(gboxes, glabels)]
+            else:
+                from tcip_annotation import json_io
+                from tcip_annotation.state import bbox_of
+                gt = []
+                for a in json_io.read_annotations(gt_path):
+                    if a.geometry is None:
+                        continue
+                    bx = bbox_of(a.geometry)
+                    gt.append({"category_id": 1,
+                               "bbox": [bx.x1, bx.y1, bx.x2 - bx.x1, bx.y2 - bx.y1], "iscrowd": 0})
             recs.append(build_coco_image_record(int(r["width"]), int(r["height"]), gt, dt, image_id=s))
         return recs
 
@@ -330,6 +352,23 @@ def run_inference(
     from tcip_mcp.model_registry import resolve_model_identity
 
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
+    # This run's name→id map, derived once here (assign_class_ids over the inference dataset's
+    # classes.json for the config's subject/attribute) and reused for both recording and decode, so
+    # export records it in operating_point.json and decodes predictions to names through this one map —
+    # consistent within the run. Single-class detection is order-invariant ({subject: 0}), so this
+    # matches the training run's map today. Binding it to the *training* run's recorded map — so a
+    # registry whose value order was edited between train and inference cannot mis-decode a multi-value
+    # attribute — lands with K4/K5, which is where attribute order first matters.
+    id_map = None
+    try:
+        data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
+        subject = data_cfg.get("subject")
+        if subject and images_dir:
+            from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
+
+            _reg, id_map = _resolve_registry_id_map(images_dir, subject, data_cfg.get("attribute"))
+    except Exception:  # noqa: BLE001 — no run scope for the map; predictions decode by raw id then
+        id_map = None
     out = {
         "checkpoint": checkpoint_path,
         "checkpoint_sha256": identity["sha256"],
@@ -340,6 +379,7 @@ def run_inference(
         "total_detections": total_detections,
         "tiled": tile,
         "operating_point": op_bundle.to_provenance()["operating_point"],
+        "id_map": id_map,
         "results": results,
         **extra,
     }
@@ -437,9 +477,10 @@ def export_predictions(
     # model that produced it, not just a (collidable) filename stem.
     sha = result.get("checkpoint_sha256")
     producer = f"model:{Path(checkpoint_path).stem}" + (f"@{sha[:12]}" if sha else "")
+    id_map = result.get("id_map")
     for r in result["results"]:
         out_json = out / f"{Path(r['image']).stem}.json"
-        write_predictions_json(out_json, r, created_by=producer)
+        write_predictions_json(out_json, r, created_by=producer, id_map=id_map)
         written.append(str(out_json))
 
     # Stamp the operating point + producing-model identity beside the delivered labels. ``validated``
@@ -447,6 +488,7 @@ def export_predictions(
     # never hardcoded, or a passing calibration would be recorded as unvalidated (and vice versa).
     atomic_write_json(out / "operating_point.json",
                       {"operating_point": result.get("operating_point"),
+                       "id_map": id_map,
                        "validated": bool(result.get("validated", False)),
                        "shippable_issues": result.get("shippable_issues", []),
                        "checkpoint": Path(checkpoint_path).stem,
