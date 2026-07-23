@@ -1,6 +1,6 @@
 """Session-tracking routes — annotation_stats.json equivalent.
 
-Mirrors yolo-annotator's per-image timer + session aggregate at
+A per-image annotation timer + session aggregate at
 ``<project_root>/.tcip/state/annotation_stats.json`` with this shape::
 
     {
@@ -30,8 +30,8 @@ Mirrors yolo-annotator's per-image timer + session aggregate at
     }
 
 The image_status dict is co-owned with the classes-route's image_status.json
-endpoint and ends up duplicated here only for compatibility with the
-yolo-annotator file format. The class-route file is canonical.
+endpoint and is duplicated here only for the annotation-stats file shape.
+The class-route file is canonical.
 """
 
 from __future__ import annotations
