@@ -584,25 +584,31 @@ MOCK_CANDIDATES = [
 
 
 def _sam_available() -> bool:
-    """Check if segment-anything and its dependencies are available."""
+    """Whether SAM2 and its runtime deps are importable — the wrapper uses ``sam2`` (not SAM1)."""
     try:
         import cv2  # noqa: F401
-        import segment_anything  # noqa: F401
+        import sam2  # noqa: F401
         import torch  # noqa: F401
         return True
     except ImportError:
         return False
 
 
+#: The SAM2 model the guarded tests exercise — the smallest variant, for speed.
+SAM_TEST_MODEL = "hiera_t"
+
+
 def _sam_checkpoint_available() -> bool:
-    """Check if the SAM vit_b checkpoint exists."""
-    ckpt = Path.home() / ".cache" / "tcip" / "sam" / "sam_vit_b_01ec64.pth"
-    return ckpt.is_file()
+    """Whether the SAM2 checkpoint the guarded tests load (``SAM_TEST_MODEL``) exists — resolved
+    through the wrapper's own ``checkpoint_path`` so the guard can't drift from what the code reads."""
+    from tcip_annotation.sam_wrapper import checkpoint_path
+
+    return checkpoint_path(SAM_TEST_MODEL).is_file()
 
 
 requires_sam = pytest.mark.skipif(
     not _sam_available() or not _sam_checkpoint_available(),
-    reason="SAM (segment-anything + checkpoint) not available",
+    reason="SAM2 (sam2 package + hiera_t checkpoint) not available",
 )
 
 
@@ -629,6 +635,7 @@ class TestSamAutoMask:
 
         candidates = auto_mask(
             real_image,
+            model_type=SAM_TEST_MODEL,
             points_per_side=16,  # smaller for speed
             min_mask_region_area=500,
         )
@@ -649,7 +656,7 @@ class TestSamAutoMask:
     def test_auto_mask_sorted_by_area(self, real_image: str):
         from tcip_annotation.sam_wrapper import auto_mask
 
-        candidates = auto_mask(real_image, points_per_side=16)
+        candidates = auto_mask(real_image, model_type=SAM_TEST_MODEL, points_per_side=16)
         areas = [c["area"] for c in candidates]
         assert areas == sorted(areas, reverse=True)
 
@@ -657,7 +664,7 @@ class TestSamAutoMask:
         """All polygon vertices should be within image bounds."""
         from tcip_annotation.sam_wrapper import auto_mask
 
-        candidates = auto_mask(real_image, points_per_side=16)
+        candidates = auto_mask(real_image, model_type=SAM_TEST_MODEL, points_per_side=16)
         for c in candidates:
             for x, y in c["polygon"]:
                 assert 0 <= x <= 512, f"x={x} out of bounds"
@@ -687,6 +694,7 @@ class TestSamPredictFromGrid:
         result = segment_prompt(
             image_path=img_path,
             grid_cells=["B2"],
+            engine_params={"model_type": SAM_TEST_MODEL},
         )
         assert "error" not in result
         assert "polygon" in result
@@ -717,8 +725,11 @@ class TestFullSamPipeline:
         # Step 1: auto-label
         auto_result = propose_annotations(
             image_path=img_path,
-            points_per_side=16,
-            min_mask_region_area=500,
+            engine_params={
+                "model_type": SAM_TEST_MODEL,
+                "points_per_side": 16,
+                "min_mask_region_area": 500,
+            },
         )
         assert "error" not in auto_result
         assert auto_result["candidate_count"] > 0
