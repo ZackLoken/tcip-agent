@@ -6,34 +6,41 @@ import csv
 from pathlib import Path
 
 
-def write_predictions_json(json_path: str | Path, result: dict, created_by: str | None = None) -> None:
-    """Write a ``GenericPredictor`` detection result as a per-image COCO/JSON prediction file.
+def write_predictions_json(
+    json_path: str | Path, result: dict, created_by: str | None = None, *,
+    id_map: dict[str, int] | None = None,
+) -> None:
+    """Write a ``GenericPredictor`` detection result as a name-based per-image prediction file.
 
     ``result`` carries pixel-xyxy ``boxes``, 1-indexed ``labels`` (background=0), ``scores``, and
-    image ``width``/``height``. Each detection becomes a pixel-xyxy
-    ``PredBBox`` (``class_id = max(label-1, 0)`` to undo the 1-indexed torchvision label,
-    ``confidence`` from the score) and is written via ``json_io.write_detect``. ``keep_empty=True``
-    so a processed image with zero detections still yields a ``{"objects": []}`` confirmed-negative
-    file — preserving the behavior of the YOLO text writer that emitted an empty ``<stem>.txt``.
-    ``created_by`` stamps the producing model on every prediction (``model:<name>``), so the
-    origin travels into GT when a human accepts it — omit only when the producer is unknown.
+    image ``width``/``height``. Each detection's numeric label is decoded to a **name** (its
+    ``subject``) via ``id_map`` — the run's *recorded* ``operating_point.json`` name→id map — so a
+    prediction on disk carries the same names its labels do, and decode is never a fresh
+    ``assign_class_ids``. Absent a recorded map, the raw 0-indexed id is used as the name (a degraded
+    but honest fallback, never a re-derivation). ``keep_empty=True`` so a processed image with zero
+    detections still yields an ``{"annotations": []}`` file. ``created_by`` stamps the producing model
+    on every prediction so the origin travels into GT when a human accepts it.
     """
     from datetime import datetime, timezone
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import PredBBox
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.class_registry import decode_class_ids
 
     w = result.get("width") or 0
     h = result.get("height") or 0
     created_at = datetime.now(timezone.utc).isoformat() if created_by else None
-    preds: list[PredBBox] = []
+    id_to_name = decode_class_ids(id_map) if id_map else {}
+    preds: list[Annotation] = []
     for box, score, label in zip(
         result.get("boxes", []), result.get("scores", []), result.get("labels", [])
     ):
         x1, y1, x2, y2 = box
-        preds.append(PredBBox(x1, y1, x2, y2, max(int(label) - 1, 0), confidence=float(score),
-                              created_by=created_by, created_at=created_at))
-    json_io.write_detect(str(json_path), preds, int(w), int(h), keep_empty=True)
+        cid = max(int(label) - 1, 0)  # undo the 1-indexed torchvision label -> 0-indexed run id
+        name = id_to_name.get(cid, str(cid))  # decode via the recorded map, never a fresh derivation
+        preds.append(Annotation(subject=name, geometry=BBox(x1, y1, x2, y2), score=float(score),
+                                created_by=created_by, created_at=created_at))
+    json_io.write_annotations(str(json_path), preds, int(w), int(h), keep_empty=True)
 
 
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "operating_point_conf",
