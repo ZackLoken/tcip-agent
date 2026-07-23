@@ -35,8 +35,7 @@ if str(_MCP_SRC) not in sys.path:
 from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import PredBBox  # noqa: E402
-from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
+from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.tools.phenology_tools import (  # noqa: E402
     build_plant_mapping,
     compute_phenology,
@@ -90,13 +89,14 @@ def _write_geo_image(path: Path, lat: float, lon: float, when: datetime) -> None
     Image.new("RGB", (8, 8)).save(path, exif=exif)
 
 
-def _pred_boxes(n_elongated: int, n_total: int) -> list[PredBBox]:
-    """Per-image JSON prediction boxes; first n_elongated carry the elongated class."""
-    boxes = []
+def _pred_boxes(n_elongated: int, n_total: int) -> list[Annotation]:
+    """Per-image name-based catkin predictions; first n_elongated carry elongation='elongated'."""
+    anns = []
     for i in range(n_total):
-        cls = ELONGATED_CLASS if i < n_elongated else 0
-        boxes.append(PredBBox(1.0, 1.0, 3.0, 3.0, cls, confidence=0.90))
-    return boxes
+        value = "elongated" if i < n_elongated else "dormant"
+        anns.append(Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0),
+                               attributes={"elongation": value}, score=0.90))
+    return anns
 
 
 def _stem(plot: str, date: str) -> str:
@@ -109,10 +109,8 @@ def main() -> int:
         root = Path(td)
         images_root = root / "images"
         preds_root = root / "preds"           # class-carrying predictions (valid)
-        preds_flat = root / "preds_no_class"  # only class 0 (invalid → guard should fire)
         mapping_path = root / ".tcip" / "state" / "plant_mapping.json"
         csv_out = root / "delivery" / "catkin_phenology.csv"
-        csv_blocked = root / "delivery" / "should_not_exist.csv"
 
         # 1. Scene: geolocated images + per-image classified predictions.
         for date in DATES:
@@ -125,14 +123,9 @@ def main() -> int:
                     plant["lat"], plant["lon"], base_time + timedelta(minutes=j),
                 )
                 (preds_root / date).mkdir(parents=True, exist_ok=True)
-                json_io.write_detect(
+                json_io.write_annotations(
                     preds_root / date / f"{stem}.json",
                     _pred_boxes(n_elong, N_DETECTIONS), 8, 8,
-                )
-                (preds_flat / date).mkdir(parents=True, exist_ok=True)
-                json_io.write_detect(
-                    preds_flat / date / f"{stem}.json",
-                    _pred_boxes(0, N_DETECTIONS), 8, 8,
                 )
 
         plant_csv = root / "plants.csv"
@@ -158,10 +151,13 @@ def main() -> int:
               f"n_mapped={m.get('n_mapped')} n_unmapped={m.get('n_unmapped')}")
         check("mapping.json persisted", mapping_path.is_file())
 
-        # 3. compute_phenology — valid classified predictions.
-        print("\nStep 2: compute_phenology (valid, class-carrying predictions)")
-        # Synthetic scene has no held-out validation, so acknowledge to write a clearly-flagged
-        # provisional CSV — the delivery gate itself is covered by the compute_phenology unit tests.
+        # 3. compute_phenology — the elongation split is DEFERRED to K4/K5.
+        # count_by_class no longer reads an integer positive class off disk (elongation is now a
+        # name-based *attribute*, resolved by K4/K5). So there is no elongation split yet, the
+        # fraction is not a valid bloom measurement, and the rail must REFUSE to deliver a curve —
+        # exactly the measurement-integrity guard. This smoke asserts that refusal (the rail holding
+        # under the deferral); the delivered curve returns as a K4/K5 acceptance test.
+        print("\nStep 2: compute_phenology refuses an un-split curve (elongation split deferred to K4/K5)")
         r = compute_phenology(
             mapping_path=str(mapping_path),
             predictions_by_date=preds_by_date,
@@ -169,43 +165,9 @@ def main() -> int:
             positive_class_id=ELONGATED_CLASS,
             acknowledge_unvalidated=True,
         )
-        check("no error", "error" not in r, r.get("error", ""))
-        check("elongation_classified true", r.get("elongation_classified") is True)
-        check("2 plants", r.get("n_plants") == 2, str(r.get("n_plants")))
-        check("CSV written", csv_out.is_file())
-
-        if csv_out.is_file():
-            with csv_out.open(newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-            check("canonical columns", list(rows[0].keys()) == phenology.PHENOLOGY_CSV_COLUMNS,
-                  str(list(rows[0].keys())))
-            by_plant = {row["plant_id"]: row for row in rows}
-            check("both plants present", set(by_plant) == {"P1", "P2"}, str(set(by_plant)))
-            for pid, row in by_plant.items():
-                # fraction 0.0 (02-11) → 0.4 (02-25) → 1.0 (03-11): crossings interpolate and
-                # must be ordered; catkin_elongation_date = "most elongated" (crops.yml) = 95% crossing.
-                elong_date = row["catkin_elongation_date"]
-                c05, c50, c95 = (row["catkin_05per_date"], row["catkin_50per_date"],
-                                 row["catkin_95per_date"])
-                check(f"{pid} elongation_date == 95per (majority)", elong_date == c95, f"{elong_date} vs {c95}")
-                check(f"{pid} all crossings present", all([c05, c50, c95]),
-                      f"05={c05} 50={c50} 95={c95}")
-                check(f"{pid} crossings ordered 05<=50<=95", c05 <= c50 <= c95,
-                      f"05={c05} 50={c50} 95={c95}")
-                check(f"{pid} accession carried through", row["accession"] in {"acc-A", "acc-B"},
-                      row["accession"])
-
-        # 4. Measurement-integrity guard — predictions with no elongation class.
-        print("\nStep 3: measurement-integrity guard (predictions carry no elongation class)")
-        g = compute_phenology(
-            mapping_path=str(mapping_path),
-            predictions_by_date={d: str(preds_flat / d) for d in DATES},
-            output_csv_path=str(csv_blocked),
-            positive_class_id=ELONGATED_CLASS,
-        )
-        check("returns an error", "error" in g, str(g)[:80])
-        check("elongation_classified false", g.get("elongation_classified") is False)
-        check("no CSV written (delivery refused)", not csv_blocked.exists())
+        check("elongation_classified false (split deferred)", r.get("elongation_classified") is False,
+              str(r.get("elongation_classified")))
+        check("no CSV written (delivery refused, not a fabricated curve)", not csv_out.exists())
 
     print()
     if _failures:
