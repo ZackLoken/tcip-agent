@@ -1,4 +1,4 @@
-"""Tests for the class / per-image-status routes."""
+"""Tests for the class-registry / per-image-status routes."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_annotation import json_io
-from tcip_annotation.state import BBox
+from tcip_annotation.json_io import write_annotations
+from tcip_annotation.state import Annotation, BBox
 from tcip_web.app import app
 
 
@@ -19,131 +19,125 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+def _catkin(x1, y1, x2, y2, *, subject: str = "catkin") -> Annotation:
+    return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2))
+
+
 def test_load_empty_registry(client: TestClient, tmp_path: Path) -> None:
     resp = client.get("/api/classes/load", params={"project_root": str(tmp_path)})
     assert resp.status_code == 200
-    assert resp.json() == {"classes": []}
+    assert resp.json() == {"subjects": {}}
 
 
 def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
-    # The registry lives in the DATASET, subject-scoped, and travels with the image set.
+    # The registry is one nested classes.json in the DATASET; it travels with the image set.
     save = client.post(
         "/api/classes/save",
         json={
             "project_root": str(tmp_path),
-            "subject": "catkin",
             "dataset_root": str(tmp_path),
-            "classes": [
-                {"id": 0, "name": "catkin", "color": "#FF0000"},
-                {"id": 1, "name": "bud", "color": "#00FFFF"},
-            ],
+            "subjects": {
+                "catkin": {
+                    "description": "a hazelnut catkin",
+                    "attributes": {
+                        "elongation": {"type": "categorical", "values": ["dormant", "elongated"]}
+                    },
+                },
+                "bush": {"description": "one hazelnut bush crown"},
+            },
         },
     )
     assert save.status_code == 200
-    assert save.json()["n_classes"] == 2
+    assert save.json()["n_subjects"] == 2
 
     load = client.get(
         "/api/classes/load",
-        params={"project_root": str(tmp_path), "subject": "catkin", "dataset_root": str(tmp_path)},
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()
-    assert len(load["classes"]) == 2
-    assert load["classes"][0] == {"id": 0, "name": "catkin", "color": "#FF0000"}
-    # Lands in the dataset, not project state.
-    on_disk = json.loads((tmp_path / "classes" / "catkin.json").read_text())
-    assert on_disk["0"]["name"] == "catkin"
+    subjects = load["subjects"]
+    assert set(subjects) == {"catkin", "bush"}
+    assert subjects["catkin"]["attributes"]["elongation"]["values"] == ["dormant", "elongated"]
+    # Lands in the dataset as one nested classes.json (no per-subject files, no numeric ids).
+    on_disk = json.loads((tmp_path / "classes.json").read_text())
+    assert set(on_disk) == {"catkin", "bush"}
 
 
-def test_save_without_subject_is_refused(client: TestClient, tmp_path: Path) -> None:
-    """A registry belongs to a subject; a subject-less save has no home and no meaning."""
+def test_save_refuses_malformed_registry(client: TestClient, tmp_path: Path) -> None:
+    """A malformed registry (here: an attribute with no ``values``) is refused, not silently
+    written — a bad registry would assign ids over garbage."""
     r = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "classes": [{"id": 0, "name": "x", "color": "#FF0000"}]},
+              "subjects": {"catkin": {"attributes": {"elongation": {"type": "categorical"}}}}},
     )
     assert r.status_code == 400
 
 
-def test_per_subject_maps_are_scoped(client: TestClient, tmp_path: Path) -> None:
-    # catkin and bush each use class 0 for their own object — subject-scoped maps keep them apart.
-    for subject, name in (("catkin", "catkin"), ("bush", "bush")):
-        r = client.post(
-            "/api/classes/save",
-            json={
-                "project_root": str(tmp_path),
-                "subject": subject,
-                "dataset_root": str(tmp_path),
-                "classes": [{"id": 0, "name": name, "color": "#FF0000"}],
+def test_registry_holds_multiple_subjects(client: TestClient, tmp_path: Path) -> None:
+    # catkin and bush each name their own object; the one nested registry keeps them distinct.
+    save = client.post(
+        "/api/classes/save",
+        json={
+            "project_root": str(tmp_path),
+            "dataset_root": str(tmp_path),
+            "subjects": {
+                "catkin": {"description": "a catkin"},
+                "bush": {"description": "a bush"},
             },
-        )
-        assert r.status_code == 200
+        },
+    )
+    assert save.status_code == 200
 
-    cat = client.get(
+    load = client.get(
         "/api/classes/load",
-        params={"project_root": str(tmp_path), "subject": "catkin", "dataset_root": str(tmp_path)},
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
     ).json()
-    bush = client.get(
-        "/api/classes/load",
-        params={"project_root": str(tmp_path), "subject": "bush", "dataset_root": str(tmp_path)},
-    ).json()
-    assert cat["classes"][0]["name"] == "catkin"
-    assert bush["classes"][0]["name"] == "bush"
-    # each map lands under its own subject file in the dataset
-    assert (tmp_path / "classes" / "catkin.json").is_file()
-    assert (tmp_path / "classes" / "bush.json").is_file()
+    assert load["subjects"]["catkin"]["description"] == "a catkin"
+    assert load["subjects"]["bush"]["description"] == "a bush"
+    assert (tmp_path / "classes.json").is_file()
 
 
 def test_dataset_root_derived_from_annotation_dir(client: TestClient, tmp_path: Path) -> None:
     """A caller that passes only an annotations dir still lands the registry in the dataset."""
-    det = tmp_path / "annotations" / "catkin" / "2026-03-02" / "detect"
-    det.mkdir(parents=True)
+    ann = tmp_path / "annotations" / "2026-03-02"
+    ann.mkdir(parents=True)
     r = client.post(
         "/api/classes/save",
-        json={"project_root": str(tmp_path), "subject": "catkin",
-              "annotations_detect_dir": str(det),
-              "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}]},
+        json={"project_root": str(tmp_path), "annotations_dir": str(ann),
+              "subjects": {"catkin": {"description": "a catkin"}}},
     )
     assert r.status_code == 200
-    assert (tmp_path / "classes" / "catkin.json").is_file()
+    assert (tmp_path / "classes.json").is_file()
 
 
-def test_load_derives_from_labels_when_map_absent(client: TestClient, tmp_path: Path) -> None:
-    # No saved map for this subject, but its labels exist → derive a provisional registry so the
-    # canvas never loads empty (names default to class_<id>).
-    det = tmp_path / "annotations" / "catkin" / "d" / "detect"
-    det.mkdir(parents=True)
-    json_io.write_detect(
-        str(det / "IMG_A.json"),
-        [BBox(50.0, 50.0, 60.0, 60.0, 0), BBox(20.0, 20.0, 30.0, 30.0, 2)],
-        100,
-        100,
+def test_load_derives_subjects_from_labels_when_registry_absent(
+    client: TestClient, tmp_path: Path
+) -> None:
+    # No saved registry, but labels exist → derive a provisional (detection-only) registry from the
+    # subjects present, so the canvas never loads empty.
+    ann = tmp_path / "annotations" / "d"
+    ann.mkdir(parents=True)
+    write_annotations(
+        str(ann / "IMG_A.json"),
+        [_catkin(50, 50, 60, 60), _catkin(20, 20, 30, 30, subject="bush")],
+        100, 100,
     )
     load = client.get(
         "/api/classes/load",
-        params={"project_root": str(tmp_path), "subject": "catkin", "annotations_detect_dir": str(det)},
+        params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
-    assert [c["id"] for c in load["classes"]] == [0, 2]
-    assert load["classes"][0]["name"] == "class_0"
-
-
-def test_load_rejects_invalid_subject(client: TestClient, tmp_path: Path) -> None:
-    resp = client.get(
-        "/api/classes/load", params={"project_root": str(tmp_path), "subject": "../evil"}
-    )
-    assert resp.status_code == 400
-
-
-def test_auto_color_is_deterministic(client: TestClient) -> None:
-    c0 = client.get("/api/classes/auto_color/0").json()
-    c10 = client.get("/api/classes/auto_color/10").json()
-    assert c0["color"] == c10["color"]  # wraps every 10
+    assert set(load["subjects"]) == {"bush", "catkin"}
 
 
 def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
     client.post(
         "/api/classes/image_status",
-        json={"project_root": str(tmp_path), "image_name": "IMG_0001.JPG", "status": "complete"},
+        json={"project_root": str(tmp_path), "image_name": "IMG_0001.JPG",
+              "status": "complete", "subject": "catkin"},
     )
-    resp = client.get("/api/classes/image_status", params={"project_root": str(tmp_path)})
+    resp = client.get(
+        "/api/classes/image_status", params={"project_root": str(tmp_path), "subject": "catkin"}
+    )
     body = resp.json()
     assert body["statuses"]["IMG_0001.JPG"] == "complete"
 
@@ -159,19 +153,19 @@ def test_image_status_rejects_invalid(client: TestClient, tmp_path: Path) -> Non
 def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path: Path) -> None:
     # A negative is intentional (completed + empty), never inferred from an empty file alone —
     # so an accidental empty file, or flipping through an image, doesn't become a training negative.
-    det = tmp_path / "detect"
-    det.mkdir()
-    json_io.write_detect(str(det / "IMG_A.json"), [BBox(50.0, 50.0, 60.0, 60.0, 0)], 100, 100)  # has objects, not completed
-    json_io.write_detect(str(det / "IMG_B.json"), [], 100, 100, keep_empty=True)  # present {"objects": []}, not completed
-    json_io.write_detect(str(det / "IMG_E.json"), [BBox(50.0, 50.0, 60.0, 60.0, 0)], 100, 100)  # has objects, completed
+    ann = tmp_path / "annotations"
+    ann.mkdir()
+    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)  # objects, not completed
+    write_annotations(str(ann / "IMG_B.json"), [], 100, 100, keep_empty=True)  # present {"annotations": []}
+    write_annotations(str(ann / "IMG_E.json"), [_catkin(50, 50, 60, 60)], 100, 100)  # objects, completed
     # IMG_C.json missing; IMG_D completed but has no file (empty)
 
     resp = client.post(
         "/api/classes/image_status/derive",
         json={
             "project_root": str(tmp_path),
-            "annotations_detect_dir": str(det),
-            "annotations_segment_dir": None,
+            "annotations_dir": str(ann),
+            "subject": "catkin",
             "image_list": ["IMG_A.JPG", "IMG_B.JPG", "IMG_C.JPG", "IMG_D.JPG", "IMG_E.JPG"],
             "complete_override": ["IMG_D.JPG", "IMG_E.JPG"],
         },
@@ -188,23 +182,23 @@ def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path:
 def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tmp_path: Path) -> None:
     # The per-file label-JSON memo is keyed on mtime_ns — a write after a prior derive() call
     # must not serve the stale (pre-write) parse of the same path.
-    det = tmp_path / "detect"
-    det.mkdir()
-    label = det / "IMG_A.json"
-    json_io.write_detect(str(label), [], 100, 100, keep_empty=True)
+    ann = tmp_path / "annotations"
+    ann.mkdir()
+    label = ann / "IMG_A.json"
+    write_annotations(str(label), [], 100, 100, keep_empty=True)
     os.utime(label, (1_000_000, 1_000_000))
 
     req = {
         "project_root": str(tmp_path),
-        "annotations_detect_dir": str(det),
-        "annotations_segment_dir": None,
+        "annotations_dir": str(ann),
+        "subject": "catkin",
         "image_list": ["IMG_A.JPG"],
         "complete_override": [],
     }
     first = client.post("/api/classes/image_status/derive", json=req).json()
     assert first["statuses"]["IMG_A.JPG"] == "unannotated"
 
-    json_io.write_detect(str(label), [BBox(50.0, 50.0, 60.0, 60.0, 0)], 100, 100)
+    write_annotations(str(label), [_catkin(50, 50, 60, 60)], 100, 100)
     os.utime(label, (2_000_000, 2_000_000))  # force a distinct mtime_ns from the first write
 
     second = client.post("/api/classes/image_status/derive", json=req).json()
@@ -214,24 +208,24 @@ def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tm
 def test_load_derived_registry_cache_invalidates_on_label_write(
     client: TestClient, tmp_path: Path
 ) -> None:
-    # Same memo, exercised through load_classes' label-derived registry path.
-    det = tmp_path / "annotations" / "catkin" / "d" / "detect"
-    det.mkdir(parents=True)
-    label = det / "IMG_A.json"
-    json_io.write_detect(str(label), [BBox(50.0, 50.0, 60.0, 60.0, 0)], 100, 100)
+    # Same memo, exercised through load_classes' label-derived subject list.
+    ann = tmp_path / "annotations" / "d"
+    ann.mkdir(parents=True)
+    label = ann / "IMG_A.json"
+    write_annotations(str(label), [_catkin(50, 50, 60, 60)], 100, 100)
     os.utime(label, (1_000_000, 1_000_000))
 
-    params = {"project_root": str(tmp_path), "subject": "catkin", "annotations_detect_dir": str(det)}
+    params = {"project_root": str(tmp_path), "annotations_dir": str(ann)}
     first = client.get("/api/classes/load", params=params).json()
-    assert [c["id"] for c in first["classes"]] == [0]
+    assert set(first["subjects"]) == {"catkin"}
 
-    json_io.write_detect(
-        str(label), [BBox(50.0, 50.0, 60.0, 60.0, 0), BBox(20.0, 20.0, 30.0, 30.0, 2)], 100, 100
+    write_annotations(
+        str(label), [_catkin(50, 50, 60, 60), _catkin(20, 20, 30, 30, subject="bush")], 100, 100
     )
     os.utime(label, (2_000_000, 2_000_000))
 
     second = client.get("/api/classes/load", params=params).json()
-    assert [c["id"] for c in second["classes"]] == [0, 2]
+    assert set(second["subjects"]) == {"bush", "catkin"}
 
 
 def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
@@ -239,6 +233,7 @@ def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
         "/api/classes/image_status/bulk",
         json={
             "project_root": str(tmp_path),
+            "subject": "catkin",
             "statuses": {
                 "A.JPG": "complete",
                 "B.JPG": "partial",
@@ -248,7 +243,7 @@ def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
     )
     assert resp.json()["n"] == 3
     loaded = client.get(
-        "/api/classes/image_status", params={"project_root": str(tmp_path)}
+        "/api/classes/image_status", params={"project_root": str(tmp_path), "subject": "catkin"}
     ).json()
     assert loaded["statuses"]["A.JPG"] == "complete"
     assert loaded["statuses"]["B.JPG"] == "partial"
