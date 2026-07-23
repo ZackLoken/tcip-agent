@@ -36,7 +36,7 @@ def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, Path, tuple[int, int, i
     restores the upright frame — mirroring a real orientation-6 capture.
     """
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -51,7 +51,9 @@ def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, Path, tuple[int, int, i
     raw.save(images_dir / "m.jpg", format="JPEG", exif=exif, quality=95)
 
     x1, y1, x2, y2 = MARKER  # already pixel xyxy in the upright frame
-    json_io.write_detect(str(labels_dir / "m.json"), [BBox(x1, y1, x2, y2, 0)], UP_W, UP_H, keep_empty=True)
+    json_io.write_annotations(str(labels_dir / "m.json"),
+                              [Annotation(subject="catkin", geometry=BBox(x1, y1, x2, y2))],
+                              UP_W, UP_H, keep_empty=True)
     return images_dir, labels_dir, MARKER
 
 
@@ -96,7 +98,7 @@ def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images_dir, labels_dir, _ = _make_orient6_dataset(tmp_path)
-    ds = DetectionDataset(str(images_dir), str(labels_dir), num_classes=1)
+    ds = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
     img_t, target = ds[0]
 
     assert img_t.shape[1:] == (UP_H, UP_W)  # [C, H, W] upright — not the raw sensor frame
@@ -119,7 +121,7 @@ def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
     from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
 
     images_dir, labels_dir, _ = _make_orient6_dataset(tmp_path)
-    base = DetectionDataset(str(images_dir), str(labels_dir), num_classes=1)
+    base = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
     tiled = TiledDetectionDataset(base, tile_size=64, overlap=0.25, skip_empty=True)
     assert tiled.num_samples > 0
 
@@ -154,7 +156,7 @@ def test_train_and_eval_read_paths_share_one_frame(tmp_path: Path) -> None:
 
     train_frame = load_image(p, 3).size          # training loader read
     eval_frame = get_image_dimensions(p)          # eval / viz / GUI read
-    ds_frame = DetectionDataset(str(images_dir), str(labels_dir), num_classes=1)[0][0].shape[1:]
+    ds_frame = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")[0][0].shape[1:]
 
     assert train_frame == eval_frame == (UP_W, UP_H)
     assert tuple(ds_frame) == (UP_H, UP_W)  # (H, W) == upright
