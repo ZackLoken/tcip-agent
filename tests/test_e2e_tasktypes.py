@@ -33,7 +33,7 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     train,
 )
 from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import BBox, Polygon  # noqa: E402
+from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 
 IMG = 64
 
@@ -89,16 +89,16 @@ def test_detection_e2e(tmp_path: Path):
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         # one centered box covering the middle of the image
-        json_io.write_detect(
+        json_io.write_annotations(
             str(labels_dir / f"img{i}.json"),
-            [BBox(19.2, 19.2, 44.8, 44.8, 0)],
+            [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
             IMG,
             IMG,
             keep_empty=True,
         )
 
     dataset = build_dataset(
-        "detection", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1
+        "detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="catkin"
     )
     loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
@@ -116,16 +116,17 @@ def test_instance_seg_e2e(tmp_path: Path):
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         # a square polygon (>= 3 vertices)
-        json_io.write_segment(
+        json_io.write_annotations(
             str(labels_dir / f"img{i}.json"),
-            [Polygon([(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)], 0)],
+            [Annotation(subject="catkin",
+                        geometry=Polygon([(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)]))],
             IMG,
             IMG,
             keep_empty=True,
         )
 
     dataset = build_dataset(
-        "instance_seg", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1
+        "instance_seg", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="catkin"
     )
     # Guard the polygon -> mask rasterization path (datasets.py). With the mask_rcnn
     # detector these masks now reach the Mask R-CNN mask loss during training.
