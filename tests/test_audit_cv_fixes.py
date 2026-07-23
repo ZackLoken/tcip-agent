@@ -138,7 +138,7 @@ def _det_dataset(tmp_path, n=3, size=128):
     from PIL import Image
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -146,8 +146,8 @@ def _det_dataset(tmp_path, n=3, size=128):
     labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         Image.new("RGB", (size, size), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
-        json_io.write_detect(str(labels_dir / f"img{i}.json"),
-                             [BBox(10, 10, 40, 40, 0)], size, size)
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], size, size)
     return images_dir, labels_dir
 
 
@@ -178,7 +178,7 @@ def test_cv1_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     (out / "model_best.pt").write_bytes(b"x")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection")
+    evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection", subject="catkin")
     assert isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["ds"].num_samples > 3  # more tiles than the 3 source images
     assert captured["tiling"] == {"enabled": True, "tile_size": 64}
@@ -193,7 +193,7 @@ def test_cv1_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     ckpt.write_bytes(b"x")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection")
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin")
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["tiling"] is None
@@ -208,7 +208,7 @@ def test_cv1_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     ckpt.write_bytes(b"x")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
                    tiling={"enabled": True, "tile_size": 64})
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
@@ -219,7 +219,7 @@ def test_cv1_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
 
     from PIL import Image
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -227,7 +227,8 @@ def test_cv1_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     labels_dir.mkdir()
     Image.new("RGB", (128, 128)).save(images_dir / "a.png")
     # object straddling the x=64 tile seam
-    json_io.write_detect(str(labels_dir / "a.json"), [BBox(54, 54, 74, 74, 0)], 128, 128)
+    json_io.write_annotations(str(labels_dir / "a.json"),
+                              [Annotation(subject="catkin", geometry=BBox(54, 54, 74, 74))], 128, 128)
 
     class _Stub:
         def predict_tiled(self, path, **kw):
@@ -235,7 +236,8 @@ def test_cv1_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
                     "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
-    r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"))
+    r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"),
+                                  subject="catkin")
     assert r["eval_regime"] == "full-frame-tiled-inference"
     # counted once against un-fragmented full-frame GT (tile-level would split/duplicate it)
     assert r["tp"] == 1 and r["fp"] == 0 and r["fn"] == 0
@@ -324,7 +326,7 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
 
     from PIL import Image
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
     import tcip_mcp.pipelines.training.generic_trainer as gt
     from tcip_mcp.tools import training_tools
 
@@ -336,9 +338,11 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
         d.mkdir()
     for i in range(2):
         Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
-        json_io.write_detect(str(labels_dir / f"t{i}.json"), [BBox(10, 10, 40, 40, 0)], 128, 128)
+        json_io.write_annotations(str(labels_dir / f"t{i}.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
     Image.new("RGB", (128, 128)).save(val_images / "v0.png")
-    json_io.write_detect(str(val_labels / "v0.json"), [BBox(10, 10, 40, 40, 0)], 128, 128)
+    json_io.write_annotations(str(val_labels / "v0.json"),
+                              [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
     def _stub_train(run, *a, **k):
         run.status = "completed"
@@ -352,7 +356,7 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
                          "task": "detection"},
-        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
                  "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
                  "tiling": {"enabled": True}},  # no tile_size -> effective default must be persisted
         "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
@@ -469,11 +473,12 @@ def test_cv0_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
 
     # Real labeled inference target; bundle is (mockingly) scoped to a foreign hash "H".
     img = _one_image(tmp_path)
-    json_io.write_detect(str(tmp_path / f"{Path(img).stem}.json"), [BBox(10, 10, 40, 40, 0)], 100, 100)
+    json_io.write_annotations(str(tmp_path / f"{Path(img).stem}.json"),
+                              [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 100, 100)
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=_op_records("c"),
                                      holdout_records=_op_records("h"))
@@ -523,7 +528,7 @@ def test_cv0_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
 
     from PIL import Image
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -531,7 +536,8 @@ def test_cv0_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
     labels_dir.mkdir()
     for i in range(4):
         Image.new("RGB", (128, 128)).save(images_dir / f"img{i}.png")
-        json_io.write_detect(str(labels_dir / f"img{i}.json"), [BBox(10, 10, 40, 40, 0)], 128, 128)
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
     calls: list[dict] = []
 
