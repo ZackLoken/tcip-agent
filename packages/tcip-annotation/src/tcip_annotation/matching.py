@@ -1,6 +1,8 @@
 """Geometry helpers and GT-vs-prediction matching engine.
 
-All functions are pure (no GUI dependencies).
+All functions are pure (no GUI dependencies). Ground truth and predictions are both
+:class:`~tcip_annotation.state.Annotation` lists — a prediction is an annotation whose ``score`` is
+set. Matching groups by *class name* (an annotation's ``subject``); an integer class id never appears.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ try:
 except ImportError:  # pragma: no cover - older shapely
     ShapelyError = Exception
 
-from tcip_annotation.state import BBox, Polygon, PredBBox, PredPolygon
+from tcip_annotation.state import Annotation, BBox, Polygon
 
 logger = logging.getLogger(__name__)
 
@@ -87,22 +89,19 @@ def _append_box_iou_pairs(np, gt_arr, pred_arr, gis, pis, iou_threshold, pairs) 
             pairs.append((float(iou[rr, cc]), gis[r0 + rr], pis[cc]))
 
 
-def _bbox_of(item_type: str, data) -> tuple[float, float, float, float]:
-    """Get axis-aligned bounding box for a box or polygon."""
-    if item_type == "box":
-        return (data.x1, data.y1, data.x2, data.y2)
-    # polygon
-    xs = [p[0] for p in data.points]
-    ys = [p[1] for p in data.points]
-    return (min(xs), min(ys), max(xs), max(ys))
+def _is_box(a: Annotation) -> bool:
+    return isinstance(a.geometry, BBox)
 
 
-def _to_shapely(item_type: str, data) -> tuple[ShapelyPolygon, float]:
-    """Convert a box or polygon to a Shapely geometry + area."""
-    if item_type == "box":
-        pts = [(data.x1, data.y1), (data.x2, data.y1), (data.x2, data.y2), (data.x1, data.y2)]
-    else:
-        pts = data.points
+def _to_shapely(a: Annotation) -> tuple[ShapelyPolygon, float]:
+    """Convert an annotation's geometry to a Shapely polygon + area."""
+    if isinstance(a.geometry, BBox):
+        b = a.geometry
+        pts = [(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)]
+    elif isinstance(a.geometry, Polygon):
+        pts = list(a.geometry.points)
+    else:  # pragma: no cover - callers filter geometry-less annotations out first
+        pts = []
     g = ShapelyPolygon(pts)
     if not g.is_valid:
         g = make_valid(g)
@@ -110,92 +109,85 @@ def _to_shapely(item_type: str, data) -> tuple[ShapelyPolygon, float]:
 
 
 def compute_matches(
-    gt_boxes: list[BBox],
-    gt_polygons: list[Polygon],
-    pred_boxes: list[PredBBox],
-    pred_polygons: list[PredPolygon],
+    gt: list[Annotation],
+    preds: list[Annotation],
     iou_threshold: float = 0.5,
     conf_threshold: float = 0.25,
 ) -> dict:
     """Match predictions to GT; classify as TP / FP / FN.
 
-    Uses greedy matching: sort all same-class GT-Pred pairs by IoU
-    descending, then assign greedily.
+    ``gt`` / ``preds`` are :class:`Annotation` lists (a prediction carries a ``score``). Matching is
+    per class name (``subject``) using greedy IoU. Geometry-less annotations (image-level labels)
+    carry no spatial extent and are ignored here.
 
-    Returns
-    -------
-    dict with keys ``'tp'``, ``'fp'``, ``'fn'``.
-      - ``tp``: list of dicts ``{gt_type, gt_idx, pred_type, pred_idx, iou, class_id, conf}``
-      - ``fp``: list of dicts ``{pred_type, pred_idx, class_id, conf}``
-      - ``fn``: list of dicts ``{gt_type, gt_idx, class_id}``
+    Returns a dict with keys ``'tp'`` / ``'fp'`` / ``'fn'``:
+      - ``tp``: ``{gt_idx, pred_idx, iou, class_name, conf}``
+      - ``fp``: ``{pred_idx, class_name, conf}``
+      - ``fn``: ``{gt_idx, class_name}``
+
+    ``gt_idx`` / ``pred_idx`` index into ``gt`` / ``preds`` directly.
     """
-    # Build unified lists with type tags
-    gt_items: list[tuple[str, int, int, object]] = []
-    for i, b in enumerate(gt_boxes):
-        gt_items.append(("box", i, b.class_id, b))
-    for i, p in enumerate(gt_polygons):
-        gt_items.append(("polygon", i, p.class_id, p))
+    gt_items: list[tuple[int, str, Annotation]] = [
+        (i, a.subject, a) for i, a in enumerate(gt) if a.geometry is not None
+    ]
+    pred_items: list[tuple[int, str, float, Annotation]] = [
+        (i, a.subject, float(a.score if a.score is not None else 1.0), a)
+        for i, a in enumerate(preds)
+        if a.geometry is not None and (a.score is None or a.score >= conf_threshold)
+    ]
 
-    pred_items: list[tuple[str, int, int, float, object]] = []
-    for i, b in enumerate(pred_boxes):
-        if b.confidence >= conf_threshold:
-            pred_items.append(("box", i, b.class_id, b.confidence, b))
-    for i, p in enumerate(pred_polygons):
-        if p.confidence >= conf_threshold:
-            pred_items.append(("polygon", i, p.class_id, p.confidence, p))
+    gt_by_class: dict[str, list[int]] = defaultdict(list)
+    for li, item in enumerate(gt_items):
+        gt_by_class[item[1]].append(li)
+    pred_by_class: dict[str, list[int]] = defaultdict(list)
+    for li, item in enumerate(pred_items):
+        pred_by_class[item[1]].append(li)
 
-    # Group by class
-    gt_by_class: dict[int, list[int]] = defaultdict(list)
-    for gi, item in enumerate(gt_items):
-        gt_by_class[item[2]].append(gi)
-    pred_by_class: dict[int, list[int]] = defaultdict(list)
-    for pi, item in enumerate(pred_items):
-        pred_by_class[item[2]].append(pi)
-
-    # Shapely geometry caches (lazy)
     gt_geom_cache: dict[int, tuple] = {}
     pred_geom_cache: dict[int, tuple] = {}
 
-    def _gt_geom(gi: int):
-        if gi not in gt_geom_cache:
-            gt_geom_cache[gi] = _to_shapely(gt_items[gi][0], gt_items[gi][3])
-        return gt_geom_cache[gi]
+    def _gt_geom(li: int):
+        if li not in gt_geom_cache:
+            gt_geom_cache[li] = _to_shapely(gt_items[li][2])
+        return gt_geom_cache[li]
 
-    def _pred_geom(pi: int):
-        if pi not in pred_geom_cache:
-            pred_geom_cache[pi] = _to_shapely(pred_items[pi][0], pred_items[pi][4])
-        return pred_geom_cache[pi]
+    def _pred_geom(li: int):
+        if li not in pred_geom_cache:
+            pred_geom_cache[li] = _to_shapely(pred_items[li][3])
+        return pred_geom_cache[li]
 
-    # Compute all same-class IoU pairs. Pure-box classes (the common detection case)
-    # use a vectorized numpy IoU matrix; any class involving a polygon falls back to
-    # the exact per-pair loop so emit order and IoU values stay byte-identical.
+    # Compute all same-class IoU pairs. Pure-box classes (the common detection case) use a
+    # vectorized numpy IoU matrix; any class involving a polygon falls back to the exact per-pair
+    # loop so emit order and IoU values stay byte-identical.
     import numpy as np
 
     pairs: list[tuple[float, int, int]] = []
-    for cid in gt_by_class:
-        if cid not in pred_by_class:
+    for cname in gt_by_class:
+        if cname not in pred_by_class:
             continue
-        gis = gt_by_class[cid]
-        pis = pred_by_class[cid]
-        if all(gt_items[gi][0] == "box" for gi in gis) and all(
-            pred_items[pi][0] == "box" for pi in pis
+        gis = gt_by_class[cname]
+        pis = pred_by_class[cname]
+        if all(_is_box(gt_items[li][2]) for li in gis) and all(
+            _is_box(pred_items[li][3]) for li in pis
         ):
             gt_arr = np.array(
-                [(d.x1, d.y1, d.x2, d.y2) for d in (gt_items[gi][3] for gi in gis)],
+                [(d.geometry.x1, d.geometry.y1, d.geometry.x2, d.geometry.y2)
+                 for d in (gt_items[li][2] for li in gis)],
                 dtype=np.float64,
             )
             pred_arr = np.array(
-                [(d.x1, d.y1, d.x2, d.y2) for d in (pred_items[pi][4] for pi in pis)],
+                [(d.geometry.x1, d.geometry.y1, d.geometry.x2, d.geometry.y2)
+                 for d in (pred_items[li][3] for li in pis)],
                 dtype=np.float64,
             )
             _append_box_iou_pairs(np, gt_arr, pred_arr, gis, pis, iou_threshold, pairs)
             continue
         for gi in gis:
             for pi in pis:
-                gt_type, _, _, gt_data = gt_items[gi]
-                p_type, _, _, _, p_data = pred_items[pi]
-                if gt_type == "box" and p_type == "box":
-                    iou = box_iou(gt_data, p_data)
+                gt_ann = gt_items[gi][2]
+                pred_ann = pred_items[pi][3]
+                if _is_box(gt_ann) and _is_box(pred_ann):
+                    iou = box_iou(gt_ann.geometry, pred_ann.geometry)
                 else:
                     g1, a1 = _gt_geom(gi)
                     g2, a2 = _pred_geom(pi)
@@ -214,31 +206,27 @@ def compute_matches(
             continue
         matched_gt.add(gi)
         matched_pred.add(pi)
-        gt_type, gt_idx, gt_cid, _ = gt_items[gi]
-        p_type, p_idx, _, p_conf, _ = pred_items[pi]
-        tp_list.append(
-            {
-                "gt_type": gt_type,
-                "gt_idx": gt_idx,
-                "pred_type": p_type,
-                "pred_idx": p_idx,
-                "iou": round(iou, 4),
-                "class_id": gt_cid,
-                "conf": round(p_conf, 4),
-            }
-        )
+        gt_idx, gt_cname, _ = gt_items[gi]
+        p_idx, _, p_conf, _ = pred_items[pi]
+        tp_list.append({
+            "gt_idx": gt_idx,
+            "pred_idx": p_idx,
+            "iou": round(iou, 4),
+            "class_name": gt_cname,
+            "conf": round(p_conf, 4),
+        })
 
     # Unmatched predictions → FP
     fp_list: list[dict] = []
-    for pi, (p_type, p_idx, p_cid, p_conf, _) in enumerate(pred_items):
-        if pi not in matched_pred:
-            fp_list.append({"pred_type": p_type, "pred_idx": p_idx, "class_id": p_cid, "conf": round(p_conf, 4)})
+    for li, (p_idx, p_cname, p_conf, _) in enumerate(pred_items):
+        if li not in matched_pred:
+            fp_list.append({"pred_idx": p_idx, "class_name": p_cname, "conf": round(p_conf, 4)})
 
     # Unmatched GT → FN
     fn_list: list[dict] = []
-    for gi, (gt_type, gt_idx, gt_cid, _) in enumerate(gt_items):
-        if gi not in matched_gt:
-            fn_list.append({"gt_type": gt_type, "gt_idx": gt_idx, "class_id": gt_cid})
+    for li, (gt_idx, gt_cname, _) in enumerate(gt_items):
+        if li not in matched_gt:
+            fn_list.append({"gt_idx": gt_idx, "class_name": gt_cname})
 
     return {"tp": tp_list, "fp": fp_list, "fn": fn_list}
 
