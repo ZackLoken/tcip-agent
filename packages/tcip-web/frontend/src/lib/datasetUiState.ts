@@ -26,7 +26,7 @@ const VIS_PREFIX = "tcip.dsvis.";
 export function datasetKey(d: DatasetSelection): string | null {
   if (!d.project_root || !d.date) return null;
   const subject = d.subject ?? "";
-  const predDir = d.predictions_detect_dir ?? d.predictions_segment_dir ?? "";
+  const predDir = d.predictions_dir ?? "";
   const model = predDir.split(/[/\\]predictions[/\\]/)[1]?.split(/[/\\]/)[0] ?? "";
   return `${d.project_root} ${d.date} ${subject} ${model}`;
 }
