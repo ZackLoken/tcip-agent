@@ -65,26 +65,33 @@ def test_derive_cross_tile_nms_clamped_to_upper_bound():
 def test_write_class_map(tmp_path):
     import json
 
-    from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_mcp import class_registry
     from tcip_mcp.tools.annotation_tools import write_class_map
-    ld = tmp_path / "labels"
-    ld.mkdir()
-    json_io.write_detect(ld / "a.json", [BBox(0, 0, 10, 10, 0), BBox(0, 0, 10, 10, 1)], 100, 100)
-    json_io.write_detect(ld / "b.json", [BBox(0, 0, 10, 10, 0)], 100, 100)
+
     out = tmp_path / "classes.json"
-    res = write_class_map(str(ld), class_names="dormant,elongated", output_path=str(out))
-    assert res["num_classes"] == 2
-    assert res["class_ids"] == [0, 1]
-    assert res["class_map"]["1"]["name"] == "elongated"
-    assert json.loads(out.read_text())["0"]["name"] == "dormant"
+    # The expert authors the nested registry: two ordered values of a categorical attribute.
+    res = write_class_map(
+        str(tmp_path),
+        subjects={"catkin": {"description": "a hazelnut catkin",
+                             "attributes": {"elongation": {"type": "categorical",
+                                                           "values": ["dormant", "elongated"]}}}},
+        output_path=str(out),
+    )
+    assert "error" not in res
+    assert res["subjects"] == ["catkin"]
+    assert res["classes_path"] == str(out)
+    # Declared order is the id order (assign_class_ids is the one name->id derivation): 0=dormant,
+    # 1=elongated — and the on-disk nested shape carries the same value order.
+    reg = class_registry.read_registry(out)
+    assert class_registry.assign_class_ids(reg, "catkin", "elongation") == {"dormant": 0, "elongated": 1}
+    assert json.loads(out.read_text())["catkin"]["attributes"]["elongation"]["values"] == \
+        ["dormant", "elongated"]
 
 
 def test_write_class_map_no_labels(tmp_path):
     from tcip_mcp.tools.annotation_tools import write_class_map
-    ld = tmp_path / "labels"
-    ld.mkdir()
-    res = write_class_map(str(ld), output_path=str(tmp_path / "c.json"))
+    # An empty registry mapping is not authorable — the tool refuses rather than writing nothing.
+    res = write_class_map(str(tmp_path), subjects={}, output_path=str(tmp_path / "c.json"))
     assert "error" in res
 
 
@@ -101,18 +108,15 @@ def test_run_inference_dry_run_reports_operating_point(tmp_path):
 
 
 def test_write_class_map_defaults_into_the_dataset(tmp_path):
-    """No output_path: the registry lands in the subject's dataset home, decoding its own labels."""
-    from pathlib import Path
-
-    from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    """No output_path: the registry lands at the dataset's canonical classes.json."""
     from tcip_mcp.tools.annotation_tools import write_class_map
 
-    det = tmp_path / "annotations" / "catkin" / "2026-03-02" / "detect"
-    det.mkdir(parents=True)
-    json_io.write_detect(str(det / "a.json"), [BBox(1, 1, 9, 9, 0), BBox(2, 2, 8, 8, 1)], 32, 32)
-
-    res = write_class_map(str(det), class_names="dormant,elongated")
+    res = write_class_map(
+        str(tmp_path),
+        subjects={"catkin": {"description": "a hazelnut catkin",
+                             "attributes": {"elongation": {"type": "categorical",
+                                                           "values": ["dormant", "elongated"]}}}},
+    )
     assert "error" not in res
-    assert res["classes_path"].endswith(str(Path("classes") / "catkin.json"))
-    assert (tmp_path / "classes" / "catkin.json").is_file()
+    assert res["classes_path"] == str(tmp_path / "classes.json")
+    assert (tmp_path / "classes.json").is_file()
