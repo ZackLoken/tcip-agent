@@ -14,7 +14,14 @@ import { AnnotateTab } from "@/tabs/AnnotateTab";
 // and CanvasStage as a passthrough so AnnotationShapes' memo behavior is intact.
 vi.mock("konva", () => ({ default: {} }));
 vi.mock("react-konva", () => ({
-  Rect: (props: { stroke?: string }) => <div data-testid="k-rect" data-stroke={props.stroke} />,
+  Rect: (props: { stroke?: string; dash?: number[]; fill?: string }) => (
+    <div
+      data-testid="k-rect"
+      data-stroke={props.stroke}
+      data-dash={props.dash ? "true" : undefined}
+      data-fill={props.fill}
+    />
+  ),
   Line: (props: { stroke?: string }) => <div data-testid="k-line" data-stroke={props.stroke} />,
   Circle: () => <div data-testid="k-circle" />,
   Text: (props: { text?: string; fill?: string }) => (
@@ -209,5 +216,33 @@ describe("AnnotateTab subject rendering", () => {
     // Colour is GUI-local (name-derived), and the label is the subject name — no integer id.
     expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("catkin"));
     expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "catkin");
+  });
+
+  it("box mode draws an active-subject polygon's read-only derived box (dashed, no handles), never a stored box", async () => {
+    useStore.getState().setRegistry({ catkin: {} });
+    const poly = {
+      points: [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+      ] as [number, number][],
+      subject: "catkin",
+      attributes: {},
+    };
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({ ...labelsFor(imagePath), polygons: [poly] }),
+    );
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    // Box mode (setupDataset). The polygon shows only its derived box: a single dashed Rect with no
+    // corner handles (handles are extra Rects), and it never entered canvas.boxes — so unsaveable.
+    const rects = screen.getAllByTestId("k-rect");
+    expect(rects).toHaveLength(1);
+    expect(rects[0]).toHaveAttribute("data-dash", "true");
+    expect(rects[0]).toHaveAttribute("data-stroke", subjectColor("catkin"));
+    expect(useStore.getState().canvas.boxes).toHaveLength(0);
+    expect(useStore.getState().canvas.polygons).toHaveLength(1);
   });
 });
