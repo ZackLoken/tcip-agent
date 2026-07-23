@@ -85,28 +85,73 @@ def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
     return (w, h) if w > 0 and h > 0 else None
 
 
-def _read_det_boxes_format(stem, labels_dir, fmt, coco, w, h, file_name):
-    """Pixel-xyxy boxes + 1-indexed labels for ``stem``.
+def _resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | None):
+    """``(registry, id_map)`` for a training scope from the dataset's ``classes.json``.
 
-    The canonical on-disk format is per-image ``json`` (json_io); ``coco`` is the assembled
-    dataset view of that JSON used for training. Both are pixel-space.
+    The single name→id derivation is :func:`class_registry.assign_class_ids`; the loader below,
+    ``assemble_coco``, and the contract dims all read *this* map, never a second one. A plain
+    single-class detector (``attribute`` is ``None``) needs no registry file — the subject *is* the
+    class — so it is derived from a synthesized single-subject registry through the same
+    ``assign_class_ids``, not a local ``{subject: 0}`` literal. Attribute classification needs the
+    registry to order its values, and refuses when there is none.
     """
-    fmt = (fmt or "json").lower()
-    if fmt == "json":
-        from tcip_annotation import json_io
-        bboxes = json_io.read_detect(str(labels_dir / f"{stem}.json"))[0]
+    from tcip_mcp import class_registry
+    from tcip_mcp.dataset_layout import classes_path, dataset_root_of
+
+    if not subject:
+        raise ValueError(
+            "a detection/instance_seg run needs an explicit subject to read name-based labels; "
+            "none was threaded through build_dataset.")
+    root = dataset_root_of(labels_dir)
+    cp = classes_path(root) if root is not None else None
+    if cp is not None and Path(cp).is_file():
+        registry = class_registry.read_registry(cp)
+    elif attribute is not None:
+        raise ValueError(
+            f"attribute {attribute!r} classification needs a classes.json to order its values, "
+            f"but none was found for {labels_dir}.")
     else:
-        from tcip_annotation import format_io
-        bboxes = []
-        if fmt == "coco":
-            if coco is not None:
-                bboxes = format_io.parse_coco_detect(coco, file_name=file_name)[0]
-        else:
-            raise ValueError(
-                f"Unknown detection label_format {fmt!r} — use 'json' (canonical per-image) or "
-                "'coco' (the assembled dataset view).")
-    boxes = [[b.x1, b.y1, b.x2, b.y2] for b in bboxes]
-    labels = [b.class_id + 1 for b in bboxes]  # 0-indexed cid -> 1-indexed (background 0)
+        registry = class_registry.ClassRegistry(subjects=(class_registry.Subject(name=subject),))
+    return registry, class_registry.assign_class_ids(registry, subject, attribute)
+
+
+def _coco_det_targets(coco, file_name):
+    """Pixel-xyxy boxes + 1-indexed labels for one image from an assembled COCO.
+
+    ``category_id`` is the run's 0-indexed id (from ``to_coco_dataset`` over the run's id_map); +1
+    applies the detector's background offset. The loader owns the +1, nothing on disk.
+    """
+    from tcip_annotation import format_io
+    anns, _, _ = format_io._coco_image_annotations(coco, file_name=file_name)
+    boxes, labels = [], []
+    for a in anns:
+        bb = a.get("bbox")
+        if not (isinstance(bb, list) and len(bb) == 4):
+            continue
+        x, y, bw, bh = (float(v) for v in bb)
+        boxes.append([x, y, x + bw, y + bh])
+        labels.append(int(a.get("category_id", 0)) + 1)
+    return boxes, labels
+
+
+def _json_det_targets(path, subject, attribute, id_map):
+    """Pixel-xyxy boxes + 1-indexed labels for one image from the name-based per-image JSON.
+
+    Filters to ``subject`` + a box-derivable geometry, then maps each kept annotation to its
+    0-indexed id via ``id_map`` (the single ``assign_class_ids`` map), +1 for background. An
+    annotation the registry cannot decode raises — a real label read as nothing is a measurement bug.
+    """
+    from tcip_annotation import json_io
+    from tcip_annotation.state import bbox_of
+
+    boxes, labels = [], []
+    for a in json_io.read_annotations(path):
+        cid = json_io.target_class_id(a, subject, attribute, id_map)
+        if cid is None or a.geometry is None:
+            continue
+        box = bbox_of(a.geometry)
+        boxes.append([box.x1, box.y1, box.x2, box.y2])
+        labels.append(cid + 1)
     return boxes, labels
 
 
@@ -116,6 +161,8 @@ def dir_label_format(labels_dir) -> str | None:
     Used to route a JSON label store onto the COCO training path. A ``.json`` that is not our
     schema is not claimed — an unrecognized store must not be read as an all-empty one.
     """
+    from tcip_annotation.json_io import ANNOTATIONS_KEY
+
     d = Path(labels_dir)
     if not d.is_dir():
         return None
@@ -124,19 +171,20 @@ def dir_label_format(labels_dir) -> str | None:
             data = json.loads(jp.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        return "json" if isinstance(data, dict) and "objects" in data else None
+        return "json" if isinstance(data, dict) and ANNOTATIONS_KEY in data else None
     return None
 
 
 def trainable_stems(
-    labels_dir, images_dir, stems=None, *, label_format: str = "json", coco: dict | None = None,
+    labels_dir, images_dir, stems=None, *, subject: str | None = None, date=None,
+    label_format: str = "json", coco: dict | None = None,
 ) -> tuple[list[str], dict[str, int]]:
     """The stems that may train, plus the partition that produced them.
 
-    A sample is admitted only when the label store actually accounts for it:
+    A sample is admitted only when the label store actually accounts for it *for this subject*:
 
-    - it has a label record with objects, or
-    - it has an *empty* record and a human marked that image negative
+    - it has ≥1 annotation of ``subject``, or
+    - it has none and a human marked that image negative for ``subject``
       (``confirmed_negative_names`` — the Complete in ``.tcip/state/image_status.json``).
 
     An image with no label file, or an empty label file nobody confirmed, is **unannotated**, not a
@@ -148,7 +196,7 @@ def trainable_stems(
     """
     names = image_name_map(images_dir)
     candidates = list(stems) if stems is not None else sorted(names)
-    negatives = confirmed_negative_names(labels_dir)
+    negatives = confirmed_negative_names(labels_dir, subject=subject, date=date)
     counts = {"annotated": 0, "confirmed_negative": 0,
               "skipped_unannotated": 0, "skipped_unconfirmed_empty": 0}
 
@@ -171,7 +219,7 @@ def trainable_stems(
             if image_name not in coco_names:
                 # assemble_coco already dropped it, but not why. Read the record so the operator is
                 # told the truth: "annotate this" and "confirm this empty one" are different jobs.
-                has_record, _ = _label_record_state(stem, labels_dir, "json")
+                has_record, _ = _label_record_state(stem, labels_dir, subject)
                 counts["skipped_unconfirmed_empty" if has_record
                        else "skipped_unannotated"] += 1
             elif image_name in coco_annotated:
@@ -186,7 +234,7 @@ def trainable_stems(
             else:
                 counts["skipped_unconfirmed_empty"] += 1
             continue
-        has_record, has_objects = _label_record_state(stem, labels_dir, label_format)
+        has_record, has_objects = _label_record_state(stem, labels_dir, subject)
         if not has_record:
             counts["skipped_unannotated"] += 1
         elif has_objects:
@@ -217,33 +265,44 @@ def _require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> No
     )
 
 
-def _label_record_state(stem: str, labels_dir, label_format: str) -> tuple[bool, bool]:
-    """``(a record exists, it has objects)`` for one stem in the active on-disk format."""
+def _label_record_state(stem: str, labels_dir, subject: str | None) -> tuple[bool, bool]:
+    """``(a record exists, it has ≥1 detection/seg target of ``subject``)`` for one stem.
+
+    ``has_objects`` is subject-scoped *and geometry-bearing*: the unified file holds every subject, so
+    "annotated" for a catkin run means it carries a catkin annotation *with geometry* — the same
+    membership ``to_coco_dataset`` applies (a box/polygon is a target; a geometry-less image-level
+    label is not). Counting a geometry-less-only image as annotated would keep it on the direct-json
+    path and train it as a zero-object negative, diverging from the COCO path and fabricating a
+    negative no human confirmed.
+    """
+    from tcip_annotation import json_io
+
     path = Path(labels_dir) / f"{stem}.json"
     if not path.is_file():
         return False, False
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return True, False
-    return True, bool(isinstance(data, dict) and data.get("objects"))
+    anns = json_io.read_annotations(str(path))
+    if subject is None:
+        return True, any(a.geometry is not None for a in anns)
+    return True, any(a.subject == subject and a.geometry is not None for a in anns)
 
 
-def confirmed_negative_names(labels_dir) -> set[str]:
-    """Image names a human marked negative (empty + Complete) **for this label dir's campaign**.
+def confirmed_negative_names(labels_dir, *, subject: str | None, date=None) -> set[str]:
+    """Image names a human marked negative (empty + Complete) **for this subject**.
 
     Walks up from ``labels_dir`` to the project's ``.tcip/state/image_status.json`` and reads only
-    the bucket for this dir's ``(trait, date)``. A confirmation is a human's statement about one
-    trait on one image; a store keyed by image name alone re-applies it to campaigns they never
+    the ``status_bucket(subject, date)`` bucket. A confirmation is a human's statement about one
+    subject on one image; a store keyed by image name alone re-applies it to subjects they never
     looked at, so an image full of bushes trains as "contains no bushes".
 
-    An empty label file alone is never a negative — someone may have just emptied it mid-work — so
-    training trusts only this confirmation. No store, or a store with no entries for this subject,
-    yields an empty set. A ``labels_dir`` whose subject cannot be resolved raises: silently
-    returning nothing would drop every hard negative the review loop harvested.
+    ``subject`` is threaded explicitly — the per-subject label dir it used to be recovered from is
+    gone. When ``subject`` is unthreaded and the project holds confirmed negatives, this **refuses
+    loudly** rather than returning nothing: a silent empty would drop every hard negative the review
+    loop harvested. With no store, or no confirmations for this subject, it returns an empty set.
     """
-    from tcip_mcp.dataset_layout import parse_annotation_dir, status_bucket
+    from tcip_mcp.dataset_layout import annotation_date, status_bucket
 
+    if date is None:
+        date = annotation_date(labels_dir)
     d = Path(labels_dir).resolve()
     for parent in (d, *d.parents):
         status_file = parent / ".tcip" / "state" / "image_status.json"
@@ -253,13 +312,9 @@ def confirmed_negative_names(labels_dir) -> set[str]:
             statuses = json.loads(status_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return set()
-        parsed = parse_annotation_dir(d)
-        if parsed is None:
-            # Refuse only when there is something to lose. A derived tree — a
-            # ``{train,val,test}/labels`` split, a curated export — cannot name its subject, and
-            # raising there would block the platform's own documented split -> train path. But if
-            # the store holds confirmed negatives this dir might have been entitled to, silently
-            # returning none of them would drop the human's work invisibly, which is worse.
+        if not subject:
+            # Refuse only when there is something to lose: a store with confirmed negatives this
+            # run might be entitled to. Silently returning none would drop the human's work.
             has_negatives = any(
                 s == "negative" for b in statuses.values() if isinstance(b, dict)
                 for s in b.values()
@@ -267,13 +322,10 @@ def confirmed_negative_names(labels_dir) -> set[str]:
             if not has_negatives:
                 return set()
             raise ValueError(
-                f"cannot tell which subject {labels_dir} belongs to, and this project has "
-                f"human-confirmed negatives that would be silently dropped. Expected the canonical "
-                f"<root>/annotations/<subject>/[<date>/]<task> layout. A derived tree (a split, a "
-                f"curated export) should carry its own .tcip/state/image_status.json — see "
-                f"materialize_review_dataset."
+                f"confirmed_negative_names needs an explicit subject to read the negative bucket "
+                f"for {labels_dir}, and this project has human-confirmed negatives that would be "
+                f"silently dropped. Thread the run's subject through build_dataset / assemble_coco."
             )
-        subject, date, _task = parsed
         bucket = statuses.get(status_bucket(subject, date))
         if not isinstance(bucket, dict):
             return set()  # this subject has no confirmations yet
@@ -281,14 +333,18 @@ def confirmed_negative_names(labels_dir) -> set[str]:
     return set()
 
 
-def assemble_coco(labels_dir, images_dir, stems=None, categories=None) -> dict:
-    """Assemble a dataset-level COCO dict from per-image JSON labels (the json_io schema).
+def assemble_coco(
+    labels_dir, images_dir, stems=None, *, subject: str, attribute: str | None = None,
+    id_map: dict[str, int], date=None,
+) -> dict:
+    """Assemble a dataset-level COCO dict from the name-based per-image JSON, scoped to ``subject``.
 
     Pairs each stem's ``<labels_dir>/<stem>.json`` with its image's on-disk file name — the same
-    name the dataset resolves at read time — so the COCO ``file_name`` keys line up. Stems whose
-    image is missing are skipped; ``json_io.to_coco_dataset`` skips missing label files
-    (unannotated is not a training negative). This is how per-image JSON reaches training: a COCO
-    the existing ``label_format='coco'`` path consumes.
+    name the dataset resolves at read time — so the COCO ``file_name`` keys line up. ``id_map`` is
+    the run's ``assign_class_ids`` map; this is the single delegation to ``json_io.to_coco_dataset``,
+    so the COCO categories, the loader targets, and the contract dims all rest on one name→id map.
+    Stems whose image is missing are skipped. This is how per-image JSON reaches training: a COCO the
+    ``label_format='coco'`` path consumes.
     """
     from tcip_annotation import json_io
 
@@ -306,8 +362,8 @@ def assemble_coco(labels_dir, images_dir, stems=None, categories=None) -> dict:
             continue
         entries.append((str(labels_dir / f"{stem}.json"), file_name))
     return json_io.to_coco_dataset(
-        entries, categories=categories,
-        confirmed_negative_names=confirmed_negative_names(labels_dir),
+        entries, subject=subject, id_map=id_map, attribute=attribute,
+        confirmed_negative_names=confirmed_negative_names(labels_dir, subject=subject, date=date),
     )
 
 
@@ -408,11 +464,17 @@ class DetectionDataset(BaseImageDataset):
         label_format: str = "json",
         coco_json: str | None = None,
         coco_data: dict | None = None,
+        subject: str | None = None,
+        attribute: str | None = None,
+        id_map: dict[str, int] | None = None,
+        date=None,
     ) -> None:
         self.images_dir = Path(images_dir)
         self.labels_dir = Path(labels_dir)
         self.transforms = transforms
         self._num_classes = num_classes
+        self.subject = subject
+        self.attribute = attribute
         self.label_format = (label_format or "json").lower()
         self._coco = None
         if coco_data is not None:  # in-memory COCO assembled from per-image JSON (train/eval)
@@ -422,11 +484,24 @@ class DetectionDataset(BaseImageDataset):
             if not coco_json:
                 raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
             self._coco = json.loads(Path(coco_json).read_text(encoding="utf-8"))
+        # The single name→id map: resolved here for a direct-json build, else supplied by
+        # build_dataset (which resolved it once for the COCO assembly). One derivation either way.
+        if id_map is None and self.label_format == "json":
+            _reg, id_map = _resolve_registry_id_map(self.labels_dir, subject, attribute)
+            self._num_classes = len(id_map)
+        self.id_map = id_map
         self.stems, self.sample_counts = trainable_stems(
             self.labels_dir, self.images_dir, stems,
-            label_format=self.label_format, coco=self._coco,
+            subject=subject, date=date, label_format=self.label_format, coco=self._coco,
         )
         _require_samples(self.stems, self.sample_counts, self.labels_dir)
+
+    def _det_targets(self, stem: str, file_name: str) -> tuple[list, list]:
+        """Pixel-xyxy boxes + 1-indexed labels for one image (coco or name-based json)."""
+        if self.label_format == "coco":
+            return _coco_det_targets(self._coco, file_name)
+        return _json_det_targets(
+            str(self.labels_dir / f"{stem}.json"), self.subject, self.attribute, self.id_map)
 
     @property
     def num_classes(self) -> int:
@@ -444,7 +519,7 @@ class DetectionDataset(BaseImageDataset):
                 counts[ann.get("category_id", 0)] += 1
         else:  # json: parse each image's annotation
             for stem in self.stems:
-                _, labels = _read_det_boxes_format(stem, self.labels_dir, self.label_format, None, 0, 0, "")
+                _, labels = self._det_targets(stem, "")
                 for lab in labels:
                     counts[lab - 1] += 1  # back to 0-indexed cid
         return dict(counts)
@@ -454,8 +529,7 @@ class DetectionDataset(BaseImageDataset):
         img = self._open_image(stem)
         w, h = self._image_size(img)
         file_name = _find_image(self.images_dir, stem).name if self.label_format == "coco" else ""
-        boxes, labels = _read_det_boxes_format(
-            stem, self.labels_dir, self.label_format, self._coco, w, h, file_name)
+        boxes, labels = self._det_targets(stem, file_name)
         target = {
             "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
             "labels": torch.tensor(labels, dtype=torch.int64),
@@ -536,11 +610,10 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"against the multi-band frame, or ingest this raster as {authored[0]}x"
                     f"{authored[1]}."
                 )
-            # Format-aware read: json (canonical) and coco (assembled) both go through
-            # the shared reader; only coco needs the image file name to match its annotations.
+            # Format-aware read via the base dataset's own targeting (json/coco share one path);
+            # only coco needs the image file name to match its annotations.
             file_name = img_path.name if base.label_format == "coco" else ""
-            full_boxes, full_labels = _read_det_boxes_format(
-                stem, base.labels_dir, base.label_format, base._coco, w, h, file_name)
+            full_boxes, full_labels = base._det_targets(stem, file_name)
             fb = np.asarray(full_boxes, dtype=np.float32).reshape(-1, 4)
             fl = np.asarray(full_labels, dtype=np.int64)
             if len(fb):
@@ -626,11 +699,17 @@ class InstanceSegDataset(BaseImageDataset):
         label_format: str = "json",
         coco_json: str | None = None,
         coco_data: dict | None = None,
+        subject: str | None = None,
+        attribute: str | None = None,
+        id_map: dict[str, int] | None = None,
+        date=None,
     ) -> None:
         self.images_dir = Path(images_dir)
         self.labels_dir = Path(labels_dir)
         self.transforms = transforms
         self._num_classes = num_classes
+        self.subject = subject
+        self.attribute = attribute
         self.label_format = (label_format or "json").lower()
         self._coco = None
         if coco_data is not None:
@@ -640,23 +719,45 @@ class InstanceSegDataset(BaseImageDataset):
             if not coco_json:
                 raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
             self._coco = json.loads(Path(coco_json).read_text(encoding="utf-8"))
+        if id_map is None and self.label_format == "json":
+            _reg, id_map = _resolve_registry_id_map(self.labels_dir, subject, attribute)
+            self._num_classes = len(id_map)
+        self.id_map = id_map
         self.stems, self.sample_counts = trainable_stems(
             self.labels_dir, self.images_dir, stems,
-            label_format=self.label_format, coco=self._coco,
+            subject=subject, date=date, label_format=self.label_format, coco=self._coco,
         )
         _require_samples(self.stems, self.sample_counts, self.labels_dir)
 
     def _read_polys(self, stem: str, w: int, h: int) -> list[tuple[list[tuple[float, float]], int]]:
-        """(pixel polygon points, 1-indexed label) per instance — from the COCO dict or the
-        canonical per-image ``<stem>.json``. Both are already pixel-space."""
+        """(pixel polygon points, 1-indexed label) per instance — from the assembled COCO or the
+        name-based per-image ``<stem>.json`` (filtered to ``subject`` + polygon geometry). Both are
+        already pixel-space; the +1 background offset is the loader's, nothing on disk carries it."""
+        out: list[tuple[list[tuple[float, float]], int]] = []
         if self.label_format == "coco":
             from tcip_annotation import format_io
             file_name = _find_image(self.images_dir, stem).name
-            polys, _ = format_io.parse_coco_segment(self._coco, file_name=file_name)
-        else:
-            from tcip_annotation import json_io
-            polys = json_io.read_segment(str(self.labels_dir / f"{stem}.json"))[0]
-        return [(list(p.points), p.class_id + 1) for p in polys]
+            anns, _, _ = format_io._coco_image_annotations(self._coco, file_name=file_name)
+            for a in anns:
+                seg = a.get("segmentation")
+                if not (isinstance(seg, list) and seg and isinstance(seg[0], list) and len(seg[0]) >= 6):
+                    continue
+                coords = seg[0]
+                pts = [(float(coords[i]), float(coords[i + 1])) for i in range(0, len(coords) - 1, 2)]
+                out.append((pts, int(a.get("category_id", 0)) + 1))
+            return out
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Polygon
+        for a in json_io.read_annotations(str(self.labels_dir / f"{stem}.json")):
+            if a.subject != self.subject or not isinstance(a.geometry, Polygon):
+                continue
+            key = a.attributes.get(self.attribute) if self.attribute else self.subject
+            if key is None or self.id_map is None or key not in self.id_map:
+                raise ValueError(
+                    f"annotation of subject {self.subject!r} has class key {key!r} not in the run's "
+                    f"id map — the registry cannot decode its own labels")
+            out.append((list(a.geometry.points), self.id_map[key] + 1))
+        return out
 
     @property
     def num_classes(self) -> int:
@@ -962,9 +1063,14 @@ def build_from_dataset_source(dataset_source: dict, **kwargs: Any) -> Dataset:
     return fn(**{**kwargs, **builder_kwargs})
 
 
-def _autoresolve_json_labels(kwargs: dict) -> None:
-    """Route a canonical per-image-JSON label dir onto the assembled-COCO path for training/eval.
-    No-op when the caller pinned a format or already supplied COCO data."""
+def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | None,
+                             id_map: dict[str, int]) -> None:
+    """Route a name-based per-image-JSON label dir onto the assembled-COCO path for training/eval.
+
+    No-op when the caller pinned a format or already supplied COCO data. The single ``id_map`` is
+    threaded into ``assemble_coco`` (and thus the one ``to_coco_dataset`` call), so the assembled
+    categories rest on the same name→id derivation as the loader targets and the contract dims.
+    """
     if kwargs.get("coco_data") is not None or kwargs.get("coco_json") or kwargs.get("label_format"):
         return
     labels_dir = kwargs.get("labels_dir", "")
@@ -972,7 +1078,9 @@ def _autoresolve_json_labels(kwargs: dict) -> None:
     if not labels_dir:
         return
     if dir_label_format(labels_dir) == "json" and images_dir:
-        kwargs["coco_data"] = assemble_coco(labels_dir, images_dir, stems=kwargs.get("stems"))
+        kwargs["coco_data"] = assemble_coco(
+            labels_dir, images_dir, stems=kwargs.get("stems"),
+            subject=subject, attribute=attribute, id_map=id_map)
         kwargs["label_format"] = "coco"
 
 
@@ -1039,7 +1147,21 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
         raise ValueError(f"Unknown task '{task}'. Available: {list(_DATASET_MAP.keys())}")
 
     if task in ("detection", "instance_seg"):
-        _autoresolve_json_labels(kwargs)
+        subject = kwargs.get("subject")
+        attribute = kwargs.get("attribute")
+        has_coco = (kwargs.get("coco_data") is not None or kwargs.get("coco_json")
+                    or (kwargs.get("label_format") or "").lower() == "coco")
+        if not has_coco and kwargs.get("labels_dir"):
+            # Name-based json: resolve the single id map once, set num_classes and assemble the COCO
+            # from it — the loader, the categories, and resolve_contract_dims all read this one map.
+            _registry, id_map = _resolve_registry_id_map(kwargs["labels_dir"], subject, attribute)
+            kwargs["id_map"] = id_map
+            kwargs["num_classes"] = len(id_map)
+            _autoresolve_json_labels(kwargs, subject=subject, attribute=attribute, id_map=id_map)
+        elif has_coco and kwargs.get("num_classes") is None:
+            coco = kwargs.get("coco_data")
+            if isinstance(coco, dict):
+                kwargs["num_classes"] = len(coco.get("categories") or []) or 1
 
     if tiling and tiling.get("enabled", True) and task == "detection":
         transforms = kwargs.pop("transforms", None)
