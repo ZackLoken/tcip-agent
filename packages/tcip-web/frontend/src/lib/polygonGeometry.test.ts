@@ -40,6 +40,21 @@ describe("polygonBbox / computePolygonBboxes", () => {
       [20, 20, 30, 25],
     ]);
   });
+
+  it("agrees with the backend's COCO-xywh box derivation (cross-codebase pin)", () => {
+    // polygonBbox (TS) and bbox_of + the _annotation_record xywh conversion (Python) are separate
+    // copies of the same min/max math; they must not drift. This polygon and its expected xywh
+    // mirror tests/test_json_io.py's SQUARE, where the backend writes bbox = [10, 20, 100, 200].
+    const square: [number, number][] = [
+      [10, 20],
+      [110, 20],
+      [110, 220],
+      [10, 220],
+    ];
+    const [minX, minY, maxX, maxY] = polygonBbox(square);
+    const cocoXywh = [minX, minY, maxX - minX, maxY - minY];
+    expect(cocoXywh).toEqual([10, 20, 100, 200]);
+  });
 });
 
 describe("findHoveredPolygon (bbox-prefiltered hover scan)", () => {
