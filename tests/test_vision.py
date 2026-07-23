@@ -12,31 +12,32 @@ from PIL import Image
 
 @pytest.fixture
 def viz_dataset(tmp_path: Path) -> Path:
-    """Create a dataset with images, labels, and predictions."""
+    """Create a dataset with images, labels, and predictions (K13.5 name-based layout)."""
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox, PredBBox
+    from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
-    labels_dir = tmp_path / "annotations" / "default" / "detect"
+    labels_dir = tmp_path / "annotations"
     labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "live" / "detect"
+    preds_dir = tmp_path / "predictions" / "live"
     preds_dir.mkdir(parents=True)
 
     for name in ("img_001", "img_002", "img_003", "img_004"):
         img = Image.new("RGB", (640, 480), color=(100, 120, 80))
         img.save(images_dir / f"{name}.jpg")
-        # Per-image JSON GT: two pixel-space boxes (classes 0 and 1).
-        json_io.write_detect(
+        # Per-image JSON GT: two pixel-space boxes under two distinct subjects.
+        json_io.write_annotations(
             labels_dir / f"{name}.json",
-            [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 1)],
+            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264)),
+             Annotation(subject="nut", geometry=BBox(176, 132, 208, 156))],
             640, 480,
         )
         # Per-image JSON predictions carry a score.
-        json_io.write_detect(
+        json_io.write_annotations(
             preds_dir / f"{name}.json",
-            [PredBBox(288, 216, 352, 264, 0, confidence=0.95),
-             PredBBox(496, 372, 528, 396, 1, confidence=0.6)],
+            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264), score=0.95),
+             Annotation(subject="nut", geometry=BBox(496, 372, 528, 396), score=0.6)],
             640, 480,
         )
 
@@ -260,8 +261,8 @@ class TestVisualizeWorstPredictions:
         from tcip_mcp.tools.vision_tools import render_failure_cases
 
         result = render_failure_cases(
-            predictions_dir=str(viz_dataset / "predictions" / "live" / "detect"),
-            labels_dir=str(viz_dataset / "annotations" / "default" / "detect"),
+            predictions_dir=str(viz_dataset / "predictions" / "live"),
+            labels_dir=str(viz_dataset / "annotations"),
             images_dir=str(viz_dataset / "images"),
             top_k=3,
         )
@@ -470,7 +471,7 @@ class TestAcceptProposalsTool:
 
         result = accept_proposals(
             image_path=str(viz_dataset / "images" / "img_003.jpg"),
-            assignments=[{"candidate_id": 0, "class_id": 1}],
+            assignments=[{"candidate_id": 0, "subject": "catkin"}],
         )
         assert "error" in result
         assert "Run propose_annotations first" in result["error"]
@@ -511,34 +512,28 @@ class TestAcceptProposalsTool:
         result = accept_proposals(
             image_path=str(viz_dataset / "images" / "img_001.jpg"),
             assignments=[
-                {"candidate_id": 0, "class_id": 0},
-                {"candidate_id": 1, "class_id": 1},
+                {"candidate_id": 0, "subject": "catkin"},
+                {"candidate_id": 1, "subject": "nut"},
             ],
         )
         assert "error" not in result
-        assert result["detection_count"] == 2
-        assert result["segmentation_count"] == 2
+        assert result["proposal_count"] == 2
         assert Path(result["image_path"]).is_file()
 
-        # Masks are staged as SAM predictions (predictions/sam), not written as GT.
+        # Masks are staged as SAM predictions (predictions/<engine>, engine="sam"), not GT — one
+        # unified per-image file holding both accepted objects by subject name.
         from tcip_annotation import json_io
 
-        det_file = viz_dataset / "predictions" / "sam" / "detect" / "img_001.json"
-        assert det_file.is_file()
-        seg_file = viz_dataset / "predictions" / "sam" / "segment" / "img_001.json"
-        assert seg_file.is_file()
-        det_boxes, _ = json_io.read_detect_pred(det_file)
-        assert len(det_boxes) == 2
-        seg_polys, _ = json_io.read_segment_pred(seg_file)
-        assert len(seg_polys) == 2
+        pred_file = viz_dataset / "predictions" / "sam" / "img_001.json"
+        assert pred_file.is_file()
+        anns = json_io.read_annotations(pred_file)
+        assert len(anns) == 2
+        assert {a.subject for a in anns} == {"catkin", "nut"}
 
         # Each staged object is SAM output: created_by="sam" and a numeric score.
-        det_objs = json.loads(det_file.read_text(encoding="utf-8"))["objects"]
-        assert det_objs and all(o["created_by"] == "sam" for o in det_objs)
-        assert all(isinstance(o["score"], float) for o in det_objs)
-        seg_objs = json.loads(seg_file.read_text(encoding="utf-8"))["objects"]
-        assert seg_objs and all(o["created_by"] == "sam" for o in seg_objs)
-        assert all(isinstance(o["score"], float) for o in seg_objs)
+        objs = json.loads(pred_file.read_text(encoding="utf-8"))["annotations"]
+        assert objs and all(o["created_by"] == "sam" for o in objs)
+        assert all(isinstance(o["score"], float) for o in objs)
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -734,12 +729,12 @@ class TestFullSamPipeline:
         accept_result = accept_proposals(
             image_path=img_path,
             assignments=[
-                {"candidate_id": c["id"], "class_id": i}
-                for i, c in enumerate(cands)
+                {"candidate_id": c["id"], "subject": subj}
+                for c, subj in zip(cands, ("catkin", "nut"))
             ],
         )
         assert "error" not in accept_result
-        assert accept_result["detection_count"] == 2
+        assert accept_result["proposal_count"] == 2
         assert Path(accept_result["image_path"]).is_file()
 
 
@@ -837,8 +832,8 @@ class TestFullPipelineIntegration:
         )
 
     def test_accept_writes_json_detect(self, pipeline_dataset: Path):
-        """SAM detections are staged as predictions: pixel bbox, class ids, and score preserved."""
-        from tcip_annotation import json_io
+        """SAM proposals are staged as predictions: pixel geometry, subject names, and score preserved."""
+        from tcip_annotation import bbox_of, json_io
         from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
@@ -847,28 +842,29 @@ class TestFullPipelineIntegration:
         result = accept_proposals(
             image_path=img_path,
             assignments=[
-                {"candidate_id": 0, "class_id": 0},
-                {"candidate_id": 1, "class_id": 1},
+                {"candidate_id": 0, "subject": "catkin"},
+                {"candidate_id": 1, "subject": "nut"},
             ],
         )
         assert "error" not in result
-        assert result["detection_count"] == 2
+        assert result["proposal_count"] == 2
 
-        det_file = pipeline_dataset / "predictions" / "sam" / "detect" / "sample.json"
-        assert det_file.is_file()
-        boxes, class_ids = json_io.read_detect_pred(det_file)
-        assert len(boxes) == 2
-        assert class_ids == {0, 1}
+        pred_file = pipeline_dataset / "predictions" / "sam" / "sample.json"
+        assert pred_file.is_file()
+        anns = json_io.read_annotations(pred_file)
+        assert len(anns) == 2
+        assert {a.subject for a in anns} == {"catkin", "nut"}
         # Pixel coords within the 640x480 image; staged as SAM predictions (created_by="sam").
-        for b in boxes:
+        for a in anns:
+            b = bbox_of(a.geometry)
             assert 0.0 <= b.x1 < b.x2 <= 640.0
             assert 0.0 <= b.y1 < b.y2 <= 480.0
-            assert b.created_by == "sam"
-        det_objs = json.loads(det_file.read_text(encoding="utf-8"))["objects"]
-        assert all(isinstance(o["score"], float) for o in det_objs)
+            assert a.created_by == "sam"
+        objs = json.loads(pred_file.read_text(encoding="utf-8"))["annotations"]
+        assert all(isinstance(o["score"], float) for o in objs)
 
     def test_accept_writes_json_segment(self, pipeline_dataset: Path):
-        """SAM segmentations are staged as predictions: pixel polygon vertices, class id, score."""
+        """SAM proposals are staged as prediction polygons: pixel vertices, subject, score."""
         from tcip_annotation import json_io
         from tcip_mcp.tools.vision_tools import accept_proposals
 
@@ -877,28 +873,28 @@ class TestFullPipelineIntegration:
 
         result = accept_proposals(
             image_path=img_path,
-            assignments=[{"candidate_id": 0, "class_id": 2}],
+            assignments=[{"candidate_id": 0, "subject": "bud"}],
         )
         assert "error" not in result
-        assert result["segmentation_count"] == 1
+        assert result["proposal_count"] == 1
 
-        seg_file = pipeline_dataset / "predictions" / "sam" / "segment" / "sample.json"
-        assert seg_file.is_file()
-        polys, class_ids = json_io.read_segment_pred(seg_file)
-        assert len(polys) == 1
-        assert class_ids == {2}
-        pts = polys[0].points
+        pred_file = pipeline_dataset / "predictions" / "sam" / "sample.json"
+        assert pred_file.is_file()
+        anns = json_io.read_annotations(pred_file)
+        assert len(anns) == 1
+        assert {a.subject for a in anns} == {"bud"}
+        pts = anns[0].geometry.points
         assert len(pts) >= 3
         for x, y in pts:
             assert 0.0 <= x <= 640.0
             assert 0.0 <= y <= 480.0
-        seg_objs = json.loads(seg_file.read_text(encoding="utf-8"))["objects"]
-        assert seg_objs and all(o["created_by"] == "sam" for o in seg_objs)
-        assert all(isinstance(o["score"], float) for o in seg_objs)
+        objs = json.loads(pred_file.read_text(encoding="utf-8"))["annotations"]
+        assert objs and all(o["created_by"] == "sam" for o in objs)
+        assert all(isinstance(o["score"], float) for o in objs)
 
     def test_detect_and_segment_consistent(self, pipeline_dataset: Path):
-        """Detection and segmentation predictions cover the same objects."""
-        from tcip_annotation import json_io
+        """Box and mask views of the staged predictions cover the same objects (one unified file)."""
+        from tcip_annotation import bbox_of, json_io
         from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
@@ -907,21 +903,19 @@ class TestFullPipelineIntegration:
         result = accept_proposals(
             image_path=img_path,
             assignments=[
-                {"candidate_id": 0, "class_id": 0},
-                {"candidate_id": 2, "class_id": 1},
+                {"candidate_id": 0, "subject": "catkin"},
+                {"candidate_id": 2, "subject": "nut"},
             ],
         )
-        assert result["detection_count"] == 2
-        assert result["segmentation_count"] == 2
+        assert result["proposal_count"] == 2
 
-        det_file = pipeline_dataset / "predictions" / "sam" / "detect" / "sample.json"
-        _, det_class_ids = json_io.read_detect(det_file)
-
-        seg_file = pipeline_dataset / "predictions" / "sam" / "segment" / "sample.json"
-        _, seg_class_ids = json_io.read_segment(seg_file)
-
-        # Same class IDs in both
-        assert sorted(det_class_ids) == sorted(seg_class_ids)
+        pred_file = pipeline_dataset / "predictions" / "sam" / "sample.json"
+        anns = json_io.read_annotations(pred_file)
+        # Each object is one polygon with a derivable box under the same subject — the box and mask
+        # views can never diverge because they are the same annotations.
+        subjects_poly = sorted(a.subject for a in anns if a.geometry is not None)
+        subjects_box = sorted(a.subject for a in anns if bbox_of(a.geometry) is not None)
+        assert subjects_poly == subjects_box == ["catkin", "nut"]
 
     def test_partial_accept_skips_rejected(self, pipeline_dataset: Path):
         """Only accepted candidates appear in output; rejected are omitted."""
@@ -933,10 +927,9 @@ class TestFullPipelineIntegration:
         # Accept only candidate 1 out of 3
         result = accept_proposals(
             image_path=img_path,
-            assignments=[{"candidate_id": 1, "class_id": 0}],
+            assignments=[{"candidate_id": 1, "subject": "catkin"}],
         )
-        assert result["detection_count"] == 1
-        assert result["segmentation_count"] == 1
+        assert result["proposal_count"] == 1
 
     def test_invalid_candidate_id_silently_skipped(self, pipeline_dataset: Path):
         """Assignments with non-existent candidate_id are ignored."""
@@ -948,12 +941,11 @@ class TestFullPipelineIntegration:
         result = accept_proposals(
             image_path=img_path,
             assignments=[
-                {"candidate_id": 999, "class_id": 0},  # non-existent
-                {"candidate_id": 0, "class_id": 1},     # valid
+                {"candidate_id": 999, "subject": "catkin"},  # non-existent
+                {"candidate_id": 0, "subject": "nut"},        # valid
             ],
         )
-        assert result["detection_count"] == 1
-        assert result["segmentation_count"] == 1
+        assert result["proposal_count"] == 1
 
     def test_render_then_accept_pipeline(self, pipeline_dataset: Path):
         """Full render â†’ accept â†’ verify pipeline (sans SAM)."""
@@ -977,13 +969,13 @@ class TestFullPipelineIntegration:
         result = accept_proposals(
             image_path=img_path,
             assignments=[
-                {"candidate_id": 0, "class_id": 0},
-                {"candidate_id": 1, "class_id": 1},
-                {"candidate_id": 2, "class_id": 0},
+                {"candidate_id": 0, "subject": "catkin"},
+                {"candidate_id": 1, "subject": "nut"},
+                {"candidate_id": 2, "subject": "catkin"},
             ],
         )
         assert "error" not in result
-        assert result["detection_count"] == 3
+        assert result["proposal_count"] == 3
 
         # Step 5: QA render was produced
         assert Path(result["image_path"]).is_file()
@@ -1090,28 +1082,25 @@ class TestSamPredictionStaging:
         )
 
     def test_json_detect_and_segment_written(self, format_dataset: Path):
-        from tcip_annotation import json_io
+        from tcip_annotation import bbox_of, json_io
         from tcip_mcp.tools.vision_tools import accept_proposals
 
         self._cache("fmt_test")
         result = accept_proposals(
             image_path=str(format_dataset / "images" / "fmt_test.jpg"),
-            assignments=[{"candidate_id": 0, "class_id": 0}],
+            assignments=[{"candidate_id": 0, "subject": "catkin"}],
         )
         assert "error" not in result
         assert "format" not in result  # fmt param dropped in the JSON cutover
-        assert result["detection_count"] == 1
-        assert result["segmentation_count"] == 1
+        assert result["proposal_count"] == 1
 
-        det = format_dataset / "predictions" / "sam" / "detect" / "fmt_test.json"
-        assert det.is_file()
-        boxes, class_ids = json_io.read_detect_pred(det)
-        assert len(boxes) == 1 and class_ids == {0}
-
-        seg = format_dataset / "predictions" / "sam" / "segment" / "fmt_test.json"
-        assert seg.is_file()
-        polys, _ = json_io.read_segment_pred(seg)
-        assert len(polys) == 1
+        pred = format_dataset / "predictions" / "sam" / "fmt_test.json"
+        assert pred.is_file()
+        anns = json_io.read_annotations(pred)
+        assert len(anns) == 1 and {a.subject for a in anns} == {"catkin"}
+        # The staged object carries a polygon (mask) with a derivable box — both views of one object.
+        assert anns[0].geometry is not None
+        assert bbox_of(anns[0].geometry) is not None
 
     def test_prediction_carries_sam_score(self, format_dataset: Path):
         """Staged SAM output is a prediction — each object has created_by="sam" and a ``score``."""
@@ -1120,11 +1109,11 @@ class TestSamPredictionStaging:
 
         accept_proposals(
             image_path=str(format_dataset / "images" / "fmt_test.jpg"),
-            assignments=[{"candidate_id": 0, "class_id": 0}],
+            assignments=[{"candidate_id": 0, "subject": "catkin"}],
         )
-        det = format_dataset / "predictions" / "sam" / "detect" / "fmt_test.json"
-        data = json.loads(det.read_text(encoding="utf-8"))
-        assert data["objects"]
-        assert all(o["created_by"] == "sam" for o in data["objects"])
-        assert all(isinstance(o["score"], float) for o in data["objects"])
+        pred = format_dataset / "predictions" / "sam" / "fmt_test.json"
+        data = json.loads(pred.read_text(encoding="utf-8"))
+        assert data["annotations"]
+        assert all(o["created_by"] == "sam" for o in data["annotations"])
+        assert all(isinstance(o["score"], float) for o in data["annotations"])
 
