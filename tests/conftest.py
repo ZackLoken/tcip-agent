@@ -70,41 +70,55 @@ def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
 
 
+#: The single detection subject the canonical test dataset declares (``data_dir``).
+DATA_DIR_SUBJECT = "catkin"
+
+
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    """Create a minimal dataset in the canonical layout, with per-image JSON labels/predictions.
+    """A minimal dataset in the canonical (K13.5) layout: name-based per-image labels + a registry.
 
-    Per-image JSON (``tcip_annotation.json_io``) is the canonical on-disk label format. Geometry
-    is two boxes per image on a 640x480 frame, matching the count/geometry expectations downstream.
+    One file per image under ``annotations/<date>/`` holding every subject (here one detection
+    subject, ``catkin``), predictions under ``predictions/<model>/<date>/``, and one nested
+    ``classes.json``. Geometry is two boxes per image on a 640x480 frame, matching the
+    count/geometry expectations downstream.
     """
     from PIL import Image
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox, PredBBox
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import ClassRegistry, Subject
 
     date = "2-11-26"
+    subject = DATA_DIR_SUBJECT
     images_dir = tmp_path / "images" / date
     images_dir.mkdir(parents=True)
-    labels_dir = tmp_path / "annotations" / "default" / date / "detect"
+    labels_dir = tmp_path / "annotations" / date
     labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "live" / date / "detect"
+    preds_dir = tmp_path / "predictions" / "live" / date
     preds_dir.mkdir(parents=True)
 
-    for name in ("img_001", "img_002", "img_003"):
-        img = Image.new("RGB", (640, 480), color=(128, 128, 128))
-        img.save(images_dir / f"{name}.jpg")
+    # One nested registry travelling with the labels: a single detection subject, no attributes.
+    class_registry.write_registry(
+        tmp_path / "classes.json",
+        ClassRegistry(subjects=(Subject(name=subject, description="a hazelnut catkin"),)),
+    )
 
-        # GT: 2 boxes per image (pixel xyxy).
-        json_io.write_detect(
+    for name in ("img_001", "img_002", "img_003"):
+        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
+        # GT: 2 boxes per image (pixel xyxy), by subject name.
+        json_io.write_annotations(
             labels_dir / f"{name}.json",
-            [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)],
+            [Annotation(subject=subject, geometry=BBox(288, 216, 352, 264)),
+             Annotation(subject=subject, geometry=BBox(176, 132, 208, 156))],
             640, 480,
         )
-        # Predictions: 1 matching (TP) + 1 elsewhere (FP), confidence in the JSON score.
-        json_io.write_detect(
+        # Predictions: 1 matching (TP) + 1 elsewhere (FP), the confidence in each annotation's score.
+        json_io.write_annotations(
             preds_dir / f"{name}.json",
-            [PredBBox(288, 216, 352, 264, 0, confidence=0.9),
-             PredBBox(496, 372, 528, 396, 0, confidence=0.7)],
+            [Annotation(subject=subject, geometry=BBox(288, 216, 352, 264), score=0.9),
+             Annotation(subject=subject, geometry=BBox(496, 372, 528, 396), score=0.7)],
             640, 480,
         )
 
