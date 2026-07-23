@@ -85,7 +85,7 @@ def test_global_nms_collapses_duplicates():
 def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128):
     from PIL import Image
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -93,8 +93,9 @@ def _det_dataset(tmp_path: Path, n: int = 1, size: int = 128):
     for i in range(n):
         Image.new("RGB", (size, size), (120, 120, 120)).save(images_dir / f"img{i}.jpg")
         # YOLO "0 0.5 0.5 0.1 0.1" (normalized) -> pixel xyxy in a size×size image
-        box = BBox(0.45 * size, 0.45 * size, 0.55 * size, 0.55 * size, 0)
-        json_io.write_detect(str(labels_dir / f"img{i}.json"), [box], size, size, keep_empty=True)
+        box = BBox(0.45 * size, 0.45 * size, 0.55 * size, 0.55 * size)
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="catkin", geometry=box)], size, size, keep_empty=True)
     return images_dir, labels_dir
 
 
@@ -104,7 +105,7 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
 
     images_dir, labels_dir = _det_dataset(tmp_path)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       num_classes=1, tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+                       subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     assert len(ds) >= 1  # 128px image -> multiple tiles
     img, target = ds[0]
     assert tuple(img.shape) == (3, 64, 64)
@@ -117,7 +118,7 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
     pytest.importorskip("torch")
     from PIL import Image
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images_dir = tmp_path / "images"
@@ -126,9 +127,11 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
     labels_dir.mkdir()
     Image.new("RGB", (256, 256), (120, 120, 120)).save(images_dir / "a.jpg")
     # YOLO "0 0.1 0.1 0.1 0.1" in a 256×256 image -> a 25.6px box in the top-left corner
-    json_io.write_detect(str(labels_dir / "a.json"), [BBox(12.8, 12.8, 38.4, 38.4, 0)], 256, 256, keep_empty=True)
+    json_io.write_annotations(str(labels_dir / "a.json"),
+                              [Annotation(subject="catkin", geometry=BBox(12.8, 12.8, 38.4, 38.4))],
+                              256, 256, keep_empty=True)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       num_classes=1, tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+                       subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     # Sliver cutoff is DERIVED from the class-average box size, not pinned.
     assert ds.class_avg_size == pytest.approx(25.6, abs=1.0)
     assert ds.min_box_size == pytest.approx(0.5 * ds.class_avg_size)
@@ -146,7 +149,7 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
 
     images_dir, labels_dir = _det_dataset(tmp_path)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
-                       num_classes=1, tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+                       subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
     imgs, targets = next(iter(loader))
     assert isinstance(imgs, list) and isinstance(targets, list)
@@ -162,7 +165,7 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset, DetectionDataset
 
     images_dir, labels_dir = _det_dataset(tmp_path, n=3, size=64)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1)
+    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), subject="catkin")
     assert isinstance(ds, DetectionDataset)
     assert len(ds) == 3  # no tiling -> one sample per image
 
