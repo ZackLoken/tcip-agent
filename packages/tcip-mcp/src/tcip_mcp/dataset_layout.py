@@ -1,26 +1,24 @@
 """Canonical dataset-layout resolver — the single source of truth for where an
 image's ground-truth labels and model predictions live on disk.
 
-Canonical layout (the label tree mirrors ``images/<date>/`` so stem-pairing is
-trivial and capture dates never collide; role / subject / date / task are orthogonal
-path segments and *class semantics live in the subject class registry, never in filenames*)::
+Canonical layout (the label tree mirrors ``images/<date>/`` so stem-pairing is trivial and capture
+dates never collide). Labels are **one file per image**, holding every subject's annotations by name;
+the on-disk path no longer carries a subject or task segment — those are properties of the records
+inside the file, resolved through the dataset's single class registry::
 
     <dataset_root>/
         images/<date>/<stem>.<imgext>
-        annotations/<subject>/<date>/<task>/<stem>.<labelext>  # ground truth
-        predictions/<model>/<date>/<task>/<stem>.<labelext>     # model outputs
-        classes/<subject>.json                                 # what its category_ids mean
+        annotations/<date>/<stem>.json      # ground truth (all subjects for the image)
+        predictions/<model>/<date>/<stem>.json   # model outputs
+        classes.json                         # the nested registry: subjects -> attributes -> values
 
-The class registry lives **in the dataset**, subject-scoped: ``category_id: 0`` is undecodable
-without it, so it must travel with the labels rather than sit in a project's private state. A second
-project opening the same image set reads the same names.
+The class registry lives **in the dataset** and travels with the labels: a name-based label
+(``subject``, attribute value) is undecodable without it. A second project opening the same image
+set reads the same names. This module is a pure *locator* — it never parses ``classes.json`` (its
+contents belong to :mod:`tcip_mcp.class_registry`); it only delegates to that module to list subjects.
 
-``<subject>`` is the annotation subject (the GUI's selector); ``<task>`` is
-``detect`` | ``segment``. A ``<date>`` of ``None`` (non-dated datasets) simply omits
-that segment.
-
-This is the single source of truth for label/prediction locations — there is no
-alternate ("flat") layout; every producer and consumer resolves paths through here.
+``<date>`` of ``None`` (non-dated datasets) simply omits that segment. This is the single source of
+truth for label/prediction locations — every producer and consumer resolves paths through here.
 """
 
 from __future__ import annotations
@@ -31,11 +29,12 @@ from typing import Optional
 # Per-image JSON is the canonical on-disk label format; ``coco`` is the assembled dataset view of it.
 LABEL_EXT = {"json": ".json", "coco": ".json"}
 _ANY_EXTS = (".json",)
-DEFAULT_SUBJECT = "default"
 DEFAULT_MODEL = "live"
+#: Geometry kinds a task authors — kept as a selector, no longer a label-path segment.
 TASKS = ("detect", "segment")
 #: Split names ``make_splits(materialize=True)`` emits.
 SPLIT_NAMES = ("train", "val", "test")
+CLASSES_FILENAME = "classes.json"
 
 
 def label_ext(fmt: Optional[str]) -> str:
@@ -65,11 +64,7 @@ def _date_seg(date: Optional[str]) -> tuple[str, ...]:
 
 
 def image_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
-    """``<dataset_root>/images/[<date>/]`` — where an image's bytes live.
-
-    ``date`` of ``None`` yields the flat ``images/`` form; a date value nests it
-    under that bucket (canonical ISO ``YYYY-MM-DD`` capture-date buckets).
-    """
+    """``<dataset_root>/images/[<date>/]`` — where an image's bytes live."""
     return Path(dataset_root, "images", *_date_seg(date))
 
 
@@ -86,59 +81,41 @@ def list_dates(dataset_root: str | Path) -> list[str]:
     return sorted(p.name for p in imgs.iterdir() if p.is_dir())
 
 
-def annotation_dir(dataset_root: str | Path, subject: Optional[str], date: Optional[str], task: str) -> Path:
-    """``<dataset_root>/annotations/<subject>/[<date>/]<task>`` (ground truth)."""
-    return Path(dataset_root, "annotations", subject or DEFAULT_SUBJECT, *_date_seg(date), task)
+def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
+    """``<dataset_root>/annotations/[<date>/]`` (ground truth — one file per image, all subjects)."""
+    return Path(dataset_root, "annotations", *_date_seg(date))
 
 
-def parse_annotation_dir(path: str | Path) -> Optional[tuple[str, Optional[str], str]]:
-    """``(subject, date, task)`` for an annotation dir — declared inverse of ``annotation_dir``.
+def annotation_date(path: str | Path) -> Optional[str]:
+    """The ``<date>`` an annotations dir/file lives under, or ``None`` (declared inverse of the
+    ``annotations/<date>/`` layout — the only recoverable path fact now that subject/task are gone).
 
-    A *subject* is the object class being isolated. Sometimes that is a ``crops.yml`` trait's own
-    subject (catkins, for ``catkin_50per_date``); often it is an enabling object no trait names — a
-    bush isolated so anything can be aggregated per plant, a leaf isolated before leaf area is
-    measured. So a subject name is **not** required to be a ``crops.yml`` trait.
-
-    Anchored on the literal ``annotations`` segment, with ``TASKS`` disambiguating the optional
-    ``<date>``. Returns ``None`` for a non-canonical path rather than guessing: a wrong subject
-    would attribute a human's confirmation to work they never looked at.
+    ``<root>/annotations`` and non-canonical trees (a split's ``labels/``) yield ``None``.
     """
-    parts = Path(path).parts
-    if "annotations" in parts:
-        i = len(parts) - 1 - parts[::-1].index("annotations")  # last, so nested roots resolve
-        rest = parts[i + 1:]
-        if len(rest) == 2 and rest[1] in TASKS:
-            return rest[0], None, rest[1]
-        if len(rest) == 3 and rest[2] in TASKS:
-            return rest[0], rest[1], rest[2]
+    p = Path(path)
+    parts = p.parts
+    if "annotations" not in parts:
         return None
-    # ``labels/<task>`` — the curated single-subject dataset ``materialize_review_dataset``
-    # emits. Not canonical layout, but a shape this platform produces itself, so resolving it to
-    # the default subject is a fact rather than a guess. Without it the review loop's own hard
-    # negatives would be unreadable.
-    if len(parts) >= 2 and parts[-2] == "labels" and parts[-1] in TASKS:
-        return DEFAULT_SUBJECT, None, parts[-1]
-    # ``<split>/labels`` — the {train,val,test} tree ``make_splits(materialize=True)`` emits, which
-    # carries its own status store (``_carry_confirmed_negatives``) under this same default
-    # subject. Anchored on the split name: resolving *any* dir called ``labels`` would turn an
-    # unresolvable subject into a silent empty negative set.
-    if len(parts) >= 2 and parts[-1] == "labels" and parts[-2] in SPLIT_NAMES:
-        return DEFAULT_SUBJECT, None, TASKS[0]
-    return None
+    i = len(parts) - 1 - parts[::-1].index("annotations")
+    rest = parts[i + 1:]
+    # A file (<date>/<stem>.json or <stem>.json) trims its trailing stem first.
+    if rest and rest[-1].endswith(".json"):
+        rest = rest[:-1]
+    return rest[0] if len(rest) == 1 else None
 
 
 #: The top-level segments under a dataset root; a path under any of them locates the root.
-_DATASET_SEGMENTS = ("annotations", "predictions", "images", "classes")
+_DATASET_SEGMENTS = ("annotations", "predictions", "images")
 
 
 def dataset_root_of(path: str | Path) -> Optional[Path]:
     """The ``<dataset_root>`` a canonical sub-path lives under, or ``None`` if it is not one.
 
-    ``<dataset_root>/{annotations|predictions|images|classes}/...`` -> ``<dataset_root>``. Lets a
-    consumer that holds only a label or prediction dir locate the dataset-level class registry that
-    decodes those ids. Anchors on the *last* dataset segment in the path, so a dataset physically
-    nested under an ancestor named ``images`` (or another segment) still resolves to the real root
-    rather than the ancestor. A bare segment with nothing above it is not inside a dataset -> ``None``.
+    ``<dataset_root>/{annotations|predictions|images}/...`` -> ``<dataset_root>``. Lets a consumer
+    that holds only a label or prediction dir locate the dataset-level ``classes.json`` that decodes
+    those names. Anchors on the *last* dataset segment in the path, so a dataset physically nested
+    under an ancestor named ``images`` (or another segment) still resolves to the real root rather
+    than the ancestor. A bare segment with nothing above it is not inside a dataset -> ``None``.
     """
     parts = Path(path).parts
     idxs = [k for k, p in enumerate(parts) if p in _DATASET_SEGMENTS]
@@ -148,24 +125,25 @@ def dataset_root_of(path: str | Path) -> Optional[Path]:
     return Path(*parts[:i]) if i > 0 else None
 
 
-def classes_path(dataset_root: str | Path, subject: Optional[str]) -> Path:
-    """``<dataset_root>/classes/<subject>.json`` — the registry that decodes a subject's labels.
+def classes_path(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/classes.json`` — the one nested registry that decodes the dataset's labels.
 
-    In the dataset (not a project's private state) and subject-scoped, so ``catkin`` and ``bush``
-    each keep their own id ``0`` and both travel with the image set. ``category_id`` in a label file
-    is meaningless without this map, so it is part of the data, not project working state.
+    In the dataset (not a project's private state) and shared across every subject, so it travels
+    with the image set. A name-based label means nothing without it, so it is part of the data.
     """
-    return Path(dataset_root, "classes", f"{subject or DEFAULT_SUBJECT}.json")
+    return Path(dataset_root, CLASSES_FILENAME)
 
 
-def status_bucket(subject: Optional[str], date: Optional[str]) -> str:
+def status_bucket(subject: str, date: Optional[str]) -> str:
     """The ``image_status.json`` key a confirmation belongs under.
 
     Scoped by subject and date but **not** task: a Complete covers detect and segment together,
     which is how ``derive_image_status`` already evaluates them. A store keyed by image name alone
-    re-applies one subject's confirmations to every other subject.
+    re-applies one subject's confirmations to every other subject. ``subject`` must be a real subject
+    (callers supply it) — there is no catch-all default; a bush image confirmed empty of catkins is
+    still positive for bush.
     """
-    return f"{subject or DEFAULT_SUBJECT}/{date}" if date else (subject or DEFAULT_SUBJECT)
+    return f"{subject}/{date}" if date else subject
 
 
 def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
@@ -183,51 +161,81 @@ def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
     }
 
 
-def prediction_dir(dataset_root: str | Path, model: Optional[str], date: Optional[str], task: str) -> Path:
-    """``<dataset_root>/predictions/<model>/[<date>/]<task>`` (model outputs)."""
-    return Path(dataset_root, "predictions", model or DEFAULT_MODEL, *_date_seg(date), task)
+def prediction_dir(dataset_root: str | Path, model: Optional[str], date: Optional[str]) -> Path:
+    """``<dataset_root>/predictions/<model>/[<date>/]`` (model outputs — one file per image)."""
+    return Path(dataset_root, "predictions", model or DEFAULT_MODEL, *_date_seg(date))
 
 
 def annotation_path(
     dataset_root: str | Path,
-    subject: Optional[str],
     date: Optional[str],
-    task: str,
     stem: str,
     fmt: str = "json",
 ) -> Path:
-    return annotation_dir(dataset_root, subject, date, task) / f"{stem}{label_ext(fmt)}"
+    return annotation_dir(dataset_root, date) / f"{stem}{label_ext(fmt)}"
 
 
 def annotation_path_for_image(
     image_path: str | Path,
-    task: str,
     fmt: str = "json",
     *,
-    subject: str = DEFAULT_SUBJECT,
     date: Optional[str] = None,
 ) -> Path:
-    """Canonical write path for an image's labels (date derived from the image path)."""
+    """Canonical write path for an image's single label file (date derived from the image path)."""
     root, img_date, stem = parse_image_path(image_path)
-    return annotation_path(root, subject, date if date is not None else img_date, task, stem, fmt)
+    return annotation_path(root, date if date is not None else img_date, stem, fmt)
 
 
 def prediction_path(
     dataset_root: str | Path,
     model: Optional[str],
     date: Optional[str],
-    task: str,
     stem: str,
     fmt: str = "json",
 ) -> Path:
-    return prediction_dir(dataset_root, model, date, task) / f"{stem}{label_ext(fmt)}"
+    return prediction_dir(dataset_root, model, date) / f"{stem}{label_ext(fmt)}"
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:
-    ann = Path(dataset_root) / "annotations"
-    if not ann.is_dir():
+    """The dataset's subjects, in the registry's declared order (delegated to ``class_registry`` —
+    this module never parses ``classes.json`` itself). ``[]`` when there is no registry."""
+    from tcip_mcp import class_registry
+
+    cp = classes_path(dataset_root)
+    if not cp.is_file():
         return []
-    return sorted(p.name for p in ann.iterdir() if p.is_dir())
+    try:
+        registry = class_registry.read_registry(cp)
+    except (OSError, class_registry.RegistryError):
+        return []
+    return [s.name for s in registry.subjects]
+
+
+def subjects_on_date(dataset_root: str | Path, date: Optional[str]) -> list[str]:
+    """Distinct subjects that actually appear in the per-image label files on ``date`` — the one
+    per-date label scan, shared by ``subjects_with_labels`` and the GUI's subject selector.
+
+    Reads each ``annotations/<date>/<stem>.json`` through ``json_io.read_annotations`` (the single
+    reader), so the subjects offered are the subjects genuinely labeled there, sorted."""
+    from tcip_annotation import json_io
+
+    d = annotation_dir(dataset_root, date)
+    if not d.is_dir():
+        return []
+    found: set[str] = set()
+    for f in d.glob("*.json"):
+        for a in json_io.read_annotations(str(f)):
+            found.add(a.subject)
+    return sorted(found)
+
+
+def subjects_with_labels(dataset_root: str | Path, date: Optional[str]) -> list[str]:
+    """Subjects that actually have ≥1 label on ``date`` — what the GUI's subject selector offers.
+
+    A subject the registry declares but that is unlabeled on the selected date lands the user on an
+    empty canvas, so the selector is sourced from the labels present, not the registry.
+    """
+    return subjects_on_date(dataset_root, date)
 
 
 def list_models(dataset_root: str | Path) -> list[str]:
@@ -240,92 +248,65 @@ def list_models(dataset_root: str | Path) -> list[str]:
 def _dir_has_label_file(d: Path) -> bool:
     """True if ``d`` holds at least one label file (any supported extension).
 
-    An *empty* label file counts as a label file here — this answers "was anything written for
-    this subject on this date", which is what the GUI's selector needs. It does **not** mean the
-    image is a confirmed negative: that requires a human Complete recorded in
-    ``.tcip/state/image_status.json``, and training reads only that (``confirmed_negative_names``).
+    An *empty* label file counts here — this answers "was anything written on this date", which is
+    what the GUI's selectors need. It does **not** mean the image is a confirmed negative: that
+    requires a human Complete recorded in ``.tcip/state/image_status.json``, and training reads only
+    that (``confirmed_negative_names``).
     """
     if not d.is_dir():
         return False
     return any(p.is_file() and p.suffix in _ANY_EXTS for p in d.iterdir())
 
 
-def subjects_with_labels(dataset_root: str | Path, date: Optional[str]) -> list[str]:
-    """Subjects that actually have ≥1 label file (detect or segment) on ``date``.
-
-    This is what the GUI's subject selector should offer for a given date — a subject
-    with no labels on the selected date is not a meaningful choice there,
-    so offering it (as the flat ``list_subjects`` does) lands the user on an empty
-    canvas. Sorted, same order as ``list_subjects``.
-    """
-    root = Path(dataset_root)
-    return [
-        subject
-        for subject in list_subjects(root)
-        if any(_dir_has_label_file(annotation_dir(root, subject, date, task)) for task in TASKS)
-    ]
-
-
 def models_with_predictions(dataset_root: str | Path, date: Optional[str]) -> list[str]:
-    """Models that actually have ≥1 prediction file (detect or segment) on ``date``.
-
-    The model selector's job is to overlay a model's predictions; a model with no
-    predictions on the selected date has nothing to show there. Sorted, same order
-    as ``list_models``.
-    """
+    """Models that actually have ≥1 prediction file on ``date`` (sorted, same order as
+    ``list_models``). A model with no predictions on the selected date has nothing to overlay."""
     root = Path(dataset_root)
     return [
         model
         for model in list_models(root)
-        if any(_dir_has_label_file(prediction_dir(root, model, date, task)) for task in TASKS)
+        if _dir_has_label_file(prediction_dir(root, model, date))
     ]
 
 
 def find_gt_label(
     image_path: str | Path,
-    task: str,
     *,
-    subject: Optional[str] = None,
     date: Optional[str] = None,
     fmt: Optional[str] = None,
 ) -> Optional[Path]:
-    """Find an existing ground-truth label file for an image (read-time resolver).
+    """Find the existing ground-truth label file for an image (read-time resolver).
 
-    Searches the canonical tree — a specific ``subject`` if given, else every
-    subject. Returns the first existing file, or ``None``. If ``fmt`` is given only
-    that extension is considered, else any supported label extension.
+    One file per image now, so this resolves ``annotations/<date>/<stem>.json`` directly. Returns
+    the file, or ``None``. If ``fmt`` is given only that extension is considered, else any supported.
     """
     root, img_date, stem = parse_image_path(image_path)
     d = date if date is not None else img_date
     exts = [label_ext(fmt)] if fmt else list(_ANY_EXTS)
-
-    subjects = [subject] if subject else list_subjects(root)
-    for t in subjects:
-        adir = annotation_dir(root, t, d, task)
-        for e in exts:
-            cand = adir / f"{stem}{e}"
-            if cand.is_file():
-                return cand
+    adir = annotation_dir(root, d)
+    for e in exts:
+        cand = adir / f"{stem}{e}"
+        if cand.is_file():
+            return cand
     return None
 
 
 def find_prediction(
     image_path: str | Path,
-    task: str,
     *,
     model: Optional[str] = None,
     date: Optional[str] = None,
     fmt: Optional[str] = None,
 ) -> Optional[Path]:
-    """Find an existing prediction file for an image — a specific ``model`` if given,
-    else every model. Returns the first existing file, or ``None``."""
+    """Find an existing prediction file for an image — a specific ``model`` if given, else every
+    model. Returns the first existing file, or ``None``."""
     root, img_date, stem = parse_image_path(image_path)
     d = date if date is not None else img_date
     exts = [label_ext(fmt)] if fmt else list(_ANY_EXTS)
 
     models = [model] if model else list_models(root)
     for m in models:
-        pdir = prediction_dir(root, m, d, task)
+        pdir = prediction_dir(root, m, d)
         for e in exts:
             cand = pdir / f"{stem}{e}"
             if cand.is_file():
