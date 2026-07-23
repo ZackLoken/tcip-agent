@@ -118,7 +118,7 @@ def _read_sidecar(pred_dir: str) -> dict:
 def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     proj, pred_dir = _make_project(tmp_path, floored=True)
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_detect_dir": pred_dir})
+        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is True
@@ -135,7 +135,7 @@ def test_route_refuses_conf_censored_and_stamps_honest_placeholder(client, tmp_p
     # The identical gate refuses a display-floored reference — surfaced honestly, not upgraded.
     proj, pred_dir = _make_project(tmp_path, floored=False)
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_detect_dir": pred_dir})
+        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is False
@@ -151,7 +151,7 @@ def test_route_no_completed_reviews(client, tmp_path: Path):
     pred_dir.mkdir(parents=True, exist_ok=True)
     (pred_dir / "A.json").write_text(json.dumps({"objects": []}), encoding="utf-8")
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": str(proj), "trait": "catkin", "pred_detect_dir": str(pred_dir)})
+        "project_root": str(proj), "trait": "catkin", "pred_dir": str(pred_dir)})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is False
@@ -163,7 +163,7 @@ def test_route_no_completed_reviews(client, tmp_path: Path):
 def test_route_unknown_trait_is_honest_400(client, tmp_path: Path):
     proj, pred_dir = _make_project(tmp_path, floored=True)
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "annotations", "pred_detect_dir": pred_dir})
+        "project_root": proj, "trait": "annotations", "pred_dir": pred_dir})
     assert resp.status_code == 400
     assert "not defined for trait" in resp.json()["detail"]
 
@@ -176,7 +176,7 @@ def test_route_does_not_downgrade_already_validated(client, tmp_path: Path):
         "operating_point": {"conf": {"validated_vs_gt": "validated_held_out", "value": 0.31}},
     }), encoding="utf-8")
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_detect_dir": pred_dir})
+        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is True
