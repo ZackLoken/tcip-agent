@@ -109,19 +109,19 @@ def stage_prediction_shapes(
     date: str | None,
     stem: str,
     *,
-    boxes: list,
-    polygons: list,
+    annotations: list,
     img_w: int,
     img_h: int,
     overwrite: bool = False,
 ) -> dict:
-    """Write already-built pred boxes/polygons into a verdict-guarded prediction bucket.
+    """Write already-built prediction :class:`Annotation` records into a verdict-guarded bucket.
 
     The one staging path shared by ``stage_proposals`` and ``accept_proposals`` so both honor
     prediction-bucket immutability: a bucket that carries review verdicts is never overwritten (the
     default redirects to the next free ``<name>@r2`` variant; ``overwrite=True`` raises
-    :class:`BucketHasVerdicts`). ``boxes``/``polygons`` are pixel-space ``PredBBox``/``PredPolygon``
-    already stamped with their producer. Returns the bucket actually written and per-task paths.
+    :class:`BucketHasVerdicts`). ``annotations`` are name-based prediction records (subject + geometry
+    + score) already stamped with their producer; boxes and polygons live in the one per-image file.
+    Returns the bucket actually written and the path.
     """
     from tcip_annotation import json_io
 
@@ -130,33 +130,23 @@ def stage_prediction_shapes(
     review_state_dir = Path(dataset_root) / ".tcip" / "state"
 
     def _bucket_dirs(name: str) -> list[Path]:
-        return [Path(prediction_dir(dataset_root, name, date, "detect")),
-                Path(prediction_dir(dataset_root, name, date, "segment"))]
+        return [Path(prediction_dir(dataset_root, name, date))]
 
     resolution = resolve_writable_bucket(review_state_dir, model_name, _bucket_dirs, overwrite=overwrite)
     bucket = resolution.name
 
-    detect_path = None
-    if boxes:
-        det_dir = Path(prediction_dir(dataset_root, bucket, date, "detect"))
-        det_dir.mkdir(parents=True, exist_ok=True)
-        out = det_dir / f"{stem}.json"
-        json_io.write_detect(out, boxes, img_w, img_h)
-        detect_path = str(out)
-
-    segment_path = None
-    if polygons:
-        seg_dir = Path(prediction_dir(dataset_root, bucket, date, "segment"))
-        seg_dir.mkdir(parents=True, exist_ok=True)
-        out = seg_dir / f"{stem}.json"
-        json_io.write_segment(out, polygons, img_w, img_h)
-        segment_path = str(out)
+    path = None
+    if annotations:
+        pred_dir = Path(prediction_dir(dataset_root, bucket, date))
+        pred_dir.mkdir(parents=True, exist_ok=True)
+        out = pred_dir / f"{stem}.json"
+        json_io.write_annotations(out, annotations, img_w, img_h)
+        path = str(out)
 
     return {
         "bucket": bucket,
         "redirected": resolution.redirected,
         "verdict_count": resolution.verdict_count,
         "requested": resolution.requested,
-        "detect_path": detect_path,
-        "segment_path": segment_path,
+        "path": path,
     }
