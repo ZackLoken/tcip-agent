@@ -118,7 +118,10 @@ def _resolve_positive_class_id(trait_name: str, classes_json_path: str | None,
     if classes_json_path:
         candidates = [Path(classes_json_path)]
     elif dataset_root is not None:
-        candidates = [classes_path(dataset_root, trait_name)]
+        # Deferred to K4/K5: classes.json is one nested registry now (no per-subject file). The
+        # minimal arity fix keeps this importing; reading the nested registry by name is K4/K5's job,
+        # so an unresolved name honestly returns None (the caller refuses) rather than a guessed id.
+        candidates = [classes_path(dataset_root)]
     else:
         candidates = []
     for path in candidates:
