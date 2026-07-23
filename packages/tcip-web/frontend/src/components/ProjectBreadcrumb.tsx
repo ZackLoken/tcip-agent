@@ -18,10 +18,9 @@ const subjectsForDate = (p: ProjectSummary, d: string): string[] => p.subjects_b
 const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
 
 /** The model bucket the current predictions dir points at (predictions/<model>/<date>/…), or null. */
-function currentModel(predDetectDir: string | null, predSegmentDir: string | null): string | null {
-  const dir = predDetectDir ?? predSegmentDir;
-  if (!dir) return null;
-  const after = dir.split(/[/\\]predictions[/\\]/)[1];
+function currentModel(predDir: string | null): string | null {
+  if (!predDir) return null;
+  const after = predDir.split(/[/\\]predictions[/\\]/)[1];
   return after ? (after.split(/[/\\]/)[0] ?? null) : null;
 }
 
@@ -100,10 +99,7 @@ export function ProjectBreadcrumb() {
         dataset.subject && subjects.includes(dataset.subject)
           ? dataset.subject
           : (subjects[0] ?? null);
-      const curModel = currentModel(
-        dataset.predictions_detect_dir,
-        dataset.predictions_segment_dir,
-      );
+      const curModel = currentModel(dataset.predictions_dir);
       const model = curModel && models.includes(curModel) ? curModel : (models[0] ?? null);
       // openWorkspaceProject saves the outgoing date's UI state and restores the new date's.
       await openWorkspaceProject(current, newDate, subject, model);
