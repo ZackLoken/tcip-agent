@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from tcip_mcp.tools.project_tools import (
@@ -38,20 +37,27 @@ def test_export_import_roundtrip(tmp_path: Path):
     src = tmp_path / "src_project"
     date = "2-11-26"
     images = src / "images" / date
-    labels = src / "annotations" / "default" / date / "detect"
+    labels = src / "annotations" / date
     for d in (images, labels):
         d.mkdir(parents=True)
     init_project(str(src))
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import ClassRegistry, Subject
 
     Image.new("RGB", (64, 64)).save(images / "img_000.jpg")
-    json_io.write_detect(str(labels / "img_000.json"), [BBox(10, 10, 30, 30, 0)], 64, 64)
-    # The subject class registry decodes the labels' category_ids — a self-contained bundle must
-    # carry it, or the archived annotations are unreadable on the other end.
-    (src / "classes").mkdir()
-    (src / "classes" / "default.json").write_text('{"0": {"name": "catkin", "color": "#FF0000"}}')
+    json_io.write_annotations(
+        str(labels / "img_000.json"),
+        [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 64, 64,
+    )
+    # The class registry decodes the labels' names — a self-contained bundle must carry it, or the
+    # archived annotations are unreadable on the other end. One nested classes.json at the root.
+    class_registry.write_registry(
+        src / "classes.json",
+        ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)),
+    )
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
@@ -67,7 +73,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     assert status["initialized"] is True
     assert status["has_config"] is True
     assert status["image_count"] == 1
-    assert (dest / "annotations" / "default" / date / "detect" / "img_000.json").is_file()
+    assert (dest / "annotations" / date / "img_000.json").is_file()
     # The registry survived, so the restored labels are still decodable.
-    restored_map = json.loads((dest / "classes" / "default.json").read_text())
-    assert restored_map["0"]["name"] == "catkin"
+    restored = class_registry.read_registry(dest / "classes.json")
+    assert [s.name for s in restored.subjects] == ["catkin"]
