@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
-import type { Mtimes, SaveResult } from "@/api/client";
-import { classesApi } from "@/api/classes";
+import type { SaveResult } from "@/api/client";
+import { classesApi, subjectColor } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { useStore } from "@/store";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
@@ -35,10 +35,8 @@ vi.mock("@/components/AnnotateToolbar", () => ({
 
 const initialStoreState = useStore.getState();
 
-const mt = (detect: number): Mtimes => ({ detect: String(detect), segment: null });
-
-// Distinct mtimes per image so a save's echoed base_mtimes identify which
-// image's load they came from.
+// Distinct mtime tokens per image so a save's echoed token identifies which image's load it
+// came from. Strings, since the ns value exceeds JS's exact-integer range.
 const LOAD_MTIME: Record<string, number> = { "img1.jpg": 100, "img2.jpg": 200 };
 
 function labelsFor(imagePath: string) {
@@ -49,7 +47,8 @@ function labelsFor(imagePath: string) {
     img_height: 800,
     boxes: [],
     polygons: [],
-    base_mtimes: mt(LOAD_MTIME[name] ?? 1),
+    imageAnnotations: [],
+    base_mtime: String(LOAD_MTIME[name] ?? 1),
   };
 }
 
@@ -58,24 +57,24 @@ function setupDataset() {
     gui: {
       ...s.gui,
       mode: "box" as const,
-      active_class: 0,
+      active_subject: "catkin",
       dataset: {
         ...s.gui.dataset,
         project_root: "C:/proj",
         dataset_root: "C:/data",
-        subject: "annotations",
+        subject: "catkin",
         date: "2026-01-01",
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
-        annotations_detect_dir: "C:/data/annotations/detect/2026-01-01",
-        annotations_segment_dir: null,
+        annotations_dir: "C:/data/annotations/2026-01-01",
+        predictions_dir: null,
       },
     },
   }));
 }
 
 function addBox() {
-  useStore.getState().addBox({ x1: 10, y1: 10, x2: 50, y2: 50, class_id: 0 });
+  useStore.getState().addBox({ x1: 10, y1: 10, x2: 50, y2: 50, subject: "catkin", attributes: {} });
 }
 
 const flush = () => act(async () => {});
@@ -92,7 +91,7 @@ beforeEach(() => {
   loadSpy = vi
     .spyOn(api.annotate, "load")
     .mockImplementation((imagePath) => Promise.resolve(labelsFor(imagePath)));
-  saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue({ status: "ok", base_mtimes: mt(1) });
+  saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue({ status: "ok", base_mtime: "1" });
   vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
   vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({});
 });
@@ -100,30 +99,30 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AnnotateTab save/load race", () => {
-  it("saves to the loaded paths and re-echoes the returned mtimes on the next save", async () => {
+  it("saves to the loaded path and re-echoes the returned mtime on the next save", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    saveSpy.mockResolvedValueOnce({ status: "ok", base_mtimes: mt(101) });
+    saveSpy.mockResolvedValueOnce({ status: "ok", base_mtime: "101" });
     act(addBox);
     pressSave();
     await flush();
 
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].image_path).toBe("C:/data/images/2026-01-01/img1.jpg");
-    expect(saveSpy.mock.calls[0][0].base_mtimes).toEqual(mt(100));
+    expect(saveSpy.mock.calls[0][0].base_mtime).toBe("100");
     expect(useStore.getState().canvas.dirty).toBe(false);
 
-    // Second save on the same image must echo the mtimes the first save returned.
+    // Second save on the same image must echo the mtime the first save returned.
     act(addBox);
     pressSave();
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(2);
-    expect(saveSpy.mock.calls[1][0].base_mtimes).toEqual(mt(101));
+    expect(saveSpy.mock.calls[1][0].base_mtime).toBe("101");
   });
 
-  it("a flush save resolving after navigation does not rewind the loaded paths or wipe dirty", async () => {
+  it("a flush save resolving after navigation does not rewind the loaded path or wipe dirty", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -144,12 +143,12 @@ describe("AnnotateTab save/load race", () => {
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].image_path).toBe("C:/data/images/2026-01-01/img1.jpg");
-    expect(saveSpy.mock.calls[0][0].base_mtimes).toEqual(mt(100));
+    expect(saveSpy.mock.calls[0][0].base_mtime).toBe("100");
 
     // Edit img2 while the img1 save is still in flight, then let it resolve late.
     act(addBox);
     await act(async () => {
-      resolveFlushSave({ status: "ok", base_mtimes: mt(150) });
+      resolveFlushSave({ status: "ok", base_mtime: "150" });
     });
 
     // The stale result must not markClean() the img2 edits...
@@ -160,17 +159,17 @@ describe("AnnotateTab save/load race", () => {
       "C:/proj",
       "img1.jpg",
       "partial",
-      "annotations",
+      "catkin",
       "2026-01-01",
     );
 
-    // ...and the next save must target img2 with img2's loaded mtimes — not
-    // img1's file with the stale save's echoed mtimes.
+    // ...and the next save must target img2 with img2's loaded mtime — not
+    // img1's file with the stale save's echoed mtime.
     pressSave();
     await flush();
     expect(saveSpy).toHaveBeenCalledTimes(2);
     expect(saveSpy.mock.calls[1][0].image_path).toBe("C:/data/images/2026-01-01/img2.jpg");
-    expect(saveSpy.mock.calls[1][0].base_mtimes).toEqual(mt(200));
+    expect(saveSpy.mock.calls[1][0].base_mtime).toBe("200");
   });
 
   it("a stale conflict for a since-left image does not show the Reload banner over the new image", async () => {
@@ -199,23 +198,16 @@ describe("AnnotateTab save/load race", () => {
   });
 });
 
-describe("AnnotateTab class registry propagation", () => {
-  it("re-renders canvas shapes when a class color/name is edited", async () => {
-    useStore.getState().setClasses([{ id: 0, name: "catkin", color: "#ff0000" }]);
+describe("AnnotateTab subject rendering", () => {
+  it("renders a box with the subject-derived colour and the subject-name label", async () => {
+    useStore.getState().setRegistry({ catkin: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
     act(addBox);
-    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", "#ff0000");
-    expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "0: catkin");
-
-    // A ColorPickerModal/agent class edit must reach the memoized canvas layer
-    // immediately — not wait for an unrelated zoom/edit/navigation re-render.
-    act(() => {
-      useStore.getState().upsertClass({ id: 0, name: "catkin_open", color: "#00ff00" });
-    });
-    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", "#00ff00");
-    expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "0: catkin_open");
+    // Colour is GUI-local (name-derived), and the label is the subject name — no integer id.
+    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("catkin"));
+    expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "catkin");
   });
 });
