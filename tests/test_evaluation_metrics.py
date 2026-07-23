@@ -316,15 +316,17 @@ def _cfg(model_source) -> dict:
 
 def test_validate_detection_returns_metrics_and_objective(tmp_path):
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
-        json_io.write_detect(str(labels_dir / f"img{i}.json"),
-                             [BBox(19.2, 19.2, 44.8, 44.8, 0)], IMG, IMG, keep_empty=True)
-    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir), num_classes=1)
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+                                  IMG, IMG, keep_empty=True)
+    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
+                       subject="catkin")
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
@@ -368,36 +370,37 @@ def test_validate_classification_metrics(tmp_path):
 
 @pytest.fixture
 def json_data_dir(tmp_path: Path) -> Path:
-    """Minimal dataset with per-image JSON labels/predictions in the canonical layout.
+    """Minimal dataset with per-image JSON labels/predictions in the canonical (K13.5) layout.
 
     score_predictions reads GT and predictions through the canonical json_io per-image schema
-    (pixel COCO xywh + native ``score``).
+    (name-based, one file per image, pixel COCO xywh + native ``score``).
     """
     from PIL import Image
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox, PredBBox
+    from tcip_annotation.state import Annotation, BBox
 
     date = "2-11-26"
     images_dir = tmp_path / "images" / date
     images_dir.mkdir(parents=True)
-    labels_dir = tmp_path / "annotations" / "default" / date / "detect"
+    labels_dir = tmp_path / "annotations" / date
     labels_dir.mkdir(parents=True)
-    preds_dir = tmp_path / "predictions" / "live" / date / "detect"
+    preds_dir = tmp_path / "predictions" / "live" / date
     preds_dir.mkdir(parents=True)
 
     for name in ("img_001", "img_002", "img_003"):
         Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
-        json_io.write_detect(
+        json_io.write_annotations(
             str(labels_dir / f"{name}.json"),
-            [BBox(288, 216, 352, 264, 0), BBox(176, 132, 208, 156, 0)],
+            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264)),
+             Annotation(subject="catkin", geometry=BBox(176, 132, 208, 156))],
             640, 480,
         )
-        # 1 matching prediction (TP) + 1 elsewhere (FP), confidence in the JSON score.
-        json_io.write_detect(
+        # 1 matching prediction (TP) + 1 elsewhere (FP), confidence in each annotation's score.
+        json_io.write_annotations(
             str(preds_dir / f"{name}.json"),
-            [PredBBox(288, 216, 352, 264, 0, confidence=0.9),
-             PredBBox(496, 372, 528, 396, 0, confidence=0.7)],
+            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264), score=0.9),
+             Annotation(subject="catkin", geometry=BBox(496, 372, 528, 396), score=0.7)],
             640, 480,
         )
     return tmp_path
