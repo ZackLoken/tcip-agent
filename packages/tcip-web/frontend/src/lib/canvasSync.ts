@@ -15,6 +15,7 @@
  * rule) — so the server-side render (capture_live_canvas) is faithful by construction.
  */
 
+import { polygonBbox } from "@/lib/polygonGeometry";
 import type { ReviewColors } from "@/lib/reviewColors";
 import {
   annotationGeometry,
@@ -148,8 +149,7 @@ export function buildAnnotateShapes(args: {
     return shapes;
   }
 
-  // Box mode: the active subject's boxes render (a box and a polygon are now distinct annotations
-  // in the one file, so there is no derived-box layer to reconcile).
+  // Box mode: the active subject's editable boxes render solid.
   args.boxes.forEach((b, i) => {
     if (b.subject !== args.activeSubject) return;
     const selected = i === (args.selectedBoxIdx ?? null);
@@ -161,6 +161,23 @@ export function buildAnnotateShapes(args: {
       tag: "gt",
       created_by: b.created_by ?? null,
       accepted_by: b.accepted_by ?? null,
+    });
+  });
+  // ...plus each active-subject polygon's read-only derived box (dashed), mirroring the canvas so
+  // the capture stays faithful. Derived from polygonBbox here — the same min/max the loader and COCO
+  // export re-derive — never a stored box, so it can't be double-counted as its own annotation.
+  args.polygons.forEach((p) => {
+    if (p.subject !== args.activeSubject) return;
+    const [x1, y1, x2, y2] = polygonBbox(p.points);
+    shapes.push({
+      kind: "box",
+      xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
+      color: args.colorFor(p.subject),
+      dashed: true,
+      label: p.subject,
+      tag: "gt",
+      created_by: p.created_by ?? null,
+      accepted_by: p.accepted_by ?? null,
     });
   });
   // Box mode still shows the selected polygon (the shape being inspected).
