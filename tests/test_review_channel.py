@@ -205,9 +205,10 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     assert len(data["annotations"]) == 1
     assert data["annotations"][0]["created_by"] == "sam"
     assert data["annotations"][0]["created_at"]
-    # It must not touch GT; the polygon is stored as a polygon (segmentation), not a box.
+    # It must not touch GT; the polygon is stored as a polygon (segmentation) that also carries its
+    # derived box on disk — not collapsed to a box-only record (segmentation stays the truth).
     assert not (root / "annotations").exists()
-    assert "segmentation" in data["annotations"][0] and "bbox" not in data["annotations"][0]
+    assert "segmentation" in data["annotations"][0] and "bbox" in data["annotations"][0]
 
 
 def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> None:
