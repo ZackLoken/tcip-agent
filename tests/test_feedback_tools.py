@@ -18,9 +18,9 @@ def _setup(tmp_path: Path):
         Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
     state = {"image": {
         "imgA.png": {"img_status": "completed", "detections": [
-            {"action": "accepted", "class_id": 0, "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
+            {"action": "accepted", "class_name": "catkin", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
         "imgB.png": {"img_status": "completed", "detections": [
-            {"action": "rejected", "class_id": 0, "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
+            {"action": "rejected", "class_name": "catkin", "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
     }}
     # Seed through the engine so the fixture cannot drift from the real shard format.
     from tcip_annotation.review_engine import ReviewEngine
@@ -38,7 +38,7 @@ def test_materialize_review_dataset_end_to_end(tmp_path):
     assert "error" not in r
     assert r["positive"] == 1 and r["hard_negative"] == 1
     assert (out / "images" / "imgA.png").is_file()
-    assert (out / "labels" / "detect" / "imgA.json").is_file()
+    assert (out / "annotations" / "imgA.json").is_file()
 
 
 def test_materialize_review_dataset_records_lineage(tmp_path, monkeypatch):
