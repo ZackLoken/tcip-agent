@@ -9,8 +9,9 @@ Convention — the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
 
     <dataset_root>/
         images/<date>/*.JPG
-        annotations/<subject>/<date>/{detect,segment}/*.txt
-        predictions/<model>/<date>/{detect,segment}/*.txt
+        annotations/<date>/<stem>.json          # ground truth, one file per image (all subjects)
+        predictions/<model>/<date>/<stem>.json  # model outputs
+        classes.json                            # the nested subject/attribute registry
 """
 
 from __future__ import annotations
@@ -23,8 +24,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_mcp.dataset_layout import (
-    TASKS,
     annotation_dir,
+    list_subjects,
     models_with_predictions,
     prediction_dir,
     subjects_with_labels,
@@ -45,9 +46,9 @@ _selected_this_session = False
 class DatasetTree(BaseModel):
     dataset_root: str
     dates_with_images: list[str]
-    # Every subject present anywhere — the child dirs of ``annotations/``, e.g.
-    # ["catkin_50per_date", "efb_presence"]. This is *what a label set is about*, not the shape
-    # kind; it is passed as ``annotation_dir``'s ``subject``.
+    # Every subject the dataset's registry (``classes.json``) declares, e.g.
+    # ["catkin", "bush"]. This is *what a label set is about*, not the shape kind; a label file
+    # names its subject on each annotation rather than in the path.
     subjects: list[str]
     model_names: list[str]       # every model present anywhere, e.g. ["baseline"]
     # Per-date availability: the subjects that actually have labels / models that actually
@@ -65,9 +66,9 @@ def _list_children(p: Path) -> list[str]:
 
 # ── /tree cache ────────────────────────────────────────────────────────────
 # subjects_with_labels/models_with_predictions each re-list annotations/ or predictions/ and
-# walk every (subject|model, task) leaf dir per date, so a naive /tree is an iterdir storm on a
-# dataset with many dates. Cache the built tree per dataset_root, keyed by a signature of every
-# directory the computation reads (stat-only, no listing) — a write inside any of those leaf
+# scan every per-image label file per date, so a naive /tree is an iterdir storm on a dataset
+# with many dates. Cache the built tree per dataset_root, keyed by a signature of every
+# directory the computation reads (stat-only, no listing) — a write inside any of those date
 # dirs bumps its own mtime_ns and invalidates the entry. Bounded to a handful of recent roots.
 _TREE_CACHE_MAX = 64
 _tree_cache: "OrderedDict[str, tuple[tuple, DatasetTree]]" = OrderedDict()
@@ -80,18 +81,18 @@ def _dir_mtime_ns(p: Path) -> int:
         return -1
 
 
-def _tree_signature(root: Path, dates: list[str], subjects: list[str], models: list[str]) -> tuple:
+def _tree_signature(root: Path, dates: list[str], models: list[str]) -> tuple:
     sig = [
         _dir_mtime_ns(root / "images"),
         _dir_mtime_ns(root / "annotations"),
         _dir_mtime_ns(root / "models"),
         _dir_mtime_ns(root / "predictions"),
+        _dir_mtime_ns(root / "classes.json"),
     ]
     for d in dates:
-        for subject in subjects:
-            sig.extend(_dir_mtime_ns(annotation_dir(root, subject, d, task)) for task in TASKS)
+        sig.append(_dir_mtime_ns(annotation_dir(root, d)))
         for model in models:
-            sig.extend(_dir_mtime_ns(prediction_dir(root, model, d, task)) for task in TASKS)
+            sig.append(_dir_mtime_ns(prediction_dir(root, model, d)))
     return tuple(sig)
 
 
@@ -103,13 +104,15 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
 
     dates = _list_children(root / "images")
-    subjects = _list_children(root / "annotations")
+    # Subjects come from the dataset registry, not from listing annotations/ — that dir now holds
+    # date buckets, not subject dirs.
+    subjects = list_subjects(root)
     model_names = sorted(
         set(_list_children(root / "models")) | set(_list_children(root / "predictions"))
     )
 
     key = str(root)
-    signature = _tree_signature(root, dates, subjects, model_names)
+    signature = _tree_signature(root, dates, model_names)
     cached = _tree_cache.get(key)
     if cached is not None and cached[0] == signature:
         _tree_cache.move_to_end(key)
@@ -177,23 +180,12 @@ async def select_dataset(req: SelectionRequest) -> dict:
                 if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
             )
 
-    # Canonical layout (see tcip_mcp.dataset_layout) — the single source of truth
-    # shared with the agent tools, so agent writes land where the GUI reads.
-    ann_detect = (
-        str(annotation_dir(root, req.subject, req.date, "detect"))
-        if req.subject and req.date
-        else None
-    )
-    ann_segment = (
-        str(annotation_dir(root, req.subject, req.date, "segment"))
-        if req.subject and req.date
-        else None
-    )
-    pred_detect = (
-        str(prediction_dir(root, req.model_name, req.date, "detect")) if req.model_name else None
-    )
-    pred_segment = (
-        str(prediction_dir(root, req.model_name, req.date, "segment")) if req.model_name else None
+    # Canonical layout (see tcip_mcp.dataset_layout) — the single source of truth shared with the
+    # agent tools, so agent writes land where the GUI reads. One file per image now holds every
+    # subject, so the label/prediction dirs carry no subject or task segment.
+    annotations_dir = str(annotation_dir(root, req.date)) if req.date else None
+    predictions_dir = (
+        str(prediction_dir(root, req.model_name, req.date)) if req.model_name and req.date else None
     )
 
     # Re-selecting the same (root, subject, date) within a session resumes at the persisted
@@ -219,10 +211,8 @@ async def select_dataset(req: SelectionRequest) -> dict:
         date=req.date,
         image_list=image_list,
         current_image_index=index,
-        annotations_detect_dir=ann_detect,
-        annotations_segment_dir=ann_segment,
-        predictions_detect_dir=pred_detect,
-        predictions_segment_dir=pred_segment,
+        annotations_dir=annotations_dir,
+        predictions_dir=predictions_dir,
     )
     await store.mutate({"dataset": selection})
 
