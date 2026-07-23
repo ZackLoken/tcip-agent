@@ -199,7 +199,7 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
     pytest.importorskip("torch")
     monkeypatch.chdir(tmp_path)
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox, PredBBox
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import get_worst_predictions
 
     preds = tmp_path / "preds"
@@ -210,11 +210,12 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
     def write_image(stem: str, scores: list[float]) -> None:
         # Confidence lives in the JSON `score`; box geometry is irrelevant to this
         # count + confidence heuristic (no IoU matching), so the boxes can be anything.
-        pred_boxes = [PredBBox(10.0, 10.0, 40.0, 22.0, 1, confidence=s) for s in scores]
-        json_io.write_detect(str(preds / f"{stem}.json"), pred_boxes, 100, 100)
+        pred_anns = [Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 40.0, 22.0), score=s)
+                     for s in scores]
+        json_io.write_annotations(str(preds / f"{stem}.json"), pred_anns, 100, 100)
         # Matching GT count → missed = extra = 0, error is exactly (1 - avg_conf).
-        gt_boxes = [BBox(20.0, 11.0, 40.0, 31.0, 0) for _ in scores]
-        json_io.write_detect(str(gts / f"{stem}.json"), gt_boxes, 100, 100)
+        gt_anns = [Annotation(subject="catkin", geometry=BBox(20.0, 11.0, 40.0, 31.0)) for _ in scores]
+        json_io.write_annotations(str(gts / f"{stem}.json"), gt_anns, 100, 100)
 
     write_image("confident", [0.9, 0.9])
     write_image("shaky", [0.1, 0.1])
