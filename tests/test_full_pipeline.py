@@ -7,6 +7,7 @@ Uses synthetic data for classification and real sample data for detection.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -176,8 +177,29 @@ class TestFullClassificationPipeline:
 # Test: detection pipeline with real catkin data
 # ---------------------------------------------------------------------------
 
-SAMPLE_IMAGES = Path(__file__).resolve().parent.parent / "data" / "images"
-SAMPLE_LABELS = Path(__file__).resolve().parent.parent / "data" / "labels" / "detect"
+# A real nested-schema dataset to run the detection pipeline against: set TCIP_SAMPLE_PROJECT to a
+# converted project root (holds classes.json + annotations/<date>/ + images/<date>/); defaults to an
+# in-repo <repo>/data sample. Skips when neither is present.
+SAMPLE_PROJECT = Path(os.environ.get(
+    "TCIP_SAMPLE_PROJECT", str(Path(__file__).resolve().parent.parent / "data")))
+
+
+def _sample_date() -> str | None:
+    """A capture date under SAMPLE_PROJECT that has both images and catkin annotations, or None."""
+    if not (SAMPLE_PROJECT / "classes.json").is_file():
+        return None
+    from tcip_annotation import json_io
+    ann_root = SAMPLE_PROJECT / "annotations"
+    if not ann_root.is_dir():
+        return None
+    for date_dir in sorted(p for p in ann_root.iterdir() if p.is_dir()):
+        if not (SAMPLE_PROJECT / "images" / date_dir.name).is_dir():
+            continue
+        for jf in date_dir.glob("*.json"):
+            if any(a.subject == "catkin" and a.geometry is not None
+                   for a in json_io.read_annotations(str(jf))):
+                return date_dir.name
+    return None
 
 
 @pytest.fixture()
@@ -186,11 +208,11 @@ def detection_output_dir(tmp_path):
 
 
 @pytest.mark.skipif(
-    not SAMPLE_IMAGES.exists() or not SAMPLE_LABELS.exists(),
-    reason="Sample detection data not found",
+    _sample_date() is None,
+    reason="No nested-schema sample project (set TCIP_SAMPLE_PROJECT to a converted dataset)",
 )
 class TestDetectionPipelineRealData:
-    """End-to-end: build → train → infer → export CSV using real catkin images."""
+    """End-to-end: build → train → infer → export CSV using real catkin images (nested schema)."""
 
     def test_build_train_infer_export(self, detection_output_dir):
         from tcip_mcp.pipelines.data.datasets import build_dataset
@@ -209,25 +231,33 @@ class TestDetectionPipelineRealData:
         model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=320, max_size=512)
         assert isinstance(model, bespoke_models.BespokeDetection)
 
-        # --- Step 2: Build dataset from real YOLO labels ---
+        # --- Step 2: Build dataset from the nested-schema labels (name-based, one file per image) ---
+        date = _sample_date()
+        assert date is not None
+        images_dir = SAMPLE_PROJECT / "images" / date
+        labels_dir = SAMPLE_PROJECT / "annotations" / date
         dataset = build_dataset(
             "detection",
-            images_dir=str(SAMPLE_IMAGES),
-            labels_dir=str(SAMPLE_LABELS),
-            num_classes=1,
+            images_dir=str(images_dir),
+            labels_dir=str(labels_dir),
+            subject="catkin",
         )
-        assert dataset.num_samples == 18
+        # num_classes is derived from the dataset's classes.json via assign_class_ids (single-class
+        # catkin here), and num_samples from the catkin-annotated images on this date.
         assert dataset.num_classes == 1
+        assert dataset.num_samples > 0
 
-        # Verify one sample loads correctly
+        # Verify samples load with the right structure. Sample 0 may be a confirmed negative (zero
+        # boxes is a valid training sample), so check the shape here and that catkin boxes exist
+        # somewhere in the set rather than assuming the first sample is annotated.
         img, target = dataset[0]
         assert img.ndim == 3 and img.shape[0] == 3  # [C, H, W]
-        assert target["boxes"].ndim == 2 and target["boxes"].shape[1] == 4
+        assert target["boxes"].ndim == 2 and target["boxes"].shape[1] == 4  # [N, 4], N may be 0
         assert target["labels"].ndim == 1
-        assert len(target["labels"]) > 0  # has annotations
+        assert any(len(dataset[i][1]["labels"]) > 0 for i in range(min(dataset.num_samples, 8)))
 
-        # Use first 4 images for fast training
-        subset = torch.utils.data.Subset(dataset, list(range(4)))
+        # Use up to 4 images for fast training
+        subset = torch.utils.data.Subset(dataset, list(range(min(4, dataset.num_samples))))
         loader = DataLoader(
             subset, batch_size=2, shuffle=True,
             collate_fn=task_collate("detection"),
@@ -265,10 +295,13 @@ class TestDetectionPipelineRealData:
             str(out / "model_best.pt"), device="cpu", score_threshold=0.01,
         )
 
-        test_images = sorted(SAMPLE_IMAGES.glob("*.JPG"))[:3]
+        img_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+        test_images = sorted(p for p in images_dir.iterdir()
+                             if p.suffix.lower() in img_exts)[:3]
+        assert test_images, "no images on the sample date"
         results = predictor.predict_batch([str(p) for p in test_images])
 
-        assert len(results) == 3
+        assert len(results) == len(test_images)
         for r in results:
             assert "image" in r
             assert "boxes" in r
@@ -284,4 +317,4 @@ class TestDetectionPipelineRealData:
         assert "image" in content
         assert "detection_count" in content
         lines = content.strip().splitlines()
-        assert len(lines) == 4  # header + 3 images
+        assert len(lines) == len(test_images) + 1  # header + one row per image
