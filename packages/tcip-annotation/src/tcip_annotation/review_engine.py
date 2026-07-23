@@ -1,10 +1,9 @@
 """ReviewEngine — Review logic, detection walk-through, accept/reject.
 
-GUI-free.  Ported from yolo-annotator (yololabeler.review.engine) with these
-adaptations:
+GUI-free:
 
-  * Operates on :mod:`tcip_annotation.state` dataclasses (``BBox``,
-    ``Polygon``, ``PredBBox``, ``PredPolygon``).
+  * Operates on :class:`tcip_annotation.state.Annotation` records (a prediction is an annotation
+    whose ``score`` is set); a class is named by its ``subject``, never an integer id.
   * Consumes the dict-based match format produced by
     :func:`tcip_annotation.matching.compute_matches` (a dict, not a tuple).
   * Per-image state (image dims, GT/pred lists) is supplied via
@@ -30,9 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from tcip_annotation.json_io import write_detect as write_detect_labels
-from tcip_annotation.json_io import write_segment as write_segment_labels
-from tcip_annotation.state import BBox, Polygon, PredBBox, PredPolygon
+from tcip_annotation.json_io import write_annotations
+from tcip_annotation.state import Annotation, bbox_of
 
 logger = logging.getLogger(__name__)
 
@@ -44,33 +42,33 @@ logger = logging.getLogger(__name__)
 class ReviewDetection:
     """One walkable entry in the Review tab's sequential traversal.
 
-    Combines match-type (TP/FP/FN), class, indices into the GT and pred
+    Combines match-type (TP/FP/FN), class name, indices into the GT and pred
     lists, matching IoU / confidence (when applicable), and the image-coord
     bounding box used to auto-zoom the canvas.
     """
 
     det_type: str  # "tp" | "fp" | "fn"
-    class_id: int
+    class_name: str
     conf: Optional[float]
     iou: Optional[float]
-    gt_type: Optional[str]  # "box" | "polygon" | None
     gt_idx: Optional[int]
-    pred_type: Optional[str]
     pred_idx: Optional[int]
     bbox: tuple[float, float, float, float]  # image-pixel coords
 
 
 @dataclass
 class ReviewContext:
-    """Per-image context the engine needs for any spatial operation."""
+    """Per-image context the engine needs for any spatial operation.
+
+    ``gt`` / ``preds`` are :class:`Annotation` lists indexed by the match dicts' ``gt_idx`` /
+    ``pred_idx``; a prediction annotation carries a ``score``.
+    """
 
     img_name: str
     img_width: int
     img_height: int
-    gt_boxes: list[BBox] = field(default_factory=list)
-    gt_polygons: list[Polygon] = field(default_factory=list)
-    pred_boxes: list[PredBBox] = field(default_factory=list)
-    pred_polygons: list[PredPolygon] = field(default_factory=list)
+    gt: list[Annotation] = field(default_factory=list)
+    preds: list[Annotation] = field(default_factory=list)
 
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -91,8 +89,6 @@ class ReviewEngine:
     state_dir : Path | str
         Directory holding the ``review/`` shard directory (one JSON file per
         reviewed image). Created if missing.
-    class_names : dict[int, str], optional
-        Class ID → human name mapping. Embedded in recorded entries for audit.
     current_user : str, optional
         Username recorded on every accept/reject/edit action.
     """
@@ -101,12 +97,10 @@ class ReviewEngine:
         self,
         state_dir: Path | str,
         *,
-        class_names: Optional[dict[int, str]] = None,
         current_user: str = "",
     ) -> None:
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self.class_names = class_names or {}
         self.current_user = current_user
         self._review_state: dict = {}
         self._reviewed_lookup: tuple[str, dict, dict] = ("", {}, {})
@@ -253,35 +247,26 @@ class ReviewEngine:
 
     # ── Bounding-box helpers ──────────────────────────────────────────────
 
-    def _bbox_of_gt(self, ctx: ReviewContext, gt_type: Optional[str], gt_idx: Optional[int]):
-        if gt_type == "box" and gt_idx is not None and 0 <= gt_idx < len(ctx.gt_boxes):
-            b = ctx.gt_boxes[gt_idx]
+    @staticmethod
+    def _bbox_of_annotation(anns: list[Annotation], idx: Optional[int]):
+        if idx is not None and 0 <= idx < len(anns) and anns[idx].geometry is not None:
+            b = bbox_of(anns[idx].geometry)
             return (b.x1, b.y1, b.x2, b.y2)
-        if gt_type == "polygon" and gt_idx is not None and 0 <= gt_idx < len(ctx.gt_polygons):
-            pts = ctx.gt_polygons[gt_idx].points
-            xs = [p[0] for p in pts]
-            ys = [p[1] for p in pts]
-            return (min(xs), min(ys), max(xs), max(ys))
         return None
 
-    def _bbox_of_pred(self, ctx: ReviewContext, pred_type: Optional[str], pred_idx: Optional[int]):
-        if pred_type == "box" and pred_idx is not None and 0 <= pred_idx < len(ctx.pred_boxes):
-            b = ctx.pred_boxes[pred_idx]
-            return (b.x1, b.y1, b.x2, b.y2)
-        if pred_type == "polygon" and pred_idx is not None and 0 <= pred_idx < len(ctx.pred_polygons):
-            pts = ctx.pred_polygons[pred_idx].points
-            xs = [p[0] for p in pts]
-            ys = [p[1] for p in pts]
-            return (min(xs), min(ys), max(xs), max(ys))
-        return None
+    def _bbox_of_gt(self, ctx: ReviewContext, gt_idx: Optional[int]):
+        return self._bbox_of_annotation(ctx.gt, gt_idx)
 
-    def _detection_bbox(self, ctx: ReviewContext, gt_type, gt_idx, p_type, p_idx):
+    def _bbox_of_pred(self, ctx: ReviewContext, pred_idx: Optional[int]):
+        return self._bbox_of_annotation(ctx.preds, pred_idx)
+
+    def _detection_bbox(self, ctx: ReviewContext, gt_idx, p_idx):
         """Return the image-coord bbox for a detection, covering GT and/or pred."""
         bboxes = []
-        gt_b = self._bbox_of_gt(ctx, gt_type, gt_idx)
+        gt_b = self._bbox_of_gt(ctx, gt_idx)
         if gt_b:
             bboxes.append(gt_b)
-        p_b = self._bbox_of_pred(ctx, p_type, p_idx)
+        p_b = self._bbox_of_pred(ctx, p_idx)
         if p_b:
             bboxes.append(p_b)
         if not bboxes:
@@ -302,20 +287,16 @@ class ReviewEngine:
         img_h = max(ctx.img_height, 1)
 
         if isinstance(det_like, ReviewDetection):
-            gt_type = det_like.gt_type
             gt_idx = det_like.gt_idx
-            p_type = det_like.pred_type
             p_idx = det_like.pred_idx
         else:
-            gt_type = det_like.get("gt_type")
             gt_idx = det_like.get("gt_idx")
-            p_type = det_like.get("pred_type")
             p_idx = det_like.get("pred_idx")
 
         if which == "gt":
-            b = self._bbox_of_gt(ctx, gt_type, gt_idx)
+            b = self._bbox_of_gt(ctx, gt_idx)
         else:
-            b = self._bbox_of_pred(ctx, p_type, p_idx)
+            b = self._bbox_of_pred(ctx, p_idx)
         if b is None:
             return None
         x1, y1, x2, y2 = b
@@ -401,75 +382,65 @@ class ReviewEngine:
         matches: dict,
         *,
         filter_type: str = "all",
-        filter_class: int | str = "all",
+        filter_class: str = "all",
     ) -> list[ReviewDetection]:
         """Produce the filtered, walkable list of detections for the Review UI.
 
-        Review status is never hidden here: within an image every matching detection is
-        walkable regardless of whether it has been reviewed (the Reviewed/Unreviewed filter
-        is image-level navigation, not per-detection visibility). Reviewed/unreviewed state
-        rides on each detection via :meth:`find_reviewed_entry` for the caller to decorate."""
+        ``filter_class`` is a class name (an annotation's ``subject``) or ``"all"``. Review status is
+        never hidden here: within an image every matching detection is walkable regardless of whether
+        it has been reviewed (the Reviewed/Unreviewed filter is image-level navigation, not
+        per-detection visibility). Reviewed/unreviewed state rides on each detection via
+        :meth:`find_reviewed_entry` for the caller to decorate."""
 
-        def _class_ok(cid: int) -> bool:
-            return filter_class == "all" or cid == filter_class
+        def _class_ok(cname: str) -> bool:
+            return filter_class == "all" or cname == filter_class
 
         dets: list[ReviewDetection] = []
 
         if filter_type in ("all", "tp"):
             for m in matches.get("tp", []):
-                cid = m["class_id"]
-                if not _class_ok(cid):
+                cname = m["class_name"]
+                if not _class_ok(cname):
                     continue
-                det = ReviewDetection(
+                dets.append(ReviewDetection(
                     det_type="tp",
-                    class_id=cid,
+                    class_name=cname,
                     conf=m.get("conf"),
                     iou=m.get("iou"),
-                    gt_type=m["gt_type"],
                     gt_idx=m["gt_idx"],
-                    pred_type=m["pred_type"],
                     pred_idx=m["pred_idx"],
-                    bbox=self._detection_bbox(
-                        ctx, m["gt_type"], m["gt_idx"], m["pred_type"], m["pred_idx"]
-                    ),
-                )
-                dets.append(det)
+                    bbox=self._detection_bbox(ctx, m["gt_idx"], m["pred_idx"]),
+                ))
 
         if filter_type in ("all", "fp"):
             for m in matches.get("fp", []):
-                cid = m["class_id"]
-                if not _class_ok(cid):
+                cname = m["class_name"]
+                if not _class_ok(cname):
                     continue
-                det = ReviewDetection(
+                dets.append(ReviewDetection(
                     det_type="fp",
-                    class_id=cid,
+                    class_name=cname,
                     conf=m.get("conf"),
                     iou=None,
-                    gt_type=None,
                     gt_idx=None,
-                    pred_type=m["pred_type"],
                     pred_idx=m["pred_idx"],
-                    bbox=self._detection_bbox(ctx, None, None, m["pred_type"], m["pred_idx"]),
-                )
-                dets.append(det)
+                    bbox=self._detection_bbox(ctx, None, m["pred_idx"]),
+                ))
 
         if filter_type in ("all", "fn"):
             for m in matches.get("fn", []):
-                cid = m["class_id"]
-                if not _class_ok(cid):
+                cname = m["class_name"]
+                if not _class_ok(cname):
                     continue
-                det = ReviewDetection(
+                dets.append(ReviewDetection(
                     det_type="fn",
-                    class_id=cid,
+                    class_name=cname,
                     conf=None,
                     iou=None,
-                    gt_type=m["gt_type"],
                     gt_idx=m["gt_idx"],
-                    pred_type=None,
                     pred_idx=None,
-                    bbox=self._detection_bbox(ctx, m["gt_type"], m["gt_idx"], None, None),
-                )
-                dets.append(det)
+                    bbox=self._detection_bbox(ctx, m["gt_idx"], None),
+                ))
 
         return dets
 
@@ -498,14 +469,12 @@ class ReviewEngine:
 
         nd = norm_det if norm_det is not None else det
         nc = norm_ctx if norm_ctx is not None else ctx
-        class_name = self.class_names.get(det.class_id, f"class_{det.class_id}")
         entry = {
             "match_type": det.det_type.upper(),
             "det_status": "reviewed",
             "action": action,
             "reviewed_by": self.current_user,
-            "class_id": det.class_id,
-            "class_name": class_name,
+            "class_name": det.class_name,
             "gt_bbox_norm": self._normalised_bbox(nc, "gt", nd),
             "pred_bbox_norm": self._normalised_bbox(nc, "pred", nd),
             "iou": round(det.iou, 4) if det.iou is not None else None,
@@ -578,28 +547,21 @@ class ReviewEngine:
                 captured += 1
         return captured
 
-    def save_gt(self, ctx: ReviewContext, *, detect_path: Optional[str] = None, segment_path: Optional[str] = None) -> bool:
-        """Write the current GT from ``ctx`` back to the canonical per-image label files.
+    def save_gt(self, ctx: ReviewContext, *, path: Optional[str] = None) -> bool:
+        """Write the current GT from ``ctx`` back to the single per-image label file.
 
-        Returns ``True`` on full success, ``False`` if any write failed.
+        The unified schema holds every subject's annotations (boxes and polygons alike) in one file
+        per image, so a review save writes ``ctx.gt`` whole. Returns ``True`` on success, ``False``
+        if the write failed.
         """
-        # keep_empty: an emptied GT keeps its record (objects: []) rather than deleting the file.
-        # That record is not a negative until a human confirms the image Complete.
-        ok = True
-        if detect_path is not None:
-            try:
-                os.makedirs(os.path.dirname(detect_path) or ".", exist_ok=True)
-                write_detect_labels(detect_path, ctx.gt_boxes, ctx.img_width, ctx.img_height,
-                                    keep_empty=True)
-            except OSError:
-                logger.exception("Could not save detect labels to %s", detect_path)
-                ok = False
-        if segment_path is not None:
-            try:
-                os.makedirs(os.path.dirname(segment_path) or ".", exist_ok=True)
-                write_segment_labels(segment_path, ctx.gt_polygons, ctx.img_width, ctx.img_height,
-                                     keep_empty=True)
-            except OSError:
-                logger.exception("Could not save segment labels to %s", segment_path)
-                ok = False
-        return ok
+        if path is None:
+            return True
+        # keep_empty: an emptied GT keeps its record ({"annotations": []}) rather than deleting the
+        # file. That record is not a negative until a human confirms the image Complete.
+        try:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            write_annotations(path, ctx.gt, ctx.img_width, ctx.img_height, keep_empty=True)
+        except OSError:
+            logger.exception("Could not save labels to %s", path)
+            return False
+        return True
