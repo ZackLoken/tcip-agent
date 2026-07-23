@@ -10,7 +10,9 @@ from pathlib import Path
 from PIL import Image
 
 from tcip_annotation import json_io
-from tcip_annotation.state import BBox
+from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+from tcip_mcp.dataset_layout import status_bucket
 
 PY_EXE = sys.executable
 DOCTOR = str(Path(__file__).parent.parent / "scripts" / "doctor.py")
@@ -19,21 +21,23 @@ DOCTOR = str(Path(__file__).parent.parent / "scripts" / "doctor.py")
 def _project(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
     (root / "images" / "2026-02-11").mkdir(parents=True)
-    det = root / "annotations" / "catkin" / "2026-02-11" / "detect"
-    det.mkdir(parents=True)
+    ann = root / "annotations" / "2026-02-11"
+    ann.mkdir(parents=True)
     state = root / ".tcip" / "state"
     state.mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
     for name in ("IMG_A", "IMG_B", "IMG_C"):
         Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / f"{name}.JPG")
     # A: confirmed negative (empty + status). B: empty WITHOUT confirmation (the IMG_0150 case).
     # C: has objects but status wrongly says negative (contradiction).
-    json_io.write_detect(det / "IMG_A.json", [], 32, 32, keep_empty=True)
-    json_io.write_detect(det / "IMG_B.json", [], 32, 32, keep_empty=True)
-    json_io.write_detect(det / "IMG_C.json", [BBox(1, 1, 9, 9, 0)], 32, 32)
+    json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
+    json_io.write_annotations(ann / "IMG_B.json", [], 32, 32, keep_empty=True)
+    json_io.write_annotations(ann / "IMG_C.json",
+                              [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
     # Scoped by subject/date — a confirmation belongs to the subject it was made in.
     (state / "image_status.json").write_text(json.dumps(
-        {"catkin/2026-02-11": {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated",
-                               "IMG_C.JPG": "negative"}}))
+        {status_bucket("catkin", "2026-02-11"): {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated",
+                                                 "IMG_C.JPG": "negative"}}))
     return root
 
 
@@ -61,10 +65,13 @@ def test_doctor_flags_the_field_session_bug_family(tmp_path):
 def test_doctor_clean_project_exits_zero(tmp_path):
     root = tmp_path / "clean"
     (root / "images" / "d").mkdir(parents=True)
-    det = root / "annotations" / "t" / "d" / "detect"
-    det.mkdir(parents=True)
+    ann = root / "annotations" / "d"
+    ann.mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
     Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
-    json_io.write_detect(det / "IMG_A.json", [BBox(1, 1, 9, 9, 0, created_by="user:zack")], 32, 32)
+    json_io.write_annotations(
+        ann / "IMG_A.json",
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9), created_by="user:zack")], 32, 32)
     res = _run(root)
     assert res.returncode == 0, res.stdout
