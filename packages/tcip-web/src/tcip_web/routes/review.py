@@ -1,9 +1,13 @@
 """Review routes: compute matches, walk detections, record actions, save GT.
 
-Uses the shared :class:`tcip_annotation.ReviewEngine`; one engine instance
-lives in memory per project (keyed by project_root). Review state is
-persisted via the engine to per-image shards under
+Uses the shared :class:`tcip_annotation.ReviewEngine`; one engine instance lives in memory per
+project (keyed by project_root). Review state is persisted via the engine to per-image shards under
 ``<project_root>/.tcip/state/review/``.
+
+Ground truth and predictions are each one JSON file per image holding every subject's annotations by
+name (a prediction is an :class:`~tcip_annotation.state.Annotation` whose ``score`` is set); a class
+is named by its ``subject``, never an integer id, so the recorded verdict carries the real subject
+name with no registry lookup.
 """
 
 from __future__ import annotations
@@ -20,20 +24,14 @@ from pydantic import BaseModel
 
 from tcip_annotation import (
     BBox,
-    PredBBox,
-    PredPolygon,
     Polygon,
     ReviewContext,
     ReviewDetection,
     ReviewEngine,
     compute_matches,
-    parse_detect_labels,
-    parse_detect_predictions,
-    parse_segment_labels,
-    parse_segment_predictions,
-    write_detect_labels,
-    write_segment_labels,
 )
+from tcip_annotation.json_io import read_annotations
+from tcip_annotation.state import Annotation
 from tcip_annotation.utils import get_image_dimensions
 from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, read_json
 from tcip_web.identity import resolve_user, user_id
@@ -46,56 +44,6 @@ router = APIRouter(prefix="/api/review", tags=["review"])
 
 _engines: dict[str, ReviewEngine] = {}
 
-# Class-name memo keyed by (registry path, mtime_ns): _get_engine resolves names per request from
-# the reviewed label's own subject registry, so an unchanged map isn't re-parsed each call; a save
-# bumps mtime_ns and invalidates just that entry. Bounded.
-_CLASS_NAMES_CACHE_MAX = 256
-_class_names_cache: dict[str, tuple[int, dict[int, str]]] = {}
-
-
-def _load_class_names(gt_path: str | None) -> dict[int, str]:
-    """Read id→name for the subject a GT label path belongs to, from its dataset registry.
-
-    The registry is subject-scoped and lives in the dataset (``<dataset_root>/classes/<subject>``),
-    so names are resolved per request from the label being reviewed — a project with two subjects
-    never shows one's names for the other. Without a resolvable registry the engine records
-    ``class_{id}`` placeholders (display only; the negative rail does not depend on names).
-    """
-    if not gt_path:
-        return {}
-    from tcip_mcp.dataset_layout import classes_path, dataset_root_of, parse_annotation_dir
-
-    label_dir = Path(gt_path).parent
-    root = dataset_root_of(label_dir)
-    parsed = parse_annotation_dir(label_dir)
-    if root is None or parsed is None:
-        return {}
-    path = classes_path(root, parsed[0])
-    try:
-        mtime_ns = path.stat().st_mtime_ns
-    except OSError:
-        mtime_ns = -1
-    key = str(path)
-    cached = _class_names_cache.get(key)
-    if cached is not None and cached[0] == mtime_ns:
-        return cached[1]
-
-    data = read_json(path, default={})
-    names: dict[int, str] = {}
-    if isinstance(data, dict):
-        for k, v in data.items():
-            try:
-                cid = int(k)
-            except (TypeError, ValueError):
-                continue
-            name = v.get("name") if isinstance(v, dict) else None
-            if name:
-                names[cid] = name
-    if len(_class_names_cache) >= _CLASS_NAMES_CACHE_MAX:
-        _class_names_cache.pop(next(iter(_class_names_cache)))
-    _class_names_cache[key] = (mtime_ns, names)
-    return names
-
 
 def _current_user() -> str:
     """Reviewer fallback when the GUI request omits ``user`` — env override else the OS login."""
@@ -104,17 +52,11 @@ def _current_user() -> str:
     return current_user()
 
 
-def _get_engine(project_root: str, gt_path: str | None = None) -> ReviewEngine:
+def _get_engine(project_root: str) -> ReviewEngine:
     key = str(Path(project_root).resolve())
-    class_names = _load_class_names(gt_path)
     if key not in _engines:
         state_dir = Path(project_root) / ".tcip" / "state"
-        _engines[key] = ReviewEngine(
-            state_dir=state_dir, class_names=class_names, current_user=_current_user()
-        )
-    else:
-        # Refresh names so classes added mid-session appear in newly recorded entries.
-        _engines[key].class_names = class_names
+        _engines[key] = ReviewEngine(state_dir=state_dir, current_user=_current_user())
     return _engines[key]
 
 
@@ -185,30 +127,31 @@ def _ensure_original_backup(label_path: Optional[str]) -> None:
         pass
 
 
-def _load_ctx(
-    image_name: str,
-    image_path: str,
-    *,
-    gt_detect_path: Optional[str],
-    gt_segment_path: Optional[str],
-    pred_detect_path: Optional[str],
-    pred_segment_path: Optional[str],
-) -> ReviewContext:
+def _ann_dict(a: Annotation) -> dict:
+    """Serialize an :class:`Annotation` for the canvas (pixel coords + attributes + provenance)."""
+    out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
+    geom = a.geometry
+    if isinstance(geom, Polygon):
+        out["points"] = [list(pt) for pt in geom.points]
+    elif isinstance(geom, BBox):
+        out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]
+    if a.score is not None:
+        out["score"] = a.score
+    out["created_by"] = a.created_by
+    out["created_at"] = a.created_at
+    out["accepted_by"] = a.accepted_by
+    out["accepted_at"] = a.accepted_at
+    return out
+
+
+def _load_ctx(image_name: str, image_path: str, *, gt_path: Optional[str],
+              pred_path: Optional[str]) -> ReviewContext:
     w, h = _image_dims(image_path)
     ctx = ReviewContext(img_name=image_name, img_width=w, img_height=h)
-
-    if gt_detect_path:
-        boxes, _ = parse_detect_labels(gt_detect_path, w, h)
-        ctx.gt_boxes = boxes
-    if gt_segment_path:
-        polys, _ = parse_segment_labels(gt_segment_path, w, h)
-        ctx.gt_polygons = polys
-    if pred_detect_path:
-        pred_boxes, _ = parse_detect_predictions(pred_detect_path, w, h)
-        ctx.pred_boxes = pred_boxes
-    if pred_segment_path:
-        pred_polys, _ = parse_segment_predictions(pred_segment_path, w, h)
-        ctx.pred_polygons = pred_polys
+    if gt_path:
+        ctx.gt = read_annotations(gt_path)
+    if pred_path:
+        ctx.preds = read_annotations(pred_path)
     return ctx
 
 
@@ -219,24 +162,20 @@ class MatchesRequest(BaseModel):
     project_root: str
     image_name: str
     image_path: str
-    gt_detect_path: Optional[str] = None
-    gt_segment_path: Optional[str] = None
-    pred_detect_path: Optional[str] = None
-    pred_segment_path: Optional[str] = None
+    gt_path: Optional[str] = None      # the per-image ground-truth label file
+    pred_path: Optional[str] = None    # the per-image prediction file
     iou_threshold: float = 0.5
     conf_threshold: float = 0.25
     filter_type: str = "all"
-    filter_class: str | int = "all"
+    filter_class: str = "all"          # a class name (an annotation's subject) or "all"
 
 
 class Detection(BaseModel):
     det_type: str
-    class_id: int
+    class_name: str
     conf: Optional[float]
     iou: Optional[float]
-    gt_type: Optional[str]
     gt_idx: Optional[int]
-    pred_type: Optional[str]
     pred_idx: Optional[int]
     bbox: tuple[float, float, float, float]
     reviewed: bool = False
@@ -250,11 +189,9 @@ class MatchesResponse(BaseModel):
     n_fp: int
     n_fn: int
     detections: list[Detection]
-    gt_boxes: list[dict]
-    gt_polygons: list[dict]
-    pred_boxes: list[dict]
-    pred_polygons: list[dict]
-    image_status: str  # "not_started" | "started" | "completed"
+    gt: list[dict]      # every GT annotation (subject + geometry + attributes + provenance)
+    preds: list[dict]   # every prediction annotation (carries score)
+    image_status: str   # "not_started" | "started" | "completed"
 
 
 def _matches_response(
@@ -264,9 +201,9 @@ def _matches_response(
     image_name: str,
     *,
     filter_type: str,
-    filter_class: str | int,
+    filter_class: str,
 ) -> MatchesResponse:
-    """Build the canvas payload (filtered + review-decorated detections, GT/pred shapes, status)
+    """Build the canvas payload (filtered + review-decorated detections, GT/pred annotations, status)
     from an already-computed match set. Shared by /matches and /action so both surfaces return the
     identical shape — letting a verdict return its fresh matches instead of forcing a second fetch."""
     dets = engine.build_detection_list(
@@ -277,35 +214,15 @@ def _matches_response(
         entry = engine.find_reviewed_entry(d, ctx)
         out_dets.append(Detection(
             det_type=d.det_type,
-            class_id=d.class_id,
+            class_name=d.class_name,
             conf=d.conf,
             iou=d.iou,
-            gt_type=d.gt_type,
             gt_idx=d.gt_idx,
-            pred_type=d.pred_type,
             pred_idx=d.pred_idx,
             bbox=d.bbox,
             reviewed=entry is not None,
             reviewed_action=entry.get("action") if entry else None,
         ))
-
-    def _box_dict(b: BBox) -> dict:
-        return {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
-
-    def _poly_dict(p: Polygon) -> dict:
-        return {"points": [list(pt) for pt in p.points], "class_id": p.class_id}
-
-    def _pred_box_dict(b: PredBBox) -> dict:
-        return {
-            "x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
-            "class_id": b.class_id, "confidence": b.confidence,
-        }
-
-    def _pred_poly_dict(p: PredPolygon) -> dict:
-        return {
-            "points": [list(pt) for pt in p.points],
-            "class_id": p.class_id, "confidence": p.confidence,
-        }
 
     return MatchesResponse(
         img_width=ctx.img_width,
@@ -314,10 +231,8 @@ def _matches_response(
         n_fp=len(matches["fp"]),
         n_fn=len(matches["fn"]),
         detections=out_dets,
-        gt_boxes=[_box_dict(b) for b in ctx.gt_boxes],
-        gt_polygons=[_poly_dict(p) for p in ctx.gt_polygons],
-        pred_boxes=[_pred_box_dict(b) for b in ctx.pred_boxes],
-        pred_polygons=[_pred_poly_dict(p) for p in ctx.pred_polygons],
+        gt=[_ann_dict(a) for a in ctx.gt],
+        preds=[_ann_dict(a) for a in ctx.preds],
         image_status=engine.get_image_review_status(image_name),
     )
 
@@ -325,23 +240,10 @@ def _matches_response(
 @router.post("/matches")
 def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
     """Compute TP/FP/FN, decorate with review status, and return everything the canvas needs."""
-    ctx = _load_ctx(
-        image_name=req.image_name,
-        image_path=req.image_path,
-        gt_detect_path=req.gt_detect_path,
-        gt_segment_path=req.gt_segment_path,
-        pred_detect_path=req.pred_detect_path,
-        pred_segment_path=req.pred_segment_path,
-    )
-    engine = _get_engine(req.project_root, req.gt_detect_path or req.gt_segment_path)
-
+    ctx = _load_ctx(req.image_name, req.image_path, gt_path=req.gt_path, pred_path=req.pred_path)
+    engine = _get_engine(req.project_root)
     matches = compute_matches(
-        gt_boxes=ctx.gt_boxes,
-        gt_polygons=ctx.gt_polygons,
-        pred_boxes=ctx.pred_boxes,
-        pred_polygons=ctx.pred_polygons,
-        iou_threshold=req.iou_threshold,
-        conf_threshold=req.conf_threshold,
+        ctx.gt, ctx.preds, iou_threshold=req.iou_threshold, conf_threshold=req.conf_threshold
     )
     return _matches_response(
         ctx, matches, engine, req.image_name,
@@ -353,18 +255,14 @@ class ActionPayload(BaseModel):
     project_root: str
     image_name: str
     image_path: str
-    gt_detect_path: Optional[str] = None
-    gt_segment_path: Optional[str] = None
-    pred_detect_path: Optional[str] = None
-    pred_segment_path: Optional[str] = None
+    gt_path: Optional[str] = None
+    pred_path: Optional[str] = None
     # The detection being acted on (same shape as the Detection response)
     det_type: str
-    class_id: int
+    class_name: str
     conf: Optional[float] = None
     iou: Optional[float] = None
-    gt_type: Optional[str] = None
     gt_idx: Optional[int] = None
-    pred_type: Optional[str] = None
     pred_idx: Optional[int] = None
     bbox: tuple[float, float, float, float]
     action: str  # "accepted" | "rejected" | "edited"
@@ -374,7 +272,7 @@ class ActionPayload(BaseModel):
     # Edited shape committed from the Review canvas (only for action="edited"): a box, or a
     # polygon's points. Accept/Reject don't carry these — they act on the loaded pred/gt by index.
     edited_box: Optional[tuple[float, float, float, float]] = None
-    edited_polygon: Optional[list[list[float]]] = None
+    edited_points: Optional[list[list[float]]] = None
     # Review thresholds so the route can decide (at the same op point as the GUI) whether
     # this verdict was the last one and the image should flip to 'completed'.
     iou_threshold: float = 0.5
@@ -382,84 +280,60 @@ class ActionPayload(BaseModel):
     # Active review filters, so the fresh matches this route returns are scoped identically to
     # what /matches would have returned (the client installs them without a second fetch).
     filter_type: str = "all"
-    filter_class: str | int = "all"
+    filter_class: str = "all"
 
 
 def _apply_gt_mutation(
     ctx: ReviewContext, payload: "ActionPayload", reviewer: str, now_iso: str
-) -> tuple[Optional[str], Optional[int]]:
-    """Author GT from a verdict; return (task changed: "detect"/"segment"/None, index the
-    written shape landed at in ctx's GT list — edited/accepted writes only). Accept an FP adds
-    the prediction; accept a TP/FN keeps GT; reject a TP/FN deletes that GT; reject an FP is a
-    no-op; edit writes the edited shape (replacing the matched GT, or adding it).
+) -> tuple[bool, Optional[int]]:
+    """Author GT from a verdict; return ``(gt_changed, index the written annotation landed at in
+    ctx.gt)`` — the index is set only for edited/accepted writes. Accept an FP adds the prediction;
+    accept a TP/FN keeps GT; reject a TP/FN deletes that GT; reject an FP is a no-op; edit writes
+    the edited shape (replacing the matched GT, or adding it).
 
-    Provenance (``reviewer`` = ``user:<name>``, ``now_iso`` = UTC): an accepted prediction
-    **carries** its ``created_by``/``created_at`` into GT (origin travels) and gets
-    ``accepted_by``/``accepted_at``; a reviewer-drawn edit is stamped ``created_by`` = reviewer."""
+    Provenance (``reviewer`` = ``user:<name>``, ``now_iso`` = UTC): an accepted prediction **carries**
+    its ``created_by``/``created_at`` into GT (origin travels) and gets ``accepted_by``/``accepted_at``
+    with its ``score`` dropped (it is ground truth now); a reviewer-drawn edit is stamped
+    ``created_by`` = reviewer."""
     dt, act = payload.det_type, payload.action
 
     if act == "edited":
+        geom: BBox | Polygon | None = None
         if payload.edited_box is not None:
-            x1, y1, x2, y2 = payload.edited_box
-            nb = BBox(x1=x1, y1=y1, x2=x2, y2=y2, class_id=payload.class_id,
-                      created_by=reviewer, created_at=now_iso)
-            if dt in ("tp", "fn") and payload.gt_type == "box" and payload.gt_idx is not None \
-                    and 0 <= payload.gt_idx < len(ctx.gt_boxes):
-                ctx.gt_boxes[payload.gt_idx] = nb
-                return "detect", payload.gt_idx
-            ctx.gt_boxes.append(nb)
-            return "detect", len(ctx.gt_boxes) - 1
-        if payload.edited_polygon is not None:
-            npg = Polygon(points=[tuple(pt) for pt in payload.edited_polygon], class_id=payload.class_id,
-                          created_by=reviewer, created_at=now_iso)
-            if dt in ("tp", "fn") and payload.gt_type == "polygon" and payload.gt_idx is not None \
-                    and 0 <= payload.gt_idx < len(ctx.gt_polygons):
-                ctx.gt_polygons[payload.gt_idx] = npg
-                return "segment", payload.gt_idx
-            ctx.gt_polygons.append(npg)
-            return "segment", len(ctx.gt_polygons) - 1
-        return None, None
+            geom = BBox(*payload.edited_box)
+        elif payload.edited_points is not None:
+            geom = Polygon(points=[(float(p[0]), float(p[1])) for p in payload.edited_points])
+        if geom is None:
+            return False, None
+        new = Annotation(subject=payload.class_name, geometry=geom,
+                         created_by=reviewer, created_at=now_iso)
+        if dt in ("tp", "fn") and payload.gt_idx is not None \
+                and 0 <= payload.gt_idx < len(ctx.gt):
+            ctx.gt[payload.gt_idx] = new
+            return True, payload.gt_idx
+        ctx.gt.append(new)
+        return True, len(ctx.gt) - 1
 
-    if act == "rejected" and dt in ("tp", "fn") and payload.gt_idx is not None:
-        if payload.gt_type == "box" and 0 <= payload.gt_idx < len(ctx.gt_boxes):
-            ctx.gt_boxes.pop(payload.gt_idx)
-            return "detect", None
-        if payload.gt_type == "polygon" and 0 <= payload.gt_idx < len(ctx.gt_polygons):
-            ctx.gt_polygons.pop(payload.gt_idx)
-            return "segment", None
-        return None, None
+    if act == "rejected" and dt in ("tp", "fn") and payload.gt_idx is not None \
+            and 0 <= payload.gt_idx < len(ctx.gt):
+        ctx.gt.pop(payload.gt_idx)
+        return True, None
 
-    if act == "accepted" and dt == "fp" and payload.pred_idx is not None:
-        if payload.pred_type == "box" and 0 <= payload.pred_idx < len(ctx.pred_boxes):
-            pb = ctx.pred_boxes[payload.pred_idx]
-            ctx.gt_boxes.append(BBox(
-                x1=pb.x1, y1=pb.y1, x2=pb.x2, y2=pb.y2, class_id=pb.class_id,
-                created_by=pb.created_by, created_at=pb.created_at,
-                accepted_by=reviewer, accepted_at=now_iso))
-            return "detect", len(ctx.gt_boxes) - 1
-        if payload.pred_type == "polygon" and 0 <= payload.pred_idx < len(ctx.pred_polygons):
-            pp = ctx.pred_polygons[payload.pred_idx]
-            ctx.gt_polygons.append(Polygon(
-                points=list(pp.points), class_id=pp.class_id,
-                created_by=pp.created_by, created_at=pp.created_at,
-                accepted_by=reviewer, accepted_at=now_iso))
-            return "segment", len(ctx.gt_polygons) - 1
-    return None, None  # accept TP/FN and reject FP leave GT untouched
+    if act == "accepted" and dt == "fp" and payload.pred_idx is not None \
+            and 0 <= payload.pred_idx < len(ctx.preds):
+        pred = ctx.preds[payload.pred_idx]
+        ctx.gt.append(replace(pred, score=None, accepted_by=reviewer, accepted_at=now_iso))
+        return True, len(ctx.gt) - 1
+
+    return False, None  # accept TP/FN and reject FP leave GT untouched
 
 
 @router.post("/action")
 def record_action(payload: ActionPayload) -> dict:
     """Record a user's accept/reject/edit decision; auto-complete the image when done."""
-    ctx = _load_ctx(
-        image_name=payload.image_name,
-        image_path=payload.image_path,
-        gt_detect_path=payload.gt_detect_path,
-        gt_segment_path=payload.gt_segment_path,
-        pred_detect_path=payload.pred_detect_path,
-        pred_segment_path=payload.pred_segment_path,
-    )
-    engine = _get_engine(payload.project_root,
-                         payload.gt_detect_path or payload.gt_segment_path)
+    ctx = _load_ctx(payload.image_name, payload.image_path,
+                    gt_path=payload.gt_path, pred_path=payload.pred_path)
+    engine = _get_engine(payload.project_root)
     # GUI-set reviewer drives both the verdict log (reviewed_by, bare) and the GT provenance
     # (accepted_by/created_by, "user:<name>") so the two never disagree on who acted.
     reviewer_name = resolve_user(payload.user)
@@ -468,74 +342,56 @@ def record_action(payload: ActionPayload) -> dict:
     now_iso = datetime.now(timezone.utc).isoformat()
     det = ReviewDetection(
         det_type=payload.det_type,
-        class_id=payload.class_id,
+        class_name=payload.class_name,
         conf=payload.conf,
         iou=payload.iou,
-        gt_type=payload.gt_type,
         gt_idx=payload.gt_idx,
-        pred_type=payload.pred_type,
         pred_idx=payload.pred_idx,
         bbox=payload.bbox,
     )
 
-    # Author GT on a copy so the guard can 400 before anything is recorded, and so the
-    # verdict entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
-    work = replace(ctx, gt_boxes=list(ctx.gt_boxes), gt_polygons=list(ctx.gt_polygons))
+    # Author GT on a copy so the guard can 400 before anything is recorded, and so the verdict
+    # entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
+    work = replace(ctx, gt=list(ctx.gt))
     changed, landed_idx = _apply_gt_mutation(work, payload, reviewer, now_iso)
-    if changed == "detect" and not payload.gt_detect_path:
-        raise HTTPException(400, "this verdict writes detect ground truth, but no detect annotations path was provided")
-    if changed == "segment" and not payload.gt_segment_path:
-        raise HTTPException(400, "this verdict writes segment ground truth, but no segment annotations path was provided")
+    if changed and not payload.gt_path:
+        raise HTTPException(
+            400, "this verdict writes ground truth, but no annotations path was provided")
 
-    # An edited verdict rewrites the GT bbox, so key the entry to the post-edit geometry —
+    # An edited verdict rewrites the GT geometry, so key the entry to the post-edit geometry —
     # otherwise the next reload's spatial lookup misses it and the detection reads unreviewed.
     norm_det = norm_ctx = None
-    if payload.action == "edited" and changed is not None and landed_idx is not None:
-        kind = "box" if changed == "detect" else "polygon"
-        norm_det = replace(det, gt_type=kind, gt_idx=landed_idx)
+    if payload.action == "edited" and changed and landed_idx is not None:
+        norm_det = replace(det, gt_idx=landed_idx)
         norm_ctx = work
     engine.record_detection_action(
         det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx
     )
 
-    # Write only the changed label file (keep_empty: an emptied GT stays a 0-byte file,
-    # not deleted). accept-TP/FN and reject-FP are no-ops.
-    if changed == "detect" and payload.gt_detect_path:
-        _guard_path(payload.gt_detect_path)
-        _ensure_original_backup(payload.gt_detect_path)  # baseline this file before its first mutation
-        os.makedirs(os.path.dirname(payload.gt_detect_path) or ".", exist_ok=True)
-        write_detect_labels(
-            payload.gt_detect_path, work.gt_boxes, ctx.img_width, ctx.img_height, keep_empty=True
-        )
-    elif changed == "segment" and payload.gt_segment_path:
-        _guard_path(payload.gt_segment_path)
-        _ensure_original_backup(payload.gt_segment_path)  # baseline this file before its first mutation
-        os.makedirs(os.path.dirname(payload.gt_segment_path) or ".", exist_ok=True)
-        write_segment_labels(
-            payload.gt_segment_path, work.gt_polygons, ctx.img_width, ctx.img_height, keep_empty=True
-        )
+    # Write the single per-image GT file (keep_empty: an emptied GT stays an {"annotations": []}
+    # record, not deleted). accept-TP/FN and reject-FP are no-ops.
+    if changed and payload.gt_path:
+        _guard_path(payload.gt_path)
+        _ensure_original_backup(payload.gt_path)  # baseline this file before its first mutation
+        engine.save_gt(work, path=payload.gt_path)
 
     # Annotation status to sync client-side (only when GT changed); an emptied GT reads as
     # "unannotated" — a negative needs an explicit Complete, not just an empty file.
     annotation_status: Optional[str] = None
-    if changed is not None:
-        annotation_status = "partial" if (work.gt_boxes or work.gt_polygons) else "unannotated"
+    if changed:
+        annotation_status = "partial" if work.gt else "unannotated"
 
-    # Promote to 'completed' once every detection at these thresholds is reviewed — the
-    # only path by which a GUI review reaches 'completed'. Recompute against the (now-authored) GT.
+    # Promote to 'completed' once every detection at these thresholds is reviewed — the only path
+    # by which a GUI review reaches 'completed'. Recompute against the (now-authored) GT.
     matches = compute_matches(
-        gt_boxes=work.gt_boxes,
-        gt_polygons=work.gt_polygons,
-        pred_boxes=ctx.pred_boxes,
-        pred_polygons=ctx.pred_polygons,
-        iou_threshold=payload.iou_threshold,
-        conf_threshold=payload.conf_threshold,
+        work.gt, ctx.preds,
+        iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
     )
     engine.check_image_review_complete(payload.image_name, matches)
     _audit(payload.project_root, "gui_review_action", {
         "image_name": payload.image_name,
         "det_type": payload.det_type,
-        "class_id": payload.class_id,
+        "class_name": payload.class_name,
         "action": payload.action,
         "gt_changed": changed,
     })
@@ -556,33 +412,24 @@ def record_action(payload: ActionPayload) -> dict:
 class MarkCompletePayload(BaseModel):
     project_root: str
     image_name: str
-    gt_detect_path: Optional[str] = None
-    gt_segment_path: Optional[str] = None
+    gt_path: Optional[str] = None
     completed: bool = True  # False reverses a manual mark (verdicts are kept)
 
 
 @router.post("/mark_complete")
 def mark_complete(payload: MarkCompletePayload) -> dict:
     """Mark (or unmark) an image fully reviewed; covers negatives / bulk-accept cases."""
-    _guard_path(payload.gt_detect_path)
-    _guard_path(payload.gt_segment_path)
+    _guard_path(payload.gt_path)
     engine = _get_engine(payload.project_root)
     if payload.completed:
         engine.mark_image_reviewed(payload.image_name)
     else:
         engine.unmark_image_reviewed(payload.image_name)
-    # Derive the annotation status from the GT files on disk — the client's matches
-    # snapshot can be stale or null mid-navigation and once wrote negatives for annotated frames.
-    has_content = False
-    for p in (payload.gt_detect_path, payload.gt_segment_path):
-        if p and os.path.isfile(p):
-            try:
-                with open(p, encoding="utf-8") as f:
-                    if any(line.strip() for line in f):
-                        has_content = True
-                        break
-            except OSError:
-                pass
+    # Derive the annotation status from the GT file on disk — the client's matches snapshot can be
+    # stale or null mid-navigation and once wrote negatives for annotated frames. A present file
+    # with no annotations of any subject is an empty (negative) record.
+    has_content = bool(payload.gt_path and os.path.isfile(payload.gt_path)
+                       and read_annotations(payload.gt_path))
     if payload.completed:
         annotation_status = "complete" if has_content else "negative"
     else:
@@ -618,10 +465,9 @@ class SaveGtPayload(BaseModel):
     project_root: str
     image_name: str
     image_path: str
-    detect_path: Optional[str] = None
-    segment_path: Optional[str] = None
-    boxes: list[dict] = []        # [{x1,y1,x2,y2,class_id}]
-    polygons: list[dict] = []     # [{points: [[x,y]...], class_id}]
+    label_path: Optional[str] = None
+    # [{subject, bbox?: [x1,y1,x2,y2], points?: [[x,y]...], attributes?, created_by?, ...}]
+    annotations: list[dict] = []
     user: Optional[str] = None    # GUI-set author; stamped as created_by unless the shape carries one
 
 
@@ -629,52 +475,40 @@ class SaveGtPayload(BaseModel):
 def save_gt(payload: SaveGtPayload) -> dict:
     """Persist edited GT (post-review modification) for a single image."""
     w, h = _image_dims(payload.image_path)
-    _guard_path(payload.detect_path)
-    _guard_path(payload.segment_path)
+    _guard_path(payload.label_path)
     engine = _get_engine(payload.project_root)
 
     # The reviewer authors this committed GT; a shape that round-trips its own provenance keeps it.
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
+
+    def _to_annotation(d: dict) -> Annotation:
+        geom: BBox | Polygon | None = None
+        if d.get("points"):
+            geom = Polygon(points=[(float(p[0]), float(p[1])) for p in d["points"]])
+        elif d.get("bbox") is not None:
+            geom = BBox(*d["bbox"])
+        round_tripped = bool(d.get("created_by"))
+        return Annotation(
+            subject=d["subject"],
+            geometry=geom,
+            attributes=dict(d.get("attributes") or {}),
+            created_by=d.get("created_by") or author,
+            created_at=d.get("created_at") or now_iso,
+            # accepted_* only on round-tripped shapes — a new shape must not mint sign-off.
+            accepted_by=d.get("accepted_by") if round_tripped else None,
+            accepted_at=d.get("accepted_at") if round_tripped else None,
+        )
+
     ctx = ReviewContext(
-        img_name=payload.image_name,
-        img_width=w,
-        img_height=h,
-        gt_boxes=[
-            BBox(
-                x1=b["x1"], y1=b["y1"], x2=b["x2"], y2=b["y2"],
-                class_id=int(b.get("class_id", 0)),
-                created_by=b.get("created_by") or author,
-                created_at=b.get("created_at") or now_iso,
-                # accepted_* only on round-tripped shapes — a new shape must not mint sign-off.
-                accepted_by=b.get("accepted_by") if b.get("created_by") else None,
-                accepted_at=b.get("accepted_at") if b.get("created_by") else None,
-            )
-            for b in payload.boxes
-        ],
-        gt_polygons=[
-            Polygon(
-                points=[tuple(pt) for pt in p["points"]],
-                class_id=int(p.get("class_id", 0)),
-                created_by=p.get("created_by") or author,
-                created_at=p.get("created_at") or now_iso,
-                accepted_by=p.get("accepted_by") if p.get("created_by") else None,
-                accepted_at=p.get("accepted_at") if p.get("created_by") else None,
-            )
-            for p in payload.polygons
-        ],
+        img_name=payload.image_name, img_width=w, img_height=h,
+        gt=[_to_annotation(d) for d in payload.annotations],
     )
-    ok = engine.save_gt(
-        ctx,
-        detect_path=payload.detect_path,
-        segment_path=payload.segment_path,
-    )
+    ok = engine.save_gt(ctx, path=payload.label_path)
     _audit(payload.project_root, "gui_review_save_gt", {
         "image_name": payload.image_name,
-        "detect_path": payload.detect_path,
-        "segment_path": payload.segment_path,
-        "n_boxes": len(payload.boxes),
-        "n_polygons": len(payload.polygons),
+        "label_path": payload.label_path,
+        "n_annotations": len(payload.annotations),
     })
     return {"status": "ok" if ok else "partial"}
 
@@ -685,10 +519,9 @@ def save_gt(payload: SaveGtPayload) -> dict:
 class ValidateReferenceRequest(BaseModel):
     project_root: str
     trait: str
-    # The prediction bucket(s) whose review is being promoted — the same per-image prediction dirs
-    # the delivery gate reads an ``operating_point.json`` from. Either/both (detect + segment).
-    pred_detect_dir: Optional[str] = None
-    pred_segment_dir: Optional[str] = None
+    # The prediction bucket whose review is being promoted — the per-image prediction dir the
+    # delivery gate reads an ``operating_point.json`` from.
+    pred_dir: Optional[str] = None
 
 
 class ValidateReferenceResponse(BaseModel):
@@ -713,7 +546,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     on refusal an honest ``validated=false`` placeholder is written and the reason is returned. An
     already-validated bucket is never downgraded.
     """
-    bucket_dirs = [d for d in (req.pred_detect_dir, req.pred_segment_dir) if d]
+    bucket_dirs = [req.pred_dir] if req.pred_dir else []
     for d in bucket_dirs:
         _guard_path(d)
     if not bucket_dirs:
@@ -825,20 +658,20 @@ class ImageStatusesResponse(BaseModel):
     # image_name -> "not_started" | "started" | "completed"; images the engine has never
     # touched are absent (the client defaults them to "not_started").
     statuses: dict[str, str]
-    # Stems (filename without extension) whose GT or prediction file for the reviewed kind
-    # holds at least one object — i.e. the image has something to review. Images whose stem is
-    # absent contribute no TP/FP/FN, so Review navigation skips them.
+    # Stems (filename without extension) whose GT or prediction file holds at least one annotation
+    # — i.e. the image has something to review. Images whose stem is absent contribute no TP/FP/FN,
+    # so Review navigation skips them.
     detection_stems: list[str]
 
 
 def _has_objects(path: Path) -> bool:
-    """True if ``path`` is a per-image label JSON with a non-empty ``objects`` list. An empty
+    """True if ``path`` is a per-image label JSON with a non-empty ``annotations`` list. An empty
     (confirmed-negative) or missing file has nothing to review."""
     try:
         data = read_json(path, default=None)
     except Exception:
         return False
-    return isinstance(data, dict) and bool(data.get("objects"))
+    return isinstance(data, dict) and bool(data.get("annotations"))
 
 
 def _stems_with_objects(*dirs: Optional[str]) -> set[str]:
@@ -861,10 +694,10 @@ def image_statuses(
     gt_dir: Optional[str] = None,
     pred_dir: Optional[str] = None,
 ) -> ImageStatusesResponse:
-    """Batch review status + detection presence for a whole (subject, date) — one call the Review
-    tab makes on dataset entry to drive the image-level Reviewed/Unreviewed filter and to skip
-    images with nothing to review. ``gt_dir``/``pred_dir`` are the reviewed-kind label dirs
-    (detect *or* segment, whichever the tab is reviewing)."""
+    """Batch review status + detection presence for a whole (date) — one call the Review tab makes
+    on dataset entry to drive the image-level Reviewed/Unreviewed filter and to skip images with
+    nothing to review. ``gt_dir``/``pred_dir`` are the per-image label dirs (annotations / a model's
+    predictions on the date)."""
     for d in (gt_dir, pred_dir):
         _guard_path(d)
     engine = _get_engine(project_root)
