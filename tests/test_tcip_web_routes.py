@@ -1,4 +1,4 @@
-"""Integration tests for tcip-web HTTP routes (Slice 1 backend)."""
+"""Integration tests for tcip-web HTTP routes (name-based per-image label schema)."""
 
 from __future__ import annotations
 
@@ -10,8 +10,9 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tcip_annotation.json_io import read_detect, write_detect
-from tcip_annotation.state import BBox, PredBBox
+from tcip_annotation.json_io import read_annotations, write_annotations
+from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
 from tcip_web.app import app
 from tcip_web.paths import safe_join
 
@@ -24,19 +25,18 @@ def client() -> TestClient:
 # ── per-image JSON label fixtures (canonical on-disk format) ─────────────────
 
 
-def _write_gt_detect(path, boxes, *, w: int = 100, h: int = 80, keep_empty: bool = False) -> None:
-    """Author a per-image JSON GT label; each box is a pixel-xyxy ``(x1, y1, x2, y2, class_id)``."""
-    write_detect(str(path), [BBox(*b) for b in boxes], w, h, keep_empty=keep_empty)
+def _write_gt(path, boxes, *, w: int = 100, h: int = 80, keep_empty: bool = False,
+              subject: str = "catkin") -> None:
+    """Author a per-image JSON GT label; each box is pixel-xyxy ``(x1, y1, x2, y2)`` of ``subject``."""
+    anns = [Annotation(subject=subject, geometry=BBox(*b)) for b in boxes]
+    write_annotations(str(path), anns, w, h, keep_empty=keep_empty)
 
 
-def _write_pred_detect(path, preds, *, w: int = 100, h: int = 80) -> None:
-    """Author a per-image JSON prediction label; each pred is ``(x1, y1, x2, y2, class_id, conf)``."""
-    write_detect(
-        str(path),
-        [PredBBox(p[0], p[1], p[2], p[3], p[4], confidence=p[5]) for p in preds],
-        w,
-        h,
-    )
+def _write_pred(path, preds, *, w: int = 100, h: int = 80, subject: str = "catkin") -> None:
+    """Author a per-image JSON prediction label; each pred is ``(x1, y1, x2, y2, conf)``."""
+    anns = [Annotation(subject=subject, geometry=BBox(p[0], p[1], p[2], p[3]), score=p[4])
+            for p in preds]
+    write_annotations(str(path), anns, w, h)
 
 
 # ── paths.safe_join ──────────────────────────────────────────────────────
@@ -73,10 +73,9 @@ def dataset_root(tmp_path: Path) -> Path:
     root = tmp_path / "Valley_Farm"
     (root / "images" / "2-11-26").mkdir(parents=True)
     (root / "images" / "3-2-26").mkdir(parents=True)
-    (root / "annotations" / "catkin" / "2-11-26" / "detect").mkdir(parents=True)
-    (root / "annotations" / "catkin" / "2-11-26" / "segment").mkdir(parents=True)
-    (root / "annotations" / "bush" / "3-2-26" / "detect").mkdir(parents=True)
     (root / "models" / "baseline").mkdir(parents=True)
+    # The dataset's subjects come from its nested registry, not from listing annotations/.
+    write_registry(root / "classes.json", ClassRegistry((Subject("catkin"), Subject("bush"))))
     # Add some images
     for i in range(3):
         img = Image.new("RGB", (100, 80), color=(128, 128, 128))
@@ -92,8 +91,8 @@ def test_dataset_tree(client: TestClient, dataset_root: Path) -> None:
     assert "3-2-26" in body["dates_with_images"]
     assert sorted(body["subjects"]) == ["bush", "catkin"]
     assert "baseline" in body["model_names"]
-    # Per-date maps present for every image date (empty here — the fixture makes subject
-    # dirs but no label files).
+    # Per-date maps present for every image date (empty here — the registry declares subjects but
+    # no label files exist yet).
     assert set(body["subjects_by_date"]) == {"2-11-26", "3-2-26"}
     assert body["subjects_by_date"]["2-11-26"] == []
 
@@ -104,13 +103,13 @@ def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_pa
     (root / "images" / "2026-03-24").mkdir(parents=True)
     Image.new("RGB", (8, 8)).save(root / "images" / "2026-02-11" / "IMG_1.JPG")
     Image.new("RGB", (8, 8)).save(root / "images" / "2026-03-24" / "IMG_2.JPG")
-    # catkin labelled + baseline predicted on 02-11; nothing on 03-24.
-    det = root / "annotations" / "catkin" / "2026-02-11" / "detect"
+    # catkin labelled + baseline predicted on 02-11; nothing on 03-24. One file per image.
+    det = root / "annotations" / "2026-02-11"
     det.mkdir(parents=True)
-    _write_gt_detect(det / "IMG_1.json", [(1, 1, 3, 3, 0)], w=8, h=8)
-    pdet = root / "predictions" / "baseline" / "2026-02-11" / "detect"
+    _write_gt(det / "IMG_1.json", [(1, 1, 3, 3)], w=8, h=8)
+    pdet = root / "predictions" / "baseline" / "2026-02-11"
     pdet.mkdir(parents=True)
-    _write_pred_detect(pdet / "IMG_1.json", [(1, 1, 3, 3, 0, 0.9)], w=8, h=8)
+    _write_pred(pdet / "IMG_1.json", [(1, 1, 3, 3, 0.9)], w=8, h=8)
 
     body = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
     assert body["subjects_by_date"]["2026-02-11"] == ["catkin"]
@@ -147,9 +146,8 @@ def test_dataset_select_populates_state(client: TestClient, dataset_root: Path, 
     assert sel["subject"] == "catkin"
     assert sel["date"] == "2-11-26"
     assert len(sel["image_list"]) == 3
-    assert sel["annotations_detect_dir"].endswith("catkin/2-11-26/detect") or sel[
-        "annotations_detect_dir"
-    ].endswith("catkin\\2-11-26\\detect")
+    # One label dir per date now (no subject/task segment).
+    assert sel["annotations_dir"].replace("\\", "/").endswith("annotations/2-11-26")
 
 
 def test_dataset_select_advisory_reflects_actual_labels(
@@ -164,19 +162,18 @@ def test_dataset_select_advisory_reflects_actual_labels(
         "date": "2-11-26",
         "model_name": "baseline",
     }
-    # The fixture makes the annotation dirs but no label files → advisory says "starts empty".
+    # No label files yet → advisory says "starts empty".
     r1 = client.post("/api/dataset/select", json=body).json()
     assert r1["annotations_present"] is False
     assert r1["predictions_present"] is False
 
     # Drop in a real label + prediction; the advisory flips to present (never rejects either way).
-    _write_gt_detect(
-        dataset_root / "annotations" / "catkin" / "2-11-26" / "detect" / "IMG_0000.json",
-        [(40, 32, 60, 48, 0)],
-    )
-    pdet = dataset_root / "predictions" / "baseline" / "2-11-26" / "detect"
+    ann = dataset_root / "annotations" / "2-11-26"
+    ann.mkdir(parents=True, exist_ok=True)
+    _write_gt(ann / "IMG_0000.json", [(40, 32, 60, 48)])
+    pdet = dataset_root / "predictions" / "baseline" / "2-11-26"
     pdet.mkdir(parents=True, exist_ok=True)
-    _write_pred_detect(pdet / "IMG_0000.json", [(40, 32, 60, 48, 0, 0.9)])
+    _write_pred(pdet / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
     r2 = client.post("/api/dataset/select", json=body).json()
     assert r2["annotations_present"] is True
     assert r2["predictions_present"] is True
@@ -266,111 +263,87 @@ def test_images_not_found(client: TestClient) -> None:
 
 def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
-    seg_path = tmp_path / "segment" / "IMG_0000.json"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
 
-    # Save
+    # Save a box annotation and a polygon annotation into the single per-image file.
     resp = client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
-            "detect_path": str(det_path),
-            "segment_path": str(seg_path),
-            "boxes": [{"x1": 10, "y1": 20, "x2": 50, "y2": 60, "class_id": 0}],
-            "polygons": [
-                {
-                    "points": [[5, 5], [10, 5], [10, 10], [5, 10]],
-                    "class_id": 1,
-                }
+            "label_path": str(label_path),
+            "annotations": [
+                {"subject": "catkin", "bbox": [10, 20, 50, 60]},
+                {"subject": "catkin", "points": [[5, 5], [10, 5], [10, 10], [5, 10]]},
             ],
         },
     )
     assert resp.status_code == 200
-    assert det_path.exists()
-    assert seg_path.exists()
+    assert label_path.exists()
 
     # Load
-    resp = client.get(
+    body = client.get(
         "/api/annotate/labels",
-        params={
-            "image_path": str(img_path),
-            "detect_path": str(det_path),
-            "segment_path": str(seg_path),
-        },
-    )
-    body = resp.json()
-    # Detect is derived from the polygon, so the box takes the polygon's class (1),
-    # not the independently-sent box's class (0). The polygon round-trips as-is.
-    assert len(body["boxes"]) == 1
-    assert body["boxes"][0]["class_id"] == 1
-    assert len(body["polygons"]) == 1
-    assert body["polygons"][0]["class_id"] == 1
+        params={"image_path": str(img_path), "label_path": str(label_path)},
+    ).json()
+    anns = body["annotations"]
+    assert len(anns) == 2
+    assert all(a["subject"] == "catkin" for a in anns)
+    # One carries a box, one a polygon (geometry kinds coexist in one file).
+    assert sum("bbox" in a for a in anns) == 1
+    assert sum("points" in a for a in anns) == 1
 
 
 def test_annotate_save_empty_preserves_negative(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    # Clearing all boxes and saving must keep a 0-byte label file, not delete it — the empty file
-    # is a valid on-disk state (it becomes a confirmed negative once the image is explicitly completed).
+    # Clearing all annotations and saving must keep the label file (an {"annotations": []} record),
+    # not delete it — it becomes a confirmed negative once the image is explicitly completed.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
 
     client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
-            "detect_path": str(det_path),
-            "boxes": [{"x1": 10, "y1": 20, "x2": 50, "y2": 60, "class_id": 0}],
-            "polygons": [],
+            "label_path": str(label_path),
+            "annotations": [{"subject": "catkin", "bbox": [10, 20, 50, 60]}],
         },
     )
-    assert det_path.exists()
+    assert label_path.exists()
 
     resp = client.post(
         "/api/annotate/labels",
-        json={
-            "image_path": str(img_path),
-            "detect_path": str(det_path),
-            "boxes": [],
-            "polygons": [],
-        },
+        json={"image_path": str(img_path), "label_path": str(label_path), "annotations": []},
     )
     assert resp.status_code == 200
-    # A present file with no objects is a confirmed negative (kept, not deleted).
-    assert det_path.exists()
-    boxes, _ = read_detect(str(det_path))
-    assert boxes == []
+    # A present file with no annotations is a confirmed negative (kept, not deleted).
+    assert label_path.exists()
+    assert read_annotations(str(label_path)) == []
 
 
 def test_annotate_save_label_path_outside_allowed_root_403(
     client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch
 ) -> None:
     # With an allow-list configured, a label path outside it must be rejected —
-    # write_detect_labels is otherwise an arbitrary file write/delete primitive.
+    # write_annotations is otherwise an arbitrary file write/delete primitive.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(dataset_root.resolve()))
     outside = tmp_path / "evil" / "IMG_0000.json"
     resp = client.post(
         "/api/annotate/labels",
-        json={
-            "image_path": str(img_path),
-            "detect_path": str(outside),
-            "boxes": [],
-            "polygons": [],
-        },
+        json={"image_path": str(img_path), "label_path": str(outside), "annotations": []},
     )
     assert resp.status_code == 403
     assert not outside.exists()
 
 
-def _save_box(client: TestClient, img_path, det_path, **extra) -> dict:
+def _save_box(client: TestClient, img_path, label_path, **extra) -> dict:
     resp = client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
-            "detect_path": str(det_path),
-            "boxes": [{"x1": 10, "y1": 20, "x2": 50, "y2": 60, "class_id": 0}],
-            "polygons": [],
+            "label_path": str(label_path),
+            "annotations": [{"subject": "catkin", "bbox": [10, 20, 50, 60]}],
             **extra,
         },
     )
@@ -383,22 +356,21 @@ def test_annotate_save_stale_mtime_conflicts(
     import os
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
-    base = _save_box(client, img_path, det_path).json()["base_mtimes"]
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    base = _save_box(client, img_path, label_path).json()["base_mtime"]
 
     # A concurrent writer changes the file after our client loaded it.
-    det_path.write_text('{"image": "IMG_0000", "width": 100, "height": 80, "objects": []}')
-    bumped = int(base["detect"]) + 1_000_000
-    os.utime(det_path, ns=(bumped, bumped))
+    label_path.write_text('{"image": "IMG_0000", "width": 100, "height": 80, "annotations": []}')
+    bumped = int(base) + 1_000_000
+    os.utime(label_path, ns=(bumped, bumped))
 
     resp = client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
-            "detect_path": str(det_path),
-            "boxes": [],
-            "polygons": [],
-            "base_mtimes": base,
+            "label_path": str(label_path),
+            "annotations": [],
+            "base_mtime": base,
         },
     )
     assert resp.status_code == 409
@@ -408,67 +380,57 @@ def test_annotate_save_matching_mtime_ok(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
-    base = _save_box(client, img_path, det_path).json()["base_mtimes"]
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    base = _save_box(client, img_path, label_path).json()["base_mtime"]
 
-    # No external change → the current mtime still matches → the save is accepted
-    # and returns fresh version tokens.
-    resp = _save_box(client, img_path, det_path, base_mtimes=base)
+    # No external change → the current mtime still matches → the save is accepted and returns a
+    # fresh version token.
+    resp = _save_box(client, img_path, label_path, base_mtime=base)
     assert resp.status_code == 200
-    token = resp.json()["base_mtimes"]["detect"]
+    token = resp.json()["base_mtime"]
     assert token is not None
-    # Tokens must be strings: the ns value exceeds JavaScript's 2**53 exact-integer
-    # range, so a numeric token gets rounded by the browser and every save 409s.
+    # Tokens must be strings: the ns value exceeds JavaScript's 2**53 exact-integer range, so a
+    # numeric token gets rounded by the browser and every save 409s.
     assert isinstance(token, str)
 
 
-def test_annotate_save_derives_detect_from_polygons(client, dataset_root, tmp_path) -> None:
-    # When polygons exist, detect is their bbox — a drawn box that disagrees is ignored,
-    # so editing a polygon can never leave a stale box twin behind. Image is 100x80.
+def test_annotate_save_persists_polygon_as_polygon(client, dataset_root, tmp_path) -> None:
+    # A polygon annotation round-trips as a polygon (its points are the source of truth), never
+    # collapsed to a box on disk. Image is 100x80.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
-    seg_path = tmp_path / "segment" / "IMG_0000.json"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
-            "detect_path": str(det_path),
-            "segment_path": str(seg_path),
-            # A box the client sent that disagrees with the polygon — must be discarded.
-            "boxes": [{"x1": 50, "y1": 50, "x2": 60, "y2": 60, "class_id": 0}],
-            "polygons": [{"points": [[10, 10], [30, 10], [30, 30], [10, 30]], "class_id": 0}],
+            "label_path": str(label_path),
+            "annotations": [{"subject": "catkin", "points": [[10, 10], [30, 10], [30, 30], [10, 30]]}],
         },
     )
     assert resp.status_code == 200
-    assert resp.json()["detect_derived"] is True
-    boxes, _ = read_detect(str(det_path))
-    assert len(boxes) == 1
-    # Detect is the polygon bbox (10,10)-(30,30), not the drawn box.
-    b = boxes[0]
-    assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 10.0, 30.0, 30.0)
+    anns = read_annotations(str(label_path))
+    assert len(anns) == 1
+    from tcip_annotation.state import Polygon
+    assert isinstance(anns[0].geometry, Polygon)
+    assert anns[0].geometry.points[0] == (10.0, 10.0)
 
 
-def test_annotate_save_keeps_boxes_when_no_polygons(client, dataset_root, tmp_path) -> None:
-    # No polygons → detect is authoritative, boxes written as drawn (detect-primary project).
+def test_annotate_save_persists_box_as_box(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
-    seg_path = tmp_path / "segment" / "IMG_0000.json"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post(
         "/api/annotate/labels",
         json={
             "image_path": str(img_path),
-            "detect_path": str(det_path),
-            "segment_path": str(seg_path),
-            "boxes": [{"x1": 50, "y1": 40, "x2": 70, "y2": 60, "class_id": 0}],
-            "polygons": [],
+            "label_path": str(label_path),
+            "annotations": [{"subject": "catkin", "bbox": [50, 40, 70, 60]}],
         },
     )
     assert resp.status_code == 200
-    assert resp.json()["detect_derived"] is False
-    boxes, _ = read_detect(str(det_path))
-    assert len(boxes) == 1
-    b = boxes[0]
-    assert (b.x1, b.y1, b.x2, b.y2) == (50.0, 40.0, 70.0, 60.0)  # drawn box, written as-is
+    anns = read_annotations(str(label_path))
+    assert len(anns) == 1
+    b = anns[0].geometry
+    assert (b.x1, b.y1, b.x2, b.y2) == (50.0, 40.0, 70.0, 60.0)  # box, written as drawn
 
 
 def test_annotate_save_writes_audit_entry(
@@ -476,8 +438,8 @@ def test_annotate_save_writes_audit_entry(
 ) -> None:
     proj = tmp_path / "proj"
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
-    resp = _save_box(client, img_path, det_path, project_root=str(proj))
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    resp = _save_box(client, img_path, label_path, project_root=str(proj))
     assert resp.status_code == 200
 
     audit = proj / ".tcip" / "audit.jsonl"
@@ -490,12 +452,12 @@ def test_annotate_save_writes_audit_entry(
 
 def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.json"
+    gt = tmp_path / "gt.json"
     # Image is 100x80; one GT covering the center (pixel xyxy [40,32,60,48]).
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
-    pred_det = tmp_path / "pred_detect.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred = tmp_path / "pred.json"
     # One prediction matching the GT (TP) + one off-center prediction (FP).
-    _write_pred_detect(pred_det, [(40, 32, 60, 48, 0, 0.9), (75, 60, 85, 68, 0, 0.8)])
+    _write_pred(pred, [(40, 32, 60, 48, 0.9), (75, 60, 85, 68, 0.8)])
     project_root = tmp_path / "proj"
     project_root.mkdir()
 
@@ -505,8 +467,8 @@ def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_p
             "project_root": str(project_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
-            "gt_detect_path": str(det_gt),
-            "pred_detect_path": str(pred_det),
+            "gt_path": str(gt),
+            "pred_path": str(pred),
             "iou_threshold": 0.3,
             "conf_threshold": 0.1,
         },
@@ -521,19 +483,19 @@ def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_p
 def test_review_image_statuses_batch(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     # A prediction file with a box (reviewable), a confirmed-negative empty file (nothing to review),
     # and a third image with no file at all — only the first should surface as a detection stem.
-    pred_dir = tmp_path / "predictions" / "detect"
+    pred_dir = tmp_path / "predictions"
     pred_dir.mkdir(parents=True)
-    _write_pred_detect(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0, 0.9)])
-    write_detect(str(pred_dir / "IMG_0001.json"), [], 100, 80, keep_empty=True)  # empty negative
+    _write_pred(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
+    write_annotations(str(pred_dir / "IMG_0001.json"), [], 100, 80, keep_empty=True)  # empty negative
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
     # Give one image a review status so the engine has state to return.
-    det_gt = tmp_path / "gt_detect.json"
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
     client.post(
         "/api/review/mark_complete",
-        json={"project_root": str(project_root), "image_name": "IMG_0000.JPG", "gt_detect_path": str(det_gt)},
+        json={"project_root": str(project_root), "image_name": "IMG_0000.JPG", "gt_path": str(gt)},
     )
 
     resp = client.get(
@@ -548,10 +510,10 @@ def test_review_image_statuses_batch(client: TestClient, dataset_root: Path, tmp
 
 def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.json"
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
-    pred_det = tmp_path / "pred_detect.json"
-    _write_pred_detect(pred_det, [(40, 32, 60, 48, 0, 0.9)])
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
@@ -561,15 +523,13 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
             "project_root": str(project_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
-            "gt_detect_path": str(det_gt),
-            "pred_detect_path": str(pred_det),
+            "gt_path": str(gt),
+            "pred_path": str(pred),
             "det_type": "tp",
-            "class_id": 0,
+            "class_name": "catkin",
             "conf": 0.9,
             "iou": 0.95,
-            "gt_type": "box",
             "gt_idx": 0,
-            "pred_type": "box",
             "pred_idx": 0,
             "bbox": [40.0, 32.0, 60.0, 48.0],
             "action": "accepted",
@@ -583,17 +543,15 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
     assert data["state"]["detections"][0]["action"] == "accepted"  # payload wraps {img_name, state}
 
 
-def _review_action(client, img_path, det_gt, project_root, **over):
+def _review_action(client, img_path, gt, project_root, **over):
     body = {
         "project_root": str(project_root),
         "image_name": "IMG_0000.JPG",
         "image_path": str(img_path),
-        "gt_detect_path": str(det_gt),
+        "gt_path": str(gt),
         "det_type": "tp",
-        "class_id": 0,
-        "gt_type": "box",
+        "class_name": "catkin",
         "gt_idx": 0,
-        "pred_type": "box",
         "pred_idx": 0,
         "bbox": [40.0, 32.0, 60.0, 48.0],
         "action": "accepted",
@@ -604,83 +562,83 @@ def _review_action(client, img_path, det_gt, project_root, **over):
 
 def test_review_accept_fp_adds_prediction_to_gt(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.json"
-    _write_gt_detect(det_gt, [], keep_empty=True)  # start with a confirmed negative (empty GT)
-    pred_det = tmp_path / "pred_detect.json"
-    _write_pred_detect(pred_det, [(40, 32, 60, 48, 0, 0.9)])
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [], keep_empty=True)  # start with a confirmed negative (empty GT)
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, det_gt, project_root,
-        pred_detect_path=str(pred_det), det_type="fp", action="accepted",
+        client, img_path, gt, project_root,
+        pred_path=str(pred), det_type="fp", action="accepted",
     )
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] == "partial"  # GT now has the promoted box
-    boxes, _ = read_detect(str(det_gt))
-    assert len(boxes) == 1 and boxes[0].class_id == 0
+    anns = read_annotations(str(gt))
+    assert len(anns) == 1 and anns[0].subject == "catkin"
 
 
 def test_review_reject_deletes_reviewed_gt(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.json"
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])  # one GT box (a missed FN)
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])  # one GT box (a missed FN)
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
-    resp = _review_action(client, img_path, det_gt, project_root, det_type="fn", action="rejected")
+    resp = _review_action(client, img_path, gt, project_root,
+                          det_type="fn", pred_idx=None, action="rejected")
     assert resp.status_code == 200
     # Emptying GT does not auto-confirm a negative (that needs an explicit Complete) — it reads as
-    # needing review. The label file is kept (empty-objects negative), not deleted.
+    # needing review. The label file is kept (empty record), not deleted.
     assert resp.json()["annotation_status"] == "unannotated"
-    assert det_gt.is_file()
-    boxes, _ = read_detect(str(det_gt))
-    assert boxes == []
+    assert gt.is_file()
+    assert read_annotations(str(gt)) == []
 
 
 def test_review_accept_tp_keeps_gt_untouched(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.json"
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
-    before = det_gt.read_text()
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    before = gt.read_text()
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
-    resp = _review_action(client, img_path, det_gt, project_root, det_type="tp", action="accepted")
+    resp = _review_action(client, img_path, gt, project_root, det_type="tp", action="accepted")
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] is None  # GT unchanged → no status update
-    assert det_gt.read_text() == before
+    assert gt.read_text() == before
 
 
 def test_review_edit_writes_edited_box_as_gt(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.json"
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, det_gt, project_root,
+        client, img_path, gt, project_root,
         det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0],
     )
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] == "partial"
-    boxes, _ = read_detect(str(det_gt))
-    assert len(boxes) == 1  # replaced the matched GT, still one box
-    b = boxes[0]
+    anns = read_annotations(str(gt))
+    assert len(anns) == 1  # replaced the matched GT, still one annotation
+    b = anns[0].geometry
     assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 10.0, 30.0, 30.0)  # the edited geometry
 
 
 def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.json"
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])  # one GT box, no predictions → an FN
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])  # one GT box, no predictions → an FN
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, det_gt, project_root,
-        det_type="fn", pred_type=None, pred_idx=None,
+        client, img_path, gt, project_root,
+        det_type="fn", pred_idx=None,
         action="edited", edited_box=[10.0, 10.0, 30.0, 30.0],
     )
     assert resp.status_code == 200
@@ -693,7 +651,7 @@ def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_roo
             "project_root": str(project_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
-            "gt_detect_path": str(det_gt),
+            "gt_path": str(gt),
         },
     ).json()
     assert len(m["detections"]) == 1
@@ -704,19 +662,19 @@ def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_roo
 
 def test_review_gt_write_without_path_is_rejected(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    pred_det = tmp_path / "pred_detect.json"
-    _write_pred_detect(pred_det, [(40, 32, 60, 48, 0, 0.9)])
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
-    # Accepting an FP writes detect GT; with no detect path configured the route must
-    # refuse loudly rather than report ok while writing nothing.
+    # Accepting an FP writes GT; with no GT path configured the route must refuse loudly rather
+    # than report ok while writing nothing.
     resp = _review_action(
         client, img_path, "unused", project_root,
-        gt_detect_path=None, pred_detect_path=str(pred_det), det_type="fp", action="accepted",
+        gt_path=None, pred_path=str(pred), det_type="fp", action="accepted",
     )
     assert resp.status_code == 400
-    assert "no detect annotations path" in resp.json()["detail"]
+    assert "no annotations path" in resp.json()["detail"]
     # The refused verdict must not have been recorded as reviewed.
     shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
     if shard_path.exists():
@@ -730,10 +688,10 @@ def test_review_action_auto_completes_and_audits(
     # A single detection on the image: reviewing it flips the image to 'completed'
     # (the only GUI path to that status) and leaves an audit-trail entry.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt.json"
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
     pred = tmp_path / "pred.json"
-    _write_pred_detect(pred, [(40, 32, 60, 48, 0, 0.9)])  # one matching prediction -> one TP
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])  # one matching prediction -> one TP
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
@@ -743,10 +701,10 @@ def test_review_action_auto_completes_and_audits(
             "project_root": str(project_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
-            "gt_detect_path": str(det_gt),
-            "pred_detect_path": str(pred),
-            "det_type": "tp", "class_id": 0, "conf": 0.9, "iou": 0.95,
-            "gt_type": "box", "gt_idx": 0, "pred_type": "box", "pred_idx": 0,
+            "gt_path": str(gt),
+            "pred_path": str(pred),
+            "det_type": "tp", "class_name": "catkin", "conf": 0.9, "iou": 0.95,
+            "gt_idx": 0, "pred_idx": 0,
             "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
             "iou_threshold": 0.3, "conf_threshold": 0.1,
         },
@@ -775,20 +733,16 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
     assert "gui_review_mark_complete" in (project_root / ".tcip" / "audit.jsonl").read_text()
 
 
-def test_review_action_records_real_class_name_and_reviewer(
+def test_review_action_records_subject_name_and_reviewer(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    # The engine resolves the class name from the reviewed label's own subject registry in the
-    # dataset — so it records "catkin", not the "class_{id}" placeholder.
+    # A prediction stores its subject NAME on disk, so the recorded verdict carries the real name
+    # ("catkin") directly — no registry lookup, no "class_{id}" placeholder.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = dataset_root / "annotations" / "catkin" / "2-11-26" / "detect" / "IMG_0000.json"
-    det_gt.parent.mkdir(parents=True, exist_ok=True)
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
     pred = tmp_path / "pred.json"
-    _write_pred_detect(pred, [(40, 32, 60, 48, 0, 0.9)])
-    (dataset_root / "classes").mkdir(exist_ok=True)
-    (dataset_root / "classes" / "catkin.json").write_text(
-        json.dumps({"0": {"name": "catkin", "color": "#FF0000"}}))
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
     project_root = tmp_path / "proj"
     state = project_root / ".tcip" / "state"
     state.mkdir(parents=True)
@@ -799,17 +753,17 @@ def test_review_action_records_real_class_name_and_reviewer(
             "project_root": str(project_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
-            "gt_detect_path": str(det_gt),
-            "pred_detect_path": str(pred),
-            "det_type": "tp", "class_id": 0, "conf": 0.9, "iou": 0.95,
-            "gt_type": "box", "gt_idx": 0, "pred_type": "box", "pred_idx": 0,
+            "gt_path": str(gt),
+            "pred_path": str(pred),
+            "det_type": "tp", "class_name": "catkin", "conf": 0.9, "iou": 0.95,
+            "gt_idx": 0, "pred_idx": 0,
             "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
             "iou_threshold": 0.3, "conf_threshold": 0.1,
         },
     )
     assert resp.status_code == 200
     entry = json.loads((state / "review" / "IMG_0000.JPG.json").read_text())["state"]["detections"][0]
-    assert entry["class_name"] == "catkin"  # real name, not "class_0"
+    assert entry["class_name"] == "catkin"  # real name, straight from the annotation's subject
     assert entry["reviewed_by"]  # non-empty reviewer
 
 
@@ -831,13 +785,14 @@ def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
     out = tmp_path / "preds"
     out.mkdir()
     (out / "img.json").write_text(
-        json.dumps({"image": "img", "width": 100, "height": 100, "objects": []})
+        json.dumps({"image": "img", "width": 100, "height": 100, "annotations": []})
     )
     engine = ReviewEngine(project_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
-                        pred_boxes=[PredBBox(10.0, 10.0, 30.0, 30.0, 0, confidence=0.9)])
-    det = ReviewDetection(det_type="fp", class_id=0, conf=0.9, iou=None, gt_type=None, gt_idx=None,
-                          pred_type="box", pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
+                        preds=[Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 30.0, 30.0),
+                                          score=0.9)])
+    det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
+                          pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
     engine.record_detection_action(det, ctx, action="accepted")
 
     # overwrite=True into a bucket that has a verdict is a 409 (no job is launched).
@@ -909,74 +864,69 @@ def test_fs_list_confined_by_image_roots(
     assert client.get("/api/fs/list", params={"path": str(outside)}).status_code == 403
 
 
-# ── Phase 3: native provenance (created_by / accepted_by) ─────────────────
+# ── native provenance (created_by / accepted_by) ─────────────────
 
 
 def test_annotate_save_stamps_created_by(client, dataset_root, tmp_path) -> None:
     """A human-drawn box is stamped created_by=user:<gui-user> + created_at."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(img_path), "detect_path": str(det_path),
-        "boxes": [{"x1": 50, "y1": 40, "x2": 70, "y2": 60, "class_id": 0}], "polygons": [],
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [{"subject": "catkin", "bbox": [50, 40, 70, 60]}],
         "user": "zack",
     })
     assert resp.status_code == 200
-    obj = json.loads(det_path.read_text())["objects"][0]
+    obj = json.loads(label_path.read_text())["annotations"][0]
     assert obj["created_by"] == "user:zack"
     assert obj["created_at"]
 
 
-def test_annotate_derived_box_inherits_author(client, dataset_root, tmp_path) -> None:
-    """Detect boxes derived from a drawn polygon inherit the polygon's author (not None)."""
+def test_annotate_save_polygon_stamps_author(client, dataset_root, tmp_path) -> None:
+    """A human-drawn polygon is stamped created_by=user:<gui-user> (not None)."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
-    seg_path = tmp_path / "segment" / "IMG_0000.json"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(img_path), "detect_path": str(det_path), "segment_path": str(seg_path),
-        "boxes": [], "polygons": [{"points": [[10, 10], [30, 10], [30, 30]], "class_id": 0}],
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [{"subject": "catkin", "points": [[10, 10], [30, 10], [30, 30]]}],
         "user": "emily",
     })
     assert resp.status_code == 200
-    assert json.loads(det_path.read_text())["objects"][0]["created_by"] == "user:emily"  # derived
-    assert json.loads(seg_path.read_text())["objects"][0]["created_by"] == "user:emily"
+    assert json.loads(label_path.read_text())["annotations"][0]["created_by"] == "user:emily"
 
 
 def test_annotate_save_falls_back_to_os_user(client, dataset_root, tmp_path) -> None:
     """Omitting user still stamps a user:<...> author (backend OS/env fallback), never bare/None."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(img_path), "detect_path": str(det_path),
-        "boxes": [{"x1": 50, "y1": 40, "x2": 70, "y2": 60, "class_id": 0}], "polygons": [],
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [{"subject": "catkin", "bbox": [50, 40, 70, 60]}],
     })
     assert resp.status_code == 200
-    obj = json.loads(det_path.read_text())["objects"][0]
+    obj = json.loads(label_path.read_text())["annotations"][0]
     assert obj["created_by"].startswith("user:")
 
 
 def test_review_accept_fp_carries_created_by_and_stamps_accepted_by(client, dataset_root, tmp_path) -> None:
     """Accepting an FP prediction into GT carries the prediction's created_by and stamps
     accepted_by=reviewer — the origin travels, and the acceptance is recorded."""
-    from tcip_annotation.json_io import write_detect
-    from tcip_annotation.state import PredBBox
-
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.json"
-    _write_gt_detect(det_gt, [], keep_empty=True)  # confirmed negative → the pred shows as FP
-    pred_det = tmp_path / "pred_detect.json"
-    write_detect(str(pred_det), [PredBBox(
-        40, 32, 60, 48, 0, confidence=0.9, created_by="sam", created_at="2026-01-01T00:00:00+00:00")],
-        100, 80)
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [], keep_empty=True)  # confirmed negative → the pred shows as FP
+    pred = tmp_path / "pred.json"
+    write_annotations(str(pred), [Annotation(
+        subject="catkin", geometry=BBox(40, 32, 60, 48), score=0.9,
+        created_by="sam", created_at="2026-01-01T00:00:00+00:00")], 100, 80)
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, det_gt, project_root,
-        pred_detect_path=str(pred_det), det_type="fp", action="accepted", user="zack",
+        client, img_path, gt, project_root,
+        pred_path=str(pred), det_type="fp", action="accepted", user="zack",
     )
     assert resp.status_code == 200
-    obj = json.loads(det_gt.read_text())["objects"][0]
+    obj = json.loads(gt.read_text())["annotations"][0]
     assert obj["created_by"] == "sam"          # prediction origin carried into GT
     assert obj["accepted_by"] == "user:zack"   # reviewer stamped
     assert obj["accepted_at"]
@@ -985,17 +935,17 @@ def test_review_accept_fp_carries_created_by_and_stamps_accepted_by(client, data
 def test_review_edit_stamps_created_by(client, dataset_root, tmp_path) -> None:
     """A reviewer-drawn edit authors GT with created_by=user:<reviewer>."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_gt = tmp_path / "gt_detect.json"
-    _write_gt_detect(det_gt, [(40, 32, 60, 48, 0)])
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, det_gt, project_root,
+        client, img_path, gt, project_root,
         det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0], user="zack",
     )
     assert resp.status_code == 200
-    obj = json.loads(det_gt.read_text())["objects"][0]
+    obj = json.loads(gt.read_text())["annotations"][0]
     assert obj["created_by"] == "user:zack"
 
 
@@ -1003,99 +953,85 @@ def test_review_edit_stamps_created_by(client, dataset_root, tmp_path) -> None:
 
 
 def test_annotate_load_returns_provenance(client, dataset_root, tmp_path) -> None:
-    from tcip_annotation.json_io import write_detect
-    from tcip_annotation.state import BBox
-
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det = tmp_path / "det.json"
-    write_detect(str(det), [BBox(10, 10, 40, 40, 0, created_by="derived:user:zack",
-                                 created_at="2026-02-11T00:00:00+00:00",
-                                 accepted_by="user:zack")], 100, 80)
+    label_path = tmp_path / "det.json"
+    write_annotations(str(label_path), [Annotation(
+        subject="catkin", geometry=BBox(10, 10, 40, 40), created_by="derived:user:zack",
+        created_at="2026-02-11T00:00:00+00:00", accepted_by="user:zack")], 100, 80)
     resp = client.get(
         "/api/annotate/labels",
-        params={"image_path": str(img_path), "detect_path": str(det)},
+        params={"image_path": str(img_path), "label_path": str(label_path)},
     )
     assert resp.status_code == 200
-    b = resp.json()["boxes"][0]
-    assert b["created_by"] == "derived:user:zack"
-    assert b["created_at"] == "2026-02-11T00:00:00+00:00"
-    assert b["accepted_by"] == "user:zack"
+    a = resp.json()["annotations"][0]
+    assert a["created_by"] == "derived:user:zack"
+    assert a["created_at"] == "2026-02-11T00:00:00+00:00"
+    assert a["accepted_by"] == "user:zack"
 
 
 def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_path) -> None:
     """A re-save must not wholesale re-stamp loaded shapes to the current annotator — the
     original creator survives (keep-original-creator policy); only NEW shapes get stamped."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(img_path), "detect_path": str(det_path),
-        "boxes": [
-            {"x1": 10, "y1": 10, "x2": 40, "y2": 40, "class_id": 0,
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [
+            {"subject": "catkin", "bbox": [10, 10, 40, 40],
              "created_by": "derived:user:zack", "created_at": "2026-02-11T00:00:00+00:00",
              "accepted_by": "user:zack"},
-            {"x1": 50, "y1": 50, "x2": 70, "y2": 70, "class_id": 0},
+            {"subject": "catkin", "bbox": [50, 50, 70, 70]},
         ],
-        "polygons": [],
         "user": "emily",
     })
     assert resp.status_code == 200
-    objs = json.loads(det_path.read_text())["objects"]
+    objs = json.loads(label_path.read_text())["annotations"]
     assert objs[0]["created_by"] == "derived:user:zack"          # original creator kept
     assert objs[0]["created_at"] == "2026-02-11T00:00:00+00:00"  # original timestamp kept
     assert objs[0]["accepted_by"] == "user:zack"                 # acceptance carried
     assert objs[1]["created_by"] == "user:emily"                 # only the new shape is Emily's
 
 
-def test_annotate_derived_boxes_inherit_polygon_provenance(client, dataset_root, tmp_path) -> None:
+def test_annotate_polygons_keep_and_stamp_provenance(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    det_path = tmp_path / "detect" / "IMG_0000.json"
-    seg_path = tmp_path / "segment" / "IMG_0000.json"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post("/api/annotate/labels", json={
-        "image_path": str(img_path), "detect_path": str(det_path), "segment_path": str(seg_path),
-        "boxes": [],
-        "polygons": [
-            {"points": [[10, 10], [30, 10], [30, 30]], "class_id": 0,
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [
+            {"subject": "catkin", "points": [[10, 10], [30, 10], [30, 30]],
              "created_by": "user:emily", "created_at": "2026-03-02T00:00:00+00:00"},
-            {"points": [[50, 50], [70, 50], [70, 70]], "class_id": 0},
+            {"subject": "catkin", "points": [[50, 50], [70, 50], [70, 70]]},
         ],
         "user": "zack",
     })
     assert resp.status_code == 200
-    det_objs = json.loads(det_path.read_text())["objects"]
-    assert det_objs[0]["created_by"] == "user:emily"   # derived box keeps its polygon's author
-    assert det_objs[1]["created_by"] == "user:zack"    # new polygon -> stamped -> box inherits
+    objs = json.loads(label_path.read_text())["annotations"]
+    assert objs[0]["created_by"] == "user:emily"   # round-tripped shape keeps its author
+    assert objs[1]["created_by"] == "user:zack"    # new polygon -> stamped to the current annotator
 
 
-def test_review_class_names_do_not_bleed_across_subjects(
+def test_review_subject_names_flow_from_annotations(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    """Class names are resolved per request from the reviewed label's own subject registry, so
-    class 0 shows 'catkin' when reviewing catkin and 'bud_mite' when reviewing efb — never one
-    subject's name for the other's labels (the bug a project-cached engine would have)."""
-    import json
-
-    (dataset_root / "classes").mkdir(exist_ok=True)
-    (dataset_root / "classes" / "catkin.json").write_text(
-        json.dumps({"0": {"name": "catkin", "color": "#FF0000"}}))
-    (dataset_root / "classes" / "efb.json").write_text(
-        json.dumps({"0": {"name": "efb_canker", "color": "#00FF00"}}))
+    """The recorded class name is the annotation's own subject — reviewing a catkin records
+    'catkin', reviewing an efb records 'efb'; the name rides on the label, so one subject's name
+    can never bleed onto another's (the bug a project-cached numeric-id engine would have)."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
 
     def _class_name_for(subject: str) -> str:
-        gt = dataset_root / "annotations" / subject / "2-11-26" / "detect" / "IMG_0000.json"
-        gt.parent.mkdir(parents=True, exist_ok=True)
-        _write_gt_detect(gt, [(40, 32, 60, 48, 0)])
+        gt = tmp_path / f"gt_{subject}.json"
+        _write_gt(gt, [(40, 32, 60, 48)], subject=subject)
         pred = tmp_path / f"pred_{subject}.json"
-        _write_pred_detect(pred, [(40, 32, 60, 48, 0, 0.9)])
+        _write_pred(pred, [(40, 32, 60, 48, 0.9)], subject=subject)
         resp = client.post(
             "/api/review/action",
             json={
                 "project_root": str(project_root), "image_name": "IMG_0000.JPG",
-                "image_path": str(img_path), "gt_detect_path": str(gt),
-                "pred_detect_path": str(pred), "det_type": "tp", "class_id": 0, "conf": 0.9,
-                "iou": 0.95, "gt_type": "box", "gt_idx": 0, "pred_type": "box", "pred_idx": 0,
+                "image_path": str(img_path), "gt_path": str(gt),
+                "pred_path": str(pred), "det_type": "tp", "class_name": subject, "conf": 0.9,
+                "iou": 0.95, "gt_idx": 0, "pred_idx": 0,
                 "bbox": [40.0, 32.0, 60.0, 48.0], "action": "accepted",
                 "iou_threshold": 0.3, "conf_threshold": 0.1,
             },
@@ -1105,4 +1041,4 @@ def test_review_class_names_do_not_bleed_across_subjects(
         return shard["state"]["detections"][0]["class_name"]
 
     assert _class_name_for("catkin") == "catkin"
-    assert _class_name_for("efb") == "efb_canker"  # same class 0, different subject, different name
+    assert _class_name_for("efb") == "efb"  # different subject, its own name, no bleed
