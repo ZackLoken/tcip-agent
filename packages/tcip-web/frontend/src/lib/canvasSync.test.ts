@@ -139,14 +139,16 @@ describe("buildAnnotateShapes", () => {
     expect(shapes[0].dashed).toBeFalsy();
   });
 
-  it("box mode adds one read-only (dashed) derived box per active-subject polygon, === polygonBbox", () => {
-    // Mirrors the canvas overlay: a polygon's detection footprint shows while boxing, dashed to set
-    // it apart from an editable box, and its coords are exactly polygonBbox — never a stored box.
+  it("box mode adds one read-only derived box per active-subject polygon, solid, === polygonBbox", () => {
+    // Mirrors the canvas overlay: a polygon's detection footprint shows while boxing, and its coords
+    // are exactly polygonBbox — never a stored box. Solid like every committed shape (dashed is
+    // reserved for transient/under-review shapes; read-only is enforced structurally, not by style).
     const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [] });
-    const derived = shapes.filter((s) => s.kind === "box" && s.dashed);
+    const derived = shapes.filter((s) => s.kind === "box");
     expect(derived).toHaveLength(1); // only the active "catkin" polygon; "other" is filtered out
     expect(derived[0].xyxy).toEqual(polygonBbox(base.polygons[0].points));
     expect(derived[0].label).toBe("catkin");
+    expect(derived[0].dashed).toBeFalsy(); // solid, not the transient/under-review dashed style
   });
 
   it("box mode includes the selected polygon and the rubber-band box", () => {
