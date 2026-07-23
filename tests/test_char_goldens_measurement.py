@@ -18,7 +18,6 @@ Rails pinned here (one section each):
 
 from __future__ import annotations
 
-import csv
 import inspect
 import json
 from pathlib import Path
@@ -28,7 +27,7 @@ import pytest
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
 from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import PredBBox  # noqa: E402
+from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as PH  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     coco_detection_metrics,
@@ -161,9 +160,11 @@ def test_golden_plant_milestones_shape_and_values():
 
 def _write_preds(d: Path, stem: str, lines: list[str]) -> None:
     d.mkdir(parents=True, exist_ok=True)
-    boxes = [PredBBox(1.0, 1.0, 3.0, 3.0, int(float(ln.split()[0])),
-                      confidence=float(ln.split()[1])) for ln in lines]
-    json_io.write_detect(d / f"{stem}.json", boxes, 8, 8)
+    # Elongation is deferred (K4/K5): the leading class id no longer drives a name-based prediction,
+    # so only geometry + confidence are written. The detection COUNT is what still carries meaning.
+    anns = [Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0),
+                       score=float(ln.split()[1])) for ln in lines]
+    json_io.write_annotations(d / f"{stem}.json", anns, 8, 8)
 
 
 def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
@@ -177,8 +178,10 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     res = PH.per_plant_phenology(
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)}, elongated_class_id=1)
 
-    assert res["elongation_classified"] is True
-    assert res["classes_seen"] == [0, 1]
+    # Deferred (K4/K5): the elongated fraction is not produced, so no bloom milestone is delivered;
+    # the per-date detection totals are still counted honestly (elongated split is 0).
+    assert res["elongation_classified"] is False
+    assert res["classes_seen"] == []
     assert len(res["rows"]) == 1
     row = res["rows"][0]
     assert row["plant_id"] == "P1"
@@ -186,14 +189,14 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     assert row["n_dates"] == 2
     assert row["n_observed_dates"] == 2
     assert row["series"] == [
-        {"date": "2026-02-11", "n_total": 4, "n_elongated": 1, "ratio": 0.25},
-        {"date": "2026-03-09", "n_total": 4, "n_elongated": 3, "ratio": 0.75},
+        {"date": "2026-02-11", "n_total": 4, "n_elongated": 0, "ratio": 0.0},
+        {"date": "2026-03-09", "n_total": 4, "n_elongated": 0, "ratio": 0.0},
     ]
-    # 0.25 → 0.75 over 26 days: 5% at first date; 50% interpolated; 95% never reached.
-    assert row["catkin_05per_date"] == "2026-02-11"
-    assert row["catkin_50per_date"] == "2026-02-24"
+    # no elongated fraction -> every crossing is None; no milestone date is manufactured.
+    assert row["catkin_05per_date"] is None
+    assert row["catkin_50per_date"] is None
     assert row["catkin_95per_date"] is None
-    assert row["catkin_elongation_date"] is None  # == 95% crossing, which is None here
+    assert row["catkin_elongation_date"] is None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -421,7 +424,7 @@ def test_golden_compute_phenology_refuses_without_elongation_class(tmp_path: Pat
     )
     assert "error" in res
     assert res["elongation_classified"] is False
-    assert res["classes_seen"] == [0]
+    assert res["classes_seen"] == []
     assert not out_csv.exists()
 
 
@@ -430,22 +433,23 @@ def test_golden_compute_phenology_requires_both_validated_flags(tmp_path: Path):
 
     mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True)  # no operating_point.json sidecars
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    # Elongation class present, but neither validity flag supplied -> gate refuses.
+    # Deferred (K4/K5): the elongated fraction is not produced, so compute_phenology refuses at the
+    # elongation-classified guard (before the validation gate the flags would drive) — no CSV.
     res = compute_phenology(
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         positive_class_id=1,
     )
-    assert "error" in res and "requires BOTH" in res["error"]
+    assert "error" in res
+    assert res["elongation_classified"] is False
     assert not out_csv.exists()
 
 
 def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sidecar(tmp_path: Path):
-    # W1-R3 old->new: previously a caller string operating_point_validated='validated_held_out' opened
-    # the gate on its own (T5-3 hole). Now the count validity is read from each bucket's
-    # operating_point.json and floored against the assertion — with NO sidecar the curve floors to
-    # false and the gate refuses, even though the caller asserted validated.
+    # Deferred (K4/K5): elongation is not produced, so compute_phenology refuses at the elongation
+    # guard before ever reconciling the on-disk operating-point validity — no CSV either way. (When
+    # K4/K5 rewires elongation, the op-validity floor this golden pinned re-enters at the count gate.)
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
     mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True)  # no sidecars written
@@ -460,17 +464,16 @@ def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sideca
         operating_point_validated="validated_held_out",  # asserted, but unbacked on disk
     )
     assert "error" in res
-    assert res["operating_point_validated"] == "false"
-    assert res["operating_point_missing_sidecars"]  # both buckets flagged
+    assert res["elongation_classified"] is False
     assert not out_csv.exists()
 
 
 def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    # W1-R3 old->new: delivery now also requires the count operating point to be validated ON DISK.
-    # The buckets carry an operating_point.json stamped validated_held_out (as a calibrated
-    # export_predictions writes), which the gate reconciles against the caller assertion.
+    # Deferred (K4/K5): the elongated fraction is not produced, so even a fully-validated call
+    # (classifier + count operating point both validated on disk) refuses rather than deliver a
+    # bloom CSV it cannot honestly measure. This golden re-flips to a delivery when K4/K5 lands.
     mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=True)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
@@ -482,13 +485,6 @@ def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
         operating_point_conf=0.4,
         operating_point_validated="validated_held_out",
     )
-    assert "error" not in res
-    assert res["elongation_classifier_validated"] == "validated_held_out"
-    assert res["operating_point_validated"] == "validated_held_out"
-    assert res["columns"] == PH.PHENOLOGY_CSV_COLUMNS
-    with out_csv.open(newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    assert list(rows[0].keys()) == PH.PHENOLOGY_CSV_COLUMNS
-    assert rows[0]["operating_point_conf"] == "0.4"
-    assert rows[0]["operating_point_validated"] == "validated_held_out"
-    assert rows[0]["elongation_classifier_validated"] == "validated_held_out"
+    assert "error" in res
+    assert res["elongation_classified"] is False
+    assert not out_csv.exists()
