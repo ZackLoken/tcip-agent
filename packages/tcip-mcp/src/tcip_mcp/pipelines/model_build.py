@@ -79,8 +79,12 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
     with a minimum-spatial-size assumption must be smoked at the size it will actually see, or a
     valid model false-fails. ``img_size`` is the tile edge when detection tiling is on (the real
     training input), else a safe non-tiny fallback that clears typical stride-32 backbones.
-    ``in_chans`` / ``num_classes`` come from ``model_source`` / ``builder_kwargs`` with a fallback —
-    resolved, not invented-and-hard-failed (an absent count falls back, it never blocks the smoke).
+    ``in_chans`` comes from ``model_source`` / ``builder_kwargs``. ``num_classes`` is reconciled with
+    the dataset's ``classes.json``: a detection/instance_seg scope resolves it through the same
+    ``assign_class_ids`` map the loader uses (so the smoke forwards at the count that will actually
+    train), and fails open to the head's ``builder_kwargs`` count when no registry/subject is in
+    scope (a bespoke ``dataset_source`` or a registry-less build). The +1 background offset lives
+    only in the loader, never here.
     """
     ms = config.get(MODEL_SOURCE_KEY) or {}
     bk = ms.get("builder_kwargs") if isinstance(ms, dict) else None
@@ -94,6 +98,17 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
 
     in_chans = _int(ms.get("in_chans", bk.get("in_chans")), 3)
     num_classes = _int(bk.get("num_classes"), 1)
+
+    data = config.get("data") or {}
+    if task in ("detection", "instance_seg"):
+        try:
+            from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
+
+            _reg, id_map = _resolve_registry_id_map(
+                data.get("labels_dir", ""), data.get("subject"), data.get("attribute"))
+            num_classes = len(id_map)
+        except Exception:  # noqa: BLE001 — fail open to the head's declared count
+            pass
 
     img_size = 224  # safe non-tiny default (7x7 at stride 32); overridden by the real tile edge below
     tiling = (config.get("data") or {}).get("tiling")
