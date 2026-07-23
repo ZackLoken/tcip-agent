@@ -218,7 +218,7 @@ describe("AnnotateTab subject rendering", () => {
     expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "catkin");
   });
 
-  it("box mode draws an active-subject polygon's read-only derived box (dashed, no handles), never a stored box", async () => {
+  it("box mode draws an active-subject polygon's read-only derived box (solid, no handles), never a stored box", async () => {
     useStore.getState().setRegistry({ catkin: {} });
     const poly = {
       points: [
@@ -236,11 +236,12 @@ describe("AnnotateTab subject rendering", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    // Box mode (setupDataset). The polygon shows only its derived box: a single dashed Rect with no
-    // corner handles (handles are extra Rects), and it never entered canvas.boxes — so unsaveable.
+    // Box mode (setupDataset). The polygon shows only its derived box: a single Rect with no corner
+    // handles (handles are extra Rects), and it never entered canvas.boxes — so unsaveable. Solid
+    // like every committed shape (read-only is enforced structurally, not by line style).
     const rects = screen.getAllByTestId("k-rect");
     expect(rects).toHaveLength(1);
-    expect(rects[0]).toHaveAttribute("data-dash", "true");
+    expect(rects[0]).not.toHaveAttribute("data-dash");  // solid — dashed is reserved for transient shapes
     expect(rects[0]).toHaveAttribute("data-stroke", subjectColor("catkin"));
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
     expect(useStore.getState().canvas.polygons).toHaveLength(1);
