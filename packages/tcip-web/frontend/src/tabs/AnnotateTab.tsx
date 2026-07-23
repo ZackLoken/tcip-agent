@@ -133,7 +133,8 @@ const AnnotationShapes = memo(function AnnotationShapes({
       {/* Read-only derived boxes: each active-subject polygon's bounding box, shown in box mode so a
           polygon's detection footprint is visible while boxing. Render-only — derived from
           polygonBbox here and never added to canvas.boxes, so it can't be selected/edited/deleted or
-          saved (dashed and handle-less to set it apart from an editable hand-drawn box). */}
+          saved (handle-less; solid like every committed shape — how to signal derived-vs-editable is
+          deferred GUI-polish, see the plan). */}
       {mode === "box" &&
         polygons.map((p, i) =>
           p.subject === activeSubject ? (
@@ -144,7 +145,6 @@ const AnnotationShapes = memo(function AnnotationShapes({
               width={boxStroke}
               labelSize={labelSize}
               label={p.subject}
-              dash={[boxStroke * 3, boxStroke * 2]}
             />
           ) : null,
         )}
@@ -1431,7 +1431,6 @@ const BoxOverlay = memo(function BoxOverlay({
   label,
   selected,
   handleR,
-  dash,
 }: {
   box: Box;
   stroke: string;
@@ -1440,7 +1439,6 @@ const BoxOverlay = memo(function BoxOverlay({
   label: string;
   selected?: boolean;
   handleR?: number;
-  dash?: number[];
 }) {
   const corners: [number, number][] = [
     [box.x1, box.y1],
@@ -1457,7 +1455,6 @@ const BoxOverlay = memo(function BoxOverlay({
         height={box.y2 - box.y1}
         stroke={stroke}
         strokeWidth={width}
-        dash={dash}
       />
       {selected &&
         handleR &&
