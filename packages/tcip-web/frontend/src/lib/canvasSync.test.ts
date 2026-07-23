@@ -7,6 +7,7 @@ import {
   createCanvasPusher,
   type CanvasStateBody,
 } from "@/lib/canvasSync";
+import { polygonBbox } from "@/lib/polygonGeometry";
 import type { ReviewColors } from "@/lib/reviewColors";
 import type { MatchesResponse } from "@/store/types";
 
@@ -122,18 +123,30 @@ describe("buildAnnotateShapes", () => {
     expect(buildAnnotateShapes({ ...base, visible: false })).toEqual([]);
   });
 
-  it("box mode renders the active-subject boxes (no polygon derivation)", () => {
+  it("box mode renders the active-subject editable boxes solid (the 'other' subject filtered out)", () => {
     const shapes = buildAnnotateShapes({
       ...base,
       mode: "box",
+      polygons: [], // isolate the editable-box behavior from the derived-box overlay
       boxes: [
         { x1: 0, y1: 0, x2: 5, y2: 5, subject: "catkin", attributes: {} },
         { x1: 8, y1: 8, x2: 9, y2: 9, subject: "other", attributes: {} },
       ],
     });
-    // Only the active subject's real box renders; polygons are not shown as boxes.
+    // Only the active subject's real box renders, solid (editable).
     expect(shapes).toHaveLength(1);
     expect(shapes[0]).toMatchObject({ kind: "box", xyxy: [0, 0, 5, 5], label: "catkin" });
+    expect(shapes[0].dashed).toBeFalsy();
+  });
+
+  it("box mode adds one read-only (dashed) derived box per active-subject polygon, === polygonBbox", () => {
+    // Mirrors the canvas overlay: a polygon's detection footprint shows while boxing, dashed to set
+    // it apart from an editable box, and its coords are exactly polygonBbox — never a stored box.
+    const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [] });
+    const derived = shapes.filter((s) => s.kind === "box" && s.dashed);
+    expect(derived).toHaveLength(1); // only the active "catkin" polygon; "other" is filtered out
+    expect(derived[0].xyxy).toEqual(polygonBbox(base.polygons[0].points));
+    expect(derived[0].label).toBe("catkin");
   });
 
   it("box mode includes the selected polygon and the rubber-band box", () => {
