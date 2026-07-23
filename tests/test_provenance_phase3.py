@@ -46,10 +46,10 @@ def _img(tmp_path):
 def test_save_annotations_stamps_created_by_when_given(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = _img(tmp_path)
-    det = tmp_path / "detect.json"
-    save_annotations(str(img), boxes=[{"x1": 10, "y1": 10, "x2": 30, "y2": 30, "class_id": 0}],
-                     detect_path=str(det), created_by="claude")
-    obj = json.loads(det.read_text())["objects"][0]
+    out = tmp_path / "labels.json"
+    save_annotations(str(img), annotations=[{"subject": "catkin", "bbox": [10, 10, 30, 30]}],
+                     path=str(out), created_by="claude")
+    obj = json.loads(out.read_text())["annotations"][0]
     assert obj["created_by"] == "claude"        # producer named by the agent
     assert obj["created_at"]
 
@@ -58,10 +58,10 @@ def test_save_annotations_no_provenance_by_default(tmp_path):
     """No created_by arg -> provenance stays unset (honest: don't fabricate an author)."""
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = _img(tmp_path)
-    det = tmp_path / "detect.json"
-    save_annotations(str(img), boxes=[{"x1": 10, "y1": 10, "x2": 30, "y2": 30, "class_id": 0}],
-                     detect_path=str(det))
-    obj = json.loads(det.read_text())["objects"][0]
+    out = tmp_path / "labels.json"
+    save_annotations(str(img), annotations=[{"subject": "catkin", "bbox": [10, 10, 30, 30]}],
+                     path=str(out))
+    obj = json.loads(out.read_text())["annotations"][0]
     assert "created_by" not in obj
     assert "created_at" not in obj
 
@@ -69,15 +69,15 @@ def test_save_annotations_no_provenance_by_default(tmp_path):
 def test_save_annotations_per_shape_created_by_overrides(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
     img = _img(tmp_path)
-    det = tmp_path / "detect.json"
+    out = tmp_path / "labels.json"
     save_annotations(
         str(img),
-        boxes=[
-            {"x1": 10, "y1": 10, "x2": 30, "y2": 30, "class_id": 0, "created_by": "sam"},
-            {"x1": 40, "y1": 40, "x2": 60, "y2": 60, "class_id": 0},
+        annotations=[
+            {"subject": "catkin", "bbox": [10, 10, 30, 30], "created_by": "sam"},
+            {"subject": "catkin", "bbox": [40, 40, 60, 60]},
         ],
-        detect_path=str(det), created_by="claude",
+        path=str(out), created_by="claude",
     )
-    objs = json.loads(det.read_text())["objects"]
+    objs = json.loads(out.read_text())["annotations"]
     assert objs[0]["created_by"] == "sam"       # per-shape wins
     assert objs[1]["created_by"] == "claude"    # falls back to the param
