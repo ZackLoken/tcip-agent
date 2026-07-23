@@ -37,55 +37,56 @@ def _image_stems(root: Path) -> dict[str, str]:
     return out
 
 
+def _bucket_subject_date(key: str) -> tuple[str, str | None]:
+    """Split a ``status_bucket(subject, date)`` key back into ``(subject, date)`` (date after '/')."""
+    subject, _, date = key.partition("/")
+    return subject, (date or None)
+
+
 def check_negatives(root: Path, findings: list) -> None:
-    """A negative is empty labels + human Complete — flag every disk/status disagreement."""
-    from tcip_mcp.dataset_layout import (
-        normalize_status_store, parse_annotation_dir, status_bucket,
-    )
+    """A negative is empty labels + human Complete, per subject — flag every disk/status disagreement.
+
+    Labels are one name-based file per image (all subjects); a confirmed negative is scoped to a
+    subject and date, so the disagreement is checked per subject present in the file.
+    """
+    from tcip_annotation import json_io
+    from tcip_mcp.dataset_layout import annotation_date, normalize_status_store
 
     # Through the same normalizer the web layer reads with, so the two can never disagree about
     # what the store says.
     by_bucket = normalize_status_store(_load(root / ".tcip" / "state" / "image_status.json"))
     stems = _image_stems(root)
-
-    def _negatives_for(label_path: Path) -> set[str]:
-        """Negatives confirmed for *this* label file's own subject.
-
-        A negative in one subject says nothing about another — that is what scoping means — so
-        comparing against every bucket would resurrect the cross-subject leak as a false alarm.
-        """
-        parsed = parse_annotation_dir(label_path.parent)
-        if parsed is None:
-            return set()
-        subject, date, _task = parsed
-        bucket = by_bucket.get(status_bucket(subject, date), {})
-        return {n for n, s in bucket.items() if s == "negative"}
-
+    ann_root = root / "annotations"
     neg_names = {n for b in by_bucket.values() for n, s in b.items() if s == "negative"}
 
-    for label in (root / "annotations").rglob("*.json") if (root / "annotations").is_dir() else []:
+    for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
         if ".original" in label.parts:
             continue
-        data = _load(label)
-        if not isinstance(data, dict) or "objects" not in data:
-            continue
+        anns = json_io.read_annotations(str(label))
         name = stems.get(label.stem, f"{label.stem}.JPG")
-        own = _negatives_for(label)  # this campaign's confirmations, not every campaign's
-        if data["objects"] == [] and name not in own:
+        date = annotation_date(label)
+        subjects_here = {a.subject for a in anns if a.geometry is not None}
+        for key, bucket in by_bucket.items():
+            if bucket.get(name) != "negative":
+                continue
+            subj, bdate = _bucket_subject_date(key)
+            if bdate != date:
+                continue
+            if subj in subjects_here:
+                findings.append(("error", f"{label.relative_to(root)}: has {subj!r} annotations but "
+                                f"the status store says 'negative' for {subj!r} — contradictory; re-review"))
+        if not anns and name not in neg_names:
             findings.append(("warn", f"{label.relative_to(root)}: empty label but not a confirmed "
-                            "negative for this campaign; excluded from training (delete the file, "
-                            "or mark the image Complete while this campaign is selected)"))
-        elif data["objects"] and name in own:
-            findings.append(("error", f"{label.relative_to(root)}: {len(data['objects'])} objects "
-                            "but the status store says 'negative' — contradictory; re-review"))
+                            "negative for any subject; excluded from training (delete the file, or "
+                            "mark the image Complete for the subject it should be a negative of)"))
         if label.stem not in stems:
             findings.append(("warn", f"{label.relative_to(root)}: label has no matching image"))
 
     # The dominant case under "label a few examples": images with no label record at all. They are
     # excluded from training, so a breeder who labelled 30 of 400 trains on 30 — worth seeing at a
     # glance. Reported as one line, not one per image.
-    labelled = {p.stem for p in (root / "annotations").rglob("*.json")
-                if ".original" not in p.parts} if (root / "annotations").is_dir() else set()
+    labelled = {p.stem for p in ann_root.rglob("*.json")
+                if ".original" not in p.parts} if ann_root.is_dir() else set()
     unannotated = sorted(set(stems) - labelled)
     if unannotated:
         shown = ", ".join(unannotated[:5]) + ("…" if len(unannotated) > 5 else "")
@@ -95,10 +96,10 @@ def check_negatives(root: Path, findings: list) -> None:
 
     for name in neg_names:
         stem = Path(name).stem
-        det = list((root / "annotations").rglob(f"{stem}.json")) if (root / "annotations").is_dir() else []
+        det = list(ann_root.rglob(f"{stem}.json")) if ann_root.is_dir() else []
         if not det:
             findings.append(("warn", f"status says {name} is negative but no label file exists "
-                            "(a confirmed negative should have an empty objects file)"))
+                            "(a confirmed negative should have an empty label file)"))
 
 
 def check_registry(root: Path, findings: list) -> None:
@@ -113,21 +114,23 @@ def check_registry(root: Path, findings: list) -> None:
 
 
 def check_provenance(root: Path, findings: list) -> None:
+    from tcip_annotation.json_io import ANNOTATIONS_KEY
+
     unstamped = 0
     for label in (root / "annotations").rglob("*.json") if (root / "annotations").is_dir() else []:
         if ".original" in label.parts:
             continue
         data = _load(label)
-        for o in (data or {}).get("objects", []) if isinstance(data, dict) else []:
+        for o in (data or {}).get(ANNOTATIONS_KEY, []) if isinstance(data, dict) else []:
             if not isinstance(o, dict):
                 continue
             if o.get("accepted_by") and not o.get("created_by"):
-                findings.append(("warn", f"{label.relative_to(root)}: object has accepted_by "
+                findings.append(("warn", f"{label.relative_to(root)}: annotation has accepted_by "
                                 "without created_by (acceptance without origin)"))
             if not o.get("created_by"):
                 unstamped += 1
     if unstamped:
-        findings.append(("info", f"{unstamped} GT objects carry no created_by (pre-provenance "
+        findings.append(("info", f"{unstamped} GT annotations carry no created_by (pre-provenance "
                         "data; fine, but new writes should always stamp)"))
 
 
