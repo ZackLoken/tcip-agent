@@ -470,48 +470,56 @@ def _poly_flat(points) -> list[float]:
     return [float(c) for pt in points for c in (pt[0], pt[1])]
 
 
-def records_from_annotation(gt_boxes, gt_polys, pred_boxes, pred_polys, *,
-                            width: int, height: int, force_segm: bool = False):
-    """BBox/Polygon GT + PredBBox/PredPolygon -> (iou_type, COCO per-image record).
+def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: bool = False,
+                             name_id: dict[str, int] | None = None):
+    """Name-based :class:`Annotation` GT + predictions -> (iou_type, COCO per-image record).
 
-    ``force_segm`` makes every box carry a rectangular ``segmentation`` so a whole
-    dataset can be scored with ``iou_type='segm'`` even when some images are box-only.
+    ``gt`` / ``preds`` are ``Annotation`` lists (a prediction carries a ``score``). The COCO
+    ``category_id`` is a 1-indexed id per distinct ``subject`` name, shared by GT and predictions.
+    Pass ``name_id`` when scoring more than one image: pycocotools accumulates every per-image record
+    into one eval, so a subject must map to the *same* id in every image — a per-image-local map (the
+    default when ``name_id`` is ``None``, fine for a single image) pools different subjects into one
+    category across images and corrupts per-class AP. ``force_segm`` makes every box carry a
+    rectangular ``segmentation`` so a whole dataset can be scored with ``iou_type='segm'``.
     """
-    use_segm = force_segm or bool(gt_polys or pred_polys)
+    from tcip_annotation.state import Polygon, bbox_of
+
+    def _has_poly(anns):
+        return any(isinstance(a.geometry, Polygon) for a in anns)
+
+    use_segm = force_segm or _has_poly(gt) or _has_poly(preds)
     iou_type = "segm" if use_segm else "bbox"
+
+    if name_id is None:  # single-image scoring: a local map cannot disagree with itself
+        names: list[str] = []
+        for a in (*gt, *preds):
+            if a.geometry is not None and a.subject not in names:
+                names.append(a.subject)
+        name_id = {n: i + 1 for i, n in enumerate(names)}  # 1-indexed (background 0), like detector labels
 
     def _box_seg(x1, y1, x2, y2):
         return [[float(x1), float(y1), float(x2), float(y1), float(x2), float(y2), float(x1), float(y2)]]
 
-    gt = []
-    for b in gt_boxes:
-        rec = {"category_id": int(b.class_id) + 1, "bbox": _xyxy_to_xywh(b.x1, b.y1, b.x2, b.y2),
-               "area": float((b.x2 - b.x1) * (b.y2 - b.y1)), "iscrowd": 0}
-        if use_segm:
-            rec["segmentation"] = _box_seg(b.x1, b.y1, b.x2, b.y2)
-        gt.append(rec)
-    for p in gt_polys:
-        xs = [pt[0] for pt in p.points]
-        ys = [pt[1] for pt in p.points]
-        x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
-        gt.append({"category_id": int(p.class_id) + 1, "bbox": _xyxy_to_xywh(x1, y1, x2, y2),
-                   "area": float((x2 - x1) * (y2 - y1)), "iscrowd": 0, "segmentation": [_poly_flat(p.points)]})
+    def _record(a, *, is_pred):
+        if a.geometry is None:
+            return None
+        box = bbox_of(a.geometry)
+        rec: dict = {"category_id": name_id[a.subject],
+                     "bbox": _xyxy_to_xywh(box.x1, box.y1, box.x2, box.y2)}
+        if is_pred:
+            rec["score"] = float(a.score if a.score is not None else 0.0)
+        else:
+            rec["area"] = float((box.x2 - box.x1) * (box.y2 - box.y1))
+            rec["iscrowd"] = 0
+        if isinstance(a.geometry, Polygon):
+            rec["segmentation"] = [_poly_flat(a.geometry.points)]
+        elif use_segm:
+            rec["segmentation"] = _box_seg(box.x1, box.y1, box.x2, box.y2)
+        return rec
 
-    dt = []
-    for b in pred_boxes:
-        rec = {"category_id": int(b.class_id) + 1, "bbox": _xyxy_to_xywh(b.x1, b.y1, b.x2, b.y2),
-               "score": float(b.confidence)}
-        if use_segm:
-            rec["segmentation"] = _box_seg(b.x1, b.y1, b.x2, b.y2)
-        dt.append(rec)
-    for p in pred_polys:
-        xs = [pt[0] for pt in p.points]
-        ys = [pt[1] for pt in p.points]
-        x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
-        dt.append({"category_id": int(p.class_id) + 1, "bbox": _xyxy_to_xywh(x1, y1, x2, y2),
-                   "score": float(p.confidence), "segmentation": [_poly_flat(p.points)]})
-
-    return iou_type, build_coco_image_record(width, height, gt, dt)
+    gt_recs = [r for r in (_record(a, is_pred=False) for a in gt) if r is not None]
+    dt_recs = [r for r in (_record(a, is_pred=True) for a in preds) if r is not None]
+    return iou_type, build_coco_image_record(width, height, gt_recs, dt_recs)
 
 
 # ====================================================================
@@ -828,6 +836,7 @@ def run_test_evaluation(
 
 def run_full_frame_evaluation(
     ckpt_path: str, images_dir: str, labels_dir: str, output_dir: str, *,
+    subject: str | None = None, attribute: str | None = None,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
     tile_size: int = 640, overlap: float = 0.2, global_nms_iou: float = 0.3,
     max_dets: int = 1000, postprocess: str = "nms", device: str | None = None,
@@ -841,8 +850,8 @@ def run_full_frame_evaluation(
     gates a phenotype delivery. Tile-level (``run_test_evaluation`` with ``tiling``) is a diagnostic
     that matches the training-run val mAP; it must not be reported as the delivery metric.
     """
-    from tcip_annotation import json_io
-
+    from tcip_mcp.dataset_layout import annotation_date
+    from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
     predictor = build_predictor(
@@ -850,6 +859,15 @@ def run_full_frame_evaluation(
         score_threshold=conf_threshold, nms_iou=global_nms_iou, max_dets=max_dets)
 
     img_dir, lbl_dir = Path(images_dir), Path(labels_dir)
+    _lbl_date = annotation_date(lbl_dir)
+    # The GT category ids come from the run's single assign_class_ids map, read through the same
+    # loader-side reader (_json_det_targets), so delivery-grade GT never diverges from what trained.
+    _gt_id_map = None
+    if subject:
+        try:
+            _reg, _gt_id_map = _resolve_registry_id_map(lbl_dir, subject, attribute)
+        except Exception:  # noqa: BLE001 — no registry in scope; GT reading falls back below
+            _gt_id_map = None
     # Same negative rail the training set uses: an image with no label record has no ground truth,
     # so scoring it turns every correct detection into a false positive and drags down the very
     # precision this delivery-grade number gates a phenotype on.
@@ -857,7 +875,7 @@ def run_full_frame_evaluation(
 
     names = image_name_map(img_dir)
     if lbl_dir.is_dir():
-        keep, sample_counts = trainable_stems(lbl_dir, img_dir)
+        keep, sample_counts = trainable_stems(lbl_dir, img_dir, subject=subject, date=_lbl_date)
         paths = [img_dir / names[s] for s in keep if s in names]
     else:
         # No label store, so no rail to apply and no ground truth either. Filtering to nothing here
@@ -873,12 +891,13 @@ def run_full_frame_evaluation(
               for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
         gt = []
         gt_file = lbl_dir / f"{p.stem}.json"
-        if gt_file.is_file():
-            for b in json_io.read_detect(str(gt_file))[0]:
-                # GT category_id is 0-indexed foreground; predictor labels are 1-indexed
-                # (torchvision background=0), so lift GT to match before matching.
-                gt.append({"category_id": int(b.class_id) + 1,
-                           "bbox": _xyxy_to_xywh(b.x1, b.y1, b.x2, b.y2), "iscrowd": 0})
+        if gt_file.is_file() and _gt_id_map is not None:
+            # Same loader-side reader + id map the training targets use (1-indexed to match the
+            # predictor's torchvision labels), so this delivery-grade GT can't diverge from training.
+            gboxes, glabels = _json_det_targets(str(gt_file), subject, attribute, _gt_id_map)
+            for (x1, y1, x2, y2), lab in zip(gboxes, glabels):
+                gt.append({"category_id": int(lab),
+                           "bbox": _xyxy_to_xywh(x1, y1, x2, y2), "iscrowd": 0})
         per_image.append(build_coco_image_record(w, h, gt, dt, image_id=p.stem))
 
     m = coco_detection_metrics(per_image, iou_threshold=iou_threshold,
