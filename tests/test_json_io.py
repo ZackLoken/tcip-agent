@@ -17,7 +17,7 @@ from tcip_annotation.json_io import (
     to_coco_dataset,
     write_annotations,
 )
-from tcip_annotation.state import Annotation, BBox, Polygon
+from tcip_annotation.state import Annotation, BBox, Polygon, bbox_of
 
 # Coordinates use binary-exact values (.0/.25/.5/.75) so the writer's 2-decimal rounding
 # is an identity and geometry assertions can be exact.
@@ -98,8 +98,36 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
     assert data["annotations"][1]["segmentation"] == [[0.5, 0.25, 30.0, 0.25, 15.25, 40.75]]
     assert all("score" not in o for o in data["annotations"])
 
+    # Each polygon record ALSO carries its derived box (COCO xywh of bbox_of(points)) alongside the
+    # segmentation — the polygon stays the source of truth, its box travels with it on disk.
+    def _xywh(pts: list[tuple[float, float]]) -> list[float]:
+        b = bbox_of(Polygon(pts))
+        return [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
+
+    assert data["annotations"][0]["bbox"] == _xywh(SQUARE) == [10.0, 20.0, 100.0, 200.0]
+    assert data["annotations"][1]["bbox"] == _xywh(TRIANGLE) == [0.5, 0.25, 29.5, 40.5]
+
+    # The on-disk bbox is derived, not a second geometry: each record reads back as exactly ONE
+    # polygon annotation (segmentation wins over the co-stored bbox), never a box AND a polygon.
     got = read_annotations(path)
+    assert len(got) == 2
+    assert all(isinstance(a.geometry, Polygon) for a in got)
     assert [(a.geometry.points, a.subject) for a in got] == [(SQUARE, "leaf"), (TRIANGLE, "catkin")]
+
+
+def test_box_only_record_reads_as_single_bbox_annotation(tmp_path: Path) -> None:
+    # A hand-drawn box (no segmentation) still reads as exactly one BBox annotation — the polygon's
+    # bbox co-storage must not make an ordinary box record ambiguous or double-counted.
+    path = tmp_path / "labels" / "IMG_box.json"
+    write_annotations(path, [Annotation(subject="catkin", geometry=BBox(10.0, 20.0, 110.0, 220.0))], 640, 480)
+
+    obj = _raw(path)["annotations"][0]
+    assert "bbox" in obj and "segmentation" not in obj
+
+    got = read_annotations(path)
+    assert len(got) == 1 and isinstance(got[0].geometry, BBox)
+    g = got[0].geometry
+    assert (g.x1, g.y1, g.x2, g.y2) == (10.0, 20.0, 110.0, 220.0)
 
 
 def test_polygon_pred_round_trip_confidence_via_score(tmp_path: Path) -> None:
