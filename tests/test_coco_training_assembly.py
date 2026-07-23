@@ -11,7 +11,12 @@ torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import BBox, Polygon  # noqa: E402
+from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
+from tcip_mcp.class_registry import (  # noqa: E402
+    Attribute, ClassRegistry, Subject, assign_class_ids,
+)
+
+CATKIN = "catkin"
 
 
 def _make_images(images_dir, stems):
@@ -20,18 +25,36 @@ def _make_images(images_dir, stems):
         Image.new("RGB", (100, 100)).save(images_dir / f"{s}.jpg")
 
 
+def _box(x1, y1, x2, y2, *, subject=CATKIN, score=None, **attrs):
+    """A name-based detection annotation (a prediction when ``score`` is set)."""
+    return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2), score=score,
+                      attributes=dict(attrs))
+
+
+def _poly(points, *, subject=CATKIN, **attrs):
+    return Annotation(subject=subject, geometry=Polygon(points), attributes=dict(attrs))
+
+
+def _reg_id_map(subject=CATKIN, attribute=None, values=()):
+    """A registry + its ``assign_class_ids`` map (the single name→id map) for a training scope."""
+    attrs = ((Attribute(name=attribute, type="categorical", values=tuple(values)),)
+             if attribute else ())
+    reg = ClassRegistry(subjects=(Subject(name=subject, attributes=attrs),))
+    return reg, assign_class_ids(reg, subject, attribute)
+
+
 # ── format detection ────────────────────────────────────────────────────────
 
 def test_dir_label_format_detects_json(tmp_path):
     from tcip_mcp.pipelines.data.datasets import dir_label_format
     d = tmp_path / "detect"
     d.mkdir()
-    json_io.write_detect(d / "a.json", [BBox(10, 10, 50, 50, 0)], 100, 100)
+    json_io.write_annotations(d / "a.json", [_box(10, 10, 50, 50)], 100, 100)
     assert dir_label_format(d) == "json"
 
 
 def test_dir_label_format_ignores_non_canonical_json(tmp_path):
-    """A LabelMe-style .json (``shapes``, no ``objects``) is not the canonical store — don't claim
+    """A LabelMe-style .json (``shapes``, no ``annotations``) is not the canonical store — don't claim
     it, so it never gets silently assembled as though it were per-image JSON."""
     from tcip_mcp.pipelines.data.datasets import dir_label_format
     d = tmp_path / "labels"
@@ -53,10 +76,15 @@ def test_assemble_coco_pairs_labels_with_images(tmp_path):
     labels = tmp_path / "detect"
     labels.mkdir()
     _make_images(images, ["img0", "img1"])
-    json_io.write_detect(labels / "img0.json", [BBox(10, 10, 50, 50, 0), BBox(0, 0, 20, 20, 1)], 100, 100)
-    json_io.write_detect(labels / "img1.json", [], 100, 100, keep_empty=True)  # confirmed negative
+    # Two classes now ride a categorical attribute of one subject (not two class_ids on the box).
+    _reg, id_map = _reg_id_map(attribute="elongation", values=("dormant", "elongated"))
+    json_io.write_annotations(
+        labels / "img0.json",
+        [_box(10, 10, 50, 50, elongation="dormant"), _box(0, 0, 20, 20, elongation="elongated")],
+        100, 100)
+    json_io.write_annotations(labels / "img1.json", [], 100, 100, keep_empty=True)  # confirmed negative
 
-    coco = assemble_coco(labels, images)
+    coco = assemble_coco(labels, images, subject=CATKIN, attribute="elongation", id_map=id_map)
     # img1's empty file is NOT human-confirmed negative -> excluded (treated as unannotated)
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}
     assert len(coco["annotations"]) == 2
@@ -68,16 +96,17 @@ def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):
 
     from tcip_mcp.pipelines.data.datasets import assemble_coco
     images = tmp_path / "images"
-    labels = tmp_path / "annotations" / "default" / "detect"
+    labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
     _make_images(images, ["img0", "img1"])
-    json_io.write_detect(labels / "img0.json", [], 100, 100, keep_empty=True)  # confirmed below
-    json_io.write_detect(labels / "img1.json", [], 100, 100, keep_empty=True)  # emptied mid-work
+    json_io.write_annotations(labels / "img0.json", [], 100, 100, keep_empty=True)  # confirmed below
+    json_io.write_annotations(labels / "img1.json", [], 100, 100, keep_empty=True)  # emptied mid-work
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
     (state / "image_status.json").write_text(_json.dumps(
-        {"default": {"img0.jpg": "negative", "img1.jpg": "partial"}}))
-    coco = assemble_coco(labels, images)
+        {"catkin": {"img0.jpg": "negative", "img1.jpg": "partial"}}))
+    _reg, id_map = _reg_id_map()
+    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}  # human-confirmed only
 
 
@@ -87,10 +116,11 @@ def test_assemble_coco_skips_stem_without_image(tmp_path):
     labels = tmp_path / "detect"
     labels.mkdir()
     _make_images(images, ["img0"])
-    json_io.write_detect(labels / "img0.json", [BBox(10, 10, 50, 50, 0)], 100, 100)
-    json_io.write_detect(labels / "orphan.json", [BBox(5, 5, 9, 9, 0)], 100, 100)  # no image
+    _reg, id_map = _reg_id_map()
+    json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
+    json_io.write_annotations(labels / "orphan.json", [_box(5, 5, 9, 9)], 100, 100)  # no image
 
-    coco = assemble_coco(labels, images)
+    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
     assert [im["file_name"] for im in coco["images"]] == ["img0.jpg"]
 
 
@@ -102,9 +132,9 @@ def test_build_dataset_detection_autoresolves_json(tmp_path):
     labels = tmp_path / "detect"
     labels.mkdir()
     _make_images(images, ["img0"])
-    json_io.write_detect(labels / "img0.json", [BBox(10, 10, 50, 50, 0)], 100, 100)
+    json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
 
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
     assert ds.label_format == "coco"  # auto-routed
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
@@ -120,10 +150,10 @@ def test_build_dataset_respects_explicit_format(tmp_path):
     labels = tmp_path / "detect"
     labels.mkdir()
     _make_images(images, ["img0"])
-    json_io.write_detect(labels / "img0.json", [BBox(10, 10, 50, 50, 0)], 100, 100)
+    json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
 
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                       num_classes=1, label_format="yolo")
+                       subject=CATKIN, label_format="yolo")
     assert ds.label_format == "yolo"  # honored, even though .json is present
 
 
@@ -133,11 +163,11 @@ def test_build_dataset_instance_seg_autoresolves_json(tmp_path):
     labels = tmp_path / "segment"
     labels.mkdir()
     _make_images(images, ["img0"])
-    json_io.write_segment(
+    json_io.write_annotations(
         labels / "img0.json",
-        [Polygon([(10, 10), (50, 10), (50, 50), (10, 50)], 0)], 100, 100)
+        [_poly([(10, 10), (50, 10), (50, 50), (10, 50)])], 100, 100)
 
-    ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels), num_classes=1)
+    ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
     assert ds.label_format == "coco"
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
@@ -150,8 +180,8 @@ def test_count_label_lines_reads_json_objects(tmp_path):
     from tcip_mcp.pipelines.data.splits import count_label_lines
     labels = tmp_path / "detect"
     labels.mkdir()
-    json_io.write_detect(labels / "a.json", [BBox(0, 0, 10, 10, 0), BBox(0, 0, 20, 20, 0)], 100, 100)
-    json_io.write_detect(labels / "neg.json", [], 100, 100, keep_empty=True)
+    json_io.write_annotations(labels / "a.json", [_box(0, 0, 10, 10), _box(0, 0, 20, 20)], 100, 100)
+    json_io.write_annotations(labels / "neg.json", [], 100, 100, keep_empty=True)
     assert count_label_lines(labels, "a") == 2
     assert count_label_lines(labels, "neg") == 0
     assert count_label_lines(labels, "missing") == 0
@@ -160,16 +190,16 @@ def test_count_label_lines_reads_json_objects(tmp_path):
 def _rail_fixture(tmp_path):
     """One annotated image, one empty-unconfirmed, one with no label file, one confirmed negative."""
     images = tmp_path / "images"
-    labels = tmp_path / "annotations" / "default" / "detect"
+    labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
     _make_images(images, ["ann", "empty", "nolabel", "neg"])
-    json_io.write_detect(labels / "ann.json", [BBox(4, 4, 12, 12, 0)], 100, 100, keep_empty=True)
-    json_io.write_detect(labels / "empty.json", [], 100, 100, keep_empty=True)
-    json_io.write_detect(labels / "neg.json", [], 100, 100, keep_empty=True)
+    json_io.write_annotations(labels / "ann.json", [_box(4, 4, 12, 12)], 100, 100, keep_empty=True)
+    json_io.write_annotations(labels / "empty.json", [], 100, 100, keep_empty=True)
+    json_io.write_annotations(labels / "neg.json", [], 100, 100, keep_empty=True)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
     (state / "image_status.json").write_text(
-        json.dumps({"default": {"neg.jpg": "negative"}}))
+        json.dumps({"catkin": {"neg.jpg": "negative"}}))
     return images, labels
 
 
@@ -183,9 +213,10 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path, label_format):
     from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset
 
     images, labels = _rail_fixture(tmp_path)
-    kwargs = {"images_dir": str(images), "labels_dir": str(labels), "num_classes": 1}
+    kwargs = {"images_dir": str(images), "labels_dir": str(labels), "subject": CATKIN}
     if label_format == "coco":
-        kwargs["coco_data"] = assemble_coco(labels, images)
+        _reg, id_map = _reg_id_map()
+        kwargs["coco_data"] = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
         kwargs["label_format"] = "coco"
     elif label_format:
         kwargs["label_format"] = label_format
@@ -203,7 +234,7 @@ def test_caller_supplied_stems_are_filtered_too(tmp_path):
 
     images, labels = _rail_fixture(tmp_path)
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                       num_classes=1, stems=["ann", "empty", "nolabel", "neg"])
+                       subject=CATKIN, stems=["ann", "empty", "nolabel", "neg"])
     assert sorted(ds.stems) == ["ann", "neg"]
 
 
@@ -211,28 +242,28 @@ def test_no_trainable_samples_raises_rather_than_training_on_nothing(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images = tmp_path / "images"
-    labels = tmp_path / "annotations" / "default" / "detect"
+    labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
     _make_images(images, ["a", "b"])
-    json_io.write_detect(labels / "a.json", [], 100, 100, keep_empty=True)  # unconfirmed empty
+    json_io.write_annotations(labels / "a.json", [], 100, 100, keep_empty=True)  # unconfirmed empty
 
     with pytest.raises(ValueError, match="no trainable samples"):
-        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
+        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
 
 
 def test_instance_seg_applies_the_same_rail(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images = tmp_path / "images"
-    labels = tmp_path / "annotations" / "default" / "segment"
+    labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
     _make_images(images, ["ann", "nolabel"])
-    json_io.write_segment(labels / "ann.json",
-                          [Polygon([(4, 4), (12, 4), (12, 12), (4, 12)], 0)], 100, 100,
-                          keep_empty=True)
+    json_io.write_annotations(labels / "ann.json",
+                              [_poly([(4, 4), (12, 4), (12, 12), (4, 12)])], 100, 100,
+                              keep_empty=True)
 
     ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels),
-                       num_classes=1)
+                       subject=CATKIN)
     assert ds.stems == ["ann"]
 
 
@@ -250,24 +281,25 @@ def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
     from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset
 
     images = tmp_path / "images"
-    labels = tmp_path / "annotations" / "default" / "detect"
+    labels = tmp_path / "annotations"
     images.mkdir(parents=True)
     labels.mkdir(parents=True)
     for stem in ("IMG_0001", "IMG_0002"):
         _Image.new("RGB", (100, 100)).save(images / f"{stem}{ext}")
-    json_io.write_detect(labels / "IMG_0001.json", [BBox(4, 4, 12, 12, 0)], 100, 100,
-                         keep_empty=True)
-    json_io.write_detect(labels / "IMG_0002.json", [], 100, 100, keep_empty=True)
+    json_io.write_annotations(labels / "IMG_0001.json", [_box(4, 4, 12, 12)], 100, 100,
+                              keep_empty=True)
+    json_io.write_annotations(labels / "IMG_0002.json", [], 100, 100, keep_empty=True)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
     (state / "image_status.json").write_text(
-        json.dumps({"default": {f"IMG_0002{ext}": "negative"}}))
+        json.dumps({"catkin": {f"IMG_0002{ext}": "negative"}}))
 
+    _reg, id_map = _reg_id_map()
     # The assembled COCO carries the real names, so to_coco_dataset can match the store.
-    coco = assemble_coco(labels, images)
+    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
     assert {im["file_name"] for im in coco["images"]} == {f"IMG_0001{ext}", f"IMG_0002{ext}"}
 
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
     assert sorted(ds.stems) == ["IMG_0001", "IMG_0002"], ds.stems
     assert ds.sample_counts["confirmed_negative"] == 1
 
@@ -296,7 +328,7 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images, labels = _rail_fixture(tmp_path)
-    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), num_classes=1)
+    ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
     assert ds.sample_counts == {"annotated": 1, "confirmed_negative": 1,
                                 "skipped_unannotated": 1, "skipped_unconfirmed_empty": 1}
 
@@ -313,7 +345,7 @@ def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_pa
         "categories": [{"id": 1, "name": "c0"}],
     }
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
-                       num_classes=1, coco_data=external, label_format="coco")
+                       subject=CATKIN, coco_data=external, label_format="coco")
     assert ds.stems == ["ann"], "an unconfirmed zero-annotation COCO image must not train"
     assert ds.sample_counts["confirmed_negative"] == 0
 
@@ -324,25 +356,25 @@ def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
     from tcip_mcp.pipelines.data.datasets import build_dataset, confirmed_negative_names
 
     images = tmp_path / "images"
-    catkin = tmp_path / "annotations" / "catkin" / "detect"
-    bush = tmp_path / "annotations" / "bush" / "detect"
-    catkin.mkdir(parents=True)
-    bush.mkdir(parents=True)
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
     _make_images(images, ["ann", "shared"])
-    for d in (catkin, bush):
-        json_io.write_detect(d / "ann.json", [BBox(4, 4, 12, 12, 0)], 100, 100, keep_empty=True)
-        json_io.write_detect(d / "shared.json", [], 100, 100, keep_empty=True)
+    # One per-image file holds every subject now; the campaign is the subject name, not a path segment.
+    json_io.write_annotations(labels / "ann.json",
+                              [_box(4, 4, 12, 12, subject="catkin"),
+                               _box(4, 4, 12, 12, subject="bush")], 100, 100, keep_empty=True)
+    json_io.write_annotations(labels / "shared.json", [], 100, 100, keep_empty=True)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
     # Confirmed negative for catkin only — the breeder never judged it for bush.
     (state / "image_status.json").write_text(json.dumps({"catkin": {"shared.jpg": "negative"}}))
 
-    assert confirmed_negative_names(catkin) == {"shared.jpg"}
-    assert confirmed_negative_names(bush) == set()
-    assert sorted(build_dataset("detection", images_dir=str(images), labels_dir=str(catkin),
-                                num_classes=1).stems) == ["ann", "shared"]
-    assert build_dataset("detection", images_dir=str(images), labels_dir=str(bush),
-                         num_classes=1).stems == ["ann"]
+    assert confirmed_negative_names(labels, subject="catkin") == {"shared.jpg"}
+    assert confirmed_negative_names(labels, subject="bush") == set()
+    assert sorted(build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
+                                subject="catkin").stems) == ["ann", "shared"]
+    assert build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
+                         subject="bush").stems == ["ann"]
 
 
 def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
@@ -355,8 +387,8 @@ def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
     state.mkdir(parents=True)
     (state / "image_status.json").write_text(json.dumps({"catkin": {"a.jpg": "negative"}}))
 
-    with pytest.raises(ValueError, match="cannot tell which subject"):
-        confirmed_negative_names(labels)
+    with pytest.raises(ValueError, match="needs an explicit subject"):
+        confirmed_negative_names(labels, subject=None)
 
 
 def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
@@ -374,7 +406,7 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
     state.mkdir(parents=True)
     (state / "image_status.json").write_text(json.dumps({"catkin": {"a.jpg": "complete"}}))
 
-    assert confirmed_negative_names(labels) == set()
+    assert confirmed_negative_names(labels, subject=None) == set()
 
 
 def test_split_tree_carries_its_confirmed_negatives(tmp_path):
@@ -384,24 +416,24 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
     from tcip_mcp.tools.data_tools import make_splits
 
     images = tmp_path / "images"
-    labels = tmp_path / "annotations" / "catkin" / "detect"
+    labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
     _make_images(images, [f"i{n:02d}" for n in range(10)])
     for n in range(10):
         stem = f"i{n:02d}"
-        boxes = [] if n % 2 else [BBox(4, 4, 12, 12, 0)]
-        json_io.write_detect(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
+        boxes = [] if n % 2 else [_box(4, 4, 12, 12)]
+        json_io.write_annotations(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
     (state / "image_status.json").write_text(json.dumps(
         {"catkin": {f"i{n:02d}.jpg": "negative" for n in range(1, 10, 2)}}))
 
     out = tmp_path / "splits"
-    make_splits(str(tmp_path), output_path=str(out), materialize=True)
+    make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin")
 
     carried = set()
     for split in ("train", "val", "test"):
         d = out / split / "labels"
         if d.is_dir():
-            carried |= confirmed_negative_names(d)
+            carried |= confirmed_negative_names(d, subject="catkin")
     assert carried, "the split tree lost every human-confirmed negative"
