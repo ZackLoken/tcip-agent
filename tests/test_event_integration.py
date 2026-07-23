@@ -100,14 +100,14 @@ class TestPostPanelEventRoute:
             "/api/events/app",
             json={
                 "event_type": "annotate_focus",
-                "data": {"subject": "bush", "date": "2-11-26", "mode": "polygon", "active_class": 2},
+                "data": {"subject": "bush", "date": "2-11-26", "mode": "polygon", "active_subject": "catkin"},
             },
         )
         assert resp.status_code == 200
         state = client.get("/api/dataset/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "polygon"
-        assert state["active_class"] == 2
+        assert state["active_subject"] == "catkin"
 
 
 class TestPushPanelDataTool:
