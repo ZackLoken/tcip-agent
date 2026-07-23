@@ -101,10 +101,8 @@ describe("ProjectPicker", () => {
         date: "2026-03-01",
         image_list: [],
         current_image_index: 0,
-        annotations_detect_dir: null,
-        annotations_segment_dir: null,
-        predictions_detect_dir: null,
-        predictions_segment_dir: null,
+        annotations_dir: null,
+        predictions_dir: null,
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
