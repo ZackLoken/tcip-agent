@@ -1,8 +1,8 @@
 """Annotation label CRUD routes for the Annotate tab.
 
-Reads / writes the canonical per-image label files using the shared
-:mod:`tcip_annotation` engine. Paths are supplied by the caller so the
-backend doesn't have to guess a dataset layout.
+Reads / writes the canonical per-image label file (one JSON per image, holding every subject's
+annotations by name) via :mod:`tcip_annotation.json_io`. The label path is supplied by the caller
+so the backend doesn't have to guess a dataset layout.
 """
 
 from __future__ import annotations
@@ -14,15 +14,9 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_annotation import (
-    BBox,
-    Polygon,
-    boxes_from_polygons,
-    parse_detect_labels,
-    parse_segment_labels,
-    write_detect_labels,
-    write_segment_labels,
-)
+from tcip_annotation import BBox, Polygon
+from tcip_annotation.json_io import read_annotations, write_annotations
+from tcip_annotation.state import Annotation
 from tcip_annotation.utils import get_image_dimensions
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
@@ -31,30 +25,17 @@ from tcip_web.state import PredictionReference, store
 router = APIRouter(prefix="/api/annotate", tags=["annotate"])
 
 
-class LabelsPayload(BaseModel):
-    image_path: str
-    detect_path: Optional[str] = None
-    segment_path: Optional[str] = None
+class AnnotationPayload(BaseModel):
+    """One annotation: its ``subject`` (the object it is about), a geometry (a box or a polygon,
+    or neither for an image-level label), and its attribute values by name."""
 
-
-class BoxPayload(BaseModel):
-    x1: float
-    y1: float
-    x2: float
-    y2: float
-    class_id: int = 0
-    # Provenance round-trips through the client: a loaded shape carries its original
-    # created_by back on save (keep-original-creator policy), so a re-save never
-    # wholesale re-stamps existing labels to the current annotator. New shapes omit it.
-    created_by: Optional[str] = None
-    created_at: Optional[str] = None
-    accepted_by: Optional[str] = None
-    accepted_at: Optional[str] = None
-
-
-class PolygonPayload(BaseModel):
-    points: list[list[float]]
-    class_id: int = 0
+    subject: str
+    bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel
+    points: Optional[list[list[float]]] = None  # polygon vertices, pixel
+    attributes: dict[str, str] = {}
+    # Provenance round-trips through the client: a loaded shape carries its original created_by
+    # back on save (keep-original-creator policy), so a re-save never wholesale re-stamps existing
+    # labels to the current annotator. New shapes omit it.
     created_by: Optional[str] = None
     created_at: Optional[str] = None
     accepted_by: Optional[str] = None
@@ -63,17 +44,14 @@ class PolygonPayload(BaseModel):
 
 class SavePayload(BaseModel):
     image_path: str
-    detect_path: Optional[str] = None
-    segment_path: Optional[str] = None
-    boxes: list[BoxPayload] = []
-    polygons: list[PolygonPayload] = []
+    label_path: Optional[str] = None
+    annotations: list[AnnotationPayload] = []
     # Project root for the audit trail (optional; skipped if absent).
     project_root: Optional[str] = None
-    # The label-file mtime tokens the client loaded, keyed "detect"/"segment". When
-    # present, a write is rejected (409) if the file changed underneath the client —
-    # a concurrent agent or second browser tab — so its edits aren't clobbered.
-    # Omit to skip the check (backward compatible for non-GUI callers).
-    base_mtimes: Optional[dict[str, Optional[str]]] = None
+    # The label-file mtime token the client loaded. When present, a write is rejected (409) if the
+    # file changed underneath the client — a concurrent agent or second browser tab — so its edits
+    # aren't clobbered. Omit to skip the check.
+    base_mtime: Optional[str] = None
     # GUI-set annotator identity (bare name, e.g. "zack"); stamped as created_by ("user:<name>").
     # Omitted by non-GUI callers -> backend falls back to the OS/env user.
     user: Optional[str] = None
@@ -94,7 +72,7 @@ def _guard_label_path(path: Optional[str]) -> None:
 
     Label read/write paths are attacker-controlled, so an exposed deployment
     (``TCIP_IMAGE_ROOTS`` set) must confine them exactly like image serving —
-    otherwise ``write_detect_labels`` is an arbitrary file write/delete primitive.
+    otherwise ``write_annotations`` is an arbitrary file write/delete primitive.
     """
     if not path:
         return
@@ -119,6 +97,23 @@ def _mtime_token(path: Optional[str]) -> Optional[str]:
         return None
 
 
+def _ann_dict(a: Annotation) -> dict:
+    """Serialize an :class:`Annotation` for the canvas (pixel coords + provenance)."""
+    out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
+    geom = a.geometry
+    if isinstance(geom, Polygon):
+        out["points"] = [list(pt) for pt in geom.points]
+    elif isinstance(geom, BBox):
+        out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]
+    if a.score is not None:
+        out["score"] = a.score
+    out["created_by"] = a.created_by
+    out["created_at"] = a.created_at
+    out["accepted_by"] = a.accepted_by
+    out["accepted_at"] = a.accepted_at
+    return out
+
+
 def _audit_gui_write(payload: "SavePayload") -> None:
     """Append a GUI label-write to the project's audit log, mirroring @audited MCP tools.
 
@@ -138,10 +133,8 @@ def _audit_gui_write(payload: "SavePayload") -> None:
                 "source": "gui",
                 "arguments": {
                     "image_path": payload.image_path,
-                    "detect_path": payload.detect_path,
-                    "segment_path": payload.segment_path,
-                    "n_boxes": len(payload.boxes),
-                    "n_polygons": len(payload.polygons),
+                    "label_path": payload.label_path,
+                    "n_annotations": len(payload.annotations),
                 },
                 "status": "ok",
             },
@@ -151,150 +144,86 @@ def _audit_gui_write(payload: "SavePayload") -> None:
 
 
 @router.get("/labels")
-def load_labels(
-    image_path: str,
-    detect_path: Optional[str] = None,
-    segment_path: Optional[str] = None,
-) -> dict:
+def load_labels(image_path: str, label_path: Optional[str] = None) -> dict:
     """Read existing labels for an image and return them in pixel coords."""
     w, h = _image_dims(image_path)
-    _guard_label_path(detect_path)
-    _guard_label_path(segment_path)
-    boxes: list[dict] = []
-    polygons: list[dict] = []
-
-    if detect_path:
-        parsed, _ = parse_detect_labels(detect_path, w, h)
-        for b in parsed:
-            boxes.append({
-                "x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
-                "class_id": b.class_id,
-                "created_by": b.created_by, "created_at": b.created_at,
-                "accepted_by": b.accepted_by, "accepted_at": b.accepted_at,
-            })
-
-    if segment_path:
-        parsed_polys, _ = parse_segment_labels(segment_path, w, h)
-        for poly in parsed_polys:
-            polygons.append({
-                "points": [list(p) for p in poly.points],
-                "class_id": poly.class_id,
-                "created_by": poly.created_by, "created_at": poly.created_at,
-                "accepted_by": poly.accepted_by, "accepted_at": poly.accepted_at,
-            })
-
+    _guard_label_path(label_path)
+    annotations: list[dict] = []
+    if label_path:
+        annotations = [_ann_dict(a) for a in read_annotations(label_path)]
     return {
         "image_path": image_path,
         "img_width": w,
         "img_height": h,
-        "boxes": boxes,
-        "polygons": polygons,
-        # Version tokens the client echoes back on save for the lost-update guard.
-        "base_mtimes": {
-            "detect": _mtime_token(detect_path),
-            "segment": _mtime_token(segment_path),
-        },
+        "annotations": annotations,
+        # Version token the client echoes back on save for the lost-update guard.
+        "base_mtime": _mtime_token(label_path),
     }
 
 
 @router.post("/labels")
 def save_labels(payload: SavePayload) -> dict:
-    """Write labels for an image. Either detect_path or segment_path may be omitted.
+    """Write labels for an image to its single per-image JSON file.
 
-    Empty box/polygon lists are written as ``objects: []`` records (``keep_empty=True``) rather
-    than deleted, so clearing all annotations keeps the record instead of erasing it. That record
-    is not a negative on its own — it trains as one only once the breeder marks the image Complete
+    An empty annotation list is written as ``{"annotations": []}`` (``keep_empty=True``) rather than
+    deleted, so clearing all annotations keeps the record instead of erasing it. That record is not a
+    negative on its own — it trains as one only once the breeder marks the image Complete
     (``image_status.json``); until then it reads as unannotated (CLAUDE.md's negative invariant).
     """
     w, h = _image_dims(payload.image_path)
-    _guard_label_path(payload.detect_path)
-    _guard_label_path(payload.segment_path)
+    _guard_label_path(payload.label_path)
 
-    # Lost-update guard: reject if a label file changed since the client loaded it
-    # (a concurrent agent write or a second browser tab). The client resolves the
-    # 409 by reloading. Omitting base_mtimes skips the check.
-    if payload.base_mtimes is not None:
-        conflicts = [
-            key
-            for key, path in (("detect", payload.detect_path), ("segment", payload.segment_path))
-            if path and _mtime_token(path) != payload.base_mtimes.get(key)
-        ]
-        if conflicts:
-            raise HTTPException(
-                409, {"error": "label file changed since it was loaded", "conflicts": conflicts}
-            )
+    # Lost-update guard: reject if the label file changed since the client loaded it (a concurrent
+    # agent write or a second browser tab). The client resolves the 409 by reloading. Omitting
+    # base_mtime skips the check.
+    if payload.base_mtime is not None and payload.label_path:
+        if _mtime_token(payload.label_path) != payload.base_mtime:
+            raise HTTPException(409, {"error": "label file changed since it was loaded"})
 
-    # Human-authored GT: a round-tripped shape keeps its original created_by (the creator
-    # stays the creator through edits); only shapes with no provenance — new ones — are
-    # stamped to the current annotator. json_io persists all four fields natively.
+    # Human-authored GT: a round-tripped shape keeps its original created_by (the creator stays the
+    # creator through edits); only shapes with no provenance — new ones — are stamped to the current
+    # annotator. json_io persists all four provenance fields natively.
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    def _prov(shape) -> dict:
-        # accepted_* only ride along on round-tripped shapes (created_by present) — a NEW shape
+    def _to_annotation(ap: AnnotationPayload) -> Annotation:
+        geometry = None
+        if ap.points:
+            geometry = Polygon(points=[(float(p[0]), float(p[1])) for p in ap.points])
+        elif ap.bbox is not None:
+            geometry = BBox(*ap.bbox)
+        # accepted_* only ride along on round-tripped shapes (created_by present) — a new shape
         # claiming acceptance would mint review sign-off that never happened.
-        round_tripped = bool(shape.created_by)
-        return {
-            "created_by": shape.created_by or author,
-            "created_at": shape.created_at if round_tripped else now_iso,
-            "accepted_by": shape.accepted_by if round_tripped else None,
-            "accepted_at": shape.accepted_at if round_tripped else None,
-        }
+        round_tripped = bool(ap.created_by)
+        return Annotation(
+            subject=ap.subject,
+            geometry=geometry,
+            attributes=dict(ap.attributes),
+            created_by=ap.created_by or author,
+            created_at=ap.created_at if round_tripped else now_iso,
+            accepted_by=ap.accepted_by if round_tripped else None,
+            accepted_at=ap.accepted_at if round_tripped else None,
+        )
 
-    boxes = [
-        BBox(b.x1, b.y1, b.x2, b.y2, class_id=b.class_id, **_prov(b))
-        for b in payload.boxes
-    ]
-    polygons = [
-        Polygon(points=[tuple(pt) for pt in p.points], class_id=p.class_id, **_prov(p))
-        for p in payload.polygons
-    ]
+    annotations = [_to_annotation(ap) for ap in payload.annotations]
 
-    # Detect is a derived view of segment: when polygons exist, the detect boxes are
-    # their bounding boxes, so editing a polygon can't leave a stale box twin behind
-    # (the two label files stay in lockstep). With no polygons, drawn boxes stand.
-    # Each derived box inherits its source polygon's provenance (derived geometry keeps
-    # the polygon's author — the valley-farm derived:user:* convention).
-    detect_derived = bool(polygons) and payload.detect_path is not None
-    if polygons:
-        detect_boxes = boxes_from_polygons(polygons)
-        with_points = [p for p in polygons if p.points]  # boxes_from_polygons skips empty ones
-        for db, src in zip(detect_boxes, with_points):
-            db.created_by, db.created_at = src.created_by, src.created_at
-            db.accepted_by, db.accepted_at = src.accepted_by, src.accepted_at
-    else:
-        detect_boxes = boxes
-
-    ok = True
-    if payload.detect_path:
+    written = payload.label_path is not None
+    if payload.label_path:
         try:
-            os.makedirs(os.path.dirname(payload.detect_path) or ".", exist_ok=True)
-            write_detect_labels(payload.detect_path, detect_boxes, w, h, keep_empty=True)
+            os.makedirs(os.path.dirname(payload.label_path) or ".", exist_ok=True)
+            write_annotations(payload.label_path, annotations, w, h, keep_empty=True)
         except OSError as exc:
-            raise HTTPException(500, f"could not write detect labels: {exc}") from exc
-
-    if payload.segment_path:
-        try:
-            os.makedirs(os.path.dirname(payload.segment_path) or ".", exist_ok=True)
-            write_segment_labels(payload.segment_path, polygons, w, h, keep_empty=True)
-        except OSError as exc:
-            raise HTTPException(500, f"could not write segment labels: {exc}") from exc
+            raise HTTPException(500, f"could not write labels: {exc}") from exc
 
     _audit_gui_write(payload)
 
     return {
-        "status": "ok" if ok else "partial",
+        "status": "ok",
         "image_path": payload.image_path,
-        "detect_written": payload.detect_path is not None,
-        "segment_written": payload.segment_path is not None,
-        "detect_derived": detect_derived,
-        "n_boxes": len(detect_boxes),
-        "n_polygons": len(polygons),
-        # New version tokens so the client can save again without a reload.
-        "base_mtimes": {
-            "detect": _mtime_token(payload.detect_path),
-            "segment": _mtime_token(payload.segment_path),
-        },
+        "label_written": written,
+        "n_annotations": len(annotations),
+        # New version token so the client can save again without a reload.
+        "base_mtime": _mtime_token(payload.label_path),
     }
 
 
