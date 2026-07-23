@@ -21,9 +21,13 @@ run: :func:`assign_class_ids` maps the names in a training scope to contiguous 0
 their *declared order*, deterministically and re-derivably — so the loader that builds targets,
 the model that predicts, and the code that later decodes a prediction all agree by construction.
 Ordering is the declared ``values`` order and never sorted: ordinal values carry rank, which
-sorting would corrupt. Because the registry file's order could change between training and decode,
-a run also *records* the map it used (the return value of :func:`assign_class_ids`) beside its
-predictions; decode reads that recorded map, never a fresh derivation against an edited registry.
+sorting would corrupt. The registry file's order could change between training and decode, so the
+intent is that a run *records* the map it used and decode reads that recorded map. Today an
+inference run derives its map once from the inference dataset's registry and both records and
+decodes through that one map (consistent within the run); single-class detection is order-invariant,
+so it matches the training map. Persisting the *training* run's map on the checkpoint, so decode is
+bound to the map the model was actually trained with regardless of later registry edits, lands with
+K4/K5 — the point at which multi-value attribute order first makes the two diverge.
 """
 
 from __future__ import annotations
