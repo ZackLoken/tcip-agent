@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from tcip_annotation import json_io
-from tcip_annotation.state import PredBBox
+from tcip_annotation.json_io import write_annotations
+from tcip_annotation.state import Annotation, BBox
 
 from tcip_web.app import app
 
@@ -18,10 +18,16 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def _write_preds(path: Path, cls_ids: list[int]) -> None:
-    """Per-image JSON prediction file with one box per class id (elongation is a class)."""
-    boxes = [PredBBox(1.0, 1.0, 3.0, 3.0, c, confidence=0.9) for c in cls_ids]
-    json_io.write_detect(path, boxes, 8, 8)
+def _write_preds(path: Path, n_detections: int) -> None:
+    """Per-image JSON prediction file with ``n_detections`` name-based catkin detections.
+
+    Elongation is now a name-based *attribute*, not an integer class, and the attribute→fraction
+    bridge is deferred to K4/K5 — so a prediction here is just a detected ``catkin`` (no elongation
+    split), which is exactly what the degenerate count reports until that bridge is wired.
+    """
+    anns = [Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)
+            for _ in range(n_detections)]
+    write_annotations(str(path), anns, 8, 8)
 
 
 def test_plant_mapping_build_with_empty_images(client: TestClient, tmp_path: Path) -> None:
@@ -92,14 +98,12 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
     preds_324 = tmp_path / "preds_3-24-26"
     preds_211.mkdir()
     preds_324.mkdir()
-    # Predictions from the 2-class elongation classifier: class 0 = non-elongated,
-    # class 1 = elongated. Elongation is a class, never a bbox-height proxy.
-    # PLANT_A on 2-11 → 4 detections, none elongated (class 0)
-    _write_preds(preds_211 / "IMG_A.json", [0, 0, 0, 0])
-    # PLANT_B on 2-11 → 2 detections, both elongated (class 1)
-    _write_preds(preds_211 / "IMG_B.json", [1, 1])
-    # PLANT_A on 3-24 → 3 detections, all elongated (class 1)
-    _write_preds(preds_324 / "IMG_A2.json", [1, 1, 1])
+    # Detection totals per (plant, date). Elongation is a name-based attribute whose fraction bridge
+    # is deferred (K4/K5), so the endpoint counts detections and reports no elongation split rather
+    # than fabricating a bloom fraction from unwired predictions.
+    _write_preds(preds_211 / "IMG_A.json", 4)   # PLANT_A on 2-11 → 4 detections
+    _write_preds(preds_211 / "IMG_B.json", 2)   # PLANT_B on 2-11 → 2 detections
+    _write_preds(preds_324 / "IMG_A2.json", 3)  # PLANT_A on 3-24 → 3 detections
 
     resp = client.post(
         "/api/results/per_plant_curves",
@@ -114,16 +118,16 @@ def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: 
     )
     body = resp.json()
     assert body["n_plants"] == 2
-    assert body["elongation_classified"] is True  # class 1 present → real classification
+    # No elongation split is wired yet — the endpoint must not pass raw detections off as a bloom
+    # measurement (measurement-integrity: no fabricated fraction).
+    assert body["elongation_classified"] is False
 
     by_key = {(r["plant_id"], r["date"]): r for r in body["rows"]}
-    # PLANT_A on 2-11: 4 total, 0 elongated → ratio 0
-    assert by_key[("PLANT_A", "2026-02-11")]["ratio"] == 0.0
+    # Detection totals are reported truthfully; the elongated fraction stays 0 (unwired).
     assert by_key[("PLANT_A", "2026-02-11")]["n_total"] == 4
-    # PLANT_B on 2-11: 2 total, 2 elongated → ratio 1.0
-    assert by_key[("PLANT_B", "2026-02-11")]["ratio"] == 1.0
-    # PLANT_A on 3-24: 3 total, 3 elongated → ratio 1.0
-    assert by_key[("PLANT_A", "2026-03-24")]["ratio"] == 1.0
+    assert by_key[("PLANT_A", "2026-02-11")]["ratio"] == 0.0
+    assert by_key[("PLANT_B", "2026-02-11")]["n_total"] == 2
+    assert by_key[("PLANT_A", "2026-03-24")]["n_total"] == 3
 
 
 def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp_path: Path) -> None:
@@ -151,8 +155,8 @@ def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp
     )
     preds = tmp_path / "preds"
     preds.mkdir()
-    # Raw single-class catkin detections: class 0 only, no elongation call.
-    _write_preds(preds / "IMG_A.json", [0, 0])
+    # Raw catkin detections, no elongation attribute wired.
+    _write_preds(preds / "IMG_A.json", 2)
 
     body = client.post(
         "/api/results/per_plant_curves",
@@ -163,7 +167,7 @@ def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp
         },
     ).json()
     assert body["elongation_classified"] is False
-    assert body["classes_seen"] == [0]
+    assert body["classes_seen"] == []  # no elongation class ids surface until the K4/K5 bridge lands
 
 
 def test_onset_dates_finds_crossings(client: TestClient) -> None:
