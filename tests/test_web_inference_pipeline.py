@@ -8,25 +8,30 @@ def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     import json
 
     from tcip_annotation import json_io
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import ClassRegistry, Subject
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
+    id_map = class_registry.assign_class_ids(
+        ClassRegistry(subjects=(Subject(name="catkin"),)), "catkin")  # {catkin: 0}
     p = tmp_path / "img.json"
     write_predictions_json(p, {
         "width": 100, "height": 100,
         "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
-    })
+    }, id_map=id_map)
     data = json.loads(p.read_text())
-    assert data["objects"][0]["category_id"] == 0          # 1-indexed label 1 -> class 0
-    assert data["objects"][0]["bbox"] == [10.0, 10.0, 20.0, 20.0]
-    assert data["objects"][0]["score"] == pytest.approx(0.9)
-    boxes, _ = json_io.read_detect_pred(p)                  # symmetric read
-    assert len(boxes) == 1 and boxes[0].confidence == pytest.approx(0.9)
+    ann = data["annotations"][0]
+    assert ann["subject"] == "catkin"                       # 1-indexed label 1 -> id 0 -> "catkin"
+    assert ann["bbox"] == [10.0, 10.0, 20.0, 20.0]
+    assert ann["score"] == pytest.approx(0.9)
+    preds = json_io.read_annotations(p)                     # symmetric read
+    assert len(preds) == 1 and preds[0].score == pytest.approx(0.9)
 
-    # Negative invariant: a zero-detection image still yields a {"objects": []} confirmed negative.
+    # Negative invariant: a zero-detection image still yields an {"annotations": []} record.
     neg = tmp_path / "empty.json"
     write_predictions_json(neg, {"width": 100, "height": 100,
                                  "boxes": [], "scores": [], "labels": [], "count": 0})
-    assert json.loads(neg.read_text())["objects"] == []
+    assert json.loads(neg.read_text())["annotations"] == []
 
 
 def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch):
@@ -72,7 +77,7 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     assert captured["tile"] is True                 # sahi=True -> pipeline tiling
     assert captured["postprocess"] == "nmm"         # the GUI's tile-merge choice reaches inference
     import json
-    obj = json.loads((out_dir / "img.json").read_text())["objects"][0]
-    assert obj["category_id"] == 0                   # 1-indexed label 1 -> class 0
+    obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
+    assert obj["subject"] == "0"                     # no recorded id_map -> id 0 stringified honestly
     assert obj["score"] == pytest.approx(0.9)        # per-object confidence preserved
     assert obj["bbox"] == [10.0, 10.0, 20.0, 20.0]   # pixel COCO xywh from xyxy [10,10,30,30]
