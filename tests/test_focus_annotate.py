@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_annotation import json_io
-from tcip_annotation.state import BBox, Polygon
+from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import annotation_dir, image_dir
 from tcip_mcp.tools.annotation_tools import focus
 
@@ -22,17 +22,17 @@ def _scene(root: Path, date: str, images: list[str]) -> None:
         (idir / name).write_bytes(b"x")  # the tool lists by suffix, never opens
 
 
-def _label(root: Path, trait: str, date: str, task: str, stem: str, classes: list[int]) -> None:
-    # Write a per-image JSON label. An empty `classes` writes a present {"objects": []}
-    # (confirmed negative); a non-empty list writes one shape per class id.
-    d = Path(annotation_dir(root, trait, date, task))
-    path = str(d / f"{stem}.json")
-    if task == "segment":
-        polys = [Polygon([(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)], c) for c in classes]
-        json_io.write_segment(path, polys, 100, 100, keep_empty=True)
-    else:
-        boxes = [BBox(10.0, 10.0, 20.0, 20.0, c) for c in classes]
-        json_io.write_detect(path, boxes, 100, 100, keep_empty=True)
+def _label(root: Path, subject: str, date: str, task: str, stem: str, count: int) -> None:
+    # Write the one per-image JSON label (all subjects, name-based). count==0 writes a present
+    # {"annotations": []} (confirmed negative); count>0 writes `count` shapes of `subject`, polygon
+    # geometry when task=='segment' else box, so focus infers the mode from the frame's own geometry.
+    d = Path(annotation_dir(root, date))
+    anns = []
+    for _ in range(count):
+        geom = (Polygon([(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]) if task == "segment"
+                else BBox(10.0, 10.0, 20.0, 20.0))
+        anns.append(Annotation(subject=subject, geometry=geom))
+    json_io.write_annotations(str(d / f"{stem}.json"), anns, 100, 100, keep_empty=True)
 
 
 def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -> None:
@@ -41,8 +41,8 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -
     imgs = [f"IMG_{i:04d}.JPG" for i in range(5)]  # 0000..0004
     _scene(root, date, imgs)
     # bush polygons (segment) on the 3rd and 4th image only.
-    _label(root, "bush", date, "segment", "IMG_0002", [0])
-    _label(root, "bush", date, "segment", "IMG_0003", [0])
+    _label(root, "bush", date, "segment", "IMG_0002", 1)
+    _label(root, "bush", date, "segment", "IMG_0003", 1)
 
     res = focus("annotate", str(root), str(root), "bush", date)
 
@@ -50,7 +50,7 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -
     assert res["image_index"] == 2  # first non-empty label
     assert res["image"] == "IMG_0002.JPG"
     assert res["mode"] == "polygon"  # inferred from segment labels
-    assert res["active_class"] == 0  # first class id on the focused frame
+    assert res["subject"] == "bush"  # the name-based rendering identity the tool surfaces
     assert res["n_images"] == 5
     assert res["n_annotated"] == 2
     # Delivery depends on whether a GUI backend happens to be listening; the resolution
@@ -58,18 +58,23 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -
     assert isinstance(res["delivered"], bool)
 
 
-def test_focus_annotate_resolves_active_class_from_the_frame(tmp_path: Path) -> None:
-    # Labels on the focused frame are class 1 — the canvas only renders the active class, so
-    # the tool must surface active_class=1 (else the frame shows blank even in the right mode).
+def test_focus_annotate_scopes_annotated_to_the_requested_subject(tmp_path: Path) -> None:
+    # Name-based schema: one file per image holds every subject. IMG_0001 is labeled only for 'leaf',
+    # IMG_0002 only for 'catkin'. Focusing on 'leaf' must land on IMG_0001 (its subject's frame) in
+    # polygon mode and count only leaf's frame — the tool scopes 'annotated' to the requested subject
+    # (the name-based replacement for the old per-frame active-class resolution).
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
     _scene(root, date, imgs)
-    _label(root, "bush", date, "segment", "IMG_0001", [1])
+    _label(root, "catkin", date, "detect", "IMG_0002", 1)
+    _label(root, "leaf", date, "segment", "IMG_0001", 1)
 
-    res = focus("annotate", str(root), str(root), "bush", date)
-    assert res["image_index"] == 1
-    assert res["active_class"] == 1
+    res = focus("annotate", str(root), str(root), "leaf", date)
+    assert res["image_index"] == 1  # leaf's frame, not catkin's
+    assert res["mode"] == "polygon"  # from leaf's polygon geometry on that frame
+    assert res["subject"] == "leaf"
+    assert res["n_annotated"] == 1  # only leaf's frame counts for leaf
 
 
 def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(tmp_path: Path) -> None:
@@ -79,13 +84,13 @@ def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(tmp_
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(8)]
     _scene(root, date, imgs)
-    _label(root, "bush", date, "segment", "IMG_0002", [0])
-    _label(root, "bush", date, "detect", "IMG_0007", [3])
+    _label(root, "bush", date, "segment", "IMG_0002", 1)
+    _label(root, "bush", date, "detect", "IMG_0007", 1)
 
     res = focus("annotate", str(root), str(root), "bush", date, image_index=7)
     assert res["image_index"] == 7
     assert res["mode"] == "box"  # from frame 7's detect label, not frame 2's segment
-    assert res["active_class"] == 3
+    assert res["subject"] == "bush"
 
 
 def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(tmp_path: Path) -> None:
@@ -98,7 +103,7 @@ def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(tmp_pa
     (idir / "IMG_0000.JPG").write_bytes(b"x")
     (idir / "IMG_0001.png").mkdir()  # a directory with an image suffix — must be ignored
     (idir / "IMG_0002.JPG").write_bytes(b"x")
-    _label(root, "bush", date, "segment", "IMG_0002", [0])
+    _label(root, "bush", date, "segment", "IMG_0002", 1)
 
     res = focus("annotate", str(root), str(root), "bush", date)
     assert res["n_images"] == 2  # the directory is not counted
@@ -111,7 +116,7 @@ def test_focus_annotate_infers_box_mode_from_detect_labels(tmp_path: Path) -> No
     date = "2026-02-11"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
     _scene(root, date, imgs)
-    _label(root, "catkin", date, "detect", "IMG_0001", [0])
+    _label(root, "catkin", date, "detect", "IMG_0001", 1)
 
     res = focus("annotate", str(root), str(root), "catkin", date)
     assert res["image_index"] == 1
@@ -124,8 +129,8 @@ def test_focus_annotate_empty_label_is_not_a_focus_target(tmp_path: Path) -> Non
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
     _scene(root, date, imgs)
-    _label(root, "bush", date, "segment", "IMG_0000", [])  # empty negative ({"objects": []})
-    _label(root, "bush", date, "segment", "IMG_0002", [0])
+    _label(root, "bush", date, "segment", "IMG_0000", 0)  # empty negative ({"annotations": []})
+    _label(root, "bush", date, "segment", "IMG_0002", 1)
 
     res = focus("annotate", str(root), str(root), "bush", date)
     assert res["image_index"] == 2  # skipped the empty-negative frame 0
@@ -137,7 +142,7 @@ def test_focus_annotate_explicit_mode_and_index_override(tmp_path: Path) -> None
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(4)]
     _scene(root, date, imgs)
-    _label(root, "bush", date, "segment", "IMG_0003", [0])
+    _label(root, "bush", date, "segment", "IMG_0003", 1)
 
     res = focus("annotate", str(root), str(root), "bush", date, mode="box", image_index=1)
     assert res["image_index"] == 1  # explicit override
