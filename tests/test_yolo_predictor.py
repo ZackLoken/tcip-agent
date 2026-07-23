@@ -52,9 +52,10 @@ def test_build_result_round_trips_through_json_export(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     r = build_result([_fake_pred(0, 0.8, (40, 40, 60, 60))], "img.jpg", 100, 100)
-    write_predictions_json(tmp_path / "img.json", r)
-    obj = json.loads((tmp_path / "img.json").read_text())["objects"][0]
-    assert obj["category_id"] == 0                 # 1-indexed dict label 1 -> 0-indexed class 0
+    # The run's recorded name->id map decodes the 1-indexed label back to its subject NAME on disk.
+    write_predictions_json(tmp_path / "img.json", r, id_map={"catkin": 0})
+    obj = json.loads((tmp_path / "img.json").read_text())["annotations"][0]
+    assert obj["subject"] == "catkin"              # 1-indexed dict label 1 -> class 0 -> "catkin"
     assert obj["score"] == 0.8
     assert obj["bbox"] == [40.0, 40.0, 20.0, 20.0]  # pixel COCO xywh from xyxy [40,40,60,60]
 
