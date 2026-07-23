@@ -17,7 +17,7 @@ export interface AnnotateFocusData {
   date?: string | null;
   image_index?: number;
   mode?: "box" | "polygon";
-  active_class?: number;
+  active_subject?: string | null;
 }
 
 export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
@@ -47,9 +47,9 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
     void api.dataset.nav(d.image_index).catch(() => {});
   }
   if (d.mode) store.setMode(d.mode);
-  // The canvas renders only shapes of the active class, so set it to the class present on the
-  // focused frame — otherwise a frame labelled with a non-zero class shows a blank canvas even
-  // in the right mode (activeClass defaults to 0).
-  if (typeof d.active_class === "number") store.setActiveClass(d.active_class);
+  // The canvas renders only shapes of the active subject, so set it to the subject present on the
+  // focused frame — otherwise a frame labelled for another subject shows a blank canvas even in
+  // the right mode.
+  if (d.active_subject) store.setActiveSubject(d.active_subject);
   store.setActiveTab("annotate");
 }
