@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from tcip_annotation import (
+    Annotation,
     BBox,
-    PredBBox,
     Polygon,
     ReviewContext,
     ReviewEngine,
@@ -18,11 +18,7 @@ from tcip_annotation import (
 
 @pytest.fixture
 def engine(tmp_path: Path) -> ReviewEngine:
-    return ReviewEngine(
-        state_dir=tmp_path,
-        class_names={0: "catkin", 1: "bud"},
-        current_user="alice",
-    )
+    return ReviewEngine(state_dir=tmp_path, current_user="alice")
 
 
 @pytest.fixture
@@ -31,16 +27,14 @@ def ctx() -> ReviewContext:
         img_name="IMG_0133.JPG",
         img_width=1000,
         img_height=800,
-        gt_boxes=[
-            BBox(100, 100, 200, 200, class_id=0),
-            BBox(400, 400, 500, 500, class_id=0),
+        gt=[
+            Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200)),
+            Annotation(subject="catkin", geometry=BBox(400, 400, 500, 500)),
         ],
-        gt_polygons=[],
-        pred_boxes=[
-            PredBBox(105, 105, 205, 205, class_id=0, confidence=0.9),  # matches gt[0]
-            PredBBox(700, 700, 800, 800, class_id=0, confidence=0.8),  # FP
+        preds=[
+            Annotation(subject="catkin", geometry=BBox(105, 105, 205, 205), score=0.9),  # matches gt[0]
+            Annotation(subject="catkin", geometry=BBox(700, 700, 800, 800), score=0.8),  # FP
         ],
-        pred_polygons=[],
     )
 
 
@@ -74,10 +68,7 @@ def test_verdict_writes_only_its_own_shard(engine: ReviewEngine, ctx: ReviewCont
     other_shard = tmp_path / "review" / "IMG_OTHER.JPG.json"
     before = other_shard.stat().st_mtime_ns
 
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     engine.record_detection_action(dets[0], ctx, action="accepted")
 
@@ -97,20 +88,14 @@ def test_verdict_calls_shard_writer_exactly_once(
 
     monkeypatch.setattr(ReviewEngine, "_save_image", spy)
 
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     engine.record_detection_action(dets[0], ctx, action="accepted")
     assert calls == [ctx.img_name]  # exactly one shard write, for the touched image only
 
 
 def test_verdicts_across_images_produce_one_shard_each(engine: ReviewEngine, ctx: ReviewContext) -> None:
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     engine.record_detection_action(dets[0], ctx, action="accepted")
     engine.mark_image_reviewed("IMG_0200.JPG")
@@ -123,10 +108,7 @@ def test_verdicts_across_images_produce_one_shard_each(engine: ReviewEngine, ctx
 
 
 def test_raw_state_round_trips_through_reload(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     for det in dets:
         engine.record_detection_action(det, ctx, action="accepted")
@@ -161,14 +143,7 @@ def test_shard_keys_colliding_after_sanitization_stay_distinct(tmp_path: Path) -
 
 
 def test_build_detection_list_tp_fp_fn(engine: ReviewEngine, ctx: ReviewContext) -> None:
-    matches = compute_matches(
-        gt_boxes=ctx.gt_boxes,
-        gt_polygons=ctx.gt_polygons,
-        pred_boxes=ctx.pred_boxes,
-        pred_polygons=ctx.pred_polygons,
-        iou_threshold=0.5,
-        conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     assert len(matches["tp"]) == 1
     assert len(matches["fp"]) == 1
     assert len(matches["fn"]) == 1
@@ -179,10 +154,7 @@ def test_build_detection_list_tp_fp_fn(engine: ReviewEngine, ctx: ReviewContext)
 
 
 def test_build_detection_list_filter_type(engine: ReviewEngine, ctx: ReviewContext) -> None:
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     tp_only = engine.build_detection_list(ctx, matches, filter_type="tp")
     assert len(tp_only) == 1 and tp_only[0].det_type == "tp"
 
@@ -191,21 +163,15 @@ def test_build_detection_list_filter_type(engine: ReviewEngine, ctx: ReviewConte
 
 
 def test_build_detection_list_filter_class(engine: ReviewEngine, ctx: ReviewContext) -> None:
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
-    all_class_0 = engine.build_detection_list(ctx, matches, filter_class=0)
-    assert all(d.class_id == 0 for d in all_class_0)
-    none = engine.build_detection_list(ctx, matches, filter_class=99)
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
+    all_catkin = engine.build_detection_list(ctx, matches, filter_class="catkin")
+    assert all(d.class_name == "catkin" for d in all_catkin)
+    none = engine.build_detection_list(ctx, matches, filter_class="nonexistent")
     assert none == []
 
 
 def test_record_and_find_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> None:
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     target = next(d for d in dets if d.det_type == "tp")
 
@@ -222,10 +188,7 @@ def test_record_and_find_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> N
 
 
 def test_record_overrides_existing(engine: ReviewEngine, ctx: ReviewContext) -> None:
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     target = dets[0]
     engine.record_detection_action(target, ctx, action="accepted")
@@ -241,10 +204,7 @@ def test_record_overrides_existing(engine: ReviewEngine, ctx: ReviewContext) -> 
 def test_build_detection_list_never_hides_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> None:
     # Review status is image-level navigation, not per-detection visibility: reviewing a detection
     # must never drop it from the walkable list (else it can't be re-inspected or un-done).
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     before = len(dets)
     engine.record_detection_action(dets[0], ctx, action="accepted")
@@ -254,10 +214,7 @@ def test_build_detection_list_never_hides_reviewed(engine: ReviewEngine, ctx: Re
 
 def test_get_all_image_statuses(engine: ReviewEngine, ctx: ReviewContext) -> None:
     assert engine.get_all_image_statuses() == {}  # nothing touched yet
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     engine.record_detection_action(dets[0], ctx, action="accepted")  # -> "started"
     engine.mark_image_reviewed("IMG_OTHER.JPG")  # -> "completed"
@@ -267,10 +224,7 @@ def test_get_all_image_statuses(engine: ReviewEngine, ctx: ReviewContext) -> Non
 
 
 def test_check_image_review_complete(engine: ReviewEngine, ctx: ReviewContext) -> None:
-    matches = compute_matches(
-        ctx.gt_boxes, ctx.gt_polygons, ctx.pred_boxes, ctx.pred_polygons,
-        iou_threshold=0.5, conf_threshold=0.25,
-    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     # Accept each detection one at a time
     for det in dets[:-1]:
@@ -283,37 +237,41 @@ def test_check_image_review_complete(engine: ReviewEngine, ctx: ReviewContext) -
 
 
 def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -> None:
-    detect_dir = tmp_path / "detect"
-    detect_dir.mkdir()
-    orig = '{"objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}'
-    (detect_dir / "IMG_0001.json").write_text(orig)
-    assert engine.backup_original_labels(detect_dir) == 1
-    backup = detect_dir / ".original" / "IMG_0001.json"
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir()
+    orig = '{"annotations": [{"subject": "catkin", "bbox": [1, 1, 8, 8]}]}'
+    (labels_dir / "IMG_0001.json").write_text(orig)
+    assert engine.backup_original_labels(labels_dir) == 1
+    backup = labels_dir / ".original" / "IMG_0001.json"
     assert backup.read_text() == orig
 
     # Mutate the label on disk; a later backup must not overwrite its baseline
-    (detect_dir / "IMG_0001.json").write_text('{"objects": []}')
-    assert engine.backup_original_labels(detect_dir) == 0
+    (labels_dir / "IMG_0001.json").write_text('{"annotations": []}')
+    assert engine.backup_original_labels(labels_dir) == 0
     assert backup.read_text() == orig  # still original
 
     # A label added after the first backup still gets its own baseline captured
-    second = '{"objects": [{"category_id": 0, "bbox": [3, 3, 7, 7]}]}'
-    (detect_dir / "IMG_0002.json").write_text(second)
-    assert engine.backup_original_labels(detect_dir) == 1
-    assert (detect_dir / ".original" / "IMG_0002.json").read_text() == second
+    second = '{"annotations": [{"subject": "catkin", "bbox": [3, 3, 4, 4]}]}'
+    (labels_dir / "IMG_0002.json").write_text(second)
+    assert engine.backup_original_labels(labels_dir) == 1
+    assert (labels_dir / ".original" / "IMG_0002.json").read_text() == second
     assert backup.read_text() == orig
 
 
-def test_save_gt_writes_both_files(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
-    from tcip_annotation.json_io import read_detect, read_segment
+def test_save_gt_writes_merged_file(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
+    from tcip_annotation.json_io import read_annotations
 
-    ctx.gt_boxes = [BBox(100, 100, 200, 200, class_id=0)]
-    ctx.gt_polygons = [Polygon([(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)], class_id=1)]
-    det_path = tmp_path / "out_detect" / "IMG.json"
-    seg_path = tmp_path / "out_segment" / "IMG.json"
-    ok = engine.save_gt(ctx, detect_path=str(det_path), segment_path=str(seg_path))
+    # One merged per-image file holds every subject — a box and a polygon together.
+    ctx.gt = [
+        Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200)),
+        Annotation(subject="leaf", geometry=Polygon([(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)])),
+    ]
+    path = tmp_path / "out" / "IMG.json"
+    ok = engine.save_gt(ctx, path=str(path))
     assert ok
-    det_boxes, _ = read_detect(str(det_path))
-    assert len(det_boxes) == 1 and det_boxes[0].class_id == 0
-    seg_polys, _ = read_segment(str(seg_path))
-    assert len(seg_polys) == 1 and seg_polys[0].class_id == 1
+    read_back = read_annotations(str(path))
+    assert len(read_back) == 2
+    box_ann = next(a for a in read_back if isinstance(a.geometry, BBox))
+    assert box_ann.subject == "catkin"
+    poly_ann = next(a for a in read_back if isinstance(a.geometry, Polygon))
+    assert poly_ann.subject == "leaf"
