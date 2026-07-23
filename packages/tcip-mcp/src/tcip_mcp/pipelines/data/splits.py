@@ -23,7 +23,6 @@ splits), annotation-balanced, and deterministic in ``seed``.
 
 from __future__ import annotations
 
-import json
 import random
 import re
 from collections import defaultdict
@@ -66,19 +65,17 @@ def count_lines(label_path: str | Path) -> int:
 
 
 def count_label_lines(labels_dir: str | Path, stem: str) -> int:
-    """Object count for ``stem`` from its canonical per-image ``<stem>.json``.
+    """Annotation count for ``stem`` from its name-based per-image ``<stem>.json``.
 
-    Drives stratified splitting, so a stem whose labels cannot be read scores 0 foreground.
+    Drives stratified splitting (a foreground-density proxy across all subjects in the file), so a
+    stem whose labels cannot be read scores 0 foreground.
     """
+    from tcip_annotation import json_io
+
     jp = Path(labels_dir) / f"{stem}.json"
     if not jp.is_file():
         return 0
-    try:
-        data = json.loads(jp.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return 0
-    objs = data.get("objects") if isinstance(data, dict) else None
-    return len(objs) if isinstance(objs, list) else 0
+    return len(json_io.read_annotations(str(jp)))
 
 
 def group_balanced_split(
