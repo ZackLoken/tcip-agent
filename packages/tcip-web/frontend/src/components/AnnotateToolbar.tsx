@@ -1,6 +1,6 @@
 /**
  * Annotate-tab context toolbar. Two rows matching the approved mockup:
- *   Row 1  — draw mode (Box/Polygon), the class picker pill, an Editor toggle, then the
+ *   Row 1  — draw mode (Box/Polygon), the subject picker pill, an Editor toggle, then the
  *            nav filter, image navigation, and the Complete checkbox.
  *   Editor — a second toolbar (collapsed by default, remembered) holding the tools you
  *            flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
@@ -9,8 +9,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { classesApi, type ImageStatus } from "@/api/classes";
-import { ColorPickerModal } from "@/components/ColorPickerModal";
+import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useStore } from "@/store";
 
@@ -70,12 +69,13 @@ export function AnnotateToolbar({
   const dataset = useStore((s) => s.gui.dataset);
   const mode = useStore((s) => s.gui.mode);
   const setMode = useStore((s) => s.setMode);
-  const activeClass = useStore((s) => s.gui.active_class);
-  const setActiveClass = useStore((s) => s.setActiveClass);
-  const classes = useStore((s) => s.classes.list);
-  const upsertClass = useStore((s) => s.upsertClass);
+  const activeSubject = useStore((s) => s.gui.active_subject);
+  const setActiveSubject = useStore((s) => s.setActiveSubject);
+  const registry = useStore((s) => s.registry.subjects);
+  const setRegistry = useStore((s) => s.setRegistry);
   const canvasBoxes = useStore((s) => s.canvas.boxes);
   const canvasPolygons = useStore((s) => s.canvas.polygons);
+  const canvasImageAnnotations = useStore((s) => s.canvas.imageAnnotations);
   const annotateUi = useStore((s) => s.annotateUi);
   const setVisible = useStore((s) => s.setVisible);
   const setSnap = useStore((s) => s.setSnap);
@@ -85,6 +85,8 @@ export function AnnotateToolbar({
   const setImageStatus = useStore((s) => s.setImageStatus);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
+
+  const subjectNames = useMemo(() => Object.keys(registry), [registry]);
 
   // Editor shelf: collapsed by default, remembered across sessions.
   const [editorOpen, setEditorOpen] = useState<boolean>(() => {
@@ -102,18 +104,19 @@ export function AnnotateToolbar({
     }
   }, [editorOpen]);
 
-  const [classMenuOpen, setClassMenuOpen] = useState(false);
-  const [pickerClassId, setPickerClassId] = useState<number | null>(null);
+  const [subjectMenuOpen, setSubjectMenuOpen] = useState(false);
   const [counterDraft, setCounterDraft] = useState<string | null>(null);
   const counterRef = useRef<HTMLInputElement | null>(null);
 
-  // Counts per class from the current canvas state (box mode counts boxes, else polygons).
-  const classCounts = useMemo(() => {
-    const counts = new Map<number, number>();
-    const src = mode === "box" ? canvasBoxes : canvasPolygons;
-    for (const s of src) counts.set(s.class_id, (counts.get(s.class_id) ?? 0) + 1);
+  // Counts per subject across everything on the current canvas (boxes + polygons + ratings).
+  const subjectCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    const bump = (subj: string) => counts.set(subj, (counts.get(subj) ?? 0) + 1);
+    for (const b of canvasBoxes) bump(b.subject);
+    for (const p of canvasPolygons) bump(p.subject);
+    for (const a of canvasImageAnnotations) bump(a.subject);
     return counts;
-  }, [mode, canvasBoxes, canvasPolygons]);
+  }, [canvasBoxes, canvasPolygons, canvasImageAnnotations]);
 
   const currentImage = dataset.image_list[dataset.current_image_index] ?? "—";
   const currentStatus: ImageStatus | undefined = currentImage
@@ -126,71 +129,40 @@ export function AnnotateToolbar({
     loadedImagePath === `${dataset.dataset_root}/images/${dataset.date}/${currentImage}`;
   const nav = useImageNav();
 
-  const activeEntry = classes.find((c) => c.id === activeClass);
-  const activeCount = classCounts.get(activeClass) ?? 0;
+  const activeCount = activeSubject ? (subjectCounts.get(activeSubject) ?? 0) : 0;
 
-  async function addNewClass() {
-    const name = window.prompt("New class name:");
+  async function addNewSubject() {
+    const name = window.prompt("New subject name:");
     if (!name) return;
     const trimmed = name.trim();
     if (!trimmed) return;
-    const existing = classes.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
-    if (existing) {
-      setActiveClass(existing.id);
+    if (subjectNames.includes(trimmed)) {
+      setActiveSubject(trimmed);
       return;
     }
-    const nextId = classes.length ? Math.max(...classes.map((c) => c.id)) + 1 : 0;
-    try {
-      const { color } = await classesApi.autoColor(nextId);
-      const entry = { id: nextId, name: trimmed, color };
-      upsertClass(entry);
-      setActiveClass(nextId);
-      if (dataset.project_root) {
-        await classesApi.save(
-          dataset.project_root,
-          dataset.subject,
-          [...classes, entry],
-          dataset.dataset_root,
-          dataset.annotations_detect_dir,
-          dataset.annotations_segment_dir,
-        );
-      }
-    } catch (e) {
-      useStore
-        .getState()
-        .pushToast(`Could not add class: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
-  async function commitColor(newColor: string) {
-    const id = pickerClassId;
-    setPickerClassId(null);
-    const entry = classes.find((c) => c.id === id);
-    if (!entry) return;
-    const updated = { ...entry, color: newColor };
-    upsertClass(updated);
+    const next = { ...registry, [trimmed]: {} };
+    setRegistry(next);
+    setActiveSubject(trimmed);
     if (dataset.project_root) {
-      const next = classes.map((c) => (c.id === entry.id ? updated : c));
       try {
         await classesApi.save(
           dataset.project_root,
-          dataset.subject,
           next,
           dataset.dataset_root,
-          dataset.annotations_detect_dir,
-          dataset.annotations_segment_dir,
+          dataset.annotations_dir,
         );
       } catch (e) {
         useStore
           .getState()
-          .pushToast(`Could not save class color: ${e instanceof Error ? e.message : String(e)}`);
+          .pushToast(`Could not add subject: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
   }
 
   async function toggleComplete(next: boolean) {
     if (!currentImage || !dataset.project_root) return;
-    const hasContent = canvasBoxes.length + canvasPolygons.length > 0;
+    const hasContent =
+      canvasBoxes.length + canvasPolygons.length + canvasImageAnnotations.length > 0;
     const newStatus: ImageStatus = next
       ? hasContent
         ? "complete"
@@ -214,11 +186,9 @@ export function AnnotateToolbar({
     }
   }
 
-  const pickerEntry = classes.find((c) => c.id === pickerClassId);
-
   return (
     <div className="shrink-0 border-b border-tcip-border bg-tcip-panel">
-      {/* Row 1 — mode + class + Editor toggle, then navigation */}
+      {/* Row 1 — mode + subject + Editor toggle, then navigation */}
       <div className="h-topbar flex items-center gap-3 px-3">
         {/* Draw mode */}
         <div
@@ -267,21 +237,20 @@ export function AnnotateToolbar({
           </button>
         </div>
 
-        {/* Class picker pill */}
+        {/* Subject picker pill */}
         <div className="relative">
           <button
             type="button"
-            onClick={() => setClassMenuOpen((o) => !o)}
-            aria-expanded={classMenuOpen}
-            disabled={!activeEntry}
-            className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-[12px] text-tcip-fg hover:border-tcip-border-hover disabled:opacity-50"
+            onClick={() => setSubjectMenuOpen((o) => !o)}
+            aria-expanded={subjectMenuOpen}
+            className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-[12px] text-tcip-fg hover:border-tcip-border-hover"
           >
             <span
               className="h-2.5 w-2.5 rounded-sm"
-              style={{ background: activeEntry?.color ?? "#666" }}
+              style={{ background: activeSubject ? subjectColor(activeSubject) : "#666" }}
               aria-hidden
             />
-            <span className="font-semibold">{activeEntry?.name ?? "—"}</span>
+            <span className="font-semibold">{activeSubject ?? "select subject"}</span>
             <span className="font-mono text-tcip-muted">({activeCount})</span>
             <svg viewBox="0 0 10 10" width="9" height="9" fill="none" aria-hidden="true">
               <path
@@ -294,34 +263,28 @@ export function AnnotateToolbar({
               />
             </svg>
           </button>
-          {classMenuOpen && (
+          {subjectMenuOpen && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => setClassMenuOpen(false)} />
+              <div className="fixed inset-0 z-10" onClick={() => setSubjectMenuOpen(false)} />
               <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-tcip-border bg-tcip-panel py-1 text-[12px] shadow-lg">
-                {classes.map((c) => (
-                  <div key={c.id} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">
-                    <button
-                      type="button"
-                      title="Edit colour"
-                      aria-label={`Edit colour for ${c.name}`}
-                      onClick={() => {
-                        setClassMenuOpen(false);
-                        setPickerClassId(c.id);
-                      }}
+                {subjectNames.map((name) => (
+                  <div key={name} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">
+                    <span
                       className="h-3.5 w-3.5 shrink-0 rounded-sm border border-tcip-border"
-                      style={{ background: c.color }}
+                      style={{ background: subjectColor(name) }}
+                      aria-hidden
                     />
                     <button
                       type="button"
                       onClick={() => {
-                        setActiveClass(c.id);
-                        setClassMenuOpen(false);
+                        setActiveSubject(name);
+                        setSubjectMenuOpen(false);
                       }}
                       className="flex flex-1 items-center py-1 text-left text-tcip-fg"
                     >
-                      <span className={c.id === activeClass ? "font-semibold" : ""}>{c.name}</span>
+                      <span className={name === activeSubject ? "font-semibold" : ""}>{name}</span>
                       <span className="ml-auto font-mono text-tcip-muted">
-                        {classCounts.get(c.id) ?? 0}
+                        {subjectCounts.get(name) ?? 0}
                       </span>
                     </button>
                   </div>
@@ -330,12 +293,12 @@ export function AnnotateToolbar({
                   <button
                     type="button"
                     onClick={() => {
-                      setClassMenuOpen(false);
-                      void addNewClass();
+                      setSubjectMenuOpen(false);
+                      void addNewSubject();
                     }}
                     className="w-full px-2 py-1 text-left text-tcip-accent hover:bg-tcip-hover"
                   >
-                    + New class
+                    + New subject
                   </button>
                 </div>
               </div>
@@ -505,15 +468,6 @@ export function AnnotateToolbar({
             </button>
           </div>
         </div>
-      )}
-
-      {pickerEntry && (
-        <ColorPickerModal
-          title={`Color for ${pickerEntry.id}: ${pickerEntry.name}`}
-          initialColor={pickerEntry.color}
-          onSubmit={commitColor}
-          onCancel={() => setPickerClassId(null)}
-        />
       )}
     </div>
   );
