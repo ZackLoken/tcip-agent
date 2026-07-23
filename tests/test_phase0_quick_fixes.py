@@ -36,16 +36,16 @@ def test_export_predictions_writes_json(tmp_path, monkeypatch):
 
     out = tmp_path / "out"
     export_predictions(str(ckpt), str(images_dir), str(out))
-    # export_predictions writes per-image COCO/JSON, not YOLO text lines.
+    # export_predictions writes the name-based per-image JSON, not YOLO text lines.
     data = json.loads((out / "img.json").read_text())
     assert data["image"] == "img"
     assert (data["width"], data["height"]) == (100, 100)
-    objs = data["objects"]
-    assert len(objs) == 1                              # (was an empty file before the fix)
-    assert objs[0]["category_id"] == 0                 # 1-indexed label 1 -> class max(1-1,0)=0
-    assert objs[0]["score"] == pytest.approx(0.9)      # confidence
+    anns = data["annotations"]
+    assert len(anns) == 1                              # (was an empty file before the fix)
+    assert anns[0]["subject"] == "0"                   # label 1 -> id 0; no run id_map -> stringified id
+    assert anns[0]["score"] == pytest.approx(0.9)      # confidence
     # COCO xywh (pixel) from pixel-xyxy box [10,10,30,30].
-    assert objs[0]["bbox"] == pytest.approx([10.0, 10.0, 20.0, 20.0])
+    assert anns[0]["bbox"] == pytest.approx([10.0, 10.0, 20.0, 20.0])
 
 
 # --------------------------------------------------------------------------
@@ -82,15 +82,16 @@ def test_export_predictions_redirects_when_bucket_has_verdicts(tmp_path, monkeyp
     out.mkdir()
     # A prediction file already sits in the bucket, and a human verdict is recorded against it.
     (out / "img.json").write_text(
-        json.dumps({"image": "img", "width": 100, "height": 100, "objects": []}))
+        json.dumps({"image": "img", "width": 100, "height": 100, "annotations": []}))
     from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
-    from tcip_annotation.state import PredBBox
+    from tcip_annotation.state import Annotation, BBox
 
     engine = ReviewEngine(project_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
-                        pred_boxes=[PredBBox(10.0, 10.0, 30.0, 30.0, 0, confidence=0.9)])
-    det = ReviewDetection(det_type="fp", class_id=0, conf=0.9, iou=None, gt_type=None, gt_idx=None,
-                          pred_type="box", pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
+                        preds=[Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 30.0, 30.0),
+                                          score=0.9)])
+    det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
+                          pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
     engine.record_detection_action(det, ctx, action="accepted")
 
     _fake_predictor(monkeypatch)
@@ -108,7 +109,7 @@ def test_export_predictions_redirects_when_bucket_has_verdicts(tmp_path, monkeyp
     assert res["bucket_redirected"] is True
     assert Path(res["output_dir"]).name == "preds@r2"
     assert (Path(res["output_dir"]) / "img.json").is_file()
-    assert json.loads((out / "img.json").read_text())["objects"] == []  # untouched
+    assert json.loads((out / "img.json").read_text())["annotations"] == []  # untouched
 
 
 # --------------------------------------------------------------------------
