@@ -12,7 +12,7 @@ import { Circle, Line, Rect, Text } from "react-konva";
 import type Konva from "konva";
 
 import { api, IMAGE_MAX_WIDTH } from "@/api/client";
-import { classesApi } from "@/api/classes";
+import { classesApi, subjectColor } from "@/api/classes";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
@@ -36,13 +36,18 @@ import {
 } from "@/lib/canvasSync";
 import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
 import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/datasetUiState";
+import {
+  annotationGeometry,
+  detGtAnnotation,
+  detOutcomeGeometry,
+  detPredAnnotation,
+  type ReviewGeom,
+} from "@/lib/reviewGeometry";
 import { useStore } from "@/store";
 import type {
-  Box,
   DatasetSelection,
   Detection,
   MatchesResponse,
-  PredBox,
   ReviewImageStatus,
   ReviewStatusFilter,
 } from "@/store/types";
@@ -56,29 +61,14 @@ const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashe
 const MIN_BOX_SIDE = 3;
 const HANDLE_HIT_PX = 10; // screen-px hit radius for edit handles
 
-/** The shape Edit picks up: the matched GT for a TP/FN (what a save replaces), the
- *  prediction for an FP (what a save adds). Deep-copied so dragging never mutates matches. */
+/** The shape Edit picks up: the matched GT for a TP/FN (what a save replaces), the prediction for
+ *  an FP (what a save adds) — by the referenced annotation's OWN geometry. Deep-copied so dragging
+ *  never mutates matches. */
 function seedEditShape(d: Detection, m: MatchesResponse): EditShape | null {
-  if (d.det_type === "fp") {
-    if (d.pred_type === "box" && d.pred_idx !== null && m.pred_boxes[d.pred_idx]) {
-      const b = m.pred_boxes[d.pred_idx];
-      return { kind: "box", box: [b.x1, b.y1, b.x2, b.y2] };
-    }
-    if (d.pred_type === "polygon" && d.pred_idx !== null && m.pred_polygons[d.pred_idx]) {
-      const pts = m.pred_polygons[d.pred_idx].points;
-      return { kind: "polygon", points: pts.map((p) => [p[0], p[1]]) };
-    }
-    return null;
-  }
-  if (d.gt_type === "box" && d.gt_idx !== null && m.gt_boxes[d.gt_idx]) {
-    const b = m.gt_boxes[d.gt_idx];
-    return { kind: "box", box: [b.x1, b.y1, b.x2, b.y2] };
-  }
-  if (d.gt_type === "polygon" && d.gt_idx !== null && m.gt_polygons[d.gt_idx]) {
-    const pts = m.gt_polygons[d.gt_idx].points;
-    return { kind: "polygon", points: pts.map((p) => [p[0], p[1]]) };
-  }
-  return null;
+  const geom = detOutcomeGeometry(d, m);
+  if (!geom) return null;
+  if (geom.kind === "box") return { kind: "box", box: geom.box };
+  return { kind: "polygon", points: geom.points.map((p): [number, number] => [p[0], p[1]]) };
 }
 
 function currentImagePath(dataset: DatasetSelection): { path: string | null; name: string | null } {
@@ -89,21 +79,11 @@ function currentImagePath(dataset: DatasetSelection): { path: string | null; nam
 }
 
 function labelPaths(dataset: DatasetSelection, name: string | null) {
-  if (!name) return { gt_detect: null, gt_segment: null, pred_detect: null, pred_segment: null };
+  if (!name) return { gt: null, pred: null };
   const stem = name.replace(/\.[^.]+$/, "");
   return {
-    gt_detect: dataset.annotations_detect_dir
-      ? `${dataset.annotations_detect_dir}/${stem}.json`
-      : null,
-    gt_segment: dataset.annotations_segment_dir
-      ? `${dataset.annotations_segment_dir}/${stem}.json`
-      : null,
-    pred_detect: dataset.predictions_detect_dir
-      ? `${dataset.predictions_detect_dir}/${stem}.json`
-      : null,
-    pred_segment: dataset.predictions_segment_dir
-      ? `${dataset.predictions_segment_dir}/${stem}.json`
-      : null,
+    gt: dataset.annotations_dir ? `${dataset.annotations_dir}/${stem}.json` : null,
+    pred: dataset.predictions_dir ? `${dataset.predictions_dir}/${stem}.json` : null,
   };
 }
 
@@ -138,7 +118,6 @@ export function ReviewTab() {
   const setDetectionIdx = useStore((s) => s.setReviewDetectionIdx);
   const markDetReviewed = useStore((s) => s.markDetectionReviewed);
   const setPredReference = useStore((s) => s.setPredReference);
-  const className = useStore((s) => s.className);
   // Shared annotation status (coloring, Complete lock) — synced when a verdict authors GT.
   const setStoreImageStatus = useStore((s) => s.setImageStatus);
   // Image-level review status (its own store slice) drives Review navigation: which images are
@@ -152,21 +131,12 @@ export function ReviewTab() {
   const { path: imgPath, name: imgName } = currentImagePath(dataset);
   const paths = useMemo(() => labelPaths(dataset, imgName), [dataset, imgName]);
 
-  // The reviewed kind (box vs polygon) and its GT/pred dirs — predictions decide it, falling back
-  // to whichever GT exists. Mirrors reloadMatches' per-image choice at the directory level.
-  const reviewDirs = useMemo(() => {
-    const kind: "box" | "polygon" = dataset.predictions_detect_dir
-      ? "box"
-      : dataset.predictions_segment_dir
-        ? "polygon"
-        : dataset.annotations_detect_dir
-          ? "box"
-          : "polygon";
-    return {
-      gtDir: kind === "box" ? dataset.annotations_detect_dir : dataset.annotations_segment_dir,
-      predDir: kind === "box" ? dataset.predictions_detect_dir : dataset.predictions_segment_dir,
-    };
-  }, [dataset]);
+  // One GT dir + one prediction dir now (the detect/segment split is gone); a unified label file
+  // holds every subject's box and polygon annotations together.
+  const reviewDirs = useMemo(
+    () => ({ gtDir: dataset.annotations_dir, predDir: dataset.predictions_dir }),
+    [dataset.annotations_dir, dataset.predictions_dir],
+  );
 
   // Review navigation config: bucket each image into Reviewed/Unreviewed (completed vs not) so the
   // shared status-filter walk applies, and skip images with nothing to review.
@@ -241,7 +211,11 @@ export function ReviewTab() {
   // User-tunable symbology colours (persisted + shared with the status bar); legend swatches
   // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
   const [reviewColors, setReviewColors] = useReviewColors();
-  const classList = useStore((s) => s.classes.list);
+  const registry = useStore((s) => s.registry.subjects);
+  const subjectSwatches = useMemo(
+    () => Object.keys(registry).map((name) => ({ name, color: subjectColor(name) })),
+    [registry],
+  );
 
   // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // Which image the installed matches belong to — identity beats the loading flag (a failed or
@@ -265,7 +239,7 @@ export function ReviewTab() {
       img_height: matches.img_height,
       viewport: host ? computeViewport(view, host, matches.img_width, matches.img_height) : null,
       user: useStore.getState().user || undefined,
-      classes: classList,
+      classes: subjectSwatches,
       legend: {
         tp: reviewColors.tp,
         fp: reviewColors.fp,
@@ -273,7 +247,7 @@ export function ReviewTab() {
         active: reviewColors.active,
       },
       counts: { tp: matches.n_tp, fp: matches.n_fp, fn: matches.n_fn },
-      shapes: buildReviewShapes(matches, reviewColors, detectionIdx, className, {
+      shapes: buildReviewShapes(matches, reviewColors, detectionIdx, {
         showGT,
         showPred,
       }),
@@ -287,7 +261,7 @@ export function ReviewTab() {
   }, [matches, reviewColors, detectionIdx, showGT, showPred, imgPath]);
   useEffect(() => {
     canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
-  }, [view, classList]);
+  }, [view, subjectSwatches]);
   useEffect(
     () =>
       onCanvasStateRequest(() => {
@@ -333,26 +307,16 @@ export function ReviewTab() {
     if (!dataset.project_root || !imgPath || !imgName) return;
     setLoading(true);
     try {
-      // Review ONE annotation kind at a time. An image often carries both detect boxes AND
-      // segment polygons for the same objects (detect is derived from polygons), so passing
-      // both makes compute_matches emit two detections per object (2 objects -> 4). Scope to
-      // the kind being reviewed — predictions decide it, falling back to whichever GT exists.
-      const kind: "box" | "polygon" = dataset.predictions_detect_dir
-        ? "box"
-        : dataset.predictions_segment_dir
-          ? "polygon"
-          : dataset.annotations_detect_dir
-            ? "box"
-            : "polygon";
+      // One unified label file per image holds every subject's box and polygon annotations, so a
+      // single gt/pred path drives the match — compute_matches keys IoU on each annotation's bbox
+      // and the overlay renders each by its own geometry.
       const res = await api.review.matches(
         {
           project_root: dataset.project_root,
           image_name: imgName,
           image_path: imgPath,
-          gt_detect_path: kind === "box" ? paths.gt_detect : null,
-          gt_segment_path: kind === "polygon" ? paths.gt_segment : null,
-          pred_detect_path: kind === "box" ? paths.pred_detect : null,
-          pred_segment_path: kind === "polygon" ? paths.pred_segment : null,
+          gt_path: paths.gt,
+          pred_path: paths.pred,
           iou_threshold: filters.iou_threshold,
           conf_threshold: filters.conf_threshold,
           filter_type: filters.filter_type,
@@ -403,18 +367,16 @@ export function ReviewTab() {
       clearTimeout(t);
       ac.abort();
     };
-    // The four path strings (not the `paths` object — mergeSnapshot rebuilds the
-    // dataset object on every WS snapshot, which would spuriously re-fire this and
-    // reset the detection index/zoom) so a backend-adopted change of prediction
-    // dirs (e.g. the agent re-selects the dataset with a different model) refreshes
-    // the matches instead of silently showing the previous model's TP/FP/FN.
+    // The path strings (not the `paths` object — mergeSnapshot rebuilds the dataset
+    // object on every WS snapshot, which would spuriously re-fire this and reset the
+    // detection index/zoom) so a backend-adopted change of the prediction dir (e.g. the
+    // agent re-selects the dataset with a different model) refreshes the matches instead
+    // of silently showing the previous model's TP/FP/FN.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     imgPath,
-    paths.gt_detect,
-    paths.gt_segment,
-    paths.pred_detect,
-    paths.pred_segment,
+    paths.gt,
+    paths.pred,
     filters.iou_threshold,
     filters.conf_threshold,
     filters.filter_type,
@@ -531,22 +493,18 @@ export function ReviewTab() {
         project_root: dataset.project_root,
         image_name: imgName,
         image_path: imgPath,
-        gt_detect_path: paths.gt_detect,
-        gt_segment_path: paths.gt_segment,
-        pred_detect_path: paths.pred_detect,
-        pred_segment_path: paths.pred_segment,
+        gt_path: paths.gt,
+        pred_path: paths.pred,
         det_type: current.det_type,
-        class_id: current.class_id,
+        class_name: current.class_name,
         conf: current.conf,
         iou: current.iou,
-        gt_type: current.gt_type,
         gt_idx: current.gt_idx,
-        pred_type: current.pred_type,
         pred_idx: current.pred_idx,
         bbox: current.bbox,
         action,
         edited_box: edited?.box ?? null,
-        edited_polygon: edited?.polygon ?? null,
+        edited_points: edited?.polygon ?? null,
         iou_threshold: filters.iou_threshold,
         conf_threshold: filters.conf_threshold,
         filter_type: filters.filter_type,
@@ -576,9 +534,7 @@ export function ReviewTab() {
 
   async function ensureBackup(): Promise<boolean> {
     if (!dataset.project_root) return false;
-    const dirs = [dataset.annotations_detect_dir, dataset.annotations_segment_dir].filter(
-      Boolean,
-    ) as string[];
+    const dirs = [dataset.annotations_dir].filter(Boolean) as string[];
     if (!dirs.length) return true;
     // backup_original_labels captures every original file in the dir in one pass, so it only needs
     // running once per label-dir set — skip the (whole-dir-scanning) call once it's done this session.
@@ -602,8 +558,7 @@ export function ReviewTab() {
       const res = await api.review.markComplete({
         project_root: dataset.project_root,
         image_name: imgName,
-        gt_detect_path: paths.gt_detect,
-        gt_segment_path: paths.gt_segment,
+        gt_path: paths.gt,
         completed,
       });
       setImageStatus(res.image_status); // local review badge
@@ -634,7 +589,7 @@ export function ReviewTab() {
       useStore.getState().pushToast("Select a dataset with a subject and predictions first.");
       return;
     }
-    if (!dataset.predictions_detect_dir && !dataset.predictions_segment_dir) {
+    if (!dataset.predictions_dir) {
       useStore
         .getState()
         .pushToast("No predictions to validate — select a model with predictions.");
@@ -645,8 +600,7 @@ export function ReviewTab() {
       const res = await api.review.validateReference({
         project_root: dataset.project_root,
         trait: dataset.subject,
-        pred_detect_dir: dataset.predictions_detect_dir,
-        pred_segment_dir: dataset.predictions_segment_dir,
+        pred_dir: dataset.predictions_dir,
       });
       setValidationResult({ validated: res.validated, reason: res.reason });
       useStore.getState().pushToast(res.reason);
@@ -1022,7 +976,6 @@ export function ReviewTab() {
               focusedIdx={detectionIdx}
               showGT={showGT}
               showPred={showPred}
-              classNameLookup={className}
               colors={reviewColors}
               suppressFocusedGt={!!edit && current?.det_type !== "fp"}
               suppressFocusedPred={!!edit && current?.det_type === "fp"}
@@ -1058,7 +1011,7 @@ export function ReviewTab() {
           <div className="max-w-md rounded-lg border border-tcip-border bg-tcip-panel/90 px-5 py-4 text-center">
             <p className="text-sm font-semibold text-tcip-fg">No detections to review</p>
             <p className="mt-1 text-xs text-tcip-muted">
-              {!dataset.predictions_detect_dir && !dataset.predictions_segment_dir
+              {!dataset.predictions_dir
                 ? "No predictions directory configured — run inference or select a model with predictions for this dataset."
                 : `No detections on this image under the current filters (IoU ≥ ${filters.iou_threshold.toFixed(
                     2,
@@ -1101,7 +1054,7 @@ export function ReviewTab() {
         {current && (
           <>
             <span className="text-tcip-muted">
-              {className(current.class_id)}
+              {current.class_name}
               {current.conf !== null && (
                 <>
                   <span className="mx-1.5 text-tcip-border">|</span>conf {current.conf.toFixed(2)}
@@ -1357,7 +1310,6 @@ interface OverlayProps {
   focusedIdx: number;
   showGT: boolean;
   showPred: boolean;
-  classNameLookup: (cid: number) => string;
   colors: ReviewColors;
   /** While editing, the picked-up shape is hidden here — it renders live in the edit overlay. */
   suppressFocusedGt?: boolean;
@@ -1372,7 +1324,6 @@ const ReviewOverlays = memo(function ReviewOverlays({
   focusedIdx,
   showGT,
   showPred,
-  classNameLookup,
   colors,
   suppressFocusedGt,
   suppressFocusedPred,
@@ -1381,20 +1332,42 @@ const ReviewOverlays = memo(function ReviewOverlays({
   const lw = 1 / (scale || 1);
   const ACTIVE_COLOR = colors.active;
 
-  // One annotation task at a time: an image can carry both detect (boxes) and segment
-  // (polygons) labels, and drawing both is unreadable. Show the kind being reviewed —
-  // driven by the predictions, falling back to the GT kind when there are no predictions.
-  const reviewKind: "box" | "polygon" = (() => {
-    if (matches.pred_boxes.length || matches.pred_polygons.length) {
-      return matches.pred_polygons.length && !matches.pred_boxes.length ? "polygon" : "box";
+  // Every detection renders by ITS OWN annotation's geometry — a box stays a box, a polygon stays
+  // a polygon, and neither kind is hidden (hiding one is an unreviewed false-negative).
+  const drawGeom = (
+    key: string,
+    geom: ReviewGeom | null,
+    stroke: string,
+    weight: number,
+    dashed: boolean,
+    fill: string | undefined,
+  ): ReactNode => {
+    if (!geom) return null;
+    if (geom.kind === "box") {
+      return (
+        <ReviewRect
+          key={key}
+          box={geom.box}
+          stroke={stroke}
+          lw={lw}
+          weight={weight}
+          dashed={dashed}
+          fill={fill}
+        />
+      );
     }
-    return matches.gt_polygons.length && !matches.gt_boxes.length ? "polygon" : "box";
-  })();
-
-  const box = (idx: number | null) => (idx !== null ? matches.gt_boxes[idx] : undefined);
-  const predBox = (idx: number | null) => (idx !== null ? matches.pred_boxes[idx] : undefined);
-  const poly = (idx: number | null) => (idx !== null ? matches.gt_polygons[idx] : undefined);
-  const predPoly = (idx: number | null) => (idx !== null ? matches.pred_polygons[idx] : undefined);
+    return (
+      <ReviewLine
+        key={key}
+        points={geom.points}
+        stroke={stroke}
+        lw={lw}
+        weight={weight}
+        dashed={dashed}
+        fill={fill}
+      />
+    );
+  };
 
   // Non-active first, the active detection last so its blue overlay sits on top.
   const order = matches.detections
@@ -1405,8 +1378,6 @@ const ReviewOverlays = memo(function ReviewOverlays({
     <>
       {order.map((i) => {
         const d = matches.detections[i];
-        // Skip detections of the other annotation kind.
-        if ((d.gt_type ?? d.pred_type) !== reviewKind) return null;
         const active = i === focusedIdx;
         const outcome = colors[d.det_type];
         const weight = active ? 3 : 2;
@@ -1417,99 +1388,49 @@ const ReviewOverlays = memo(function ReviewOverlays({
           // review turns dashed blue (see the review legend).
           if (showPred && !(active && suppressFocusedPred)) {
             const stroke = active ? ACTIVE_COLOR : outcome;
-            const fill = `${stroke}26`;
-            const b = predBox(d.pred_type === "box" ? d.pred_idx : null);
-            const p = predPoly(d.pred_type === "polygon" ? d.pred_idx : null);
-            if (b)
-              nodes.push(
-                <ReviewRect
-                  key="fp"
-                  box={b}
-                  stroke={stroke}
-                  lw={lw}
-                  weight={weight}
-                  dashed={active}
-                  fill={fill}
-                />,
-              );
-            else if (p)
-              nodes.push(
-                <ReviewLine
-                  key="fp"
-                  points={p.points}
-                  stroke={stroke}
-                  lw={lw}
-                  weight={weight}
-                  dashed={active}
-                  fill={fill}
-                />,
-              );
+            nodes.push(
+              drawGeom(
+                "fp",
+                annotationGeometry(detPredAnnotation(d, matches)),
+                stroke,
+                weight,
+                active,
+                `${stroke}26`,
+              ),
+            );
           }
         } else {
           // TP / FN = ground truth, solid. Active FN turns blue; active TP keeps its green GT.
-          if (showGT && d.gt_type && !(active && suppressFocusedGt)) {
+          if (showGT && !(active && suppressFocusedGt)) {
             const activeFn = active && d.det_type === "fn";
             const stroke = activeFn ? ACTIVE_COLOR : outcome;
-            // The active FN has no prediction, so its GT box IS the thing under review — draw it
-            // dashed blue like every other under-review shape (active FP, the active TP's pred) so
-            // it matches the "Under review" legend entry instead of reading as a solid outcome box.
-            // A faint blue wash reads through even where the dashed line coincides with GT below it.
+            // The active FN has no prediction, so its GT IS the thing under review — draw it dashed
+            // blue like every other under-review shape so it matches the "Under review" legend
+            // entry instead of reading as a solid outcome box. A faint blue wash reads through.
             const fill = activeFn ? `${ACTIVE_COLOR}26` : d.reviewed ? `${outcome}26` : undefined;
-            const b = box(d.gt_type === "box" ? d.gt_idx : null);
-            const p = poly(d.gt_type === "polygon" ? d.gt_idx : null);
-            if (b)
-              nodes.push(
-                <ReviewRect
-                  key="gt"
-                  box={b}
-                  stroke={stroke}
-                  lw={lw}
-                  weight={weight}
-                  dashed={activeFn}
-                  fill={fill}
-                />,
-              );
-            else if (p)
-              nodes.push(
-                <ReviewLine
-                  key="gt"
-                  points={p.points}
-                  stroke={stroke}
-                  lw={lw}
-                  weight={weight}
-                  dashed={activeFn}
-                  fill={fill}
-                />,
-              );
+            nodes.push(
+              drawGeom(
+                "gt",
+                annotationGeometry(detGtAnnotation(d, matches)),
+                stroke,
+                weight,
+                activeFn,
+                fill,
+              ),
+            );
           }
           // The TP under review also shows its prediction as a dashed-blue overlay (pred vs GT).
           if (active && d.det_type === "tp" && showPred && !suppressFocusedPred) {
-            const b = predBox(d.pred_type === "box" ? d.pred_idx : null);
-            const p = predPoly(d.pred_type === "polygon" ? d.pred_idx : null);
-            if (b)
-              nodes.push(
-                <ReviewRect
-                  key="tp-pred"
-                  box={b}
-                  stroke={ACTIVE_COLOR}
-                  lw={lw}
-                  weight={3}
-                  dashed
-                  fill={`${ACTIVE_COLOR}26`}
-                />,
-              );
-            else if (p)
-              nodes.push(
-                <ReviewLine
-                  key="tp-pred"
-                  points={p.points}
-                  stroke={ACTIVE_COLOR}
-                  lw={lw}
-                  weight={3}
-                  dashed
-                  fill={`${ACTIVE_COLOR}26`}
-                />,
-              );
+            nodes.push(
+              drawGeom(
+                "tp-pred",
+                annotationGeometry(detPredAnnotation(d, matches)),
+                ACTIVE_COLOR,
+                3,
+                true,
+                `${ACTIVE_COLOR}26`,
+              ),
+            );
           }
         }
 
@@ -1519,7 +1440,7 @@ const ReviewOverlays = memo(function ReviewOverlays({
               key="lbl"
               x={d.bbox[0]}
               y={d.bbox[1]}
-              text={`${classNameLookup(d.class_id)}${d.conf !== null ? ` ${d.conf.toFixed(2)}` : ""}`}
+              text={`${d.class_name}${d.conf !== null ? ` ${d.conf.toFixed(2)}` : ""}`}
               fill={ACTIVE_COLOR}
               size={11 * lw}
             />,
@@ -1540,19 +1461,20 @@ function ReviewRect({
   dashed,
   fill,
 }: {
-  box: Box | PredBox;
+  box: [number, number, number, number];
   stroke: string;
   lw: number;
   weight: number;
   dashed?: boolean;
   fill?: string;
 }) {
+  const [x1, y1, x2, y2] = box;
   return (
     <Rect
-      x={box.x1}
-      y={box.y1}
-      width={box.x2 - box.x1}
-      height={box.y2 - box.y1}
+      x={x1}
+      y={y1}
+      width={x2 - x1}
+      height={y2 - y1}
       stroke={stroke}
       strokeWidth={weight * lw}
       dash={dashed ? [8 * lw, 4 * lw] : undefined}
