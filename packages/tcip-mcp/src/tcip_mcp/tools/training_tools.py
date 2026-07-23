@@ -665,6 +665,12 @@ def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
     if task in ("detection", "instance_seg"):
         kw = {"images_dir": data_cfg.get("images_dir", ""),
               "labels_dir": data_cfg.get("labels_dir", "")}
+        # The run's subject (and optional attribute): required to read name-based labels and to
+        # derive the single assign_class_ids map. Threaded so every train/val build uses one map.
+        if data_cfg.get("subject"):
+            kw["subject"] = data_cfg["subject"]
+        if data_cfg.get("attribute"):
+            kw["attribute"] = data_cfg["attribute"]
         # Thread the on-disk label format through to the dataset (json | coco).
         if data_cfg.get("label_format"):
             kw["label_format"] = data_cfg["label_format"]
@@ -768,11 +774,17 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         if task in ("detection", "instance_seg") and not (
             data_cfg.get("label_format") or data_cfg.get("coco_json")
         ):
-            from tcip_mcp.pipelines.data.datasets import assemble_coco, dir_label_format
+            from tcip_mcp.pipelines.data.datasets import (
+                assemble_coco, dir_label_format, _resolve_registry_id_map,
+            )
             _labels, _images = src.get("labels_dir", ""), src.get("images_dir", "")
             if _labels and _images and dir_label_format(_labels) == "json":
-                build_src["coco_data"] = assemble_coco(_labels, _images)
+                _subject, _attribute = src.get("subject"), src.get("attribute")
+                _reg, _id_map = _resolve_registry_id_map(_labels, _subject, _attribute)
+                build_src["coco_data"] = assemble_coco(
+                    _labels, _images, subject=_subject, attribute=_attribute, id_map=_id_map)
                 build_src["label_format"] = "coco"
+                build_src["num_classes"] = len(_id_map)
 
         full_ds = build_dataset(task, **build_src, transforms=transforms)
         stems = list(getattr(full_ds, "stems", None) or getattr(full_ds, "_stems", []))
@@ -845,37 +857,38 @@ def get_worst_predictions(
     if not gt_path.is_dir():
         return {"error": f"Labels directory not found: {labels_dir}"}
 
-    from tcip_annotation import json_io
+    from tcip_annotation.json_io import read_annotations
 
     scores: list[tuple[str, float]] = []
     for pred_file in pred_path.glob("*.json"):
+        if pred_file.name == "operating_point.json":
+            continue
         gt_file = gt_path / pred_file.name
-        preds, _ = json_io.read_detect_pred(pred_file)
-        gt_boxes, _ = json_io.read_detect(gt_file) if gt_file.is_file() else ([], set())
+        preds = [a for a in read_annotations(str(pred_file)) if a.geometry is not None]
+        gt_anns = [a for a in read_annotations(str(gt_file)) if a.geometry is not None] if gt_file.is_file() else []
 
         n_pred = len(preds)
-        n_gt = len(gt_boxes)
+        n_gt = len(gt_anns)
 
         # Simple error heuristic: |pred - gt| + missed + extra + low confidence
         missed = max(0, n_gt - n_pred)
         extra = max(0, n_pred - n_gt)
         avg_conf = 0.0
         if n_pred > 0:
-            confs = [p.confidence for p in preds]
+            confs = [p.score for p in preds if p.score is not None]
             avg_conf = sum(confs) / len(confs) if confs else 0.5
 
         # Higher score = worse prediction
         error_score = missed * 2.0 + extra * 1.0 + (1.0 - avg_conf)
-        stem = pred_file.stem
-        scores.append((stem, error_score))
+        scores.append((pred_file.stem, error_score))
 
     # Also include GT images with no predictions at all (completely missed)
     for gt_file in gt_path.glob("*.json"):
         pred_file = pred_path / gt_file.name
         if not pred_file.is_file():
-            gt_boxes, _ = json_io.read_detect(gt_file)
-            if gt_boxes:
-                scores.append((gt_file.stem, len(gt_boxes) * 3.0))
+            gt_anns = [a for a in read_annotations(str(gt_file)) if a.geometry is not None]
+            if gt_anns:
+                scores.append((gt_file.stem, len(gt_anns) * 3.0))
 
     scores.sort(key=lambda x: x[1], reverse=True)
     worst = scores[:top_k]
@@ -902,6 +915,8 @@ def evaluate_model(
     global_nms_iou: float = DEFAULT_NMS_IOU,
     postprocess: str = "nms",
     trait: str | None = None,
+    subject: str | None = None,
+    attribute: str | None = None,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
@@ -954,7 +969,14 @@ def evaluate_model(
     if not Path(ckpt).is_file():
         return {"error": f"Checkpoint not found: {ckpt}"}
 
-    run_tiling = (run.config.get("data", {}) or {}).get("tiling") if run is not None else None
+    run_data_cfg = (run.config.get("data", {}) or {}) if run is not None else {}
+    run_tiling = run_data_cfg.get("tiling")
+    # The eval scope's subject/attribute: caller-supplied wins, else the producing run's config, so
+    # the name-based GT reads through the same id map the run trained with.
+    if subject is None:
+        subject = run_data_cfg.get("subject")
+    if attribute is None:
+        attribute = run_data_cfg.get("attribute")
 
     # Delivery-grade full-frame path (tiled inference + full-frame GT matching).
     if use_tiled_inference and task == "detection":
@@ -963,6 +985,7 @@ def evaluate_model(
         # exactly the point of this path; dropping them silently re-pins 0.3.
         return run_full_frame_evaluation(
             ckpt, images_dir, labels_dir, str(Path(ckpt).parent),
+            subject=subject, attribute=attribute,
             conf_threshold=conf_threshold, iou_threshold=iou_threshold,
             tile_size=int(tcfg.get("tile_size", 640)), overlap=float(tcfg.get("overlap", 0.2)),
             global_nms_iou=global_nms_iou, postprocess=postprocess,
@@ -975,9 +998,11 @@ def evaluate_model(
     if task != "detection":
         tiling = None
 
-    ds_kwargs = {"images_dir": images_dir}
+    ds_kwargs: dict = {"images_dir": images_dir}
     if task in ("detection", "instance_seg"):
         ds_kwargs["labels_dir"] = labels_dir
+        ds_kwargs["subject"] = subject
+        ds_kwargs["attribute"] = attribute
     elif task == "semantic_seg":
         ds_kwargs["masks_dir"] = labels_dir
     try:
