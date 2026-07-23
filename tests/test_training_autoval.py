@@ -23,7 +23,7 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     train,
 )
 from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import BBox  # noqa: E402
+from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
 IMG = 64
 
@@ -46,9 +46,9 @@ def _detection_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), ti
         for t in range(tiles):
             stem = f"{pref}_{t}_0"
             _save_png(images_dir / f"{stem}.png")
-            json_io.write_detect(
+            json_io.write_annotations(
                 str(labels_dir / f"{stem}.json"),
-                [BBox(19.2, 19.2, 44.8, 44.8, 0)],
+                [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
                 IMG,
                 IMG,
                 keep_empty=True,
@@ -62,6 +62,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
+        "subject": "catkin",
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
@@ -94,15 +95,16 @@ def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
     _save_png(images_dir / "src_0_0.png")
-    json_io.write_detect(
+    json_io.write_annotations(
         str(labels_dir / "src_0_0.json"),
-        [BBox(19.2, 19.2, 44.8, 44.8, 0)],
+        [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
         IMG,
         IMG,
         keep_empty=True,
     )
 
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "auto_val": True}
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                "subject": "catkin", "auto_val": True}
     _train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
     assert val_ds is None  # single group -> no leakage-free val possible
 
@@ -112,6 +114,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(labels_dir),
+        "subject": "catkin",
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
