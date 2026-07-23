@@ -33,8 +33,12 @@ def _make_project(ws: Path, name: str, *, dates=(), subjects=(), models=()) -> P
         ddir = proj / "images" / d
         ddir.mkdir(parents=True)
         Image.new("RGB", (8, 8), (0, 0, 0)).save(ddir / "img.png")
-    for t in subjects:
-        (proj / "annotations" / t).mkdir(parents=True)
+    if subjects:
+        # Subjects live in the dataset's nested registry now, not as child dirs of annotations/.
+        from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+
+        write_registry(proj / "classes.json",
+                       ClassRegistry(tuple(Subject(s) for s in sorted(subjects))))
     for m in models:
         (proj / "predictions" / m).mkdir(parents=True)
     return proj
@@ -60,7 +64,9 @@ def test_list_projects_lists_workspace_projects(client, workspace_dir):
 
 def test_projects_report_per_date_subject_model_availability(client, workspace_dir):
     # catkin labelled on 02-11 (+ baseline predictions there); bush labelled on 03-02;
-    # 03-24 has images but nothing labelled.
+    # 03-24 has images but nothing labelled. One name-based label file per image.
+    from tcip_annotation.json_io import write_annotations
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.dataset_layout import annotation_dir, prediction_dir
 
     proj = _make_project(
@@ -70,18 +76,18 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
         subjects=["catkin", "bush"],
         models=["baseline"],
     )
-    (annotation_dir(proj, "catkin", "2026-02-11", "detect")).mkdir(parents=True, exist_ok=True)
-    (annotation_dir(proj, "catkin", "2026-02-11", "detect") / "img.json").write_text(
-        '{"objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}', encoding="utf-8"
-    )
-    (annotation_dir(proj, "bush", "2026-03-02", "detect")).mkdir(parents=True, exist_ok=True)
-    (annotation_dir(proj, "bush", "2026-03-02", "detect") / "img.json").write_text(
-        '{"objects": [{"category_id": 0, "bbox": [2, 2, 8, 8]}]}', encoding="utf-8"
-    )
-    (prediction_dir(proj, "baseline", "2026-02-11", "detect")).mkdir(parents=True, exist_ok=True)
-    (prediction_dir(proj, "baseline", "2026-02-11", "detect") / "img.json").write_text(
-        '{"objects": [{"category_id": 0, "bbox": [1, 1, 9, 9], "score": 0.9}]}', encoding="utf-8"
-    )
+    ad = annotation_dir(proj, "2026-02-11")
+    ad.mkdir(parents=True, exist_ok=True)
+    write_annotations(str(ad / "img.json"), [Annotation(subject="catkin", geometry=BBox(1, 1, 7, 7))],
+                      8, 8)
+    ad2 = annotation_dir(proj, "2026-03-02")
+    ad2.mkdir(parents=True, exist_ok=True)
+    write_annotations(str(ad2 / "img.json"), [Annotation(subject="bush", geometry=BBox(2, 2, 6, 6))],
+                      8, 8)
+    pd = prediction_dir(proj, "baseline", "2026-02-11")
+    pd.mkdir(parents=True, exist_ok=True)
+    write_annotations(str(pd / "img.json"),
+                      [Annotation(subject="catkin", geometry=BBox(1, 1, 7, 7), score=0.9)], 8, 8)
 
     hz = next(
         p
