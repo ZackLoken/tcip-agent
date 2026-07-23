@@ -19,7 +19,12 @@ import {
   type CanvasStateBody,
 } from "@/lib/canvasSync";
 import { canvasToAnnotations } from "@/lib/labelSerde";
-import { computePolygonBboxes, findHoveredPolygon, pointInPolygon } from "@/lib/polygonGeometry";
+import {
+  computePolygonBboxes,
+  findHoveredPolygon,
+  pointInPolygon,
+  polygonBbox,
+} from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/reviewEditGeometry";
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@/store/types";
@@ -35,6 +40,13 @@ function currentImagePath(dataset: DatasetSelection): string | null {
   const name = dataset.image_list[dataset.current_image_index];
   if (!name) return null;
   return `${dataset.dataset_root}/images/${dataset.date}/${name}`;
+}
+
+/** A polygon's read-only derived box (its axis-aligned bounds), for box-mode display only. Reuses
+ *  polygonBbox — the same min/max the loader and COCO export re-derive — so it can't drift. */
+function derivedBoxFromPolygon(p: PolygonShape): Box {
+  const [x1, y1, x2, y2] = polygonBbox(p.points);
+  return { x1, y1, x2, y2, subject: p.subject, attributes: {} };
 }
 
 function pointToSegmentDist(
@@ -114,6 +126,25 @@ const AnnotationShapes = memo(function AnnotationShapes({
               label={b.subject}
               selected={i === selectedBoxIdx}
               handleR={selVertR}
+            />
+          ) : null,
+        )}
+
+      {/* Read-only derived boxes: each active-subject polygon's bounding box, shown in box mode so a
+          polygon's detection footprint is visible while boxing. Render-only — derived from
+          polygonBbox here and never added to canvas.boxes, so it can't be selected/edited/deleted or
+          saved (dashed and handle-less to set it apart from an editable hand-drawn box). */}
+      {mode === "box" &&
+        polygons.map((p, i) =>
+          p.subject === activeSubject ? (
+            <BoxOverlay
+              key={`derived-${i}`}
+              box={derivedBoxFromPolygon(p)}
+              stroke={subjectColor(p.subject)}
+              width={boxStroke}
+              labelSize={labelSize}
+              label={p.subject}
+              dash={[boxStroke * 3, boxStroke * 2]}
             />
           ) : null,
         )}
@@ -1400,6 +1431,7 @@ const BoxOverlay = memo(function BoxOverlay({
   label,
   selected,
   handleR,
+  dash,
 }: {
   box: Box;
   stroke: string;
@@ -1408,6 +1440,7 @@ const BoxOverlay = memo(function BoxOverlay({
   label: string;
   selected?: boolean;
   handleR?: number;
+  dash?: number[];
 }) {
   const corners: [number, number][] = [
     [box.x1, box.y1],
@@ -1424,6 +1457,7 @@ const BoxOverlay = memo(function BoxOverlay({
         height={box.y2 - box.y1}
         stroke={stroke}
         strokeWidth={width}
+        dash={dash}
       />
       {selected &&
         handleR &&
