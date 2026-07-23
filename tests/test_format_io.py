@@ -2,16 +2,15 @@
 
 import json
 
+import pytest
 
-from tcip_annotation.state import BBox, Polygon
+from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_annotation.format_io import (
     detect_format,
     load_annotations,
     save_annotations,
-    parse_coco_detect,
-    parse_coco_segment,
-    write_coco_detect,
-    write_coco_segment,
+    parse_coco_annotations,
+    write_coco,
 )
 
 
@@ -29,6 +28,12 @@ def test_detect_format_dir_json_coco(tmp_path):
     assert detect_format(str(tmp_path)) == "coco"
 
 
+def test_detect_format_per_image_json(tmp_path):
+    js = tmp_path / "IMG_0001.json"
+    js.write_text('{"image": "IMG_0001", "annotations": [{"subject": "catkin", "bbox": [1, 1, 9, 9]}]}')
+    assert detect_format(str(js)) == "json"
+
+
 def _sample_coco_detect():
     return {
         "images": [
@@ -44,26 +49,27 @@ def _sample_coco_detect():
 
 def test_parse_coco_detect():
     coco = _sample_coco_detect()
-    boxes, class_ids = parse_coco_detect(coco, file_name="IMG_0001.jpg")
-    assert len(boxes) == 2
-    assert class_ids == {0, 1}
-    # COCO bbox [x, y, w, h] → BBox(x1, y1, x2, y2)
-    assert boxes[0].x1 == 100
-    assert boxes[0].y1 == 200
-    assert boxes[0].x2 == 150
-    assert boxes[0].y2 == 260
+    anns = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
+    assert len(anns) == 2
+    assert {a.subject for a in anns} == {"tree", "nut"}
+    # COCO bbox [x, y, w, h] → BBox(x1, y1, x2, y2), subject decoded from the file's categories.
+    assert anns[0].geometry.x1 == 100
+    assert anns[0].geometry.y1 == 200
+    assert anns[0].geometry.x2 == 150
+    assert anns[0].geometry.y2 == 260
 
 
 def test_parse_coco_detect_missing_image():
     coco = _sample_coco_detect()
-    boxes, class_ids = parse_coco_detect(coco, file_name="MISSING.jpg")
-    assert len(boxes) == 0
+    anns = parse_coco_annotations(coco, file_name="MISSING.jpg")
+    assert len(anns) == 0
 
 
-def test_write_coco_detect_roundtrip(tmp_path):
-    boxes = [BBox(10, 20, 50, 80, 0), BBox(100, 100, 200, 150, 1)]
+def test_write_coco_roundtrip(tmp_path):
+    anns = [Annotation(subject="tree", geometry=BBox(10, 20, 50, 80)),
+            Annotation(subject="nut", geometry=BBox(100, 100, 200, 150))]
     path = str(tmp_path / "annotations.json")
-    write_coco_detect(path, {"IMG_0001.jpg": (boxes, 640, 480)})
+    write_coco(path, {"IMG_0001.jpg": (anns, 640, 480)})
 
     with open(path) as f:
         coco = json.load(f)
@@ -72,14 +78,15 @@ def test_write_coco_detect_roundtrip(tmp_path):
     assert len(coco["annotations"]) == 2
     assert coco["images"][0]["file_name"] == "IMG_0001.jpg"
 
-    # Parse back
-    parsed, cids = parse_coco_detect(coco, file_name="IMG_0001.jpg")
+    # Parse back — the categories written by write_coco decode the ids to names.
+    parsed = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
     assert len(parsed) == 2
-    assert parsed[0].x1 == 10
-    assert parsed[0].x2 == 50
+    assert {a.subject for a in parsed} == {"tree", "nut"}
+    assert parsed[0].geometry.x1 == 10
+    assert parsed[0].geometry.x2 == 50
 
 
-# ── COCO segment parse/write round-trip ─────────────────────────────────────
+# ── COCO polygon parse/write round-trip ──────────────────────────────────────
 
 
 def _sample_coco_segment():
@@ -94,69 +101,76 @@ def _sample_coco_segment():
                 "bbox": [10, 20, 40, 60], "area": 2400, "iscrowd": 0,
             },
         ],
-        "categories": [],
+        "categories": [{"id": 0, "name": "leaf"}],
     }
 
 
 def test_parse_coco_segment():
     coco = _sample_coco_segment()
-    polygons, class_ids = parse_coco_segment(coco, file_name="IMG_0001.jpg")
-    assert len(polygons) == 1
-    assert polygons[0].class_id == 0
-    assert len(polygons[0].points) == 4
-    assert polygons[0].points[0] == (10.0, 20.0)
+    anns = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
+    assert len(anns) == 1
+    assert anns[0].subject == "leaf"
+    assert isinstance(anns[0].geometry, Polygon)
+    assert len(anns[0].geometry.points) == 4
+    assert anns[0].geometry.points[0] == (10.0, 20.0)
 
 
-def test_write_coco_segment_roundtrip(tmp_path):
-    poly = Polygon([(10, 20), (50, 20), (50, 80), (10, 80)], class_id=0)
+def test_write_coco_polygon_roundtrip(tmp_path):
+    poly = Polygon([(10, 20), (50, 20), (50, 80), (10, 80)])
+    anns = [Annotation(subject="leaf", geometry=poly)]
     path = str(tmp_path / "seg.json")
-    write_coco_segment(path, {"IMG_0001.jpg": ([poly], 640, 480)})
+    write_coco(path, {"IMG_0001.jpg": (anns, 640, 480)})
 
     with open(path) as f:
         coco = json.load(f)
 
-    parsed, cids = parse_coco_segment(coco, file_name="IMG_0001.jpg")
+    parsed = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
     assert len(parsed) == 1
-    assert len(parsed[0].points) == 4
+    assert isinstance(parsed[0].geometry, Polygon)
+    assert len(parsed[0].geometry.points) == 4
+    assert parsed[0].subject == "leaf"
 
 
 # ── Unified load/save dispatch ──────────────────────────────────────────────
 
 
 def test_load_annotations_coco(tmp_path):
-    """load_annotations dispatches to COCO parser for .json files."""
+    """load_annotations detects and dispatches to the COCO parser for a dataset-level .json."""
     coco = _sample_coco_detect()
     path = tmp_path / "annotations.json"
     path.write_text(json.dumps(coco))
-    boxes, cids = load_annotations(
-        str(path), 640, 480, task="detect", file_name="IMG_0001.jpg"
-    )
-    assert len(boxes) == 2
+    anns = load_annotations(str(path), file_name="IMG_0001.jpg")
+    assert len(anns) == 2
 
 
 def test_save_annotations_coco(tmp_path):
-    """save_annotations dispatches to COCO writer for fmt='coco'."""
-    boxes = [BBox(100, 200, 200, 300, 0)]
+    """save_annotations dispatches to the COCO writer for fmt='coco'."""
+    anns = [Annotation(subject="tree", geometry=BBox(100, 200, 200, 300))]
     path = str(tmp_path / "annotations.json")
-    save_annotations(
-        path, boxes, 640, 480, task="detect", fmt="coco", file_name="IMG_0001.jpg"
-    )
+    save_annotations(path, anns, 640, 480, fmt="coco", file_name="IMG_0001.jpg")
     with open(path) as f:
         coco = json.load(f)
     assert len(coco["annotations"]) == 1
 
 
-# ── PASCAL VOC round-trip ───────────────────────────────────────────────────
+# ── format-detection refusals ───────────────────────────────────────────────
 
 
 def test_detect_format_refuses_an_unrecognized_store(tmp_path):
     """A misdetected format reads real annotations as empty negatives, so a wrong answer here is
     worse than no answer. There is no fallback guess left to make."""
-    import pytest
-
     odd = tmp_path / "labels.json"
     odd.write_text(json.dumps({"regions": [{"x": 1}]}))  # an in-house schema we do not know
     with pytest.raises(ValueError, match="Cannot determine the annotation format"):
         detect_format(str(odd))
     with pytest.raises(ValueError):
         detect_format(str(tmp_path / "nothing_here"))
+
+
+def test_detect_format_refuses_pre_k13_objects_schema(tmp_path):
+    """The pre-K13.5 'objects' schema is not sniffed — it raises rather than reading as zero
+    annotations (which would train on fabricated empty negatives)."""
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps({"image": "a", "objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}))
+    with pytest.raises(ValueError):
+        detect_format(str(old))
