@@ -188,6 +188,11 @@ def _annotation_record(a: Annotation) -> dict | None:
         if len(geom.points) < 3:
             return None  # a degenerate polygon is not a shape; skip so write<->read stays symmetric
         rec["segmentation"] = [[round(float(c), 2) for xy in geom.points for c in xy]]
+        # The polygon's box travels with it (COCO-style record). Derived from the points here and
+        # never authored or trusted as input — the polygon stays the sole source of truth, so the two
+        # can't diverge; every reader re-derives via bbox_of rather than reading this stored value.
+        b = bbox_of(geom)
+        rec["bbox"] = [round(b.x1, 2), round(b.y1, 2), round(b.x2 - b.x1, 2), round(b.y2 - b.y1, 2)]
     elif isinstance(geom, BBox):
         rec["bbox"] = [round(geom.x1, 2), round(geom.y1, 2),
                        round(geom.x2 - geom.x1, 2), round(geom.y2 - geom.y1, 2)]
