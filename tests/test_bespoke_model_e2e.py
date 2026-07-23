@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader  # noqa: E402
 
 from tests import bespoke_models  # noqa: E402  — the agent-authored bespoke model + train loop
 from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import BBox  # noqa: E402
+from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
 IMG = 64
 
@@ -73,12 +73,13 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
         _save_png(images_dir / f"img{i}.png")
         w, h = shapes[i % len(shapes)]
         x1, y1 = 32 - w / 2, 32 - h / 2
-        json_io.write_detect(str(labels_dir / f"img{i}.json"),
-                             [BBox(x1, y1, x1 + w, y1 + h, 0)], IMG, IMG, keep_empty=True)
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(x1, y1, x1 + w, y1 + h))],
+                                  IMG, IMG, keep_empty=True)
         gt_wh.append((w, h))
 
     dataset = build_dataset("detection", images_dir=str(images_dir),
-                            labels_dir=str(labels_dir), num_classes=1)
+                            labels_dir=str(labels_dir), subject="catkin")
     train_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
     val_loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("detection"))
 
