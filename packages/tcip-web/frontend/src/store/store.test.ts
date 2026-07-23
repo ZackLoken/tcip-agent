@@ -16,7 +16,8 @@ function loadOnePolygon(): void {
     img_width: 100,
     img_height: 100,
     boxes: [],
-    polygons: [{ points, class_id: 0 }],
+    polygons: [{ points, subject: "catkin", attributes: {} }],
+    imageAnnotations: [],
   };
   s().loadLabelsIntoCanvas(labels);
 }
@@ -46,7 +47,7 @@ describe("canvas store", () => {
 
   it("addBox pushes an undo snapshot that undo restores", () => {
     expect(s().canvas.boxes).toHaveLength(0);
-    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, class_id: 0 });
+    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, subject: "catkin", attributes: {} });
     expect(s().canvas.boxes).toHaveLength(1);
     expect(s().canvas.undoStack).toHaveLength(1);
     s().undo();
@@ -55,10 +56,17 @@ describe("canvas store", () => {
   });
 
   it("dragBox moves a box WITHOUT pushing an undo snapshot", () => {
-    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, class_id: 0 });
+    s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, subject: "catkin", attributes: {} });
     const before = s().canvas.undoStack.length;
-    s().dragBox(0, { x1: 2, y1: 3, x2: 9, y2: 11, class_id: 0 });
-    expect(s().canvas.boxes[0]).toEqual({ x1: 2, y1: 3, x2: 9, y2: 11, class_id: 0 });
+    s().dragBox(0, { x1: 2, y1: 3, x2: 9, y2: 11, subject: "catkin", attributes: {} });
+    expect(s().canvas.boxes[0]).toEqual({
+      x1: 2,
+      y1: 3,
+      x2: 9,
+      y2: 11,
+      subject: "catkin",
+      attributes: {},
+    });
     // Like dragVertex: a live resize/move must not flood the undo stack.
     expect(s().canvas.undoStack.length).toBe(before);
     expect(s().canvas.dirty).toBe(true);
@@ -67,6 +75,27 @@ describe("canvas store", () => {
   it("pushUndo caps the undo stack at 30 entries", () => {
     for (let i = 0; i < 40; i++) s().pushUndo();
     expect(s().canvas.undoStack).toHaveLength(30);
+  });
+
+  it("commitCurrentPolygon refuses with no subject, and tags the subject when one is set", () => {
+    // Authoring is guarded: a subjectless shape has nowhere to attach (the backend save rejects it).
+    useStore.setState((st) => ({ gui: { ...st.gui, active_subject: null } }));
+    s().setCurrentPolygon([
+      [0, 0],
+      [10, 0],
+      [10, 10],
+    ]);
+    expect(s().commitCurrentPolygon()).toBe(false);
+    expect(s().canvas.polygons).toHaveLength(0);
+
+    useStore.setState((st) => ({ gui: { ...st.gui, active_subject: "catkin" } }));
+    s().setCurrentPolygon([
+      [0, 0],
+      [10, 0],
+      [10, 10],
+    ]);
+    expect(s().commitCurrentPolygon()).toBe(true);
+    expect(s().canvas.polygons[0].subject).toBe("catkin");
   });
 });
 
