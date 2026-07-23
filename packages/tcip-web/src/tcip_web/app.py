@@ -263,8 +263,8 @@ async def post_panel_event(panel: str, event: PanelEvent):
         mutation: dict[str, Any] = {"active_tab": "annotate"}
         if "mode" in event.data:
             mutation["mode"] = event.data["mode"]
-        if "active_class" in event.data:
-            mutation["active_class"] = event.data["active_class"]
+        if "active_subject" in event.data:
+            mutation["active_subject"] = event.data["active_subject"]
         await _gui_store.mutate(mutation)
     await _broadcast_to_panel(panel, payload)
     return {"status": "ok", "panel": panel, "event_type": event.event_type}
