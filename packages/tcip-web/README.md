@@ -83,7 +83,7 @@ Port discovery inside MCP tools: `TCIP_WEB_PORT` env > `.tcip/state/web_port.txt
 
 ## Keyboard map
 
-Matches yolo-annotator; `?` opens the full help overlay in the browser.
+`?` opens the full help overlay in the browser.
 
 ## VS Code extension
 
