@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { api } from "@/api/client";
 import { applyReviewFocus } from "@/lib/reviewFocus";
 import { useStore } from "@/store";
-import type { Detection, MatchesResponse } from "@/store/types";
+import type { Annotation, Detection, MatchesResponse } from "@/store/types";
 import { ReviewTab } from "@/tabs/ReviewTab";
 
 // Konva needs a real 2D canvas; these tests exercise empty-state rendering, nav
@@ -38,11 +38,11 @@ vi.mock("@/components/Canvas/CanvasStage", () => ({
 }));
 const initialStoreState = useStore.getState();
 
-const PRED_DIR_A = "C:/data/predictions/model_a/detect/2026-01-01";
-const PRED_DIR_B = "C:/data/predictions/model_b/detect/2026-01-01";
+const PRED_DIR_A = "C:/data/predictions/model_a/2026-01-01";
+const PRED_DIR_B = "C:/data/predictions/model_b/2026-01-01";
 
-function setupDataset(opts: { predDetectDir?: string | null } = {}) {
-  const predDetectDir = opts.predDetectDir !== undefined ? opts.predDetectDir : PRED_DIR_A;
+function setupDataset(opts: { predDir?: string | null } = {}) {
+  const predDir = opts.predDir !== undefined ? opts.predDir : PRED_DIR_A;
   useStore.setState((s) => ({
     gui: {
       ...s.gui,
@@ -50,14 +50,12 @@ function setupDataset(opts: { predDetectDir?: string | null } = {}) {
         ...s.gui.dataset,
         project_root: "C:/proj",
         dataset_root: "C:/data",
-        subject: "annotations",
+        subject: "catkin",
         date: "2026-01-01",
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
-        annotations_detect_dir: "C:/data/annotations/detect/2026-01-01",
-        annotations_segment_dir: null,
-        predictions_detect_dir: predDetectDir,
-        predictions_segment_dir: null,
+        annotations_dir: "C:/data/annotations/2026-01-01",
+        predictions_dir: predDir,
       },
     },
   }));
@@ -66,12 +64,10 @@ function setupDataset(opts: { predDetectDir?: string | null } = {}) {
 function det(over: Partial<Detection> = {}): Detection {
   return {
     det_type: "tp",
-    class_id: 0,
+    class_name: "catkin",
     conf: 0.9,
     iou: 0.8,
-    gt_type: "box",
     gt_idx: 0,
-    pred_type: "box",
     pred_idx: null,
     bbox: [10, 10, 50, 50],
     reviewed: false,
@@ -80,7 +76,10 @@ function det(over: Partial<Detection> = {}): Detection {
   };
 }
 
-function matchesRes(detections: Detection[]): MatchesResponse {
+function matchesRes(
+  detections: Detection[],
+  extra: { gt?: Annotation[]; preds?: Annotation[] } = {},
+): MatchesResponse {
   return {
     img_width: 1000,
     img_height: 800,
@@ -88,10 +87,8 @@ function matchesRes(detections: Detection[]): MatchesResponse {
     n_fp: detections.filter((d) => d.det_type === "fp").length,
     n_fn: detections.filter((d) => d.det_type === "fn").length,
     detections,
-    gt_boxes: [],
-    gt_polygons: [],
-    pred_boxes: [],
-    pred_polygons: [],
+    gt: extra.gt ?? [],
+    preds: extra.preds ?? [],
     image_status: "not_started",
   };
 }
@@ -136,7 +133,7 @@ describe("ReviewTab empty states", () => {
   });
 
   it("explains a missing predictions directory instead of blaming filters", async () => {
-    setupDataset({ predDetectDir: null });
+    setupDataset({ predDir: null });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(useStore.getState().review.matches).not.toBeNull());
@@ -177,9 +174,8 @@ describe("ReviewTab validation-reference affordance", () => {
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith({
         project_root: "C:/proj",
-        trait: "annotations",
-        pred_detect_dir: PRED_DIR_A,
-        pred_segment_dir: null,
+        trait: "catkin",
+        pred_dir: PRED_DIR_A,
       }),
     );
     expect(await screen.findByText("Validated")).toBeInTheDocument();
@@ -220,13 +216,10 @@ describe("ReviewTab detection nav bounds", () => {
 });
 
 describe("ReviewTab in-place edit", () => {
-  const gtBox = { x1: 10, y1: 10, x2: 50, y2: 50, class_id: 0 };
+  const gtAnn: Annotation = { subject: "catkin", bbox: [10, 10, 50, 50], attributes: {} };
 
   function seedEditableMatches() {
-    matchesSpy.mockResolvedValue({
-      ...matchesRes([det()]),
-      gt_boxes: [gtBox],
-    });
+    matchesSpy.mockResolvedValue(matchesRes([det()], { gt: [gtAnn] }));
   }
 
   const editBtn = () => screen.getByTitle("Adjust this shape on the canvas (E)");
@@ -242,7 +235,7 @@ describe("ReviewTab in-place edit", () => {
       image_status: "started",
       annotation_status: "partial",
       // /action now returns the fresh matches; the edit tests install them via applyMatches.
-      matches: { ...matchesRes([det()]), gt_boxes: [gtBox] },
+      matches: matchesRes([det()], { gt: [gtAnn] }),
     });
     backupSpy = vi.spyOn(api.review, "backupLabels").mockResolvedValue({
       status: "ok",
@@ -272,9 +265,9 @@ describe("ReviewTab in-place edit", () => {
     expect(actionSpy.mock.calls[0][0]).toMatchObject({
       action: "edited",
       edited_box: [10, 10, 50, 50],
-      edited_polygon: null,
+      edited_points: null,
       det_type: "tp",
-      gt_type: "box",
+      class_name: "catkin",
       gt_idx: 0,
     });
     // The verdict bar returns once the edit is committed.
@@ -286,12 +279,11 @@ describe("ReviewTab in-place edit", () => {
   });
 
   it("an FP edit commits the prediction shape (added to GT, not replacing)", async () => {
-    matchesSpy.mockResolvedValue({
-      ...matchesRes([
-        det({ det_type: "fp", gt_type: null, gt_idx: null, pred_type: "box", pred_idx: 0 }),
-      ]),
-      pred_boxes: [{ x1: 100, y1: 100, x2: 140, y2: 150, class_id: 0, confidence: 0.7 }],
-    });
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0 })], {
+        preds: [{ subject: "catkin", bbox: [100, 100, 140, 150], attributes: {}, score: 0.7 }],
+      }),
+    );
     render(<ReviewTab />);
     await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
 
@@ -321,19 +313,19 @@ describe("ReviewTab in-place edit", () => {
 });
 
 describe("ReviewTab matches-recompute effect", () => {
-  it("re-fetches when the prediction dirs change under the same image (agent swaps model)", async () => {
+  it("re-fetches when the prediction dir changes under the same image (agent swaps model)", async () => {
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
-    expect(matchesSpy.mock.calls[0][0].pred_detect_path).toBe(`${PRED_DIR_A}/img1.json`);
+    expect(matchesSpy.mock.calls[0][0].pred_path).toBe(`${PRED_DIR_A}/img1.json`);
 
-    // mergeSnapshot's same-identity branch adopts backend-changed prediction dirs
+    // mergeSnapshot's same-identity branch adopts the backend-changed prediction dir
     // without changing imgPath — the tab must not keep showing the old model's matches.
     act(() => {
       const s = useStore.getState();
-      s.patchGui({ dataset: { ...s.gui.dataset, predictions_detect_dir: PRED_DIR_B } });
+      s.patchGui({ dataset: { ...s.gui.dataset, predictions_dir: PRED_DIR_B } });
     });
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(2));
-    expect(matchesSpy.mock.calls[1][0].pred_detect_path).toBe(`${PRED_DIR_B}/img1.json`);
+    expect(matchesSpy.mock.calls[1][0].pred_path).toBe(`${PRED_DIR_B}/img1.json`);
   });
 
   it("re-fetches when an agent review_focus re-targets the already-open image with identical paths", async () => {
@@ -350,7 +342,7 @@ describe("ReviewTab matches-recompute effect", () => {
     await act(async () => {
       await applyReviewFocus({
         dataset_root: "C:/data",
-        subject: "annotations",
+        subject: "catkin",
         date: "2026-01-01",
         image_index: 0,
       });
@@ -431,8 +423,8 @@ describe("ReviewTab auto-resume", () => {
     matchesSpy.mockResolvedValue(
       matchesRes([
         det({ reviewed: true, reviewed_action: "accepted" }),
-        det({ det_type: "fp", pred_type: "box", pred_idx: 0 }),
-        det({ det_type: "fn", pred_type: null, pred_idx: null }),
+        det({ det_type: "fp", pred_idx: 0, gt_idx: null }),
+        det({ det_type: "fn", pred_idx: null, gt_idx: 1 }),
       ]),
     );
     render(<ReviewTab />);
@@ -445,12 +437,11 @@ describe("ReviewTab auto-resume", () => {
 
 describe("ReviewTab symbology", () => {
   it("draws the focused FN as a dashed under-review box, not a solid one", async () => {
-    matchesSpy.mockResolvedValue({
-      ...matchesRes([
-        det({ det_type: "fn", pred_type: null, pred_idx: null, gt_type: "box", gt_idx: 0 }),
-      ]),
-      gt_boxes: [{ x1: 10, y1: 10, x2: 50, y2: 50, class_id: 0 }],
-    });
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fn", pred_idx: null, gt_idx: 0 })], {
+        gt: [{ subject: "catkin", bbox: [10, 10, 50, 50], attributes: {} }],
+      }),
+    );
     render(<ReviewTab />);
     await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
 
@@ -461,5 +452,44 @@ describe("ReviewTab symbology", () => {
       .find((r) => r.getAttribute("data-stroke") === "#00BFFF");
     expect(active).toBeDefined();
     expect(active!.getAttribute("data-dashed")).toBe("true");
+  });
+
+  it("renders both a box and a polygon annotation on one image (no geometry kind hidden)", async () => {
+    // Measurement-critical: a unified file may mix bbox and polygon annotations; the overlay must
+    // draw BOTH by their own geometry — hiding a kind is an unreviewed false-negative.
+    matchesSpy.mockResolvedValue(
+      matchesRes(
+        [
+          det({ det_type: "fn", pred_idx: null, gt_idx: 0, bbox: [0, 0, 10, 10] }),
+          det({
+            det_type: "fn",
+            pred_idx: null,
+            gt_idx: 1,
+            bbox: [40, 40, 60, 60],
+            class_name: "leaf",
+          }),
+        ],
+        {
+          gt: [
+            { subject: "catkin", bbox: [0, 0, 10, 10], attributes: {} },
+            {
+              subject: "leaf",
+              points: [
+                [40, 40],
+                [60, 40],
+                [60, 60],
+              ],
+              attributes: {},
+            },
+          ],
+        },
+      ),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 2")).toBeInTheDocument());
+
+    // The box GT draws as a k-rect and the polygon GT as a k-line — both present.
+    expect(screen.getAllByTestId("k-rect").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByTestId("k-line").length).toBeGreaterThanOrEqual(1);
   });
 });
