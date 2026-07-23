@@ -234,3 +234,28 @@ def test_records_from_annotation_honors_a_global_name_id():
         width=100, height=100, name_id=name_id)
     assert {r["category_id"] for r in rec["gt"]} == {2}
     assert {r["category_id"] for r in rec["dt"]} == {2}
+
+
+# (j) the COCO-assembled loader must match images by their REAL on-disk name, not a case-normalized
+# one — real drone frames use an uppercase .JPG, and matching against a fabricated ".jpg" silently
+# yields zero boxes (an all-empty training set). (Fails pre-fix only on a case-insensitive FS, where
+# the miscased probe "succeeds"; the real-name match is correct on every platform.)
+def test_uppercase_extension_image_still_yields_boxes(tmp_path):
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    _write_registry(tmp_path, Subject(name="catkin"))
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "annotations"
+    images_dir.mkdir(parents=True)
+    Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / "IMG_1.JPG")  # uppercase ext
+    labels_dir.mkdir(parents=True)
+    json_io.write_annotations(
+        labels_dir / "IMG_1.json",
+        [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 640, 480)
+
+    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
+                       subject="catkin")
+    assert ds.num_samples == 1
+    _img, target = ds[0]
+    assert target["boxes"].shape[0] == 1  # the catkin box survived the COCO name match
+    assert len(target["labels"]) == 1
