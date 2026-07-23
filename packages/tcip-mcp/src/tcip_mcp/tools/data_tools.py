@@ -12,18 +12,16 @@ from tcip_mcp.audit import audited
 
 
 def _scan_dataset(root: str) -> dict:
-    """Scan a directory tree for images and labels in any supported format.
+    """Scan a directory tree for images and labels.
 
-    Reads the canonical per-image JSON labels, or an assembled dataset-level COCO.
+    Labels are the name-based per-image JSON — one file per image, all subjects — under
+    ``annotations/<date>/`` (no detect/segment split), or a single assembled dataset-level COCO.
     """
     root_path = Path(root)
     image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-    label_exts = {".txt", ".xml", ".json"}
     images: list[str] = []
-    labels_detect: list[str] = []
-    labels_segment: list[str] = []
-    preds_detect: list[str] = []
-    preds_segment: list[str] = []
+    labels: list[str] = []
+    preds: list[str] = []
     detected_format: str | None = None
 
     # Find images (recurse to catch the canonical images/<date>/ layout).
@@ -33,21 +31,14 @@ def _scan_dataset(root: str) -> dict:
         if f.is_file() and f.suffix.lower() in image_exts:
             images.append(str(f))
 
-    # Ground-truth labels: annotations/<trait>/[<date>/]<task>/*.{txt,xml,json}
+    # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject).
     ann_dir = root_path / "annotations"
     if ann_dir.is_dir():
-        for f in sorted(ann_dir.rglob("*")):
-            if not (f.is_file() and f.suffix in label_exts):
-                continue
-            if f.parent.name == "detect":
-                labels_detect.append(str(f))
-            elif f.parent.name == "segment":
-                labels_segment.append(str(f))
-        if labels_detect:
-            # Auto-detect format from the first label file
+        labels = [str(f) for f in sorted(ann_dir.rglob("*.json")) if f.is_file()]
+        if labels:
             try:
                 from tcip_annotation.format_io import detect_format
-                detected_format = detect_format(labels_detect[0])
+                detected_format = detect_format(labels[0])
             except ValueError:
                 detected_format = None  # unrecognized: report nothing rather than a guess
 
@@ -58,31 +49,19 @@ def _scan_dataset(root: str) -> dict:
             try:
                 from tcip_annotation.format_io import detect_format
                 if detect_format(str(coco_path)) == "coco":
-                    labels_detect = [str(coco_path)]
+                    labels = [str(coco_path)]
                     detected_format = "coco"
             except ValueError:
                 pass
             break
 
-    # Predictions: predictions/<model>/[<date>/]<task>/*.{txt,xml,json}
+    # Predictions: predictions/<model>/[<date>/]<stem>.json (operating_point.json is a stamp).
     pred_dir = root_path / "predictions"
     if pred_dir.is_dir():
-        for f in sorted(pred_dir.rglob("*")):
-            if not (f.is_file() and f.suffix in label_exts):
-                continue
-            if f.parent.name == "detect":
-                preds_detect.append(str(f))
-            elif f.parent.name == "segment":
-                preds_segment.append(str(f))
+        preds = [str(f) for f in sorted(pred_dir.rglob("*.json"))
+                 if f.is_file() and f.name != "operating_point.json"]
 
-    return {
-        "images": images,
-        "labels_detect": labels_detect,
-        "labels_segment": labels_segment,
-        "predictions_detect": preds_detect,
-        "predictions_segment": preds_segment,
-        "format": detected_format,
-    }
+    return {"images": images, "labels": labels, "predictions": preds, "format": detected_format}
 
 
 @mcp.tool()
@@ -90,11 +69,11 @@ def _scan_dataset(root: str) -> dict:
 def scan_dataset(folder_path: str) -> dict:
     """Scan a folder for images, labels, and predictions.
 
-    Reads the canonical per-image JSON labels, or an assembled dataset-level COCO.
+    Reads the name-based per-image JSON labels (one file per image, all subjects), or an assembled
+    dataset-level COCO.
 
     Expects the canonical layout (see tcip_mcp.dataset_layout):
-        images/<date>/  annotations/<trait>/<date>/{detect,segment}/
-        predictions/<model>/<date>/{detect,segment}/
+        images/<date>/  annotations/<date>/<stem>.json  predictions/<model>/<date>/<stem>.json
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -104,26 +83,18 @@ def scan_dataset(folder_path: str) -> dict:
 
     scan = _scan_dataset(folder_path)
 
-    # Build stem-based pairing
     image_stems = {Path(p).stem: p for p in scan["images"]}
-    label_stems = {Path(p).stem: p for p in scan["labels_detect"]}
+    label_stems = {Path(p).stem for p in scan["labels"]}
 
-    paired = 0
-    unlabelled = 0
-    for stem in image_stems:
-        if stem in label_stems:
-            paired += 1
-        else:
-            unlabelled += 1
+    paired = sum(1 for stem in image_stems if stem in label_stems)
+    unlabelled = len(image_stems) - paired
 
     return {
         "path": folder_path,
         "format": scan.get("format"),
         "image_count": len(scan["images"]),
-        "labels_detect_count": len(scan["labels_detect"]),
-        "labels_segment_count": len(scan["labels_segment"]),
-        "predictions_detect_count": len(scan["predictions_detect"]),
-        "predictions_segment_count": len(scan["predictions_segment"]),
+        "labels_count": len(scan["labels"]),
+        "predictions_count": len(scan["predictions"]),
         "paired_images": paired,
         "unlabelled_images": unlabelled,
         "image_stems_sample": sorted(image_stems.keys())[:10],
@@ -151,41 +122,38 @@ def validate_data_quality(folder_path: str) -> dict:
 
     # Per-image labels: check stem matching (a dataset-level COCO has no per-stem file)
     if fmt != "coco":
-        for label_path in scan["labels_detect"]:
+        for label_path in scan["labels"]:
             stem = Path(label_path).stem
             if stem not in image_stems:
                 issues.append({"level": "error", "file": label_path, "message": "No matching image"})
 
-    # Format-specific validation
-    class_ids: set[int] = set()
+    # Format-specific validation — the subjects present, not numeric ids (labels are name-based now).
+    subjects: set[str] = set()
 
-    if fmt == "json":  # the canonical per-image label file
+    if fmt == "json":  # the name-based per-image label file
         from tcip_annotation import json_io
-        for label_path in scan["labels_detect"]:
+        for label_path in scan["labels"]:
             try:
-                boxes, cids = json_io.read_detect(label_path)
-                class_ids.update(cids)
+                for a in json_io.read_annotations(label_path):
+                    subjects.add(a.subject)
             except Exception as e:
                 issues.append({"level": "error", "file": label_path, "message": f"JSON parse error: {e}"})
     elif fmt == "coco":
         from tcip_annotation.format_io import _parse_coco_json
-        for label_path in scan["labels_detect"]:
+        for label_path in scan["labels"]:
             try:
                 coco = _parse_coco_json(label_path)
-                for ann in coco.get("annotations", []):
-                    cid = ann.get("category_id", 0)
-                    class_ids.add(cid)
-                # Check all annotated images have files
+                for c in coco.get("categories", []):
+                    if c.get("name"):
+                        subjects.add(str(c["name"]))
                 coco_fnames = {img.get("file_name", "") for img in coco.get("images", [])}
                 for fn in coco_fnames:
-                    stem = Path(fn).stem
-                    if stem not in image_stems:
+                    if Path(fn).stem not in image_stems:
                         issues.append({"level": "warning", "file": label_path, "message": f"COCO image '{fn}' not found in images dir"})
             except Exception as e:
                 issues.append({"level": "error", "file": label_path, "message": f"COCO parse error: {e}"})
-    # Check for empty label files (per-file formats only)
     if fmt != "coco":
-        for label_path in scan["labels_detect"]:
+        for label_path in scan["labels"]:
             if os.path.getsize(label_path) == 0:
                 issues.append({"level": "warning", "file": label_path, "message": "Empty label file"})
 
@@ -193,8 +161,8 @@ def validate_data_quality(folder_path: str) -> dict:
         "path": folder_path,
         "format": fmt,
         "total_images": len(scan["images"]),
-        "total_labels": len(scan["labels_detect"]),
-        "class_ids": sorted(class_ids),
+        "total_labels": len(scan["labels"]),
+        "subjects": sorted(subjects),
         "issues": issues,
         "issue_count": len(issues),
         "is_valid": all(i["level"] != "error" for i in issues),
@@ -214,6 +182,7 @@ def make_splits(
     output_path: str | None = None,
     materialize: bool = False,
     copy_files: bool = True,
+    subject: str | None = None,
 ) -> dict:
     """Compute a leakage-free, annotation-stratified train/val/test split.
 
@@ -256,7 +225,7 @@ def make_splits(
 
     scan = _scan_dataset(folder_path)
     image_map = {Path(p).stem: p for p in scan["images"]}
-    label_map = {Path(p).stem: p for p in scan["labels_detect"]}
+    label_map = {Path(p).stem: p for p in scan["labels"]}
 
     stratified = bool(stratify_foreground and label_map)
     if stratified:
@@ -337,7 +306,7 @@ def make_splits(
                     dst_lbl = lbl_dir / src_lbl.name
                     if not dst_lbl.exists():
                         place_fn(str(src_lbl), str(dst_lbl))
-        _carry_confirmed_negatives(label_map, out_dir, parts, image_map)
+        _carry_confirmed_negatives(label_map, out_dir, parts, image_map, subject)
         result["output_dir"] = str(out_dir)
         result["structure"] = f"{out_dir}/{{train,val,test}}/{{images,labels}}/"
 
@@ -345,17 +314,20 @@ def make_splits(
 
 
 def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
-                               image_map: dict) -> None:
-    """Copy the source campaign's confirmed negatives into each split's own status store.
+                               image_map: dict, subject: str | None) -> None:
+    """Copy the source subject's confirmed negatives into each split's own status store.
 
-    A split tree cannot name the subject it came from — it is ``{train,val,test}/labels`` by
-    construction — so it has to carry the confirmations rather than inherit them by accident.
-    Without this, every image a human confirmed as a negative reads as an unconfirmed empty in the
-    split and is dropped from training.
+    A split tree is ``{train,val,test}/labels`` by construction and cannot recover the subject from
+    its path, so the confirmations are carried explicitly under the threaded ``subject`` (keyed by
+    ``status_bucket(subject, None)``, since the split carries no date). Without this, every image a
+    human confirmed negative reads as an unconfirmed empty in the split and is dropped from training.
+    No subject threaded -> nothing to attribute the confirmations to, so none are carried.
     """
     import json as _json
 
-    from tcip_mcp.dataset_layout import DEFAULT_SUBJECT, status_bucket
+    if not subject:
+        return
+    from tcip_mcp.dataset_layout import annotation_date, status_bucket
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
     src_dirs = {Path(p).parent for p in label_map.values()}
@@ -363,10 +335,7 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
         return
     negatives: set[str] = set()
     for d in src_dirs:
-        try:
-            negatives |= confirmed_negative_names(d)
-        except ValueError:
-            continue  # that subject is unresolvable; its own raise stands where it is read
+        negatives |= confirmed_negative_names(d, subject=subject, date=annotation_date(d))
     if not negatives:
         return
     for split_name, split_stems in parts.items():
@@ -376,5 +345,5 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
             continue
         store = out_dir / split_name / ".tcip" / "state" / "image_status.json"
         store.parent.mkdir(parents=True, exist_ok=True)
-        store.write_text(_json.dumps({status_bucket(DEFAULT_SUBJECT, None): carried}, indent=2),
+        store.write_text(_json.dumps({status_bucket(subject, None): carried}, indent=2),
                          encoding="utf-8")
