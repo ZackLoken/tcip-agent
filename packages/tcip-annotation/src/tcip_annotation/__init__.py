@@ -1,30 +1,24 @@
-"""Headless annotation library — canonical per-image JSON labels + the assembled dataset COCO."""
+"""Headless annotation library — canonical name-based per-image JSON labels + a single-file COCO."""
 
 from tcip_annotation.state import (
+    Annotation,
     AnnotationState,
     BBox,
     Polygon,
-    PredBBox,
-    PredPolygon,
-    boxes_from_polygons,
+    bbox_of,
 )
-# Label I/O is the canonical per-image JSON (json_io); the dataset-level COCO is assembled from it.
+# Label I/O is the canonical per-image JSON (json_io); a single-file COCO is a genuine interop format.
 from tcip_annotation.json_io import (
-    read_detect as parse_detect_labels,
-    read_segment as parse_segment_labels,
-    read_detect_pred as parse_detect_predictions,
-    read_segment_pred as parse_segment_predictions,
-    write_detect as write_detect_labels,
-    write_segment as write_segment_labels,
+    read_annotations,
+    write_annotations,
+    to_coco_dataset,
 )
 from tcip_annotation.format_io import (
     detect_format,
     load_annotations as load_annotations_any,
     save_annotations as save_annotations_any,
-    parse_coco_detect,
-    parse_coco_segment,
-    write_coco_detect,
-    write_coco_segment,
+    parse_coco_annotations,
+    write_coco,
 )
 from tcip_annotation.matching import compute_matches, box_iou, polygon_iou, point_in_polygon
 from tcip_annotation.annotation_engine import AnnotationEngine
@@ -37,28 +31,22 @@ except ImportError:
     pass
 
 __all__ = [
+    "Annotation",
     "AnnotationState",
     "BBox",
     "Polygon",
-    "PredBBox",
-    "PredPolygon",
-    "boxes_from_polygons",
-    # Canonical per-image COCO/JSON — the platform's native on-disk label format (primary read/write path)
-    "parse_detect_labels",
-    "parse_segment_labels",
-    "parse_detect_predictions",
-    "parse_segment_predictions",
-    "write_detect_labels",
-    "write_segment_labels",
+    "bbox_of",
+    # Canonical per-image JSON — the platform's native on-disk label format (primary read/write path)
+    "read_annotations",
+    "write_annotations",
+    "to_coco_dataset",
     # Multi-format import/export (auto-detect + dispatch; behind the load/save_annotations tools)
     "detect_format",
     "load_annotations_any",
     "save_annotations_any",
-    # COCO-specific
-    "parse_coco_detect",
-    "parse_coco_segment",
-    "write_coco_detect",
-    "write_coco_segment",
+    # COCO-specific (interop)
+    "parse_coco_annotations",
+    "write_coco",
     # Matching
     "compute_matches",
     "box_iou",
