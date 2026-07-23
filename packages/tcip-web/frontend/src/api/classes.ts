@@ -1,12 +1,31 @@
-/** Class registry + per-image-status API helpers. */
+/** Dataset class-registry + per-image-status API helpers.
+ *
+ * The registry is one nested mapping per dataset: subject -> {description?, attributes?}. It
+ * carries no integer ids and no colors — a label references names, an id is a per-training-run
+ * artifact, and a color is GUI-local (see subjectColor). It travels with the image set: a
+ * name-based label is undecodable without it.
+ */
 
 import { getJson, postJson } from "@/api/http";
 
-export interface ClassEntry {
-  id: number;
-  name: string;
-  color: string;
+/** One attribute of a subject: categorical (unordered) or ordinal (ranked). ``values`` are the
+ *  declared value names, in order (the rank order for an ordinal). */
+export interface AttributeDef {
+  type: "categorical" | "ordinal";
+  values: string[];
 }
+
+/** A subject entry: a human description plus zero or more attributes. A subject with no attributes
+ *  is simply detected (e.g. bush). */
+export interface SubjectDef {
+  description?: string;
+  defined_by?: string;
+  defined_at?: string;
+  attributes?: Record<string, AttributeDef>;
+}
+
+/** The nested registry: subject name -> its definition. Top-level keys are the subjects. */
+export type Registry = Record<string, SubjectDef>;
 
 // "negative" = the breeder marked the image Complete with no objects — a confirmed negative,
 // recorded in image_status.json. An empty label file alone is NOT this: it reads as
@@ -14,48 +33,32 @@ export interface ClassEntry {
 export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
 export const classesApi = {
-  // Class ids are subject-scoped (catkin=0, bush=0 coexist), and the registry lives in the
-  // dataset, not the project — so a shared image set carries its own names. Pass the active
-  // subject and the dataset_root; the label dirs let the server derive a provisional map when a
-  // subject has no saved one yet.
-  load: (
-    project_root: string,
-    subject?: string | null,
-    dataset_root?: string | null,
-    annotations_detect_dir?: string | null,
-    annotations_segment_dir?: string | null,
-  ) => {
+  // The registry lives in the dataset (not the project), so a shared image set carries its own
+  // subject names. Pass the dataset_root; the annotations dir lets the server derive a provisional
+  // registry (detection-only, no attributes) from the labels when no classes.json is saved yet.
+  load: (project_root: string, dataset_root?: string | null, annotations_dir?: string | null) => {
     const params = new URLSearchParams({ project_root });
-    if (subject) params.set("subject", subject);
     if (dataset_root) params.set("dataset_root", dataset_root);
-    if (annotations_detect_dir) params.set("annotations_detect_dir", annotations_detect_dir);
-    if (annotations_segment_dir) params.set("annotations_segment_dir", annotations_segment_dir);
-    return getJson<{ classes: ClassEntry[] }>(`/api/classes/load?${params.toString()}`);
+    if (annotations_dir) params.set("annotations_dir", annotations_dir);
+    return getJson<{ subjects: Registry }>(`/api/classes/load?${params.toString()}`);
   },
 
   save: (
     project_root: string,
-    subject: string | null,
-    classes: ClassEntry[],
+    subjects: Registry,
     dataset_root?: string | null,
-    annotations_detect_dir?: string | null,
-    annotations_segment_dir?: string | null,
+    annotations_dir?: string | null,
   ) =>
-    postJson<{ status: string; n_classes: number }>("/api/classes/save", {
+    postJson<{ status: string; n_subjects: number; classes_path: string }>("/api/classes/save", {
       project_root,
-      subject,
-      classes,
+      subjects,
       dataset_root,
-      annotations_detect_dir,
-      annotations_segment_dir,
+      annotations_dir,
     }),
 
-  autoColor: (class_id: number) =>
-    getJson<{ class_id: number; color: string }>(`/api/classes/auto_color/${class_id}`),
-
-  // A Complete is a statement about one subject (the annotations/<subject>/ dir) on one date.
-  // Every read and write is scoped to it, so confirming an image while annotating catkins cannot
-  // mark it negative for a disease subject nobody has looked at yet.
+  // A Complete is a statement about one subject on one date. Every read and write is scoped to it,
+  // so confirming an image while annotating catkins cannot mark it negative for a disease subject
+  // nobody has looked at yet.
   loadImageStatus: (project_root: string, subject: string | null, date: string | null) => {
     const params = new URLSearchParams({ project_root });
     if (subject) params.set("subject", subject);
@@ -90,17 +93,18 @@ export const classesApi = {
 
   deriveImageStatus: (body: {
     project_root: string;
-    annotations_detect_dir: string | null;
-    annotations_segment_dir: string | null;
+    annotations_dir: string | null;
+    subject: string | null;
     image_list: string[];
     complete_override?: string[];
   }) =>
     postJson<{ statuses: Record<string, ImageStatus> }>("/api/classes/image_status/derive", body),
 };
 
-// High-contrast palette — matches backend DEFAULT_CLASS_COLORS so JS-side
-// auto-color lookups stay in sync with server-written classes.json.
-export const DEFAULT_CLASS_COLORS = [
+// High-contrast palette the GUI derives subject/value colours from. Colour is GUI-local (the
+// registry stores none), so it is a pure function of the name — the same subject renders the same
+// colour every session with nothing persisted.
+export const SUBJECT_COLORS = [
   "#FF0000",
   "#00FFFF",
   "#FFFF00",
@@ -113,9 +117,13 @@ export const DEFAULT_CLASS_COLORS = [
   "#00CED1",
 ];
 
-export function autoColor(classId: number): string {
-  return DEFAULT_CLASS_COLORS[
-    ((classId % DEFAULT_CLASS_COLORS.length) + DEFAULT_CLASS_COLORS.length) %
-      DEFAULT_CLASS_COLORS.length
-  ];
+/** Deterministic name -> hex: a subject (or attribute-value) name always maps to the same swatch,
+ *  without storing colour anywhere. FNV-1a over the name, indexed into the palette. */
+export function subjectColor(name: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return SUBJECT_COLORS[Math.abs(h) % SUBJECT_COLORS.length];
 }
