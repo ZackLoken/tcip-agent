@@ -1,15 +1,15 @@
 """Materialize a curated detection dataset from human review verdicts (W5).
 
 Torch-free. Turns review verdicts (per-image shards under ``.tcip/state/review/``) into training data:
-  - accepted / edited GT boxes  -> positive per-image JSON labels (the canonical format)
-  - rejected-only images        -> confirmed-negative JSON (``{"objects": []}``) backgrounds
-plus a ``curated_manifest.json`` for provenance. The output layout (``images/`` +
-``labels/detect/``) matches ``data_tools._scan_dataset`` so the loop chains straight
-into ``make_splits`` / ``launch_training`` with no glue.
+  - accepted / edited GT boxes  -> positive name-based per-image JSON labels (the canonical format)
+  - rejected-only images        -> confirmed-negative JSON (``{"annotations": []}``) backgrounds
+plus a ``curated_manifest.json`` for provenance. The output layout (``images/`` + ``annotations/``)
+matches ``data_tools._scan_dataset`` so the loop chains straight into ``make_splits`` /
+``launch_training`` with no glue.
 
-The verdict log stores normalized YOLO center-form boxes (``[cx, cy, w, h]``); positives are
-denormalized to pixel coordinates using the copied image's dimensions (the canonical JSON is
-pixel-space) — no inference re-run.
+The verdict log stores normalized center-form boxes (``[cx, cy, w, h]``) plus the class *name*
+(``class_name`` — an annotation's subject); positives are denormalized to pixel coordinates using the
+copied image's dimensions (the canonical JSON is pixel-space) — no inference re-run.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tcip_annotation.json_io import write_detect
-from tcip_annotation.state import BBox
+from tcip_annotation.json_io import write_annotations
+from tcip_annotation.state import Annotation, BBox
 from tcip_annotation.utils import get_image_dimensions
 
 _POSITIVE_ACTIONS = {"accepted", "edited"}
@@ -31,10 +31,10 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")
 def partition_review_verdicts(review_state: dict, *, only_completed: bool = False) -> dict[str, dict]:
     """Partition per-image review verdicts into positives / hard-negatives / skip.
 
-    Returns ``{img_name: {"positives": [(class_id, cx, cy, w, h)],
+    Returns ``{img_name: {"positives": [(class_name, cx, cy, w, h)],
     "rejected_count": int, "status": "positive"|"hard_negative"|"skip"}}``.
     A detection's box is ``gt_bbox_norm or pred_bbox_norm`` (the fallback handles
-    accepted-FP entries that carry only a predicted box).
+    accepted-FP entries that carry only a predicted box); ``class_name`` is the subject.
     """
     result: dict[str, dict] = {}
     for img_name, img_data in review_state.get("image", {}).items():
@@ -48,7 +48,7 @@ def partition_review_verdicts(review_state: dict, *, only_completed: bool = Fals
                 box = entry.get("gt_bbox_norm") or entry.get("pred_bbox_norm")
                 if box and len(box) == 4:
                     cx, cy, w, h = (float(v) for v in box)
-                    positives.append((int(entry.get("class_id", 0)), cx, cy, w, h))
+                    positives.append((str(entry.get("class_name", "")), cx, cy, w, h))
             elif action == "rejected":
                 rejected += 1
         status = "positive" if positives else ("hard_negative" if rejected else "skip")
@@ -69,13 +69,14 @@ def _find_source_image(source_images_dir: str, img_name: str) -> Path | None:
 
 
 def _write_positive_label(path: Path, positives: list[tuple], img_w: int, img_h: int) -> None:
-    # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the canonical per-image JSON.
-    boxes = [
-        BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
-             (cx + w / 2) * img_w, (cy + h / 2) * img_h, cid)
-        for (cid, cx, cy, w, h) in positives
+    # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the name-based per-image JSON.
+    anns = [
+        Annotation(subject=name,
+                   geometry=BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
+                                 (cx + w / 2) * img_w, (cy + h / 2) * img_h))
+        for (name, cx, cy, w, h) in positives
     ]
-    write_detect(str(path), boxes, img_w, img_h, keep_empty=True)
+    write_annotations(str(path), anns, img_w, img_h, keep_empty=True)
 
 
 def materialize_dataset(
@@ -83,27 +84,29 @@ def materialize_dataset(
     source_images_dir: str,
     output_dir: str,
     *,
+    subject: str | None = None,
     review_state_path: str = "",
     include_hard_negatives: bool = True,
     copy_files: bool = True,
     only_completed: bool = False,
     producer_model: dict | None = None,
 ) -> dict:
-    """Write ``output_dir/images/`` + ``output_dir/labels/detect/`` + manifest.
+    """Write ``output_dir/images/`` + ``output_dir/annotations/`` + manifest.
 
-    ``producer_model`` (best-effort, may be ``None``) records the identity of the model whose
-    predictions the human reviewed, so the curated GT is traceable to what produced it.
+    ``subject`` is the object the review was about (the confirmed negatives are keyed under it). When
+    omitted it is derived from the verdicts' own class names (single-subject reviews). ``producer_model``
+    (best-effort) records the model whose predictions the human reviewed, for traceability.
     """
     partition = partition_review_verdicts(review_state, only_completed=only_completed)
     out = Path(output_dir)
     images_out = out / "images"
-    labels_out = out / "labels" / "detect"
+    labels_out = out / "annotations"
     images_out.mkdir(parents=True, exist_ok=True)
     labels_out.mkdir(parents=True, exist_ok=True)
 
     place = shutil.copy2 if copy_files else os.symlink
     counts = {"positive": 0, "hard_negative": 0, "skipped": 0, "total_boxes": 0, "missing_images": 0}
-    class_ids: set[int] = set()
+    subjects: set[str] = set()
     manifest_images: list[dict] = []
 
     for img_name, info in partition.items():
@@ -126,9 +129,9 @@ def materialize_dataset(
             _write_positive_label(label_path, info["positives"], img_w, img_h)
             counts["positive"] += 1
             counts["total_boxes"] += len(info["positives"])
-            class_ids.update(cid for (cid, *_rest) in info["positives"])
-        else:  # hard_negative -> confirmed-negative JSON ({"objects": []})
-            write_detect(str(label_path), [], img_w, img_h, keep_empty=True)
+            subjects.update(name for (name, *_rest) in info["positives"])
+        else:  # hard_negative -> confirmed-negative JSON ({"annotations": []})
+            write_annotations(str(label_path), [], img_w, img_h, keep_empty=True)
             counts["hard_negative"] += 1
 
         manifest_images.append({
@@ -136,21 +139,20 @@ def materialize_dataset(
             "rejected_count": info["rejected_count"], "label": str(label_path),
         })
 
-    # Hard negatives here come from explicit human rejection verdicts, so mark them in the
-    # output's own status store — training only trusts human-confirmed negatives, never bare
-    # empty files (someone may have emptied a label mid-work).
+    # Hard negatives here come from explicit human rejection verdicts, so mark them in the output's
+    # own status store under the review's subject — training only trusts human-confirmed negatives,
+    # never bare empty files (someone may have emptied a label mid-work). The subject is threaded
+    # (or the single subject the verdicts name); with none, negatives can't be attributed and are
+    # left as unconfirmed empties rather than mis-keyed.
     negatives = {e["image"]: "negative" for e in manifest_images if e["status"] == "hard_negative"}
-    if negatives:
-        from tcip_mcp.dataset_layout import parse_annotation_dir, status_bucket
+    neg_subject = subject or (next(iter(subjects)) if len(subjects) == 1 else None)
+    if negatives and neg_subject:
+        from tcip_mcp.dataset_layout import status_bucket
 
-        # Written into the bucket the emitted label dir resolves to, so training reads these back
-        # as confirmed negatives. An unbucketed write would be quarantined as unattributable and
-        # every human rejection verdict would be silently dropped from the retrain.
-        subject, date, _task = parse_annotation_dir(labels_out) or (None, None, "detect")
         status_file = out / ".tcip" / "state" / "image_status.json"
         status_file.parent.mkdir(parents=True, exist_ok=True)
         status_file.write_text(
-            json.dumps({status_bucket(subject, date): negatives}, indent=2))
+            json.dumps({status_bucket(neg_subject, None): negatives}, indent=2))
 
     manifest = {
         "created": datetime.now(timezone.utc).isoformat(),
@@ -158,17 +160,19 @@ def materialize_dataset(
         "source_images_dir": str(source_images_dir),
         "output_dir": str(out),
         "producer_model": producer_model,
+        "subject": neg_subject,
         "counts": counts,
-        "class_ids": sorted(class_ids),
+        "subjects": sorted(subjects),
         "images": manifest_images,
     }
     (out / "curated_manifest.json").write_text(json.dumps(manifest, indent=2))
 
     return {
         **counts,
-        "class_ids": sorted(class_ids),
+        "subjects": sorted(subjects),
+        "subject": neg_subject,
         "output_dir": str(out),
-        "structure": f"{out}/images/ + {out}/labels/detect/",
+        "structure": f"{out}/images/ + {out}/annotations/",
         "manifest": str(out / "curated_manifest.json"),
     }
 
