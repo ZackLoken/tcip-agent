@@ -36,10 +36,8 @@ describe("applyAnnotateFocus", () => {
         date: "2026-03-02",
         image_list: [],
         current_image_index: 0, // backend always resets to 0
-        annotations_detect_dir: null,
-        annotations_segment_dir: "/ws/proj/annotations/bush/2026-03-02/segment",
-        predictions_detect_dir: null,
-        predictions_segment_dir: null,
+        annotations_dir: "/ws/proj/annotations/2026-03-02",
+        predictions_dir: null,
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
@@ -76,10 +74,8 @@ describe("applyAnnotateFocus", () => {
       date: "2026-03-02",
       image_list: [],
       current_image_index: 0,
-      annotations_detect_dir: null,
-      annotations_segment_dir: "/ws/proj/annotations/bush/2026-03-02/segment",
-      predictions_detect_dir: null,
-      predictions_segment_dir: null,
+      annotations_dir: "/ws/proj/annotations/2026-03-02",
+      predictions_dir: null,
     };
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
