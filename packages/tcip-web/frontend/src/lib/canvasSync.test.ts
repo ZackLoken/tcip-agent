@@ -51,7 +51,14 @@ describe("computeViewport", () => {
 
 describe("buildAnnotateShapes", () => {
   const base = {
-    boxes: [],
+    boxes: [] as {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      subject: string;
+      attributes: Record<string, string>;
+    }[],
     polygons: [
       {
         points: [
@@ -59,7 +66,8 @@ describe("buildAnnotateShapes", () => {
           [10, 0],
           [10, 10],
         ] as [number, number][],
-        class_id: 0,
+        subject: "catkin",
+        attributes: {},
         created_by: "user:zack",
       },
       {
@@ -68,30 +76,31 @@ describe("buildAnnotateShapes", () => {
           [30, 20],
           [30, 30],
         ] as [number, number][],
-        class_id: 1,
+        subject: "other",
+        attributes: {},
       },
     ],
     currentPolygon: [] as [number, number][],
     selectedPolygonIdx: null,
     mode: "polygon",
-    activeClass: 0,
+    activeSubject: "catkin",
     visible: true,
-    colorFor: (cid: number) => (cid === 0 ? "#FF0000" : "#00FF00"),
-    nameFor: (cid: number) => (cid === 0 ? "catkin" : "other"),
+    colorFor: (subject: string) => (subject === "catkin" ? "#FF0000" : "#00FF00"),
   };
 
-  it("filters polygon mode to the active class, keeps provenance, colors from the GUI", () => {
+  it("filters polygon mode to the active subject, keeps provenance, colors from the GUI", () => {
     const shapes = buildAnnotateShapes(base);
-    expect(shapes).toHaveLength(1); // class 1 filtered out (not selected)
+    expect(shapes).toHaveLength(1); // "other" filtered out (not selected)
     expect(shapes[0]).toMatchObject({
       kind: "polygon",
       color: "#FF0000",
+      label: "catkin",
       tag: "gt",
       created_by: "user:zack",
     });
   });
 
-  it("a selected polygon of another class is included and highlighted", () => {
+  it("a selected polygon of another subject is included and highlighted", () => {
     const shapes = buildAnnotateShapes({ ...base, selectedPolygonIdx: 1 });
     expect(shapes).toHaveLength(2);
     expect(shapes[1].color).toBe("#00BFFF");
@@ -113,21 +122,25 @@ describe("buildAnnotateShapes", () => {
     expect(buildAnnotateShapes({ ...base, visible: false })).toEqual([]);
   });
 
-  it("box mode renders polygon-DERIVED boxes of the active class, not the stale box store", () => {
+  it("box mode renders the active-subject boxes (no polygon derivation)", () => {
     const shapes = buildAnnotateShapes({
       ...base,
       mode: "box",
-      boxes: [{ x1: 0, y1: 0, x2: 5, y2: 5, class_id: 0 }], // stale loaded detect layer
+      boxes: [
+        { x1: 0, y1: 0, x2: 5, y2: 5, subject: "catkin", attributes: {} },
+        { x1: 8, y1: 8, x2: 9, y2: 9, subject: "other", attributes: {} },
+      ],
     });
-    // polygons exist -> derived boxes; only class 0 renders (class-1 polygon filtered).
+    // Only the active subject's real box renders; polygons are not shown as boxes.
     expect(shapes).toHaveLength(1);
-    expect(shapes[0]).toMatchObject({ kind: "box", xyxy: [0, 0, 10, 10] }); // bbox of polygon 0
+    expect(shapes[0]).toMatchObject({ kind: "box", xyxy: [0, 0, 5, 5], label: "catkin" });
   });
 
   it("box mode includes the selected polygon and the rubber-band box", () => {
     const shapes = buildAnnotateShapes({
       ...base,
       mode: "box",
+      boxes: [],
       selectedPolygonIdx: 1,
       drawingBox: { x1: 50, y1: 50, x2: 40, y2: 60 },
     });
@@ -147,12 +160,10 @@ describe("buildReviewShapes", () => {
     detections: [
       {
         det_type: "tp",
-        class_id: 0,
+        class_name: "catkin",
         conf: 0.9,
         iou: 0.8,
-        gt_type: "box",
         gt_idx: 0,
-        pred_type: "box",
         pred_idx: 0,
         bbox: [0, 0, 10, 10],
         reviewed: true,
@@ -160,12 +171,10 @@ describe("buildReviewShapes", () => {
       },
       {
         det_type: "fp",
-        class_id: 0,
+        class_name: "catkin",
         conf: 0.7,
         iou: null,
-        gt_type: null,
         gt_idx: null,
-        pred_type: "box",
         pred_idx: 1,
         bbox: [20, 20, 30, 30],
         reviewed: false,
@@ -173,34 +182,29 @@ describe("buildReviewShapes", () => {
       },
       {
         det_type: "fn",
-        class_id: 0,
+        class_name: "catkin",
         conf: null,
         iou: null,
-        gt_type: "box",
         gt_idx: 1,
-        pred_type: null,
         pred_idx: null,
         bbox: [40, 40, 50, 50],
         reviewed: false,
         reviewed_action: null,
       },
     ],
-    gt_boxes: [
-      { x1: 0, y1: 0, x2: 10, y2: 10, class_id: 0 },
-      { x1: 40, y1: 40, x2: 50, y2: 50, class_id: 0 },
+    gt: [
+      { subject: "catkin", bbox: [0, 0, 10, 10], attributes: {} },
+      { subject: "catkin", bbox: [40, 40, 50, 50], attributes: {} },
     ],
-    gt_polygons: [],
-    pred_boxes: [
-      { x1: 1, y1: 1, x2: 11, y2: 11, class_id: 0, confidence: 0.9 },
-      { x1: 20, y1: 20, x2: 30, y2: 30, class_id: 0, confidence: 0.7 },
+    preds: [
+      { subject: "catkin", bbox: [1, 1, 11, 11], attributes: {}, score: 0.9 },
+      { subject: "catkin", bbox: [20, 20, 30, 30], attributes: {}, score: 0.7 },
     ],
-    pred_polygons: [],
     image_status: "started",
   } as unknown as MatchesResponse;
-  const nameFor = () => "catkin";
 
   it("mirrors the review symbology: outcome colors, focused dashed-active, reviewed wash", () => {
-    const shapes = buildReviewShapes(matches, COLORS, 1, nameFor);
+    const shapes = buildReviewShapes(matches, COLORS, 1);
     const tp = shapes.find((s) => s.tag === "tp")!;
     const fp = shapes.find((s) => s.tag === "fp")!;
     const fn = shapes.find((s) => s.tag === "fn")!;
@@ -210,63 +214,79 @@ describe("buildReviewShapes", () => {
   });
 
   it("the focused TP overlays its prediction dashed-active", () => {
-    const shapes = buildReviewShapes(matches, COLORS, 0, nameFor);
+    const shapes = buildReviewShapes(matches, COLORS, 0);
     const pred = shapes.find((s) => s.tag === "pred");
     expect(pred).toMatchObject({ color: COLORS.active, dashed: true });
   });
 
   it("honors the GT / Pred visibility toggles", () => {
     expect(
-      buildReviewShapes(matches, COLORS, 1, nameFor, { showPred: false }).some(
+      buildReviewShapes(matches, COLORS, 1, { showPred: false }).some(
         (s) => s.tag === "fp" || s.tag === "pred",
       ),
     ).toBe(false);
     expect(
-      buildReviewShapes(matches, COLORS, 1, nameFor, { showGT: false }).some(
+      buildReviewShapes(matches, COLORS, 1, { showGT: false }).some(
         (s) => s.tag === "tp" || s.tag === "fn",
       ),
     ).toBe(false);
   });
 
-  it("renders only the kind under review — derived box twins must not double-render", () => {
+  it("renders BOTH geometry kinds — a box and a polygon annotation each draw (no kind hidden)", () => {
+    // Measurement-critical: a unified file may mix a bbox annotation and a polygon annotation.
+    // Both must render by their OWN geometry; hiding a kind is an unreviewed false-negative.
     const mixed = {
-      ...matches,
-      // A polygon-kind detection for the same object (the derived-twin scenario): preds are
-      // boxes, so reviewKind = box and the polygon-kind detection must be skipped.
+      img_width: 100,
+      img_height: 80,
+      n_tp: 0,
+      n_fp: 0,
+      n_fn: 2,
       detections: [
-        ...matches.detections,
         {
           det_type: "fn",
-          class_id: 0,
+          class_name: "catkin",
           conf: null,
           iou: null,
-          gt_type: "polygon",
           gt_idx: 0,
-          pred_type: null,
           pred_idx: null,
           bbox: [0, 0, 10, 10],
           reviewed: false,
           reviewed_action: null,
         },
-      ],
-      gt_polygons: [
         {
-          points: [
-            [0, 0],
-            [10, 0],
-            [10, 10],
-          ] as [number, number][],
-          class_id: 0,
+          det_type: "fn",
+          class_name: "leaf",
+          conf: null,
+          iou: null,
+          gt_idx: 1,
+          pred_idx: null,
+          bbox: [40, 40, 60, 60],
+          reviewed: false,
+          reviewed_action: null,
         },
       ],
+      gt: [
+        { subject: "catkin", bbox: [0, 0, 10, 10], attributes: {} },
+        {
+          subject: "leaf",
+          points: [
+            [40, 40],
+            [60, 40],
+            [60, 60],
+          ],
+          attributes: {},
+        },
+      ],
+      preds: [],
+      image_status: "started",
     } as unknown as MatchesResponse;
-    const shapes = buildReviewShapes(mixed, COLORS, 1, nameFor);
-    expect(shapes.some((s) => s.kind === "polygon")).toBe(false); // box kind only
-    expect(shapes).toHaveLength(3); // tp + fp + fn boxes, no phantom polygon twin
+    const shapes = buildReviewShapes(mixed, COLORS, -1); // none focused
+    expect(shapes.filter((s) => s.kind === "box")).toHaveLength(1);
+    expect(shapes.filter((s) => s.kind === "polygon")).toHaveLength(1);
   });
 
   it("draws the focused detection last so neighbours never bury it", () => {
-    const shapes = buildReviewShapes(matches, COLORS, 0, nameFor);
+    const shapes = buildReviewShapes(matches, COLORS, 0);
     expect(shapes.at(-1)!.tag).toBe("pred"); // the focused TP's overlay is on top
   });
 });
