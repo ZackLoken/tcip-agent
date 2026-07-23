@@ -3,8 +3,7 @@ import { Circle, Line, Rect, Text } from "react-konva";
 import Konva from "konva";
 
 import { api, IMAGE_MAX_WIDTH } from "@/api/client";
-import type { Mtimes } from "@/api/client";
-import { classesApi, type ClassEntry } from "@/api/classes";
+import { classesApi, subjectColor, type AttributeDef } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
@@ -19,12 +18,8 @@ import {
   onCanvasStateRequest,
   type CanvasStateBody,
 } from "@/lib/canvasSync";
-import {
-  computePolygonBboxes,
-  findHoveredPolygon,
-  pointInPolygon,
-  polygonBbox,
-} from "@/lib/polygonGeometry";
+import { canvasToAnnotations } from "@/lib/labelSerde";
+import { computePolygonBboxes, findHoveredPolygon, pointInPolygon } from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/reviewEditGeometry";
 import { useStore } from "@/store";
 import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@/store/types";
@@ -67,27 +62,19 @@ function pointToSegmentDist(
  * The committed boxes + polygons (content layer). Memoized and — crucially — the mouse
  * cursor is not one of its props, so a mouse move (which only updates cursor-following
  * overlays) does not re-render/reconcile these hundreds–thousands of Konva nodes. It
- * re-renders only when the shapes, selection/hover, active class, or zoom-derived stroke
+ * re-renders only when the shapes, selection/hover, active subject, or zoom-derived stroke
  * sizes actually change.
  */
 interface AnnotationShapesProps {
   boxes: Box[];
   polygons: PolygonShape[];
   mode: "box" | "polygon";
-  activeClass: number;
+  activeSubject: string | null;
   selectedPolygonIdx: number | null;
   selectedBoxIdx: number | null;
   hoveredIdx: number | null;
   draggingIdx: number | undefined;
   renderLabels: boolean;
-  /** Class registry entries. Not read directly — classColor/className are stable
-   *  store methods that read live state via get() — but the memo compares props,
-   *  so this is what invalidates it (and re-renders the tab, which subscribes to
-   *  the same list) when a class's color or name changes. Without it the canvas
-   *  keeps stale colors/names until an unrelated re-render. */
-  classes: ClassEntry[];
-  classColor: (id: number) => string;
-  className: (id: number) => string;
   boxStroke: number;
   polyStroke: number;
   vertR: number;
@@ -99,14 +86,12 @@ const AnnotationShapes = memo(function AnnotationShapes({
   boxes,
   polygons,
   mode,
-  activeClass,
+  activeSubject,
   selectedPolygonIdx,
   selectedBoxIdx,
   hoveredIdx,
   draggingIdx,
   renderLabels,
-  classColor,
-  className,
   boxStroke,
   polyStroke,
   vertR,
@@ -116,17 +101,17 @@ const AnnotationShapes = memo(function AnnotationShapes({
   if (!renderLabels) return null;
   return (
     <>
-      {/* Boxes (only active class in box mode, like yolo-annotator) */}
+      {/* Boxes (only the active subject in box mode) */}
       {mode === "box" &&
         boxes.map((b, i) =>
-          b.class_id === activeClass ? (
+          b.subject === activeSubject ? (
             <BoxOverlay
               key={`box-${i}`}
               box={b}
-              stroke={i === selectedBoxIdx ? "#00BFFF" : classColor(b.class_id)}
+              stroke={i === selectedBoxIdx ? "#00BFFF" : subjectColor(b.subject)}
               width={boxStroke}
               labelSize={labelSize}
-              label={`${b.class_id}: ${className(b.class_id)}`}
+              label={b.subject}
               selected={i === selectedBoxIdx}
               handleR={selVertR}
             />
@@ -140,19 +125,19 @@ const AnnotationShapes = memo(function AnnotationShapes({
         const dragging = draggingIdx === i;
         // In box mode only show the selected polygon; in polygon mode show all
         if (mode === "box" && !selected) return null;
-        // In polygon mode filter to active class unless selected
-        if (mode === "polygon" && !selected && p.class_id !== activeClass) return null;
+        // In polygon mode filter to the active subject unless selected
+        if (mode === "polygon" && !selected && p.subject !== activeSubject) return null;
         const showVerts = selected || hovered || dragging;
         return (
           <PolygonOverlay
             key={`poly-${i}`}
             polygon={p}
-            stroke={selected ? "#00BFFF" : classColor(p.class_id)}
+            stroke={selected ? "#00BFFF" : subjectColor(p.subject)}
             width={polyStroke}
             vertexRadius={selected ? selVertR : vertR}
             showVertices={showVerts}
             labelSize={labelSize}
-            label={`${p.class_id}: ${className(p.class_id)}`}
+            label={p.subject}
           />
         );
       })}
@@ -164,14 +149,11 @@ export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const view = useStore((s) => s.gui.view);
   const mode = useStore((s) => s.gui.mode);
-  const activeClass = useStore((s) => s.gui.active_class);
+  const activeSubject = useStore((s) => s.gui.active_subject);
   const predRef = useStore((s) => s.gui.pred_reference);
-  const classColor = useStore((s) => s.classColor);
-  const className = useStore((s) => s.className);
-  // Subscribe to the class registry itself: classColor/className are stable
-  // function refs, so without this an upsertClass (color/name edit) would never
-  // re-render the tab or invalidate the AnnotationShapes memo.
-  const classList = useStore((s) => s.classes.list);
+  // The subject registry (subject -> {description?, attributes?}); drives colours (name-derived,
+  // GUI-local) and the per-instance attribute editor.
+  const registry = useStore((s) => s.registry.subjects);
 
   const canvas = useStore((s) => s.canvas);
   const loadLabels = useStore((s) => s.loadLabelsIntoCanvas);
@@ -189,7 +171,7 @@ export function AnnotateTab() {
   const markClean = useStore((s) => s.markClean);
   const setPredReference = useStore((s) => s.setPredReference);
   const pushUndo = useStore((s) => s.pushUndo);
-  const setActiveClass = useStore((s) => s.setActiveClass);
+  const setActiveSubject = useStore((s) => s.setActiveSubject);
 
   const annotateUi = useStore((s) => s.annotateUi);
   const setHoveredPolygon = useStore((s) => s.setHoveredPolygon);
@@ -209,20 +191,17 @@ export function AnnotateTab() {
   const boxDragRef = useRef<{ idx: number; drag: EditDrag } | null>(null);
 
   // I/O safety. The canvas belongs to exactly the image last loaded from disk:
-  //  - loadedPathsRef: the (image, det, seg) the current boxes/polygons came from.
-  //    save() writes there — never to paths recomputed from a since-changed dataset,
-  //    which is how the old code could write one image's boxes onto another's file.
-  //  - loadedKeyRef: gates reloads to a genuine image-identity change, so unrelated
-  //    store updates (a WS snapshot, a mode/class toggle) don't re-read disk and
-  //    clobber unsaved edits.
-  //  - saveBlocked: set when a load failed, so a blank canvas can't overwrite the
-  //    labels still on disk.
+  //  - loadedPathsRef: the (image, label) the current shapes came from. save() writes there —
+  //    never to a path recomputed from a since-changed dataset, which is how the old code could
+  //    write one image's shapes onto another's file.
+  //  - loadedKeyRef: gates reloads to a genuine image-identity change, so unrelated store updates
+  //    (a WS snapshot, a mode/subject toggle) don't re-read disk and clobber unsaved edits.
+  //  - saveBlocked: set when a load failed, so a blank canvas can't overwrite the labels on disk.
   const loadedKeyRef = useRef<string | null>(null);
   const loadedPathsRef = useRef<{
     image: string;
-    det: string | null;
-    seg: string | null;
-    mtimes: Mtimes;
+    label: string | null;
+    mtime: string | null;
   } | null>(null);
   const [ioError, setIoError] = useState<string | null>(null);
   const [saveBlocked, setSaveBlocked] = useState(false);
@@ -252,6 +231,10 @@ export function AnnotateTab() {
 
   // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
   // The ref always holds the freshest closure so the debounced pusher never reads stale state.
+  const subjectSwatches = useMemo(
+    () => Object.keys(registry).map((name) => ({ name, color: subjectColor(name) })),
+    [registry],
+  );
   const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
   buildCanvasBodyRef.current = () => {
     if (!imgPath || !dataset.project_root) return null;
@@ -270,13 +253,14 @@ export function AnnotateTab() {
       img_height: canvas.imgHeight,
       viewport: host ? computeViewport(view, host, canvas.imgWidth, canvas.imgHeight) : null,
       mode,
-      active_class: activeClass,
+      active_subject: activeSubject ?? undefined,
       dirty: canvas.dirty,
       user: useStore.getState().user || undefined,
-      classes: classList,
+      classes: subjectSwatches,
       counts: {
         boxes: canvas.boxes.length,
         polygons: canvas.polygons.length,
+        image_ratings: canvas.imageAnnotations.length,
         drawing_points: canvas.currentPolygon.length,
       },
       shapes: buildAnnotateShapes({
@@ -287,10 +271,9 @@ export function AnnotateTab() {
         selectedPolygonIdx: canvas.selectedPolygonIdx,
         selectedBoxIdx,
         mode,
-        activeClass,
+        activeSubject: activeSubject ?? "",
         visible: annotateUi.visible,
-        colorFor: classColor,
-        nameFor: className,
+        colorFor: subjectColor,
       }),
     };
   };
@@ -310,7 +293,7 @@ export function AnnotateTab() {
     canvas.selectedPolygonIdx,
     imgPath,
     mode,
-    activeClass,
+    activeSubject,
     selectedBoxIdx,
     annotateUi.visible,
     annotateUi.draggingVertex,
@@ -318,7 +301,7 @@ export function AnnotateTab() {
   ]);
   useEffect(() => {
     canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), false);
-  }, [view, classList, canvas.dirty]);
+  }, [view, subjectSwatches, canvas.dirty]);
   useEffect(
     () =>
       onCanvasStateRequest(() => {
@@ -335,9 +318,9 @@ export function AnnotateTab() {
 
   // ── Label load + save ───────────────────────────────────────────────
 
-  // Save the current canvas to the paths it was actually loaded from. Reads the
-  // live store + refs (not render closures), so it stays correct even when called
-  // from an effect while the app is mid-transition to another image.
+  // Save the current canvas to the path it was actually loaded from. Reads the live store + refs
+  // (not render closures), so it stays correct even when called from an effect while the app is
+  // mid-transition to another image.
   async function save(opts?: { interactive?: boolean }) {
     // interactive=false is the auto-flush on navigate/unmount: it can't show the Reload
     // banner (the user is on another image), but a dropped save must never be silent —
@@ -354,12 +337,14 @@ export function AnnotateTab() {
     try {
       result = await api.annotate.save({
         image_path: paths.image,
-        detect_path: paths.det,
-        segment_path: paths.seg,
-        boxes: c.boxes,
-        polygons: c.polygons,
+        label_path: paths.label,
+        annotations: canvasToAnnotations({
+          boxes: c.boxes,
+          polygons: c.polygons,
+          imageAnnotations: c.imageAnnotations,
+        }),
         project_root: projectRoot,
-        base_mtimes: paths.mtimes,
+        base_mtime: paths.mtime,
         user: useStore.getState().user,
       });
     } catch {
@@ -403,8 +388,8 @@ export function AnnotateTab() {
     if (projectRoot && name) {
       const current = useStore.getState().imageStatus.byImage[name];
       if (current !== "complete") {
-        const hasContent = c.boxes.length + c.polygons.length > 0;
-        // boxes -> partial; an empty save keeps a prior confirmed negative, else unannotated
+        const hasContent = c.boxes.length + c.polygons.length + c.imageAnnotations.length > 0;
+        // content -> partial; an empty save keeps a prior confirmed negative, else unannotated
         // (a negative needs an explicit Complete, not just an empty file).
         const newStatus = hasContent
           ? "partial"
@@ -425,11 +410,11 @@ export function AnnotateTab() {
     // the time the POST resolves the load effect may already have loaded the next
     // image and repointed loadedPathsRef. Rewinding the ref here would make every
     // later save write the new image's shapes onto the old image's label file
-    // (with echoed mtimes that match it, so the backend's 409 guard can't catch
+    // (with an echoed mtime that matches it, so the backend's 409 guard can't catch
     // it), and markClean() would silently drop edits already made on the new image.
     if (loadedPathsRef.current !== paths) return;
 
-    loadedPathsRef.current = { ...paths, mtimes: result.base_mtimes };
+    loadedPathsRef.current = { ...paths, mtime: result.base_mtime };
     markClean();
     setIoError(null);
     setConflict(false);
@@ -441,9 +426,9 @@ export function AnnotateTab() {
     const paths = loadedPathsRef.current;
     if (!paths) return;
     try {
-      const labels = await api.annotate.load(paths.image, paths.det, paths.seg);
+      const labels = await api.annotate.load(paths.image, paths.label);
       loadLabels(labels);
-      loadedPathsRef.current = { ...paths, mtimes: labels.base_mtimes };
+      loadedPathsRef.current = { ...paths, mtime: labels.base_mtime };
       setIoError(null);
       setConflict(false);
       setSaveBlocked(false);
@@ -452,7 +437,7 @@ export function AnnotateTab() {
     }
   }
 
-  // Flush telemetry + any unsaved edits for the image being left, using the paths
+  // Flush telemetry + any unsaved edits for the image being left, using the path
   // that canvas belongs to. Called before loading a different image and on unmount.
   function flushLeaving() {
     const leaving = useStore.getState().sessionTracking.currentImageName;
@@ -462,7 +447,7 @@ export function AnnotateTab() {
 
   // React to the agent writing labels (panel event). If it touched the file we're
   // viewing: reload on a clean canvas, or offer a Reload conflict prompt if dirty.
-  // (Different file/layout → the StatusBar indicator already shows the activity.)
+  // (Different file → the StatusBar indicator already shows the activity.)
   useEffect(() => {
     if (
       !agentActivity ||
@@ -476,8 +461,8 @@ export function AnnotateTab() {
       ? (agentActivity.data.written as string[])
       : [];
     const norm = (p: string | null) => (p ? p.replace(/\\/g, "/") : "");
-    const current = new Set([norm(paths.det), norm(paths.seg)].filter(Boolean));
-    if (!written.some((w) => current.has(norm(w)))) return;
+    const current = norm(paths.label);
+    if (!current || !written.some((w) => norm(w) === current)) return;
     if (useStore.getState().canvas.dirty) {
       setConflict(true);
       setIoError(
@@ -492,42 +477,47 @@ export function AnnotateTab() {
   useEffect(() => {
     if (!imgPath || !currentImageName) return;
     const stem = currentImageName.replace(/\.[^.]+$/, "");
-    const det = dataset.annotations_detect_dir
-      ? `${dataset.annotations_detect_dir}/${stem}.json`
-      : null;
-    const seg = dataset.annotations_segment_dir
-      ? `${dataset.annotations_segment_dir}/${stem}.json`
-      : null;
-    const key = `${imgPath}\0${det ?? ""}\0${seg ?? ""}`;
+    const label = dataset.annotations_dir ? `${dataset.annotations_dir}/${stem}.json` : null;
+    const key = `${imgPath}\0${label ?? ""}`;
 
     // Already displaying this exact image + label target. Ignore — this is what
-    // stops an unrelated store change (a WS state snapshot, a mode/class toggle,
+    // stops an unrelated store change (a WS state snapshot, a mode/subject toggle,
     // any patchGui that swaps the dataset object) from re-reading disk and
     // discarding unsaved canvas edits.
     if (loadedKeyRef.current === key) return;
 
-    // Switching images: flush the previous image's work first (to the paths it
+    // Switching images: flush the previous image's work first (to the path it
     // belongs to), then load the new one.
     flushLeaving();
 
     let cancelled = false;
     void (async () => {
       try {
-        const labels = await api.annotate.load(imgPath, det, seg);
+        const labels = await api.annotate.load(imgPath, label);
         if (cancelled) return;
         loadLabels(labels);
         loadedKeyRef.current = key;
-        loadedPathsRef.current = { image: imgPath, det, seg, mtimes: labels.base_mtimes };
+        loadedPathsRef.current = { image: imgPath, label, mtime: labels.base_mtime };
         setSaveBlocked(false);
         setIoError(null);
         setConflict(false);
-        startImageSessionTracking(currentImageName, labels.boxes.length + labels.polygons.length);
+        startImageSessionTracking(
+          currentImageName,
+          labels.boxes.length + labels.polygons.length + labels.imageAnnotations.length,
+        );
       } catch {
         if (cancelled) return;
         // Show a blank canvas but block saving so a transient load failure can't let an
         // empty canvas overwrite the labels still on disk. image_path stays empty so the
         // Complete checkbox won't derive a status from this blank canvas either.
-        loadLabels({ image_path: "", img_width: 0, img_height: 0, boxes: [], polygons: [] });
+        loadLabels({
+          image_path: "",
+          img_width: 0,
+          img_height: 0,
+          boxes: [],
+          polygons: [],
+          imageAnnotations: [],
+        });
         loadedKeyRef.current = key;
         loadedPathsRef.current = null;
         setSaveBlocked(true);
@@ -541,10 +531,10 @@ export function AnnotateTab() {
     return () => {
       cancelled = true;
     };
-    // Keyed on image identity + label dirs only (see loadedKeyRef guard); save /
+    // Keyed on image identity + label dir only (see loadedKeyRef guard); save /
     // loadLabels / tracking actions are stable or ref-based.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imgPath, currentImageName, dataset.annotations_detect_dir, dataset.annotations_segment_dir]);
+  }, [imgPath, currentImageName, dataset.annotations_dir]);
 
   function emitImageSessionEvent(imageName: string) {
     const state = useStore.getState();
@@ -553,7 +543,8 @@ export function AnnotateTab() {
     if (!projectRoot) return;
     if (tracking.currentImageName !== imageName || tracking.imageEnterTimeMs === null) return;
 
-    const finalAnnotationCount = state.canvas.boxes.length + state.canvas.polygons.length;
+    const c = state.canvas;
+    const finalAnnotationCount = c.boxes.length + c.polygons.length + c.imageAnnotations.length;
     const elapsedSeconds = Math.max(0, (Date.now() - tracking.imageEnterTimeMs) / 1000);
     const key = `${imageName}|${tracking.imageEnterTimeMs}|${tracking.annotationsAddedDelta}|${finalAnnotationCount}`;
     if (tracking.lastFlushedKey === key) return;
@@ -599,11 +590,22 @@ export function AnnotateTab() {
     selectPolygon(null);
   }
 
-  function selectClassByNumberKey(key: number) {
-    // pick by ID if present in class registry
-    const entries = useStore.getState().classes.list;
-    const target = entries.find((c) => c.id === key);
-    if (target) setActiveClass(key);
+  function selectSubjectByIndex(idx: number) {
+    // Number keys pick the Nth declared subject (0-based), mirroring the old class-number keys.
+    const names = Object.keys(useStore.getState().registry.subjects);
+    if (names[idx]) setActiveSubject(names[idx]);
+  }
+
+  // No subject selected → an authored shape has nowhere to attach and the backend save rejects
+  // it. Refuse to start a drawing and say so, once (not per click).
+  const noSubjectNoticeRef = useRef<string | null>(null);
+  function requireSubject(): boolean {
+    if (activeSubject) return true;
+    if (noSubjectNoticeRef.current !== currentImageName) {
+      noSubjectNoticeRef.current = currentImageName;
+      useStore.getState().pushToast("Select a subject before drawing (use the subject picker).");
+    }
+    return false;
   }
 
   useKeyboardShortcuts([
@@ -662,16 +664,16 @@ export function AnnotateTab() {
       },
       when: () => !isLocked,
     },
-    { keys: "0", action: () => selectClassByNumberKey(0) },
-    { keys: "1", action: () => selectClassByNumberKey(1) },
-    { keys: "2", action: () => selectClassByNumberKey(2) },
-    { keys: "3", action: () => selectClassByNumberKey(3) },
-    { keys: "4", action: () => selectClassByNumberKey(4) },
-    { keys: "5", action: () => selectClassByNumberKey(5) },
-    { keys: "6", action: () => selectClassByNumberKey(6) },
-    { keys: "7", action: () => selectClassByNumberKey(7) },
-    { keys: "8", action: () => selectClassByNumberKey(8) },
-    { keys: "9", action: () => selectClassByNumberKey(9) },
+    { keys: "0", action: () => selectSubjectByIndex(0) },
+    { keys: "1", action: () => selectSubjectByIndex(1) },
+    { keys: "2", action: () => selectSubjectByIndex(2) },
+    { keys: "3", action: () => selectSubjectByIndex(3) },
+    { keys: "4", action: () => selectSubjectByIndex(4) },
+    { keys: "5", action: () => selectSubjectByIndex(5) },
+    { keys: "6", action: () => selectSubjectByIndex(6) },
+    { keys: "7", action: () => selectSubjectByIndex(7) },
+    { keys: "8", action: () => selectSubjectByIndex(8) },
+    { keys: "9", action: () => selectSubjectByIndex(9) },
   ]);
 
   // ── Snap helper (image-space) ───────────────────────────────────────
@@ -706,8 +708,6 @@ export function AnnotateTab() {
   const didDragRef = useRef(false);
   // True between the start/stop clicks of a freehand (Stream mode) polygon.
   const streamingRef = useRef(false);
-  // Throttle the "detect is derived" notice to once per image, not once per click.
-  const derivedNoticeRef = useRef<string | null>(null);
 
   const onDown = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     if (isLocked) return;
@@ -717,19 +717,6 @@ export function AnnotateTab() {
     // (e.g. an outside click meant to deselect), forcing a second click.
     didDragRef.current = false;
     if (mode === "box") {
-      // Detect boxes are derived from polygons when any exist, so a drawn box would be
-      // discarded on save — point the annotator at polygon mode instead of losing it.
-      if (canvas.polygons.length > 0) {
-        if (derivedNoticeRef.current !== currentImageName) {
-          derivedNoticeRef.current = currentImageName;
-          useStore
-            .getState()
-            .pushToast(
-              "Detect boxes are derived from polygons on this image — switch to Polygon mode (M) to add an object.",
-            );
-        }
-        return;
-      }
       const sc = view.scale || 1;
       // Grab a handle / body of the already-selected box to resize or move it.
       if (selectedBoxIdx !== null && canvas.boxes[selectedBoxIdx]) {
@@ -742,19 +729,20 @@ export function AnnotateTab() {
           return;
         }
       }
-      // Otherwise a press inside an existing (active-class) box selects it; empty space
+      // Otherwise a press inside an existing (active-subject) box selects it; empty space
       // deselects and starts a new box.
       for (let i = canvas.boxes.length - 1; i >= 0; i--) {
         const b = canvas.boxes[i];
-        if (b.class_id === activeClass && ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
+        if (b.subject === activeSubject && ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
           setSelectedBoxIdx(i);
           return;
         }
       }
       setSelectedBoxIdx(null);
+      if (!requireSubject()) return;
       const cx = Math.max(0, Math.min(canvas.imgWidth || ix, ix));
       const cy = Math.max(0, Math.min(canvas.imgHeight || iy, iy));
-      setDrawing({ x1: cx, y1: cy, x2: cx, y2: cy, class_id: activeClass });
+      setDrawing({ x1: cx, y1: cy, x2: cx, y2: cy, subject: activeSubject!, attributes: {} });
       return;
     }
     // Polygon: button press starts either a vertex drag (if clicked within
@@ -809,22 +797,6 @@ export function AnnotateTab() {
   // One bbox per polygon (recomputed only when the polygon list changes) lets the hover
   // scan reject most polygons with four comparisons before the O(vertices) ray-cast.
   const polygonBboxes = useMemo(() => computePolygonBboxes(canvas.polygons), [canvas.polygons]);
-
-  // The detect layer is derived from polygons whenever any exist. In box mode, show those
-  // derived boxes (read-only); with no polygons, box mode edits the real boxes. Memoized
-  // (like polygonBboxes) so a pan/zoom tick doesn't rebuild all N boxes and defeat the
-  // AnnotationShapes memo it feeds.
-  const boxesDerived = mode === "box" && canvas.polygons.length > 0;
-  const boxesToRender = useMemo(
-    () =>
-      boxesDerived
-        ? canvas.polygons.map((p): Box => {
-            const [x1, y1, x2, y2] = polygonBbox(p.points);
-            return { x1, y1, x2, y2, class_id: p.class_id };
-          })
-        : canvas.boxes,
-    [boxesDerived, canvas.polygons, canvas.boxes],
-  );
 
   // rAF-throttle mouse moves: coalesce a burst of pointer events into one update per frame.
   // The ref always holds the freshest closure, so a re-render between scheduling and the
@@ -887,7 +859,7 @@ export function AnnotateTab() {
         boxDragRef.current = { idx: bDrag.idx, drag: r.drag };
         if (r.shape.kind === "box") {
           const [x1, y1, x2, y2] = r.shape.box;
-          dragBox(bDrag.idx, { ...b, x1, y1, x2, y2 }); // undo captured on down; spread keeps provenance
+          dragBox(bDrag.idx, { ...b, x1, y1, x2, y2 }); // undo captured on down; spread keeps subject/attrs
         }
       }
       return;
@@ -945,7 +917,8 @@ export function AnnotateTab() {
         y1: Math.min(drawing.y1, cy),
         x2: Math.max(drawing.x1, cx),
         y2: Math.max(drawing.y1, cy),
-        class_id: activeClass,
+        subject: drawing.subject,
+        attributes: {},
       };
       if (box.x2 - box.x1 > MIN_BOX_SIDE && box.y2 - box.y1 > MIN_BOX_SIDE) {
         addBox(box);
@@ -977,6 +950,7 @@ export function AnnotateTab() {
         selectPolygon(null); // one click = one action: deselect first, stream on the next click
         return;
       }
+      if (canvas.currentPolygon.length === 0 && !requireSubject()) return;
       const [sx, sy] = snapImagePoint(ix, iy);
       if (canvas.currentPolygon.length === 0) {
         pushUndo();
@@ -1004,6 +978,7 @@ export function AnnotateTab() {
     }
     // Clicked empty space with nothing selected: start a new polygon
     if (canvas.selectedPolygonIdx === null) {
+      if (!requireSubject()) return;
       const [sx, sy] = snapImagePoint(ix, iy);
       setCurrentPolygon([[sx, sy]]);
     } else {
@@ -1059,8 +1034,7 @@ export function AnnotateTab() {
       selectPolygon(null);
       return;
     }
-    // Box right-click delete — box mode only: in polygon mode a coincident (invisible)
-    // detect box would swallow the click and silently fork the two GT layouts.
+    // Box right-click delete — box mode only.
     if (mode === "box") {
       for (let i = 0; i < canvas.boxes.length; i++) {
         const b = canvas.boxes[i];
@@ -1147,7 +1121,7 @@ export function AnnotateTab() {
                 <InProgressPolygon
                   points={canvas.currentPolygon}
                   cursor={cursor}
-                  stroke={classColor(activeClass)}
+                  stroke={activeSubject ? subjectColor(activeSubject) : "#FFE7B1"}
                   strokeW={polyStroke}
                   vertR={vertR}
                 />
@@ -1160,7 +1134,7 @@ export function AnnotateTab() {
                   y={Math.min(drawing.y1, drawing.y2)}
                   width={Math.abs(drawing.x2 - drawing.x1)}
                   height={Math.abs(drawing.y2 - drawing.y1)}
-                  stroke={classColor(activeClass)}
+                  stroke={subjectColor(drawing.subject)}
                   strokeWidth={boxStroke}
                   dash={[6 * scaleLineW, 4 * scaleLineW]}
                 />
@@ -1175,18 +1149,15 @@ export function AnnotateTab() {
         >
           {/* Committed shapes — memoized, cursor-independent (see AnnotationShapes) */}
           <AnnotationShapes
-            boxes={boxesToRender}
+            boxes={canvas.boxes}
             polygons={canvas.polygons}
             mode={mode}
-            activeClass={activeClass}
+            activeSubject={activeSubject}
             selectedPolygonIdx={canvas.selectedPolygonIdx}
-            selectedBoxIdx={boxesDerived ? null : selectedBoxIdx}
+            selectedBoxIdx={selectedBoxIdx}
             hoveredIdx={hoveredIdx}
             draggingIdx={draggingIdx}
             renderLabels={renderLabels}
-            classes={classList}
-            classColor={classColor}
-            className={className}
             boxStroke={boxStroke}
             polyStroke={polyStroke}
             vertR={vertR}
@@ -1209,16 +1180,169 @@ export function AnnotateTab() {
           </div>
         )}
 
+        {!isLocked && <AttributePanel selectedBoxIdx={mode === "box" ? selectedBoxIdx : null} />}
+
         <AnnotateLegend />
       </div>
     </div>
   );
 }
 
-/** Hover-triggered legend, anchored lower-left of the canvas. Lists the project's classes
- *  (outline colour = class) plus the selected-shape blue — the same grammar as Review. */
+/** Per-instance attribute editing + a geometry-less (image/plant-level) rating entry. Minimal but
+ *  functional (the polished editor is a later slice): the selected shape's attributes, plus the
+ *  image-level ratings that ride in the same label file with no box. */
+function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
+  const activeSubject = useStore((s) => s.gui.active_subject);
+  const registry = useStore((s) => s.registry.subjects);
+  const boxes = useStore((s) => s.canvas.boxes);
+  const polygons = useStore((s) => s.canvas.polygons);
+  const selectedPolygonIdx = useStore((s) => s.canvas.selectedPolygonIdx);
+  const imageAnnotations = useStore((s) => s.canvas.imageAnnotations);
+  const updateBox = useStore((s) => s.updateBox);
+  const updatePolygon = useStore((s) => s.updatePolygon);
+  const addImageAnnotation = useStore((s) => s.addImageAnnotation);
+  const updateImageAnnotation = useStore((s) => s.updateImageAnnotation);
+  const deleteImageAnnotation = useStore((s) => s.deleteImageAnnotation);
+
+  const selected =
+    selectedBoxIdx != null && boxes[selectedBoxIdx]
+      ? ({ kind: "box", idx: selectedBoxIdx, shape: boxes[selectedBoxIdx] } as const)
+      : selectedPolygonIdx != null && polygons[selectedPolygonIdx]
+        ? ({
+            kind: "polygon",
+            idx: selectedPolygonIdx,
+            shape: polygons[selectedPolygonIdx],
+          } as const)
+        : null;
+
+  const withAttr = (attrs: Record<string, string>, attr: string, value: string) => {
+    const next = { ...attrs };
+    if (value) next[attr] = value;
+    else delete next[attr];
+    return next;
+  };
+
+  const setInstanceAttr = (attr: string, value: string) => {
+    if (!selected) return;
+    if (selected.kind === "box") {
+      const b = boxes[selected.idx];
+      updateBox(selected.idx, { ...b, attributes: withAttr(b.attributes, attr, value) });
+    } else {
+      const p = polygons[selected.idx];
+      updatePolygon(selected.idx, { ...p, attributes: withAttr(p.attributes, attr, value) });
+    }
+  };
+
+  return (
+    <div className="absolute top-3 right-3 z-20 w-60 rounded-md border border-tcip-border bg-tcip-panel/95 p-3 text-[11px] shadow-lg backdrop-blur">
+      <h4 className="mb-1 text-[11px] font-semibold tracking-wide text-tcip-fg">Attributes</h4>
+      {selected ? (
+        <div className="mb-2">
+          <div className="mb-1 text-tcip-muted">
+            Selected <span className="font-semibold text-tcip-fg">{selected.shape.subject}</span>
+          </div>
+          <AttributeEditors
+            subject={selected.shape.subject}
+            attributes={selected.shape.attributes}
+            registry={registry}
+            onChange={setInstanceAttr}
+          />
+        </div>
+      ) : (
+        <p className="mb-2 text-tcip-muted">Select a shape to set its attributes.</p>
+      )}
+
+      <div className="mt-2 border-t border-tcip-border pt-2">
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tcip-muted">
+          Image-level ratings
+        </div>
+        {imageAnnotations.length === 0 && (
+          <p className="mb-1 text-tcip-muted">None on this image.</p>
+        )}
+        {imageAnnotations.map((a, i) => (
+          <div key={i} className="mb-1.5 rounded border border-tcip-border p-1.5">
+            <div className="mb-1 flex items-center gap-1">
+              <span className="font-semibold text-tcip-fg">{a.subject}</span>
+              <button
+                type="button"
+                className="ml-auto text-tcip-muted hover:text-tcip-fp"
+                title="Remove this rating"
+                onClick={() => deleteImageAnnotation(i)}
+              >
+                ✕
+              </button>
+            </div>
+            <AttributeEditors
+              subject={a.subject}
+              attributes={a.attributes}
+              registry={registry}
+              onChange={(attr, value) =>
+                updateImageAnnotation(i, { ...a, attributes: withAttr(a.attributes, attr, value) })
+              }
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          className="tcip-btn mt-1 w-full text-[11px]"
+          disabled={!activeSubject}
+          onClick={() => activeSubject && addImageAnnotation(activeSubject)}
+        >
+          + Rating for {activeSubject ?? "…"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** One `<select>` per declared attribute of the subject; empty resets the value. */
+function AttributeEditors({
+  subject,
+  attributes,
+  registry,
+  onChange,
+}: {
+  subject: string;
+  attributes: Record<string, string>;
+  registry: Record<string, { attributes?: Record<string, AttributeDef> }>;
+  onChange: (attr: string, value: string) => void;
+}) {
+  const defs = registry[subject]?.attributes ?? {};
+  const entries = Object.entries(defs);
+  if (entries.length === 0) {
+    return <p className="text-tcip-muted">No attributes declared for {subject}.</p>;
+  }
+  return (
+    <>
+      {entries.map(([name, def]) => (
+        <label key={name} className="mb-1 flex items-center gap-1.5">
+          <span className="w-20 shrink-0 truncate text-tcip-muted" title={name}>
+            {name}
+          </span>
+          <select
+            className="tcip-select flex-1 text-[11px]"
+            value={attributes[name] ?? ""}
+            onChange={(e) => onChange(name, e.target.value)}
+          >
+            <option value="">—</option>
+            {def.values.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </label>
+      ))}
+    </>
+  );
+}
+
+/** Hover-triggered legend, anchored lower-left of the canvas. Lists the dataset's subjects
+ *  (outline colour = subject, GUI-local) plus the selected-shape blue — the same grammar as
+ *  Review. */
 function AnnotateLegend() {
-  const classes = useStore((s) => s.classes.list);
+  const registry = useStore((s) => s.registry.subjects);
+  const names = Object.keys(registry);
   return (
     <div className="group absolute bottom-3 left-3 z-20">
       <div className="pointer-events-none absolute bottom-full left-0 mb-2 w-max min-w-[8rem] translate-y-1 whitespace-nowrap rounded-md border border-tcip-border-hover bg-tcip-panel p-3 opacity-0 shadow-lg transition-all group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
@@ -1226,13 +1350,13 @@ function AnnotateLegend() {
           Annotate Legend
         </h4>
         <ul className="space-y-1.5">
-          {classes.map((c) => (
-            <li key={c.id} className="flex items-center gap-2.5 text-[12px]">
+          {names.map((name) => (
+            <li key={name} className="flex items-center gap-2.5 text-[12px]">
               <span
                 className="inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px]"
-                style={{ borderColor: c.color }}
+                style={{ borderColor: subjectColor(name) }}
               />
-              <span className="text-tcip-fg">{c.name}</span>
+              <span className="text-tcip-fg">{name}</span>
             </li>
           ))}
           <li className="flex items-center gap-2.5 text-[12px]">
