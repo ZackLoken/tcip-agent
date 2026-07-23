@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from typing import Callable
 
+from tcip_annotation import Annotation, Polygon, bbox_of, load_annotations_any
+from tcip_annotation.json_io import read_annotations as read_labels
 from tcip_annotation.utils import get_image_dimensions
 from tcip_annotation.viz import (
     render_candidates,
@@ -24,6 +27,38 @@ from tcip_annotation.viz import (
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import mcp
+
+
+def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
+    """A stable subject-name → color-index map for the (int-keyed) renderers, plus its indexer.
+
+    Labels are name-based now; the viz layer colors by an integer and labels from a ``{index: name}``
+    map, so each distinct subject in one render gets a stable index and its own name in the legend.
+    """
+    idx: dict[str, int] = {}
+
+    def index(name: str) -> int:
+        if name not in idx:
+            idx[name] = len(idx)
+        return idx[name]
+
+    return idx, index
+
+
+def _name_map(idx: dict[str, int]) -> dict[int, str]:
+    return {i: name for name, i in idx.items()}
+
+
+def _box_dict(a: Annotation, index: Callable[[str], int]) -> dict:
+    b = bbox_of(a.geometry)
+    d = {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": index(a.subject)}
+    if a.score is not None:
+        d["confidence"] = a.score
+    return d
+
+
+def _poly_dict(a: Annotation, index: Callable[[str], int]) -> dict:
+    return {"points": [[p[0], p[1]] for p in a.geometry.points], "class_id": index(a.subject)}
 
 
 @mcp.tool()
@@ -86,61 +121,47 @@ def _viz_annotations(
     class_names: str = "",
 ) -> dict:
     """Render ground-truth annotations on a single image. See ``visualize``."""
-    from tcip_annotation.format_io import (
-        detect_format,
-        load_annotations as format_load,
-    )
+    from tcip_annotation.format_io import detect_format
     from tcip_mcp.dataset_layout import find_gt_label
 
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    w, h = get_image_dimensions(image_path)
     stem = img.stem
-
-    name_map = {}
-    if class_names:
-        name_map = {i: n.strip() for i, n in enumerate(class_names.split(","))}
-
-    label_path = find_gt_label(image_path, task)
+    label_path = find_gt_label(image_path)
     if label_path is None:
-        return {"error": f"No {task} labels found for {stem}"}
+        return {"error": f"No labels found for {stem}"}
 
     try:
         fmt = detect_format(str(label_path))
     except ValueError as exc:
         return {"error": str(exc)}
+    anns = load_annotations_any(str(label_path), fmt=fmt, file_name=img.name)
+    idx, index = _subject_indexer()
 
     if task == "detect":
-        boxes, class_ids = format_load(str(label_path), w, h, task="detect", fmt=fmt)
-        box_dicts = [
-            {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
-            for b in boxes
-        ]
-        out = render_detections(image_path, box_dicts, class_names=name_map)
-        summary = f"Rendered {len(boxes)} detections on {img.name}"
-        if name_map:
+        shapes = [a for a in anns if a.geometry is not None]
+        out = render_detections(image_path, [_box_dict(a, index) for a in shapes],
+                                class_names=_name_map(idx))
+        summary = f"Rendered {len(shapes)} detections on {img.name}"
+        if shapes:
             from collections import Counter
-            counts = Counter(name_map.get(b.class_id, str(b.class_id)) for b in boxes)
+            counts = Counter(a.subject for a in shapes)
             summary += " — " + ", ".join(f"{v} {k}" for k, v in counts.most_common())
     else:
-        polys, class_ids = format_load(str(label_path), w, h, task="segment", fmt=fmt)
-        poly_dicts = [
-            {"points": [(pt[0], pt[1]) for pt in p.points], "class_id": p.class_id}
-            for p in polys
-        ]
-        out = render_segmentations(image_path, poly_dicts, class_names=name_map)
-        summary = f"Rendered {len(polys)} segmentation masks on {img.name}"
+        shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
+        out = render_segmentations(image_path, [_poly_dict(a, index) for a in shapes],
+                                   class_names=_name_map(idx))
+        summary = f"Rendered {len(shapes)} segmentation masks on {img.name}"
 
-    _count = len(boxes) if task == "detect" else len(polys)
     return {
         "image_path": out,
         "summary": summary,
         "format": fmt,
         # `count` is the stable key across all visualize sources; the source-specific alias stays.
-        "count": _count,
-        "annotation_count": _count,
+        "count": len(shapes),
+        "annotation_count": len(shapes),
     }
 
 
@@ -151,52 +172,39 @@ def _viz_predictions(
     conf_threshold: float = 0.0,
 ) -> dict:
     """Render model predictions on a single image. See ``visualize``."""
-    from tcip_annotation import parse_detect_predictions, parse_segment_predictions
-
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    w, h = get_image_dimensions(image_path)
     stem = img.stem
-
-    name_map = {}
-    if class_names:
-        name_map = {i: n.strip() for i, n in enumerate(class_names.split(","))}
-
     from tcip_mcp.dataset_layout import find_prediction
 
-    pred_file = find_prediction(image_path, task)
+    pred_file = find_prediction(image_path)
     if pred_file is None:
-        return {"error": f"No {task} predictions found for {stem}"}
+        return {"error": f"No predictions found for {stem}"}
+
+    preds = read_labels(str(pred_file))
+    if conf_threshold > 0:
+        preds = [a for a in preds if (a.score is None or a.score >= conf_threshold)]
+    idx, index = _subject_indexer()
 
     if task == "detect":
-        pred_boxes, class_ids = parse_detect_predictions(str(pred_file), w, h)
-        if conf_threshold > 0:
-            pred_boxes = [b for b in pred_boxes if b.confidence >= conf_threshold]
-        box_dicts = [
-            {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
-             "class_id": b.class_id, "confidence": b.confidence}
-            for b in pred_boxes
-        ]
-        out = render_detections(image_path, box_dicts, class_names=name_map)
-        summary = f"Rendered {len(pred_boxes)} predictions on {img.name}"
+        shapes = [a for a in preds if a.geometry is not None]
+        out = render_detections(image_path, [_box_dict(a, index) for a in shapes],
+                                class_names=_name_map(idx))
+        summary = f"Rendered {len(shapes)} predictions on {img.name}"
     else:
-        pred_polys, class_ids = parse_segment_predictions(str(pred_file), w, h)
-        poly_dicts = [
-            {"points": [(pt[0], pt[1]) for pt in p.points], "class_id": p.class_id}
-            for p in pred_polys
-        ]
-        out = render_segmentations(image_path, poly_dicts, class_names=name_map)
-        summary = f"Rendered {len(pred_polys)} prediction masks on {img.name}"
+        shapes = [a for a in preds if isinstance(a.geometry, Polygon)]
+        out = render_segmentations(image_path, [_poly_dict(a, index) for a in shapes],
+                                   class_names=_name_map(idx))
+        summary = f"Rendered {len(shapes)} prediction masks on {img.name}"
 
-    _count = len(pred_boxes) if task == "detect" else len(pred_polys)
     return {
         "image_path": out,
         "summary": summary,
         # `count` is the stable key across all visualize sources; the source-specific alias stays.
-        "count": _count,
-        "prediction_count": _count,
+        "count": len(shapes),
+        "prediction_count": len(shapes),
     }
 
 
@@ -211,77 +219,50 @@ def _viz_comparison(
 
     Green = ground truth, Red = predictions, Yellow lines = matched pairs.
     """
-    from tcip_annotation import parse_detect_predictions
-    from tcip_annotation.format_io import (
-        detect_format,
-        load_annotations as format_load,
-    )
+    from tcip_annotation.format_io import detect_format
     from tcip_annotation.matching import compute_matches
-    from tcip_mcp.dataset_layout import find_gt_label
+    from tcip_mcp.dataset_layout import find_gt_label, find_prediction
 
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    w, h = get_image_dimensions(image_path)
     stem = img.stem
+    idx, index = _subject_indexer()
 
-    name_map = {}
-    if class_names:
-        name_map = {i: n.strip() for i, n in enumerate(class_names.split(","))}
-
-    # Load GT
-    label_path = find_gt_label(image_path, task)
+    label_path = find_gt_label(image_path)
     if label_path is None:
-        return {"error": f"No {task} labels found for {stem}"}
-
+        return {"error": f"No labels found for {stem}"}
     try:
         fmt = detect_format(str(label_path))
     except ValueError as exc:
         return {"error": str(exc)}
-    gt_boxes_raw, _ = format_load(str(label_path), w, h, task="detect", fmt=fmt)
-    gt_dicts = [
-        {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
-        for b in gt_boxes_raw
-    ]
+    gt = [a for a in load_annotations_any(str(label_path), fmt=fmt, file_name=img.name)
+          if a.geometry is not None]
+    gt_dicts = [_box_dict(a, index) for a in gt]
 
-    # Load predictions
-    from tcip_mcp.dataset_layout import find_prediction
-
-    pred_file = find_prediction(image_path, task)
+    pred_file = find_prediction(image_path)
     pred_dicts: list[dict] = []
-    matches_out: list[dict] = []
     if pred_file is not None:
-        pred_boxes_raw, _ = parse_detect_predictions(str(pred_file), w, h)
-        pred_dicts = [
-            {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
-             "class_id": b.class_id, "confidence": b.confidence}
-            for b in pred_boxes_raw
-        ]
+        preds = [a for a in read_labels(str(pred_file)) if a.geometry is not None]
+        pred_dicts = [_box_dict(a, index) for a in preds]
         # Match at the caller's conf operating point (not compute_matches' silent 0.25 default).
-        match_result = compute_matches(
-            gt_boxes_raw, [], pred_boxes_raw, [],
-            iou_threshold=iou_threshold, conf_threshold=conf_threshold,
-        )
-        tp = match_result.get("tp", 0)
-        fp = match_result.get("fp", 0)
-        fn = match_result.get("fn", 0)
+        match_result = compute_matches(gt, preds, iou_threshold=iou_threshold,
+                                       conf_threshold=conf_threshold)
+        tp = len(match_result["tp"])
+        fp = len(match_result["fp"])
+        fn = len(match_result["fn"])
     else:
-        tp, fp, fn = 0, 0, len(gt_boxes_raw)
+        tp, fp, fn = 0, 0, len(gt)
 
-    out = render_comparison(
-        image_path, gt_dicts, pred_dicts,
-        matches=matches_out, class_names=name_map,
-    )
+    out = render_comparison(image_path, gt_dicts, pred_dicts, matches=[], class_names=_name_map(idx))
 
     return {
         "image_path": out,
         "summary": f"GT={len(gt_dicts)}, Pred={len(pred_dicts)}, TP={tp}, FP={fp}, FN={fn}",
         "gt_count": len(gt_dicts),
         "pred_count": len(pred_dicts),
-        "tp": tp,
-        "fp": fp,
-        "fn": fn,
+        "tp": tp, "fp": fp, "fn": fn,
     }
 
 
@@ -341,30 +322,19 @@ def render_failure_cases(
         if not img_path:
             continue
 
-        w, h = get_image_dimensions(img_path)
+        idx, index = _subject_indexer()
 
-        # Parse GT boxes
-        from tcip_annotation import parse_detect_labels
         gt_file = Path(labels_dir) / f"{stem}.json"
         gt_dicts = []
         if gt_file.is_file():
-            gt_boxes, _ = parse_detect_labels(str(gt_file), w, h)
-            gt_dicts = [
-                {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
-                for b in gt_boxes
-            ]
+            gt_dicts = [_box_dict(a, index) for a in read_labels(str(gt_file))
+                        if a.geometry is not None]
 
-        # Parse pred boxes
-        from tcip_annotation import parse_detect_predictions
         pred_file = Path(predictions_dir) / f"{stem}.json"
         pred_dicts = []
         if pred_file.is_file():
-            pred_boxes, _ = parse_detect_predictions(str(pred_file), w, h)
-            pred_dicts = [
-                {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
-                 "class_id": b.class_id, "confidence": b.confidence}
-                for b in pred_boxes
-            ]
+            pred_dicts = [_box_dict(a, index) for a in read_labels(str(pred_file))
+                          if a.geometry is not None]
 
         failure_cases.append({
             "image": stem,
@@ -398,20 +368,13 @@ def _viz_dataset_sample(
     class_names: str = "",
 ) -> dict:
     """Render a grid of random annotated dataset samples. See ``visualize``."""
-    from tcip_annotation.format_io import (
-        detect_format,
-        load_annotations as format_load,
-    )
+    from tcip_annotation.format_io import detect_format
     from tcip_mcp.dataset_layout import find_gt_label
 
     root = Path(folder_path)
     images_dir = root / "images"
     if not images_dir.is_dir():
         return {"error": f"Images directory not found: {images_dir}"}
-
-    name_map = {}
-    if class_names:
-        name_map = {i: n_name.strip() for i, n_name in enumerate(class_names.split(","))}
 
     # Collect all image paths (recurse for the canonical images/<date>/ layout).
     all_images = sorted(
@@ -421,38 +384,28 @@ def _viz_dataset_sample(
     if not all_images:
         return {"error": "No images found in dataset"}
 
-    # Sample
     sample = random.sample(all_images, min(n, len(all_images)))
-
-    # Render each with annotations
     rendered_paths = []
     titles = []
     for img_path in sample:
-        w, h = get_image_dimensions(str(img_path))
-        label_path = find_gt_label(str(img_path), task)
-
+        label_path = find_gt_label(str(img_path))
         if label_path is not None:
             try:
                 fmt = detect_format(str(label_path))
             except ValueError:
                 label_path = None  # unrecognized store: render the image without labels
         if label_path is not None:
+            idx, index = _subject_indexer()
+            anns = load_annotations_any(str(label_path), fmt=fmt, file_name=img_path.name)
             if task == "detect":
-                boxes, _ = format_load(str(label_path), w, h, task="detect", fmt=fmt)
-                box_dicts = [
-                    {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
-                    for b in boxes
-                ]
-                out = render_detections(str(img_path), box_dicts, class_names=name_map)
+                shapes = [a for a in anns if a.geometry is not None]
+                out = render_detections(str(img_path), [_box_dict(a, index) for a in shapes],
+                                        class_names=_name_map(idx))
             else:
-                polys, _ = format_load(str(label_path), w, h, task="segment", fmt=fmt)
-                poly_dicts = [
-                    {"points": [(pt[0], pt[1]) for pt in p.points], "class_id": p.class_id}
-                    for p in polys
-                ]
-                out = render_segmentations(str(img_path), poly_dicts, class_names=name_map)
-            count = len(boxes) if task == "detect" else len(polys)
-            titles.append(f"{img_path.stem} ({count})")
+                shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
+                out = render_segmentations(str(img_path), [_poly_dict(a, index) for a in shapes],
+                                           class_names=_name_map(idx))
+            titles.append(f"{img_path.stem} ({len(shapes)})")
         else:
             # No annotations — just use raw image
             out = str(img_path)
@@ -574,11 +527,10 @@ def accept_proposals(
 
     Args:
         image_path: Absolute path to the image (same as propose_annotations).
-        assignments: List of dicts, each with 'candidate_id' (int) and
-            'class_id' (int). Only listed candidates are staged.
+        assignments: List of dicts, each with 'candidate_id' (int) and 'subject' (name).
+            Only listed candidates are staged.
     """
     import json
-    from tcip_annotation.state import PredBBox, PredPolygon
 
     img = Path(image_path)
     if not img.is_file():
@@ -598,34 +550,28 @@ def accept_proposals(
 
     w, h = get_image_dimensions(image_path)
 
-    # Build predictions from accepted candidates (created_by=<engine>, score = the engine's score).
+    # Build name-based predictions from accepted candidates (created_by=<engine>, score = the
+    # engine's proposal score). Each proposal's polygon becomes an Annotation under its subject.
     from datetime import datetime, timezone
+    from tcip_annotation.state import Polygon as _Polygon
     staged_at = datetime.now(timezone.utc).isoformat()
-    boxes: list[PredBBox] = []
-    polygons: list[PredPolygon] = []
+    proposals: list[Annotation] = []
+    n_poly = 0
 
     for assign in assignments:
         cid = assign["candidate_id"]
-        class_id = assign["class_id"]
+        subject = assign.get("subject")
         cand = cand_map.get(cid)
-        if cand is None:
+        if cand is None or not subject:
             continue
-
         score = float(cand.get("score", 0.0))  # neutral proposal score, in [0, 1]
         poly_pts = cand["polygon"]
         if len(poly_pts) >= 3:
-            polygons.append(PredPolygon(
-                [(float(x), float(y)) for x, y in poly_pts], class_id,
-                confidence=score, created_by=engine, created_at=staged_at,
-            ))
-
-        # Also stage a bounding box (from polygon extent)
-        xs = [p[0] for p in poly_pts]
-        ys = [p[1] for p in poly_pts]
-        boxes.append(PredBBox(
-            min(xs), min(ys), max(xs), max(ys), class_id,
-            confidence=score, created_by=engine, created_at=staged_at,
-        ))
+            proposals.append(Annotation(
+                subject=str(subject),
+                geometry=_Polygon([(float(x), float(y)) for x, y in poly_pts]),
+                score=score, created_by=engine, created_at=staged_at))
+            n_poly += 1
 
     # Stage into the predictions tree through the shared verdict-guarded helper — model output for a
     # human to accept on the Review canvas, never written straight to ground truth.
@@ -636,23 +582,19 @@ def accept_proposals(
     try:
         staged = stage_prediction_shapes(
             str(root), engine, date, img.stem,
-            boxes=boxes, polygons=polygons, img_w=w, img_h=h, overwrite=False,
+            annotations=proposals, img_w=w, img_h=h, overwrite=False,
         )
     except BucketHasVerdicts as exc:
         return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
     bucket = staged["bucket"]
 
     # Render final result for QA
-    from tcip_annotation.viz import render_detections
-    box_dicts = [
-        {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": b.class_id}
-        for b in boxes
-    ]
-    out = render_detections(image_path, box_dicts)
+    idx, index = _subject_indexer()
+    out = render_detections(image_path, [_box_dict(a, index) for a in proposals],
+                            class_names=_name_map(idx))
 
-    note = (f"Staged {len(boxes)} detections and {len(polygons)} segmentations "
-            f"from {len(assignments)} {engine!r} proposals as predictions (created_by={engine!r}) "
-            f"for review — not ground truth.")
+    note = (f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
+            f"predictions (created_by={engine!r}) for review — not ground truth.")
     if staged["redirected"]:
         note = (f"bucket {engine!r} has {staged['verdict_count']} review verdict(s) — staged to a fresh "
                 f"bucket {bucket!r} instead so the reviewed predictions stay intact. " + note)
@@ -663,8 +605,7 @@ def accept_proposals(
         "bucket": bucket,
         "bucket_redirected": staged["redirected"],
         "summary": note,
-        "detection_count": len(boxes),
-        "segmentation_count": len(polygons),
+        "proposal_count": n_poly,
     }
 
 
