@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from tcip_annotation import json_io
-from tcip_annotation.state import BBox
+from tcip_annotation.state import Annotation, BBox
 
 from pathlib import Path
 
@@ -17,7 +17,7 @@ from tcip_mcp.tools.data_tools import (
 def test_scan_dataset(data_dir: Path):
     result = scan_dataset(str(data_dir))
     assert result["image_count"] == 3
-    assert result["labels_detect_count"] == 3
+    assert result["labels_count"] == 3
     assert result["paired_images"] == 3
     assert result["unlabelled_images"] == 0
 
@@ -32,7 +32,7 @@ def test_validate_data_quality(data_dir: Path):
     assert result["total_images"] == 3
     assert result["total_labels"] == 3
     assert result["is_valid"] is True
-    assert 0 in result["class_ids"]
+    assert "catkin" in result["subjects"]
 
 
 def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
@@ -73,14 +73,15 @@ def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"),
     date = "2-11-26"
     images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    labels_dir = root / "annotations" / "default" / date / "detect"
+    labels_dir = root / "annotations" / date
     labels_dir.mkdir(parents=True)
     for pref in prefixes:
         for t in range(tiles):
             stem = f"{pref}_{t}_0"
             Image.new("RGB", (64, 64), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-            json_io.write_detect(str(labels_dir / f"{stem}.json"),
-                                 [BBox(19, 13, 45, 51, 0)], 64, 64)
+            json_io.write_annotations(labels_dir / f"{stem}.json",
+                                      [Annotation(subject="catkin", geometry=BBox(19, 13, 45, 51))],
+                                      64, 64)
     return root
 
 
