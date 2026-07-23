@@ -21,21 +21,22 @@ if str(_MCP_SRC) not in sys.path:
     sys.path.insert(0, str(_MCP_SRC))
 
 from tcip_annotation import json_io  # noqa: E402
-from tcip_annotation.state import PredBBox  # noqa: E402
+from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
 
 
-def _pred_boxes(lines: list[str]) -> list[PredBBox]:
-    """Build per-image JSON prediction boxes from 'cls conf ...' YOLO-ish lines.
+def _pred_annotations(lines: list[str]) -> list[Annotation]:
+    """Build name-based prediction annotations from 'cls conf ...' YOLO-ish lines.
 
-    Only the class id and confidence carry meaning for phenology counting; geometry is a
-    placeholder box, since elongation is a class, never a geometric proxy.
+    Elongation is deferred (K4/K5): the leading class id no longer maps to a name, so only geometry
+    and confidence are kept. The detection COUNT is the quantity that still carries meaning.
     """
-    boxes = []
+    anns = []
     for line in lines:
         parts = line.split()
-        boxes.append(PredBBox(1.0, 1.0, 3.0, 3.0, int(float(parts[0])), confidence=float(parts[1])))
-    return boxes
+        anns.append(Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0),
+                               score=float(parts[1])))
+    return anns
 
 
 # ── date helpers ─────────────────────────────────────────────────────────
@@ -149,19 +150,19 @@ def test_elongation_date_is_the_95per_majority_crossing():
 # ── elongated-fraction from classified predictions ───────────────────────
 
 
-def test_count_by_class_counts_elongated_by_class_not_geometry(tmp_path):
-    # Two detections: class 0 (not elongated) and class 1 (elongated). Geometry
-    # is irrelevant — elongation is the class id.
+def test_count_by_class_counts_total_detections_elongation_deferred(tmp_path):
+    # Deferred (K4/K5): total detections are still counted from geometry, but the elongated split is
+    # not produced — nothing here fabricates a fraction from unwired (attribute-less) predictions.
     p = tmp_path / "img.json"
-    json_io.write_detect(
+    json_io.write_annotations(
         p,
-        [PredBBox(1, 1, 3, 30, 0, confidence=0.9),   # tall box, but class 0 → not elongated
-         PredBBox(1, 1, 40, 3, 1, confidence=0.8)],  # wide box, but class 1 → elongated
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 3, 30), score=0.9),
+         Annotation(subject="catkin", geometry=BBox(1, 1, 40, 3), score=0.8)],
         8, 8,
     )
     total, elongated, classes_seen = phenology.count_by_class(p, elongated_class_id=1)
-    assert (total, elongated) == (2, 1)
-    assert classes_seen == {0, 1}
+    assert (total, elongated) == (2, 0)
+    assert classes_seen == set()
 
 
 def test_count_by_class_missing_file_is_empty():
@@ -182,7 +183,7 @@ class _Assignment:
 
 def _write_preds(dir_path: Path, stem: str, lines: list[str]) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
-    json_io.write_detect(dir_path / f"{stem}.json", _pred_boxes(lines), 8, 8)
+    json_io.write_annotations(dir_path / f"{stem}.json", _pred_annotations(lines), 8, 8)
 
 
 def test_per_plant_phenology_builds_fraction_series(tmp_path):
@@ -199,19 +200,20 @@ def test_per_plant_phenology_builds_fraction_series(tmp_path):
 
     out = phenology.per_plant_phenology(mapping, preds, elongated_class_id=1)
 
-    assert out["elongation_classified"] is True
-    assert out["classes_seen"] == [0, 1]
+    # Deferred (K4/K5): elongation split not produced -> no bloom milestones; totals still counted.
+    assert out["elongation_classified"] is False
+    assert out["classes_seen"] == []
     assert len(out["rows"]) == 1
     row = out["rows"][0]
     assert row["plant_id"] == "P1"
     assert row["accession"] == "acc-9"
     assert row["n_dates"] == 2
-    # Fraction rises 0.0 (May 1) → 1.0 (May 15); crossings interpolate between the two dates:
-    # 50% at the midpoint (May 8), 95% near the top (May 14). catkin_elongation_date = "most
-    # catkins elongated" (crops.yml) = the 95% crossing.
-    assert row["catkin_50per_date"] == "2024-05-08"
-    assert row["catkin_95per_date"] == "2024-05-14"
-    assert row["catkin_elongation_date"] == row["catkin_95per_date"]
+    # Two detections counted on each date; the elongated split stays 0 (deferred), so no crossing.
+    assert [s["n_total"] for s in row["series"]] == [2, 2]
+    assert all(s["n_elongated"] == 0 for s in row["series"])
+    assert row["catkin_50per_date"] is None
+    assert row["catkin_95per_date"] is None
+    assert row["catkin_elongation_date"] is None
 
 
 def test_per_plant_phenology_excludes_zero_detection_date_from_milestones(tmp_path):
@@ -223,7 +225,7 @@ def test_per_plant_phenology_excludes_zero_detection_date_from_milestones(tmp_pa
     d1 = tmp_path / "2024-05-15"
     d0.mkdir(parents=True, exist_ok=True)
     # zero detections on this date: a present-but-empty prediction file (confirmed negative)
-    json_io.write_detect(d0 / "P1_a.json", [], 8, 8, keep_empty=True)
+    json_io.write_annotations(d0 / "P1_a.json", [], 8, 8, keep_empty=True)
     _write_preds(d1, "P1_b", ["1 0.9 0.5 0.5 0.1 0.1", "1 0.8 0.4 0.4 0.1 0.1"])
     mapping = {
         "2024-05-01": [_Assignment("P1_a", "P1", "acc-9")],
@@ -236,9 +238,9 @@ def test_per_plant_phenology_excludes_zero_detection_date_from_milestones(tmp_pa
     # the zero-detection date is kept in the raw series but flagged as no-observation (ratio None)
     assert row["series"][0] == {"date": "2024-05-01", "n_total": 0, "n_elongated": 0, "ratio": None}
     assert row["n_dates"] == 2 and row["n_observed_dates"] == 1
-    # ...and it does not feed the milestones: every crossing is the first real observation.
-    assert row["catkin_elongation_date"] == "2024-05-15"  # = catkin_95per_date
-    assert row["catkin_50per_date"] == "2024-05-15"
+    # ...and elongation is deferred (K4/K5), so no milestone is produced from the observed date.
+    assert row["catkin_elongation_date"] is None
+    assert row["catkin_50per_date"] is None
 
 
 def test_per_plant_phenology_flags_unclassified_predictions(tmp_path):
@@ -252,7 +254,7 @@ def test_per_plant_phenology_flags_unclassified_predictions(tmp_path):
     out = phenology.per_plant_phenology(mapping, preds, elongated_class_id=1)
 
     assert out["elongation_classified"] is False
-    assert out["classes_seen"] == [0]
+    assert out["classes_seen"] == []  # deferred (K4/K5): no class split produced
 
 
 def test_per_plant_series_accepts_dict_assignments(tmp_path):
@@ -268,4 +270,4 @@ def test_per_plant_series_accepts_dict_assignments(tmp_path):
     per_plant, classes = phenology.per_plant_series(mapping, preds, elongated_class_id=1)
     assert "P1" in per_plant
     assert per_plant["P1"]["accession"] == "acc-9"
-    assert classes == {1}
+    assert classes == set()  # deferred (K4/K5): count_by_class reports no class split
