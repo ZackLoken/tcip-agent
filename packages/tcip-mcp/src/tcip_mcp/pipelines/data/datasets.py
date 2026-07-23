@@ -33,10 +33,22 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
 
 def _find_image(images_dir: Path, stem: str) -> Path:
-    for ext in (".jpg", ".JPG", ".jpeg", ".png", ".tif"):
-        p = images_dir / f"{stem}{ext}"
-        if p.exists():
-            return p
+    """The image file for ``stem``, case-agnostically — sensors save both ``.JPG`` and ``.jpg`` and a
+    project mixes them. Probes each known extension in both cases (cheap, and correct on a
+    case-sensitive filesystem), then falls back to a real directory scan so any-case extension
+    resolves. For matching a name against a store, use ``image_name_map`` (the real on-disk name);
+    this returns a path good for *opening*, whose ``.name`` may be miscased on a case-insensitive FS.
+    """
+    images_dir = Path(images_dir)
+    for ext in sorted(IMAGE_EXTS):
+        for e in (ext, ext.upper()):
+            p = images_dir / f"{stem}{e}"
+            if p.exists():
+                return p
+    if images_dir.is_dir():  # exotic/mixed casing (e.g. ``.Jpg``) — resolve from the real listing
+        for p in images_dir.iterdir():
+            if p.stem == stem and p.suffix.lower() in IMAGE_EXTS:
+                return p
     raise FileNotFoundError(f"No image for stem: {stem}")
 
 
@@ -495,6 +507,10 @@ class DetectionDataset(BaseImageDataset):
             subject=subject, date=date, label_format=self.label_format, coco=self._coco,
         )
         _require_samples(self.stems, self.sample_counts, self.labels_dir)
+        # Real on-disk filenames, for matching a stem to the COCO's ``file_name`` (which carries the
+        # true name). ``_find_image`` returns a constructed, possibly-miscased name (Path.exists is
+        # case-insensitive on Windows), so it must not be used for that comparison — see image_name_map.
+        self._image_names = image_name_map(self.images_dir)
 
     def _det_targets(self, stem: str, file_name: str) -> tuple[list, list]:
         """Pixel-xyxy boxes + 1-indexed labels for one image (coco or name-based json)."""
@@ -528,7 +544,7 @@ class DetectionDataset(BaseImageDataset):
         stem = self.stems[idx]
         img = self._open_image(stem)
         w, h = self._image_size(img)
-        file_name = _find_image(self.images_dir, stem).name if self.label_format == "coco" else ""
+        file_name = self._image_names.get(stem, "") if self.label_format == "coco" else ""
         boxes, labels = self._det_targets(stem, file_name)
         target = {
             "boxes": torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4),
@@ -600,7 +616,7 @@ class TiledDetectionDataset(BaseImageDataset):
             # every box would be cropped from somewhere it was never drawn. Comparing the two
             # decoders instead would prove nothing: they share a branch and agree by construction.
             authored = _authored_frame(stem, base.labels_dir, base.label_format,
-                                       base._coco, img_path.name)
+                                       base._coco, base._image_names.get(stem, ""))
             if authored is not None and authored != (w, h):
                 raise ValueError(
                     f"tiled dataset frame mismatch for stem {stem!r}: the labels record a "
@@ -611,8 +627,9 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"{authored[1]}."
                 )
             # Format-aware read via the base dataset's own targeting (json/coco share one path);
-            # only coco needs the image file name to match its annotations.
-            file_name = img_path.name if base.label_format == "coco" else ""
+            # only coco needs the image file name to match its annotations. Use the real on-disk name
+            # (img_path.name can be miscased on Windows), or the coco match silently finds nothing.
+            file_name = base._image_names.get(stem, "") if base.label_format == "coco" else ""
             full_boxes, full_labels = base._det_targets(stem, file_name)
             fb = np.asarray(full_boxes, dtype=np.float32).reshape(-1, 4)
             fl = np.asarray(full_labels, dtype=np.int64)
@@ -728,6 +745,8 @@ class InstanceSegDataset(BaseImageDataset):
             subject=subject, date=date, label_format=self.label_format, coco=self._coco,
         )
         _require_samples(self.stems, self.sample_counts, self.labels_dir)
+        # Real on-disk filenames for the COCO ``file_name`` match (see DetectionDataset / image_name_map).
+        self._image_names = image_name_map(self.images_dir)
 
     def _read_polys(self, stem: str, w: int, h: int) -> list[tuple[list[tuple[float, float]], int]]:
         """(pixel polygon points, 1-indexed label) per instance — from the assembled COCO or the
@@ -736,7 +755,7 @@ class InstanceSegDataset(BaseImageDataset):
         out: list[tuple[list[tuple[float, float]], int]] = []
         if self.label_format == "coco":
             from tcip_annotation import format_io
-            file_name = _find_image(self.images_dir, stem).name
+            file_name = self._image_names.get(stem, "")
             anns, _, _ = format_io._coco_image_annotations(self._coco, file_name=file_name)
             for a in anns:
                 seg = a.get("segmentation")
