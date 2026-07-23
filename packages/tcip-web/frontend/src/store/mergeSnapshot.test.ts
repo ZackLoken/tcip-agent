@@ -13,10 +13,8 @@ function dataset(over: Partial<DatasetSelection> = {}): DatasetSelection {
     date: "2-11-26",
     image_list: ["a.jpg", "b.jpg", "c.jpg"],
     current_image_index: 0,
-    annotations_detect_dir: "/proj/ds/annotations/catkin/2-11-26/detect",
-    annotations_segment_dir: null,
-    predictions_detect_dir: null,
-    predictions_segment_dir: null,
+    annotations_dir: "/proj/ds/annotations/2-11-26",
+    predictions_dir: null,
     ...over,
   };
 }
@@ -27,7 +25,7 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
     dataset: dataset(),
     view: { scale: 1, offset_x: 0, offset_y: 0 },
     mode: "box",
-    active_class: 0,
+    active_subject: "catkin",
     review: {
       iou_threshold: 0.5,
       conf_threshold: 0.25,
@@ -42,12 +40,12 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
 
 describe("mergeSnapshot ownership model", () => {
   beforeEach(() => {
-    // Known populated local state: user is on Review, polygon mode, class 3, image 2.
+    // Known populated local state: user is on Review, polygon mode, subject "bush", image 2.
     useStore.setState({
       gui: snapshot({
         active_tab: "review",
         mode: "polygon",
-        active_class: 3,
+        active_subject: "bush",
         dataset: dataset({ current_image_index: 2 }),
       }),
       wsVersion: 5,
@@ -55,18 +53,19 @@ describe("mergeSnapshot ownership model", () => {
   });
 
   it("preserves client-owned fields on a same-dataset snapshot", () => {
-    // Backend re-broadcasts with its stale active_tab / mode / index.
+    // Backend re-broadcasts with its stale active_tab / mode / index / subject.
     s().mergeSnapshot(
       snapshot({
         active_tab: "annotate",
         mode: "box",
+        active_subject: "catkin",
         dataset: dataset({ current_image_index: 0 }),
       }),
       6,
     );
     expect(s().gui.active_tab).toBe("review");
     expect(s().gui.mode).toBe("polygon");
-    expect(s().gui.active_class).toBe(3);
+    expect(s().gui.active_subject).toBe("bush");
     expect(s().gui.dataset.current_image_index).toBe(2); // navigation kept
   });
 
@@ -85,7 +84,7 @@ describe("mergeSnapshot ownership model", () => {
     useStore.setState((st) => ({
       gui: {
         ...st.gui,
-        pred_reference: { type: "box", coords: [0, 0, 1, 1], class_id: 0, confidence: null },
+        pred_reference: { type: "box", coords: [0, 0, 1, 1], confidence: null },
       },
     }));
     s().mergeSnapshot(
@@ -107,6 +106,7 @@ describe("mergeSnapshot ownership model", () => {
     // snapshot restores tab/mode/filters instead of leaving the Annotate defaults.
     useStore.setState({
       gui: snapshot({
+        active_subject: null,
         dataset: dataset({
           project_root: null,
           dataset_root: null,
@@ -122,14 +122,14 @@ describe("mergeSnapshot ownership model", () => {
       snapshot({
         active_tab: "review",
         mode: "polygon",
-        active_class: 2,
+        active_subject: "bush",
         dataset: dataset({ current_image_index: 2 }),
       }),
       1,
     );
     expect(s().gui.active_tab).toBe("review");
     expect(s().gui.mode).toBe("polygon");
-    expect(s().gui.active_class).toBe(2);
+    expect(s().gui.active_subject).toBe("bush");
     expect(s().gui.dataset.current_image_index).toBe(2);
   });
 });
