@@ -154,19 +154,21 @@ def test_provenance_roundtrip_is_serializable():
 
 def test_dataset_hash_content_addressed(tmp_path):
     from tcip_annotation import json_io
-    from tcip_annotation.state import BBox
+    from tcip_annotation.state import Annotation, BBox
 
     d = tmp_path / "labels"
     d.mkdir()
-    json_io.write_detect(d / "a.json", [BBox(10, 10, 30, 30, 0)], 100, 100)
-    json_io.write_detect(d / "b.json", [], 100, 100, keep_empty=True)  # negative still contributes
+    json_io.write_annotations(d / "a.json", [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))],
+                              100, 100)
+    json_io.write_annotations(d / "b.json", [], 100, 100, keep_empty=True)  # negative still contributes
     h1 = dataset_hash(d)
     h2 = dataset_hash(d)
     assert h1 == h2
     # JSON-only: a stray legacy .txt is not part of the canonical GT identity and is ignored.
     (d / "a.txt").write_text("0 0.5 0.5 0.1 0.1\n")
     assert dataset_hash(d) == h1
-    json_io.write_detect(d / "a.json", [BBox(10, 10, 30, 30, 1)], 100, 100)  # change GT content
+    json_io.write_annotations(d / "a.json", [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))],
+                              100, 100)  # change GT content
     assert dataset_hash(d) != h1  # canonical JSON content changes the identity (not read as empty)
 
 
