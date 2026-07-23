@@ -64,4 +64,49 @@ describe("labelSerde round-trip", () => {
       attributes: { severity: "severe" },
     });
   });
+
+  it("buckets a both-geometry annotation (points AND bbox) to ONE polygon, ZERO boxes", () => {
+    // Measurement-critical: a polygon record carries its derived bbox on disk. The split is
+    // points-first (if/else-if), so it must produce exactly one polygon and no box — a two-ifs
+    // regression would emit BOTH and double-count the catkin.
+    const annotations: Annotation[] = [
+      {
+        subject: "catkin",
+        points: [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+        ],
+        bbox: [0, 0, 10, 10],
+        attributes: {},
+      },
+    ];
+    const canvas = annotationsToCanvas(annotations);
+    expect(canvas.polygons).toHaveLength(1);
+    expect(canvas.boxes).toHaveLength(0);
+  });
+
+  it("a polygon-with-bbox stays one polygon and emits NO bbox/second record across load->save->load", () => {
+    const original: Annotation[] = [
+      {
+        subject: "catkin",
+        points: [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+        ],
+        bbox: [0, 0, 10, 10],
+        attributes: {},
+      },
+    ];
+    const saved = canvasToAnnotations(annotationsToCanvas(original));
+    // Save emits the polygon only — no bbox, no extra record — so the box is never authored.
+    expect(saved).toHaveLength(1);
+    expect(saved[0].points).toBeDefined();
+    expect(saved[0].bbox).toBeUndefined();
+
+    const reloaded = annotationsToCanvas(saved as unknown as Annotation[]);
+    expect(reloaded.polygons).toHaveLength(1);
+    expect(reloaded.boxes).toHaveLength(0);
+  });
 });
