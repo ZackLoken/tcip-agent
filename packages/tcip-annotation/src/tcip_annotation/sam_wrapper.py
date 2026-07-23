@@ -57,6 +57,14 @@ _MODEL_MAP = {
     "hiera_l":  ("configs/sam2.1/sam2.1_hiera_l.yaml",  "sam2.1_hiera_large.pt"),
 }
 
+def checkpoint_path(model_type: str = "hiera_b+") -> Path:
+    """The local checkpoint path ``_get_predictor`` loads for ``model_type`` — the single source of
+    truth for the filename/location, so callers (and tests that gate on availability) never drift.
+    ``Path.home()`` is read at call time (not cached at import) so a test that redirects it works."""
+    if model_type not in _MODEL_MAP:
+        raise ValueError(f"Unknown model_type '{model_type}'. Valid: {sorted(_MODEL_MAP)}")
+    return Path.home() / ".cache" / "tcip" / "sam2" / _MODEL_MAP[model_type][1]
+
 
 def _get_predictor(model_type: str = "hiera_b+") -> Any:
     """Load or reuse the SAM2 predictor singleton."""
@@ -74,16 +82,15 @@ def _get_predictor(model_type: str = "hiera_b+") -> Any:
     from sam2.sam2_image_predictor import SAM2ImagePredictor
     import torch
 
-    config_file, ckpt_filename = _MODEL_MAP[model_type]
+    config_file, _ = _MODEL_MAP[model_type]
 
-    checkpoint_dir = Path.home() / ".cache" / "tcip" / "sam2"
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_path = checkpoint_dir / ckpt_filename
+    ckpt_path = checkpoint_path(model_type)
+    ckpt_path.parent.mkdir(parents=True, exist_ok=True)
     if not ckpt_path.is_file():
         raise FileNotFoundError(
             f"SAM2 checkpoint not found at {ckpt_path}. "
             f"Download from https://github.com/facebookresearch/sam2#model-description "
-            f"(looking for {ckpt_filename})."
+            f"(looking for {ckpt_path.name})."
         )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
