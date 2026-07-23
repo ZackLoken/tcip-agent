@@ -34,11 +34,11 @@ class DatasetSelection(BaseModel):
     image_list: list[str] = Field(default_factory=list)
     current_image_index: int = 0
 
-    # Paths resolved relative to dataset_root (images/{date}/<stem>.JPG):
-    annotations_detect_dir: Optional[str] = None
-    annotations_segment_dir: Optional[str] = None
-    predictions_detect_dir: Optional[str] = None
-    predictions_segment_dir: Optional[str] = None
+    # Label/prediction dirs resolved relative to dataset_root. One file per image now holds
+    # every subject, so the path carries no subject or task segment (see dataset_layout):
+    #   annotations_dir = annotations/<date>/;  predictions_dir = predictions/<model>/<date>/
+    annotations_dir: Optional[str] = None
+    predictions_dir: Optional[str] = None
 
 
 class PredictionReference(BaseModel):
@@ -46,7 +46,7 @@ class PredictionReference(BaseModel):
 
     type: str  # "box" | "polygon"
     coords: list[float] | list[list[float]]
-    class_id: int = 0
+    subject: str = ""
     confidence: Optional[float] = None
 
 
@@ -80,7 +80,7 @@ class GuiState(BaseModel):
     dataset: DatasetSelection = Field(default_factory=DatasetSelection)
     view: ViewState = Field(default_factory=ViewState)
     mode: str = "box"  # box|polygon
-    active_class: int = 0
+    active_subject: str = ""
     review: ReviewFilters = Field(default_factory=ReviewFilters)
     pred_reference: Optional[PredictionReference] = None
 
