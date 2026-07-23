@@ -46,10 +46,10 @@ class CanvasStatePayload(BaseModel):
     img_height: int = 0
     viewport: Optional[dict] = None  # {x, y, w, h, scale} in image coords
     mode: Optional[str] = None
-    active_class: Optional[int] = None
+    active_subject: Optional[str] = None
     dirty: Optional[bool] = None
     user: Optional[str] = None
-    classes: list[dict] = []  # [{id, name, color}]
+    classes: list[dict] = []  # [{name, color}]
     legend: Optional[dict] = None  # e.g. review {tp, fp, fn, active} hex colors
     counts: Optional[dict] = None
     # None = heartbeat (geometry file untouched); a list = full geometry push.
@@ -135,7 +135,7 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
         "img_height": payload.img_height,
         "viewport": payload.viewport,
         "mode": payload.mode,
-        "active_class": payload.active_class,
+        "active_subject": payload.active_subject,
         "dirty": payload.dirty,
         "user": payload.user,
         "classes": payload.classes,
