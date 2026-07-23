@@ -15,7 +15,7 @@ from pathlib import Path
 from PIL import Image
 
 from tcip_annotation import json_io
-from tcip_annotation.state import BBox
+from tcip_annotation.state import Annotation, BBox
 
 
 # 4 source prefixes (srcA..srcD) × 3 tiles × 1 GT box each — 4 leakage groups, uniform density.
@@ -48,13 +48,14 @@ def _multi_source_dataset(root: Path) -> Path:
     date = "2-11-26"
     images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
-    labels_dir = root / "annotations" / "default" / date / "detect"
+    labels_dir = root / "annotations" / date
     labels_dir.mkdir(parents=True)
     for pref in ("srcA", "srcB", "srcC", "srcD"):
         for t in range(3):
             stem = f"{pref}_{t}_0"
             Image.new("RGB", (64, 64), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
-            json_io.write_detect(str(labels_dir / f"{stem}.json"), [BBox(10, 10, 30, 30, 0)], 64, 64)
+            json_io.write_annotations(str(labels_dir / f"{stem}.json"),
+                                      [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 64, 64)
     return root
 
 
