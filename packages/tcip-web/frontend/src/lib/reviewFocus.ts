@@ -35,7 +35,7 @@ export async function applyReviewFocus(d: ReviewFocusData): Promise<void> {
     (d.dataset_root !== cur.dataset_root ||
       (d.subject ?? null) !== cur.subject ||
       (d.date ?? null) !== cur.date ||
-      (!!d.model_name && !predictionsMatchModel(cur.predictions_detect_dir, d.model_name)));
+      (!!d.model_name && !predictionsMatchModel(cur.predictions_dir, d.model_name)));
   if (needsSwitch) {
     const res = await api.dataset.select({
       project_root: d.project_root ?? d.dataset_root!,
