@@ -37,13 +37,14 @@ def materialize_review_dataset(
     include_hard_negatives: bool = True,
     only_completed: bool = False,
     copy_files: bool = True,
+    subject: str | None = None,
 ) -> dict:
-    """Build a curated YOLO detection dataset from human review verdicts.
+    """Build a curated detection dataset from human review verdicts.
 
-    Accepted/edited GT boxes become positive labels; rejected-only images become
-    empty-label hard negatives. When ``experiment_id`` is given, records the review
-    session as experiment lineage. Output (``images/`` + ``labels/detect/``) chains
-    straight into ``make_splits`` / ``launch_training``.
+    Accepted/edited GT boxes become positive name-based labels; rejected-only images become
+    empty-label hard negatives (keyed under ``subject`` — derived from the verdicts when omitted).
+    When ``experiment_id`` is given, records the review session as experiment lineage. Output
+    (``images/`` + ``annotations/``) chains straight into ``make_splits`` / ``launch_training``.
 
     Args:
         review_state_dir: Directory holding the review state (``review/`` shards, or a
@@ -66,7 +67,7 @@ def materialize_review_dataset(
     state_path = engine.shard_dir
 
     result = materialize_dataset(
-        review_state, source_images_dir, output_dir,
+        review_state, source_images_dir, output_dir, subject=subject,
         review_state_path=str(state_path), include_hard_negatives=include_hard_negatives,
         copy_files=copy_files, only_completed=only_completed,
     )
