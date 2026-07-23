@@ -5,13 +5,13 @@
 
 import { asJson } from "@/api/http";
 import type { CanvasStateBody } from "@/lib/canvasSync";
+import { annotationsToCanvas } from "@/lib/labelSerde";
 import type {
-  Box,
-  Detection,
+  Annotation,
+  AnnotationPayload,
   DatasetSelection,
   ImageLabels,
   MatchesResponse,
-  PolygonShape,
   PredictionReference,
   ReviewImageStatus,
 } from "@/store/types";
@@ -49,30 +49,23 @@ export interface FsListing {
   entries: FsEntry[];
 }
 
-/** Per-file label version tokens (stringified mtime ns), echoed back opaquely on save.
- *  Strings because the ns value exceeds 2**53 — as a number, JSON.parse would round it
- *  and every save would 409. */
-export interface Mtimes {
-  detect: string | null;
-  segment: string | null;
-}
-
-export type LoadedLabels = ImageLabels & { base_mtimes: Mtimes };
+/** The unified per-image label version token (stringified mtime ns), echoed back opaquely on save.
+ *  A string because the ns value exceeds 2**53 — as a number, JSON.parse would round it and every
+ *  save would 409. */
+export type LoadedLabels = ImageLabels & { base_mtime: string | null };
 
 export interface SaveLabelsBody {
   image_path: string;
-  detect_path?: string | null;
-  segment_path?: string | null;
-  boxes: Box[];
-  polygons: PolygonShape[];
+  label_path?: string | null;
+  annotations: AnnotationPayload[];
   project_root?: string | null;
-  /** Echo the loaded mtimes so the backend can 409 a stale (lost-update) write. */
-  base_mtimes?: Mtimes | null;
+  /** Echo the loaded mtime token so the backend can 409 a stale (lost-update) write. */
+  base_mtime?: string | null;
   /** GUI-set annotator identity; stamped as created_by ("user:<name>") on saved GT. */
   user?: string | null;
 }
 
-export type SaveResult = { status: "ok"; base_mtimes: Mtimes } | { status: "conflict" };
+export type SaveResult = { status: "ok"; base_mtime: string | null } | { status: "conflict" };
 
 /**
  * Cap the width of the image served to the canvas. A 20MP drone frame is ~5500px wide;
@@ -177,8 +170,27 @@ export const api = {
   },
 
   annotate: {
-    load: (image_path: string, detect_path?: string | null, segment_path?: string | null) =>
-      call<LoadedLabels>(`/api/annotate/labels?${q({ image_path, detect_path, segment_path })}`),
+    // Read the one unified per-image label file, splitting the annotation list into the canvas'
+    // box / polygon / geometry-less buckets (shared with save via labelSerde).
+    load: async (image_path: string, label_path?: string | null): Promise<LoadedLabels> => {
+      const raw = await call<{
+        image_path: string;
+        img_width: number;
+        img_height: number;
+        annotations: Annotation[];
+        base_mtime: string | null;
+      }>(`/api/annotate/labels?${q({ image_path, label_path })}`);
+      const { boxes, polygons, imageAnnotations } = annotationsToCanvas(raw.annotations ?? []);
+      return {
+        image_path: raw.image_path,
+        img_width: raw.img_width,
+        img_height: raw.img_height,
+        boxes,
+        polygons,
+        imageAnnotations,
+        base_mtime: raw.base_mtime,
+      };
+    },
 
     // Not routed through call(): a 409 (the label file changed underneath the
     // client) is an expected outcome the caller resolves by reloading, not an error.
@@ -193,8 +205,8 @@ export const api = {
         const text = await resp.text().catch(() => "");
         throw new Error(`${resp.status} ${resp.statusText}: ${text}`);
       }
-      const data = (await resp.json()) as { base_mtimes: Mtimes };
-      return { status: "ok", base_mtimes: data.base_mtimes };
+      const data = (await resp.json()) as { base_mtime: string | null };
+      return { status: "ok", base_mtime: data.base_mtime };
     },
 
     openImage: (body: {
@@ -220,14 +232,12 @@ export const api = {
         project_root: string;
         image_name: string;
         image_path: string;
-        gt_detect_path?: string | null;
-        gt_segment_path?: string | null;
-        pred_detect_path?: string | null;
-        pred_segment_path?: string | null;
+        gt_path?: string | null;
+        pred_path?: string | null;
         iou_threshold?: number;
         conf_threshold?: number;
         filter_type?: string;
-        filter_class?: string | number;
+        filter_class?: string;
       },
       signal?: AbortSignal,
     ) =>
@@ -241,28 +251,24 @@ export const api = {
       project_root: string;
       image_name: string;
       image_path: string;
-      gt_detect_path?: string | null;
-      gt_segment_path?: string | null;
-      pred_detect_path?: string | null;
-      pred_segment_path?: string | null;
+      gt_path?: string | null;
+      pred_path?: string | null;
       det_type: string;
-      class_id: number;
+      class_name: string;
       conf?: number | null;
       iou?: number | null;
-      gt_type?: string | null;
       gt_idx?: number | null;
-      pred_type?: string | null;
       pred_idx?: number | null;
       bbox: [number, number, number, number];
       action: "accepted" | "rejected" | "edited";
       // Only for action "edited": the shape the user adjusted on the Review canvas.
       edited_box?: [number, number, number, number] | null;
-      edited_polygon?: number[][] | null;
+      edited_points?: number[][] | null;
       iou_threshold?: number;
       conf_threshold?: number;
       // Active filters, so the fresh matches the server returns are scoped like the current view.
       filter_type?: string;
-      filter_class?: string | number;
+      filter_class?: string;
       /** GUI-set reviewer identity; stamped as accepted_by/created_by ("user:<name>") on GT. */
       user?: string | null;
     }) =>
@@ -281,14 +287,13 @@ export const api = {
     markComplete: (body: {
       project_root: string;
       image_name: string;
-      gt_detect_path?: string | null;
-      gt_segment_path?: string | null;
+      gt_path?: string | null;
       completed?: boolean;
     }) =>
       call<{
         status: string;
         image_status: MatchesResponse["image_status"];
-        // Derived server-side from the GT files — never from a stale client snapshot.
+        // Derived server-side from the GT file — never from a stale client snapshot.
         annotation_status: "complete" | "partial" | "negative" | "unannotated";
       }>("/api/review/mark_complete", {
         method: "POST",
@@ -303,12 +308,7 @@ export const api = {
 
     // Promote a completed review into a validation reference for its (model, trait, date). Runs the
     // same disjoint + count-bias gate the backend uses and returns an honest validated / not-yet result.
-    validateReference: (body: {
-      project_root: string;
-      trait: string;
-      pred_detect_dir?: string | null;
-      pred_segment_dir?: string | null;
-    }) =>
+    validateReference: (body: { project_root: string; trait: string; pred_dir?: string | null }) =>
       call<{
         validated: boolean;
         reference: string | null;
@@ -328,14 +328,14 @@ export const api = {
       gt_dir?: string | null;
       pred_dir?: string | null;
     }) => {
-      const q = new URLSearchParams({ project_root: params.project_root });
-      if (params.gt_dir) q.set("gt_dir", params.gt_dir);
-      if (params.pred_dir) q.set("pred_dir", params.pred_dir);
+      const qs = new URLSearchParams({ project_root: params.project_root });
+      if (params.gt_dir) qs.set("gt_dir", params.gt_dir);
+      if (params.pred_dir) qs.set("pred_dir", params.pred_dir);
       return call<{ statuses: Record<string, ReviewImageStatus>; detection_stems: string[] }>(
-        `/api/review/image_statuses?${q.toString()}`,
+        `/api/review/image_statuses?${qs.toString()}`,
       );
     },
   },
 };
 
-export type { Detection };
+export type { Detection } from "@/store/types";
