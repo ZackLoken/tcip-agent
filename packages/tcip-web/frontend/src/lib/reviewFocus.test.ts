@@ -22,10 +22,8 @@ const SELECTION = {
   date: "2026-02-11",
   image_list: [],
   current_image_index: 0, // backend resets to 0
-  annotations_detect_dir: "/ws/proj/annotations/catkin/2026-02-11/detect",
-  annotations_segment_dir: null,
-  predictions_detect_dir: "/ws/proj/predictions/baseline/2026-02-11/detect",
-  predictions_segment_dir: null,
+  annotations_dir: "/ws/proj/annotations/2026-02-11",
+  predictions_dir: "/ws/proj/predictions/baseline/2026-02-11",
 };
 
 beforeEach(() => {
@@ -75,7 +73,7 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "catkin",
       date: "2026-02-11",
-      predictions_detect_dir: "/ws/proj/predictions/baseline/2026-02-11/detect",
+      predictions_dir: "/ws/proj/predictions/baseline/2026-02-11",
     });
 
     await applyReviewFocus({
@@ -101,7 +99,7 @@ describe("applyReviewFocus", () => {
       dataset_root: "/ws/proj",
       subject: "catkin",
       date: "2026-02-11",
-      predictions_detect_dir: "/ws/proj/predictions/OTHER/2026-02-11/detect",
+      predictions_dir: "/ws/proj/predictions/OTHER/2026-02-11",
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(api.dataset.select).mockResolvedValue({ status: "ok", selection: SELECTION } as any);
