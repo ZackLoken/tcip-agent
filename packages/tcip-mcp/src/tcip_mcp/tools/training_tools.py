@@ -283,14 +283,19 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     try:
         from tcip_mcp.experiments import update_status
 
+        # The dataset identity this run trains on — computed ONCE and passed to both immutable
+        # records (lineage + split.json) so they cannot disagree about which data produced the number.
+        ds_id, ds_fp = _dataset_identity(data_cfg)
         experiment_id = _ensure_experiment(
             experiment_id, config, data_cfg.get("images_dir"), resume_from, run.run_id,
+            dataset_id=ds_id, dataset_fingerprint=ds_fp,
         )
         # Thread the resolved id into the live config so the default trainer's checkpoints carry it
         # (the envelope's ctx.save_checkpoint stamps it explicitly). run.config is this same dict.
         config["experiment_id"] = experiment_id
         update_status(experiment_id, "running")
-        _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+        _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg,
+                                dataset_id=ds_id, dataset_fingerprint=ds_fp)
     except Exception as exc:  # Experiment tracking is best-effort, but failures must be visible.
         logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
 
@@ -587,8 +592,44 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     return cfg
 
 
+def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
+    """``(dataset_id, dataset_fingerprint)`` for the run's dataset — the content end of the
+    reproduce-a-number chain. The fingerprint is recomputed here (recompute-on-read is authority); the
+    id comes from the dataset's ``dataset.json`` if it was registered. ``(None, None)`` for a bespoke /
+    imageless run (no dataset_root), matching ``dataset_hash=None`` rather than fabricating identity.
+    """
+    images_dir = data_cfg.get("images_dir")
+    if not images_dir:
+        return None, None
+    import json
+
+    from tcip_mcp.dataset_layout import dataset_identity_path, dataset_root_of
+    from tcip_mcp.pipelines.resolution import dataset_fingerprint
+
+    root = dataset_root_of(images_dir)
+    if root is None:
+        return None, None
+    try:
+        fp = dataset_fingerprint(root)
+    except OSError as exc:
+        # A fingerprint read failure must not sink the whole experiment record (lineage,
+        # split.json, status) for a run that otherwise trains fine — degrade to an honest
+        # None, matching the bespoke/imageless case, rather than fabricating or propagating.
+        logger.warning("dataset_fingerprint failed for %s: %s", root, exc)
+        fp = None
+    ds_id = None
+    ident = dataset_identity_path(root)
+    if ident.is_file():
+        try:
+            ds_id = json.loads(ident.read_text(encoding="utf-8")).get("id")
+        except (OSError, ValueError):
+            ds_id = None
+    return ds_id, fp
+
+
 def _ensure_experiment(
     experiment_id: str, config: dict, data_source, resume_from: str, run_id: str,
+    *, dataset_id: str | None = None, dataset_fingerprint: str | None = None,
 ) -> str:
     """Create or attach the experiment for a run, enforcing experiment immutability.
 
@@ -600,7 +641,8 @@ def _ensure_experiment(
     """
     from tcip_mcp.experiments import create_experiment, get_experiment
 
-    created = create_experiment(experiment_id, config, data_source=data_source)
+    created = create_experiment(experiment_id, config, data_source=data_source,
+                                dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
     if "error" not in created:
         return experiment_id
 
@@ -617,16 +659,21 @@ def _ensure_experiment(
         "experiment_id %s already has a run; experiments are immutable — tracking "
         "this run as %s instead.", experiment_id, fresh_id,
     )
-    create_experiment(fresh_id, config, parent_experiment=experiment_id, data_source=data_source)
+    create_experiment(fresh_id, config, parent_experiment=experiment_id, data_source=data_source,
+                      dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
     return fresh_id
 
 
-def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict) -> None:
-    """Persist which stems (+ seed + dataset_hash) produced this run's metrics (R5).
+def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict, *,
+                            dataset_id: str | None = None,
+                            dataset_fingerprint: str | None = None) -> None:
+    """Persist which stems (+ seed + dataset_hash + dataset identity) produced this run's metrics (R5).
 
-    The same seed yields a different split if the label set changes, so a metric is only
-    reproducible with the exact train/val membership recorded beside it. Best-effort — a
-    provenance write must never sink a launch.
+    The same seed yields a different split if the label set changes, so a metric is only reproducible
+    with the exact train/val membership recorded beside it. The whole-dataset ``dataset_fingerprint``
+    (+ id) records the content identity too, so this artifact is literally "fingerprint + split" —
+    content identity + membership + seed in one immutable record. Best-effort — a provenance write must
+    never sink a launch.
     """
     def _stems(ds) -> list[str]:
         return sorted(getattr(ds, "stems", None) or getattr(ds, "_stems", []) or [])
@@ -646,6 +693,8 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
             "val": _stems(val_ds) if val_ds is not None else [],
             "seed": int(split.get("seed", 42)),
             "dataset_hash": dh,
+            "dataset_id": dataset_id,
+            "dataset_fingerprint": dataset_fingerprint,
         }
         exp_dir = experiments_dir() / experiment_id
         if exp_dir.is_dir():
