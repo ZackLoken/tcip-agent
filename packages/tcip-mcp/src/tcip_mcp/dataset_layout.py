@@ -134,6 +134,15 @@ def classes_path(dataset_root: str | Path) -> Path:
     return Path(dataset_root, CLASSES_FILENAME)
 
 
+def dataset_identity_path(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/dataset.json`` — the dataset's identity ({crop, id, fingerprint}).
+
+    Sibling of ``classes.json``: identity is part of the data, so it travels with the image set. The
+    stored fingerprint is a cache — recompute-on-read (``resolution.dataset_fingerprint``) is authority.
+    """
+    return Path(dataset_root, "dataset.json")
+
+
 def status_bucket(subject: str, date: Optional[str]) -> str:
     """The ``image_status.json`` key a confirmation belongs under.
 
