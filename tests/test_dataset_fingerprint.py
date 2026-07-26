@@ -1,0 +1,135 @@
+"""K13.5 slice 3 — the whole-dataset content fingerprint (dataset identity).
+
+Pins: the fingerprint reuses ``dataset_hash`` for its label term (no second label-hasher); it is
+pixel-aware (a re-encode under the same filename changes it — the D2 gap ``dataset_hash`` alone leaves
+open); registry order matters but whitespace doesn't; it is content-addressed (enumeration-order- and
+path-independent, so a moved dataset keeps its identity); and it is ``None`` for a bespoke dataset.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+from PIL import Image
+
+from tcip_annotation import json_io
+from tcip_annotation.state import Annotation, BBox
+from tcip_mcp import class_registry
+from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject
+from tcip_mcp.pipelines import resolution
+from tcip_mcp.pipelines.resolution import dataset_fingerprint
+
+
+def _make_dataset(root: Path, *, pixel=(120, 120, 120), catkin_box=(10, 10, 40, 40), ext="jpg") -> None:
+    """A minimal nested-schema dataset: one dated image + its catkin label + a registry."""
+    date = "2026-02-11"
+    (root / "images" / date).mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 64), color=pixel).save(root / "images" / date / f"IMG_1.{ext}")
+    (root / "annotations" / date).mkdir(parents=True, exist_ok=True)
+    json_io.write_annotations(
+        root / "annotations" / date / "IMG_1.json",
+        [Annotation(subject="catkin", geometry=BBox(*catkin_box))], 64, 64)
+    class_registry.write_registry(
+        root / "classes.json",
+        ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)))
+
+
+def test_fingerprint_reuses_dataset_hash_for_labels(tmp_path, monkeypatch):
+    _make_dataset(tmp_path)
+    calls = []
+    real = resolution.dataset_hash
+    monkeypatch.setattr(resolution, "dataset_hash", lambda *a, **k: calls.append(a) or real(*a, **k))
+    fp = dataset_fingerprint(tmp_path)
+    assert fp is not None
+    assert calls, "dataset_fingerprint must CALL dataset_hash for its label term, not re-implement it"
+
+
+def test_a_label_edit_changes_the_fingerprint(tmp_path):
+    _make_dataset(tmp_path)
+    before = dataset_fingerprint(tmp_path)
+    # move the box -> label bytes change
+    json_io.write_annotations(
+        tmp_path / "annotations" / "2026-02-11" / "IMG_1.json",
+        [Annotation(subject="catkin", geometry=BBox(11, 11, 41, 41))], 64, 64)
+    assert dataset_fingerprint(tmp_path) != before
+
+
+def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
+    """The D2 canary: dataset_hash (labels-only) is unchanged, but the fingerprint MUST change when
+    the pixels change under an untouched filename + labels.
+
+    Uses BMP (uncompressed) rather than JPEG so the re-encode is guaranteed to preserve the file's
+    byte size regardless of color — a JPEG re-encode's size varies with content too, so a test built
+    on it would pass identically for a pixel-blind names+size(+mtime) image term, proving nothing
+    about pixel awareness specifically (that stat-only term is asserted below to NOT detect this
+    edit, confirming the size channel really is closed off here).
+    """
+    _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
+    before_fp = dataset_fingerprint(tmp_path)
+    before_labels = resolution.dataset_hash(tmp_path / "annotations" / "2026-02-11")
+    img_path = tmp_path / "images" / "2026-02-11" / "IMG_1.bmp"
+    size_before = img_path.stat().st_size
+    # re-encode the image with different pixels, same filename, labels untouched
+    Image.new("RGB", (64, 64), color=(0, 200, 0)).save(img_path)
+    assert img_path.stat().st_size == size_before  # confirms the size channel is closed, not just JPEG luck
+    assert resolution.dataset_hash(tmp_path / "annotations" / "2026-02-11") == before_labels  # labels-only: blind
+    assert dataset_fingerprint(tmp_path) != before_fp  # fingerprint: pixel-aware, catches it even though size didn't
+
+
+def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
+    _make_dataset(tmp_path)
+    # add an ordered attribute -> registry (and thus fingerprint) changes
+    reg2 = ClassRegistry(subjects=(Subject(
+        name="catkin", description="a hazelnut catkin",
+        attributes=(Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),)),))
+    class_registry.write_registry(tmp_path / "classes.json", reg2)
+    with_attr = dataset_fingerprint(tmp_path)
+    _make_dataset(tmp_path)  # reset registry to no-attr
+    assert dataset_fingerprint(tmp_path) != with_attr
+
+    # a whitespace-only reformat of classes.json must NOT change identity (canonical re-serialization)
+    reg2_again = ClassRegistry(subjects=(Subject(
+        name="catkin", description="a hazelnut catkin",
+        attributes=(Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),)),))
+    class_registry.write_registry(tmp_path / "classes.json", reg2_again)
+    fp_a = dataset_fingerprint(tmp_path)
+    cp = tmp_path / "classes.json"
+    cp.write_text(json.dumps(json.loads(cp.read_text()), indent=4) + "\n\n", encoding="utf-8")  # reformat
+    assert dataset_fingerprint(tmp_path) == fp_a
+
+
+def test_fingerprint_is_content_addressed_move_preserves_it(tmp_path):
+    src = tmp_path / "a"
+    _make_dataset(src)
+    dst = tmp_path / "b"
+    shutil.copytree(src, dst)  # same content, different path
+    assert dataset_fingerprint(dst) == dataset_fingerprint(src)
+
+
+def test_flat_layout_does_not_collide_with_a_subdir_literally_named_annotations(tmp_path):
+    """A flat annotations/*.json dataset must not key its label term identically to a nested
+    dataset whose one subdir happens to be literally named 'annotations' — both would otherwise
+    hash to the same key bytes (the flat branch keyed by the root dir's own name)."""
+    flat = tmp_path / "flat"
+    (flat / "annotations").mkdir(parents=True)
+    json_io.write_annotations(
+        flat / "annotations" / "A.json",
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+
+    nested = tmp_path / "nested"
+    (nested / "annotations" / "annotations").mkdir(parents=True)
+    json_io.write_annotations(
+        nested / "annotations" / "annotations" / "A.json",
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+
+    assert resolution._labels_term(flat / "annotations") != resolution._labels_term(nested / "annotations")
+
+
+def test_bespoke_dataset_has_no_fingerprint(tmp_path):
+    # images but no labels, and labels but no images, both -> None (never a fabricated identity)
+    (tmp_path / "images" / "d").mkdir(parents=True)
+    Image.new("RGB", (8, 8)).save(tmp_path / "images" / "d" / "x.jpg")
+    assert dataset_fingerprint(tmp_path) is None  # no labels
+    assert dataset_fingerprint(tmp_path / "nonexistent") is None
