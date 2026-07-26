@@ -35,9 +35,8 @@ Citing one as a reason *not* to make a change is the error, not the caution.
 
 TCIP is an **agentic ML/CV platform for automated phenotyping in tree-crop breeding
 programs** — a PyTorch-native, no-fixed-task-taxonomy pipeline builder. You are the
-ML/CV engineer driving it. It is **freestanding**: the MCP server is a transport-
-neutral stdio server (any MCP client), and the GUI is a standalone browser app — no
-editor required.
+ML/CV engineer driving it. See `README.md` for the pitch, the process diagram, and
+the roadmap — not restated here.
 
 **Scope today: 2D imagery (RGB + N-channel), object detection first** (Phase 1:
 hazelnut catkin phenology). The dataset layer serves the known task loaders
@@ -56,17 +55,17 @@ model code imports directly, and `instance_seg` is real (Mask R-CNN). **3D point
 (LiDAR / SfM) are not built** and carry no scaffolding — there is no point-cloud
 dataset/loader or task type; that's new work, not a config flag. See Roadmap in README.
 
-Three processes, one shared `.tcip/` state dir:
+Three processes, one shared `.tcip/` state dir (diagram: `README.md` § Architecture).
+Package map — each package's own `CLAUDE.md` covers its layout and conventions; this file
+doesn't repeat them:
 
-```
-Claude ──MCP(stdio)──▶ tcip-mcp ──HTTP/WS──▶ tcip-web (FastAPI + React/Konva GUI)
-                          └── reads/writes .tcip/ (experiments, registry, audit, reports)
-```
-
-- `packages/tcip-mcp/` — MCP server: domain tools (`tools/`) + composable ML (`pipelines/`). Your primary surface.
-- `packages/tcip-annotation/` — headless annotation/review engine (label I/O, IoU matching, SAM).
-- `packages/tcip-web/` — FastAPI backend + Vite/React/TS/Tailwind/Konva frontend. The human's UI.
-- `scripts/` — one-off scripts you write (see "Scripts vs tools").
+- `packages/tcip-mcp/` — MCP server: domain tools + composable ML. Your primary surface.
+  See `packages/tcip-mcp/CLAUDE.md`.
+- `packages/tcip-annotation/` — headless annotation/review engine. No dependency on the
+  other packages. See `packages/tcip-annotation/CLAUDE.md`.
+- `packages/tcip-web/` — FastAPI backend + Vite/React/TS/Tailwind/Konva frontend. The
+  human's UI. See `packages/tcip-web/CLAUDE.md`.
+- `scripts/` — one-off scripts you write (prefer this over a new MCP tool — see Conventions).
 - `.github/skills/` — domain knowledge. **Read the relevant `SKILL.md` before acting** in its
   domain (these are repo files, not registered skills — use Read, not the Skill tool).
 
@@ -108,9 +107,8 @@ nothing; say so rather than counting it.
 `pytest tests/` takes minutes. Reporting the fast half as green is guessing. Wait, then report — and
 report a green gate as "no detected breakage", never as evidence the work is correct.
 
-**Zack commits; you never do.** No `git commit`, `git push`, or branch operations. Leave finished
-work uncommitted with a per-commit file breakdown. For a frozen snapshot use `git stash create`,
-which touches neither the tree, the index, nor the stash list.
+(Commit/push/branch discipline — no branch ops, per-commit file breakdown, `git stash create` for
+snapshots — is a global rule now; see global `CLAUDE.md`, not restated here.)
 
 ## Invariants that protect the science (hard rules)
 
@@ -139,13 +137,13 @@ which touches neither the tree, the index, nor the stash list.
   - **Never commit unvalidated domain logic as if it were a definition.** Provisional logic
     is flagged provisional and validated or removed; it must not silently become
     institutional truth that the next session reuses.
-- **An annotation campaign is not a trait.** `annotations/<campaign>/` names an object class that
-  must be isolated. Sometimes that is a trait's own subject (catkins, for `catkin_50per_date`);
-  often it is an enabling object no trait names — a *bush* isolated so anything can be aggregated
-  per plant, a *leaf* isolated before leaf area is measured. So campaign names are not governed by
-  `crops.yml` and must not be validated against it. (The code still calls this `trait` in
-  `dataset_layout` and `annotation_type` in the web layer; both names are wrong and a rename is
-  pending.)
+- **A subject is not a trait.** `annotations/<subject>/` names an object class that must be
+  isolated (K13.5 unified the prior `campaign`/`annotation_type`/segment-sense `trait` names to
+  `subject` end to end, backend and web layer — verified current in `dataset_layout.py` and
+  `packages/tcip-web/src`, no stale references). Sometimes a subject is a trait's own object
+  (catkins, for `catkin_50per_date`); often it is an enabling object no trait names — a *bush*
+  isolated so anything can be aggregated per plant, a *leaf* isolated before leaf area is measured.
+  So subject names are not governed by `crops.yml` and must not be validated against it.
 - **A negative is empty labels + an explicit human Complete** (the `image_status.json` store) —
   an empty label file alone is never a negative (it may be emptied mid-work) and never trains
   as one. Don't delete empty label files without asking.
@@ -165,6 +163,11 @@ which touches neither the tree, the index, nor the stash list.
   word: TCIP's own history (delete it) and other tools' formats or browser APIs (interop — keep it,
   but do not call it legacy). Do not trust a "legacy" label in a docstring — check the callers, since
   the label is often wrong.
+  **This rule expires the moment that premise stops being true** — the first time a breeder has a
+  real project with real annotations/experiments/models on a schema this platform later changes.
+  From that point, a schema/format change needs an actual migration path (this file's job then is to
+  say how to write one safely, not to forbid it) and "no users yet" is no longer a fact you can cite.
+  Whoever notices real user data exists updates this bullet, not just their own PR.
 - **Enumerate the consumers before deleting anything.** Grep the symbol, the filename, the config
   key. A deletion whose assertion has no new home was a fact, not clutter.
 - **When two code paths must agree, call one from the other.** Never write a second implementation
@@ -234,11 +237,8 @@ longer fragments `.tcip/`.
   bloat, not tool shortage. Add a tool only for an audit seam, long-running
   infrastructure, or domain knowledge the agent lacks.
 - Crop traits are controlled vocabulary in `.github/skills/crops/` — verify there before asserting.
-- Match surrounding code style.
-- **Comments and emphasis (hard rule).** Match the file's existing comment density — most edits need
-  no new comment. Keep any comment to one line; never add a multi-line block to explain "why" on a
-  routine change. Never use all-caps for emphasis in code or prose (write "not"/"never", not
-  "NOT"/"NEVER"). Scan your own diff for both before presenting it.
+- Match surrounding code style. (Comment/emphasis style is a global rule — see global `CLAUDE.md`;
+  not restated here.)
 
 ## Pointers
 
@@ -246,3 +246,12 @@ longer fragments `.tcip/`.
 - `.github/skills/` — crops, crop-science, project-setup, annotation, training, evaluation,
   pipeline-design, toolkit-inventory, cv-research, phenology, visual-analysis, delivery,
   self-improvement. Load before acting in a domain (current list: `ls .github/skills/`).
+- `packages/*/CLAUDE.md` — per-package layout and conventions (loads automatically when you
+  read files in that package; not duplicated here).
+- `docs/` and `.claude/` — local, gitignored dev tooling (refactor task/status tracking, hooks,
+  subagents, permission config). Not part of the shipped platform and not present on a fresh clone;
+  present only on machines where they've been set up. If `docs/current-task.md` /
+  `docs/recent-summary.md` exist, `.claude/hooks/session_start.py` auto-injects them at session
+  start — update `docs/recent-summary.md` before ending a session with refactor work still in
+  flight (see global `workflow-playbook` skill). If they don't exist, there's no refactor-tracking
+  scaffolding on this machine yet.
