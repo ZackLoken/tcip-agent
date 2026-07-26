@@ -1,0 +1,123 @@
+"""K13.5 slice 3b — the experiment immutably records the dataset identity it trained on.
+
+The content end of the reproduce-a-number chain: id + fingerprint are written into the lineage and
+split.json at creation, are never backfilled/changed via update_lineage (identity, not a mutable
+edge), and compare_experiments surfaces whether two runs share a dataset so a metric comparison across
+different data is not read as apples-to-apples.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+import tcip_mcp.experiments as exp
+from tcip_mcp.experiments import compare_experiments, create_experiment, update_lineage
+
+
+@pytest.fixture
+def exp_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(exp, "EXPERIMENTS_DIR", tmp_path / "experiments")
+    return tmp_path / "experiments"
+
+
+def _make_dataset(root: Path) -> None:
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import ClassRegistry, Subject
+
+    (root / "images" / "2-11-26").mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (32, 32)).save(root / "images" / "2-11-26" / "img_000.jpg")
+    (root / "annotations" / "2-11-26").mkdir(parents=True, exist_ok=True)
+    json_io.write_annotations(str(root / "annotations" / "2-11-26" / "img_000.json"),
+                              [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    class_registry.write_registry(root / "classes.json",
+                                  ClassRegistry(subjects=(Subject(name="catkin"),)))
+
+
+def test_create_experiment_records_identity_in_lineage(exp_dir):
+    create_experiment("e1", {}, dataset_id="abc123", dataset_fingerprint="ff00")
+    lin = json.loads((exp_dir / "e1" / "lineage.json").read_text())
+    assert lin["dataset_id"] == "abc123" and lin["dataset_fingerprint"] == "ff00"
+
+
+def test_update_lineage_cannot_change_or_backfill_identity(exp_dir):
+    create_experiment("e1", {}, dataset_id="abc123", dataset_fingerprint="ff00")
+    # a recorded identity is immutable; a legitimate edge (model_weights) still updates
+    res = update_lineage("e1", dataset_fingerprint="DIFFERENT", model_weights="w.pt")
+    assert res["lineage"]["dataset_fingerprint"] == "ff00"
+    assert res["lineage"]["model_weights"] == "w.pt"
+    # a run that recorded None identity stays None — never silently backfilled
+    create_experiment("e2", {})
+    update_lineage("e2", dataset_fingerprint="sneaky")
+    assert json.loads((exp_dir / "e2" / "lineage.json").read_text())["dataset_fingerprint"] is None
+
+
+def test_compare_experiments_surfaces_shared_fingerprint(exp_dir):
+    create_experiment("a", {}, dataset_id="1", dataset_fingerprint="ff")
+    create_experiment("b", {}, dataset_id="1", dataset_fingerprint="ff")
+    assert compare_experiments(["a", "b"])["same_dataset_fingerprint"] is True
+    create_experiment("c", {}, dataset_id="2", dataset_fingerprint="ee")
+    assert compare_experiments(["a", "c"])["same_dataset_fingerprint"] is False
+
+
+def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(exp_dir):
+    """One run with a known fingerprint compared against a bespoke/imageless run (None) must
+    report unknown identity, not a false apples-to-apples True — the two demonstrably did not
+    train on the same (known) data."""
+    create_experiment("a", {}, dataset_id="1", dataset_fingerprint="ff")
+    create_experiment("b", {})  # bespoke/imageless -> no recorded fingerprint
+    assert compare_experiments(["a", "b"])["same_dataset_fingerprint"] is None
+
+
+def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tcip_mcp.tools.training_tools import _dataset_identity
+
+    _make_dataset(tmp_path)
+    reg = register_dataset(str(tmp_path), crop="hazelnut")
+    ds_id, fp = _dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
+    assert ds_id == reg["id"] and fp == reg["fingerprint"]
+    # bespoke / imageless run -> no fabricated identity
+    assert _dataset_identity({}) == (None, None)
+
+
+def test_dataset_identity_fingerprint_io_error_degrades_to_none(tmp_path, monkeypatch):
+    """A fingerprint read failure (a locked/removed image mid-scan) must degrade to an honest
+    None, not raise — raising here propagates out of launch_training's tracking try/except and
+    silently drops the whole experiment record (lineage/status/split.json) for a run that still
+    trains, which is strictly worse than losing only the fingerprint."""
+    import tcip_mcp.pipelines.resolution as resolution
+    from tcip_mcp.tools.training_tools import _dataset_identity
+
+    _make_dataset(tmp_path)
+
+    def _raise(_root):
+        raise OSError("simulated I/O error mid-scan")
+
+    # _dataset_identity does `from tcip_mcp.pipelines.resolution import dataset_fingerprint`
+    # locally at call time, so it must be patched at the source module.
+    monkeypatch.setattr(resolution, "dataset_fingerprint", _raise)
+    ds_id, fp = _dataset_identity({"images_dir": str(tmp_path / "images" / "2-11-26")})
+    assert fp is None
+    assert ds_id is None  # no dataset.json registered in this fixture
+
+
+def test_persist_split_manifest_records_identity(exp_dir):
+    from tcip_mcp.tools.training_tools import _persist_split_manifest
+
+    create_experiment("e1", {})
+
+    class _DS:
+        stems = ["a", "b"]
+
+    _persist_split_manifest("e1", _DS(), None, {"labels_dir": ""},
+                            dataset_id="x", dataset_fingerprint="yz")
+    split = json.loads((exp_dir / "e1" / "split.json").read_text())
+    assert split["dataset_id"] == "x" and split["dataset_fingerprint"] == "yz"
+    assert split["train"] == ["a", "b"]  # membership still recorded beside the identity
