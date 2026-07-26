@@ -54,10 +54,20 @@ def resolve_state(path: Path) -> Path:
 
 def repo_root_from_here() -> Path:
     """The repo root inferred from this file's location — the nearest ancestor holding
-    ``.mcp.json`` or ``CLAUDE.md``. Stable regardless of cwd; used to *pin* the env var."""
+    ``.mcp.json``, checked across every ancestor before falling back to the nearest one holding
+    ``CLAUDE.md``. Stable regardless of cwd; used to *pin* the env var.
+
+    ``.mcp.json`` lives only at the true repo root, so it is checked in a full pass first; each
+    package under ``packages/`` carries its own ``CLAUDE.md`` too, so checking both markers in a
+    single climb would stop at a package's own file instead of continuing to the repo root.
+    """
     here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / ".mcp.json").is_file() or (parent / "CLAUDE.md").is_file():
+    parents = list(here.parents)
+    for parent in parents:
+        if (parent / ".mcp.json").is_file():
+            return parent
+    for parent in parents:
+        if (parent / "CLAUDE.md").is_file():
             return parent
     return Path.cwd()
 
