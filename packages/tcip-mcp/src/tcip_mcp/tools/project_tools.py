@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -17,6 +18,78 @@ def _project_dir(project_path: str) -> Path:
     p = Path(project_path) / ".tcip"
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+# --- dataset identity registry (project -> datasets it uses) --------------
+
+
+def _datasets_registry_path(project_root: str | Path) -> Path:
+    return Path(project_root) / ".tcip" / "datasets.json"
+
+
+def read_datasets(project_root: str | Path) -> list[dict]:
+    """The project's ``.tcip/datasets.json`` registry (``[{id, path, crop, fingerprint}]``), or []."""
+    p = _datasets_registry_path(project_root)
+    if not p.is_file():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def upsert_dataset(project_root: str | Path, entry: dict) -> None:
+    """Add or refresh a dataset in the project's registry, matched by ``id`` — a moved dataset updates
+    the ``path`` of its existing id rather than duplicating, so identity survives a move."""
+    p = _datasets_registry_path(project_root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    regs = [r for r in read_datasets(project_root) if r.get("id") != entry.get("id")]
+    regs.append(entry)
+    atomic_write_text(p, json.dumps(sorted(regs, key=lambda r: str(r.get("id", ""))), indent=2) + "\n")
+
+
+@mcp.tool()
+@audited
+def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> dict:
+    """Record a dataset's identity so a delivered number can be traced to the exact data behind it.
+
+    Writes ``<dataset_root>/dataset.json = {crop, id, fingerprint}`` (identity travels with the data)
+    and upserts the dataset into the project's ``.tcip/datasets.json``. ``crop`` is the human's fact and
+    is required — never inferred from a path or slug. ``id`` is minted once and preserved across
+    re-runs and path moves; ``fingerprint`` is the whole-dataset content digest (labels + image pixels
+    + registry), recomputed here — but the stored value is a cache, and recompute-on-read
+    (``resolution.dataset_fingerprint``) is the authority.
+
+    Args:
+        dataset_root: Root of the dataset (holds ``images/``, ``annotations/``, ``classes.json``).
+        crop: The crop this dataset's imagery is of (e.g. ``hazelnut``). Required; the expert's fact.
+        project_root: Project to register the dataset under. Empty defaults to ``dataset_root``.
+    """
+    from tcip_mcp.dataset_layout import dataset_identity_path
+    from tcip_mcp.pipelines.resolution import dataset_fingerprint
+
+    root = Path(dataset_root)
+    if not root.is_dir():
+        return {"error": f"dataset_root not found: {dataset_root}"}
+    if not crop:
+        return {"error": "crop is required (the expert's fact; never inferred from a path or slug)"}
+
+    ident_path = dataset_identity_path(root)
+    existing: dict = {}
+    if ident_path.is_file():
+        try:
+            existing = json.loads(ident_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            existing = {}
+    ds_id = existing.get("id") or uuid.uuid4().hex[:12]  # minted once; stable across re-runs and moves
+    fingerprint = dataset_fingerprint(root)
+    identity = {"crop": crop, "id": ds_id, "fingerprint": fingerprint}
+    atomic_write_text(ident_path, json.dumps(identity, indent=2) + "\n")
+
+    proj = Path(project_root) if project_root else root
+    upsert_dataset(proj, {"id": ds_id, "path": str(root), "crop": crop, "fingerprint": fingerprint})
+    return {"dataset_root": str(root), **identity}
 
 
 def _scaffold_project(project_path: str) -> dict:
@@ -236,11 +309,18 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
 
         # The single nested registry decodes the labels' subject/attribute names — without it the
         # archived annotations are undecodable, so a self-contained bundle must carry it.
-        from tcip_mcp.dataset_layout import classes_path
+        from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
 
         registry = classes_path(root)
         if registry.is_file():
             zf.write(registry, registry.relative_to(root))
+            files_added += 1
+
+        # dataset.json — the dataset's identity ({crop, id, fingerprint}); identity is part of the
+        # data, so it travels with the registry it sits beside.
+        identity = dataset_identity_path(root)
+        if identity.is_file():
+            zf.write(identity, identity.relative_to(root))
             files_added += 1
 
         # .tcip config, experiments, audit — the project's working state
