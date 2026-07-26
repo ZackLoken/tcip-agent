@@ -9,7 +9,76 @@ from tcip_mcp.tools.project_tools import (
     inspect_project,
     archive_project,
     import_project,
+    read_datasets,
+    register_dataset,
 )
+
+
+def _make_dataset(root: Path) -> None:
+    """A minimal nested-schema dataset (image + label + registry) for identity tests."""
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import ClassRegistry, Subject
+
+    (root / "images" / "2-11-26").mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (32, 32)).save(root / "images" / "2-11-26" / "img_000.jpg")
+    (root / "annotations" / "2-11-26").mkdir(parents=True, exist_ok=True)
+    json_io.write_annotations(
+        str(root / "annotations" / "2-11-26" / "img_000.json"),
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    class_registry.write_registry(
+        root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+
+
+def test_register_dataset_writes_identity_and_registers(tmp_path: Path):
+    import json
+
+    src = tmp_path / "proj"
+    _make_dataset(src)
+
+    res = register_dataset(str(src), crop="hazelnut")
+    assert "error" not in res
+    assert res["crop"] == "hazelnut" and res["id"] and res["fingerprint"]
+
+    # dataset.json holds {crop, id, fingerprint}.
+    ident = json.loads((src / "dataset.json").read_text())
+    assert ident == {"crop": "hazelnut", "id": res["id"], "fingerprint": res["fingerprint"]}
+    # the project registry knows the dataset.
+    regs = read_datasets(src)
+    assert len(regs) == 1 and regs[0]["id"] == res["id"] and regs[0]["crop"] == "hazelnut"
+
+
+def test_register_dataset_requires_crop_and_keeps_id_stable(tmp_path: Path):
+    src = tmp_path / "proj"
+    _make_dataset(src)
+
+    assert "error" in register_dataset(str(src), crop="")  # crop is the expert's fact, required
+
+    first = register_dataset(str(src), crop="hazelnut")
+    again = register_dataset(str(src), crop="hazelnut")
+    assert again["id"] == first["id"]  # id minted once, preserved across re-runs
+    assert len(read_datasets(src)) == 1  # not duplicated in the registry
+
+
+def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path):
+    import shutil
+
+    src = tmp_path / "orig"
+    _make_dataset(src)
+    reg = register_dataset(str(src), crop="hazelnut")
+
+    moved = tmp_path / "moved"
+    shutil.copytree(src, moved)  # same content, new path
+    register_dataset(str(moved), crop="hazelnut", project_root=str(src))
+
+    regs = read_datasets(src)
+    same = [r for r in regs if r["id"] == reg["id"]]
+    assert len(same) == 1  # one entry for the id — the move updated the path, not duplicated
+    assert same[0]["path"] == str(moved)
+    assert same[0]["fingerprint"] == reg["fingerprint"]  # unchanged content -> same fingerprint
 
 
 def test_init_project(tmp_path: Path):
@@ -58,6 +127,7 @@ def test_export_import_roundtrip(tmp_path: Path):
         src / "classes.json",
         ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)),
     )
+    reg = register_dataset(str(src), crop="hazelnut")  # dataset.json identity travels with the data
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
@@ -77,3 +147,8 @@ def test_export_import_roundtrip(tmp_path: Path):
     # The registry survived, so the restored labels are still decodable.
     restored = class_registry.read_registry(dest / "classes.json")
     assert [s.name for s in restored.subjects] == ["catkin"]
+    # dataset.json travelled with the data — identity (id/crop/fingerprint) survives the round-trip.
+    import json
+
+    restored_id = json.loads((dest / "dataset.json").read_text())
+    assert restored_id == {"crop": "hazelnut", "id": reg["id"], "fingerprint": reg["fingerprint"]}
