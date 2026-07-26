@@ -5,9 +5,6 @@
 /tcip-projects/
 /data/
 
-# ── Design docs (working notes, not for version control) ────────────────────
-/docs
-
 # ── Review corpus (478-agent review output; evidence for the refactor, ~70MB) ──
 /.review-corpus/
 
@@ -44,8 +41,13 @@ packages/tcip-web/static/assets/*.css
 # ── Retired VS Code extension build output ───────────────────────────────
 packages/tcip-vscode/out/
 
-# ── Claude Code local settings ───────────────────────────────────────────
+# ── Claude Code config (dev tooling for working on TCIP; not something the shipped ──
+# ── platform uses at runtime, so none of it is tracked) ─────────────────────
 .claude/
+
+# ── Refactor process docs (current-task/recent-summary/decisions/grounding: dev-process ──
+# ── tracking, not something the shipped platform needs) ─────────────────────
+/docs/
 
 # ── Editor workspace files ────────────────────────────────────────────────
 .vscode/
