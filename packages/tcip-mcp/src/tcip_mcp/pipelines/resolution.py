@@ -268,6 +268,126 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     return h.hexdigest()[:16]
 
 
+_FINGERPRINT_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+
+
+def _labels_term(annotations_root: Path) -> str | None:
+    """Whole-dataset label identity, composed from :func:`dataset_hash` per label dir.
+
+    Labels live at ``annotations/<date>/*.json`` (date-nested) or flat ``annotations/*.json``.
+    ``dataset_hash`` is the single label-byte hasher (flat glob), so this *calls* it per dir and
+    combines the per-dir digests keyed by dir name — never re-implementing label hashing. ``None``
+    when no labels exist anywhere.
+    """
+    if not annotations_root.is_dir():
+        return None
+    subdirs = sorted(d for d in annotations_root.iterdir() if d.is_dir())
+    flat = not subdirs
+    label_dirs = subdirs if subdirs else [annotations_root]
+    h = hashlib.sha256()
+    any_labels = False
+    for d in label_dirs:
+        if not any(d.glob("*.json")):
+            continue
+        any_labels = True
+        # A real subdir name can never be empty, so the flat root keys with "" rather than its own
+        # name — otherwise a dated subdir named literally "annotations" would key identically to the
+        # flat case and collide with it.
+        key = "" if flat else d.name
+        h.update(key.encode("utf-8"))
+        h.update(b"\0")
+        h.update(dataset_hash(d).encode("utf-8"))  # reuse the label-byte hasher, per dir
+        h.update(b"\0")
+    return h.hexdigest()[:16] if any_labels else None
+
+
+def _images_term(images_root: Path, cache_path: Path | None) -> str | None:
+    """Whole-dataset image identity from each image's *pixel bytes* (content, not name/size) — so a
+    re-encode under the same filename changes identity (closes the labels-only/pixel-blind gap). Each
+    file's sha is cached by ``(relpath, size, mtime_ns)`` so only changed files re-hash; a cache miss
+    always hashes the bytes. ``None`` when there are no images (bespoke/imageless).
+    """
+    if not images_root.is_dir():
+        return None
+    files = sorted(p for p in images_root.rglob("*")
+                   if p.is_file() and p.suffix.lower() in _FINGERPRINT_IMAGE_EXTS)
+    if not files:
+        return None
+    old: dict[str, str] = {}
+    if cache_path and cache_path.is_file():
+        try:
+            loaded = json.loads(cache_path.read_text(encoding="utf-8"))
+            old = loaded if isinstance(loaded, dict) else {}
+        except (OSError, ValueError):
+            old = {}
+    new: dict[str, str] = {}  # only current files -> the cache never grows unbounded
+    manifest: dict[str, str] = {}
+    for f in files:
+        rel = f.relative_to(images_root).as_posix()
+        st = f.stat()
+        key = f"{rel}\0{st.st_size}\0{st.st_mtime_ns}"
+        sha = old.get(key) or hashlib.sha256(f.read_bytes()).hexdigest()
+        new[key] = sha
+        manifest[rel] = sha
+    if cache_path and new != old:
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(new), encoding="utf-8")
+        except OSError:
+            pass
+    h = hashlib.sha256()
+    for rel in sorted(manifest):
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update(manifest[rel].encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
+def _registry_term(dataset_root: Path) -> str:
+    """Digest over the canonical registry serialization in *declared order* (load-bearing in
+    ``assign_class_ids``). Serialized via ``registry_to_dict`` rather than raw bytes, so a
+    whitespace-only reformat of ``classes.json`` does not change identity but a value reorder/addition
+    does. Empty string when the dataset has no registry."""
+    from tcip_mcp.class_registry import RegistryError, read_registry, registry_to_dict
+    from tcip_mcp.dataset_layout import classes_path
+
+    cp = classes_path(dataset_root)
+    if not cp.is_file():
+        return ""
+    try:
+        canonical = json.dumps(registry_to_dict(read_registry(cp)), separators=(",", ":"))
+    except (OSError, ValueError, RegistryError):
+        return ""
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def dataset_fingerprint(dataset_root: str | Path) -> str | None:
+    """Whole-dataset content identity: labels + image pixels + registry.
+
+    A superset of :func:`dataset_hash` (which stays the per-split-subset firewall key): the label term
+    *calls* ``dataset_hash``; the image term hashes pixel bytes; the registry term digests the canonical
+    class registry. Content-addressed, so it is machine-independent (a moved dataset keeps its
+    fingerprint) and detects a change to any of the three (a re-encode, a relabel, a registry edit).
+    ``None`` for a dataset with no images or no labels (e.g. a bespoke ``dataset_source``) — matching
+    ``dataset_hash``'s honesty rather than fabricating identity. Authority is recompute-on-read; a
+    stored fingerprint (``dataset.json``) is a cache.
+    """
+    root = Path(dataset_root)
+    labels = _labels_term(root / "annotations")
+    images = _images_term(root / "images", root / ".tcip" / "state" / "image_hash_cache.json")
+    if labels is None or images is None:
+        return None
+    h = hashlib.sha256()
+    h.update(b"labels:")
+    h.update(labels.encode("utf-8"))
+    h.update(b"\0images:")
+    h.update(images.encode("utf-8"))
+    h.update(b"\0classes:")
+    h.update(_registry_term(root).encode("utf-8"))
+    return h.hexdigest()[:16]
+
+
 # --- on-disk operating-point reconciliation (the delivery gate reads the sidecar, not a caller string) ---
 
 def read_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
