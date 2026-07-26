@@ -241,7 +241,7 @@ describe("AnnotateTab subject rendering", () => {
     // like every committed shape (read-only is enforced structurally, not by line style).
     const rects = screen.getAllByTestId("k-rect");
     expect(rects).toHaveLength(1);
-    expect(rects[0]).not.toHaveAttribute("data-dash");  // solid — dashed is reserved for transient shapes
+    expect(rects[0]).not.toHaveAttribute("data-dash"); // solid — dashed is reserved for transient shapes
     expect(rects[0]).toHaveAttribute("data-stroke", subjectColor("catkin"));
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
     expect(useStore.getState().canvas.polygons).toHaveLength(1);
