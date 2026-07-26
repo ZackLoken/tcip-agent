@@ -69,8 +69,15 @@ def create_experiment(
     *,
     parent_experiment: str | None = None,
     data_source: str | None = None,
+    dataset_id: str | None = None,
+    dataset_fingerprint: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new experiment directory with config snapshot."""
+    """Create a new experiment directory with config snapshot.
+
+    ``dataset_id`` / ``dataset_fingerprint`` record the identity of the data this run trained on (the
+    content end of the reproduce-a-number chain), written into the immutable lineage at creation. They
+    are set once here and never via ``update_lineage`` (identity, not a mutable edge).
+    """
     d = _exp_dir(experiment_id)
     if d.exists():
         return {"error": f"Experiment already exists: {experiment_id}"}
@@ -92,6 +99,8 @@ def create_experiment(
     # Lineage
     lineage = {
         "data_source": data_source,
+        "dataset_id": dataset_id,
+        "dataset_fingerprint": dataset_fingerprint,
         "parent_experiment": parent_experiment,
         "model_weights": None,
         "predictions": None,
@@ -214,6 +223,13 @@ def update_lineage(
     d = _exp_dir(experiment_id)
     if not d.exists():
         return {"error": f"Experiment not found: {experiment_id}"}
+
+    # Dataset identity is set once at creation and is immutable — never a lineage edge to backfill.
+    # (The additive-only lock below would otherwise permit a first write to an empty identity field
+    # even post-terminal, which would be a silent change to what data the run trained on.)
+    identity_updates = {k: updates.pop(k) for k in ("dataset_id", "dataset_fingerprint") if k in updates}
+    if identity_updates:
+        _audit_refused(experiment_id, "update_lineage_identity", {"fields": sorted(identity_updates)})
 
     lineage_path = d / "lineage.json"
     with file_transaction(lineage_path):
@@ -381,9 +397,26 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
         model_source = config.get("model_source", {})
         summary["model"] = model_source.get("builder", "unknown")
 
+        # Dataset identity (the content end of the reproduce-a-number chain), from the immutable lineage.
+        lineage_path = _exp_dir(eid) / "lineage.json"
+        if lineage_path.is_file():
+            try:
+                lin = json.loads(lineage_path.read_text())
+                summary["dataset_id"] = lin.get("dataset_id")
+                summary["dataset_fingerprint"] = lin.get("dataset_fingerprint")
+            except (OSError, ValueError):
+                pass
+
         comparisons.append(summary)
 
-    return {"experiments": comparisons, "count": len(comparisons)}
+    # Whether every compared run trained on the same dataset content — a metric comparison across
+    # different data is not apples-to-apples, so surface it rather than let the caller assume.
+    # A run with no recorded fingerprint (bespoke/imageless) makes the comparison's data identity
+    # unknown, not "same" by default — so an unset fingerprint must not be filtered out before the
+    # equality check the way an errored comparison is.
+    fps = {c.get("dataset_fingerprint") for c in comparisons if "error" not in c}
+    same_dataset = None if (not fps or None in fps) else len(fps) == 1
+    return {"experiments": comparisons, "count": len(comparisons), "same_dataset_fingerprint": same_dataset}
 
 
 def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
