@@ -886,9 +886,9 @@ def run_full_frame_evaluation(
     ``run_inference``, THIS is the delivery-gating call: an unresolvable ``tile_size`` (no explicit
     value and nothing persisted on the checkpoint) raises rather than silently fabricating 640, since
     a wrong tile scale here is a wrong number that gates a phenotype, not just a wrong preview.
-    ``overlap`` alone falling back to a default does NOT raise — some model kinds (YOLO, trained
-    square) have no persisted overlap analog at all, which is a legitimate fact, not a missing
-    derivation; only ``tile_size``'s absence changes the object count's scale.
+    ``overlap`` alone falling back to a default does NOT raise — a checkpoint trained with no
+    tiling overlap convention at all has no persisted overlap analog, which is a legitimate fact,
+    not a missing derivation; only ``tile_size``'s absence changes the object count's scale.
     """
     from tcip_mcp.dataset_layout import annotation_date
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
