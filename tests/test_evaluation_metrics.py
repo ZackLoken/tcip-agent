@@ -32,7 +32,10 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     run_test_evaluation,
     sweep_operating_point,
 )
-from tcip_mcp.pipelines.training.generic_trainer import _selection_value  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
+    _selection_value,
+    resolve_selection_metric,
+)
 
 
 # --------------------------------------------------------------------------
@@ -238,9 +241,29 @@ def test_regression_metrics():
 
 
 def test_selection_value_prefers_objective_for_detection():
-    assert _selection_value("detection", {"val_loss": 0.1, "val_objective": 5.0}, 0.2) == 5.0
-    assert _selection_value("classification", {"val_loss": 0.1}, 0.2) == 0.1
-    assert _selection_value("detection", {"val_loss": 0.1}, 0.2) == 0.1  # no objective -> val_loss
+    assert _selection_value("detection", {"val_loss": 0.1, "val_objective": 5.0}, 0.2, "objective") == 5.0
+    assert _selection_value("classification", {"val_loss": 0.1}, 0.2, "loss") == 0.1
+    assert _selection_value("detection", {"val_loss": 0.1}, 0.2, "objective") == 0.1  # no objective -> val_loss
+
+
+def test_resolve_selection_metric_defaults():
+    assert resolve_selection_metric("detection", None, None) == "objective"
+    assert resolve_selection_metric("instance_seg", None, None) == "objective"
+    assert resolve_selection_metric("classification", None, None) == "loss"
+    assert resolve_selection_metric("semantic_seg", None, None) == "loss"
+
+
+def test_resolve_selection_metric_rejects_incoherent_explicit_choice():
+    with pytest.raises(ValueError, match="comparability-only"):
+        resolve_selection_metric("detection", "catkin", "map50")
+
+
+def test_resolve_selection_metric_allows_coherent_explicit_choice():
+    # A legitimate explicit choice must still succeed — a rail must admit valid work, not
+    # only reject invalid work.
+    assert resolve_selection_metric("detection", "catkin", "f1") == "f1"
+    assert resolve_selection_metric("detection", "catkin", "recall") == "recall"
+    assert resolve_selection_metric("detection", None, "map50") == "map50"  # no trait -> no gate
 
 
 # --------------------------------------------------------------------------
@@ -341,6 +364,40 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
         assert k in last, f"missing {k}"
     assert (tmp_path / "out" / "model_best.pt").is_file()
     assert run.best_metric == pytest.approx(last["val_objective"])
+
+
+def test_train_center_match_trait_records_governing_criterion(tmp_path):
+    """K9 F1: threading `trait` into _validate surfaces val_governing_criterion (a dict) and
+    val_map50_role (a str) in val_metrics — the TensorBoard scalar loop must skip these
+    non-numeric values rather than crash `add_scalar` on them."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    for i in range(4):
+        _save_png(images_dir / f"img{i}.png")
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+                                  IMG, IMG, keep_empty=True)
+    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
+                       subject="catkin")
+    loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("detection"))
+
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                    "builder_kwargs": {"num_classes": 1, "min_size": IMG, "max_size": IMG * 2},
+                    "task": "detection"}
+    cfg = _cfg(model_source)
+    cfg["evaluation"] = {"trait": "catkin"}
+    run = create_run(cfg, str(tmp_path / "out"))
+    run = train(run, loader, val_loader=loader, task="detection")
+
+    assert run.status == "completed", getattr(run, "error", run.status)
+    last = run.metrics_history[-1]
+    assert "val_governing_criterion" in last
+    assert last["val_map50_role"] == "comparability_only"
+    assert last["selection_metric"] == "objective"
+    assert last["selection_trait"] == "catkin"
 
 
 def test_validate_classification_metrics(tmp_path):
