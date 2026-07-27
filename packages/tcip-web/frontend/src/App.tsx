@@ -204,7 +204,13 @@ function App() {
         // Scoped to the selected subject: a Complete recorded while annotating catkin says
         // nothing about bush, and reading a global map re-applied it to subjects the breeder
         // never looked at — then wrote the result back over their original confirmations.
-        const saved = await classesApi.loadImageStatus(projectRoot, subject, datasetDate);
+        const saved = await classesApi.loadImageStatus(
+          projectRoot,
+          subject,
+          datasetDate,
+          datasetRoot,
+          annotationsDir,
+        );
         const savedMap = saved.statuses ?? {};
         // Reconcile every image against the label files, honoring confirmed reviews via
         // complete_override — so a wrongly-saved "negative" whose files have content heals
@@ -227,7 +233,14 @@ function App() {
           Object.entries(reconciled).filter(([name, st]) => savedMap[name] !== st),
         ) as Record<string, "complete" | "partial" | "negative" | "unannotated">;
         if (Object.keys(changed).length) {
-          await classesApi.setImageStatusBulk(projectRoot, changed, subject, datasetDate);
+          await classesApi.setImageStatusBulk(
+            projectRoot,
+            changed,
+            subject,
+            datasetDate,
+            datasetRoot,
+            annotationsDir,
+          );
         }
         setImageStatuses(reconciled);
       } catch (err) {
