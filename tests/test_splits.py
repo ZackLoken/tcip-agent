@@ -9,8 +9,12 @@ import pytest
 from tcip_mcp.pipelines.data.splits import (
     default_group_key,
     GROUP_KEY_FNS,
+    cal_holdout_lock_path,
+    cal_holdout_split,
     count_lines,
     group_balanced_split,
+    resolve_group_key_fn,
+    resolve_locked_cal_holdout_split,
 )
 
 
@@ -79,3 +83,97 @@ def test_group_split_no_foreground_fallback():
     assert parts["train"] and parts["val"]  # fallback splits by tile count
     with pytest.raises(ValueError):
         group_balanced_split(stems, annotation_counts=counts, seed=5, require_foreground=True)
+
+
+# --- resolve_group_key_fn (K1) ---
+
+def test_resolve_group_key_fn_unrecognized_group_by_raises():
+    with pytest.raises(ValueError, match="Unrecognized"):
+        resolve_group_key_fn("not_a_real_key", ["a", "b"])
+
+
+def test_resolve_group_key_fn_group_key_map_missing_stems_raises():
+    with pytest.raises(ValueError, match="missing"):
+        resolve_group_key_fn("tile_prefix", ["a", "b"], group_key_map={"a": "g1"})
+
+
+def test_resolve_group_key_fn_group_key_map_used_when_it_covers_every_stem():
+    fn = resolve_group_key_fn("tile_prefix", ["a", "b"], group_key_map={"a": "g1", "b": "g1"})
+    assert fn("a") == fn("b") == "g1"
+
+
+def test_resolve_group_key_fn_named_policy_still_works():
+    fn = resolve_group_key_fn("tile_prefix", ["a_0_0"])
+    assert fn("a_0_0") == "a"
+    assert resolve_group_key_fn("stem", ["a_0_0"])("a_0_0") == "a_0_0"
+
+
+# --- cal_holdout_split (K1) ---
+
+def test_cal_holdout_split_remaps_train_val_to_calibration_holdout():
+    stems = _grouped(6)
+    parts = cal_holdout_split(stems, holdout_ratio=0.5, seed=1)
+    assert set(parts) == {"calibration", "holdout"}
+    assert sorted(parts["calibration"] + parts["holdout"]) == sorted(stems)
+
+
+# --- resolve_locked_cal_holdout_split (K1) ---
+
+def test_resolve_locked_cal_holdout_split_group_straddle():
+    # Group "m" has two tiles; many other stems sort alphabetically BETWEEN them, so a naive
+    # lexicographic midpoint cut (the pre-K1 behavior at every calibration call site) would split
+    # them across cal/holdout. The locked, group-aware split must not.
+    stems = ["m_0_0"] + [f"g{i}_0_0" for i in range(8)] + ["m_9_9"]
+    locked = resolve_locked_cal_holdout_split(stems, identity_hash="straddle-test", seed=1)
+    cal, hold = set(locked["calibration"]), set(locked["holdout"])
+    assert ("m_0_0" in cal) == ("m_9_9" in cal)
+    assert ("m_0_0" in hold) == ("m_9_9" in hold)
+
+
+def test_resolve_locked_cal_holdout_split_stable_across_redeclared_policy():
+    stems = _grouped(6)
+    first = resolve_locked_cal_holdout_split(stems, identity_hash="stable-test", seed=1)
+    # A later call declaring a DIFFERENT seed/group_by, with no force_redraw, must not redraw.
+    second = resolve_locked_cal_holdout_split(
+        stems, identity_hash="stable-test", seed=99, group_by="stem")
+    assert first["calibration"] == second["calibration"]
+    assert first["holdout"] == second["holdout"]
+
+
+def test_resolve_locked_cal_holdout_split_persists_lock_file():
+    stems = _grouped(4)
+    resolve_locked_cal_holdout_split(stems, identity_hash="persist-test", seed=3)
+    assert cal_holdout_lock_path("persist-test").is_file()
+
+
+def test_resolve_locked_cal_holdout_split_group_key_map_produces_working_split():
+    # Rail-admits-valid-work: a valid group_key_map covering every stem still produces a usable
+    # locked split (not just a raise-on-bad-input path).
+    stems = ["p1", "p2", "p3", "p4"]
+    group_key_map = {"p1": "gA", "p2": "gA", "p3": "gB", "p4": "gB"}
+    locked = resolve_locked_cal_holdout_split(
+        stems, identity_hash="map-test", group_by="ignored", group_key_map=group_key_map, seed=2)
+    cal, hold = set(locked["calibration"]), set(locked["holdout"])
+    assert ("p1" in cal) == ("p2" in cal)  # gA never straddles
+    assert ("p3" in cal) == ("p4" in cal)  # gB never straddles
+    assert cal | hold == set(stems)
+
+
+def test_resolve_locked_cal_holdout_split_force_redraw_records_history():
+    stems = _grouped(6)
+    first = resolve_locked_cal_holdout_split(stems, identity_hash="redraw-test", seed=1)
+    assert len(first["redraw_history"]) == 1
+    assert first["redraw_history"][0]["old_content_hash"] is None  # nothing existed before it
+
+    second = resolve_locked_cal_holdout_split(
+        stems, identity_hash="redraw-test", seed=2, force_redraw=True,
+        timestamp="2026-01-01T00:00:00Z")
+    assert len(second["redraw_history"]) == 2  # the first draw + this redraw, never dropped
+    entry = second["redraw_history"][-1]
+    assert entry["timestamp"] == "2026-01-01T00:00:00Z"
+    assert entry["old_content_hash"] is not None  # the OLD (first) split's membership, captured
+    assert entry["policy"]["seed"] == 2
+
+    # Re-running with the SAME (now-locked) policy and no force_redraw returns it unchanged.
+    third = resolve_locked_cal_holdout_split(stems, identity_hash="redraw-test", seed=2)
+    assert third == second
