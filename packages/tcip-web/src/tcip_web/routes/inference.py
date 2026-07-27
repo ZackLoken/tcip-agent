@@ -58,6 +58,10 @@ class InferenceJob:
     overlap: float
     max_dets: int = DEFAULT_MAX_DETS
     postprocess: str = "nms"  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
+    # K10 finding 3: whether the caller explicitly chose sahi, or it fell back to DEFAULT_TILED —
+    # threaded into raw_operating_point's tiled_source so the sidecar's provenance can tell the
+    # two apart, same as the MCP door's run_inference already does for its own `tile` param.
+    sahi_source: str = "default"
     total: int = 0
     done: int = 0
     status: str = "pending"  # pending | running | completed | failed | cancelled
@@ -168,7 +172,7 @@ def _worker(job: InferenceJob) -> None:
         # Resolve the operating point through the SAME firewalled bundle as the MCP door: conf is a
         # documented default with no per-dataset GT, so it is unvalidated and stamped validated=false.
         op_bundle = raw_operating_point(
-            conf=job.conf, cross_tile_nms=job.iou, tiled=job.sahi,
+            conf=job.conf, cross_tile_nms=job.iou, tiled=job.sahi, tiled_source=job.sahi_source,
             tile_size=job.slice_hw[0], max_dets=job.max_dets,
         )
         conf = op_bundle.get("conf").unvalidated_value(acknowledge_unvalidated=True)
@@ -236,7 +240,9 @@ class LaunchInferencePayload(BaseModel):
     # tiling + conf/iou default to the ONE shared source so the GUI and the MCP agent produce the
     # SAME count off the same checkpoint (they used to diverge: sahi/640 + 0.25/0.7 here vs
     # tile=False/224 + 0.5/0.3 in run_inference — tiling drives the count most of all).
-    sahi: bool = DEFAULT_TILED
+    # K10 finding 3: None (default) is a documented fallback, not an implicit True — distinguished
+    # from an explicit caller choice so the job's provenance can say which one happened.
+    sahi: bool | None = None
     conf: float = DEFAULT_CONF
     iou: float = DEFAULT_NMS_IOU
     slice_h: int = DEFAULT_TILE_SIZE
@@ -278,12 +284,24 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         raise HTTPException(409, str(exc)) from exc
     resolved_output_dir = str(parent / resolution.name)
 
+    # K10 finding 3: resolve the None sentinel ONCE, here — InferenceJob.sahi stays a concrete
+    # bool everywhere else (behavior + provenance both read it), with sahi_source carrying which
+    # case this was. Note the meaning of "explicit" differs by door on purpose: the MCP tool's
+    # `tile` distinguishes an agent that supplied the kwarg from one that omitted it; here it
+    # distinguishes a request body that carried the field from one that didn't — since the GUI's
+    # checkbox is a controlled input with no "unset" state, every real launch IS the breeder's
+    # explicit choice, even when it matches the default. Stage-6 review (K10): this is a
+    # deliberate difference in what "explicit" means per door, not a labeling bug.
+    resolved_sahi = DEFAULT_TILED if payload.sahi is None else payload.sahi
+    sahi_source = "explicit" if payload.sahi is not None else "default"
+
     job = InferenceJob(
         job_id=f"inf-{uuid.uuid4().hex[:8]}",
         checkpoint_path=payload.checkpoint_path,
         images_dir=payload.images_dir,
         output_dir=resolved_output_dir,
-        sahi=payload.sahi,
+        sahi=resolved_sahi,
+        sahi_source=sahi_source,
         conf=payload.conf,
         iou=payload.iou,
         slice_hw=(payload.slice_h, payload.slice_w),
