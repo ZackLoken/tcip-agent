@@ -204,13 +204,20 @@ def trainable_stems(
     project where the breeder labelled 30 of 400 images trained on 370 images asserted to be empty.
 
     Returns ``(stems, counts)`` where counts carries ``annotated`` / ``confirmed_negative`` /
-    ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` so a run can record what it dropped.
+    ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` / ``quarantined_stale_definition`` so a
+    run can record what it dropped. The last is distinct from ``skipped_unconfirmed_empty``: it means
+    a human DID confirm the image negative, but the subject's attribute schema has since changed and
+    the confirmation can no longer be trusted as-is — a different situation from nobody ever having
+    looked, and one a reproduce-a-number chain must be able to tell apart (see
+    ``confirmed_negative_names``'s quarantine logic).
     """
     names = image_name_map(images_dir)
     candidates = list(stems) if stems is not None else sorted(names)
-    negatives = confirmed_negative_names(labels_dir, subject=subject, date=date)
-    counts = {"annotated": 0, "confirmed_negative": 0,
-              "skipped_unannotated": 0, "skipped_unconfirmed_empty": 0}
+    quarantined: set[str] = set()
+    negatives = confirmed_negative_names(labels_dir, subject=subject, date=date,
+                                         quarantined_out=quarantined)
+    counts = {"annotated": 0, "confirmed_negative": 0, "skipped_unannotated": 0,
+              "skipped_unconfirmed_empty": 0, "quarantined_stale_definition": 0}
 
     coco_names: set[str] | None = None
     coco_annotated: set[str] = set()
@@ -243,6 +250,8 @@ def trainable_stems(
                 # confirmation is re-checked here rather than inferred from the file's shape.
                 keep.append(stem)
                 counts["confirmed_negative"] += 1
+            elif image_name in quarantined:
+                counts["quarantined_stale_definition"] += 1
             else:
                 counts["skipped_unconfirmed_empty"] += 1
             continue
@@ -255,6 +264,8 @@ def trainable_stems(
         elif image_name in negatives:
             keep.append(stem)
             counts["confirmed_negative"] += 1
+        elif image_name in quarantined:
+            counts["quarantined_stale_definition"] += 1
         else:
             counts["skipped_unconfirmed_empty"] += 1
     return keep, counts
@@ -268,12 +279,18 @@ def _require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> No
     """
     if stems:
         return
+    quarantined = counts.get("quarantined_stale_definition", 0)
+    quarantine_note = (
+        f" {quarantined} more were confirmed negative but quarantined because the subject's "
+        f"attribute schema changed since — re-confirm them or revert the schema edit."
+        if quarantined else ""
+    )
     raise ValueError(
         f"no trainable samples in {labels_dir}: {counts['skipped_unannotated']} image(s) have no "
         f"label record and {counts['skipped_unconfirmed_empty']} have an empty one nobody "
         f"confirmed. An empty label file is a negative only once a human marks that image "
         f"Complete; until then it reads as unannotated. Annotate some images, or mark the "
-        f"genuinely-empty ones Complete."
+        f"genuinely-empty ones Complete.{quarantine_note}"
     )
 
 
@@ -298,51 +315,115 @@ def _label_record_state(stem: str, labels_dir, subject: str | None) -> tuple[boo
     return True, any(a.subject == subject and a.geometry is not None for a in anns)
 
 
-def confirmed_negative_names(labels_dir, *, subject: str | None, date=None) -> set[str]:
+def confirmed_negative_names(
+    labels_dir, *, subject: str | None, date=None, quarantined_out: set[str] | None = None,
+) -> set[str]:
     """Image names a human marked negative (empty + Complete) **for this subject**.
 
-    Walks up from ``labels_dir`` to the project's ``.tcip/state/image_status.json`` and reads only
-    the ``status_bucket(subject, date)`` bucket. A confirmation is a human's statement about one
-    subject on one image; a store keyed by image name alone re-applies it to subjects they never
-    looked at, so an image full of bushes trains as "contains no bushes".
+    Reads the dataset-native ``image_status_path`` — a sibling of ``classes.json``, so confirmations
+    travel with the dataset rather than living in whichever project's private ``.tcip/`` happened to
+    be an ancestor — and returns only the ``status_bucket(subject, date)`` bucket. A confirmation is
+    a human's statement about one subject on one image; a store keyed by image name alone re-applies
+    it to subjects they never looked at, so an image full of bushes trains as "contains no bushes".
+
+    A negative is **quarantined** — excluded from the return value — only when the dataset's
+    ``image_status_digest.json`` sidecar carries an explicit stamp for THAT image (not merely its
+    bucket — a bucket holds every image ever touched under the subject/date, so a bucket-wide stamp
+    would be silently overwritten by the next unrelated write and un-quarantine a stale confirmation
+    nobody re-reviewed) AND it no longer matches the subject's current
+    :func:`~tcip_mcp.class_registry.attribute_schema_digest`: positive, provable evidence the
+    subject's classification schema changed since that confirmation was made. Absence of a stamp —
+    no sidecar, no stamp for that image, or a dataset that predates this mechanism entirely — is
+    **not** quarantined: a rail must admit valid work, not only reject it, and treating "nobody
+    stamped this yet" as "unverifiable, therefore invalid" would silently empty
+    every pre-existing project's confirmed negatives. Pass ``quarantined_out`` (a set, mutated in
+    place) to also learn which names were excluded — see :func:`trainable_stems`'s
+    ``quarantined_stale_definition`` count.
 
     ``subject`` is threaded explicitly — the per-subject label dir it used to be recovered from is
-    gone. When ``subject`` is unthreaded and the project holds confirmed negatives, this **refuses
+    gone. When ``subject`` is unthreaded and the dataset holds confirmed negatives, this **refuses
     loudly** rather than returning nothing: a silent empty would drop every hard negative the review
-    loop harvested. With no store, or no confirmations for this subject, it returns an empty set.
+    loop harvested. With no locatable dataset root, no store, or no confirmations for this subject,
+    it returns an empty set.
     """
-    from tcip_mcp.dataset_layout import annotation_date, status_bucket
+    from tcip_mcp.class_registry import attribute_schema_digest, read_registry
+    from tcip_mcp.dataset_layout import (
+        annotation_date, classes_path, dataset_root_of, image_status_digest_path,
+        image_status_path, status_bucket,
+    )
 
     if date is None:
         date = annotation_date(labels_dir)
-    d = Path(labels_dir).resolve()
-    for parent in (d, *d.parents):
-        status_file = parent / ".tcip" / "state" / "image_status.json"
-        if not status_file.is_file():
-            continue
-        try:
-            statuses = json.loads(status_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+    root = dataset_root_of(labels_dir)
+    if root is None:
+        return set()
+    status_file = image_status_path(root)
+    if not status_file.is_file():
+        return set()
+    try:
+        statuses = json.loads(status_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(statuses, dict):
+        return set()
+    if not subject:
+        # Refuse only when there is something to lose: a store with confirmed negatives this
+        # run might be entitled to. Silently returning none would drop the human's work.
+        has_negatives = any(
+            s == "negative" for b in statuses.values() if isinstance(b, dict)
+            for s in b.values()
+        )
+        if not has_negatives:
             return set()
-        if not subject:
-            # Refuse only when there is something to lose: a store with confirmed negatives this
-            # run might be entitled to. Silently returning none would drop the human's work.
-            has_negatives = any(
-                s == "negative" for b in statuses.values() if isinstance(b, dict)
-                for s in b.values()
-            )
-            if not has_negatives:
-                return set()
-            raise ValueError(
-                f"confirmed_negative_names needs an explicit subject to read the negative bucket "
-                f"for {labels_dir}, and this project has human-confirmed negatives that would be "
-                f"silently dropped. Thread the run's subject through build_dataset / assemble_coco."
-            )
-        bucket = statuses.get(status_bucket(subject, date))
-        if not isinstance(bucket, dict):
-            return set()  # this subject has no confirmations yet
-        return {name for name, s in bucket.items() if s == "negative"}
-    return set()
+        raise ValueError(
+            f"confirmed_negative_names needs an explicit subject to read the negative bucket "
+            f"for {labels_dir}, and this dataset has human-confirmed negatives that would be "
+            f"silently dropped. Thread the run's subject through build_dataset / assemble_coco."
+        )
+    bucket_key = status_bucket(subject, date)
+    bucket = statuses.get(bucket_key)
+    if not isinstance(bucket, dict):
+        return set()  # this subject has no confirmations yet
+    negatives = {name for name, s in bucket.items() if s == "negative"}
+    if not negatives:
+        return negatives
+
+    stamped_by_image: dict = {}
+    digest_file = image_status_digest_path(root)
+    if digest_file.is_file():
+        try:
+            stamps = json.loads(digest_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            stamps = {}
+        if isinstance(stamps, dict):
+            bucket_stamps = stamps.get(bucket_key)
+            if isinstance(bucket_stamps, dict):
+                stamped_by_image = bucket_stamps
+    if not stamped_by_image:
+        return negatives  # nothing stamped in this bucket -> no signal -> admit (a rail admits valid work)
+
+    current_digest = None
+    cp = classes_path(root)
+    if cp.is_file():
+        try:
+            current_digest = attribute_schema_digest(read_registry(cp), subject)
+        except (OSError, ValueError):
+            current_digest = None
+    if current_digest is None:
+        return negatives  # nothing current to compare against -> admit
+
+    # Per-image, not per-bucket: a bucket holds every image ever touched under this subject/date, so
+    # a later, unrelated write to the SAME bucket must never resurrect a DIFFERENT image's stale,
+    # never-re-reviewed confirmation just because the bucket as a whole got re-stamped.
+    trusted: set[str] = set()
+    for name in negatives:
+        stamped = stamped_by_image.get(name)
+        if isinstance(stamped, str) and stamped != current_digest:
+            if quarantined_out is not None:
+                quarantined_out.add(name)
+        else:
+            trusted.add(name)
+    return trusted
 
 
 def assemble_coco(
