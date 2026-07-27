@@ -1019,7 +1019,7 @@ def evaluate_model(
     conf_threshold: float = DEFAULT_CONF,  # report/select at the ship point
     iou_threshold: float = 0.5,
     iou_type: str | None = None,
-    max_dets: int = 100,
+    max_dets: int | None = None,
     tiling: dict | None = None,
     use_tiled_inference: bool = False,
     global_nms_iou: float = DEFAULT_NMS_IOU,
@@ -1034,13 +1034,22 @@ def evaluate_model(
     pycocotools mAP + precision/recall/F1; classification/ordinal/regression get the
     in-house scalar metrics — and writes ``test_results.json`` beside the checkpoint.
 
-    Two detection eval regimes (CV1):
-      * default (single full-res forward pass) or ``tiling`` set -> tile-level DIAGNOSTIC that
-        matches the training-run val mAP. When ``run_id_or_ckpt`` is a run id and ``tiling`` is
-        left None, the run's own training tiling is reused so held-out eval matches that regime;
-        an explicit checkpoint PATH stays untiled unless ``tiling`` is passed.
-      * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric (tiled inference
-        reconstructed to full frame, matched to full-frame GT). Report THIS to gate a delivery.
+    Three detection eval regimes (CV1/K10):
+      * Untiled default (no ``tiling``, checkpoint trained without tiling) -> single full-res
+        forward pass, ``eval_regime="full-frame-single-pass"``. For a checkpoint that was NEVER
+        tile-trained, this IS the correct delivery gate — untiled training, untiled eval, untiled
+        inference are all the same regime, so there is nothing to reconcile. Do not reach for
+        ``use_tiled_inference`` for such a checkpoint; it has no persisted tile geometry to gate
+        against and will refuse (see below).
+      * ``tiling`` set (or a run id whose training WAS tiled, reused automatically) -> tile-level
+        DIAGNOSTIC that matches the training-run val mAP. This is NOT the delivery metric — it
+        scores fragmented tiles against fragmented GT, not the shipped full-frame count.
+      * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric for a TILE-TRAINED
+        checkpoint (tiled inference reconstructed to full frame, matched to full-frame GT). Report
+        THIS to gate a delivery for such a checkpoint. Tile geometry is resolved from the
+        checkpoint's own persisted training geometry (or an explicit override); a checkpoint with
+        neither refuses rather than silently fabricating a scale — see
+        ``run_full_frame_evaluation``'s docstring for the full precedence and the escape hatch.
 
     Args:
         run_id_or_ckpt: A training run id (uses its ``model_best.pt``) or a checkpoint path.
@@ -1051,7 +1060,13 @@ def evaluate_model(
         iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
         iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task — 'segm' for
             instance_seg, 'bbox' otherwise — so a mask model isn't silently scored as boxes.
-        max_dets: COCOeval max detections per image.
+        max_dets: Full-frame/COCOeval detection cap. ``None`` (default, K10 finding 2) resolves
+            per-regime — 100 (the COCOeval ``maxDets`` convention) on the tile-level diagnostic
+            path, 1000 (``DEFAULT_MAX_DETS`` — dense full-frame scenes aren't truncated) on the
+            delivery-grade ``use_tiled_inference`` path. An explicit value is always honored
+            verbatim on both paths (no rescuing substitution) — the delivery-grade path stamps a
+            per-image ``cap_hit``/``max_dets_cap_saturated_frac`` so an explicit cap that actually
+            truncates real detections is visible rather than silently assumed safe.
         tiling: Optional detection tiling dict ({enabled, tile_size, overlap, ...}) for a
             tile-level eval. None + a run id reuses the run's training tiling; None + a
             checkpoint path stays untiled.
@@ -1068,6 +1083,7 @@ def evaluate_model(
         run_full_frame_evaluation, run_test_evaluation,
     )
     from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
 
     ckpt = run_id_or_ckpt
     run = None
@@ -1091,16 +1107,25 @@ def evaluate_model(
     # Delivery-grade full-frame path (tiled inference + full-frame GT matching).
     if use_tiled_inference and task == "detection":
         tcfg = tiling or run_tiling or {}
-        # Thread the merge settings through — evaluating at a derived (non-default) NMS is
-        # exactly the point of this path; dropping them silently re-pins 0.3.
-        return run_full_frame_evaluation(
-            ckpt, images_dir, labels_dir, str(Path(ckpt).parent),
-            subject=subject, attribute=attribute,
-            conf_threshold=conf_threshold, iou_threshold=iou_threshold,
-            tile_size=int(tcfg.get("tile_size", 640)), overlap=float(tcfg.get("overlap", 0.2)),
-            global_nms_iou=global_nms_iou, postprocess=postprocess,
-            max_dets=max_dets if max_dets > 100 else 1000, trait=trait,
-        )
+        # K10 finding 2: an explicit caller max_dets is honored verbatim (no rescuing sentinel);
+        # None resolves to the delivery-grade default (dense full-frame scenes aren't truncated).
+        resolved_max_dets = DEFAULT_MAX_DETS if max_dets is None else max_dets
+        # K10 finding 1: tile_size/overlap pass through as None-if-absent — run_full_frame_evaluation
+        # itself resolves them from the checkpoint's persisted training geometry (or refuses) rather
+        # than this wrapper silently defaulting to 640/0.2. Thread the merge settings through too —
+        # evaluating at a derived (non-default) NMS is exactly the point of this path; dropping them
+        # silently re-pins 0.3.
+        try:
+            return run_full_frame_evaluation(
+                ckpt, images_dir, labels_dir, str(Path(ckpt).parent),
+                subject=subject, attribute=attribute,
+                conf_threshold=conf_threshold, iou_threshold=iou_threshold,
+                tile_size=tcfg.get("tile_size"), overlap=tcfg.get("overlap"),
+                global_nms_iou=global_nms_iou, postprocess=postprocess,
+                max_dets=resolved_max_dets, trait=trait,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
 
     # Tile-level diagnostic (or untiled). Only detection tiles; a run id reuses its training tiling.
     if tiling is None and run is not None:
@@ -1122,8 +1147,12 @@ def evaluate_model(
 
     loader = DataLoader(dataset, batch_size=4, collate_fn=task_collate(task))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # K10 finding 2: 100 is the COCOeval maxDets convention for this tile-level/diagnostic
+    # regime — distinct from the delivery-grade path's 1000 above, resolved here (not via a
+    # shared sentinel value) so an explicit caller max_dets<=100 is never silently substituted.
+    resolved_max_dets = 100 if max_dets is None else max_dets
     return run_test_evaluation(
         ckpt, loader, device, task, str(Path(ckpt).parent),
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
-        iou_type=iou_type, max_dets=max_dets, tiling=tiling, trait=trait,
+        iou_type=iou_type, max_dets=resolved_max_dets, tiling=tiling, trait=trait,
     )
