@@ -324,10 +324,15 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
     No subject threaded -> nothing to attribute the confirmations to, so none are carried.
     """
     import json as _json
+    import shutil as _shutil
 
     if not subject:
         return
-    from tcip_mcp.dataset_layout import annotation_date, status_bucket
+    from tcip_mcp.class_registry import attribute_schema_digest, read_registry
+    from tcip_mcp.dataset_layout import (
+        annotation_date, classes_path, dataset_root_of, image_status_digest_path,
+        image_status_path, status_bucket,
+    )
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
     src_dirs = {Path(p).parent for p in label_map.values()}
@@ -338,12 +343,38 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
         negatives |= confirmed_negative_names(d, subject=subject, date=annotation_date(d))
     if not negatives:
         return
+
+    # Resolve one source dataset's registry (best-effort) to carry a fresh per-image schema stamp
+    # alongside the negatives — without this, a split tree has no classes.json to compare against
+    # and quarantine can never fire on it (a permanent no-op, not "admit until proven stale").
+    digest = None
+    src_classes: Path | None = None
+    for d in src_dirs:
+        root = dataset_root_of(d)
+        if root is None:
+            continue
+        cp = classes_path(root)
+        if not cp.is_file():
+            continue
+        try:
+            candidate = attribute_schema_digest(read_registry(cp), subject)
+        except (OSError, ValueError):
+            candidate = None
+        if candidate is not None:
+            digest, src_classes = candidate, cp
+            break
+
+    bucket_key = status_bucket(subject, None)
     for split_name, split_stems in parts.items():
         names = {Path(image_map[s]).name for s in split_stems if s in image_map}
         carried = {n: "negative" for n in sorted(negatives & names)}
         if not carried:
             continue
-        store = out_dir / split_name / ".tcip" / "state" / "image_status.json"
+        split_root = out_dir / split_name
+        store = image_status_path(split_root)
         store.parent.mkdir(parents=True, exist_ok=True)
-        store.write_text(_json.dumps({status_bucket(subject, None): carried}, indent=2),
-                         encoding="utf-8")
+        store.write_text(_json.dumps({bucket_key: carried}, indent=2), encoding="utf-8")
+        if digest is not None and src_classes is not None:
+            _shutil.copy2(src_classes, split_root / "classes.json")
+            image_status_digest_path(split_root).write_text(_json.dumps(
+                {bucket_key: {n: digest for n in carried}}, indent=2))
