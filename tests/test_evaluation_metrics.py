@@ -23,7 +23,6 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     classification_metrics,
     coco_detection_metrics,
     compute_composite_objective,
-    count_bias_at,
     effective_iou_type,
     gt_class_avg_size,
     ordinal_metrics,
@@ -176,7 +175,8 @@ def test_golden_operating_point_pickers():
     sweep = sweep_operating_point(_sweep_records(), tolerance=10.0, class_id=0)
     assert pick_count_unbiased(sweep) == pytest.approx(0.6)   # zero count bias
     assert pick_f1_max(sweep) == pytest.approx(0.0)           # recall-max point
-    assert count_bias_at(sweep, 0.6)["count_bias_mean"] == pytest.approx(0.0)
+    at06 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.6))
+    assert at06["count_bias_mean"] == pytest.approx(0.0)
 
 
 # --------------------------------------------------------------------------
