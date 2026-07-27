@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
@@ -26,19 +28,25 @@ def _ann(cx, cy, cid=0, score=None):
     return a
 
 
-def _records(idp="c"):
+def _records(idp="c", *, shift: float = 0.0):
     """Constructed so the count-unbiased conf (0.6) differs from the F1-max conf (0.9).
 
     Image A: 1 GT; a correct det @0.9 + a spurious far det @0.6.
     Image B: 2 GT; a correct det @0.9 + a hesitant-but-correct det @0.3.
     conf 0.6 -> A over-counts (+1, spurious kept), B under-counts (-1, hesitant dropped) => net bias 0.
     conf 0.9 -> A unbiased, B under-counts (-1) => net bias -0.5 but higher F1 (no spurious FP).
+
+    ``shift`` offsets every GT box's center by that many px (well inside the ~10px center-match
+    tolerance derived from these boxes) while leaving the detections in place — used to give a
+    holdout fixture genuinely different GT content from calibration's (K1's content-overlap gate
+    would otherwise flag a byte-identical-content holdout, differing only by ``image_id``, as a
+    clone unable to function as an independent check).
     """
     a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
-         "gt": [_ann(100, 100)],
+         "gt": [_ann(100 + shift, 100)],
          "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}
     b = {"width": 400, "height": 400, "image_id": f"{idp}_b",
-         "gt": [_ann(100, 100), _ann(200, 200)],
+         "gt": [_ann(100 + shift, 100), _ann(200 + shift, 200)],
          "dt": [_ann(100, 100, score=0.9), _ann(200, 200, score=0.3)]}
     return [a, b]
 
@@ -120,13 +128,21 @@ def test_max_dets_from_density_floors_sparse_scenes():
 def test_resolve_operating_point_validated_with_holdout():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     b = resolve_operating_point("catkin", dataset_hash="h1",
-                                calibration_records=_records("c"), holdout_records=_records("h"))
+                                calibration_records=_records("c"),
+                                holdout_records=_records("h", shift=3.0))
     conf = b.get("conf")
     assert conf.derivation_class == "calibration"
     assert conf.validated_vs_gt == "validated_held_out"
     assert b.is_shippable
     assert conf.value == pytest.approx(0.6)  # count-unbiased pick
     assert b.get("max_dets").value >= 100  # derived from GT density
+    sweep = conf.sweep
+    assert sweep["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout content
+    assert sweep["train_disjointness"] == {"checked": False, "unresolvable": False,
+                                           "leaked_groups": [], "leaked_stems": [],
+                                           "group_check": None}
+    assert sweep["calibration_image_ids"] == ["c_a", "c_b"]
+    assert sweep["holdout_image_ids"] == ["h_a", "h_b"]
 
 
 def _biased_holdout():
@@ -173,6 +189,80 @@ def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable():
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records())
     assert b.get("conf").validated_vs_gt == "false"
     assert not b.is_shippable
+
+
+# --- K1: content-overlap + train-disjointness gates ---
+
+def test_resolve_operating_point_content_clone_holdout_is_false():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    # Same GT content as calibration (only image_id differs, no shift) -> disjoint by image_id but
+    # the holdout can't function as an independent check; the content-overlap gate must refuse it.
+    b = resolve_operating_point("catkin", dataset_hash="h1",
+                                calibration_records=_records("c"), holdout_records=_records("h"))
+    conf = b.get("conf")
+    assert conf.validated_vs_gt == "false"
+    assert not b.is_shippable
+    assert conf.sweep["content_overlap_frac"] == pytest.approx(1.0)
+
+
+def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch):
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_dir = tmp_path / ".tcip" / "experiments" / "exp1"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "split.json").write_text(
+        json.dumps({"train": ["a_0_0", "a_0_1"], "group_by": "tile_prefix"}), encoding="utf-8")
+
+    # Calibration/holdout share tile group "a" (stem "a_0_2") with the training split above.
+    cal = [{"width": 400, "height": 400, "image_id": "a_0_2", "gt": [_ann(100, 100)],
+            "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}]
+    hold = [{"width": 400, "height": 400, "image_id": "a_0_3", "gt": [_ann(100, 100 + 5)],
+             "dt": [_ann(100, 100, score=0.9)]}]
+    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                holdout_records=hold, experiment_id="exp1")
+    conf = b.get("conf")
+    assert conf.validated_vs_gt == "false"
+    assert conf.sweep["train_disjointness"]["leaked_groups"] == ["a"]
+
+
+def test_resolve_operating_point_train_disjointness_unresolvable_when_split_missing(tmp_path, monkeypatch):
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    # A KNOWN experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
+    # experiment_id=None case (a foreign/unregistered checkpoint), per the owner decision.
+    b = resolve_operating_point("catkin", dataset_hash="h1",
+                                calibration_records=_records("c"),
+                                holdout_records=_records("h", shift=3.0),
+                                experiment_id="does-not-exist")
+    conf = b.get("conf")
+    assert conf.validated_vs_gt == "false"
+    assert conf.sweep["train_disjointness"] == {"checked": False, "unresolvable": True,
+                                                 "leaked_groups": [], "leaked_stems": [],
+                                                 "group_check": None}
+
+
+def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_validates(tmp_path, monkeypatch):
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_dir = tmp_path / ".tcip" / "experiments" / "exp2"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "split.json").write_text(
+        json.dumps({"train": ["z_0_0", "z_0_1"], "group_by": "tile_prefix"}), encoding="utf-8")
+
+    # Calibration/holdout use tile groups "c"/"h" — disjoint from training's "z" group.
+    b = resolve_operating_point("catkin", dataset_hash="h1",
+                                calibration_records=_records("c"),
+                                holdout_records=_records("h", shift=3.0),
+                                experiment_id="exp2")
+    conf = b.get("conf")
+    assert conf.validated_vs_gt == "validated_held_out"
+    assert b.is_shippable
+    assert conf.sweep["train_disjointness"] == {"checked": True, "unresolvable": False,
+                                                 "leaked_groups": [], "leaked_stems": [],
+                                                 "group_check": "performed"}
 
 
 def test_resolve_operating_point_no_gt_placeholder_unshippable():
