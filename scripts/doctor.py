@@ -50,11 +50,12 @@ def check_negatives(root: Path, findings: list) -> None:
     subject and date, so the disagreement is checked per subject present in the file.
     """
     from tcip_annotation import json_io
-    from tcip_mcp.dataset_layout import annotation_date, normalize_status_store
+    from tcip_mcp.dataset_layout import annotation_date, image_status_path, normalize_status_store
 
     # Through the same normalizer the web layer reads with, so the two can never disagree about
-    # what the store says.
-    by_bucket = normalize_status_store(_load(root / ".tcip" / "state" / "image_status.json"))
+    # what the store says. Confirmations are dataset-native (K13.5 slice 4); this check already
+    # assumes root == dataset_root (it reads root/images and root/annotations directly).
+    by_bucket = normalize_status_store(_load(image_status_path(root)))
     stems = _image_stems(root)
     ann_root = root / "annotations"
     neg_names = {n for b in by_bucket.values() for n, s in b.items() if s == "negative"}
