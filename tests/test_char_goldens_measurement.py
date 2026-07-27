@@ -52,17 +52,24 @@ def _ann(cx, cy, cid=0, score=None):
     return a
 
 
-def _sweep_records(idp="c"):
+def _sweep_records(idp="c", *, shift: float = 0.0):
     """Two images engineered so count-unbiased conf (0.6) != F1-max conf (0.0).
 
     Image A: 1 GT; correct det @0.9 + a spurious far det @0.6.
     Image B: 2 GT; correct det @0.9 + a hesitant-but-correct det @0.3.
+
+    ``shift`` offsets every GT box's center by that many px (well inside the ~10px center-match
+    tolerance derived from these boxes), leaving the detections in place. Used to give the holdout
+    fixture (K1) genuinely different GT content from calibration's — a holdout differing from
+    calibration only by ``image_id`` is byte-identical CONTENT and the content-overlap gate now
+    (correctly) refuses it; see ``test_golden_duplicate_content_holdout_is_false`` below, which
+    pins exactly that refusal on the OLD (shift=0) fixture pair.
     """
     a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
-         "gt": [_ann(100, 100)],
+         "gt": [_ann(100 + shift, 100)],
          "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}
     b = {"width": 400, "height": 400, "image_id": f"{idp}_b",
-         "gt": [_ann(100, 100), _ann(200, 200)],
+         "gt": [_ann(100 + shift, 100), _ann(200 + shift, 200)],
          "dt": [_ann(100, 100, score=0.9), _ann(200, 200, score=0.3)]}
     return [a, b]
 
@@ -116,7 +123,7 @@ def test_golden_resolve_operating_point_validated_conf():
 
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=_sweep_records("c"),
-                                holdout_records=_sweep_records("h"))
+                                holdout_records=_sweep_records("h", shift=3.0))
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.6)  # count-unbiased pick
     assert conf.derivation_class == "calibration"
@@ -126,6 +133,7 @@ def test_golden_resolve_operating_point_validated_conf():
     assert conf.dataset_hash == "h1"
     assert b.is_shippable is True
     assert b.get("max_dets")._raw == 100  # ~1.5x p99 GT/image, floored at 100 for this sparse fixture
+    assert conf.sweep["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout (K1)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -221,7 +229,7 @@ def test_golden_stamp_shape_calibrated_validated():
 
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=_sweep_records("c"),
-                                holdout_records=_sweep_records("h"))
+                                holdout_records=_sweep_records("h", shift=3.0))
     stamp = _stamp(b, validated=b.is_shippable, issues=b.shippable_issues())
     assert set(stamp.keys()) == {"operating_point", "validated", "shippable_issues"}
     assert stamp["validated"] is True  # held-out calibration passed
@@ -266,6 +274,25 @@ def test_golden_validated_flag_path_calibrated_no_holdout_is_false():
                                 calibration_records=_sweep_records("c"))
     assert b.get("conf").validated_vs_gt == "false"
     assert b.is_shippable is False
+
+
+def test_golden_duplicate_content_holdout_is_false():
+    """K1's delivered number, old->new: the SAME fixture pair the two goldens above used before
+    this cluster (identical GT content, differing only by ``image_id`` prefix — the OLD
+    ``_sweep_records("c")``/``_sweep_records("h")`` call with no ``shift``) used to stamp
+    ``validated_held_out``/shippable=True. A byte-identical-content holdout can't function as an
+    independent check, so K1 adds the content-overlap gate and this pair now stamps
+    ``false``/shippable=False instead — pinned here exactly as before/after this cluster's change.
+    """
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    b = resolve_operating_point("catkin", dataset_hash="h1",
+                                calibration_records=_sweep_records("c"),
+                                holdout_records=_sweep_records("h"))
+    conf = b.get("conf")
+    assert conf.validated_vs_gt == "false"
+    assert b.is_shippable is False
+    assert conf.sweep["content_overlap_frac"] == pytest.approx(1.0)
 
 
 # ══════════════════════════════════════════════════════════════════════════
