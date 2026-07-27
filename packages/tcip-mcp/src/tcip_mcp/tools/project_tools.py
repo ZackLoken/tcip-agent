@@ -58,8 +58,8 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     and upserts the dataset into the project's ``.tcip/datasets.json``. ``crop`` is the human's fact and
     is required — never inferred from a path or slug. ``id`` is minted once and preserved across
     re-runs and path moves; ``fingerprint`` is the whole-dataset content digest (labels + image pixels
-    + registry), recomputed here — but the stored value is a cache, and recompute-on-read
-    (``resolution.dataset_fingerprint``) is the authority.
+    + registry + confirmed negatives), recomputed here — but the stored value is a cache, and
+    recompute-on-read (``resolution.dataset_fingerprint``) is the authority.
 
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``annotations/``, ``classes.json``).
