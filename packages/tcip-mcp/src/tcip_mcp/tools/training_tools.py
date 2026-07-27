@@ -24,7 +24,12 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         model_source: {builder, builder_kwargs, task, in_chans}
         data: {images_dir, labels_dir, task}  # known loaders, OR a bespoke
               # {dataset_source: {builder, builder_kwargs, source_files, task}, task}
-        training: {batch_size, device, stages, mixed_precision, ...}
+        training: {batch_size, ...}  # the full key list generic_trainer.train() reads
+              # (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/
+              # lr_scaling/stage_warmup_epochs/enforce_monotonic_unfreeze/
+              # gradient_accumulation_steps/checkpoint_every_n_epochs/early_stopping/evaluation)
+              # is documented on train()'s own docstring, not repeated here — read that for the
+              # canonical, always-current list. training_source: optional custom train(ctx) loop.
 
     Args:
         config: Full training configuration dict.
@@ -56,6 +61,19 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             _import_dotted(model_source["builder"])
         except Exception as exc:
             issues.append(f"model_source.builder not importable: {exc}")
+
+    # training_source seam (mirrors model_source/dataset_source above) — a bare "module:function"
+    # string, not a dict (K9: the skill's own example previously showed the wrong shape).
+    training_source = config.get("training_source")
+    if training_source is not None:
+        if not isinstance(training_source, str) or not training_source:
+            issues.append("training_source must be a non-empty 'module:function' string")
+        else:
+            from tcip_mcp.pipelines.model_build import _import_dotted
+            try:
+                _import_dotted(training_source)
+            except Exception as exc:
+                issues.append(f"training_source not importable: {exc}")
 
     # Data config validation
     data_cfg = config.get("data")
@@ -134,11 +152,34 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     # Per-stage 'epochs' is required; 'lr' is optional (StageSpec) and the trainer
     # reads learning rates from config['optimizer'], never from a stage. Absent
     # stages are fine — launch_training supplies its own default schedule.
+    warnings: list[str] = []
     for i, stage in enumerate(train_cfg.get("stages") or []):
         if "epochs" not in stage:
             issues.append(f"Stage {i} missing 'epochs'")
+        if "lr" in stage:
+            warnings.append(
+                f"training.stages[{i}].lr is set but ignored — the trainer reads learning rate "
+                "only from the top-level 'optimizer' block (backbone_lr/head_lr), applied "
+                "uniformly across every stage. Move the value into 'optimizer' if you meant to "
+                "change it."
+            )
 
-    result: dict = {"valid": False, "issues": issues}
+    # K9: fail fast on an incoherent explicit selection_metric (a metric a center-match trait's
+    # own criterion demotes to comparability-only) at validation time, not mid-run.
+    eval_cfg = train_cfg.get("evaluation") or config.get("evaluation") or {}
+    sel_metric = eval_cfg.get("selection_metric")
+    trait_name = eval_cfg.get("trait")
+    if sel_metric and trait_name:
+        from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
+
+        task_for_check = (model_source.get("task") if isinstance(model_source, dict) else None) \
+            or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
+        try:
+            resolve_selection_metric(task_for_check, trait_name, sel_metric)
+        except ValueError as exc:
+            issues.append(str(exc))
+
+    result: dict = {"valid": False, "issues": issues, "warnings": warnings}
 
     # Smoke: build the model and run the correctness contract at the RESOLVED dims, so a broken
     # bespoke builder is caught here (before the daemon thread spawns) rather than surfacing only as
@@ -225,13 +266,8 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
         dataset=data_cfg,
         augmentation=config.get("augmentation", {}),
         sampler=config.get("sampler", "random"),
-        optimizer=config.get("optimizer", {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 1e-4}),
-        stages=train_cfg.get("stages", [{"freeze_to": -1, "epochs": 5}, {"freeze_to": 2, "epochs": 10}]),
-        mixed_precision=train_cfg.get("mixed_precision", True),
         batch_size=train_cfg.get("batch_size", 2),
         num_workers=train_cfg.get("num_workers", 0),
-        seed=train_cfg.get("seed"),
-        deterministic=train_cfg.get("deterministic", False),
     )
 
     run = create_run(config, output_dir)
