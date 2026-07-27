@@ -143,9 +143,10 @@ def _cap_saturated_frac(records: list[dict] | None) -> float | None:
     """Fraction of records whose raw detection count hit the model's applied per-image cap.
 
     Fix K, non-gating provenance only: a per-image ``cap_hit`` flag is stamped by
-    ``records_from_detector``/``records_over_loader`` when the cap was known at generation time.
-    Records built another way (e.g. a tiled predictor pass) carry none and are excluded from the
-    fraction entirely, not counted as an unsaturated 0 — ``None`` when nothing here carries the flag.
+    ``records_from_detector``/``records_over_loader`` when the cap was known at generation time, and
+    (K10) by ``run_full_frame_evaluation`` for its own tiled-and-reconstructed pass. Records built
+    some other way carry none and are excluded from the fraction entirely, not counted as an
+    unsaturated 0 — ``None`` when nothing here carries the flag.
     """
     hits = [r["cap_hit"] for r in (records or []) if "cap_hit" in r]
     return (sum(hits) / len(hits)) if hits else None
@@ -364,7 +365,9 @@ def resolve_operating_point(
     calibration_records: list[dict] | None = None,
     holdout_records: list[dict] | None = None,
     tile_size: int | None = None,
+    tile_size_source: str = "default",
     tiled: bool | None = None,
+    tiled_source: str = "default",
     cross_tile_nms: float | None = None,
     max_dets: int | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
@@ -374,6 +377,13 @@ def resolve_operating_point(
 ) -> ResolvedBundle:
     """Resolve the operating point for (trait, dataset). Pure over records — callers pass the model
     pass output; ``records_over_loader`` produces it. ``tile_size`` may be model-derived (imgsz).
+
+    ``tile_size_source``/``tiled_source`` (K10 finding 3) are the caller's own resolution of whether
+    each value was an explicit override, derived from the checkpoint's persisted training geometry,
+    or a documented default — not inferred here from mere truthiness. A truthy ``tile_size`` is not
+    proof of derivation: a caller with no persisted geometry and no explicit value still passes a
+    concrete fallback number, and without the source travelling separately this function used to
+    stamp that fabricated value ``"derived"`` unconditionally.
 
     ``validated_reference`` is the stamp a *passing* held-out gate earns: ``validated_held_out`` when
     the records came from GT annotations (default), ``review_confirmed`` when they were reconstructed
@@ -553,12 +563,23 @@ def resolve_operating_point(
                                  validated_vs_gt=VALIDATED_FALSE, dataset_scoped=True, dataset_hash=dataset_hash)
 
     # --- deterministic / distribution / documented-default params ---
-    params["tile_size"] = (
-        derived("tile_size", int(tile_size), derivation_class="deterministic",
-                derived_from="model imgsz / persisted training geometry")
-        if tile_size else default("tile_size", DEFAULT_TILE_SIZE)
-    )
-    params["tiled"] = default("tiled", DEFAULT_TILED if tiled is None else bool(tiled))
+    if tile_size and tile_size_source == "explicit":
+        params["tile_size"] = ResolvedParam(
+            "tile_size", int(tile_size), source="explicit",
+            derivation_class="deterministic", derived_from="caller override")
+    elif tile_size and tile_size_source == "derived":
+        params["tile_size"] = derived(
+            "tile_size", int(tile_size), derivation_class="deterministic",
+            derived_from="model imgsz / persisted training geometry")
+    else:
+        params["tile_size"] = default("tile_size", tile_size or DEFAULT_TILE_SIZE)
+    resolved_tiled = DEFAULT_TILED if tiled is None else bool(tiled)
+    if tiled is not None and tiled_source == "explicit":
+        params["tiled"] = ResolvedParam(
+            "tiled", resolved_tiled, source="explicit",
+            derivation_class="deterministic", derived_from="caller override")
+    else:
+        params["tiled"] = default("tiled", resolved_tiled)
     # cross_tile_nms: an explicit override wins and is stamped as such; otherwise derive it from the
     # calibration GT's neighbor-IoU distribution; failing that (no GT / no genuine overlaps) an honest
     # default — never a derivation label on a number no derivation produced.
