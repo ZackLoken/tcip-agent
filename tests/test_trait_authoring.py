@@ -58,6 +58,24 @@ def test_config_spec_unknown_field_is_rejected(tmp_path: Path):
     assert load_trait_specs(specs_dir=tmp_path) == []
 
 
+# ── K2 Fix E: count_objective is validated against the registry, not a hardcoded whitelist ─
+
+def test_config_spec_invalid_count_objective_is_rejected(tmp_path: Path):
+    _write_spec(tmp_path, "bogus", {"delivers": ["leaf_length"], "count_objective": "not_a_real_objective"})
+    assert load_trait_specs(specs_dir=tmp_path) == []
+
+
+def test_config_spec_every_registered_objective_is_accepted(tmp_path: Path):
+    # The validator's accepted values are DERIVED from the same registry the picker uses (Fix E) —
+    # one source of truth, not a second hardcoded list that could drift out of sync.
+    from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
+
+    for i, objective in enumerate(COUNT_OBJECTIVE_PICKERS):
+        _write_spec(tmp_path, f"t{i}", {"delivers": ["leaf_length"], "count_objective": objective})
+    specs = load_trait_specs(specs_dir=tmp_path)
+    assert {s.count_objective for s in specs} == set(COUNT_OBJECTIVE_PICKERS)
+
+
 def test_missing_specs_dir_yields_no_config(tmp_path: Path):
     assert load_trait_specs(specs_dir=tmp_path / "nope") == []
 
