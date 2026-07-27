@@ -1,0 +1,245 @@
+"""K10 — "delivery-grade evaluation runs in a different regime than inference." Dedicated
+coverage for the three corrected findings:
+
+Finding 1: the delivery-gating path (``evaluate_model(use_tiled_inference=True)`` /
+``run_full_frame_evaluation``) resolves tile geometry via the SAME shared ``resolve_tile_geometry``
+``run_inference`` uses, and refuses rather than silently fabricating 640/0.2 when nothing is
+resolvable — see ``test_audit_cv_fixes.py``'s CV2 section for the geometry-resolution tests
+themselves; this file covers the ``evaluate_model`` wrapper's passthrough + refusal handling.
+
+Finding 2: ``max_dets`` is honored verbatim on both regimes (no ``if max_dets > 100 else 1000``
+sentinel), with a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path so
+an explicit low cap that truncates real detections is visible rather than silently assumed safe.
+
+Finding 3: ``tiled``'s provenance (``raw_operating_point``/``resolve_operating_point``) now
+distinguishes an explicit caller choice from a documented default, mirroring the existing
+``tile_size``/``tile_size_source`` pattern — see ``test_audit_cv_fixes.py`` for the
+calibrated-bundle integration test (the ceiling-check-found residual: a fabricated tile_size no
+longer falsely stamps "derived").
+"""
+
+from __future__ import annotations
+
+import pytest
+
+torch = pytest.importorskip("torch")
+pytest.importorskip("pycocotools")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Finding 2 — max_dets honored verbatim (no rescuing sentinel)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _det_dataset(tmp_path, n=3, size=128):
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        Image.new("RGB", (size, size), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], size, size)
+    return images_dir, labels_dir
+
+
+def test_k10_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
+    """Before this fix: training_tools.evaluate_model's use_tiled_inference branch silently
+    substituted 1000 for any caller max_dets <= 100 — the exact value _max_dets_from_density's own
+    floor legitimately derives for a sparse dataset. Now an explicit value is always honored."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    captured: dict = {}
+
+    def _fake(ckpt, images_dir, labels_dir, output_dir, **kw):
+        captured.update(kw)
+        return {"eval_regime": "full-frame-tiled-inference"}
+
+    monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _fake)
+    images_dir, labels_dir = _det_dataset(tmp_path)
+    ckpt = tmp_path / "model.pt"
+    ckpt.write_bytes(b"x")
+
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
+                   use_tiled_inference=True, max_dets=50)
+    assert captured["max_dets"] == 50  # honored verbatim, not bumped to 1000
+
+
+def test_k10_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch):
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    captured: dict = {}
+
+    def _fake(ckpt, images_dir, labels_dir, output_dir, **kw):
+        captured.update(kw)
+        return {"eval_regime": "full-frame-tiled-inference"}
+
+    monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _fake)
+    images_dir, labels_dir = _det_dataset(tmp_path)
+    ckpt = tmp_path / "model.pt"
+    ckpt.write_bytes(b"x")
+
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
+                   use_tiled_inference=True)
+    assert captured["max_dets"] == DEFAULT_MAX_DETS == 1000
+
+
+def test_k10_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypatch):
+    """The COCOeval maxDets convention default for the OTHER (tile-level/diagnostic) regime —
+    distinct from the gating regime's 1000, resolved without the two colliding via a shared
+    sentinel value."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    captured: dict = {}
+
+    def _fake(ckpt, loader, device, task, output_dir, **kw):
+        captured.update(kw)
+        return {"tiled": False, "eval_regime": "tile-level"}
+
+    monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+    images_dir, labels_dir = _det_dataset(tmp_path)
+    ckpt = tmp_path / "model.pt"
+    ckpt.write_bytes(b"x")
+
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin")
+    assert captured["max_dets"] == 100
+
+
+def test_k10_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    captured: dict = {}
+
+    def _fake(ckpt, loader, device, task, output_dir, **kw):
+        captured.update(kw)
+        return {"tiled": False, "eval_regime": "tile-level"}
+
+    monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+    images_dir, labels_dir = _det_dataset(tmp_path)
+    ckpt = tmp_path / "model.pt"
+    ckpt.write_bytes(b"x")
+
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
+                   max_dets=7)
+    assert captured["max_dets"] == 7
+
+
+def test_k10_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
+    """evaluate_model is an @mcp.tool() surface that returns {"error": ...} for every other
+    failure — a bare raise from run_full_frame_evaluation would surface as an MCP exception
+    instead, inconsistent with the rest of this tool's contract."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    def _refuse(*a, **kw):
+        raise ValueError("Cannot resolve a trustworthy tile_size for ckpt.pt: ... tiling=")
+
+    monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _refuse)
+    images_dir, labels_dir = _det_dataset(tmp_path)
+    ckpt = tmp_path / "model.pt"
+    ckpt.write_bytes(b"x")
+
+    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+                       subject="catkin", use_tiled_inference=True)
+    assert "error" in r
+    assert "tiling=" in r["error"]
+
+
+def test_k10_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
+    """K10 finding 2 residual (rail-safety): honoring an explicit low max_dets verbatim reopens a
+    truncation hole unless it's at least DETECTABLE. A caller-explicit cap that actually binds on
+    real detections must be visible in the result, not silently assumed safe."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (200, 200)).save(images_dir / "a.png")
+    json_io.write_annotations(str(labels_dir / "a.json"),
+                              [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 200, 200)
+
+    class _ManyDetectionsStub:
+        train_tile_size = 100
+        train_overlap = 0.2
+
+        def predict_tiled(self, path, **kw):
+            # 5 detections returned; max_dets below will cap the caller intentionally at 2.
+            boxes = [[10, 10, 30, 30], [50, 50, 70, 70], [90, 90, 110, 110],
+                     [130, 130, 150, 150], [170, 170, 190, 190]]
+            return {"image": path, "width": 200, "height": 200, "boxes": boxes,
+                    "scores": [0.9, 0.8, 0.7, 0.6, 0.5], "labels": [1] * 5, "count": 5}
+
+    build_predictor_orig = predictor_mod.build_predictor
+    try:
+        predictor_mod.build_predictor = lambda **kw: _ManyDetectionsStub()
+        r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir),
+                                      str(tmp_path / "out"), subject="catkin", max_dets=2)
+    finally:
+        predictor_mod.build_predictor = build_predictor_orig
+    assert r["max_dets"] == 2  # honored verbatim
+    assert r["max_dets_cap_saturated_frac"] == 1.0  # the one image hit the cap — now visible
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Finding 3 — tiled provenance distinguishes explicit from default
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_k10_raw_operating_point_tiled_source_explicit_vs_default():
+    from tcip_mcp.pipelines.resolution import raw_operating_point
+
+    explicit_bundle = raw_operating_point(
+        conf=0.5, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=100,
+        tiled_source="explicit",
+    )
+    assert explicit_bundle.get("tiled").source == "explicit"
+
+    default_bundle = raw_operating_point(
+        conf=0.5, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=100,
+    )
+    assert default_bundle.get("tiled").source == "default"
+
+
+def test_k10_resolve_operating_point_tile_size_source_not_inferred_from_truthiness():
+    """Before this fix: `if tile_size:` was the only test — ANY truthy value (including a
+    fabricated fallback the caller never actually derived) was stamped "derived". Now the
+    caller's own resolved source travels through explicitly."""
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    # A truthy tile_size with NO source claim defaults to "default" — not silently "derived".
+    b_default = resolve_operating_point("catkin", dataset_hash=None, tile_size=640)
+    assert b_default.get("tile_size").source == "default"
+
+    b_derived = resolve_operating_point(
+        "catkin", dataset_hash=None, tile_size=224, tile_size_source="derived")
+    assert b_derived.get("tile_size").source == "derived"
+    assert b_derived.get("tile_size")._raw == 224
+
+    b_explicit = resolve_operating_point(
+        "catkin", dataset_hash=None, tile_size=512, tile_size_source="explicit")
+    assert b_explicit.get("tile_size").source == "explicit"
+
+
+def test_k10_resolve_operating_point_tiled_source_explicit_vs_default():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    b_default = resolve_operating_point("catkin", dataset_hash=None, tiled=True)
+    assert b_default.get("tiled").source == "default"
+
+    b_explicit = resolve_operating_point(
+        "catkin", dataset_hash=None, tiled=False, tiled_source="explicit")
+    assert b_explicit.get("tiled").source == "explicit"
+    assert b_explicit.get("tiled")._raw is False
