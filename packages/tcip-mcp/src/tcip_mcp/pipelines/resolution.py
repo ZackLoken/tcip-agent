@@ -50,6 +50,7 @@ DEFAULT_CONF = 0.5
 DEFAULT_NMS_IOU = 0.3
 DEFAULT_TILED = True
 DEFAULT_TILE_SIZE = 640
+DEFAULT_OVERLAP = 0.2
 # A high full-frame detection cap so dense scenes (hundreds of catkins) aren't silently truncated
 # at a framework default (torchvision 100 / ultralytics 300). Enforced after any tiled merge.
 DEFAULT_MAX_DETS = 1000
@@ -210,7 +211,7 @@ class ResolvedBundle:
 
 def raw_operating_point(
     *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
-    max_dets: int, tile_size_source: str = "default",
+    max_dets: int, tile_size_source: str = "default", tiled_source: str = "default",
 ) -> ResolvedBundle:
     """The operating point for RAW (uncalibrated) inference — the one both doors resolve through.
 
@@ -221,7 +222,11 @@ def raw_operating_point(
 
     ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
     geometry, ``explicit`` (caller override), or a ``default`` fallback (CV2) — so a 224-train /
-    640-infer scale mismatch is visible in the provenance rather than silent.
+    640-infer scale mismatch is visible in the provenance rather than silent. ``tiled_source`` is the
+    same vocabulary for the boolean itself (K10 finding 3) — a caller that explicitly chose to tile
+    (or not) stamps ``"explicit"``; a caller who passed nothing gets ``"default"``. Both callers of
+    this function resolve their own bool once (``None`` sentinel -> ``DEFAULT_TILED`` internally)
+    before reaching here, so ``tiled`` itself is always a concrete bool.
     """
     if tiled and tile_size_source == "derived":
         tile_param = derived("tile_size", tile_size, derivation_class="deterministic",
@@ -231,12 +236,17 @@ def raw_operating_point(
                                    derivation_class="deterministic", derived_from="caller override")
     else:
         tile_param = default("tile_size", tile_size if tiled else None)
+    if tiled_source == "explicit":
+        tiled_param = ResolvedParam("tiled", tiled, source="explicit",
+                                    derivation_class="deterministic", derived_from="caller override")
+    else:
+        tiled_param = default("tiled", tiled)
     return ResolvedBundle(trait="", dataset_hash=None, params={
         "conf": ResolvedParam("conf", conf, source="default", derivation_class="calibration",
                               validated_vs_gt=VALIDATED_FALSE),
         "cross_tile_nms": default("cross_tile_nms", cross_tile_nms if tiled else None,
                                   derivation_class="distribution"),
-        "tiled": default("tiled", tiled),
+        "tiled": tiled_param,
         "tile_size": tile_param,
         "max_dets": default("max_dets", max_dets, derivation_class="distribution"),
     })
