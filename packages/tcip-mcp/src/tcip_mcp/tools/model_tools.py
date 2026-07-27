@@ -46,9 +46,8 @@ def register_model(
     if experiment_id:
         from tcip_mcp.experiments import register_model_from_experiment as _reg
         return _reg(experiment_id, checkpoint_path, project_path=project_path, name=name or None)
-    # Record the model kind so the GUI + agent know how to run it (e.g. a pretrained YOLO
-    # baseline registers as ``ultralytics``); best-effort — a checkpoint that can't be sniffed
-    # still registers, and build_predictor re-sniffs at inference time.
+    # Record the model kind so the GUI + agent know how to run it; best-effort — a checkpoint
+    # that can't be sniffed still registers, and build_predictor re-sniffs at inference time.
     kind = None
     try:
         from tcip_mcp.pipelines.inference.predictor import detect_kind
