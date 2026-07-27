@@ -288,6 +288,9 @@ export const api = {
       project_root: string;
       image_name: string;
       gt_path?: string | null;
+      // The prediction bucket loaded for this image — a confirmed negative carries zero verdicts,
+      // so it has nowhere else to record which model it was reviewed against.
+      pred_dir?: string | null;
       completed?: boolean;
     }) =>
       call<{
