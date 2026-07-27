@@ -178,6 +178,7 @@ def make_splits(
     test_ratio: float = 0.1,
     seed: int = 42,
     group_by: str = "tile_prefix",
+    group_key_map: dict[str, str] | None = None,
     stratify_foreground: bool = True,
     output_path: str | None = None,
     materialize: bool = False,
@@ -203,7 +204,11 @@ def make_splits(
         test_ratio: Fraction for test set.
         seed: Random seed for reproducibility.
         group_by: Group selector — ``"tile_prefix"`` (strip a trailing
-            ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per image).
+            ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per image). Ignored when
+            ``group_key_map`` is given.
+        group_key_map: An agent-derived ``{stem: group_key}`` map overriding ``group_by`` —
+            must cover every stem in the dataset. Recorded as ``group_by="explicit_map"`` in
+            the result and manifest (the resolved policy, not the raw ``group_by`` string).
         stratify_foreground: Balance splits by foreground annotation count.
         output_path: Where to write manifests (and, when materializing, the file tree).
             Defaults to ``folder_path/splits`` when materializing, else manifests are
@@ -219,8 +224,7 @@ def make_splits(
     from tcip_mcp.pipelines.data.splits import (
         group_balanced_split,
         count_label_lines,
-        GROUP_KEY_FNS,
-        default_group_key,
+        resolve_group_key_fn,
     )
 
     scan = _scan_dataset(folder_path)
@@ -243,7 +247,11 @@ def make_splits(
             s: count_label_lines(Path(label_map[s]).parent, s) for s in stems
         }
 
-    group_key_fn = GROUP_KEY_FNS.get(group_by, default_group_key)
+    try:
+        group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    resolved_group_by = "explicit_map" if group_key_map else group_by
     parts = group_balanced_split(
         stems,
         annotation_counts=annotation_counts,
@@ -269,7 +277,7 @@ def make_splits(
             with open(out_dir / f"{split_name}.json", "w") as f:
                 json.dump(sorted(split_stems), f, indent=2)
         with open(out_dir / "split_manifest.json", "w") as f:
-            json.dump({"seed": seed, "dataset_hash": dataset_hash, "group_by": group_by,
+            json.dump({"seed": seed, "dataset_hash": dataset_hash, "group_by": resolved_group_by,
                        "splits": {k: sorted(v) for k, v in parts.items()}}, f, indent=2)
         manifest_dir = str(out_dir)
 
@@ -283,7 +291,7 @@ def make_splits(
         "groups": len({group_key_fn(s) for s in stems}),
         "seed": seed,
         "dataset_hash": dataset_hash,
-        "group_by": group_by,
+        "group_by": resolved_group_by,
         "stratified": stratified,
         "manifest_dir": manifest_dir,
     }
