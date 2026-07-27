@@ -178,6 +178,8 @@ export function AnnotateToolbar({
         newStatus,
         dataset.subject,
         dataset.date,
+        dataset.dataset_root,
+        dataset.annotations_dir,
       );
     } catch (e) {
       useStore
