@@ -22,7 +22,7 @@ import json
 import logging
 from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -168,10 +168,18 @@ class ImageStatusPayload(BaseModel):
     status: str  # "complete" | "partial" | "negative" | "unannotated"
     subject: str | None = None  # the object a Complete is scoped to (not necessarily a trait)
     date: str | None = None
+    dataset_root: Optional[str] = None
+    annotations_dir: Optional[str] = None
 
 
-def _image_status_path(project_root: str) -> Path:
-    return Path(project_root) / ".tcip" / "state" / "image_status.json"
+def _require_dataset_root(dataset_root: str | None, annotations_dir: str | None) -> str:
+    """``_resolve_dataset_root``, but a write must locate the dataset or fail loudly (mirrors
+    ``save_classes``) — a silent fallback would write a human's Complete nowhere anyone reads it."""
+    root = _resolve_dataset_root(dataset_root, annotations_dir)
+    if not root:
+        raise HTTPException(400, "cannot locate the dataset to record image status against; "
+                                 "pass dataset_root or an annotations dir")
+    return root
 
 
 def _load_status_store(path: Path) -> dict[str, dict[str, str]]:
@@ -187,11 +195,60 @@ def _bucket(subject: str | None, date: str | None) -> str:
     return status_bucket(subject or "", date)
 
 
+def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
+                  image_names: Iterable[str]) -> None:
+    """Best-effort: record the subject's current attribute-schema digest against each of
+    ``image_names``, so a later read can tell a confirmation made under a since-changed schema from
+    one still valid. Stamped **per image**, not per bucket — a bucket holds every image ever touched
+    under this subject/date, so a bucket-wide stamp would be silently overwritten by the NEXT
+    unrelated write to the bucket, un-quarantining a DIFFERENT image's stale confirmation nobody
+    re-reviewed. Never blocks the status write — an unreadable/absent registry just leaves these
+    images unstamped (admitted, not quarantined, on read; see ``confirmed_negative_names``)."""
+    if not subject:
+        return
+    from tcip_mcp.class_registry import attribute_schema_digest, read_registry
+    from tcip_mcp.dataset_layout import classes_path, image_status_digest_path
+
+    cp = classes_path(dataset_root)
+    if not cp.is_file():
+        return
+    try:
+        digest = attribute_schema_digest(read_registry(cp), subject)
+    except (OSError, ValueError):
+        # ValueError covers json.JSONDecodeError and class_registry.RegistryError (its subclass) —
+        # a malformed/unreadable registry must never turn a status write into a 500.
+        return
+    if digest is None:
+        return
+    path = image_status_digest_path(dataset_root)
+    try:
+        with file_transaction(path):
+            stamps = read_json(path, default={})
+            if not isinstance(stamps, dict):
+                stamps = {}
+            bucket_stamps = stamps.get(bucket)
+            if not isinstance(bucket_stamps, dict):
+                bucket_stamps = {}
+            for name in image_names:
+                bucket_stamps[name] = digest
+            stamps[bucket] = dict(sorted(bucket_stamps.items()))
+            atomic_write_json(path, dict(sorted(stamps.items())))
+    except OSError:
+        # Best-effort, like the registry read above: a failure writing the sidecar itself (disk
+        # full, permissions) must not turn an already-successful status write into a 500.
+        pass
+
+
 @router.get("/image_status")
-def get_image_status(project_root: str, subject: str | None = None,
-                     date: str | None = None) -> dict:
+def get_image_status(project_root: str, subject: str | None = None, date: str | None = None,
+                     dataset_root: str | None = None, annotations_dir: str | None = None) -> dict:
     """Statuses for one subject/date."""
-    path = _image_status_path(project_root)
+    root = _resolve_dataset_root(dataset_root, annotations_dir)
+    if not root:
+        return {"statuses": {}}
+    from tcip_mcp.dataset_layout import image_status_path
+
+    path = image_status_path(root)
     if not path.exists():
         return {"statuses": {}}
     return {"statuses": _load_status_store(path).get(_bucket(subject, date), {})}
@@ -201,12 +258,16 @@ def get_image_status(project_root: str, subject: str | None = None,
 def set_image_status(payload: ImageStatusPayload) -> dict:
     if payload.status not in VALID_STATUSES:
         raise HTTPException(400, f"invalid status: {payload.status}")
-    path = _image_status_path(payload.project_root)
+    from tcip_mcp.dataset_layout import image_status_path
+
+    root = _require_dataset_root(payload.dataset_root, payload.annotations_dir)
+    path = image_status_path(root)
     bucket = _bucket(payload.subject, payload.date)
     with file_transaction(path):
         store = _load_status_store(path)
         store.setdefault(bucket, {})[payload.image_name] = payload.status
         atomic_write_json(path, {k: dict(sorted(store[k].items())) for k in sorted(store)})
+    _stamp_digest(root, bucket, payload.subject, [payload.image_name])
     return {"status": "ok"}
 
 
@@ -215,19 +276,27 @@ class ImageStatusBulkPayload(BaseModel):
     statuses: dict[str, str]  # image_name → status
     subject: str | None = None
     date: str | None = None
+    dataset_root: Optional[str] = None
+    annotations_dir: Optional[str] = None
 
 
 @router.post("/image_status/bulk")
 def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
-    path = _image_status_path(payload.project_root)
+    from tcip_mcp.dataset_layout import image_status_path
+
+    root = _require_dataset_root(payload.dataset_root, payload.annotations_dir)
+    path = image_status_path(root)
     bucket = _bucket(payload.subject, payload.date)
+    applied: list[str] = []
     with file_transaction(path):
         store = _load_status_store(path)
         target = store.setdefault(bucket, {})
         for name, st in payload.statuses.items():
             if st in VALID_STATUSES:
                 target[name] = st
+                applied.append(name)
         atomic_write_json(path, {k: dict(sorted(store[k].items())) for k in sorted(store)})
+    _stamp_digest(root, bucket, payload.subject, applied)
     return {"status": "ok", "n": len(payload.statuses)}
 
 
