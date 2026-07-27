@@ -32,6 +32,7 @@ K4/K5 — the point at which multi-value attribute order first makes the two div
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -148,6 +149,27 @@ def registry_to_dict(registry: ClassRegistry) -> dict:
             }
         out[s.name] = body
     return out
+
+
+def attribute_schema_digest(registry: ClassRegistry, subject: str) -> str | None:
+    """Digest over ``subject``'s attribute vocabulary (name -> {type, declared-order values}) only.
+
+    ``None`` if ``subject`` is not in the registry at all. Deliberately excludes ``description``/
+    ``defined_by``/``defined_at`` — free-text provenance whose editing (a typo fix, a citation
+    update) says nothing about what an instance of the subject looks like, so hashing it would
+    quarantine confirmations over changes that never affected them. This is attribute-*schema* drift
+    detection, not full subject-redefinition detection: a ``description``-only redefinition of what
+    the subject *is* is real but is a domain-expert judgment call, not something a hash can catch —
+    an attribute-less subject (e.g. ``bush``) still gets a real, stable digest of ``{}``.
+    """
+    s = registry.subject(subject)
+    if s is None:
+        return None
+    canonical = json.dumps(
+        {a.name: {"type": a.type, "values": list(a.values)} for a in s.attributes},
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 def read_registry(path: str | Path) -> ClassRegistry:
