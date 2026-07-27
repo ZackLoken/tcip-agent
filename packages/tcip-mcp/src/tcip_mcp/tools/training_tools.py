@@ -105,6 +105,26 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                             "in_chans", int(model_source["in_chans"]), derivation_class="deterministic")})
                     issues.extend(validate_resolved_bundle(b, probed_channels=probed))
 
+    # Split-policy validation (K1): mirrors the channel firewall above — only fires when a
+    # grouping policy is actually declared, probes the dataset's stems the same way the channel
+    # check probes a sample image, and never false-fails on an empty/absent/unreadable dir. Catches
+    # an unrecognized ``group_by`` or an incomplete ``group_key_map`` here, at preflight, rather
+    # than deep in ``_auto_train_val`` where it would now raise (T7).
+    split_cfg = data_cfg.get("split") if isinstance(data_cfg, dict) else None
+    if isinstance(split_cfg, dict) and (split_cfg.get("group_by") or split_cfg.get("group_key_map")):
+        images_dir = data_cfg.get("images_dir")
+        if images_dir and Path(images_dir).is_dir():
+            from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
+            stems = sorted(f.stem for f in Path(images_dir).iterdir()
+                           if f.suffix.lower() in IMAGE_EXTS)
+            if stems:
+                from tcip_mcp.pipelines.data.splits import resolve_group_key_fn
+                try:
+                    resolve_group_key_fn(split_cfg.get("group_by", "tile_prefix"), stems,
+                                         group_key_map=split_cfg.get("group_key_map"))
+                except ValueError as exc:
+                    issues.append(f"data.split: {exc}")
+
     # Training config validation
     train_cfg = config.get("training", {})
     batch_size = train_cfg.get("batch_size", 2)
@@ -688,6 +708,7 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
         if labels_dir and Path(labels_dir).is_dir():
             dh = dataset_hash(labels_dir)
         split = data_cfg.get("split", {})
+        resolved_group_by = split.get("resolved_group_by")
         manifest = {
             "train": _stems(train_ds),
             "val": _stems(val_ds) if val_ds is not None else [],
@@ -695,7 +716,20 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
             "dataset_hash": dh,
             "dataset_id": dataset_id,
             "dataset_fingerprint": dataset_fingerprint,
+            # The actually resolved grouping (not the requested string) — "explicit_map" when
+            # ``_auto_train_val`` resolved a caller group_key_map, "external" for the two-directory
+            # explicit-val path (no computed grouping at all), the named strategy otherwise, or None
+            # when no split manifest logic ran. K1's train-disjointness gate (operating_point.py)
+            # reads this to recompute the training run's own group keys — a missing/None value here
+            # fails that check closed rather than guessing a policy.
+            "group_by": resolved_group_by,
         }
+        if resolved_group_by == "explicit_map" and split.get("group_key_map"):
+            # The map itself (K1 finding 1.1) — without it, _train_disjointness has a policy NAME
+            # but no way to actually compute group keys for stems outside this run, which is what
+            # made the group_key_map capability effectively unusable (exercising it permanently
+            # blocked that model's later calibration).
+            manifest["group_key_map"] = split["group_key_map"]
         exp_dir = experiments_dir() / experiment_id
         if exp_dir.is_dir():
             path = exp_dir / "split.json"
@@ -781,13 +815,19 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
          group-aware train/val split (no held-out test) so the trainer receives
          a real validation loader. Train keeps augmentation; val gets none.
       3. ordinal / regression, ``auto_val`` disabled, a tiny/single-group set, or
-         any failure -> ``(full_train_ds, None)``. Never raises into the caller.
+         most failures -> ``(full_train_ds, None)``. ``resolve_group_key_fn`` (an
+         unrecognized ``split.group_by`` or a ``split.group_key_map`` missing stem
+         coverage) is called outside any handler here and its ``ValueError`` propagates
+         to the caller — silently training without validation on a policy error the
+         caller could have fixed is worse than surfacing it. Every other failure in this
+         function (dataset build errors, a malformed ``val_ratio``/``seed``, a
+         ``group_balanced_split`` failure) still degrades to ``(full_train_ds, None)``.
 
     Reads ``auto_val`` / ``val_*`` / ``split.*`` from ``data_cfg`` (== config["data"]).
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.splits import (
-        group_balanced_split, count_label_lines, GROUP_KEY_FNS, default_group_key,
+        group_balanced_split, count_label_lines, resolve_group_key_fn,
     )
 
     STEM_TASKS = {"detection", "instance_seg", "semantic_seg", "classification"}
@@ -798,6 +838,12 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
     # 1. Explicit validation source.
     val_images = data_cfg.get("val_images_dir")
     if val_images:
+        # This path builds train/val from two SEPARATE directories with no computed grouping —
+        # there is no group policy to persist. Record that shape explicitly (K1 finding 1.2) so
+        # _persist_split_manifest writes a distinct "external" marker rather than leaving the field
+        # unset, which _train_disjointness would otherwise be unable to tell apart from "no split
+        # manifest was ever written" (a split.json this old, from before this check existed).
+        data_cfg.setdefault("split", {})["resolved_group_by"] = "external"
         try:
             train_ds = build_dataset(task, **src, transforms=transforms, tiling=tiling)
             val_src = dict(src)
@@ -837,15 +883,30 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
 
         full_ds = build_dataset(task, **build_src, transforms=transforms)
         stems = list(getattr(full_ds, "stems", None) or getattr(full_ds, "_stems", []))
-        if len(stems) < 2:
-            return full_ds, None
+    except Exception as exc:
+        logger.warning("Auto train/val split failed (%s); training without validation.", exc)
+        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
 
-        split_cfg = data_cfg.get("split", {})
+    if len(stems) < 2:
+        return full_ds, None
+
+    # setdefault (not get): the resolved grouping is written back into data_cfg["split"] below
+    # so _persist_split_manifest (called separately, after this returns) can record what was
+    # actually used — the same "write the effective value back" pattern the tiling geometry
+    # above uses.
+    split_cfg = data_cfg.setdefault("split", {})
+    group_by = split_cfg.get("group_by", "tile_prefix")
+    group_key_map = split_cfg.get("group_key_map")
+    # Deliberately outside any try/except: a malformed grouping policy is a caller-config
+    # error, not a runtime split failure, and must reach the caller rather than degrade
+    # silently to "training without validation" like the failures handled below.
+    group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
+    split_cfg["resolved_group_by"] = "explicit_map" if group_key_map else group_by
+
+    try:
         val_ratio = float(split_cfg.get("val_ratio", 0.2))
         seed = int(split_cfg.get("seed", 42))
-        group_by = split_cfg.get("group_by", "tile_prefix")
         stratify = split_cfg.get("stratify_foreground", True)
-        group_key_fn = GROUP_KEY_FNS.get(group_by, default_group_key)
 
         annotation_counts = None
         if stratify and task in ("detection", "instance_seg"):
