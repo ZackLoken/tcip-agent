@@ -436,8 +436,7 @@ export function ReviewTab() {
   }
 
   /**
-   * Find the next unreviewed detection. Mirrors yolo-annotator's
-   * filter-exhaustion auto-switch: if the active type filter has no more
+   * Find the next unreviewed detection: if the active type filter has no more
    * unreviewed detections, try the next type, and if nothing remains on
    * the image at all, advance to the next image.
    */
