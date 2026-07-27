@@ -91,6 +91,34 @@ def test_resolve_model_identity_foreign_checkpoint(tmp_path):
     assert ident["experiment_id"] is None  # no run -> honest null, not a failure
 
 
+def test_resolve_model_identity_reads_checkpoint_own_experiment_id(tmp_path):
+    """K1: the ordinary train-then-calibrate workflow saves a checkpoint stamped with its own
+    ``experiment_id`` (via ``stamp_model_ref``) but never registers it before calibration runs —
+    ``resolve_model_identity`` must read that stamp directly rather than resolving None just
+    because no registry entry exists yet (which used to silently bypass the train-disjointness
+    gate for every checkpoint that hadn't been explicitly registered)."""
+    torch = pytest.importorskip("torch")
+    from tcip_mcp.model_registry import resolve_model_identity
+
+    ckpt = tmp_path / "stamped.pt"
+    torch.save({"model_state_dict": {}, "experiment_id": "expStamped"}, ckpt)
+
+    ident = resolve_model_identity(ckpt, project_path=str(tmp_path))
+    assert ident["experiment_id"] == "expStamped"
+    assert ident["sha256"]
+
+
+def test_resolve_model_identity_caller_experiment_id_wins_over_stamp(tmp_path):
+    torch = pytest.importorskip("torch")
+    from tcip_mcp.model_registry import resolve_model_identity
+
+    ckpt = tmp_path / "stamped.pt"
+    torch.save({"model_state_dict": {}, "experiment_id": "expStamped"}, ckpt)
+
+    ident = resolve_model_identity(ckpt, experiment_id="expCaller", project_path=str(tmp_path))
+    assert ident["experiment_id"] == "expCaller"
+
+
 # ── R3/D6: terminal-state lock is additive-only ───────────────────────────────
 
 @pytest.fixture()
