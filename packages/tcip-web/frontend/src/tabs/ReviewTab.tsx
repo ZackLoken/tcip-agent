@@ -573,6 +573,8 @@ export function ReviewTab() {
           res.annotation_status,
           dataset.subject,
           dataset.date,
+          dataset.dataset_root,
+          dataset.annotations_dir,
         )
         .catch(() => {});
     } catch (e) {
