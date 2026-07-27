@@ -37,6 +37,17 @@ from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 # eval surface. Documented default, not a frozen truth — no derivation label is claimed for it.
 DEFAULT_SCORE_WEIGHTS: dict[str, float] = {"loss": 0.45, "f1": 0.35, "map50": 0.20}
 
+# The metric keys that ``evaluate()`` labels comparability-only (``map50_role``) once a center-match
+# trait's own governing criterion takes over ``precision``/``recall``/``f1`` (see the center_match
+# branch below) — the AP@0.5-family keys plus the IoU@0.5-convention precision/recall/F1 that get
+# relabeled ``iou_*`` at that point. K9: the single source of truth for "is this metric governing or
+# comparability-only for a center-match trait" — ``resolve_selection_metric`` (generic_trainer.py)
+# and ``select_best_model`` (model_tools.py) both import this rather than re-encoding the names.
+CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset({
+    "map50", "map", "map_at_maxdets", "map50_at_maxdets",
+    "iou_precision", "iou_recall", "iou_f1",
+})
+
 
 # ====================================================================
 # Composite selection objective (ported verbatim from chestnut-burr)
@@ -324,6 +335,9 @@ def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: 
     distinct from AP@0.5, which stays a labeled comparability metric that governs nothing.
     """
     if criterion["kind"] == "center_match":
+        # Deliberately uncapped by max_dets (K9), unlike the iou_match branch below: a count
+        # trait's total is every conf-surviving detection, not the COCOeval detection-cap
+        # convention that AP@0.5 comparability uses.
         tol = float(criterion["tolerance"])
         tp = fp = fn = 0
         for rec in per_image:
