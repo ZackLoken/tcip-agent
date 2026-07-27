@@ -68,32 +68,19 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
 
 @dataclass
 class TrainConfig:
-    """Everything the trainer needs — fully serializable for checkpoints."""
+    """Constructor-time config carrier for ``launch_training``'s data-loader setup.
+
+    Only ``sampler``/``batch_size``/``num_workers`` are ever read off an instance (K9) — the
+    trainer itself reads every other setting straight from ``run.config`` (see ``train()``'s own
+    ``config.get(...)`` calls), so this dataclass does not double as a config record. Do not add a
+    field here expecting ``train()`` to honor it; wire it into ``run.config`` instead.
+    """
     model_source: dict
     dataset: dict           # {task, images_dir, labels_dir, ...}
     augmentation: dict = field(default_factory=dict)
     sampler: str = "random"
-    optimizer: dict = field(default_factory=lambda: {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 1e-4})
-    stages: list[dict] = field(default_factory=lambda: [
-        {"freeze_to": -1, "epochs": 5},   # train heads only (freeze all backbone)
-        {"freeze_to": 2, "epochs": 10},    # unfreeze top backbone layers
-        {"freeze_to": 0, "epochs": 5},     # full fine-tune
-    ])
-    early_stopping: dict = field(default_factory=lambda: {"enabled": True, "patience": 7, "min_delta": 1e-4})
-    mixed_precision: bool = True
-    gradient_accumulation_steps: int = 1
-    checkpoint_every_n_epochs: int = 5
     batch_size: int = 4
     num_workers: int = 2
-    scheduler: dict = field(default_factory=lambda: {"type": "cosine"})
-    # W2 knobs (documentation/serialization only — train() reads run.config).
-    stage_warmup_epochs: int = 0
-    lr_scaling: dict = field(default_factory=lambda: {
-        "enabled": False, "reference_effective_batch": 64, "scale_power": 0.5, "max_lr": None})
-    enforce_monotonic_unfreeze: bool = True
-    evaluation: dict = field(default_factory=dict)  # W1 eval params (doc-only; train() reads run.config)
-    seed: int | None = None          # W7: serialization-only; runtime seeding reads run.config
-    deterministic: bool = False      # W7: serialization-only
 
 
 # ====================================================================
@@ -295,25 +282,63 @@ def _validate(
     model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str, *,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
+    trait: str | None = None,
 ) -> dict:
     """Task-aware validation — delegates to ``evaluation.evaluate`` and ``val_``-prefixes.
 
     detection/instance_seg → precision/recall/F1/mAP50/mAP + composite objective;
     classification → accuracy/F1; ordinal → MAE/rank_acc; regression → MAE/RMSE;
-    semantic_seg stays loss-only. Always returns ``val_loss``.
+    semantic_seg → mIoU/dice/pixel_acc/per-class IoU (``evaluation.semantic_seg_metrics``). Always
+    returns ``val_loss``. Only detection/instance_seg's composite objective (or an explicit
+    ``evaluation.selection_metric``, K9) drives ``model_best.pt``/early stopping — every other
+    task, including semantic_seg, selects by ``val_loss`` (see ``resolve_selection_metric``).
+
+    ``trait``: when set, a count trait's derived localization criterion governs the reported
+    detection count/F1 instead of the IoU@0.5 comparability convention (see ``evaluate``).
     """
     metrics = evaluate(
         model, val_loader, device, task,
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
         iou_type=iou_type, max_dets=max_dets, score_weights=score_weights,
+        trait=trait,
     )
     return {f"val_{k}": v for k, v in metrics.items()}
 
 
-def _selection_value(task: str, val_metrics: dict, avg_loss: float) -> float:
-    """Best-model/early-stopping driver: composite objective for detection, else val_loss."""
-    if task in ("detection", "instance_seg") and "val_objective" in val_metrics:
-        return val_metrics["val_objective"]
+def resolve_selection_metric(task: str, trait: str | None, requested: str | None) -> str:
+    """Resolve the bare metric key (into ``val_metrics``, without the ``val_`` prefix) that drives
+    both ``model_best.pt`` and early stopping — deliberately the SAME key for both (K9).
+
+    Default (unchanged from the prior hardcoded behavior): ``"objective"`` for detection/
+    instance_seg, else ``"loss"``. An explicit ``requested`` is honored, except it is rejected when
+    ``trait`` is a center-match trait and ``requested`` names a metric that trait's own
+    localization criterion demotes to comparability-only (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``)
+    — selecting checkpoints by a metric the trait doesn't trust is a defensibility regression, not a
+    legitimate choice.
+    """
+    default = "objective" if task in ("detection", "instance_seg") else "loss"
+    if not requested:
+        return default
+    if trait:
+        from tcip_mcp.pipelines.training.evaluation import CENTER_MATCH_COMPARABILITY_KEYS
+        from tcip_mcp.traits import CENTER_MATCH, get_trait
+
+        spec = get_trait(trait)
+        if spec.localization == CENTER_MATCH and requested in CENTER_MATCH_COMPARABILITY_KEYS:
+            raise ValueError(
+                f"evaluation.selection_metric={requested!r} is a comparability-only metric for "
+                f"trait {trait!r} (localization=center_match) — it does not govern this trait's "
+                "phenotype count. Select by 'objective', 'f1', 'precision', 'recall', or 'loss', "
+                "which resolve through the trait's own center-match criterion."
+            )
+    return requested
+
+
+def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str) -> float:
+    """Best-model/early-stopping driver: ``val_metrics[f'val_{metric}']``, falling back to ``val_loss``."""
+    key = f"val_{metric}"
+    if key in val_metrics:
+        return val_metrics[key]
     return val_metrics.get("val_loss", avg_loss)
 
 
@@ -395,6 +420,38 @@ def train(
     ``epoch_callback(epoch:int, epoch_metrics:dict)`` (optional) is invoked after
     each epoch's metrics are recorded — used by HPO to report intermediate values
     for pruning. It may raise to abort the run (e.g. ``optuna.TrialPruned``).
+
+    This is the canonical, ground-truth list of every ``run.config`` key this function reads
+    (K9 — every other surface, e.g. ``preflight_config``'s docstring and the training skill's
+    example, points here rather than re-deriving its own copy). ``run.config`` is an open dict,
+    not a fixed schema (``TrainConfigSchema``/``StageSpec`` both keep ``extra="allow"``) — a bespoke
+    ``model_source``/``dataset_source``/``training_source`` may read its own additional keys this
+    function never touches.
+
+    - ``device`` (str, default cuda-if-available else cpu)
+    - ``batch_size`` (int) — only as a fallback when ``train_loader`` itself has no ``.batch_size``
+      (the DataLoader's own batch size, set at construction, is the primary source).
+    - ``seed`` (int | None), ``deterministic`` (bool, default False) — RNG seeding before model
+      build; also under ``training.seed``/``training.deterministic``. ``create_run`` already draws
+      and records a seed when none is configured, so ``seed`` is never actually ``None`` here in
+      practice.
+    - ``mixed_precision`` (bool, default True) — AMP, only when ``device`` is cuda.
+    - ``stages`` (list of ``{freeze_to, epochs}``; a per-stage ``lr`` is accepted but ignored —
+      see ``optimizer`` below) — default a single 10-epoch full-unfreeze stage.
+    - ``optimizer`` (``{name, backbone_lr, head_lr, weight_decay}``, default adamw/1e-4/1e-3/1e-4)
+      — the ONE source of learning rate, applied uniformly across every stage.
+    - ``scheduler`` (``{type, ...}``; ``type`` in cosine/plateau/onecycle/step, default cosine).
+    - ``lr_scaling`` (``{enabled, reference_effective_batch, scale_power, max_lr}``, default
+      disabled) — effective-batch LR scaling at stage boundaries.
+    - ``stage_warmup_epochs`` (int, default 0), ``enforce_monotonic_unfreeze`` (bool, default True).
+    - ``gradient_accumulation_steps`` (int, default 1; a stage may override its own), and a
+      per-stage ``gradient_accumulation_steps`` override.
+    - ``checkpoint_every_n_epochs`` (int, default 5) — periodic resumable checkpoints.
+    - ``early_stopping`` (``{enabled, patience, min_delta}``, default enabled-if-val_loader,
+      patience 7, min_delta 1e-4).
+    - ``evaluation`` (``{trait, selection_metric, conf_threshold, iou_threshold, iou_type,
+      max_dets, score_weights}``, all optional) — ``trait`` and ``selection_metric`` drive
+      ``resolve_selection_metric`` (K9); the rest pass through to ``_validate``/``evaluate``.
     """
     config = run.config
     run.status = "running"
@@ -453,6 +510,8 @@ def train(
         pending_snapshot = None   # best optimizer state from the previous stage
         prev_trainable = None     # trainable param count of the previous stage
         eval_cfg = config.get("evaluation", {})  # W1 metric / selection params
+        trait = eval_cfg.get("trait")
+        selection_metric = resolve_selection_metric(task, trait, eval_cfg.get("selection_metric"))
 
         global_step = 0
         stopped_early = False
@@ -622,13 +681,16 @@ def train(
                 if val_loader is not None:
                     val_metrics = _validate(
                         model, val_loader, device, task,
-                        conf_threshold=eval_cfg.get("conf_threshold", DEFAULT_CONF),  # select at the ship point
+                        # A fixed default unless eval_cfg explicitly overrides it — NOT the
+                        # resolved ship-point conf (that is derived later by resolve_operating_point).
+                        conf_threshold=eval_cfg.get("conf_threshold", DEFAULT_CONF),
                         iou_threshold=eval_cfg.get("iou_threshold", 0.5),
                         iou_type=eval_cfg.get("iou_type"),
                         max_dets=eval_cfg.get("max_dets", 100),
                         score_weights=eval_cfg.get("score_weights"),
+                        trait=trait,
                     )
-                sel = _selection_value(task, val_metrics, avg_loss)
+                sel = _selection_value(task, val_metrics, avg_loss, selection_metric)
 
                 # W2: suppress the scheduler during warmup epochs.
                 if not in_warmup:
@@ -645,6 +707,8 @@ def train(
                     "eff_batch": eff_batch,
                     "trainable_params": trainable,
                     "selection": round(sel, 6),
+                    "selection_metric": selection_metric,
+                    "selection_trait": trait,
                     **val_metrics,
                 }
                 run.metrics_history.append(epoch_metrics)
@@ -653,7 +717,10 @@ def train(
                     tb_writer.add_scalar("train/loss", avg_loss, run.current_epoch)
                     tb_writer.add_scalar("train/lr", current_lr, run.current_epoch)
                     for k, v in val_metrics.items():
-                        tb_writer.add_scalar(f"val/{k}", v, run.current_epoch)
+                        # A center-match trait's val_metrics carries non-scalar entries
+                        # (governing_criterion: dict, map50_role: str) that add_scalar rejects.
+                        if isinstance(v, (int, float)) and not isinstance(v, bool):
+                            tb_writer.add_scalar(f"val/{k}", v, run.current_epoch)
                     tb_writer.flush()
 
                 with open(metrics_path, "a") as f:
