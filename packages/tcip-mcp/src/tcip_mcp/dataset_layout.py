@@ -105,7 +105,9 @@ def annotation_date(path: str | Path) -> Optional[str]:
 
 
 #: The top-level segments under a dataset root; a path under any of them locates the root.
-_DATASET_SEGMENTS = ("annotations", "predictions", "images")
+#: ``labels`` covers a split-materialized tree (``make_splits(materialize=True)`` writes
+#: ``{split}/labels/*.json`` rather than ``annotations/``) so the same locator resolves both shapes.
+_DATASET_SEGMENTS = ("annotations", "predictions", "images", "labels")
 
 
 def dataset_root_of(path: str | Path) -> Optional[Path]:
@@ -141,6 +143,34 @@ def dataset_identity_path(dataset_root: str | Path) -> Path:
     stored fingerprint is a cache — recompute-on-read (``resolution.dataset_fingerprint``) is authority.
     """
     return Path(dataset_root, "dataset.json")
+
+
+def image_status_path(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/.tcip/state/image_status.json`` — the confirmed-negatives store.
+
+    Sibling of ``classes_path``/``dataset_identity_path``: a Complete is a fact about the dataset's
+    content (what actually trains), so it travels with the dataset rather than living in whichever
+    project's private ``.tcip/`` happens to be an ancestor. The single locator every writer
+    (the GUI's review flow, ``materialize_dataset``, ``make_splits``) and every reader
+    (``confirmed_negative_names``, ``doctor.py``) must call — never reconstruct this path locally.
+    """
+    return Path(dataset_root, ".tcip", "state", "image_status.json")
+
+
+def image_status_digest_path(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/.tcip/state/image_status_digest.json`` — ``{bucket: {image_name: digest}}``.
+
+    Sibling of :func:`image_status_path`, stamped by the same writers at confirmation time with the
+    subject's attribute-schema digest in effect (:func:`tcip_mcp.class_registry.attribute_schema_digest`).
+    Stamped **per image**, not per bucket: a bucket holds every image a human has ever touched under
+    one subject/date, so a bucket-wide stamp would be silently overwritten by the next unrelated
+    write to that bucket, un-quarantining a stale confirmation nobody re-reviewed. Lets a reader tell
+    a confirmation made under a since-changed attribute schema from one still valid — see
+    ``confirmed_negative_names``'s quarantine logic. Absence of a stamp is not evidence of staleness
+    (a rail must admit valid work, not only reject it): only a stamp that positively disagrees with
+    the current schema is grounds to quarantine that one image.
+    """
+    return Path(dataset_root, ".tcip", "state", "image_status_digest.json")
 
 
 def status_bucket(subject: str, date: Optional[str]) -> str:
