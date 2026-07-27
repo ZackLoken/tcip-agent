@@ -362,16 +362,61 @@ def _registry_term(dataset_root: Path) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+def _confirmations_term(dataset_root: Path) -> str:
+    """Digest over the dataset-native confirmed-negative store's raw content (all buckets, sorted).
+
+    Reads ``dataset_layout.image_status_path`` only — never a foreign/legacy store — since
+    confirmations are now dataset-native (K13.5 slice 4), the same way ``_registry_term`` reads only
+    ``classes_path``. Hashes RAW on-disk negative membership, not the quarantine-filtered view
+    ``confirmed_negative_names`` returns: fingerprint is content identity (should two datasets be
+    considered the same content), quarantine is a training-time trust decision, and conflating them
+    would make the fingerprint *less* sensitive to a real on-disk difference than it should be — the
+    unsafe direction. Empty string when there is no store or no negative entries, matching
+    ``_registry_term``'s "optional, additive" convention so a dataset with zero confirmed negatives
+    still gets a valid non-None fingerprint.
+    """
+    from tcip_mcp.dataset_layout import image_status_path
+
+    p = image_status_path(dataset_root)
+    if not p.is_file():
+        return ""
+    try:
+        statuses = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(statuses, dict):
+        return ""
+    h = hashlib.sha256()
+    any_negatives = False
+    for bucket in sorted(k for k in statuses if isinstance(statuses[k], dict)):
+        names = sorted(n for n, s in statuses[bucket].items() if s == "negative")
+        if not names:
+            continue
+        any_negatives = True
+        h.update(bucket.encode("utf-8"))
+        h.update(b"\0")
+        for n in names:
+            h.update(n.encode("utf-8"))
+            h.update(b"\0")
+    return h.hexdigest()[:16] if any_negatives else ""
+
+
 def dataset_fingerprint(dataset_root: str | Path) -> str | None:
-    """Whole-dataset content identity: labels + image pixels + registry.
+    """Whole-dataset content identity: labels + image pixels + registry + confirmed negatives.
 
     A superset of :func:`dataset_hash` (which stays the per-split-subset firewall key): the label term
     *calls* ``dataset_hash``; the image term hashes pixel bytes; the registry term digests the canonical
-    class registry. Content-addressed, so it is machine-independent (a moved dataset keeps its
-    fingerprint) and detects a change to any of the three (a re-encode, a relabel, a registry edit).
-    ``None`` for a dataset with no images or no labels (e.g. a bespoke ``dataset_source``) — matching
-    ``dataset_hash``'s honesty rather than fabricating identity. Authority is recompute-on-read; a
-    stored fingerprint (``dataset.json``) is a cache.
+    class registry; the confirmations term digests the dataset-native confirmed-negative store.
+    Content-addressed, so it is machine-independent (a moved dataset keeps its fingerprint) and detects
+    a change to any of the four (a re-encode, a relabel, a registry edit, confirming/un-confirming a
+    negative). ``None`` for a dataset with no images or no labels (e.g. a bespoke ``dataset_source``) —
+    matching ``dataset_hash``'s honesty rather than fabricating identity. Authority is recompute-on-read;
+    a stored fingerprint (``dataset.json``) is a cache.
+
+    Adding the confirmations term is a one-time formula-version shift (K13.5 slice 4): recomputing
+    against an existing ``dataset.json``/experiment ``lineage.json`` written under the 3-term formula
+    reads as CHANGED even with identical on-disk content. That is expected, not corruption — experiments
+    are immutable, so old lineage records keep their old fingerprint value rather than being rewritten.
     """
     root = Path(dataset_root)
     labels = _labels_term(root / "annotations")
@@ -385,6 +430,8 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     h.update(images.encode("utf-8"))
     h.update(b"\0classes:")
     h.update(_registry_term(root).encode("utf-8"))
+    h.update(b"\0confirmations:")
+    h.update(_confirmations_term(root).encode("utf-8"))
     return h.hexdigest()[:16]
 
 
