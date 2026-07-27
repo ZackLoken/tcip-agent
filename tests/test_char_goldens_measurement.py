@@ -31,12 +31,28 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as PH  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     coco_detection_metrics,
-    count_bias_at,
     gt_class_avg_size,
     pick_count_unbiased,
     pick_f1_max,
     sweep_operating_point,
 )
+from tests._dense_op_fixtures import dense_records  # noqa: E402
+
+_N_IMAGES = 20
+_OBJECTS_PER_IMAGE = 80
+
+
+def _good_cal_holdout(*, shift: float = 5.0):
+    """A dense, realistic (K2 rule 17) reference: a good detector with one low-conf spurious
+    detection per image — the count-unbiased pick lands at the high, correct-match score (0.9)
+    once that low-conf FP is filtered out, with zero bias/dispersion on the holdout."""
+    miss = [0] * _N_IMAGES
+    fp = [1] * _N_IMAGES
+    cal = dense_records(n_images=_N_IMAGES, objects_per_image=_OBJECTS_PER_IMAGE, id_prefix="c",
+                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    hold = dense_records(n_images=_N_IMAGES, objects_per_image=_OBJECTS_PER_IMAGE, id_prefix="h",
+                         shift=shift, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    return cal, hold
 
 
 # ── shared fixture helpers ────────────────────────────────────────────────
@@ -114,26 +130,34 @@ def test_golden_pick_count_unbiased_and_f1_max():
     assert pick_count_unbiased(sweep) == pytest.approx(0.6)
     assert pick_f1_max(sweep) == pytest.approx(0.0)
     # count bias vanishes at the count-unbiased pick, over-counts (+0.5) at the F1-max pick
-    assert count_bias_at(sweep, 0.6)["count_bias_mean"] == pytest.approx(0.0)
-    assert count_bias_at(sweep, 0.0)["count_bias_mean"] == pytest.approx(0.5)
+    by_conf = {round(c["conf"], 6): c for c in sweep["curve"]}
+    assert by_conf[0.6]["count_bias_mean"] == pytest.approx(0.0)
+    assert by_conf[0.0]["count_bias_mean"] == pytest.approx(0.5)
 
 
 def test_golden_resolve_operating_point_validated_conf():
+    # K2 (Fix D): resolve_operating_point now fails closed without an asserted staged_conf_floor,
+    # and rule 17 requires a dense, realistic reference to exercise the holdout gate — the old
+    # 2-image sparse fixture no longer suffices (its per-image variance now trips Fix C's
+    # equivalence criterion; see test_golden_duplicate_content_holdout_is_false below for what a
+    # sparse fixture STILL correctly refuses).
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
+    cal, hold = _good_cal_holdout()
     b = resolve_operating_point("catkin", dataset_hash="h1",
-                                calibration_records=_sweep_records("c"),
-                                holdout_records=_sweep_records("h", shift=3.0))
+                                calibration_records=cal, holdout_records=hold,
+                                staged_conf_floor=0.01)
     conf = b.get("conf")
-    assert conf._raw == pytest.approx(0.6)  # count-unbiased pick
+    assert conf._raw == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert conf.derivation_class == "calibration"
     assert conf.derived_from == "count-unbiased center-match sweep"
     assert conf.validated_vs_gt == "validated_held_out"
     assert conf.dataset_scoped is True
     assert conf.dataset_hash == "h1"
     assert b.is_shippable is True
-    assert b.get("max_dets")._raw == 100  # ~1.5x p99 GT/image, floored at 100 for this sparse fixture
+    assert b.get("max_dets")._raw == 120  # ~1.5x p99 GT/image (80/image here)
     assert conf.sweep["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout (K1)
+    assert conf.sweep["failures"] == []
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -227,9 +251,10 @@ def _stamp(bundle, *, validated: bool, issues: list[str]) -> dict:
 def test_golden_stamp_shape_calibrated_validated():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
+    cal, hold = _good_cal_holdout()
     b = resolve_operating_point("catkin", dataset_hash="h1",
-                                calibration_records=_sweep_records("c"),
-                                holdout_records=_sweep_records("h", shift=3.0))
+                                calibration_records=cal, holdout_records=hold,
+                                staged_conf_floor=0.01)
     stamp = _stamp(b, validated=b.is_shippable, issues=b.shippable_issues())
     assert set(stamp.keys()) == {"operating_point", "validated", "shippable_issues"}
     assert stamp["validated"] is True  # held-out calibration passed
@@ -239,7 +264,7 @@ def test_golden_stamp_shape_calibrated_validated():
     for name, prov in op.items():
         assert set(prov.keys()) == _PARAM_PROVENANCE_KEYS
     conf = op["conf"]
-    assert conf["value"] == pytest.approx(0.6)
+    assert conf["value"] == pytest.approx(0.9)
     assert conf["source"] == "derived"
     assert conf["derivation_class"] == "calibration"
     assert conf["validated_vs_gt"] == "validated_held_out"
