@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 
 from tcip_mcp.pipelines.inference.predictor import KIND_ULTRALYTICS
+from tcip_mcp.pipelines.resolution import DEFAULT_TILE_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -58,17 +59,22 @@ def build_result(object_predictions, image_path: str, w: int, h: int,
     return result
 
 
-def _training_imgsz(checkpoint_path: str, default: int = 640) -> int:
+def _training_imgsz(checkpoint_path: str) -> int | None:
     """The size the YOLO model was trained at (from the checkpoint), so a tile tracks the
-    model instead of a guessed constant. Falls back to ``default``."""
+    model instead of a guessed constant. ``None`` when the checkpoint carries no ``imgsz`` —
+    a real "unknown", not a silent 640, so a caller resolving tile geometry (K10 CV2) can tell
+    a genuine derivation from a fabricated one."""
     import torch
 
     try:
         ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        imgsz = (ckpt.get("train_args") or {}).get("imgsz", default) if isinstance(ckpt, dict) else default
+        train_args = (ckpt.get("train_args") or {}) if isinstance(ckpt, dict) else {}
+        if "imgsz" not in train_args:
+            return None
+        imgsz = train_args["imgsz"]
         return int(imgsz[0] if isinstance(imgsz, (list, tuple)) else imgsz)
     except Exception:
-        return default
+        return None
 
 
 class YoloPredictor:
@@ -172,7 +178,7 @@ class YoloPredictor:
         from sahi.predict import get_sliced_prediction
         from sahi.slicing import get_slice_bboxes
 
-        tile = int(tile_size or self.training_imgsz)
+        tile = int(tile_size or self.training_imgsz or DEFAULT_TILE_SIZE)
         arr, w, h = self._upright_array(image_path)
         match = global_nms_iou if global_nms_iou is not None else DEFAULT_MATCH_THRESHOLD
         result = get_sliced_prediction(
