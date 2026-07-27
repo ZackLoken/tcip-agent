@@ -102,7 +102,7 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
     job = InferenceJob(job_id="j1", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-                       output_dir=str(tmp_path / "out"), sahi=False, conf=0.25, iou=0.7,
+                       output_dir=str(tmp_path / "out"), tile=False, conf=0.25, iou=0.7,
                        slice_hw=(640, 640), overlap=0.2)
     _register(job)
 
