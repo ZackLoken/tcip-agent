@@ -30,14 +30,20 @@ def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
     return [cx - s / 2, cy - s / 2, s, s]  # xywh centered at (cx, cy)
 
 
-def _records(idp: str, score: float) -> list[dict]:
-    """Two images, each 1 GT + 1 exactly-matching det at ``score`` — zero count bias at any conf."""
+def _records(idp: str, score: float, *, shift: float = 0.0) -> list[dict]:
+    """Two images, each 1 GT + 1 exactly-matching det at ``score`` — zero count bias at any conf.
+
+    ``shift`` (K1): offsets the GT (and matching det) center by that many px, well inside the
+    center-match tolerance, so a holdout's GT content genuinely differs from calibration's — a
+    holdout identical in content (differing only by ``image_id``) now trips the content-overlap
+    gate, which would otherwise mask what this guard is specifically testing.
+    """
     return [
         {"width": 400, "height": 400, "image_id": f"{idp}_a",
-         "gt": [{"category_id": 0, "bbox": _box(100, 100)}],
+         "gt": [{"category_id": 0, "bbox": _box(100 + shift, 100)}],
          "dt": [{"category_id": 0, "bbox": _box(100, 100), "score": score}]},
         {"width": 400, "height": 400, "image_id": f"{idp}_b",
-         "gt": [{"category_id": 0, "bbox": _box(200, 200)}],
+         "gt": [{"category_id": 0, "bbox": _box(200 + shift, 200)}],
          "dt": [{"category_id": 0, "bbox": _box(200, 200), "score": score}]},
     ]
 
@@ -80,7 +86,7 @@ def test_low_conf_tail_reference_still_validates():
     # detections carry a sub-floor score, so the reference shows the tail and validation stands.
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=_records("c", 0.4),
-                                holdout_records=_records("h", 0.4))
+                                holdout_records=_records("h", 0.4, shift=3.0))
     conf = b.get("conf")
     assert conf.validated_vs_gt == "validated_held_out"
     assert b.is_shippable is True
