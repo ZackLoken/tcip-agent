@@ -5,8 +5,8 @@ Jobs run on a background thread. Each job writes per-image COCO/JSON predictions
 so they plug straight into the Review tab and the per-plant curve pipeline.
 
 Inference goes through ``build_predictor`` — the same entry point as the MCP ``run_inference``
-tool — which dispatches on the checkpoint's model kind: a tcip composed-model checkpoint runs
-through native SAHI-style tiling, a pretrained ultralytics YOLO checkpoint runs through SAHI.
+tool — which dispatches on the checkpoint's model kind and runs the tcip composed-model
+checkpoint through its own native SAHI-style tiling.
 The operating point (conf / NMS IoU / tiling / max_dets) is resolved through the same
 ``raw_operating_point`` bundle as the MCP door and its provenance is stamped alongside the
 predictions, so a GUI run and an agent run can't diverge on the count or hide an unvalidated
@@ -51,17 +51,19 @@ class InferenceJob:
     checkpoint_path: str
     images_dir: str
     output_dir: str
-    sahi: bool
+    tile: bool
     conf: float
     iou: float
     slice_hw: tuple[int, int]
     overlap: float
     max_dets: int = DEFAULT_MAX_DETS
     postprocess: str = "nms"  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
-    # K10 finding 3: whether the caller explicitly chose sahi, or it fell back to DEFAULT_TILED —
-    # threaded into raw_operating_point's tiled_source so the sidecar's provenance can tell the
-    # two apart, same as the MCP door's run_inference already does for its own `tile` param.
-    sahi_source: str = "default"
+    # K10 finding 3 (K21: renamed from sahi/sahi_source — this predates ultralytics removal and
+    # is the generic tile toggle, not a SAHI-specific one): whether the caller explicitly chose to
+    # tile, or it fell back to DEFAULT_TILED — threaded into raw_operating_point's tiled_source so
+    # the sidecar's provenance can tell the two apart, same as the MCP door's run_inference already
+    # does for its own `tile` param.
+    tile_source: str = "default"
     total: int = 0
     done: int = 0
     status: str = "pending"  # pending | running | completed | failed | cancelled
@@ -131,7 +133,7 @@ def rehydrate() -> None:
                 checkpoint_path="",
                 images_dir=s.get("images_dir", ""),
                 output_dir=s.get("output_dir", ""),
-                sahi=False,
+                tile=False,
                 conf=0.0,
                 iou=0.0,
                 slice_hw=(0, 0),
@@ -163,7 +165,7 @@ def _worker(job: InferenceJob) -> None:
         job.total = len(images)
 
         # One inference entry point (same as MCP run_inference): build_predictor dispatches on
-        # the checkpoint's model kind (torchvision-composed → native tiling; ultralytics → SAHI).
+        # the checkpoint's model kind, sniffed from the checkpoint itself.
         from tcip_mcp.pipelines.inference.predictor import build_predictor
         from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
         from tcip_mcp.pipelines.resolution import raw_operating_point
@@ -172,7 +174,7 @@ def _worker(job: InferenceJob) -> None:
         # Resolve the operating point through the SAME firewalled bundle as the MCP door: conf is a
         # documented default with no per-dataset GT, so it is unvalidated and stamped validated=false.
         op_bundle = raw_operating_point(
-            conf=job.conf, cross_tile_nms=job.iou, tiled=job.sahi, tiled_source=job.sahi_source,
+            conf=job.conf, cross_tile_nms=job.iou, tiled=job.tile, tiled_source=job.tile_source,
             tile_size=job.slice_hw[0], max_dets=job.max_dets,
         )
         conf = op_bundle.get("conf").unvalidated_value(acknowledge_unvalidated=True)
@@ -210,7 +212,7 @@ def _worker(job: InferenceJob) -> None:
                 break
             results = predictor.predict_batch(
                 [str(img)],
-                tile=job.sahi,
+                tile=job.tile,
                 tile_size=job.slice_hw[0],
                 overlap=job.overlap,
                 global_nms_iou=job.iou,
@@ -238,11 +240,12 @@ class LaunchInferencePayload(BaseModel):
     images_dir: str
     output_dir: str
     # tiling + conf/iou default to the ONE shared source so the GUI and the MCP agent produce the
-    # SAME count off the same checkpoint (they used to diverge: sahi/640 + 0.25/0.7 here vs
-    # tile=False/224 + 0.5/0.3 in run_inference — tiling drives the count most of all).
+    # SAME count off the same checkpoint (they used to diverge: this field, named `sahi` before
+    # K21 removed ultralytics/SAHI support, at 640 + 0.25/0.7 here vs tile=False/224 + 0.5/0.3 in
+    # run_inference — tiling drives the count most of all).
     # K10 finding 3: None (default) is a documented fallback, not an implicit True — distinguished
     # from an explicit caller choice so the job's provenance can say which one happened.
-    sahi: bool | None = None
+    tile: bool | None = None
     conf: float = DEFAULT_CONF
     iou: float = DEFAULT_NMS_IOU
     slice_h: int = DEFAULT_TILE_SIZE
@@ -284,24 +287,24 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         raise HTTPException(409, str(exc)) from exc
     resolved_output_dir = str(parent / resolution.name)
 
-    # K10 finding 3: resolve the None sentinel ONCE, here — InferenceJob.sahi stays a concrete
-    # bool everywhere else (behavior + provenance both read it), with sahi_source carrying which
+    # K10 finding 3: resolve the None sentinel ONCE, here — InferenceJob.tile stays a concrete
+    # bool everywhere else (behavior + provenance both read it), with tile_source carrying which
     # case this was. Note the meaning of "explicit" differs by door on purpose: the MCP tool's
     # `tile` distinguishes an agent that supplied the kwarg from one that omitted it; here it
     # distinguishes a request body that carried the field from one that didn't — since the GUI's
     # checkbox is a controlled input with no "unset" state, every real launch IS the breeder's
     # explicit choice, even when it matches the default. Stage-6 review (K10): this is a
     # deliberate difference in what "explicit" means per door, not a labeling bug.
-    resolved_sahi = DEFAULT_TILED if payload.sahi is None else payload.sahi
-    sahi_source = "explicit" if payload.sahi is not None else "default"
+    resolved_tile = DEFAULT_TILED if payload.tile is None else payload.tile
+    tile_source = "explicit" if payload.tile is not None else "default"
 
     job = InferenceJob(
         job_id=f"inf-{uuid.uuid4().hex[:8]}",
         checkpoint_path=payload.checkpoint_path,
         images_dir=payload.images_dir,
         output_dir=resolved_output_dir,
-        sahi=resolved_sahi,
-        sahi_source=sahi_source,
+        tile=resolved_tile,
+        tile_source=tile_source,
         conf=payload.conf,
         iou=payload.iou,
         slice_hw=(payload.slice_h, payload.slice_w),
