@@ -18,6 +18,12 @@ path passes; ``resolve_operating_point`` stamps it ``review_confirmed`` (distinc
 floor are truncated and cannot stamp a validated claim — the reviewed predictions must have been
 generated at a floored conf for the sweep to reach the low-conf tail (the G1 precondition).
 
+Fix G (producer-identity scoping) and Fix H (FN-adjudication coverage) both live here: every verdict
+(and confirmed-negative image record) is scoped to the producing bucket(s) it was actually recorded
+against BEFORE any gate statistic sees it, and every record carries whether the image was genuinely
+adjudicated for missed objects — the two facts a review-confirmed reference must never let a caller
+skip.
+
 Torch-free.
 """
 
@@ -32,6 +38,16 @@ from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED, ResolvedBu
 
 _POSITIVE_ACTIONS = {"accepted", "edited"}
 
+# Every name resolve_operating_point can put in sweep["failures"] (cross-cutting named-failure
+# architecture) — the single source of truth describe_review_validation checks completeness
+# against, independent of which branch of its elif chain a given name happens to hit first.
+_KNOWN_FAILURE_NAMES = {
+    "insufficient_adjudication_coverage", "not_disjoint", "conf_censored", "content_duplicated",
+    "train_disjointness_unresolvable", "train_disjointness_leaked", "insufficient_calibration_gt",
+    "insufficient_holdout_gt", "insufficient_holdout_images", "count_bias_exceeds_tolerance",
+    "localization_quality_floor_failed", "count_error_dispersion_too_high",
+}
+
 
 def _to_xywh(box_norm: list, img_w: float, img_h: float) -> list[float]:
     """Normalized center-form ``[cx, cy, w, h]`` -> top-left ``[x, y, w, h]`` scaled by image dims.
@@ -43,13 +59,80 @@ def _to_xywh(box_norm: list, img_w: float, img_h: float) -> list[float]:
     return [(cx - bw / 2) * img_w, (cy - bh / 2) * img_h, bw * img_w, bh * img_h]
 
 
+def _same_producer(entry_identity: dict, target: dict) -> bool:
+    """True when ``entry_identity`` (a verdict/image's recorded producer fact) and ``target`` (a
+    bucket's own identity) name the SAME producing model (Fix G) — never a directory-string
+    comparison.
+
+    Prefers ``checkpoint_sha256`` (the exact model bytes) when both sides recorded one; falls back
+    to ``experiment_id`` only when a side has no sha to compare against. Missing on both sides is
+    not a match — there is nothing here to reconcile, so an unresolvable identity fails closed
+    rather than being treated as "unknown, so allow it".
+    """
+    e_sha, t_sha = entry_identity.get("checkpoint_sha256"), target.get("checkpoint_sha256")
+    if e_sha is not None and t_sha is not None:
+        return e_sha == t_sha
+    e_exp, t_exp = entry_identity.get("experiment_id"), target.get("experiment_id")
+    return e_exp is not None and t_exp is not None and e_exp == t_exp
+
+
+def _matches_any_bucket(identity: dict | None, bucket_identities: list[dict]) -> bool:
+    """True when ``identity`` (a verdict/image's own recorded producer fact, or ``None``) names the
+    SAME producer as any of ``bucket_identities``. ``None``/empty never matches — a verdict with no
+    recorded identity (written before Fix G, or authored by a caller that never resolved one) fails
+    closed rather than being grandfathered in (CLAUDE.md's no-back-compat rule)."""
+    if not identity:
+        return False
+    return any(_same_producer(identity, target) for target in bucket_identities)
+
+
 def review_to_records(
     review_state: dict,
     *,
+    bucket_identities: list[dict],
     image_dims: dict[str, tuple[int, int]] | None = None,
     only_completed: bool = True,
 ) -> list[dict]:
     """Reconstruct per-image COCO records (gt=affirmed, dt=model predictions) from review verdicts.
+
+    ``bucket_identities`` (Fix G — REQUIRED, no default that would silently skip scoping): the
+    producer identity/identities (``checkpoint_sha256``/``experiment_id``) of the prediction
+    bucket(s) this reference is being built FOR. Only verdict entries (and confirmed-negative image
+    records) recorded against a MATCHING producer are included:
+
+      - an image with verdict entries: only entries whose ``producer_identity`` matches any of
+        ``bucket_identities`` contribute to ``gt``/``dt``. If NONE of an image's entries match, the
+        whole image is dropped — it carries no evidence FOR this bucket, so it must not silently
+        count as a zero-bias/zero-object agreement for it (the exact contamination Fix G exists to
+        close: model A's review verdicts must not validate model B's bucket).
+      - an image with zero verdict entries (a confirmed negative via ``mark_complete``) carries its
+        producer identity at the IMAGE level instead (``img_data["producer_identity"]``, Fix G item
+        2) — checked the same way; a mismatch or missing stamp drops the image entirely rather than
+        counting it as a negative for the wrong bucket.
+
+    A verdict/image with NO recorded identity at all (written before this fix) always fails closed
+    here — excluded, never grandfathered (CLAUDE.md's no-back-compat rule; this platform has no
+    users yet).
+
+    Each returned record also carries ``adjudication_covered`` (Fix H) — ``True`` when there is
+    positive evidence a human could have caught a missed object on this image:
+
+      - a verdict-bearing image: the image's ``gt_preexisting`` fact is ``True``, OR at least one
+        of its (scoped) verdict entries is a gt-only entry (``pred_bbox_norm is None and
+        gt_bbox_norm is not None``) — the breeder actually swept this image for missed objects,
+        whether or not they found one.
+      - a zero-verdict (``mark_complete``) image: the RECORDED ``adjudication_covered`` fact the
+        route stamped at completion time (stage-6 review) — ``True`` only for a genuine negative
+        (the route confirmed the bucket held zero predictions for this image, so there was nothing
+        to individually adjudicate and Complete is itself the confirming act), never for a bulk-
+        accept of a populated image the breeder never individually reviewed. A missing/unset fact
+        (verdicts written before this distinction existed) is ``False`` — fails closed, matching
+        every other unrecorded-fact rule in this cluster.
+
+    ``resolve_operating_point_from_review`` passes this field to ``resolve_operating_point`` as a
+    GATE (Fix H) — every record must satisfy it or the whole reference is refused, never a per-record
+    filter (a filter here is a fail-open: the excluded set correlates with the quantity being
+    measured — see ``resolve_operating_point``'s own docstring for the reproduced scenario).
 
     ``image_dims`` maps image name (WITH extension, as review state keys it) -> ``(width, height)``
     to denormalize boxes to pixels (the faithful scale); omit it to keep records on the normalized
@@ -69,9 +152,32 @@ def review_to_records(
         if only_completed and img_data.get("img_status") != "completed":
             continue
         img_w, img_h = dims.get(img_name, (1.0, 1.0))
+        detections = img_data.get("detections") or []
+        gt_preexisting = bool(img_data.get("gt_preexisting"))
+
+        if not detections:
+            # A confirmed-negative / zero-verdict image (mark_complete): nothing here to carry a
+            # per-entry identity, so it lives at the image level instead (Fix G item 2). Coverage is
+            # the RECORDED fact the route stamped at completion time — True only for a genuine
+            # negative (bucket held zero predictions here), never inferred from gt_preexisting
+            # (stage-6 review: gt_preexisting is never set on a zero-verdict image, since only
+            # record_detection_action writes it, so treating it as the coverage fact silently
+            # dropped every confirmed negative from the reference).
+            if not _matches_any_bucket(img_data.get("producer_identity"), bucket_identities):
+                continue
+            records.append({"width": int(img_w), "height": int(img_h),
+                            "image_id": Path(img_name).stem, "gt": [], "dt": [],
+                            "adjudication_covered": bool(img_data.get("adjudication_covered"))})
+            continue
+
+        scoped = [e for e in detections
+                 if _matches_any_bucket(e.get("producer_identity"), bucket_identities)]
+        if not scoped:
+            continue  # nothing on this image pertains to the bucket(s) being validated
+
         gt: list[dict] = []
         dt: list[dict] = []
-        for entry in img_data.get("detections", []):
+        for entry in scoped:
             action = entry.get("action")
             cid = int(entry.get("class_id", 0))
             gt_norm = entry.get("gt_bbox_norm")
@@ -87,8 +193,12 @@ def review_to_records(
                 if box and len(box) == 4:
                     gt.append({"category_id": cid + 1, "bbox": _to_xywh(box, img_w, img_h),
                                "iscrowd": 0})
+        has_gt_only_entry = any(
+            e.get("pred_bbox_norm") is None and e.get("gt_bbox_norm") is not None for e in scoped
+        )
         records.append({"width": int(img_w), "height": int(img_h),
-                        "image_id": Path(img_name).stem, "gt": gt, "dt": dt})
+                        "image_id": Path(img_name).stem, "gt": gt, "dt": dt,
+                        "adjudication_covered": gt_preexisting or has_gt_only_entry})
     return records
 
 
@@ -107,10 +217,46 @@ def review_reference_hash(records: list[dict]) -> str:
     return h.hexdigest()[:16]
 
 
+def review_conf_threshold(
+    review_state: dict, *, bucket_identities: list[dict], only_completed: bool = True,
+) -> float | None:
+    """The review session's effective confidence-display threshold (Fix D item 4), from RECORDED
+    verdict facts — the max ``conf_threshold`` across every (bucket-scoped) verdict entry on the
+    images this reference includes, never a re-typed default.
+
+    Scoped by ``bucket_identities`` the same way :func:`review_to_records` scopes gt/dt (the SAME
+    predicate, ``_matches_any_bucket`` — one implementation, not a second one that could drift), so
+    an unrelated review session over a different model's predictions never inflates or deflates the
+    floor this reference was actually shown at.
+
+    ``None`` when any image (with at least one bucket-scoped verdict entry) recorded no
+    ``conf_threshold`` on any of them (verdicts written before this fix) — the review-side term is
+    then UNKNOWN, which the caller combines with the generation-side floor via ``max(...)``; either
+    half unknown makes the combined ``staged_conf_floor`` ``None`` (fails closed per
+    ``_conf_censored``, the same rule Fix G's missing identity follows). An image with zero
+    bucket-scoped verdict entries (nothing walked/reviewed against this bucket) contributes
+    nothing here — neither raising a value nor tripping the unknown case.
+    """
+    thresholds: list[float] = []
+    for img_data in review_state.get("image", {}).values():
+        if only_completed and img_data.get("img_status") != "completed":
+            continue
+        scoped = [e for e in (img_data.get("detections") or [])
+                 if _matches_any_bucket(e.get("producer_identity"), bucket_identities)]
+        if not scoped:
+            continue
+        image_thresholds = [e.get("conf_threshold") for e in scoped]
+        if any(t is None for t in image_thresholds):
+            return None
+        thresholds.extend(float(t) for t in image_thresholds)
+    return max(thresholds) if thresholds else None
+
+
 def resolve_operating_point_from_review(
     review_state: dict,
     trait_name: str,
     *,
+    bucket_identities: list[dict],
     image_dims: dict[str, tuple[int, int]] | None = None,
     only_completed: bool = True,
     tile_size: int | None = None,
@@ -122,6 +268,7 @@ def resolve_operating_point_from_review(
     seed: int = 0,
     holdout_ratio: float = 0.5,
     experiment_id: str | None = None,
+    staged_conf_floor: float | None = None,
 ) -> ResolvedBundle:
     """Resolve the count operating point from review verdicts (the review-confirmation reference).
 
@@ -137,6 +284,18 @@ def resolve_operating_point_from_review(
     regardless, and any divergence is surfaced on the bundle's conf sweep, not just logged
     (``attach_split_policy_provenance``, K1 finding 5).
 
+    ``bucket_identities`` (Fix G — REQUIRED, no default): threaded straight to
+    ``review_to_records`` — see there for the scoping/fail-closed semantics. There is no
+    legitimate call to this function without a target bucket; a caller who genuinely has none must
+    still say so explicitly by passing an empty list (which, per the same fail-closed rule, refuses
+    every verdict rather than silently admitting them all).
+
+    ``staged_conf_floor`` (Fix D) is the effective floor the reviewed predictions were staged/shown
+    at — ``max(generation_conf, review_conf_threshold)`` per the design, computed by the CALLER
+    (``routes/review.py``, which has both the buckets' ``operating_point.json`` sidecars and
+    ``review_conf_threshold``'s recorded-verdict computation) and passed straight through to
+    ``resolve_operating_point``. This function does not derive it.
+
     ``resolve_locked_cal_holdout_split`` raises ``ValueError`` when the lock references a stem no
     longer among the reviewed images, or when its lock file is corrupt (K1 finding 4) — this
     propagates to the caller rather than crashing later on a missing dict lookup.
@@ -146,7 +305,8 @@ def resolve_operating_point_from_review(
         attach_split_policy_provenance, resolve_operating_point,
     )
 
-    records = review_to_records(review_state, image_dims=image_dims, only_completed=only_completed)
+    records = review_to_records(review_state, image_dims=image_dims, only_completed=only_completed,
+                                bucket_identities=bucket_identities)
     ref_hash = review_reference_hash(records)
     by_id = {str(r.get("image_id", "")): r for r in records}
     stems = sorted(by_id)
@@ -163,7 +323,8 @@ def resolve_operating_point_from_review(
         holdout_records=hold_records or None,
         tile_size=tile_size, tiled=tiled, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         validated_reference=VALIDATED_REVIEW_CONFIRMED,
-        experiment_id=experiment_id,
+        experiment_id=experiment_id, staged_conf_floor=staged_conf_floor,
+        adjudication_covered=lambda r: bool(r.get("adjudication_covered")),
     )
     attach_split_policy_provenance(bundle, locked)
     return bundle
@@ -173,12 +334,16 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
     """Translate a review-confirmed operating-point bundle into a breeder-legible validation result.
 
     Reads the conf param's own sweep diagnostics (the SAME gate output ``resolve_operating_point``
-    already produced — never a re-run) and maps them to plain language a non-CV breeder can act on:
-    validated, or a specific "not yet" with the reason (predictions produced at too high a conf, not
-    enough reviewed images to hold some back, the held-back counts didn't agree closely enough, the
-    held-back images duplicate the calibration images' content, or the model's training record
-    can't confirm the reviewed images were actually held out — K1 finding 3). Pure over the bundle —
-    no torch, no re-derivation.
+    already produced — never a re-run) and maps them to plain language a non-CV breeder can act on.
+    ``resolve_operating_point``'s named ``failures`` list (cross-cutting, K2) is the single source of
+    truth for WHICH check refused; this function's job is only to translate each name to a message —
+    exhaustively, so an unrecognized failure name is a loud error here, not a silent fallthrough to
+    the generic "counts didn't agree" message. Pure over the bundle — no torch, no re-derivation.
+
+    Fix I: the "Validated" message's miss-coverage claim is read directly off the exact-conf holdout
+    curve entry Fix F produces (``sweep['holdout_bias']``, already carrying ``tp``/``fn``/``recall``
+    at precisely the shipped conf) — never a second, independently-computed miss statistic that could
+    drift from what the gate actually decided.
     """
     conf = bundle.params.get("conf")
     validated = bool(conf is not None and conf.is_shippable)
@@ -187,36 +352,81 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
     conf_value = (float(conf.unvalidated_value(acknowledge_unvalidated=True))
                   if conf is not None else None)
     sweep = (conf.sweep if conf is not None else None) or {}
-    td = sweep.get("train_disjointness") or {}
+    failures = sweep.get("failures") or []
+    # Stage-6 review: the elif chain below returns on the FIRST recognized name, so an unmapped name
+    # riding alongside a recognized one used to fall through silently instead of raising. Check
+    # exhaustiveness unconditionally, over the WHOLE list, before any branch runs.
+    unrecognized = set(failures) - _KNOWN_FAILURE_NAMES
+    if unrecognized:
+        raise AssertionError(
+            f"resolve_operating_point reported unrecognized gate failure(s) {sorted(unrecognized)} "
+            f"(full list: {failures!r}) — describe_review_validation has no breeder-facing message "
+            "for one of these yet.")
     if validated:
+        hb = sweep.get("holdout_bias") or {}
+        tp, fn = hb.get("tp"), hb.get("fn")
+        miss_note = ""
+        if tp is not None and fn is not None and (tp + fn) > 0:
+            miss_note = (f" On the held-back images, it found {tp} of {tp + fn} objects you "
+                        f"confirmed ({100 * tp / (tp + fn):.0f}% recall).")
         reason = (f"Validated. Your review of {reviewed_image_count} reviewed image(s) confirms this "
-                  "model's counts closely enough to use as a validation reference for results.")
-    elif sweep.get("conf_censored"):
-        reason = ("Not yet. The reviewed predictions were produced at too high a confidence cutoff, so "
-                  "the check can't see the borderline detections it needs. Re-run the predictions at a "
-                  "low confidence, review those, then try again.")
+                  f"model's counts closely enough to use as a validation reference for results.{miss_note}")
     elif "passed_holdout" not in sweep:
+        # Stage-6 review: this branch must come before conf_censored/conf_floor_mismatch. Those two
+        # raw sweep keys are ALSO present (and often True/truthy) in the no-holdout branch's
+        # sweep_data, which has no "failures" list at all — checking the raw keys here misdirected a
+        # "too few images reviewed" session into "re-run at a low confidence" every time.
         reason = ("Not yet. Too few images have been reviewed — the check needs at least two fully "
                   "reviewed images so it can hold some back to test against. Review a few more, then "
                   "try again.")
-    elif not sweep.get("disjoint", False):
+    elif "conf_censored" in failures:
+        reason = ("Not yet. The reviewed predictions were produced at too high a confidence cutoff, so "
+                  "the check can't see the borderline detections it needs. Re-run the predictions at a "
+                  "low confidence, review those, then try again.")
+    elif "insufficient_adjudication_coverage" in failures:
+        reason = ("Not yet. At least one of these reviewed images shows no evidence that missed "
+                  "objects were checked for. For images that had no ground truth before this "
+                  'review: uncheck "Reviewed" on that image to unlock it, use the "mark missed '
+                  'object" tool at least once — even just to confirm nothing was missed — then '
+                  'mark it Reviewed again. Then try again.')
+    elif "insufficient_calibration_gt" in failures or "insufficient_holdout_gt" in failures:
+        reason = ("Not yet. One side of the review split has no confirmed objects at all — an "
+                  "all-negative reference can't validate a count. Review some images with real "
+                  "objects represented on both sides, then try again.")
+    elif "insufficient_holdout_images" in failures:
+        reason = ("Not yet. Only one image was held back to check against — the platform needs at "
+                  "least two so it can judge how consistent the counts are, not just whether they "
+                  "happen to agree once. Review a few more images, then try again.")
+    elif "not_disjoint" in failures:
         reason = ("Not yet. The reviewed images couldn't be split into independent groups to "
                   "cross-check. Review more images, then try again.")
-    elif td.get("unresolvable"):
+    elif "train_disjointness_unresolvable" in failures:
         reason = ("Not yet. This model's training record doesn't establish which images it trained "
                   "on, so the platform can't confirm the reviewed images were actually held back. "
                   "Retrain with the current data (which records this), or use a model whose training "
                   "record is known.")
-    elif td.get("leaked_groups") or td.get("leaked_stems"):
+    elif "train_disjointness_leaked" in failures:
         reason = ("Not yet. Some of the reviewed images (or images from the same source, e.g. tiles "
                   "of one photo) were also used to train this model, so they can't function as an "
                   "independent check. Review a different set of images this model never trained on.")
-    elif sweep.get("content_duplicated"):
+    elif "content_duplicated" in failures:
         reason = ("Not yet. The held-back images you reviewed duplicate the calibration images' "
                   "content, so they can't function as an independent check. Review a genuinely "
                   "distinct set of images, then try again.")
-    else:
+    elif "localization_quality_floor_failed" in failures:
+        reason = ("Not yet. On the held-back images, the counts happened to match, but the model's "
+                  "predictions didn't actually line up with what you confirmed — the agreement is "
+                  "coincidental, not real matching. Review more images, or improve the model.")
+    elif "count_error_dispersion_too_high" in failures:
+        reason = ("Not yet. On the held-back images, the counts agree on average, but individual "
+                  "images are far off in ways that cancel out overall — the count isn't reliable "
+                  "image-to-image yet. Review more images, or improve the model.")
+    elif "count_bias_exceeds_tolerance" in failures:
         reason = ("Not yet. On the held-back images, the model's counts didn't agree closely enough "
                   "with your review to trust them yet. Reviewing more images, or improving the model, "
                   "can help.")
+    else:
+        raise AssertionError(
+            f"resolve_operating_point reported unrecognized gate failure(s) {failures!r} — "
+            "describe_review_validation has no breeder-facing message for one of these yet.")
     return {"validated": validated, "reference": reference, "conf": conf_value, "reason": reason}
