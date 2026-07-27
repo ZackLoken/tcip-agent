@@ -366,10 +366,13 @@ def test_golden_consolidated_operating_point_defaults():
     assert gp_sig.parameters["tile_size"].default == R.DEFAULT_TILE_SIZE
     assert gp_sig.parameters["global_nms_iou"].default == R.DEFAULT_NMS_IOU
 
-    # training_tools.evaluate_model — the eval-surface max_dets default is a separate knob (not
-    # the inference operating point) and is unchanged by R1.
+    # training_tools.evaluate_model — K10 finding 2: max_dets is no longer a plain 100 default
+    # shared by both eval regimes via a rescuing ">100 else 1000" sentinel (which collided with
+    # _max_dets_from_density's own floor of exactly 100). The signature default is now the honest
+    # None sentinel; TRAP 5 (cluster-map.md) requires pinning what each regime RESOLVES it to for a
+    # no-arg caller, not just the unspecified shape — see the two resolved-value assertions below.
     ev_sig = inspect.signature(TT.evaluate_model)
-    assert ev_sig.parameters["max_dets"].default == 100
+    assert ev_sig.parameters["max_dets"].default is None
     assert ev_sig.parameters["iou_threshold"].default == 0.5
     assert ev_sig.parameters["global_nms_iou"].default == 0.3
     assert ev_sig.parameters["conf_threshold"].default == 0.5
@@ -381,8 +384,69 @@ def test_golden_consolidated_operating_point_defaults():
     assert coco_sig.parameters["max_dets"].default == 100
     ff_sig = inspect.signature(EV.run_full_frame_evaluation)
     assert ff_sig.parameters["global_nms_iou"].default == 0.3
+    # K10 finding 1: tile_size/overlap are no longer pinned constants (640/0.2) — an honest None
+    # sentinel resolved from the checkpoint's persisted geometry (or refused) by resolve_tile_geometry.
+    assert ff_sig.parameters["tile_size"].default is None
+    assert ff_sig.parameters["overlap"].default is None
+    # max_dets itself keeps its own 1000 default at this layer (the delivery-grade default,
+    # distinct from evaluate_model's None sentinel one layer up).
     assert ff_sig.parameters["max_dets"].default == 1000
     assert EV.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
+
+
+def test_golden_k10_evaluate_model_resolves_max_dets_per_regime_when_unset():
+    """TRAP 5 counterpart assertion (cluster-map.md): a signature-shape golden alone cannot see
+    what a no-arg caller's max_dets actually RESOLVES to per regime — without this, the golden set
+    would ratify "the default is unspecified" rather than pin the two real behaviors (1000 on the
+    delivery-gating regime, 100 on the tile-level/diagnostic regime)."""
+    from tcip_mcp.pipelines import resolution as R
+    from tcip_mcp.pipelines.training import evaluation as EV
+    from tcip_mcp.tools import training_tools as TT
+
+    captured: dict = {}
+
+    def _fake_gate(ckpt, images_dir, labels_dir, output_dir, **kw):
+        captured["gate_max_dets"] = kw.get("max_dets")
+        return {"eval_regime": "full-frame-tiled-inference"}
+
+    def _fake_diagnostic(ckpt, loader, device, task, output_dir, **kw):
+        captured["diagnostic_max_dets"] = kw.get("max_dets")
+        return {"tiled": False, "eval_regime": "tile-level"}
+
+    orig_gate = EV.run_full_frame_evaluation
+    orig_diag = EV.run_test_evaluation
+    try:
+        EV.run_full_frame_evaluation = _fake_gate
+        EV.run_test_evaluation = _fake_diagnostic
+        import tempfile
+        from pathlib import Path as _Path
+
+        from PIL import Image
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        with tempfile.TemporaryDirectory() as td:
+            tmp = _Path(td)
+            images_dir, labels_dir = tmp / "images", tmp / "labels"
+            images_dir.mkdir()
+            labels_dir.mkdir()
+            Image.new("RGB", (64, 64)).save(images_dir / "a.png")
+            json_io.write_annotations(str(labels_dir / "a.json"),
+                                      [Annotation(subject="catkin", geometry=BBox(5, 5, 20, 20))],
+                                      64, 64)
+            ckpt = tmp / "m.pt"
+            ckpt.write_bytes(b"x")
+
+            TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+                              subject="catkin", use_tiled_inference=True)
+            TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+                              subject="catkin")
+    finally:
+        EV.run_full_frame_evaluation = orig_gate
+        EV.run_test_evaluation = orig_diag
+
+    assert captured["gate_max_dets"] == R.DEFAULT_MAX_DETS == 1000
+    assert captured["diagnostic_max_dets"] == 100
 
 
 # ══════════════════════════════════════════════════════════════════════════
