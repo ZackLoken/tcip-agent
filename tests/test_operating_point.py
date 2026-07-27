@@ -8,13 +8,16 @@ import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
+from tests._dense_op_fixtures import dense_records  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
-    count_bias_at,
     gt_class_avg_size,
     pick_count_unbiased,
     pick_f1_max,
     sweep_operating_point,
 )
+
+N_IMAGES = 20
+OBJECTS_PER_IMAGE = 80
 
 
 def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
@@ -51,6 +54,21 @@ def _records(idp="c", *, shift: float = 0.0):
     return [a, b]
 
 
+def _good_cal_holdout(*, shift: float = 5.0):
+    """A dense, realistic (rule 17) reference: a good detector with one low-conf spurious detection
+    per image (a realistic false-positive profile) that vanishes once conf crosses it — the
+    count-unbiased pick lands at the high, correct-match score (0.9), comfortably above a real
+    calibration floor, with zero bias/dispersion and full recall/precision on the holdout.
+    """
+    miss = [0] * N_IMAGES
+    fp = [1] * N_IMAGES
+    cal = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="c",
+                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
+                         shift=shift, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    return cal, hold
+
+
 def test_gt_class_avg_size_derived_from_data():
     assert gt_class_avg_size(_records()) == pytest.approx(20.0)
 
@@ -66,10 +84,11 @@ def test_count_unbiased_differs_from_f1_max():
     assert f1m == pytest.approx(0.0)  # F1 peaks at low conf (hesitant true det lifts recall)
     assert cu != f1m  # the whole point: a count phenotype is not optimized by F1
 
+    by_conf = {round(c["conf"], 6): c for c in sweep["curve"]}
     # at the count-unbiased point the net per-image count bias vanishes...
-    assert count_bias_at(sweep, cu)["count_bias_mean"] == pytest.approx(0.0)
+    assert by_conf[round(cu, 6)]["count_bias_mean"] == pytest.approx(0.0)
     # ...while the F1-max point over-counts (keeps A's spurious det for recall's sake).
-    assert count_bias_at(sweep, f1m)["count_bias_mean"] == pytest.approx(0.5)
+    assert by_conf[round(f1m, 6)]["count_bias_mean"] == pytest.approx(0.5)
 
 
 def test_center_match_respects_tolerance():
@@ -77,8 +96,23 @@ def test_center_match_respects_tolerance():
     recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
              "dt": [_ann(100 + 100, 100, score=0.9)]}]  # 100px off, tolerance ~10
     sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
-    at0 = count_bias_at(sweep, 0.0)
+    at0 = sweep["curve"][0]  # conf=0.0 is always the first (lowest) grid point
+    assert at0["conf"] == pytest.approx(0.0)
     assert at0["tp"] == 0 and at0["fp"] == 1 and at0["fn"] == 1  # miss + false positive
+
+
+def test_sweep_curve_carries_dispersion_and_reference_size_fields():
+    # Fix B/C: every curve entry now also carries count_error_p90 / count_bias_std / n_images,
+    # computed from the SAME per-image biases list, not a second pass over the data.
+    recs = dense_records(n_images=4, objects_per_image=10,
+                         miss_pattern=[0, 1, 0, 2], fp_pattern=[0, 0, 1, 0])
+    sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    at09 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.9))
+    # biases = fp - fn per image = [0, -1, 1, -2]
+    assert at09["n_images"] == 4
+    assert at09["count_bias_mean"] == pytest.approx(-0.5)
+    assert at09["count_bias_std"] == pytest.approx(1.2909944, abs=1e-5)
+    assert at09["count_error_p90"] == pytest.approx(1.7, abs=1e-6)
 
 
 # --- resolve_operating_point + the in-model seam ---
@@ -127,30 +161,24 @@ def test_max_dets_from_density_floors_sparse_scenes():
 
 def test_resolve_operating_point_validated_with_holdout():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    cal, hold = _good_cal_holdout()
     b = resolve_operating_point("catkin", dataset_hash="h1",
-                                calibration_records=_records("c"),
-                                holdout_records=_records("h", shift=3.0))
+                                calibration_records=cal, holdout_records=hold,
+                                staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.derivation_class == "calibration"
     assert conf.validated_vs_gt == "validated_held_out"
     assert b.is_shippable
-    assert conf.value == pytest.approx(0.6)  # count-unbiased pick
+    assert conf.value == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert b.get("max_dets").value >= 100  # derived from GT density
     sweep = conf.sweep
+    assert sweep["failures"] == []
     assert sweep["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout content
     assert sweep["train_disjointness"] == {"checked": False, "unresolvable": False,
                                            "leaked_groups": [], "leaked_stems": [],
                                            "group_check": None}
-    assert sweep["calibration_image_ids"] == ["c_a", "c_b"]
-    assert sweep["holdout_image_ids"] == ["h_a", "h_b"]
-
-
-def _biased_holdout():
-    # each image: 1 GT + 2 spurious far high-conf detections, so the count over-counts by ~2 at the
-    # calibration-chosen conf, i.e. it fails on this held-out split.
-    return [{"width": 400, "height": 400, "image_id": f"h_{i}", "gt": [_ann(100, 100)],
-             "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.9), _ann(50, 300, score=0.9)]}
-            for i in range(3)]
+    assert set(sweep["calibration_image_ids"]) == {f"c_{i}" for i in range(N_IMAGES)}
+    assert set(sweep["holdout_image_ids"]) == {f"h_{i}" for i in range(N_IMAGES)}
 
 
 def test_resolve_operating_point_overlapping_holdout_not_validated():
@@ -177,11 +205,19 @@ def test_resolve_operating_point_missing_image_ids_fails_closed():
 
 def test_resolve_operating_point_biased_holdout_is_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    cal, _ = _good_cal_holdout()
+    # a dense holdout with a REAL, consistent per-image miss (not just a sparse fixture's one-off
+    # spread) — count bias -3/image, well beyond tolerance regardless of dispersion/SE.
+    biased_hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
+                                shift=5.0, miss_pattern=[3] * N_IMAGES, fp_pattern=[0] * N_IMAGES,
+                                score=0.9)
     b = resolve_operating_point("catkin", dataset_hash="h1",
-                                calibration_records=_records(), holdout_records=_biased_holdout())
+                                calibration_records=cal, holdout_records=biased_hold,
+                                staged_conf_floor=0.01)
     # measured on the disjoint split but FAILED (bias > tolerance) -> not validated, firewall holds
     assert b.get("conf").validated_vs_gt == "false"
     assert not b.is_shippable
+    assert "count_bias_exceeds_tolerance" in b.get("conf").sweep["failures"]
 
 
 def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable():
@@ -232,15 +268,16 @@ def test_resolve_operating_point_train_disjointness_unresolvable_when_split_miss
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     # A KNOWN experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
     # experiment_id=None case (a foreign/unregistered checkpoint), per the owner decision.
+    cal, hold = _good_cal_holdout()
     b = resolve_operating_point("catkin", dataset_hash="h1",
-                                calibration_records=_records("c"),
-                                holdout_records=_records("h", shift=3.0),
-                                experiment_id="does-not-exist")
+                                calibration_records=cal, holdout_records=hold,
+                                staged_conf_floor=0.01, experiment_id="does-not-exist")
     conf = b.get("conf")
     assert conf.validated_vs_gt == "false"
     assert conf.sweep["train_disjointness"] == {"checked": False, "unresolvable": True,
                                                  "leaked_groups": [], "leaked_stems": [],
                                                  "group_check": None}
+    assert "train_disjointness_unresolvable" in conf.sweep["failures"]
 
 
 def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_validates(tmp_path, monkeypatch):
@@ -252,11 +289,11 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
     (exp_dir / "split.json").write_text(
         json.dumps({"train": ["z_0_0", "z_0_1"], "group_by": "tile_prefix"}), encoding="utf-8")
 
-    # Calibration/holdout use tile groups "c"/"h" — disjoint from training's "z" group.
+    # Calibration/holdout use id prefixes "c"/"h" — disjoint from training's "z" group.
+    cal, hold = _good_cal_holdout()
     b = resolve_operating_point("catkin", dataset_hash="h1",
-                                calibration_records=_records("c"),
-                                holdout_records=_records("h", shift=3.0),
-                                experiment_id="exp2")
+                                calibration_records=cal, holdout_records=hold,
+                                staged_conf_floor=0.01, experiment_id="exp2")
     conf = b.get("conf")
     assert conf.validated_vs_gt == "validated_held_out"
     assert b.is_shippable
