@@ -58,11 +58,21 @@ export const classesApi = {
 
   // A Complete is a statement about one subject on one date. Every read and write is scoped to it,
   // so confirming an image while annotating catkins cannot mark it negative for a disease subject
-  // nobody has looked at yet.
-  loadImageStatus: (project_root: string, subject: string | null, date: string | null) => {
+  // nobody has looked at yet. Confirmations are dataset-native (like the registry) rather than
+  // project-private, so dataset_root/annotations_dir resolve where the store actually lives —
+  // same as classesApi.load/save above.
+  loadImageStatus: (
+    project_root: string,
+    subject: string | null,
+    date: string | null,
+    dataset_root?: string | null,
+    annotations_dir?: string | null,
+  ) => {
     const params = new URLSearchParams({ project_root });
     if (subject) params.set("subject", subject);
     if (date) params.set("date", date);
+    if (dataset_root) params.set("dataset_root", dataset_root);
+    if (annotations_dir) params.set("annotations_dir", annotations_dir);
     return getJson<{ statuses: Record<string, ImageStatus> }>(
       `/api/classes/image_status?${params.toString()}`,
     );
@@ -74,6 +84,8 @@ export const classesApi = {
     status: ImageStatus,
     subject: string | null,
     date: string | null,
+    dataset_root?: string | null,
+    annotations_dir?: string | null,
   ) =>
     postJson<unknown>("/api/classes/image_status", {
       project_root,
@@ -81,6 +93,8 @@ export const classesApi = {
       status,
       subject,
       date,
+      dataset_root,
+      annotations_dir,
     }),
 
   setImageStatusBulk: (
@@ -88,8 +102,17 @@ export const classesApi = {
     statuses: Record<string, ImageStatus>,
     subject: string | null,
     date: string | null,
+    dataset_root?: string | null,
+    annotations_dir?: string | null,
   ) =>
-    postJson<unknown>("/api/classes/image_status/bulk", { project_root, statuses, subject, date }),
+    postJson<unknown>("/api/classes/image_status/bulk", {
+      project_root,
+      statuses,
+      subject,
+      date,
+      dataset_root,
+      annotations_dir,
+    }),
 
   deriveImageStatus: (body: {
     project_root: string;
