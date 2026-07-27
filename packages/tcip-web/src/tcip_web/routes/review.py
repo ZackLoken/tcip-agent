@@ -595,14 +595,28 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     from tcip_mcp.traits import TraitUnknownError
 
     review_state = {"image": completed}
+    # K1: thread the producing run's experiment_id through so the calibration's train-disjointness
+    # gate can check the reviewed images against that run's training split. Sourced from the
+    # buckets' own operating_point.json sidecars (stamped by export_predictions), never asserted —
+    # when multiple buckets disagree on which run produced them, pass None (mixed-provenance
+    # shouldn't silently vouch for one run's disjointness) rather than raising, so this route keeps
+    # working for a legitimate multi-bucket review call.
+    bucket_exp_ids = {sc.get("experiment_id") for sc in sidecars.values() if sc.get("experiment_id")}
+    review_experiment_id = next(iter(bucket_exp_ids)) if len(bucket_exp_ids) == 1 else None
     try:
-        bundle = resolve_operating_point_from_review(review_state, req.trait, only_completed=True)
+        bundle = resolve_operating_point_from_review(
+            review_state, req.trait, only_completed=True, experiment_id=review_experiment_id)
     except TraitUnknownError:
         raise HTTPException(
             400,
             f"a validation reference is not defined for trait {req.trait!r} yet — this action is "
             "available for traits the platform can calibrate a count operating point for.",
         ) from None
+    except ValueError as exc:
+        # A locked cal/holdout split refusing this call (K1 finding 4): a reviewed image was
+        # deleted/renamed since the split locked, or the lock file itself is corrupt. Either way
+        # this is an honest refusal, not a 500 — surface it as such.
+        raise HTTPException(400, str(exc)) from None
 
     result = describe_review_validation(bundle, reviewed_image_count=n)
 
