@@ -40,12 +40,15 @@ def _floored_state():
 def test_review_to_records_reconstructs_gt_and_dt():
     recs = review_to_records(_floored_state(), image_dims=_DIMS)
     by_id = {r["image_id"]: r for r in recs}
+    # image_id is the STEM (K1 finding 2), matching the GT path's convention and training stems —
+    # an extensioned id here could never match a training stem in _train_disjointness.
+    assert set(by_id) == {"A", "B"}
     # gt = affirmed boxes (accepted/edited/FN/accepted-FP); dt = every model prediction w/ its score.
-    assert len(by_id["A.jpg"]["gt"]) == 1  # rejected FP is NOT gt
-    assert sorted(d["score"] for d in by_id["A.jpg"]["dt"]) == [0.05, 0.9]  # both predictions kept
-    assert len(by_id["B.jpg"]["gt"]) == 2
+    assert len(by_id["A"]["gt"]) == 1  # rejected FP is NOT gt
+    assert sorted(d["score"] for d in by_id["A"]["dt"]) == [0.05, 0.9]  # both predictions kept
+    assert len(by_id["B"]["gt"]) == 2
     # boxes are pixel xywh top-left (denormalized), category lifted to 1-indexed like the GT path.
-    gt0 = by_id["A.jpg"]["gt"][0]
+    gt0 = by_id["A"]["gt"][0]
     assert gt0["category_id"] == 1
     assert gt0["bbox"] == pytest.approx([90.0, 90.0, 20.0, 20.0])
 
@@ -55,7 +58,7 @@ def test_review_only_completed_images():
     state["image"]["C.jpg"] = {"img_status": "started", "detections": [
         _entry("TP", "accepted", 0, [0.1, 0.1, 0.05, 0.05], [0.1, 0.1, 0.05, 0.05], 0.9)]}
     ids = {r["image_id"] for r in review_to_records(state, image_dims=_DIMS)}
-    assert ids == {"A.jpg", "B.jpg"}  # a partially-reviewed image is not a confirmed reference
+    assert ids == {"A", "B"}  # a partially-reviewed image is not a confirmed reference
 
 
 def test_review_confirmed_stamps_when_the_same_gate_passes():
