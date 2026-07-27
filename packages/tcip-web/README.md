@@ -23,7 +23,7 @@ packages/tcip-web/
       images.py         # EXIF-oriented JPEG serving (+ downsample)
       review.py         # compute_matches, action, backup, save_gt
       training.py       # validate / launch / list / metrics / WS stream
-      inference.py      # SAHI-tiled background jobs + progress WS
+      inference.py      # SAHI-style tiled background jobs + progress WS
       results.py        # plant mapping + per-plant curves + onset dates + CSV
       tuning.py         # HPO launch + sweep listing
   frontend/             # Vite + React + TS + Tailwind + Zustand + Konva
