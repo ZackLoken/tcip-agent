@@ -29,7 +29,7 @@ export function InferenceTab() {
   const [modelPath, setModelPath] = useState<string>("");
   const [imagesDir, setImagesDir] = useState<string>("");
   const [outputDir, setOutputDir] = useState<string>("");
-  const [sahi, setSahi] = useState<boolean>(true);
+  const [tile, setTile] = useState<boolean>(true);
   const [postprocess, setPostprocess] = useState<"nms" | "nmm">("nms");
   const [conf, setConf] = useState<number>(0.25);
   const [iou, setIou] = useState<number>(0.7);
@@ -99,7 +99,7 @@ export function InferenceTab() {
         checkpoint_path: modelPath,
         images_dir: imagesDir,
         output_dir: outputDir,
-        sahi,
+        tile,
         conf,
         iou,
         slice_h: sliceH,
@@ -188,15 +188,15 @@ export function InferenceTab() {
 
         <div className="flex items-center gap-3 mb-3">
           <label className="flex items-center gap-2 text-[12px]">
-            <input type="checkbox" checked={sahi} onChange={(e) => setSahi(e.target.checked)} />
-            SAHI tiled inference
+            <input type="checkbox" checked={tile} onChange={(e) => setTile(e.target.checked)} />
+            Tiled inference
           </label>
           <label className="flex items-center gap-1 text-[12px] text-tcip-muted">
             Tile merge
             <select
               className="tcip-select text-[12px]"
               value={postprocess}
-              disabled={!sahi}
+              disabled={!tile}
               title="How boxes from adjacent tiles are combined. NMM unions a box split across a seam; NMS suppresses overlaps."
               onChange={(e) => setPostprocess(e.target.value === "nmm" ? "nmm" : "nms")}
             >
