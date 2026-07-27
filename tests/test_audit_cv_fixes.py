@@ -408,6 +408,24 @@ def _op_records(idp, *, shift=0.0):
     return [a, b]
 
 
+def _good_dense_cal_holdout():
+    """K2 rule 17: resolve_operating_point's holdout gate (Fix B/C) needs a REALISTIC dense
+    reference, not the 2-image ``_op_records`` toy (its per-image variance now trips Fix C's
+    equivalence criterion at n=2). A good detector with one low-conf spurious detection per image —
+    the count-unbiased pick lands at the high, correct-match score (0.9) once that FP is filtered
+    out, with zero bias/dispersion and full recall/precision on the holdout.
+    """
+    from tests._dense_op_fixtures import dense_records
+
+    n_images, objects_per_image = 20, 80
+    miss, fp = [0] * n_images, [1] * n_images
+    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
+                         shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    return cal, hold
+
+
 class _CalStub:
     """Predictor stub with the mutable operating-point surface run_inference sets."""
 
@@ -448,9 +466,10 @@ def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
+    cal, hold = _good_dense_cal_holdout()
     bundle = resolve_operating_point("catkin", dataset_hash="H",
-                                     calibration_records=_op_records("c"),
-                                     holdout_records=_op_records("h", shift=3.0))
+                                     calibration_records=cal, holdout_records=hold,
+                                     staged_conf_floor=0.01)
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H"))
     stub = _CalStub()
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
@@ -465,9 +484,9 @@ def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     assert r["conf_source"] == "calibration"
     assert r["validated"] is True                                   # held-out passed
     assert r["dataset_hash"] == "H"
-    assert r["operating_point"]["conf"]["value"] == pytest.approx(0.6)
-    assert stub.applied_conf == pytest.approx(0.6)                  # resolved conf governs the model
-    assert r["sweep_summary"]["count_unbiased_conf"] == pytest.approx(0.6)
+    assert r["operating_point"]["conf"]["value"] == pytest.approx(0.9)
+    assert stub.applied_conf == pytest.approx(0.9)                  # resolved conf governs the model
+    assert r["sweep_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
     assert Path(r["sweep_path"]).is_file()
 
 
@@ -509,9 +528,10 @@ def test_cv0_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypa
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
+    cal, hold = _good_dense_cal_holdout()
     bundle = resolve_operating_point("catkin", dataset_hash="H",
-                                     calibration_records=_op_records("c"),
-                                     holdout_records=_op_records("h", shift=3.0))
+                                     calibration_records=cal, holdout_records=hold,
+                                     staged_conf_floor=0.01)
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H"))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
     monkeypatch.chdir(tmp_path)
