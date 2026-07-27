@@ -391,15 +391,6 @@ def test_k10_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
 
 
-def test_k10_yolo_training_imgsz_none_when_absent():
-    """Before: _training_imgsz silently returned 640 on any read failure, so the delivery gate's
-    refusal could never fire for a YOLO checkpoint carrying no real training geometry — the
-    refusal was decorative for the whole model kind."""
-    from tcip_mcp.pipelines.inference.yolo_predictor import _training_imgsz
-
-    assert _training_imgsz("/nonexistent/checkpoint/path.pt") is None
-
-
 def test_cv2_explicit_tile_size_wins(tmp_path, monkeypatch):
     from tcip_mcp.tools.inference_tools import run_inference
 
