@@ -1,5 +1,5 @@
 """Phase 2.1c — the web inference job runs through the tcip pipeline GenericPredictor
-(one detector code path), not a separate ultralytics+SAHI stack."""
+(one detector code path; K21 removed the second, ultralytics+SAHI-specific one)."""
 
 import pytest
 
@@ -66,7 +66,7 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
 
     job = InferenceJob(
         job_id="t", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), sahi=True, conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=True, conf=0.25, iou=0.7,
         slice_hw=(640, 640), overlap=0.2, postprocess="nmm",
     )
     _worker(job)
@@ -74,7 +74,7 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     assert job.status == "completed"
     assert job.done == 1 and job.total == 1
     assert captured["checkpoint"] == str(ckpt)
-    assert captured["tile"] is True                 # sahi=True -> pipeline tiling
+    assert captured["tile"] is True                 # tile=True -> pipeline tiling
     assert captured["postprocess"] == "nmm"         # the GUI's tile-merge choice reaches inference
     import json
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
