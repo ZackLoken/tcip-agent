@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED, ResolvedBundle
@@ -50,10 +51,17 @@ def review_to_records(
 ) -> list[dict]:
     """Reconstruct per-image COCO records (gt=affirmed, dt=model predictions) from review verdicts.
 
-    ``image_dims`` maps image name -> ``(width, height)`` to denormalize boxes to pixels (the
-    faithful scale); omit it to keep records on the normalized unit square. ``only_completed``
-    restricts to fully-reviewed images (a partially-reviewed image is not a confirmed reference).
-    Each record carries ``image_id=img_name`` so the disjointness the gate checks is provable.
+    ``image_dims`` maps image name (WITH extension, as review state keys it) -> ``(width, height)``
+    to denormalize boxes to pixels (the faithful scale); omit it to keep records on the normalized
+    unit square. ``only_completed`` restricts to fully-reviewed images (a partially-reviewed image
+    is not a confirmed reference).
+
+    Each record carries ``image_id=Path(img_name).stem`` — the STEM, not the extensioned review-
+    state key (K1 finding 2). Training stems (``split.json``'s ``"train"`` list) never carry an
+    extension, so an extensioned ``image_id`` here could never match a training stem in
+    ``_train_disjointness`` — the leak the disjointness check exists to catch went entirely
+    undetected on this path. Stemming also restores tile-group coherence: ``_TILE_GROUP_RE`` only
+    matches a bare stem, so an extensioned id degenerated to one group per tile.
     """
     dims = image_dims or {}
     records: list[dict] = []
@@ -80,7 +88,7 @@ def review_to_records(
                     gt.append({"category_id": cid + 1, "bbox": _to_xywh(box, img_w, img_h),
                                "iscrowd": 0})
         records.append({"width": int(img_w), "height": int(img_h),
-                        "image_id": img_name, "gt": gt, "dt": dt})
+                        "image_id": Path(img_name).stem, "gt": gt, "dt": dt})
     return records
 
 
@@ -109,30 +117,56 @@ def resolve_operating_point_from_review(
     tiled: bool | None = None,
     cross_tile_nms: float | None = None,
     max_dets: int | None = None,
+    group_by: str = "tile_prefix",
+    group_key_map: dict[str, str] | None = None,
+    seed: int = 0,
+    holdout_ratio: float = 0.5,
+    experiment_id: str | None = None,
 ) -> ResolvedBundle:
     """Resolve the count operating point from review verdicts (the review-confirmation reference).
 
-    Splits the reviewed images into a disjoint calibration/holdout half (by image, mirroring the
-    GT calibration path) and hands both to ``resolve_operating_point`` with
-    ``validated_reference='review_confirmed'`` — so the SAME disjoint + count-bias gate decides
-    whether the conf is shippable, and the conf-censoring guard still fails a display-floored
-    reference closed. Returns a bundle whose conf is stamped ``review_confirmed`` only if that gate
-    passes, else ``false``.
+    Splits the reviewed images into a LOCKED, group-aware calibration/holdout split (K1 —
+    ``resolve_locked_cal_holdout_split``, keyed by the review reference's own content hash so a
+    later call over the same verdicts returns the same split rather than a fresh cut) and hands
+    both to ``resolve_operating_point`` with ``validated_reference='review_confirmed'`` — so the
+    SAME disjoint + count-bias + content-overlap + train-disjointness gate decides whether the
+    conf is shippable, and the conf-censoring guard still fails a display-floored reference
+    closed. Returns a bundle whose conf is stamped ``review_confirmed`` only if that gate passes,
+    else ``false``. ``seed``/``holdout_ratio`` only govern the FIRST (locking) draw for this
+    reference's identity hash — a later call over the same verdicts returns the locked split
+    regardless, and any divergence is surfaced on the bundle's conf sweep, not just logged
+    (``attach_split_policy_provenance``, K1 finding 5).
+
+    ``resolve_locked_cal_holdout_split`` raises ``ValueError`` when the lock references a stem no
+    longer among the reviewed images, or when its lock file is corrupt (K1 finding 4) — this
+    propagates to the caller rather than crashing later on a missing dict lookup.
     """
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
+    from tcip_mcp.pipelines.operating_point import (
+        attach_split_policy_provenance, resolve_operating_point,
+    )
 
     records = review_to_records(review_state, image_dims=image_dims, only_completed=only_completed)
     ref_hash = review_reference_hash(records)
-    ordered = sorted(records, key=lambda r: str(r.get("image_id", "")))
-    mid = max(1, len(ordered) // 2)
-    cal_records, hold_records = ordered[:mid], ordered[mid:]
-    return resolve_operating_point(
+    by_id = {str(r.get("image_id", "")): r for r in records}
+    stems = sorted(by_id)
+    annotation_counts = {s: len(by_id[s].get("gt", [])) for s in stems}
+    locked = resolve_locked_cal_holdout_split(
+        stems, identity_hash=ref_hash, annotation_counts=annotation_counts,
+        group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
+    )
+    cal_records = [by_id[s] for s in locked["calibration"] if s in by_id]
+    hold_records = [by_id[s] for s in locked["holdout"] if s in by_id]
+    bundle = resolve_operating_point(
         trait_name, dataset_hash=ref_hash,
         calibration_records=cal_records or None,
         holdout_records=hold_records or None,
         tile_size=tile_size, tiled=tiled, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         validated_reference=VALIDATED_REVIEW_CONFIRMED,
+        experiment_id=experiment_id,
     )
+    attach_split_policy_provenance(bundle, locked)
+    return bundle
 
 
 def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: int) -> dict[str, Any]:
@@ -141,8 +175,10 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
     Reads the conf param's own sweep diagnostics (the SAME gate output ``resolve_operating_point``
     already produced — never a re-run) and maps them to plain language a non-CV breeder can act on:
     validated, or a specific "not yet" with the reason (predictions produced at too high a conf, not
-    enough reviewed images to hold some back, or the held-back counts didn't agree closely enough).
-    Pure over the bundle — no torch, no re-derivation.
+    enough reviewed images to hold some back, the held-back counts didn't agree closely enough, the
+    held-back images duplicate the calibration images' content, or the model's training record
+    can't confirm the reviewed images were actually held out — K1 finding 3). Pure over the bundle —
+    no torch, no re-derivation.
     """
     conf = bundle.params.get("conf")
     validated = bool(conf is not None and conf.is_shippable)
@@ -151,6 +187,7 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
     conf_value = (float(conf.unvalidated_value(acknowledge_unvalidated=True))
                   if conf is not None else None)
     sweep = (conf.sweep if conf is not None else None) or {}
+    td = sweep.get("train_disjointness") or {}
     if validated:
         reason = (f"Validated. Your review of {reviewed_image_count} reviewed image(s) confirms this "
                   "model's counts closely enough to use as a validation reference for results.")
@@ -165,6 +202,19 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
     elif not sweep.get("disjoint", False):
         reason = ("Not yet. The reviewed images couldn't be split into independent groups to "
                   "cross-check. Review more images, then try again.")
+    elif td.get("unresolvable"):
+        reason = ("Not yet. This model's training record doesn't establish which images it trained "
+                  "on, so the platform can't confirm the reviewed images were actually held back. "
+                  "Retrain with the current data (which records this), or use a model whose training "
+                  "record is known.")
+    elif td.get("leaked_groups") or td.get("leaked_stems"):
+        reason = ("Not yet. Some of the reviewed images (or images from the same source, e.g. tiles "
+                  "of one photo) were also used to train this model, so they can't function as an "
+                  "independent check. Review a different set of images this model never trained on.")
+    elif sweep.get("content_duplicated"):
+        reason = ("Not yet. The held-back images you reviewed duplicate the calibration images' "
+                  "content, so they can't function as an independent check. Review a genuinely "
+                  "distinct set of images, then try again.")
     else:
         reason = ("Not yet. On the held-back images, the model's counts didn't agree closely enough "
                   "with your review to trust them yet. Reviewing more images, or improving the model, "
