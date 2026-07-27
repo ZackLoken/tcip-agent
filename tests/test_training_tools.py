@@ -41,6 +41,102 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     assert preflight_config(cfg)["valid"] is True
 
 
+def test_preflight_config_warns_on_ignored_per_stage_lr(tmp_path):
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2,
+                     "stages": [{"freeze_to": -1, "epochs": 5, "lr": 1e-3}]},
+    }
+    r = preflight_config(cfg)
+    assert r["valid"] is True  # a per-stage lr is ignored, not rejected (StageSpec extra="allow")
+    assert any("stages[0].lr is set but ignored" in w for w in r["warnings"])
+
+    # No per-stage lr -> no warning.
+    cfg["training"]["stages"] = [{"freeze_to": -1, "epochs": 5}]
+    assert preflight_config(cfg)["warnings"] == []
+
+
+# --------------------------------------------------------------------------
+# preflight_config — training_source seam (K9): a bare "module:function" string
+# --------------------------------------------------------------------------
+
+def test_preflight_config_training_source_shape_and_importability(tmp_path):
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    base_cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2},
+    }
+
+    # A dict (the old, wrong shape) is rejected.
+    cfg = dict(base_cfg, training_source={"train": "tests.bespoke_models:build_bespoke_detection"})
+    r = preflight_config(cfg)
+    assert any("training_source must be a non-empty" in i for i in r["issues"])
+
+    # A bare string that doesn't import is rejected with the import error surfaced.
+    cfg = dict(base_cfg, training_source="nonexistent_module:train")
+    r = preflight_config(cfg)
+    assert any("training_source not importable" in i for i in r["issues"])
+
+    # A bare, importable string passes.
+    cfg = dict(base_cfg, training_source="tests.bespoke_models:build_bespoke_detection")
+    assert preflight_config(cfg)["valid"] is True
+
+    # Absent training_source is fine (optional seam).
+    assert preflight_config(base_cfg)["valid"] is True
+
+
+# --------------------------------------------------------------------------
+# preflight_config — selection_metric coherence (K9): reject a comparability-only
+# metric for a center-match trait at validation time, not mid-run.
+# --------------------------------------------------------------------------
+
+def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    base_cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2},
+    }
+
+    # A comparability-only metric for a center-match trait is rejected.
+    cfg = dict(base_cfg)
+    cfg["training"] = dict(cfg["training"], evaluation={"trait": "catkin", "selection_metric": "map50"})
+    r = preflight_config(cfg)
+    assert any("comparability-only" in i for i in r["issues"])
+
+    # A governing metric for the same trait is fine.
+    cfg["training"] = dict(cfg["training"], evaluation={"trait": "catkin", "selection_metric": "f1"})
+    assert preflight_config(cfg)["valid"] is True
+
+    # No trait -> no coherence gate, even for a comparability metric.
+    cfg["training"] = dict(cfg["training"], evaluation={"selection_metric": "map50"})
+    assert preflight_config(cfg)["valid"] is True
+
+
 # --------------------------------------------------------------------------
 # _apply_hpo_params — lr/weight_decay reach what the trainer actually reads
 # --------------------------------------------------------------------------
