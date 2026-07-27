@@ -31,14 +31,14 @@ export interface LaunchInferenceBody {
   checkpoint_path: string;
   images_dir: string;
   output_dir: string;
-  sahi?: boolean;
+  tile?: boolean;
   conf?: number;
   iou?: number;
   slice_h?: number;
   slice_w?: number;
   overlap?: number;
   // Cross-tile merge (tiled runs only): "nms" suppresses overlaps, "nmm" unions boxes split
-  // across a tile seam. Only meaningful when sahi=true.
+  // across a tile seam. Only meaningful when tile=true.
   postprocess?: "nms" | "nmm";
 }
 
