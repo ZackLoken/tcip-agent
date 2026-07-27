@@ -28,7 +28,7 @@ def require_composed_detector(predictor, *, purpose: str = "uncertainty scoring"
     """Return an error string if ``predictor`` isn't a bespoke tcip nn.Module detector, else None.
 
     The uncertainty/diversity scorers read logits from ``predictor.model`` as an ``nn.Module``;
-    a YOLO/ultralytics predictor's ``.model`` is not one, so scoring it is invalid.
+    a non-composed predictor kind's ``.model`` may not be one, so scoring it would be invalid.
     """
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 
