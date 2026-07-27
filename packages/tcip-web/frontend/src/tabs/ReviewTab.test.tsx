@@ -32,8 +32,23 @@ vi.mock("react-konva", () => ({
   Text: (props: { text?: string }) => <div data-testid="k-text" data-text={props.text} />,
 }));
 vi.mock("@/components/Canvas/CanvasStage", () => ({
-  CanvasStage: (props: { children?: React.ReactNode }) => (
-    <div data-testid="canvas-stage">{props.children}</div>
+  // Forward pixel handlers as plain mouse events (clientX/Y stand in for image-pixel coords — the
+  // real screen<->image conversion is CanvasStage's own concern, exercised elsewhere) so tests can
+  // simulate a canvas drag (e.g. the "mark missed object" draw) without a real Konva stage.
+  CanvasStage: (props: {
+    children?: React.ReactNode;
+    onPixelDown?: (x: number, y: number, ev: unknown) => void;
+    onPixelMove?: (x: number, y: number, ev: unknown) => void;
+    onPixelUp?: (x: number, y: number, ev: unknown) => void;
+  }) => (
+    <div
+      data-testid="canvas-stage"
+      onMouseDown={(e) => props.onPixelDown?.(e.clientX, e.clientY, { evt: { button: e.button } })}
+      onMouseMove={(e) => props.onPixelMove?.(e.clientX, e.clientY, { evt: { buttons: 1 } })}
+      onMouseUp={(e) => props.onPixelUp?.(e.clientX, e.clientY, { evt: {} })}
+    >
+      {props.children}
+    </div>
   ),
 }));
 const initialStoreState = useStore.getState();
@@ -308,6 +323,85 @@ describe("ReviewTab in-place edit", () => {
       screen.queryByTitle("Replace the ground-truth shape with this one (Enter)"),
     ).not.toBeInTheDocument();
     expect(screen.getByText(/Accept/)).toBeInTheDocument();
+    expect(actionSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReviewTab mark-missed-object affordance", () => {
+  let actionSpy: MockInstance<typeof api.review.action>;
+  let backupSpy: MockInstance<typeof api.review.backupLabels>;
+
+  const markBtn = () => screen.getByTitle(/Draw a box around an object the model missed/i);
+
+  beforeEach(() => {
+    // No existing detections at all — the exact case startEdit can't handle (nothing to seed from).
+    matchesSpy.mockResolvedValue(matchesRes([]));
+    actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
+      status: "ok",
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes([]),
+    });
+    backupSpy = vi.spyOn(api.review, "backupLabels").mockResolvedValue({
+      status: "ok",
+      files_backed_up: 0,
+    });
+  });
+
+  it("draws and submits a missed object with no detection selected", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(markBtn());
+    const stage = screen.getByTestId("canvas-stage");
+    fireEvent.mouseDown(stage, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseMove(stage, { clientX: 60, clientY: 60 });
+    fireEvent.mouseUp(stage, { clientX: 60, clientY: 60 });
+
+    expect(screen.getByText("Marking missed object")).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("Save this missed object to ground truth (Enter)"));
+
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    expect(backupSpy).toHaveBeenCalledTimes(1);
+    expect(actionSpy.mock.calls[0][0]).toMatchObject({
+      det_type: "fn",
+      action: "edited",
+      class_name: "catkin",
+      gt_idx: null,
+      pred_idx: null,
+      conf: null,
+      edited_box: [10, 10, 60, 60],
+      edited_points: null,
+    });
+    // The verdict bar returns once the box is committed.
+    await waitFor(() =>
+      expect(screen.queryByText("Marking missed object")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("cancels the armed draw mode without recording anything", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(markBtn());
+    expect(screen.getByRole("button", { name: /cancel drawing/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /cancel drawing/i }));
+
+    expect(screen.queryByText("Marking missed object")).not.toBeInTheDocument();
+    expect(actionSpy).not.toHaveBeenCalled();
+  });
+
+  it("a box too small to save is rejected before it ever reaches Save", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(markBtn());
+    const stage = screen.getByTestId("canvas-stage");
+    fireEvent.mouseDown(stage, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseMove(stage, { clientX: 11, clientY: 11 });
+    fireEvent.mouseUp(stage, { clientX: 11, clientY: 11 });
+
+    expect(screen.queryByText("Marking missed object")).not.toBeInTheDocument();
     expect(actionSpy).not.toHaveBeenCalled();
   });
 });
