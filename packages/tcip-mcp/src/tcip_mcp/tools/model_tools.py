@@ -72,25 +72,51 @@ def list_registered_models(project_path: str = "", tag: str | None = None) -> di
     return {"models": models, "count": len(models)}
 
 
+def _labeled_available_metrics(models: list[dict]) -> list[dict]:
+    from tcip_mcp.pipelines.training.evaluation import CENTER_MATCH_COMPARABILITY_KEYS
+
+    keys = sorted({k for m in models for k in m.get("metrics", {})})
+    return [
+        {"metric": k, "role": "comparability_only"
+         if k.removeprefix("val_") in CENTER_MATCH_COMPARABILITY_KEYS else "unlabeled"}
+        for k in keys
+    ]
+
+
 @mcp.tool()
 @audited
-def select_best_model(project_path: str = "", metric: str = "val_map50") -> dict:
-    """Get the best registered model by a metric.
+def select_best_model(project_path: str = "", metric: str = "") -> dict:
+    """Get the best registered model by an explicit metric — no default is assumed (K9).
+
+    map50-family metrics (and, once a center-match trait is in play, the IoU-convention
+    precision/recall/F1 relabeled ``iou_*``) are a labeled comparability convention, not
+    necessarily what governs a trait's phenotype (see the evaluation skill /
+    ``resolve_match_criterion``) — silently ranking by ``val_map50`` could promote a model that is
+    worse on the trait's own governing criterion. Call with ``metric=""`` (or an unknown metric) to
+    get ``available_metrics`` instead of guessing, each labeled ``comparability_only`` vs
+    ``unlabeled``.
 
     Args:
         project_path: Project root directory. Empty defaults to the platform state root.
-        metric: Metric key to rank by (default ``val_map50``; loss/error keys rank ascending).
+        metric: Metric key to rank by — required. loss/error keys rank ascending, others descending.
     """
     registry = ModelRegistry(_registry_root(project_path))
-    best = registry.best_model(metric)
-    if best is None:
-        models = registry.list_models()
-        if not models:
-            return {"error": "No models registered"}
-        available = sorted({k for m in models for k in m.get("metrics", {})})
+    models = registry.list_models()
+    if not models:
+        return {"error": "No models registered"}
+    if not metric:
         return {
-            "error": f"No registered model has metric '{metric}'.",
-            "available_metrics": available,
+            "error": "metric is required — select_best_model no longer defaults to 'val_map50' "
+                     "(a labeled comparability metric, not necessarily what governs a trait's "
+                     "phenotype). Pick one of available_metrics.",
+            "available_metrics": _labeled_available_metrics(models),
             "n_models": len(models),
         }
-    return best
+    best = registry.best_model(metric)
+    if best is None:
+        return {
+            "error": f"No registered model has metric '{metric}'.",
+            "available_metrics": _labeled_available_metrics(models),
+            "n_models": len(models),
+        }
+    return {**best, "ranking_basis": metric}
