@@ -102,3 +102,36 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
             g = default_group_key(stem)
             assert seen.get(g, split) == split, f"group {g} spans splits"
             seen[g] = split
+
+
+def test_make_splits_group_key_map_never_straddles(tmp_path: Path):
+    """K1 (Finding 5): an agent-derived group_key_map (3 stems, 2 groups) is honored — the two
+    same-group stems never land in different splits."""
+    import json
+
+    root = _multi_source_dataset(tmp_path / "ds", prefixes=("x", "y", "z"), tiles=1)
+    out = tmp_path / "m"
+    group_key_map = {"x_0_0": "gA", "y_0_0": "gA", "z_0_0": "gB"}
+    result = make_splits(str(root), output_path=str(out), seed=1,
+                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0,
+                         group_by="tile_prefix", group_key_map=group_key_map)
+    assert "error" not in result
+    assert result["group_by"] == "explicit_map"
+
+    membership: dict[str, str] = {}
+    for split in ("train", "val", "test"):
+        for stem in json.loads((out / f"{split}.json").read_text()):
+            membership[stem] = split
+    assert membership["x_0_0"] == membership["y_0_0"]  # gA never straddles
+    manifest = json.loads((out / "split_manifest.json").read_text())
+    assert manifest["group_by"] == "explicit_map"
+
+
+def test_make_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Path):
+    """K1 (Finding 6): a silent ``GROUP_KEY_FNS.get(group_by, default_group_key)`` fallback used to
+    mis-group a dataset without anyone noticing. It must now refuse loudly and write nothing."""
+    root = _multi_source_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), group_by="not_a_real_key")
+    assert "error" in result
+    assert not out.exists() or not (out / "split_manifest.json").is_file()
