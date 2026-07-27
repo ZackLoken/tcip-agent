@@ -131,7 +131,7 @@ dependencies:
       - pytest-timeout==2.4.0
       - python-dateutil==2.9.0.post0
       - python-dotenv==1.2.2
-      - python-graphviz==0.21
+      - graphviz==0.21
       - python-multipart==0.0.32
       - pywin32==312
       - pywinpty==3.0.5
