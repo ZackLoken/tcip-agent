@@ -83,6 +83,37 @@ def _audit(project_root: str, tool: str, arguments: dict) -> None:
         pass
 
 
+def _resolve_producer_identity_for_dir(pred_dir: Optional[str]) -> Optional[dict]:
+    """The producing model's identity for prediction bucket ``pred_dir`` (Fix G).
+
+    Resolved from the bucket's own ``operating_point.json`` sidecar — ``checkpoint_sha256`` and
+    ``experiment_id``, the same facts ``validate_reference`` already reads for its own scoping.
+    ``None`` when there is no dir or no sidecar to read; callers store this as a plain fact on the
+    verdict/image record rather than looking it up again at validation time.
+    """
+    if not pred_dir:
+        return None
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    sidecar = read_operating_point_sidecar(pred_dir)
+    if sidecar is None:
+        return None
+    return {
+        "checkpoint_sha256": sidecar.get("checkpoint_sha256"),
+        "experiment_id": sidecar.get("experiment_id"),
+        "bucket_dir": str(Path(pred_dir)),
+    }
+
+
+def _resolve_producer_identity(pred_path: Optional[str]) -> Optional[dict]:
+    """Same as :func:`_resolve_producer_identity_for_dir`, from a per-image PREDICTION FILE path
+    (``ActionPayload.pred_path``) — the bucket dir is its parent, used only as the LOOKUP key to
+    find the sidecar, never as the identity itself (Fix G)."""
+    if not pred_path:
+        return None
+    return _resolve_producer_identity_for_dir(str(Path(pred_path).parent))
+
+
 def _image_dims(path: str) -> tuple[int, int]:
     try:
         p = assert_path_allowed(path)
@@ -364,8 +395,10 @@ def record_action(payload: ActionPayload) -> dict:
     if payload.action == "edited" and changed and landed_idx is not None:
         norm_det = replace(det, gt_idx=landed_idx)
         norm_ctx = work
+    producer_identity = _resolve_producer_identity(payload.pred_path)
     engine.record_detection_action(
-        det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx
+        det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx,
+        producer_identity=producer_identity, conf_threshold=payload.conf_threshold,
     )
 
     # Write the single per-image GT file (keep_empty: an emptied GT stays an {"annotations": []}
@@ -413,6 +446,10 @@ class MarkCompletePayload(BaseModel):
     project_root: str
     image_name: str
     gt_path: Optional[str] = None
+    # The prediction bucket loaded for this image (Fix G) — a confirmed negative carries zero
+    # verdict entries, so it has nowhere else to record which model it was reviewed against; this
+    # stamps that producer-identity fact on the image-level record instead.
+    pred_dir: Optional[str] = None
     completed: bool = True  # False reverses a manual mark (verdicts are kept)
 
 
@@ -420,9 +457,23 @@ class MarkCompletePayload(BaseModel):
 def mark_complete(payload: MarkCompletePayload) -> dict:
     """Mark (or unmark) an image fully reviewed; covers negatives / bulk-accept cases."""
     _guard_path(payload.gt_path)
+    _guard_path(payload.pred_dir)
     engine = _get_engine(payload.project_root)
     if payload.completed:
-        engine.mark_image_reviewed(payload.image_name)
+        producer_identity = _resolve_producer_identity_for_dir(payload.pred_dir)
+        # Fix H (stage-6 review): a zero-verdict Complete is FN-adjudication-covered ONLY when it is
+        # a genuine negative — the bucket held ZERO predictions for this image, so there was nothing
+        # to individually walk and Complete is itself the confirming act. A bulk-accept of an image
+        # the bucket DID predict on, with no individual verdicts recorded, is NOT covered — the
+        # breeder never actually looked, and treating it as covered would let exactly that padding
+        # dilute a real reference's statistics (the stage-6 fail-open this distinction exists to
+        # close). No prediction file for this stem reads as "nothing to check" -> also covered.
+        is_negative = True
+        if payload.pred_dir:
+            pred_file = Path(payload.pred_dir) / f"{Path(payload.image_name).stem}.json"
+            is_negative = not _has_objects(pred_file)
+        engine.mark_image_reviewed(payload.image_name, producer_identity=producer_identity,
+                                   adjudication_covered=is_negative)
     else:
         engine.unmark_image_reviewed(payload.image_name)
     # Derive the annotation status from the GT file on disk — the client's matches snapshot can be
@@ -589,6 +640,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     from tcip_mcp.pipelines.feedback import (
         describe_review_validation,
         resolve_operating_point_from_review,
+        review_conf_threshold,
         review_reference_hash,
         review_to_records,
     )
@@ -603,9 +655,35 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     # working for a legitimate multi-bucket review call.
     bucket_exp_ids = {sc.get("experiment_id") for sc in sidecars.values() if sc.get("experiment_id")}
     review_experiment_id = next(iter(bucket_exp_ids)) if len(bucket_exp_ids) == 1 else None
+
+    # Fix G: scope every verdict/negative record to the bucket(s) actually being validated, at the
+    # deepest choke point (resolve_operating_point_from_review), not just here.
+    bucket_identities = [
+        {"checkpoint_sha256": sc.get("checkpoint_sha256"), "experiment_id": sc.get("experiment_id")}
+        for sc in sidecars.values()
+    ]
+    # Fix D item 4: the review path's effective staging floor is max(generation_conf,
+    # review_conf_threshold) — the generation half read off the same sidecars already loaded above,
+    # the review half read off the verdicts' own recorded conf_threshold (scoped identically to the
+    # bucket(s) above). Either half unknown makes the combined floor None (fails closed).
+    gen_confs = [
+        v for sc in sidecars.values()
+        if isinstance(v := ((sc.get("operating_point") or {}).get("conf") or {}).get("value"),
+                     (int, float))
+    ]
+    generation_conf = max(float(v) for v in gen_confs) if gen_confs else None
+    review_conf = review_conf_threshold(review_state, bucket_identities=bucket_identities,
+                                        only_completed=True)
+    staged_conf_floor = (
+        max(generation_conf, review_conf)
+        if generation_conf is not None and review_conf is not None
+        else None
+    )
+
     try:
         bundle = resolve_operating_point_from_review(
-            review_state, req.trait, only_completed=True, experiment_id=review_experiment_id)
+            review_state, req.trait, only_completed=True, experiment_id=review_experiment_id,
+            bucket_identities=bucket_identities, staged_conf_floor=staged_conf_floor)
     except TraitUnknownError:
         raise HTTPException(
             400,
@@ -623,7 +701,8 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     # Stamp each bucket's provenance sidecar (operating_point.json is not a label, so this never
     # touches the reviewed per-image predictions or the verdict-immutability guard).
     op_prov = bundle.to_provenance()["operating_point"]
-    ref_hash = review_reference_hash(review_to_records(review_state))
+    ref_hash = review_reference_hash(
+        review_to_records(review_state, bucket_identities=bucket_identities))
     now_iso = datetime.now(timezone.utc).isoformat()
     stamped: list[str] = []
     for d in bucket_dirs:
