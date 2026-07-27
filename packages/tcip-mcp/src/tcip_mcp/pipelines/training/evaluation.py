@@ -355,8 +355,12 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
 
     One model pass produces ``per_image`` (unfiltered dt with scores); this sweeps conf cheaply in
     Python — no re-forwarding. For each conf: aggregate TP/FP/FN and per-image count bias (FP-FN).
-    Returns ``{tolerance, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
-    count_bias_mean, abs_count_error_mean}]}``.
+    Passing an explicit ``conf_grid`` (e.g. a single-element ``[conf]``) skips grid construction and
+    evaluates EXACTLY those points — the exact-conf holdout evaluation (no nearest-neighbor snap)
+    relies on this. Returns ``{tolerance, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
+    count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images}]}`` — the last
+    three are per-conf statistics across ``per_image`` (dispersion + reference-sufficiency terms the
+    operating-point gate reads, never recomputes).
     """
     scores = sorted({d["score"] for rec in per_image for d in rec.get("dt", [])})
     if conf_grid is None:
@@ -384,25 +388,44 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
         precision = tp / (tp + fp) if (tp + fp) else 0.0
         recall = tp / (tp + fn) if (tp + fn) else 0.0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        abs_biases = [abs(b) for b in biases]
         curve.append({
             "conf": float(conf), "tp": tp, "fp": fp, "fn": fn,
             "precision": precision, "recall": recall, "f1": f1,
             "count_bias_mean": float(np.mean(biases)) if biases else 0.0,
-            "abs_count_error_mean": float(np.mean([abs(b) for b in biases])) if biases else 0.0,
+            "abs_count_error_mean": float(np.mean(abs_biases)) if biases else 0.0,
+            # Tail dispersion (Fix B) — a p90 of |bias|, not another mean, since a mean can hide one
+            # badly-off image among many. Reference-sufficiency terms (Fix C) — computed here, once,
+            # so the gate never re-derives a second matcher over the same per-image biases.
+            "count_error_p90": float(np.quantile(abs_biases, 0.9)) if abs_biases else 0.0,
+            "count_bias_std": float(np.std(biases, ddof=1)) if len(biases) > 1 else 0.0,
+            "n_images": len(biases),
         })
     return {"tolerance": float(tolerance), "class_id": class_id, "curve": curve}
 
 
 def pick_count_unbiased(sweep: dict) -> float | None:
-    """The conf that minimizes |mean per-image count bias| (tie-break: higher F1, lower |error|).
+    """The conf that minimizes |mean per-image count bias| (tie-break: higher F1, lower |error|,
+    higher conf).
 
     This is the count-trait operating point — where the model's totals match GT totals — which is
     generally not the F1-max point (that optimizes matching, not count agreement).
+
+    The final ``-c["conf"]`` tie-break (K2, stage-6 review) is a completion of the existing
+    tie-break, not a new selection objective: when |bias| and F1 and |abs error| are ALL exactly
+    tied across several confs — which happens on a reference filtered to a floor, since nothing
+    below the floor is visible to distinguish them — the lowest tied conf (e.g. the grid's seeded
+    0.0) used to win by default. That is generically the worst of the tied candidates in practice
+    (it admits the most low-confidence noise for no better count agreement) and, combined with the
+    conf-censoring guard, could make a genuinely trustworthy pick read as censored merely because the
+    tie resolved to the search floor. Preferring the HIGHEST tied conf breaks ties toward the most
+    conservative, best-supported candidate among equals — it does not change what is optimized.
     """
     curve = sweep.get("curve") or []
     if not curve:
         return None
-    best = min(curve, key=lambda c: (abs(c["count_bias_mean"]), -c["f1"], c["abs_count_error_mean"]))
+    best = min(curve, key=lambda c: (abs(c["count_bias_mean"]), -c["f1"], c["abs_count_error_mean"],
+                                     -c["conf"]))
     return best["conf"]
 
 
@@ -410,14 +433,6 @@ def pick_f1_max(sweep: dict) -> float | None:
     """The F1-max conf — reported alongside the count-unbiased point to show the trade-off."""
     curve = sweep.get("curve") or []
     return max(curve, key=lambda c: c["f1"])["conf"] if curve else None
-
-
-def count_bias_at(sweep: dict, conf: float) -> dict | None:
-    """The curve entry at (nearest) ``conf`` — used to MEASURE bias on a held-out split."""
-    curve = sweep.get("curve") or []
-    if not curve:
-        return None
-    return min(curve, key=lambda c: abs(c["conf"] - conf))
 
 
 # ---- converters -----------------------------------------------------
@@ -434,11 +449,16 @@ def _mask_to_rle(mask) -> dict:
 
 
 def records_from_detector(target: dict, output: dict, *, width: int, height: int,
-                          include_masks: bool = False) -> dict:
+                          include_masks: bool = False, detections_cap: int | None = None) -> dict:
     """torchvision GT target + detector output -> one COCO per-image record.
 
     With ``include_masks`` (instance_seg / Mask R-CNN) each GT and prediction also carries
     an RLE ``segmentation``, so the record can be scored with ``iou_type='segm'``.
+
+    ``detections_cap`` (Fix K, non-gating provenance): when the caller knows the in-model
+    ``detections_per_img`` this output was generated under, stamp ``cap_hit`` — whether this
+    image's raw detection count reached that cap — so a reviewer can see per-image cap
+    saturation without re-deriving it later from a number that's no longer available by then.
     """
     gt = []
     gboxes = target.get("boxes")
@@ -463,7 +483,10 @@ def records_from_detector(target: dict, output: dict, *, width: int, height: int
             if pmasks is not None and i < len(pmasks):
                 res["segmentation"] = _mask_to_rle(pmasks[i])
             dt.append(res)
-    return build_coco_image_record(width, height, gt, dt, image_id=target.get("image_id"))
+    rec = build_coco_image_record(width, height, gt, dt, image_id=target.get("image_id"))
+    if detections_cap is not None:
+        rec["cap_hit"] = len(dt) >= detections_cap
+    return rec
 
 
 def _poly_flat(points) -> list[float]:
