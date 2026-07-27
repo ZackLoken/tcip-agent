@@ -356,10 +356,20 @@ def test_resolve_operating_point_cross_tile_nms_honest_default_when_underivable(
 
 
 def test_resolve_operating_point_tile_size_derived():
+    """K10 finding 3 residual: a bare truthy tile_size with no source claim used to be inferred as
+    "derived" unconditionally (`if tile_size: derived(...)`) — so a fabricated fallback value (e.g.
+    the checkpoint had no persisted geometry, and 640 was substituted one layer up) could be
+    stamped "derived from persisted training geometry" when nothing was actually derived. The
+    caller must now say which it was via ``tile_size_source``; omitting it is honestly "default"."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    b = resolve_operating_point("catkin", dataset_hash="h1", tile_size=640)
-    assert b.get("tile_size").source == "derived"
-    assert b.get("tile_size").value == 640
+    b_no_claim = resolve_operating_point("catkin", dataset_hash="h1", tile_size=640)
+    assert b_no_claim.get("tile_size").source == "default"
+    assert b_no_claim.get("tile_size").value == 640
+
+    b_derived = resolve_operating_point(
+        "catkin", dataset_hash="h1", tile_size=640, tile_size_source="derived")
+    assert b_derived.get("tile_size").source == "derived"
+    assert b_derived.get("tile_size").value == 640
 
 
 def test_classification_metrics_per_class_and_bias():
