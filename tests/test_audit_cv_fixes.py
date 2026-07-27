@@ -391,13 +391,19 @@ def _op_ann(cx, cy, cid=0, score=None):
     return a
 
 
-def _op_records(idp):
-    """Records where count-unbiased conf (0.6) is well-defined and the holdout passes (validated)."""
+def _op_records(idp, *, shift=0.0):
+    """Records where count-unbiased conf (0.6) is well-defined and the holdout passes (validated).
+
+    ``shift`` (K1): offsets every GT box's center by that many px (well inside the ~10px
+    center-match tolerance) so a holdout fixture's GT content genuinely differs from
+    calibration's — a holdout identical in content to calibration (differing only by
+    ``image_id``) now trips the content-overlap gate.
+    """
     a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
-         "gt": [_op_ann(100, 100)],
+         "gt": [_op_ann(100 + shift, 100)],
          "dt": [_op_ann(100, 100, score=0.9), _op_ann(300, 300, score=0.6)]}
     b = {"width": 400, "height": 400, "image_id": f"{idp}_b",
-         "gt": [_op_ann(100, 100), _op_ann(200, 200)],
+         "gt": [_op_ann(100 + shift, 100), _op_ann(200 + shift, 200)],
          "dt": [_op_ann(100, 100, score=0.9), _op_ann(200, 200, score=0.3)]}
     return [a, b]
 
@@ -444,7 +450,7 @@ def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
 
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=_op_records("c"),
-                                     holdout_records=_op_records("h"))
+                                     holdout_records=_op_records("h", shift=3.0))
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H"))
     stub = _CalStub()
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
@@ -481,7 +487,7 @@ def test_cv0_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
                               [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 100, 100)
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=_op_records("c"),
-                                     holdout_records=_op_records("h"))
+                                     holdout_records=_op_records("h", shift=3.0))
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H"))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
     monkeypatch.chdir(tmp_path)
@@ -505,7 +511,7 @@ def test_cv0_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypa
 
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=_op_records("c"),
-                                     holdout_records=_op_records("h"))
+                                     holdout_records=_op_records("h", shift=3.0))
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H"))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
     monkeypatch.chdir(tmp_path)
