@@ -21,22 +21,36 @@ logger = logging.getLogger(__name__)
 
 def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                                tile, tile_size, overlap, tile_batch_size,
-                               global_nms_iou, postprocess, cross_tile_nms, max_dets):
+                               global_nms_iou, postprocess, cross_tile_nms, max_dets,
+                               group_by="tile_prefix", group_key_map=None, experiment_id=None,
+                               seed=0, holdout_ratio=0.5):
     """Resolve a per-dataset operating point from a labeled split (CV0). Returns (bundle, hash).
 
     The count-unbiased center-match sweep + held-out bias check run the SAME predictor path the
-    delivery will use (same tile/tile_size/overlap/nms/postprocess) over a disjoint cal/holdout split
-    of the labeled dir, at a floor conf so hesitant detections survive to be swept — so the resolved
-    conf is validated in the regime it ships through, not an untiled full-frame model pass.
+    delivery will use (same tile/tile_size/overlap/nms/postprocess) over a disjoint, LOCKED
+    cal/holdout split of the labeled dir (K1 — ``resolve_locked_cal_holdout_split``: group-coherent,
+    seeded, and stable across calls, not a fresh lexicographic cut every time), at a floor conf so
+    hesitant detections survive to be swept — so the resolved conf is validated in the regime it
+    ships through, not an untiled full-frame model pass. ``seed``/``holdout_ratio`` only take effect
+    on the FIRST (locking) draw for this labeled dir's identity hash.
+
+    Raises ``ValueError`` (propagated from ``resolve_locked_cal_holdout_split``) when the lock
+    references a stem whose image/label no longer exists, or its lock file is corrupt (K1 finding
+    4) — the caller (``run_inference``) turns this into a clean ``{"error": ...}`` rather than
+    letting a bare ``KeyError`` surface from a stale ``stem_to_image`` lookup.
     """
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
+    from tcip_mcp.pipelines.data.splits import (
+        count_label_lines, label_image_stems, resolve_locked_cal_holdout_split,
+    )
     from tcip_mcp.pipelines.operating_point import (
-        resolve_operating_point, set_detector_operating_point,
+        attach_split_policy_provenance, resolve_operating_point, set_detector_operating_point,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
     from tcip_mcp.pipelines.training.evaluation import build_coco_image_record
 
-    labels_p, images_p = Path(labels_dir), Path(images_dir)
+    labels_p = Path(labels_dir)
+    dh = dataset_hash(labels_dir)
     # The run's subject + single id map (from predictor.config): calibration GT reads through the
     # same loader-side reader the training targets use, so the swept count can't diverge from training.
     _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
@@ -47,13 +61,22 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             _reg, _cal_id_map = _resolve_registry_id_map(labels_dir, _subject, _attribute)
         except Exception:  # noqa: BLE001 — fall back to a single-class GT read below
             _cal_id_map = None
-    image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-    label_stems = {p.stem for p in labels_p.glob("*.json")}
-    stem_to_image = {p.stem: p for p in images_p.iterdir()
-                     if p.suffix.lower() in image_exts and p.stem in label_stems}
-    stems = sorted(stem_to_image)
-    mid = max(1, len(stems) // 2)
-    cal_stems, hold_stems = stems[:mid], stems[mid:]
+    # Labels-intersect-images-on-disk (K1 finding 4): the shared scan force_redraw_cal_holdout_split
+    # now also uses, so the two paths can't disagree about which stems exist. A stem whose image was
+    # deleted/renamed never even enters the split universe here.
+    stems, stem_to_image = label_image_stems(labels_dir, images_dir)
+    annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+    locked = resolve_locked_cal_holdout_split(
+        stems, identity_hash=dh, annotation_counts=annotation_counts,
+        group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
+    )
+    if locked.get("unlocked_stems"):
+        logger.info(
+            "cal/holdout split for %s has %d stem(s) not covered by the existing lock (new since "
+            "it was drawn); excluded from this calibration: %s", dh,
+            len(locked["unlocked_stems"]), locked["unlocked_stems"][:10],
+        )
+    cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
     # Floor the in-model + predictor conf so hesitant detections survive to be swept.
     set_detector_operating_point(predictor.model, score_thresh=0.01)
@@ -93,17 +116,27 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
 
     cal_records = _records(cal_stems)
     hold_records = _records(hold_stems)
-    dh = dataset_hash(labels_dir)
     bundle = resolve_operating_point(
         trait, dataset_hash=dh, calibration_records=cal_records,
         holdout_records=hold_records or None, tile_size=tile_size,
-        cross_tile_nms=cross_tile_nms, max_dets=max_dets,
+        cross_tile_nms=cross_tile_nms, max_dets=max_dets, experiment_id=experiment_id,
     )
+    attach_split_policy_provenance(bundle, locked)
     return bundle, dh
 
 
 def _sweep_summary(conf_param) -> dict:
-    """Compact, response-safe view of a calibration sweep (the full curve is written to disk)."""
+    """Compact, response-safe view of a calibration sweep (the full curve is written to disk).
+
+    Includes ``disjoint``/``content_overlap_frac``/``train_disjointness`` (K1 finding 3) so the
+    calling agent sees the real reason a calibration refused validation, not only the pass/fail
+    booleans — a refusal from train-provenance or content-overlap looked identical to a plain
+    holdout-bias failure before this. Also includes ``split_policy_divergence``/
+    ``split_unlocked_stems`` (K1 finding 5, via ``attach_split_policy_provenance``) so a caller
+    whose declared ``seed``/``holdout_ratio``/``group_by`` didn't take effect against an existing
+    lock sees that here, in the tool's own response, rather than only in the persisted sweep
+    artifact or a server log line.
+    """
     sweep = conf_param.sweep or {}
     hb = sweep.get("holdout_bias") or {}
     return {
@@ -113,7 +146,120 @@ def _sweep_summary(conf_param) -> dict:
         "passed_holdout": sweep.get("passed_holdout"),
         "conf_censored": sweep.get("conf_censored"),
         "count_bias_tolerance": sweep.get("count_bias_tolerance"),
+        "disjoint": sweep.get("disjoint"),
+        "content_overlap_frac": sweep.get("content_overlap_frac"),
+        "content_duplicated": sweep.get("content_duplicated"),
+        "train_disjointness": sweep.get("train_disjointness"),
+        "split_policy_divergence": sweep.get("split_policy_divergence"),
+        "split_unlocked_stems": sweep.get("split_unlocked_stems"),
     }
+
+
+@mcp.tool()
+@audited
+def force_redraw_cal_holdout_split(
+    labels_dir: str | None = None,
+    images_dir: str | None = None,
+    identity_hash: str | None = None,
+    group_by: str = "tile_prefix",
+    group_key_map: dict[str, str] | None = None,
+    seed: int = 0,
+    holdout_ratio: float = 0.5,
+    reason: str = "",
+) -> dict:
+    """Deliberately redraw a LOCKED calibration/holdout split (K1 admin action).
+
+    A cal/holdout split locks on its first draw (``resolve_locked_cal_holdout_split``) so the
+    "held-out validation" gate can never silently pass on a different, weaker holdout drawn
+    after the fact. Redrawing one is a real, audited decision — never automatic, never a hidden
+    kwarg on a high-traffic tool like ``run_inference`` — so it is its own small tool. ``reason``
+    is required and non-empty, and every redraw (this one included) is appended to the lock's
+    ``redraw_history`` with its policy, timestamp, and the OLD split's membership captured before
+    it is overwritten — so a redraw-until-it-passes pattern is visible on review even though
+    nothing here enforces that a reason differ from a prior one; the defense is a reviewable
+    audit trail, not an automatic block.
+
+    Provide either ``labels_dir`` (the identity is derived as ``dataset_hash(labels_dir)``, and
+    its stems are re-scanned) or ``identity_hash`` directly (e.g. a review-reference hash — in
+    that case the existing lock's own calibration+holdout stems are reused as the redraw's stem
+    universe, since a review reference has no labels directory to re-scan).
+
+    Args:
+        labels_dir: Labeled dir whose GT identity locked the split (mutually exclusive with
+            ``identity_hash`` — if both are omitted, or ``identity_hash`` is given with no
+            existing lock and no ``labels_dir``, this refuses).
+        images_dir: Images for ``labels_dir``. When given, stems are the same labels-intersect-
+            images-on-disk universe ``run_inference``'s calibration uses (K1 finding 4) — a stem
+            whose image was deleted/renamed never enters the redraw's stem universe. Omitted ->
+            every labeled stem is used regardless of whether an image still exists for it
+            (the pre-K1 behavior), for a caller that has no images directory to check against.
+        identity_hash: The locked split's identity hash directly.
+        group_by: New grouping policy — ``"tile_prefix"`` / ``"stem"`` (ignored if
+            ``group_key_map`` is given).
+        group_key_map: Explicit ``{stem: group_key}`` map covering every stem, overriding
+            ``group_by``.
+        seed: New split seed.
+        holdout_ratio: New calibration/holdout fraction.
+        reason: Required, non-empty justification for this redraw — recorded in the audit log
+            alongside the old and new split membership.
+    """
+    if not reason or not reason.strip():
+        return {"error": "reason is required (a non-empty justification) for a force_redraw"}
+    if not labels_dir and not identity_hash:
+        return {"error": "provide either labels_dir or identity_hash"}
+
+    from datetime import datetime, timezone
+
+    from tcip_mcp.audit import record_event
+    from tcip_mcp.pipelines.data.splits import (
+        cal_holdout_lock_path, count_label_lines, label_image_stems,
+        resolve_locked_cal_holdout_split,
+    )
+    from tcip_mcp.pipelines.resolution import dataset_hash
+    from tcip_mcp.utils.atomic_io import read_json
+
+    if identity_hash is None:
+        identity_hash = dataset_hash(labels_dir)
+
+    old_lock = read_json(cal_holdout_lock_path(identity_hash), default=None)
+    old_membership = ({"calibration": old_lock.get("calibration", []),
+                       "holdout": old_lock.get("holdout", [])} if old_lock else None)
+
+    if labels_dir:
+        # The SAME labels-intersect-images scan _calibrate_operating_point uses (K1 finding 4),
+        # not a second independent glob — with images_dir omitted this degrades to the prior
+        # labels-only scan (stem_to_image unused here either way).
+        stems, _ = label_image_stems(labels_dir, images_dir)
+        annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+    elif old_lock:
+        stems = sorted(set(old_lock.get("calibration", [])) | set(old_lock.get("holdout", [])))
+        annotation_counts = None
+    else:
+        return {"error": f"no existing lock for identity_hash={identity_hash!r}, and no "
+                          "labels_dir to derive stems from"}
+
+    new_lock = resolve_locked_cal_holdout_split(
+        stems, identity_hash=identity_hash, annotation_counts=annotation_counts,
+        group_by=group_by, group_key_map=group_key_map, holdout_ratio=holdout_ratio, seed=seed,
+        force_redraw=True, timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+    new_membership = {"calibration": new_lock["calibration"], "holdout": new_lock["holdout"]}
+
+    # @audited (the decorator on this tool) logs only the call's kwargs, never the RETURN value —
+    # and the auditable fact here is what the redraw actually produced, not just that one was
+    # requested. record_event brackets that the same way envelope.py's training loop closes the
+    # "no audit record for what happened inside the call" hole. A distinct tool name (not this
+    # function's own) so the two log entries — @audited's call-args line and this result line —
+    # don't collide under one ambiguous schema.
+    record_event(
+        "force_redraw_cal_holdout_split_result",
+        {"identity_hash": identity_hash, "group_by": group_by, "group_key_map": group_key_map,
+         "seed": seed, "holdout_ratio": holdout_ratio, "reason": reason},
+        old_membership=old_membership, new_membership=new_membership,
+    )
+
+    return {"identity_hash": identity_hash, "reason": reason,
+            "old_membership": old_membership, "new_membership": new_membership}
 
 
 @mcp.tool()
@@ -136,6 +282,10 @@ def run_inference(
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
     experiment_id: str | None = None,
+    group_by: str = "tile_prefix",
+    group_key_map: dict[str, str] | None = None,
+    split_seed: int = 0,
+    split_holdout_ratio: float = 0.5,
 ) -> dict:
     """Run a trained model on images.
 
@@ -167,7 +317,23 @@ def run_inference(
             validate the operating point. Its GT identity scopes the resolved conf (dataset firewall).
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
         experiment_id: The run that produced the checkpoint, for provenance. Best-effort resolved
-            from the registry when omitted; a raw/foreign checkpoint legitimately has none.
+            (checkpoint's own stamp, then the registry) when omitted; a raw/foreign checkpoint
+            legitimately has none. Also gates calibration's train-disjointness check (K1): a
+            *known* run whose training split can't be read/reconstructed fails that check closed.
+        group_by: Grouping policy for the LOCKED calibration/holdout split (K1) — ``"tile_prefix"``
+            (default) or ``"stem"``. Ignored when ``group_key_map`` is given. Only the FIRST
+            calibration call for a given calibration-labels identity draws the split; later calls
+            return the same locked split regardless of this argument (see
+            ``force_redraw_cal_holdout_split`` to redraw deliberately).
+        group_key_map: An agent-derived ``{stem: group_key}`` map overriding ``group_by`` for the
+            locked calibration/holdout split — must cover every stem in ``calibration_labels_dir``.
+        split_seed: Split seed for the LOCKED calibration/holdout split (K1 finding 5) — like
+            ``group_by``, only takes effect on the FIRST calibration call for a given
+            calibration-labels identity; a later call's declared value is compared to the lock and
+            any divergence is reported in ``sweep_summary``/the resolved bundle rather than
+            silently ignored.
+        split_holdout_ratio: Calibration/holdout fraction for the LOCKED split (K1 finding 5) —
+            same first-call-only semantics as ``split_seed``.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -208,6 +374,13 @@ def run_inference(
         max_dets=max_dets,
     )
 
+    # Producing-model identity resolved BEFORE calibration (K1), not after: the calibration's
+    # train-disjointness gate needs the checkpoint's own experiment_id to check the cal/holdout
+    # images against that run's training split. sha is cached (never re-hashed per call).
+    from tcip_mcp.model_registry import resolve_model_identity
+
+    identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
+
     # CV2: derive the tile geometry from the checkpoint's training geometry unless the caller pinned
     # it, so a tiled run doesn't silently infer at a different scale than it trained at (which shifts
     # the object count — the phenotype). None sentinel keeps an explicit 640 distinct from the default.
@@ -246,13 +419,22 @@ def run_inference(
     extra: dict = {}
     if trait and calibration_labels_dir:
         cal_images = calibration_images_dir or images_dir
-        bundle, cal_hash = _calibrate_operating_point(
-            predictor, trait, calibration_labels_dir, cal_images,
-            tile=tile, tile_size=resolved_tile, overlap=resolved_overlap,
-            tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
-            cross_tile_nms=(global_nms_iou if global_nms_iou != DEFAULT_NMS_IOU else None),
-            max_dets=(max_dets if max_dets != DEFAULT_MAX_DETS else None),
-        )
+        try:
+            bundle, cal_hash = _calibrate_operating_point(
+                predictor, trait, calibration_labels_dir, cal_images,
+                tile=tile, tile_size=resolved_tile, overlap=resolved_overlap,
+                tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
+                cross_tile_nms=(global_nms_iou if global_nms_iou != DEFAULT_NMS_IOU else None),
+                max_dets=(max_dets if max_dets != DEFAULT_MAX_DETS else None),
+                group_by=group_by, group_key_map=group_key_map,
+                experiment_id=identity["experiment_id"],
+                seed=split_seed, holdout_ratio=split_holdout_ratio,
+            )
+        except ValueError as exc:
+            # A locked cal/holdout split refusing this call (K1 finding 4): a calibration stem's
+            # image/label was deleted/renamed since the split locked, or the lock file is corrupt.
+            # Clean refusal here, not a bare KeyError from a stale stem_to_image lookup downstream.
+            return {"error": str(exc)}
         conf_param = bundle.get("conf")
         conf = (conf_param.value if conf_param.is_shippable
                 else conf_param.unvalidated_value(acknowledge_unvalidated=True))
@@ -345,13 +527,10 @@ def run_inference(
     )
     total_detections = sum(r["count"] for r in results)
 
-    # Producing-model identity travels with the result so every downstream deliverable can name the
-    # exact checkpoint (content hash) + run behind the count. sha is cached (never re-hashed per call).
+    # Producing-model identity (resolved above, before calibration) travels with the result so every
+    # downstream deliverable can name the exact checkpoint (content hash) + run behind the count.
     from datetime import datetime, timezone
 
-    from tcip_mcp.model_registry import resolve_model_identity
-
-    identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
     # This run's name→id map, derived once here (assign_class_ids over the inference dataset's
     # classes.json for the config's subject/attribute) and reused for both recording and decode, so
     # export records it in operating_point.json and decodes predictions to names through this one map —
