@@ -34,16 +34,31 @@ def main(argv: list[str] | None = None) -> int:
                         help="Experiment id to persist under (.tcip/experiments/<id>/). "
                              "Defaults to a hash-tagged id.")
     parser.add_argument("--val-ratio", type=float, default=0.5,
-                        help="Holdout fraction of the labeled split (disjoint by stem).")
+                        help="Holdout fraction of the labeled split (disjoint by stem). Only takes "
+                             "effect on the FIRST calibration call for this labels_dir's GT identity "
+                             "— a cal/holdout split locks on its first draw, and a later run with a "
+                             "different --val-ratio/--seed over unchanged labels reuses the locked "
+                             "split unchanged (a divergence is printed, not silently ignored).")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="Split seed for the LOCKED cal/holdout split. Same first-call-only "
+                             "semantics as --val-ratio.")
     parser.add_argument("--device", default=None, help="cuda / cpu (auto if omitted).")
+    parser.add_argument("--group-by", default="tile_prefix",
+                        help="Grouping policy for the cal/holdout split: 'tile_prefix' (default, "
+                             "strips a trailing _<x>_<y> tile offset) or 'stem' (one group per "
+                             "image). Ignored if --group-key-map is given.")
+    parser.add_argument("--group-key-map", default=None,
+                        help="Path to a JSON file mapping stem -> group key, overriding --group-by.")
     args = parser.parse_args(argv)
 
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.data.splits import count_label_lines, resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
-        records_over_loader, resolve_operating_point, set_detector_operating_point,
+        attach_split_policy_provenance, records_over_loader, resolve_operating_point,
+        set_detector_operating_point,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
     from tcip_mcp.pipelines.training.generic_trainer import task_collate
@@ -57,8 +72,33 @@ def main(argv: list[str] | None = None) -> int:
     if len(stems) < 2:
         print(f"Need >=2 labeled stems to split cal/holdout; found {len(stems)}.", file=sys.stderr)
         return 2
-    n_hold = max(1, int(round(len(stems) * args.val_ratio)))
-    hold_stems, cal_stems = stems[:n_hold], stems[n_hold:]
+
+    group_key_map = None
+    if args.group_key_map:
+        with open(args.group_key_map, encoding="utf-8") as f:
+            group_key_map = json.load(f)
+
+    dh = dataset_hash(args.labels_dir)
+    annotation_counts = {s: count_label_lines(args.labels_dir, s) for s in stems}
+    # LOCKED split (K1): the first call for this labels_dir's GT identity draws + locks the
+    # cal/holdout split; a later run of this script over unchanged labels returns the SAME split
+    # rather than a fresh cut that could happen to draw a weaker holdout.
+    locked = resolve_locked_cal_holdout_split(
+        stems, identity_hash=dh, annotation_counts=annotation_counts,
+        group_by=args.group_by, group_key_map=group_key_map, holdout_ratio=args.val_ratio,
+        seed=args.seed,
+    )
+    if locked.get("policy_divergence"):
+        div = locked["policy_divergence"]
+        print(f"Note: a cal/holdout split for this labels_dir is already locked with a different "
+              f"policy than requested — the locked split is used unchanged.\n"
+              f"  requested: {div['requested']}\n  locked:    {div['locked']}\n"
+              f"  Use force_redraw_cal_holdout_split to redraw deliberately.", file=sys.stderr)
+    if locked.get("unlocked_stems"):
+        print(f"Note: {len(locked['unlocked_stems'])} stem(s) are new since this split was locked "
+              "and are excluded from this calibration (the lock stays authoritative for what it "
+              "already covers).", file=sys.stderr)
+    cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
     set_detector_operating_point(predictor.model, score_thresh=0.01)
 
@@ -68,11 +108,12 @@ def main(argv: list[str] | None = None) -> int:
         loader = DataLoader(ds, batch_size=4, collate_fn=task_collate("detection"))
         return records_over_loader(predictor.model, loader, predictor.device, "detection")
 
-    dh = dataset_hash(args.labels_dir)
     bundle = resolve_operating_point(
         args.trait, dataset_hash=dh, calibration_records=_records(cal_stems),
         holdout_records=_records(hold_stems), tile_size=tile_size,
+        experiment_id=args.experiment_id,
     )
+    attach_split_policy_provenance(bundle, locked)
 
     exp_id = args.experiment_id or f"opcal_{args.trait}_{dh}"
     out_dir = project_root() / ".tcip" / "experiments" / exp_id
