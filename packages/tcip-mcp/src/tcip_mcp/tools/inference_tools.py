@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                                tile, tile_size, overlap, tile_batch_size,
                                global_nms_iou, postprocess, cross_tile_nms, max_dets,
+                               tile_size_source="default", tiled_source="default",
                                group_by="tile_prefix", group_key_map=None, experiment_id=None,
                                seed=0, holdout_ratio=0.5):
     """Resolve a per-dataset operating point from a labeled split (CV0). Returns (bundle, hash).
@@ -38,6 +39,11 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     references a stem whose image/label no longer exists, or its lock file is corrupt (K1 finding
     4) — the caller (``run_inference``) turns this into a clean ``{"error": ...}`` rather than
     letting a bare ``KeyError`` surface from a stale ``stem_to_image`` lookup.
+
+    ``tile_size_source``/``tiled_source`` (K10 finding 3) are the caller's already-resolved
+    provenance for ``tile_size``/``tile`` — forwarded into ``resolve_operating_point`` so the
+    calibrated bundle doesn't stamp a fabricated tile_size as ``"derived"``, and so it records
+    whether calibration itself actually tiled rather than always asserting ``tiled=True``.
     """
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
     from tcip_mcp.pipelines.data.splits import (
@@ -122,6 +128,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     bundle = resolve_operating_point(
         trait, dataset_hash=dh, calibration_records=cal_records,
         holdout_records=hold_records or None, tile_size=tile_size,
+        tile_size_source=tile_size_source, tiled=tile, tiled_source=tiled_source,
         cross_tile_nms=cross_tile_nms, max_dets=max_dets, experiment_id=experiment_id,
         staged_conf_floor=applied.get("score_thresh"),
     )
@@ -285,7 +292,7 @@ def run_inference(
     images_dir: str | None = None,
     conf_threshold: float = DEFAULT_CONF,
     device: str | None = None,
-    tile: bool = DEFAULT_TILED,
+    tile: bool | None = None,
     tile_size: int | None = None,
     overlap: float | None = None,
     tile_batch_size: int = 96,
@@ -314,7 +321,10 @@ def run_inference(
         images_dir: Directory containing images to process.
         conf_threshold: Minimum confidence score.
         device: Device to use ('cuda' or 'cpu').
-        tile: Enable tiled (SAHI-style) detection inference.
+        tile: Enable tiled (SAHI-style) detection inference. ``None`` (default) is a documented
+            default (K10 finding 3), not silently ``False``/``True`` — its provenance is stamped
+            ``"default"`` vs ``"explicit"`` so a caller who deliberately chose one way is
+            distinguishable from one who left it unset.
         tile_size: Sliding-window tile edge (px). ``None`` (default) derives it from the
             checkpoint's training tile geometry so inference matches the trained scale; a value
             overrides. Foreign/legacy checkpoints with no geometry fall back to 640 with a warning.
@@ -353,6 +363,13 @@ def run_inference(
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
 
+    # K10 finding 3: resolve the tiled bool ONCE, here, so every behavioral and provenance site
+    # below reads the same resolved value — a caller who left ``tile`` unset gets DEFAULT_TILED
+    # behavior everywhere, and the ORIGINAL None-or-bool is never passed further as a live value
+    # (that would make e.g. predict_batch dispatch on falsy None and silently run untiled).
+    tiled_source = "explicit" if tile is not None else "default"
+    resolved_tile_bool = DEFAULT_TILED if tile is None else tile
+
     if dry_run:
         # Report the effective operating point without loading the model or running inference, so the
         # agent can see what conf/NMS/tiling will govern the object count before committing to a run.
@@ -361,10 +378,14 @@ def run_inference(
             "checkpoint_path": checkpoint_path,
             "operating_point": {
                 "conf": conf_threshold,
-                "cross_tile_nms": global_nms_iou if tile else None,
-                "tiled": tile,
-                "tile_size": tile_size if tile_size is not None else "derived-from-checkpoint",
-                "overlap": overlap if overlap is not None else "derived-from-checkpoint",
+                "cross_tile_nms": global_nms_iou if resolved_tile_bool else None,
+                "tiled": resolved_tile_bool,
+                "tiled_source": tiled_source,
+                # Stage-6 review: the checkpoint isn't loaded in a dry run, so neither value is
+                # actually "derived" yet — an explicit value is known; an unset one is only a
+                # PENDING derivation (or the fabricated default, if the checkpoint has none).
+                "tile_size": tile_size if tile_size is not None else "pending-checkpoint-derivation",
+                "overlap": overlap if overlap is not None else "pending-checkpoint-derivation",
                 "max_dets": max_dets,
                 "postprocess": postprocess,
             },
@@ -396,31 +417,31 @@ def run_inference(
 
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
 
-    # CV2: derive the tile geometry from the checkpoint's training geometry unless the caller pinned
-    # it, so a tiled run doesn't silently infer at a different scale than it trained at (which shifts
-    # the object count — the phenotype). None sentinel keeps an explicit 640 distinct from the default.
+    # CV2/K10: derive the tile geometry from the checkpoint's training geometry unless the caller
+    # pinned it, so a tiled run doesn't silently infer at a different scale than it trained at
+    # (which shifts the object count — the phenotype). The shared resolver (K10) is a pure
+    # fact-return — it never refuses — so the warn-and-proceed policy for this exploratory path
+    # lives here, distinct from the delivery-gating path's refuse policy in
+    # ``run_full_frame_evaluation``.
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+
+    resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
+        predictor, tile_size=tile_size, overlap=overlap)
     geometry_warning = None
-    if tile_size is not None:
-        resolved_tile, tile_size_source = int(tile_size), "explicit"
-    elif getattr(predictor, "train_tile_size", None):
-        resolved_tile, tile_size_source = int(predictor.train_tile_size), "derived"
-        if tile and resolved_tile != DEFAULT_TILE_SIZE:
-            # Loud, not just provenance: counts change vs the old pinned 640 for this checkpoint.
-            logger.info("tile_size %d derived from the checkpoint's training geometry "
-                        "(was pinned %d before derivation existed)", resolved_tile, DEFAULT_TILE_SIZE)
-    else:
-        resolved_tile, tile_size_source = DEFAULT_TILE_SIZE, "default"
-        if tile:
-            geometry_warning = (
-                "checkpoint carries no training tile geometry; using default "
-                f"{DEFAULT_TILE_SIZE} — counts may not match training scale. Retrain (geometry now "
-                "persisted) or pass tile_size explicitly."
-            )
-            logger.warning(geometry_warning)
-    resolved_overlap = (
-        float(overlap) if overlap is not None
-        else (float(predictor.train_overlap) if getattr(predictor, "train_overlap", None) is not None else 0.2)
-    )
+    if tile_size_source == "derived" and resolved_tile_bool and resolved_tile != DEFAULT_TILE_SIZE:
+        # Loud, not just provenance: counts change vs the old pinned 640 for this checkpoint.
+        logger.info("tile_size %d derived from the checkpoint's training geometry "
+                    "(was pinned %d before derivation existed)", resolved_tile, DEFAULT_TILE_SIZE)
+    elif tile_size_source == "default" and resolved_tile_bool:
+        geometry_warning = (
+            "checkpoint carries no training tile geometry; using default "
+            f"{DEFAULT_TILE_SIZE} — counts may not match training scale. Retrain (geometry now "
+            "persisted) or pass tile_size explicitly."
+        )
+        logger.warning(geometry_warning)
+    # overlap_source == "default" is expected and unremarkable for a model with no persisted
+    # overlap analog (e.g. YOLO trains square) — only tile_size's absence changes the object
+    # count's scale, so only tile_size's default fallback is worth a warning.
 
     if image_paths is None:
         if images_dir is None:
@@ -437,7 +458,8 @@ def run_inference(
         try:
             bundle, cal_hash = _calibrate_operating_point(
                 predictor, trait, calibration_labels_dir, cal_images,
-                tile=tile, tile_size=resolved_tile, overlap=resolved_overlap,
+                tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
+                tile_size_source=tile_size_source, tiled_source=tiled_source,
                 tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
                 cross_tile_nms=(global_nms_iou if global_nms_iou != DEFAULT_NMS_IOU else None),
                 max_dets=(max_dets if max_dets != DEFAULT_MAX_DETS else None),
@@ -516,8 +538,9 @@ def run_inference(
         # its in-model conf; the bundle stamps it validated_vs_gt=false so the un-trustworthiness of
         # this uncalibrated operating point (the count is the phenotype) travels with the result.
         op_bundle = raw_operating_point(
-            conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=tile,
+            conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=resolved_tile_bool,
             tile_size=resolved_tile, max_dets=max_dets, tile_size_source=tile_size_source,
+            tiled_source=tiled_source,
         )
         extra = {"validated": False, "conf_source": "default"}
 
@@ -525,19 +548,19 @@ def run_inference(
     # available — full tiled inference over thousands of images is hours on CPU vs minutes on
     # a GPU. Install a CUDA torch build (see environment.yml) to use the card.
     cpu_warning = None
-    if device != "cpu" and (tile or len(image_paths) > 8):
+    if device != "cpu" and (resolved_tile_bool or len(image_paths) > 8):
         import torch
 
         if not torch.cuda.is_available():
             cpu_warning = (
                 f"CUDA not available — running {len(image_paths)} image(s)"
-                f"{' tiled' if tile else ''} on CPU, which is much slower. Install a CUDA torch "
-                "build (see environment.yml) to use the GPU."
+                f"{' tiled' if resolved_tile_bool else ''} on CPU, which is much slower. Install a "
+                "CUDA torch build (see environment.yml) to use the GPU."
             )
             logger.warning(cpu_warning)
 
     results = predictor.predict_batch(
-        image_paths, tile=tile, tile_size=resolved_tile, overlap=resolved_overlap,
+        image_paths, tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
         tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
     )
     total_detections = sum(r["count"] for r in results)
@@ -571,7 +594,12 @@ def run_inference(
         "produced_at": datetime.now(timezone.utc).isoformat(),
         "image_count": len(results),
         "total_detections": total_detections,
-        "tiled": tile,
+        "tiled": resolved_tile_bool,
+        # Stage-6 review: overlap has no home in the ResolvedBundle's tracked params (only conf/
+        # cross_tile_nms/tiled/tile_size/max_dets are) — surface the value this specific call
+        # actually ran at directly, rather than silently drop it after resolving it.
+        "overlap": resolved_overlap,
+        "overlap_source": overlap_source,
         "operating_point": op_bundle.to_provenance()["operating_point"],
         "id_map": id_map,
         "results": results,
@@ -591,7 +619,7 @@ def export_predictions(
     output_dir: str,
     conf_threshold: float = DEFAULT_CONF,
     device: str | None = None,
-    tile: bool = DEFAULT_TILED,
+    tile: bool | None = None,
     tile_size: int | None = None,
     overlap: float | None = None,
     tile_batch_size: int = 96,
@@ -623,7 +651,9 @@ def export_predictions(
         output_dir: Directory for output .json prediction files.
         conf_threshold: Minimum confidence score.
         device: Device to use.
-        tile: Tiled (SAHI-style) inference for small dense objects.
+        tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
+            ``run_inference`` unresolved — see its own ``tile`` doc: a documented default distinct
+            from an explicit choice, not silently ``False``.
         tile_size: Sliding-window tile edge (px).
         overlap: Fractional tile overlap.
         tile_batch_size: Tiles per forward batch.
@@ -720,7 +750,7 @@ def tabulate_counts(
     output_path: str,
     conf_threshold: float = DEFAULT_CONF,
     device: str | None = None,
-    tile: bool = DEFAULT_TILED,
+    tile: bool | None = None,
     tile_size: int | None = None,
     overlap: float | None = None,
     tile_batch_size: int = 96,
@@ -754,7 +784,9 @@ def tabulate_counts(
         output_path: Path for the output CSV file.
         conf_threshold: Minimum confidence score.
         device: Device to use.
-        tile: Tiled (SAHI-style) inference for small dense objects.
+        tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
+            ``run_inference`` unresolved — see its own ``tile`` doc: a documented default distinct
+            from an explicit choice, not silently ``False``.
         tile_size: Sliding-window tile edge (px).
         overlap: Fractional tile overlap.
         tile_batch_size: Tiles per forward batch.
