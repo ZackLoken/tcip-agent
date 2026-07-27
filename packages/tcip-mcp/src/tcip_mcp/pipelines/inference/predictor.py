@@ -2,13 +2,16 @@
 
 Inference dispatches on a model KIND so the platform can run more than one framework of
 detector without special-casing at every call site. A tcip checkpoint (a bespoke model built
-by an agent-written importable builder) is the default kind; a pretrained ultralytics YOLO
-checkpoint is a foreign artifact we sniff.
+by an agent-written importable builder) is the only kind today; the dispatch stays
+kind-aware — sniffed from the checkpoint, not hardcoded to one implementation — because
+``.kind`` is a real field other code already reads generically (``require_composed_detector``,
+the model registry), not scaffolding for a single implementation.
 
 Kind travels three ways: stamped on tcip checkpoints at save time (a top-level ``kind`` key),
-recorded on the registry entry, and — for a foreign ``.pt`` we never wrote — sniffed from the
-checkpoint's top-level keys. An undeterminable kind raises rather than guessing and running a
-wrong forward, which would silently corrupt the count (and the count is the phenotype).
+recorded on the registry entry, and — for a foreign ``.pt`` this platform never wrote —
+sniffed from the checkpoint's top-level keys. An undeterminable kind raises rather than
+guessing and running a wrong forward, which would silently corrupt the count (and the count
+is the phenotype).
 """
 
 from __future__ import annotations
@@ -21,19 +24,19 @@ logger = logging.getLogger(__name__)
 # A bespoke, from-scratch model built by an agent-written importable builder (model_source).
 # Reproduced by re-importing that builder — never by exec.
 KIND_TCIP_MODULE = "tcip_module"
-KIND_ULTRALYTICS = "ultralytics"
 DEFAULT_KIND = KIND_TCIP_MODULE
 
 
 @runtime_checkable
 class Predictor(Protocol):
-    """The inference surface every model kind exposes (torchvision, ultralytics, future kinds).
+    """The inference surface every model kind exposes (today: ``GenericPredictor``; the shape
+    stays open to a future foreign kind).
 
     Detection result dict:
     ``{image, width, height, boxes[[x1,y1,x2,y2] px], scores[], labels[], count}`` (tiled adds
     ``tiles``). Labels are **1-indexed foreground** (background = 0) — the torchvision
     convention the rest of the pipeline (JSON prediction export, Review, CSV) already
-    assumes; a kind that is natively 0-indexed (ultralytics) shifts to it at its own boundary,
+    assumes; a future kind that is natively 0-indexed would shift to it at its own boundary,
     so downstream code never has to know which kind produced a result.
     """
 
@@ -48,19 +51,19 @@ class Predictor(Protocol):
 def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:
     """Resolve the kind from an already-loaded checkpoint object (no second disk read)."""
     if not isinstance(ckpt, dict):
-        # ultralytics can pickle a bare nn.Module in some export paths.
-        return KIND_ULTRALYTICS
+        raise ValueError(
+            f"Cannot determine model kind for {checkpoint_path}: checkpoint did not unpickle to a "
+            f"dict (got {type(ckpt).__name__}), so it carries none of the structural markers "
+            "('kind' / 'model_source'+'model_state_dict') this platform's own checkpoints do."
+        )
     stamped = ckpt.get("kind")
     if stamped:
         return str(stamped)
     # Structural fallback for tcip checkpoints whose kind wasn't stamped.
     if "model_source" in ckpt and "model_state_dict" in ckpt:
         return KIND_TCIP_MODULE
-    if "model" in ckpt and ("train_args" in ckpt or "names" in ckpt or "nc" in ckpt):
-        return KIND_ULTRALYTICS
     raise ValueError(
-        f"Cannot determine model kind for {checkpoint_path}: no 'kind'/'model_source' (tcip) and "
-        f"no ultralytics markers ('model' + 'train_args'/'names'/'nc'). "
+        f"Cannot determine model kind for {checkpoint_path}: no 'kind'/'model_source' (tcip). "
         f"Top-level keys: {sorted(ckpt)[:12]}"
     )
 
@@ -115,10 +118,6 @@ def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: 
     Pass ``kind`` to skip detection (e.g. the registry already recorded it). Predictor
     kwargs (``device``, ``score_threshold``, ``nms_iou``, ``max_dets``, …) pass through.
     """
-    if kind == KIND_ULTRALYTICS:
-        from tcip_mcp.pipelines.inference.yolo_predictor import YoloPredictor
-        return YoloPredictor(checkpoint_path, **kwargs)
-
     ckpt = None
     if kind is None:
         # Sniff by loading once; hand the loaded checkpoint to the predictor so the weights aren't
@@ -142,7 +141,4 @@ def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: 
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
         extra = {"checkpoint": ckpt} if ckpt is not None else {}
         return GenericPredictor(checkpoint_path=checkpoint_path, **extra, **kwargs)
-    if kind == KIND_ULTRALYTICS:
-        from tcip_mcp.pipelines.inference.yolo_predictor import YoloPredictor
-        return YoloPredictor(checkpoint_path, **kwargs)
     raise ValueError(f"Unsupported model kind {kind!r} for {checkpoint_path}")
