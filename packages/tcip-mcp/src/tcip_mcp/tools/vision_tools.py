@@ -278,6 +278,11 @@ def render_failure_cases(
 ) -> dict:
     """Find and render the worst predictions for failure analysis.
 
+    Ranks by a count-mismatch + low-confidence heuristic (`get_worst_predictions`) — no IoU
+    matching, so an image with the right box count but every box mislocated scores as good. Not a
+    substitute for `score_predictions`(`detail=True`)'s IoU-matched TP/FP/FN when mislocalization
+    itself is the question.
+
     Returns a grid image and individual failure case images.
 
     Args:
