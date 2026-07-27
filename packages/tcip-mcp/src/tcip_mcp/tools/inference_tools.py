@@ -78,9 +78,12 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         )
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
-    # Floor the in-model + predictor conf so hesitant detections survive to be swept.
-    set_detector_operating_point(predictor.model, score_thresh=0.01)
-    predictor.score_threshold = 0.01
+    # Floor the in-model + predictor conf so hesitant detections survive to be swept. The applied
+    # value (not a re-typed 0.01 literal) is threaded into resolve_operating_point as the reference's
+    # staged_conf_floor (Fix D) — the SAME value this call actually applied, per CLAUDE.md's "when
+    # two paths must agree, call one from the other."
+    applied = set_detector_operating_point(predictor.model, score_thresh=0.01)
+    predictor.score_threshold = applied.get("score_thresh", 0.01)
 
     def _records(sub_stems):
         if not sub_stems:
@@ -120,6 +123,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         trait, dataset_hash=dh, calibration_records=cal_records,
         holdout_records=hold_records or None, tile_size=tile_size,
         cross_tile_nms=cross_tile_nms, max_dets=max_dets, experiment_id=experiment_id,
+        staged_conf_floor=applied.get("score_thresh"),
     )
     attach_split_policy_provenance(bundle, locked)
     return bundle, dh
@@ -136,6 +140,13 @@ def _sweep_summary(conf_param) -> dict:
     whose declared ``seed``/``holdout_ratio``/``group_by`` didn't take effect against an existing
     lock sees that here, in the tool's own response, rather than only in the persisted sweep
     artifact or a server log line.
+
+    ``failures`` (K2, stage-6 review) is the SAME named-failure list ``describe_review_validation``
+    reads for the breeder-facing message — surfaced here too, plus the individual new gate fields
+    (``conf_floor_mismatch``, dispersion/localization terms), so an agent hitting one of K2's new
+    refusal conditions on the GT path sees a real reason instead of every other field reading
+    "fine" (the same defect K1 finding 3 fixed for the train-provenance/content-overlap terms,
+    reintroduced one level up by K2's new conjuncts until now).
     """
     sweep = conf_param.sweep or {}
     hb = sweep.get("holdout_bias") or {}
@@ -144,8 +155,12 @@ def _sweep_summary(conf_param) -> dict:
         "f1_max_conf": sweep.get("f1_max_conf"),
         "holdout_bias": hb.get("count_bias_mean") if isinstance(hb, dict) else None,
         "passed_holdout": sweep.get("passed_holdout"),
+        "failures": sweep.get("failures"),
         "conf_censored": sweep.get("conf_censored"),
+        "conf_floor_mismatch": sweep.get("conf_floor_mismatch"),
         "count_bias_tolerance": sweep.get("count_bias_tolerance"),
+        "count_error_tolerance": sweep.get("count_error_tolerance"),
+        "count_error_p90": hb.get("count_error_p90") if isinstance(hb, dict) else None,
         "disjoint": sweep.get("disjoint"),
         "content_overlap_frac": sweep.get("content_overlap_frac"),
         "content_duplicated": sweep.get("content_duplicated"),
