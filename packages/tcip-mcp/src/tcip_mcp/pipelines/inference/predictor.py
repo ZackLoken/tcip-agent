@@ -73,6 +73,42 @@ def detect_kind(checkpoint_path: str) -> str:
     return _kind_from_ckpt(ckpt, checkpoint_path)
 
 
+def resolve_tile_geometry(
+    predictor: Any, *, tile_size: int | None, overlap: float | None,
+) -> tuple[int, str, float, str]:
+    """Resolve tile_size/overlap by precedence: explicit caller value > the checkpoint's own
+    persisted training geometry (``predictor.train_tile_size``/``train_overlap``) > a documented
+    default (K10 CV2/CV3 — one implementation both ``run_inference`` and the delivery-grade
+    ``run_full_frame_evaluation`` call, so they can't silently disagree on which regime a model
+    actually ran in).
+
+    Pure fact-return, never raises: this is a capability, not a policy. Returns
+    ``(tile_size, tile_size_source, overlap, overlap_source)`` where each ``*_source`` is one of
+    ``"explicit"``/``"derived"``/``"default"``. A caller with a stake in the source (e.g. a
+    delivery gate that must not silently fabricate a number) inspects the returned source itself
+    and decides whether to refuse, warn, or proceed — that policy does not belong here, since an
+    exploratory caller (``run_inference``) and a certifying caller (``run_full_frame_evaluation``)
+    legitimately make different calls on the same fact.
+    """
+    from tcip_mcp.pipelines.resolution import DEFAULT_OVERLAP, DEFAULT_TILE_SIZE
+
+    if tile_size is not None:
+        resolved_tile, tile_source = int(tile_size), "explicit"
+    elif getattr(predictor, "train_tile_size", None) is not None:
+        resolved_tile, tile_source = int(predictor.train_tile_size), "derived"
+    else:
+        resolved_tile, tile_source = DEFAULT_TILE_SIZE, "default"
+
+    if overlap is not None:
+        resolved_overlap, overlap_source = float(overlap), "explicit"
+    elif getattr(predictor, "train_overlap", None) is not None:
+        resolved_overlap, overlap_source = float(predictor.train_overlap), "derived"
+    else:
+        resolved_overlap, overlap_source = DEFAULT_OVERLAP, "default"
+
+    return resolved_tile, tile_source, resolved_overlap, overlap_source
+
+
 def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: Any) -> "Predictor":
     """Construct the right predictor for a checkpoint's kind (the one inference entry point).
 
