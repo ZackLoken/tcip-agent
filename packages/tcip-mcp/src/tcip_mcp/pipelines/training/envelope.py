@@ -184,7 +184,16 @@ class TrainContext:
         held-out-validated point, not a pin. Pass calibration_records/holdout_records (kwargs mirror
         ``resolve_operating_point``). Defaults ``experiment_id`` to this run's own id (K1), so the
         train-disjointness gate checks the calibration/holdout images against the training split
-        this exact run drew — a caller-supplied ``experiment_id`` still wins."""
+        this exact run drew — a caller-supplied ``experiment_id`` still wins.
+
+        ``staged_conf_floor`` (K2 — pass it, or this can never validate): the confidence threshold
+        YOUR OWN inference pass floored detections to when it produced ``calibration_records``/
+        ``holdout_records`` — e.g. whatever ``score_thresh``/``score_threshold`` you set on the model
+        before running it (``set_detector_operating_point``'s own return value, if you used it, IS
+        this fact — thread it straight through, never re-type the number). Omitting it fails the
+        reference closed as censored (``resolve_operating_point``'s own docstring explains why: an
+        unstated floor can't be reconciled against the picked conf). This is a real, caller-supplied
+        fact about how your records were produced, not a default this method can derive for you."""
         from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
         kwargs.setdefault("experiment_id", self.experiment_id)
