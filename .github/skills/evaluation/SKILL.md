@@ -31,10 +31,20 @@ Change detection is not a built task type — see README's Roadmap.
 
 | Tool | Purpose |
 |------|---------|
+| `evaluate_model` | Evaluate a checkpoint on a held-out dataset; writes `test_results.json` |
 | `score_predictions` | Score on-disk predictions vs GT — an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
 | `render_failure_cases` | Surface + render the N images with highest triage error |
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
+
+`evaluate_model` accepts an optional `trait=` — when set, the trait's own governing criterion
+(not the IoU@0.5 comparability convention) determines detection counts/F1, matching what governs
+delivery (see Metrics by Task Type above); omit it and the IoU@0.5 convention governs instead. For
+a tile-trained checkpoint, `evaluate_model` reports in one of two regimes: the default tile-level
+run is a DIAGNOSTIC only (matches training-time val mAP, not the shipped full-frame count);
+`use_tiled_inference=True` reconstructs predictions to full frame and is the delivery-grade metric
+to report for gating. An untiled checkpoint has no regime split — its one run already is the
+delivery metric (see `evaluate_model`'s own docstring for the full precedence).
 
 ## Failure Triage
 
@@ -54,7 +64,8 @@ When metrics are poor, investigate systematically:
 When comparing models:
 1. Same dataset split (use `make_splits` with fixed seed)
 2. Same evaluation set
-3. Compare on primary metric for the task
+3. Compare using the metric that governs this trait/task's phenotype (see Metrics by Task Type
+   above) — not necessarily the labeled comparability metric
 4. For classification/ordinal, check per-class performance — overall accuracy can hide
    class-specific failures; for detection, check per-image FP/FN patterns instead (see
    Failure Triage above — there's no per-class AP today)
