@@ -130,24 +130,61 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
 
 
 def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
-    client.post(
+    # Confirmations are dataset-native (K13.5 slice 4): a write must locate dataset_root.
+    post = client.post(
         "/api/classes/image_status",
-        json={"project_root": str(tmp_path), "image_name": "IMG_0001.JPG",
-              "status": "complete", "subject": "catkin"},
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "catkin"},
     )
+    assert post.status_code == 200
     resp = client.get(
-        "/api/classes/image_status", params={"project_root": str(tmp_path), "subject": "catkin"}
+        "/api/classes/image_status",
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "catkin"},
     )
     body = resp.json()
     assert body["statuses"]["IMG_0001.JPG"] == "complete"
+    assert (tmp_path / ".tcip" / "state" / "image_status.json").is_file()
 
 
 def test_image_status_rejects_invalid(client: TestClient, tmp_path: Path) -> None:
     resp = client.post(
         "/api/classes/image_status",
-        json={"project_root": str(tmp_path), "image_name": "x", "status": "bogus"},
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "image_name": "x", "status": "bogus"},
     )
     assert resp.status_code == 400
+
+
+def test_image_status_write_refuses_without_a_locatable_dataset(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A write that can't locate dataset_root must fail loudly, not silently write nowhere anyone
+    reads (mirrors save_classes' same refusal)."""
+    resp = client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(tmp_path), "image_name": "IMG_0001.JPG",
+              "status": "complete", "subject": "catkin"},
+    )
+    assert resp.status_code == 400
+
+
+def test_image_status_lands_at_dataset_root_not_an_unrelated_project(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A project referencing a dataset elsewhere must confirm negatives INTO the dataset, not into
+    the project's own private state — the cross-root case K13.5 slice 4 exists to fix."""
+    project_root = tmp_path / "project"
+    dataset_root = tmp_path / "shared_dataset"
+    project_root.mkdir()
+    dataset_root.mkdir()
+
+    client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(project_root), "dataset_root": str(dataset_root),
+              "image_name": "IMG_0001.JPG", "status": "negative", "subject": "catkin"},
+    )
+    assert (dataset_root / ".tcip" / "state" / "image_status.json").is_file()
+    assert not (project_root / ".tcip" / "state" / "image_status.json").is_file()
 
 
 def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path: Path) -> None:
@@ -233,6 +270,7 @@ def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
         "/api/classes/image_status/bulk",
         json={
             "project_root": str(tmp_path),
+            "dataset_root": str(tmp_path),
             "subject": "catkin",
             "statuses": {
                 "A.JPG": "complete",
@@ -243,7 +281,8 @@ def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
     )
     assert resp.json()["n"] == 3
     loaded = client.get(
-        "/api/classes/image_status", params={"project_root": str(tmp_path), "subject": "catkin"}
+        "/api/classes/image_status",
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "catkin"},
     ).json()
     assert loaded["statuses"]["A.JPG"] == "complete"
     assert loaded["statuses"]["B.JPG"] == "partial"
