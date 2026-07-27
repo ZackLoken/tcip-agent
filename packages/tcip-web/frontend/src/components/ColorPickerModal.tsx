@@ -1,6 +1,5 @@
 /**
- * Dark color picker modeled after yolo-annotator's _show_dark_color_picker.
- * SI palette + basic palette + hex input, resolving to a hex string.
+ * Dark color picker: SI palette + basic palette + hex input, resolving to a hex string.
  */
 
 import { useEffect, useRef, useState } from "react";
