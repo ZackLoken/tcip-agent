@@ -83,6 +83,30 @@ def test_prioritize_review_queue_checkpoint_missing(tmp_path):
     assert "error" in r  # early guard, no torch import needed
 
 
+def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch):
+    """Active-learning uncertainty scoring reads model logits, which a non-composed predictor
+    kind (a bespoke tcip model was never built for) doesn't expose — so it must fail LOUD with a
+    clear error, not crash on ``.model``. (Relocated from the K21-removed test_yolo_predictor.py,
+    which exercised this via a stubbed ultralytics kind — genericized since the guard itself has
+    nothing to do with any specific foreign kind, only with "not the composed tcip kind".)
+    """
+    from types import SimpleNamespace
+
+    import tcip_mcp.pipelines.inference.predictor as predmod
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "a.jpg").write_bytes(b"x")
+    # prioritize_review_queue imports build_predictor from the predictor module at call time.
+    monkeypatch.setattr(predmod, "build_predictor",
+                        lambda *a, **k: SimpleNamespace(kind="foreign_kind"))
+
+    r = prioritize_review_queue(checkpoint_path=str(ckpt), images_dir=str(images))
+    assert "error" in r and "foreign_kind" in r["error"]
+
+
 def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
     """The refusal is a ValueError whatever the name looks like.
 
