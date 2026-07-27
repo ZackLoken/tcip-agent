@@ -60,11 +60,15 @@ def main(argv: list[str] | None = None) -> int:
         attach_split_policy_provenance, records_over_loader, resolve_operating_point,
         set_detector_operating_point,
     )
-    from tcip_mcp.pipelines.resolution import dataset_hash
+    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, dataset_hash
     from tcip_mcp.pipelines.training.generic_trainer import task_collate
     from tcip_mcp.project_paths import project_root
 
-    predictor = build_predictor(checkpoint_path=args.checkpoint, device=args.device)
+    # Fix J: match the MCP path's cap exactly (DEFAULT_MAX_DETS) rather than leaving the framework
+    # default (torchvision 100/300) in place, which can truncate a dense calibration image's raw
+    # detections during this untiled pass before the score_thresh=0.01 floor even sees them.
+    predictor = build_predictor(checkpoint_path=args.checkpoint, device=args.device,
+                                max_dets=DEFAULT_MAX_DETS)
     tile_size = getattr(predictor, "train_tile_size", None)
 
     probe = build_dataset("detection", images_dir=args.images_dir, labels_dir=args.labels_dir)
@@ -100,7 +104,11 @@ def main(argv: list[str] | None = None) -> int:
               "already covers).", file=sys.stderr)
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
-    set_detector_operating_point(predictor.model, score_thresh=0.01)
+    # Floor the in-model conf so hesitant detections survive to be swept, keeping the cap set above
+    # (Fix J — two entry doors, one cap). The applied score_thresh (not a re-typed 0.01 literal) is
+    # threaded into resolve_operating_point as staged_conf_floor (Fix D).
+    applied = set_detector_operating_point(predictor.model, score_thresh=0.01,
+                                           detections_per_img=DEFAULT_MAX_DETS)
 
     def _records(sub):
         ds = build_dataset("detection", images_dir=args.images_dir,
@@ -111,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     bundle = resolve_operating_point(
         args.trait, dataset_hash=dh, calibration_records=_records(cal_stems),
         holdout_records=_records(hold_stems), tile_size=tile_size,
-        experiment_id=args.experiment_id,
+        experiment_id=args.experiment_id, staged_conf_floor=applied.get("score_thresh"),
     )
     attach_split_policy_provenance(bundle, locked)
 
