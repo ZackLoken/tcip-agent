@@ -189,12 +189,34 @@ class ReviewEngine:
 
     # ── Image-level status ────────────────────────────────────────────────
 
-    def mark_image_reviewed(self, img_name: str) -> None:
+    def mark_image_reviewed(self, img_name: str, *, producer_identity: Optional[dict] = None,
+                            adjudication_covered: Optional[bool] = None) -> None:
+        """Mark ``img_name`` fully reviewed (e.g. a confirmed negative / bulk-accept).
+
+        ``producer_identity`` (Fix G): the resolved producing-bucket fact (``checkpoint_sha256``/
+        ``experiment_id``), a plain dict the CALLER resolves (this package never looks one up
+        itself — see the module docstring). A confirmed negative carries zero verdict entries, so
+        it has nowhere else to record which model it was reviewed against; this stamps that fact at
+        the image level instead. ``None`` (the default) leaves any existing stamp untouched.
+
+        ``adjudication_covered`` (Fix H, stage-6 review): whether this zero-verdict completion is a
+        genuine negative the CALLER has already confirmed (the prediction bucket held zero
+        detections for this image, so Complete is itself the confirming act) — never inferred by
+        this package. A bulk-accept of an image the bucket DID predict on, completed with no
+        individual verdicts, must pass ``False`` (or omit it): stamping every zero-verdict Complete
+        as covered would let an unreviewed bulk-accept dilute a real reference's statistics, which is
+        exactly the fail-open this distinction exists to close. ``None`` (the default) leaves any
+        existing stamp untouched.
+        """
         per_image = self._review_state.setdefault("image", {})
         img_data = per_image.setdefault(
             img_name, {"img_status": "completed", "detections": []}
         )
         img_data["img_status"] = "completed"
+        if producer_identity is not None:
+            img_data["producer_identity"] = producer_identity
+        if adjudication_covered is not None:
+            img_data["adjudication_covered"] = adjudication_covered
         self._save_image(img_name)
 
     def unmark_image_reviewed(self, img_name: str) -> None:
@@ -454,6 +476,8 @@ class ReviewEngine:
         *,
         norm_det: Optional[ReviewDetection] = None,
         norm_ctx: Optional[ReviewContext] = None,
+        producer_identity: Optional[dict] = None,
+        conf_threshold: Optional[float] = None,
     ) -> None:
         """Log an accept / reject / edit action for a detection.
 
@@ -461,11 +485,31 @@ class ReviewEngine:
         edited verdict rewrites the GT bbox, so the entry must be keyed to the post-edit
         geometry (what the next reload's lookup sees) while any prior entry for this
         detection is still found via the pre-edit geometry of ``det``/``ctx``.
+
+        ``producer_identity`` (Fix G): the resolved producing-bucket fact (``checkpoint_sha256``/
+        ``experiment_id``, plus ``bucket_dir`` for human legibility) this verdict was recorded
+        against — a plain dict the CALLER resolves (``tcip-web``, which can read a bucket's
+        ``operating_point.json`` sidecar); this package stores it verbatim and never resolves one
+        itself, keeping it free of any dependency on ``tcip-mcp``/``tcip-web``. Persisted on the
+        verdict entry so a later validation pass can scope verdicts to the SAME producing model,
+        not a directory-name comparison.
+
+        ``conf_threshold`` (Fix D item 4): the review session's confidence-display threshold in
+        effect when this verdict was recorded — persisted so the review-confirmed reference can
+        reconstruct the effective floor the reviewed predictions were shown at.
+
+        On the FIRST verdict recorded for this image, stamps ``gt_preexisting = bool(ctx.gt)`` onto
+        the image-level record (Fix H) — the pristine, pre-mutation GT the caller already holds at
+        that point, a recorded fact (never inferred later) for whether this image had ground truth
+        BEFORE the review session touched it.
         """
         per_image = self._review_state.setdefault("image", {})
+        is_first_verdict = ctx.img_name not in per_image
         img_data = per_image.setdefault(
             ctx.img_name, {"img_status": "started", "detections": []}
         )
+        if is_first_verdict:
+            img_data["gt_preexisting"] = bool(ctx.gt)
 
         nd = norm_det if norm_det is not None else det
         nc = norm_ctx if norm_ctx is not None else ctx
@@ -479,6 +523,8 @@ class ReviewEngine:
             "pred_bbox_norm": self._normalised_bbox(nc, "pred", nd),
             "iou": round(det.iou, 4) if det.iou is not None else None,
             "conf": round(det.conf, 4) if det.conf is not None else None,
+            "producer_identity": producer_identity,
+            "conf_threshold": conf_threshold,
         }
 
         existing = self.find_reviewed_entry(det, ctx)
