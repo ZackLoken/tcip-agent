@@ -91,10 +91,10 @@ def test_finding1_external_marker_not_permanently_blocked_when_disjoint(tmp_path
     (exp_dir / "split.json").write_text(
         json.dumps({"train": ["train_a", "train_b"], "group_by": "external"}), encoding="utf-8")
 
+    cal, hold = _good_dense_op_records()
     b = resolve_operating_point("catkin", dataset_hash="h1",
-                                calibration_records=_op_records("c"),
-                                holdout_records=_op_records("h", shift=3.0),
-                                experiment_id="exp_ext")
+                                calibration_records=cal, holdout_records=hold,
+                                staged_conf_floor=0.01, experiment_id="exp_ext")
     conf = b.get("conf")
     assert conf.validated_vs_gt == "validated_held_out"  # NOT permanently blocked
     td = conf.sweep["train_disjointness"]
@@ -175,14 +175,18 @@ def test_finding1_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
 # Finding 2 — review-confirmation image ids are stemmed, matching training stems.
 # ===========================================================================
 
+_IDENTITY = {"checkpoint_sha256": "deadbeef", "experiment_id": None}
+
+
 def test_finding2_review_to_records_stems_the_image_id():
     from tcip_mcp.pipelines.feedback.review_calibration import review_to_records
 
     review_state = {"image": {"srcA_0_0.jpg": {"img_status": "completed", "detections": [
         {"action": "accepted", "class_id": 0,
-         "gt_bbox_norm": [0.5, 0.5, 0.1, 0.1], "pred_bbox_norm": [0.5, 0.5, 0.1, 0.1], "conf": 0.9},
+         "gt_bbox_norm": [0.5, 0.5, 0.1, 0.1], "pred_bbox_norm": [0.5, 0.5, 0.1, 0.1], "conf": 0.9,
+         "producer_identity": _IDENTITY},
     ]}}}
-    recs = review_to_records(review_state)
+    recs = review_to_records(review_state, bucket_identities=[_IDENTITY])
     assert recs[0]["image_id"] == "srcA_0_0"  # stemmed, not "srcA_0_0.jpg"
 
 
@@ -200,18 +204,21 @@ def test_finding2_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
 
     def _entry(gt, pred, conf):
         return {"action": "accepted", "class_id": 0, "gt_bbox_norm": gt, "pred_bbox_norm": pred,
-                "conf": conf}
+                "conf": conf, "producer_identity": _IDENTITY}
 
     # Two reviewed images — both further tiles of the SAME source the model trained on — keyed
-    # WITH an extension, exactly as review state stores them.
+    # WITH an extension, exactly as review state stores them. gt_preexisting=True (Fix H) so these
+    # records aren't excluded from the gate as unadjudicated — this test is about train
+    # disjointness, not FN-coverage.
     review_state = {"image": {
-        "srcA_0_2.jpg": {"img_status": "completed",
+        "srcA_0_2.jpg": {"img_status": "completed", "gt_preexisting": True,
                          "detections": [_entry([0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.05)]},
-        "srcA_0_3.jpg": {"img_status": "completed",
+        "srcA_0_3.jpg": {"img_status": "completed", "gt_preexisting": True,
                          "detections": [_entry([0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.05)]},
     }}
     bundle = resolve_operating_point_from_review(
-        review_state, "catkin", group_by="stem", experiment_id="exp_review")
+        review_state, "catkin", group_by="stem", experiment_id="exp_review",
+        bucket_identities=[_IDENTITY])
     td = bundle.get("conf").sweep["train_disjointness"]
     assert td["leaked_groups"] == ["srcA"]  # would be [] before the fix
     assert bundle.get("conf").validated_vs_gt == "false"
@@ -235,7 +242,8 @@ def test_finding3_describe_review_validation_unresolvable_message():
     from tcip_mcp.pipelines.feedback import describe_review_validation
 
     b = _review_bundle({"conf_censored": False, "disjoint": True, "passed_holdout": False,
-                        "train_disjointness": {"unresolvable": True}})
+                        "train_disjointness": {"unresolvable": True},
+                        "failures": ["train_disjointness_unresolvable"]})
     out = describe_review_validation(b, reviewed_image_count=4)
     assert out["validated"] is False
     assert "training record" in out["reason"]
@@ -246,7 +254,8 @@ def test_finding3_describe_review_validation_leaked_message():
 
     b = _review_bundle({"conf_censored": False, "disjoint": True, "passed_holdout": False,
                         "train_disjointness": {"unresolvable": False, "leaked_groups": ["srcA"],
-                                                "leaked_stems": []}})
+                                                "leaked_stems": []},
+                        "failures": ["train_disjointness_leaked"]})
     out = describe_review_validation(b, reviewed_image_count=4)
     assert out["validated"] is False
     assert "also used to train" in out["reason"]
@@ -256,7 +265,7 @@ def test_finding3_describe_review_validation_content_duplicated_message():
     from tcip_mcp.pipelines.feedback import describe_review_validation
 
     b = _review_bundle({"conf_censored": False, "disjoint": True, "passed_holdout": False,
-                        "content_duplicated": True})
+                        "content_duplicated": True, "failures": ["content_duplicated"]})
     out = describe_review_validation(b, reviewed_image_count=4)
     assert out["validated"] is False
     assert "duplicate" in out["reason"]
@@ -444,3 +453,18 @@ def _op_records(idp="c", *, shift: float = 0.0):
          "gt": [_op_ann(100 + shift, 100), _op_ann(200 + shift, 200)],
          "dt": [_op_ann(100, 100, score=0.9), _op_ann(200, 200, score=0.3)]}
     return [a, b]
+
+
+def _good_dense_op_records():
+    """K2 rule 17: a realistic dense reference for tests that expect the holdout gate to VALIDATE —
+    the 2-image ``_op_records`` toy's per-image variance now trips Fix C's equivalence criterion at
+    n=2 (a genuine, intended tightening; see test_operating_point.py for the same fixture idiom)."""
+    from tests._dense_op_fixtures import dense_records
+
+    n_images, objects_per_image = 20, 80
+    miss, fp = [0] * n_images, [1] * n_images
+    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
+                         shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    return cal, hold
