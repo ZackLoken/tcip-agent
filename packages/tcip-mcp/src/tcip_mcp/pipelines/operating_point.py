@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from typing import Any
+from typing import Any, Callable
 
 from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 from tcip_mcp.pipelines.resolution import (
@@ -33,18 +33,42 @@ from tcip_mcp.pipelines.resolution import (
     derived,
 )
 from tcip_mcp.pipelines.training.evaluation import (
-    count_bias_at,
     gt_class_avg_size,
     pick_count_unbiased,
     pick_f1_max,
     sweep_operating_point,
 )
-from tcip_mcp.traits import get_trait
+from tcip_mcp.traits import COUNT_OBJECTIVES, COUNT_UNBIASED, DETECTION_F1, PRESENCE, get_trait
 
 # The non-count operating-point fallbacks all resolve to resolution.py's single source of truth
 # (DEFAULT_TILED / DEFAULT_TILE_SIZE / DEFAULT_NMS_IOU / DEFAULT_MAX_DETS / DEFAULT_CONF) so the same
 # model+images can't give a different count by entry door. cross_tile_nms shares the NMS-IoU knob (a
 # distribution derivation refines it); the conf placeholder is only ever read via unvalidated_value().
+
+# Count-objective -> (picker, derivation label). One registry, not two hardcoded lists to keep in
+# sync (Fix E): the KEYS are ``traits.COUNT_OBJECTIVES`` (torch-free, so ``traits._spec_from_config``
+# validates a config-authored count_objective against that set directly, never importing this
+# torch-heavy module just to check a name) — this dict only adds the picker/label each objective
+# resolves to. The label stamped on ``conf`` is derived from whichever picker actually ran
+# (pick-then-label), never from the reference type alone. PRESENCE deliberately shares DETECTION_F1's
+# F1-max picker/label: presence is a per-object find/no-find call, exactly what F1 (harmonic
+# precision/recall) measures on matching quality — unlike COUNT_UNBIASED's sum-agreement objective
+# (the phenotype is a count), which needs its own picker. An unregistered objective (only reachable
+# via a code-authored TraitSpec, since config-authored specs are validated against COUNT_OBJECTIVES)
+# falls back to the F1-max entry, same as before.
+COUNT_OBJECTIVE_PICKERS: dict[str, tuple[Callable[[dict], float | None], str]] = {
+    COUNT_UNBIASED: (pick_count_unbiased, "count-unbiased center-match sweep"),
+    DETECTION_F1: (pick_f1_max, "F1-max center-match sweep"),
+    PRESENCE: (pick_f1_max, "F1-max center-match sweep"),
+}
+assert set(COUNT_OBJECTIVE_PICKERS) == COUNT_OBJECTIVES, (
+    "COUNT_OBJECTIVE_PICKERS must cover exactly traits.COUNT_OBJECTIVES — the single source of "
+    "truth traits._spec_from_config validates config-authored objectives against")
+
+# Fix C's one-sided confidence multiplier for the mean+SE equivalence criterion (~95%) — a stated
+# CV-derivation convention, not a breeder-semantics decision, so it lives here as a named constant
+# rather than buried in a formula.
+_EQUIVALENCE_Z = 1.645
 
 
 def set_detector_operating_point(model: Any, *, score_thresh: float | None = None,
@@ -68,6 +92,18 @@ def set_detector_operating_point(model: Any, *, score_thresh: float | None = Non
     return applied
 
 
+def _current_detections_cap(model: Any) -> int | None:
+    """The in-model ``detections_per_img`` a model is CURRENTLY set to, or ``None`` if unset.
+
+    Read, not derived — whatever ``set_detector_operating_point`` last applied (or the framework
+    default if nothing was ever set). Used only to stamp Fix K's non-gating cap-saturation signal
+    at record-generation time, when the cap is actually known.
+    """
+    det = getattr(model, "detector", model)
+    target = getattr(det, "roi_heads", None) or det
+    return getattr(target, "detections_per_img", None)
+
+
 def records_over_loader(model: Any, loader: Any, device: Any, task: str) -> list[dict]:
     """One unfiltered model pass -> per-image COCO records (boxes + scores) for a conf sweep.
 
@@ -80,6 +116,7 @@ def records_over_loader(model: Any, loader: Any, device: Any, task: str) -> list
 
     include_masks = task == "instance_seg"
     stems = getattr(getattr(loader, "dataset", None), "stems", None)
+    cap = _current_detections_cap(model)
     model.eval()
     records: list[dict] = []
     with torch.no_grad():
@@ -88,7 +125,7 @@ def records_over_loader(model: Any, loader: Any, device: Any, task: str) -> list
             outputs = model(images)
             for img, tgt, out in zip(images, targets, outputs):
                 rec = records_from_detector(tgt, out, width=img.shape[-1], height=img.shape[-2],
-                                            include_masks=include_masks)
+                                            include_masks=include_masks, detections_cap=cap)
                 idx = tgt.get("image_id")
                 if stems is not None and isinstance(idx, int) and 0 <= idx < len(stems):
                     rec["image_id"] = stems[idx]  # globally-unique so cal/holdout overlap is detectable
@@ -102,18 +139,46 @@ def _min_dt_score(records: list[dict]) -> float | None:
     return min(scores) if scores else None
 
 
-def _conf_censored(records: list[dict] | None, display_floor: float) -> bool:
-    """True when a reference's detections were filtered above the calibration floor.
+def _cap_saturated_frac(records: list[dict] | None) -> float | None:
+    """Fraction of records whose raw detection count hit the model's applied per-image cap.
 
-    The count-unbiased sweep is only trustworthy when the reference includes the low-conf tail —
-    predictions generated at/below the calibration floor (``_calibrate_operating_point`` floors the
-    detector to ``score_thresh=0.01`` for exactly this reason). A reference whose lowest detection
-    score sits at or above the display conf floor (e.g. predictions a human reviewed, staged at
-    ``DEFAULT_CONF``) is truncated: the sweep can't reach the boxes a lower conf would recover, so its
-    count-unbiased point and held-out bias are not trustworthy and must not stamp a ``validated`` claim.
+    Fix K, non-gating provenance only: a per-image ``cap_hit`` flag is stamped by
+    ``records_from_detector``/``records_over_loader`` when the cap was known at generation time.
+    Records built another way (e.g. a tiled predictor pass) carry none and are excluded from the
+    fraction entirely, not counted as an unsaturated 0 — ``None`` when nothing here carries the flag.
     """
-    lo = _min_dt_score(records or [])
-    return lo is not None and lo >= display_floor
+    hits = [r["cap_hit"] for r in (records or []) if "cap_hit" in r]
+    return (sum(hits) / len(hits)) if hits else None
+
+
+def _conf_censored(chosen_conf: float, staged_conf_floor: float | None) -> bool:
+    """True when the picked conf sits AT OR BELOW the floor the reference was staged/filtered at.
+
+    The count-unbiased sweep is only trustworthy when the reference includes the low-conf tail below
+    the picked conf. A conf picked strictly ABOVE the staging floor is fully supported by the
+    reference — every surviving detection with ``score >= conf`` genuinely survived the floor's own
+    filter, so the sweep saw everything it needed to. A conf at or below the floor means the sweep
+    could not see whether an even-lower conf would have done better, so the pick is untrustworthy.
+    ``staged_conf_floor is None`` (the caller made no assertion of what floor the reference was
+    generated at) is always censored — there is nothing here to reconcile the pick against, so
+    validation fails closed rather than trusting an unstated assumption.
+    """
+    return staged_conf_floor is None or chosen_conf <= staged_conf_floor
+
+
+def _floor_mismatch(records: list[dict] | None, staged_conf_floor: float | None) -> bool:
+    """True when the reference's OBSERVED lowest score is inconsistent with the ASSERTED floor.
+
+    A material gap (>0.05) between what the caller asserts the reference was staged at and what the
+    data actually shows is itself evidence the assertion is wrong, or that something else (a stale
+    bucket, cap-trimmed tiles, a bespoke caller) truncated the reference after generation — a
+    distinct failure mode from ``_conf_censored`` (which only compares the picked conf, not the
+    reference's own data, against the asserted floor).
+    """
+    if staged_conf_floor is None:
+        return False
+    observed_min = _min_dt_score(records or [])
+    return observed_min is not None and observed_min > staged_conf_floor + 0.05
 
 
 def _max_dets_from_density(records: list[dict], floor: int = 100) -> int:
@@ -304,6 +369,8 @@ def resolve_operating_point(
     max_dets: int | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
     experiment_id: str | None = None,
+    staged_conf_floor: float | None = None,
+    adjudication_covered: Callable[[dict], bool] | None = None,
 ) -> ResolvedBundle:
     """Resolve the operating point for (trait, dataset). Pure over records — callers pass the model
     pass output; ``records_over_loader`` produces it. ``tile_size`` may be model-derived (imgsz).
@@ -318,35 +385,67 @@ def resolve_operating_point(
     training split); ``None`` (a foreign/unregistered checkpoint) skips the check rather than
     failing closed, per the owner decision that only a *known* run whose provenance can't be
     resolved should refuse.
+
+    ``staged_conf_floor`` (Fix D) is the floor the reference's predictions were actually generated /
+    filtered at — a caller-supplied FACT, not inferred from the reference's own scores. ``None``
+    (the caller asserted nothing) fails closed: see ``_conf_censored``. The GT/calibration callers
+    thread the value ``set_detector_operating_point`` actually applied; the review path has no floor
+    threaded here yet (see ``feedback.review_calibration.resolve_operating_point_from_review`` for
+    that seam).
+
+    ``adjudication_covered`` (Fix C item 5 / Fix H): an optional per-record predicate — when given,
+    it is a GATE, not a filter: EVERY calibration and holdout record must satisfy it, or the whole
+    reference is refused (``insufficient_adjudication_coverage``), before any bias/dispersion
+    statistic is computed. Records are never silently dropped and re-measured on the survivors —
+    stage-6 review of an earlier draft found that a per-record filter here is a fail-open: the
+    excluded set is correlated with the very quantity being measured (an image survives only if a
+    miss was attested), so a biased population could earn a clean stamp on a favorable subsample
+    while the full reviewed population was off by several times the trait tolerance. ``None`` (the
+    default; every GT-path caller) applies no requirement — correct there, since a labeled record is
+    inherently adjudication-covered. ``feedback.review_calibration.resolve_operating_point_from_review``
+    passes the real Fix H predicate (per-image FN-adjudication coverage).
     """
     if validated_reference not in VALIDATED_SHIPPABLE:
         raise ValueError(f"validated_reference must be one of {VALIDATED_SHIPPABLE}, got {validated_reference!r}")
     trait = get_trait(trait_name)
     review = validated_reference == VALIDATED_REVIEW_CONFIRMED
-    conf_derived_from = ("count-unbiased center-match sweep over review verdicts"
-                         if review else "count-unbiased center-match sweep")
+    # Fix H gate (NOT a filter — see the docstring above for why a filter fails open): every record
+    # must satisfy the predicate or the whole reference is refused, unfiltered, further down.
+    adjudication_ok = adjudication_covered is None or (
+        all(adjudication_covered(r) for r in (calibration_records or []))
+        and all(adjudication_covered(r) for r in (holdout_records or []))
+    )
+    picker, base_label = COUNT_OBJECTIVE_PICKERS.get(
+        trait.count_objective, (pick_f1_max, "F1-max center-match sweep"))
+    conf_derived_from = base_label + (" over review verdicts" if review else "")
     params: dict[str, ResolvedParam] = {}
 
     # --- conf: the count operating point (calibration) ---
     if calibration_records:
         tol = trait.localization_tolerance_frac * gt_class_avg_size(calibration_records)  # spec owns the "half"
         cal_sweep = sweep_operating_point(calibration_records, tolerance=tol)
-        conf = pick_count_unbiased(cal_sweep) if trait.count_objective == "count_unbiased" else pick_f1_max(cal_sweep)
+        conf = picker(cal_sweep)
         conf = DEFAULT_CONF if conf is None else conf
-        # conf-censoring guard: a count-unbiased 'validated' claim is only honest if the reference
-        # shows the low-conf tail; a display-filtered reference (min score >= the display floor) is
-        # truncated and cannot be stamped validated — carry it as an unvalidated placeholder instead.
-        censored = _conf_censored(calibration_records, DEFAULT_CONF)
+        # conf-censoring guard (Fix D): a count-unbiased 'validated' claim is only honest if the
+        # picked conf sits strictly above the floor the reference was staged at — not merely if the
+        # reference's own scores happen to look low (that predicate is unfalsifiable from a caller
+        # who mis-asserts the floor; see _floor_mismatch for the reconciling check).
+        censored = _conf_censored(conf, staged_conf_floor)
+        floor_mismatch = _floor_mismatch(calibration_records, staged_conf_floor)
         if holdout_records:
             # Disjointness can only be proven from image_ids, so fail closed (not disjoint) when
             # either set has none — else the same records passed as cal+holdout look validated.
             cal_ids = {r["image_id"] for r in calibration_records if "image_id" in r}
             hold_ids = {r["image_id"] for r in holdout_records if "image_id" in r}
             disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
-            censored = censored or _conf_censored(holdout_records, DEFAULT_CONF)
+            floor_mismatch = floor_mismatch or _floor_mismatch(holdout_records, staged_conf_floor)
             hold_tol = trait.localization_tolerance_frac * gt_class_avg_size(holdout_records)
-            hold_sweep = sweep_operating_point(holdout_records, tolerance=hold_tol)
-            hb = count_bias_at(hold_sweep, conf)  # bias on the holdout at the calibration-chosen conf
+            # Fix F: exact-conf evaluation, not a nearest-grid-point snap — an explicit single-point
+            # conf_grid makes sweep_operating_point evaluate EXACTLY the conf that will ship, never
+            # an approximation from the holdout's own independently-built grid (which need not
+            # contain, or be anywhere near, the calibration-chosen conf).
+            hold_sweep = sweep_operating_point(holdout_records, tolerance=hold_tol, conf_grid=[conf])
+            hb = hold_sweep["curve"][0]  # the exact-conf holdout bias entry
             # content-overlap gate (K1): a holdout whose GT content is fully cloned from calibration
             # (same boxes, different image_id) can't function as an independent check.
             content = _content_overlap(calibration_records, holdout_records)
@@ -354,26 +453,90 @@ def resolve_operating_point(
             # checkpoint's OWN training split, or the "held-out" bias check is measured partly on
             # data the model already trained on.
             td = _train_disjointness(experiment_id, cal_ids, hold_ids)
-            train_provenance_blocked = (
-                td["unresolvable"] or bool(td["leaked_groups"]) or bool(td["leaked_stems"])
+
+            # Fix C item 1: positive-evidence, unconditional, stated per-side (not a union) — an
+            # all-negative reference on either side can't validate a count operating point.
+            cal_gt_count = sum(len(r.get("gt", [])) for r in calibration_records)
+            hold_gt_count = sum(len(r.get("gt", [])) for r in holdout_records)
+            # Fix C items 2-4: the mean+SE equivalence/CI criterion, replacing a bare mean check —
+            # degrades correctly at small n (SE grows, so less evidence is HARDER to pass, not
+            # easier) and needs no second, unrelated tolerance constant.
+            se = hb["count_bias_std"] / math.sqrt(hb["n_images"]) if hb["n_images"] else 0.0
+            count_bias_ok = abs(hb["count_bias_mean"]) + _EQUIVALENCE_Z * se <= trait.count_bias_tolerance
+            # Fix B item 3: a real (still-categorical, not tuned) match-quality floor — mathematically
+            # equivalent to tp > 0 (precision/recall are both 0 exactly when tp is 0), so it catches
+            # the fully-degenerate case while count bias vanishes; it does NOT discriminate a trivial
+            # 1-of-many match from a near-complete one (a continuous quality criterion is future
+            # work, not part of this cluster — see the design doc).
+            localization_floor_ok = hb["recall"] > 0 and hb["precision"] > 0
+            # Fix B items 1-2: a p90 TAIL dispersion floor, gated only once a real value is authored
+            # for this trait (no invented default — see TraitSpec.count_error_tolerance).
+            dispersion_ok = (
+                trait.count_error_tolerance is None
+                or hb["count_error_p90"] <= trait.count_error_tolerance
             )
-            passed = (disjoint and not censored and hb is not None
-                      and abs(hb["count_bias_mean"]) <= trait.count_bias_tolerance
-                      and not content["duplicated"] and not train_provenance_blocked)
+
+            # Named-failure architecture: every gate condition below is named here, once, so
+            # describe_review_validation (and any future caller) maps failures to breeder-legible
+            # reasons from this SAME list rather than re-deriving which check actually failed.
+            # cap-saturation (Fix K) is intentionally absent — it is non-gating provenance only.
+            # conf_floor_mismatch (Fix D reconciliation) is ALSO non-gating (stage-6 review): its
+            # pinned +/-0.05 band is an ordinary property of a model's score distribution as often
+            # as it is evidence of tampering, and gating on it re-created exactly the kind of
+            # unsound pinned-constant refusal Fix D's redesign was meant to eliminate. It is still
+            # computed and surfaced in sweep_data for a human/agent to notice, never blocking.
+            failures: list[str] = []
+            if not adjudication_ok:
+                failures.append("insufficient_adjudication_coverage")
+            if not disjoint:
+                failures.append("not_disjoint")
+            if censored:
+                failures.append("conf_censored")
+            if content["duplicated"]:
+                failures.append("content_duplicated")
+            if td["unresolvable"]:
+                failures.append("train_disjointness_unresolvable")
+            if td["leaked_groups"] or td["leaked_stems"]:
+                failures.append("train_disjointness_leaked")
+            if cal_gt_count == 0:
+                failures.append("insufficient_calibration_gt")
+            if hold_gt_count == 0:
+                failures.append("insufficient_holdout_gt")
+            if hb["n_images"] < 2:
+                failures.append("insufficient_holdout_images")
+            if not count_bias_ok:
+                failures.append("count_bias_exceeds_tolerance")
+            if not localization_floor_ok:
+                failures.append("localization_quality_floor_failed")
+            if not dispersion_ok:
+                failures.append("count_error_dispersion_too_high")
+            passed = not failures
+
             sweep_data = {"calibration": cal_sweep, "f1_max_conf": pick_f1_max(cal_sweep),
                           "holdout_bias": hb, "count_bias_tolerance": trait.count_bias_tolerance,
-                          "disjoint": disjoint, "conf_censored": censored, "passed_holdout": passed,
+                          "count_error_tolerance": trait.count_error_tolerance,
+                          "equivalence_z": _EQUIVALENCE_Z,
+                          "disjoint": disjoint, "conf_censored": censored,
+                          "conf_floor_mismatch": floor_mismatch, "staged_conf_floor": staged_conf_floor,
+                          "adjudication_covered": adjudication_ok,
+                          "passed_holdout": passed, "failures": failures,
                           "content_overlap_frac": content["content_overlap_frac"],
                           "content_duplicated": content["duplicated"],
                           "train_disjointness": td,
-                          "calibration_image_ids": sorted(cal_ids), "holdout_image_ids": sorted(hold_ids)}
-            # validated only if the holdout is disjoint AND uncensored AND the bias passed there AND
-            # its content isn't a clone of calibration AND train-provenance isn't blocked — not merely
-            # because a holdout was supplied. Reference here is the annotations/verdicts, not truth;
-            # the stamp records which reference (GT vs review-confirmed) cleared the gate.
+                          "calibration_image_ids": sorted(cal_ids), "holdout_image_ids": sorted(hold_ids),
+                          "calibration_observed_min_score": _min_dt_score(calibration_records),
+                          "holdout_observed_min_score": _min_dt_score(holdout_records),
+                          "calibration_cap_saturated_frac": _cap_saturated_frac(calibration_records),
+                          "holdout_cap_saturated_frac": _cap_saturated_frac(holdout_records)}
+            # validated only if the gate above raised NO named failure — not merely because a
+            # holdout was supplied. Reference here is the annotations/verdicts, not truth; the stamp
+            # records which reference (GT vs review-confirmed) cleared the gate.
             validated = validated_reference if passed else VALIDATED_FALSE
         else:
             sweep_data = {"calibration": cal_sweep, "conf_censored": censored,
+                          "conf_floor_mismatch": floor_mismatch, "staged_conf_floor": staged_conf_floor,
+                          "calibration_observed_min_score": _min_dt_score(calibration_records),
+                          "calibration_cap_saturated_frac": _cap_saturated_frac(calibration_records),
                           "note": "calibrated but not held-out-measured"}
             validated = VALIDATED_FALSE
         params["conf"] = derived("conf", float(conf), derivation_class="calibration",
