@@ -24,11 +24,9 @@ src/tcip_annotation/
   detail to route around.
 - **Label formats: `{json, coco}` only.** VOC/LabelMe/YOLO label formats were removed (K13c) along
   with the `_getexif` fallback. Don't reintroduce a format branch without checking whether that
-  removal is still current.
-- **Label-format "YOLO" is not the YOLO model.** `YoloPredictor`, `KIND_ULTRALYTICS`, and
-  `predictor.py` are ultralytics checkpoint support — a different thing that happens to share a
-  name. Only the label *format* was removed; don't touch model-side YOLO support on the strength of
-  that.
+  removal is still current. (Model-side ultralytics/YOLO checkpoint support — `YoloPredictor`,
+  `KIND_ULTRALYTICS` — was a separate thing entirely, and was itself removed in K21; there is no
+  YOLO of either kind left in this platform.)
 - A negative is empty labels **plus** an explicit human Complete (see root `CLAUDE.md`'s
   measurement-integrity invariants) — this package's read/write paths must not treat an empty label
   file alone as a negative.
