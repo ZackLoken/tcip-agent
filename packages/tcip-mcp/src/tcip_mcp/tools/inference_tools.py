@@ -400,8 +400,8 @@ def run_inference(
     from tcip_mcp.pipelines.resolution import dataset_hash, raw_operating_point
 
     # Thread NMS IoU + the full-frame detection cap into the model so they govern which boxes exist
-    # (torchvision in-model thresholds / ultralytics overrides), not just cross-tile merge — else
-    # nms_iou has no effect on an untiled run and dense scenes truncate at the framework default.
+    # (torchvision's own in-model thresholds), not just cross-tile merge — else nms_iou has no
+    # effect on an untiled run and dense scenes truncate at the framework default.
     predictor = build_predictor(
         checkpoint_path=checkpoint_path,
         device=device,
@@ -440,8 +440,8 @@ def run_inference(
         )
         logger.warning(geometry_warning)
     # overlap_source == "default" is expected and unremarkable for a model with no persisted
-    # overlap analog (e.g. YOLO trains square) — only tile_size's absence changes the object
-    # count's scale, so only tile_size's default fallback is worth a warning.
+    # overlap analog — only tile_size's absence changes the object count's scale, so only
+    # tile_size's default fallback is worth a warning.
 
     if image_paths is None:
         if images_dir is None:
