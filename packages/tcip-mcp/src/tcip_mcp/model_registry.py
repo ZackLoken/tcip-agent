@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction
+
+logger = logging.getLogger(__name__)
 
 
 def _compute_sha256(filepath: str | Path) -> str:
@@ -50,16 +53,44 @@ def resolve_model_identity(
 ) -> dict:
     """Best-effort producing-model identity for a checkpoint: ``{checkpoint, sha256, experiment_id}``.
 
-    ``sha256`` is the cached content hash (never re-hashed per call). ``experiment_id`` is the
-    caller's if given, else recovered from a registry entry whose ``checkpoint_path`` matches
-    (via its ``experiment:<id>`` tag). A raw/foreign checkpoint legitimately has no experiment —
-    the identity records the sha and leaves ``experiment_id`` ``None`` rather than failing.
+    ``sha256`` is the cached content hash (never re-hashed per call). ``experiment_id`` resolves,
+    in order: the caller's explicit value; the checkpoint payload's OWN stamped ``experiment_id``
+    (every checkpoint saved through the audited envelope carries one via ``stamp_model_ref`` —
+    K1: without this, the ordinary train-then-calibrate workflow silently resolved to ``None`` and
+    bypassed the train-disjointness gate entirely, not just genuinely-foreign checkpoints); then a
+    best-effort registry lookup (a checkpoint registered but never carrying the stamp, e.g. from
+    before the stamp existed). A raw/foreign checkpoint legitimately has no experiment — the
+    identity records the sha and leaves ``experiment_id`` ``None`` rather than failing.
+
+    Reads the checkpoint with ``weights_only=True`` — sufficient to read the stamped ``str`` (a
+    payload of tensors/dicts/basic Python types, which is what ``stamp_model_ref`` produces and
+    what this reads back) without executing arbitrary pickle content or loading the full weights
+    just to read one field. A checkpoint that fails even this safe load is logged and treated as
+    "no stamp" — the SAME ``experiment_id=None`` outcome as a genuinely foreign checkpoint, but a
+    distinct, visible log line rather than an indistinguishable silent ``pass``, since "the stamp
+    couldn't be read" and "there was never a stamp" are materially different situations.
     """
     from tcip_mcp.project_paths import project_root
 
     ckpt = Path(checkpoint_path)
     sha = checkpoint_sha256(ckpt)
     exp = experiment_id
+    if exp is None and ckpt.is_file():
+        try:
+            import torch  # local checkpoint the caller is deliberately identifying
+
+            payload = torch.load(ckpt, map_location="cpu", weights_only=True)
+            if isinstance(payload, dict):
+                stamped = payload.get("experiment_id")
+                if isinstance(stamped, str) and stamped:
+                    exp = stamped
+        except Exception as exc:
+            logger.warning(
+                "could not read a stamped experiment_id from checkpoint %s (%s); treating it as "
+                "unstamped for this identity resolution (falls through to the registry lookup, "
+                "then a foreign/no-provenance identity) — this is distinct from a checkpoint that "
+                "genuinely never carried a stamp.", ckpt, exc,
+            )
     if exp is None and sha is not None:
         try:
             registry = ModelRegistry(project_path or str(project_root()))
