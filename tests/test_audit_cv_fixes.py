@@ -236,8 +236,11 @@ def test_cv1_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
                     "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    # K10 finding 1: this stub carries no persisted training tile geometry, so the delivery-grade
+    # gate now refuses unless the caller states the geometry explicitly (the affordance a rail must
+    # admit — see test_k10_gate_refuses_unresolvable_tile_geometry for the refusal itself).
     r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"),
-                                  subject="catkin")
+                                  subject="catkin", tile_size=64, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
     # counted once against un-fragmented full-frame GT (tile-level would split/duplicate it)
     assert r["tp"] == 1 and r["fp"] == 0 and r["fn"] == 0
@@ -291,6 +294,9 @@ def test_cv2_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
     ts = r["operating_point"]["tile_size"]
     assert ts["value"] == 224 and ts["source"] == "derived"
     assert "warning" not in r  # geometry was recoverable
+    # Stage-6 review: overlap has no home in the ResolvedBundle's tracked params — surfaced
+    # directly on the result instead of silently dropped after being resolved.
+    assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
 
 
 def test_cv2_foreign_checkpoint_falls_back_to_default_with_warning(tmp_path, monkeypatch):
@@ -305,6 +311,93 @@ def test_cv2_foreign_checkpoint_falls_back_to_default_with_warning(tmp_path, mon
     assert captured["tile_size"] == DEFAULT_TILE_SIZE
     assert r["operating_point"]["tile_size"]["source"] == "default"
     assert "no training tile geometry" in r["warning"]
+    assert r["overlap"] == pytest.approx(0.2) and r["overlap_source"] == "default"
+
+
+# ======================================================================
+# K10 finding 1 — the delivery-gating path resolves tile geometry the SAME
+# way run_inference does (via the shared resolve_tile_geometry), and REFUSES
+# rather than silently defaulting when nothing can be resolved.
+# ======================================================================
+
+def test_k10_gate_refuses_unresolvable_tile_geometry(tmp_path):
+    """Before this fix: a checkpoint with no persisted tiling and no explicit override silently
+    scored the delivery gate at a pinned 640/0.2. Now it refuses rather than fabricate a number
+    on the path the docstring calls "the number that gates a phenotype delivery"."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+
+    class _NoGeometryStub:
+        train_tile_size = None
+        train_overlap = None
+
+        def predict_tiled(self, path, **kw):
+            return {"image": path, "width": 100, "height": 100,
+                    "boxes": [], "scores": [], "labels": [], "count": 0}
+
+    predictor_mod_build = predictor_mod.build_predictor
+    try:
+        predictor_mod.build_predictor = lambda **kw: _NoGeometryStub()
+        with pytest.raises(ValueError, match="tiling="):
+            run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir),
+                                      str(tmp_path / "out"))
+    finally:
+        predictor_mod.build_predictor = predictor_mod_build
+
+
+def test_k10_gate_derives_tile_geometry_from_checkpoint(tmp_path):
+    """The checkpoint's own persisted training geometry (already sitting on the predictor object)
+    governs the gate instead of the old pinned 640/0.2 — the ~2.9x scale mismatch K10 found."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (100, 100)).save(images_dir / "a.png")
+    json_io.write_annotations(str(labels_dir / "a.json"),
+                              [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 100, 100)
+    captured: dict = {}
+
+    class _DerivedGeometryStub:
+        train_tile_size = 224
+        train_overlap = 0.1
+
+        def predict_tiled(self, path, **kw):
+            captured["tile_size"] = kw.get("tile_size")
+            captured["overlap"] = kw.get("overlap")
+            return {"image": path, "width": 100, "height": 100,
+                    "boxes": [], "scores": [], "labels": [], "count": 0}
+
+    predictor_mod_build = predictor_mod.build_predictor
+    try:
+        predictor_mod.build_predictor = lambda **kw: _DerivedGeometryStub()
+        r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir),
+                                      str(tmp_path / "out"), subject="catkin")
+    finally:
+        predictor_mod.build_predictor = predictor_mod_build
+    assert captured["tile_size"] == 224 and captured["overlap"] == pytest.approx(0.1)
+    assert r["tile_size"] == 224 and r["tile_size_source"] == "derived"
+    assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
+
+
+def test_k10_yolo_training_imgsz_none_when_absent():
+    """Before: _training_imgsz silently returned 640 on any read failure, so the delivery gate's
+    refusal could never fire for a YOLO checkpoint carrying no real training geometry — the
+    refusal was decorative for the whole model kind."""
+    from tcip_mcp.pipelines.inference.yolo_predictor import _training_imgsz
+
+    assert _training_imgsz("/nonexistent/checkpoint/path.pt") is None
 
 
 def test_cv2_explicit_tile_size_wins(tmp_path, monkeypatch):
@@ -599,6 +692,59 @@ def test_cv0_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
     assert all(c["tile"] is True for c in calls)
     assert all(c["tile_size"] == 64 for c in calls)
     assert len({c["overlap"] for c in calls}) == 1
+
+
+def test_k10_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_derived(
+        tmp_path, monkeypatch):
+    """K10 finding 3 residual (ceiling-check): before this fix, resolve_operating_point inferred
+    "derived" from mere truthiness of tile_size — so a checkpoint with NO persisted geometry, whose
+    tile_size silently fell back to the fabricated DEFAULT_TILE_SIZE, still got stamped "derived
+    from persisted training geometry" on the calibrated (potentially validated_held_out) bundle.
+    Now the real source computed by resolve_tile_geometry travels through _calibrate_operating_point
+    into resolve_operating_point, so a fabricated fallback is honestly stamped "default"."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    for i in range(4):
+        Image.new("RGB", (128, 128)).save(images_dir / f"img{i}.png")
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+
+    class _NoGeometryStub:
+        def __init__(self):
+            from types import SimpleNamespace
+            self.model = SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)
+            self.device = "cpu"
+            self.score_threshold = 0.5
+            self.train_tile_size = None
+            self.train_overlap = None
+
+        def predict_batch(self, paths, tile=False, tile_size=None, overlap=None,
+                          tile_batch_size=96, global_nms_iou=None, postprocess="nms"):
+            boxes = [[10, 10, 40, 40], [100, 100, 130, 130]] if tile else []
+            scores = [0.9, 0.6] if tile else []
+            labels = [1, 1] if tile else []
+            return [{"image": p, "width": 128, "height": 128, "boxes": boxes,
+                     "scores": scores, "labels": labels, "count": len(boxes)} for p in paths]
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _NoGeometryStub())
+    monkeypatch.chdir(tmp_path)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
+                      trait="catkin", calibration_labels_dir=str(labels_dir))
+    ts = r["operating_point"]["tile_size"]
+    assert ts["value"] == 640  # the fabricated fallback (DEFAULT_TILE_SIZE) — real value, unchanged
+    assert ts["source"] == "default"  # honestly labeled — NOT "derived" despite being truthy
 
 
 def test_cv0_export_predictions_validated_from_bundle(tmp_path, monkeypatch):
