@@ -168,6 +168,8 @@ describe("AnnotateTab save/load race", () => {
       "partial",
       "catkin",
       "2026-01-01",
+      "C:/data",
+      "C:/data/annotations/2026-01-01",
     );
 
     // ...and the next save must target img2 with img2's loaded mtime — not
