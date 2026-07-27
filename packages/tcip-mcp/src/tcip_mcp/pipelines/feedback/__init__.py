@@ -4,6 +4,7 @@ calibration reference from review verdicts (W1)."""
 from tcip_mcp.pipelines.feedback.review_calibration import (
     describe_review_validation,
     resolve_operating_point_from_review,
+    review_conf_threshold,
     review_reference_hash,
     review_to_records,
 )
@@ -11,6 +12,7 @@ from tcip_mcp.pipelines.feedback.review_calibration import (
 __all__ = [
     "describe_review_validation",
     "resolve_operating_point_from_review",
+    "review_conf_threshold",
     "review_reference_hash",
     "review_to_records",
 ]
