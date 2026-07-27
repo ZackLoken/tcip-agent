@@ -184,8 +184,21 @@ def _worker(job: InferenceJob) -> None:
         # Stamp the operating point next to the predictions so a GUI-produced set carries the same
         # provenance (and validated=false) the MCP door records — a phenotype's numbers are only as
         # trustworthy as the operating point that produced them.
+        #
+        # checkpoint_sha256/experiment_id (stage-6 review, K2 Fix G): the SAME producing-model
+        # identity resolver the MCP door uses (model_registry.resolve_model_identity — never a
+        # second implementation), so a bucket the GUI's own Inference tab produces carries the same
+        # identity fact Fix G's review-verdict scoping matches against. Without this, a GUI-produced
+        # bucket could never be validated via the review-confirmation route: its sidecar carried
+        # neither field, so producer-identity matching failed closed on every review session no
+        # matter how thoroughly it was reviewed.
+        from tcip_mcp.model_registry import resolve_model_identity
+
+        identity = resolve_model_identity(job.checkpoint_path)
         provenance = op_bundle.to_provenance()
         provenance["validated"] = op_bundle.is_shippable
+        provenance["checkpoint_sha256"] = identity["sha256"]
+        provenance["experiment_id"] = identity["experiment_id"]
         atomic_write_json(output_dir / "operating_point.json", provenance)
 
         for img in images:
