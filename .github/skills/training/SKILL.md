@@ -13,16 +13,16 @@ Multi-stage training for transfer learning:
 stages:
   - freeze_to: -1    # Freeze entire backbone, train head only
     epochs: 5
-    lr: 1e-3
   - freeze_to: 2     # Unfreeze last 2 backbone layers
     epochs: 10
-    lr: 1e-4
   - freeze_to: 0     # Full fine-tuning
     epochs: 10
-    lr: 1e-5
 ```
 
-Each stage has its own learning rate, epoch count, and freeze depth. The optimizer is rebuilt between stages.
+Each stage has its own epoch count and freeze depth. Learning rate is not per-stage — the
+top-level `optimizer` block's `backbone_lr`/`head_lr` apply uniformly across every stage (a
+per-stage `lr` key is accepted but ignored; `preflight_config` warns if you set one). The
+optimizer is rebuilt between stages.
 
 ## Early Stopping
 
@@ -30,8 +30,21 @@ Each stage has its own learning rate, epoch count, and freeze depth. The optimiz
 early_stopping:
   enabled: true
   patience: 7        # Epochs without improvement before stopping
-  metric: val_loss   # Metric to monitor
-  mode: min          # min for loss, max for mAP
+  min_delta: 0.0001  # Minimum change to count as improvement
+```
+
+Early stopping and `model_best.pt` share the same selection criterion — there is no separate
+`metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`
+(defaults to the composite objective for detection/instance_seg, `val_loss` otherwise). For a
+count trait with a center-match criterion, an explicit `selection_metric` must be one of the
+trait's own governing metrics (`objective`/`f1`/`precision`/`recall`/`loss`) — the map50-family
+comparability metrics are rejected, since selecting checkpoints by a metric the trait doesn't
+trust is a defensibility regression:
+
+```yaml
+evaluation:
+  trait: catkin
+  selection_metric: f1   # optional — omit to use the task's default (objective/loss)
 ```
 
 ## Config Structure
@@ -40,6 +53,13 @@ early_stopping:
 `training_source` for a custom `train(ctx)` loop) — see how you build the model and import
 the plain blocks in `pipeline-design/SKILL.md`; don't re-derive it here.
 
+The example below is representative, not exhaustive — `training` is an open dict, and
+`generic_trainer.train()`'s own docstring is the canonical, always-current list of every key it
+reads (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/lr_scaling/
+stage_warmup_epochs/enforce_monotonic_unfreeze/gradient_accumulation_steps/
+checkpoint_every_n_epochs/early_stopping/evaluation). Read that docstring rather than assuming this
+example is complete.
+
 ```python
 config = {
     "model_source": {  # importable nn.Module builder — see pipeline-design skill
@@ -47,7 +67,8 @@ config = {
         "builder_kwargs": {"in_chans": 3, "num_classes": 3},
         "task": "detection",
     },
-    # "training_source": {"train": "my_module:train"},  # optional custom loop
+    # "training_source": "my_module:train",  # optional custom train(ctx) loop — a bare
+    #     dotted string ("module:function"), not a dict — see pipeline-design skill
     "data": {
         "images_dir": "data/images",
         "labels_dir": "data/labels/detect",
@@ -57,7 +78,9 @@ config = {
         "batch_size": 4,
         "stages": [...],
         "mixed_precision": True,
-        "device": "cuda"
+        "device": "cuda",
+        "seed": 42,             # optional — reproducible init/shuffle when set
+        "deterministic": False  # optional — cuDNN deterministic algorithms (slower)
     },
     "augmentation": {
         "horizontal_flip": 0.5,
@@ -75,7 +98,7 @@ config = {
 | `check_training_status` | Check run progress, metrics, and TensorBoard URL |
 | `list_training_runs` | List all runs in session |
 | `run_hpo` | HPO on Ray Tune — you pick the search algorithm + trial scheduler |
-| `render_failure_cases` | Surface + render images with worst prediction quality |
+| `render_failure_cases` | Surface + render images ranked by count-mismatch (not IoU-matched — see evaluation skill) |
 | `create_experiment` | Track training run with full lineage |
 
 ## TensorBoard
