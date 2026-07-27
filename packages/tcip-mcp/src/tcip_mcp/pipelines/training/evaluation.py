@@ -861,7 +861,7 @@ def run_full_frame_evaluation(
     ckpt_path: str, images_dir: str, labels_dir: str, output_dir: str, *,
     subject: str | None = None, attribute: str | None = None,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
-    tile_size: int = 640, overlap: float = 0.2, global_nms_iou: float = 0.3,
+    tile_size: int | None = None, overlap: float | None = None, global_nms_iou: float = 0.3,
     max_dets: int = 1000, postprocess: str = "nms", device: str | None = None,
     trait: str | None = None,
 ) -> dict:
@@ -872,14 +872,50 @@ def run_full_frame_evaluation(
     so it answers "how well does the shipped full-frame count match ground truth" — the number that
     gates a phenotype delivery. Tile-level (``run_test_evaluation`` with ``tiling``) is a diagnostic
     that matches the training-run val mAP; it must not be reported as the delivery metric.
+
+    Only call THIS with a checkpoint that was actually trained tiled (``predictor.train_tile_size``
+    persisted), a foreign checkpoint whose geometry you can independently derive and state, or one
+    where you intend to state a tile scale yourself. A checkpoint trained WITHOUT tiling has no
+    "regime mismatch" to reconcile in the first place — ``evaluate_model``'s default
+    (``use_tiled_inference=False``) full-frame single-pass path IS that model's correct delivery
+    gate (same untiled regime end to end), and is the one to call instead of this function.
+
+    ``tile_size``/``overlap`` are resolved (K10 CV3) by the SAME precedence
+    ``run_inference`` uses — explicit > the checkpoint's own persisted training geometry > a
+    documented default — via the shared ``resolve_tile_geometry``. Unlike the exploratory
+    ``run_inference``, THIS is the delivery-gating call: an unresolvable ``tile_size`` (no explicit
+    value and nothing persisted on the checkpoint) raises rather than silently fabricating 640, since
+    a wrong tile scale here is a wrong number that gates a phenotype, not just a wrong preview.
+    ``overlap`` alone falling back to a default does NOT raise — some model kinds (YOLO, trained
+    square) have no persisted overlap analog at all, which is a legitimate fact, not a missing
+    derivation; only ``tile_size``'s absence changes the object count's scale.
     """
     from tcip_mcp.dataset_layout import annotation_date
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
-    from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tcip_mcp.pipelines.inference.predictor import build_predictor, resolve_tile_geometry
+    from tcip_mcp.pipelines.operating_point import _cap_saturated_frac
 
     predictor = build_predictor(
         checkpoint_path=str(ckpt_path), device=device,
         score_threshold=conf_threshold, nms_iou=global_nms_iou, max_dets=max_dets)
+
+    resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
+        predictor, tile_size=tile_size, overlap=overlap)
+    if tile_size_source == "default":
+        raise ValueError(
+            f"Cannot resolve a trustworthy tile_size for {ckpt_path}: no explicit tile_size was "
+            "passed and the checkpoint carries no persisted training tile geometry. This is the "
+            "delivery-grade gating path (\"Report THIS to gate a delivery\") — it refuses to silently "
+            "score at a fabricated default rather than the model's real training scale. If this "
+            "checkpoint was trained WITHOUT tiling, call evaluate_model with "
+            "use_tiled_inference=False instead — that untiled regime IS its correct delivery gate, "
+            "with no scale to reconcile. If you have genuinely derived (or intend to derive, e.g. "
+            "from this dataset's object-size distribution vs. image resolution — 'Parameters: "
+            "derive, don't pin') a tile scale for this checkpoint, pass it explicitly via the "
+            "tiling= dict (and overlap, if known); it is NOT cross-checked against the checkpoint's "
+            "actual training scale, so state it deliberately, not as a guess."
+        )
+    tile_size, overlap = resolved_tile, resolved_overlap
 
     img_dir, lbl_dir = Path(images_dir), Path(labels_dir)
     _lbl_date = annotation_date(lbl_dir)
@@ -921,7 +957,12 @@ def run_full_frame_evaluation(
             for (x1, y1, x2, y2), lab in zip(gboxes, glabels):
                 gt.append({"category_id": int(lab),
                            "bbox": _xyxy_to_xywh(x1, y1, x2, y2), "iscrowd": 0})
-        per_image.append(build_coco_image_record(w, h, gt, dt, image_id=p.stem))
+        rec = build_coco_image_record(w, h, gt, dt, image_id=p.stem)
+        # K10 finding 2 residual: max_dets is honored verbatim on this gating path (no rescuing
+        # sentinel) — stamp per-image cap saturation so a caller-explicit low max_dets that
+        # truncates real detections is visible rather than silently assumed away.
+        rec["cap_hit"] = len(dt) >= max_dets
+        per_image.append(rec)
 
     m = coco_detection_metrics(per_image, iou_threshold=iou_threshold,
                                conf_threshold=conf_threshold, max_dets=max_dets)
@@ -932,7 +973,10 @@ def run_full_frame_evaluation(
         "model_path": str(ckpt_path), "task": "detection", "iou_type": "bbox",
         **_producer_identity(ckpt_path),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
-        "tile_size": tile_size, "tiled": True, "eval_regime": "full-frame-tiled-inference",
+        "max_dets_cap_saturated_frac": _cap_saturated_frac(per_image),
+        "tile_size": tile_size, "tile_size_source": tile_size_source,
+        "overlap": overlap, "overlap_source": overlap_source,
+        "tiled": True, "eval_regime": "full-frame-tiled-inference",
         # Which images this number was computed over, and which were held out for having no
         # ground truth — so a reviewer can reconstruct the denominator, not just the metric.
         "scored_images": len(paths), "sample_counts": sample_counts,
