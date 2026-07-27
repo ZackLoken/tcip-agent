@@ -42,9 +42,6 @@ dependencies:
       # --- web backend ---
       - fastapi>=0.115.0
       - uvicorn[standard]>=0.30.0
-      # --- inference helpers (lazy-imported by tcip-web) ---
-      - ultralytics>=8.3
-      - sahi>=0.11
       # --- hyperparameter optimization (Ray Tune, lazy-imported) ---
       # Ray drives the sweep; search-algorithm backends are agent-selectable and each
       # degrades gracefully if absent. Installed via pip (Ray on Windows is pip-only).
