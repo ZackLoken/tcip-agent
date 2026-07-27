@@ -39,14 +39,58 @@ from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED, ResolvedBu
 _POSITIVE_ACTIONS = {"accepted", "edited"}
 
 # Every name resolve_operating_point can put in sweep["failures"] (cross-cutting named-failure
-# architecture) — the single source of truth describe_review_validation checks completeness
-# against, independent of which branch of its elif chain a given name happens to hit first.
-_KNOWN_FAILURE_NAMES = {
-    "insufficient_adjudication_coverage", "not_disjoint", "conf_censored", "content_duplicated",
-    "train_disjointness_unresolvable", "train_disjointness_leaked", "insufficient_calibration_gt",
-    "insufficient_holdout_gt", "insufficient_holdout_images", "count_bias_exceeds_tolerance",
-    "localization_quality_floor_failed", "count_error_dispersion_too_high",
-}
+# architecture), paired with its breeder-facing message, IN PRIORITY ORDER (first match wins when
+# more than one failure applies at once). This is the ONE place that association is spelled out —
+# describe_review_validation's exhaustiveness check and its message selection both read from this
+# same list, so there is no second, separately-maintained "known names" set to drift out of sync
+# with it (an earlier version had exactly that: a name set and an if/elif chain, kept in agreement
+# by hand).
+_FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
+    (("conf_censored",),
+     "Not yet. The reviewed predictions were produced at too high a confidence cutoff, so the check "
+     "can't see the borderline detections it needs. Re-run the predictions at a low confidence, "
+     "review those, then try again."),
+    (("insufficient_adjudication_coverage",),
+     'Not yet. At least one of these reviewed images shows no evidence that missed objects were '
+     'checked for. For images that had no ground truth before this review: uncheck "Reviewed" on '
+     'that image to unlock it, use the "mark missed object" tool at least once — even just to '
+     'confirm nothing was missed — then mark it Reviewed again. Then try again.'),
+    (("insufficient_calibration_gt", "insufficient_holdout_gt"),
+     "Not yet. One side of the review split has no confirmed objects at all — an all-negative "
+     "reference can't validate a count. Review some images with real objects represented on both "
+     "sides, then try again."),
+    (("insufficient_holdout_images",),
+     "Not yet. Only one image was held back to check against — the platform needs at least two so "
+     "it can judge how consistent the counts are, not just whether they happen to agree once. "
+     "Review a few more images, then try again."),
+    (("not_disjoint",),
+     "Not yet. The reviewed images couldn't be split into independent groups to cross-check. Review "
+     "more images, then try again."),
+    (("train_disjointness_unresolvable",),
+     "Not yet. This model's training record doesn't establish which images it trained on, so the "
+     "platform can't confirm the reviewed images were actually held back. Retrain with the current "
+     "data (which records this), or use a model whose training record is known."),
+    (("train_disjointness_leaked",),
+     "Not yet. Some of the reviewed images (or images from the same source, e.g. tiles of one "
+     "photo) were also used to train this model, so they can't function as an independent check. "
+     "Review a different set of images this model never trained on."),
+    (("content_duplicated",),
+     "Not yet. The held-back images you reviewed duplicate the calibration images' content, so they "
+     "can't function as an independent check. Review a genuinely distinct set of images, then try "
+     "again."),
+    (("localization_quality_floor_failed",),
+     "Not yet. On the held-back images, the counts happened to match, but the model's predictions "
+     "didn't actually line up with what you confirmed — the agreement is coincidental, not real "
+     "matching. Review more images, or improve the model."),
+    (("count_error_dispersion_too_high",),
+     "Not yet. On the held-back images, the counts agree on average, but individual images are far "
+     "off in ways that cancel out overall — the count isn't reliable image-to-image yet. Review "
+     "more images, or improve the model."),
+    (("count_bias_exceeds_tolerance",),
+     "Not yet. On the held-back images, the model's counts didn't agree closely enough with your "
+     "review to trust them yet. Reviewing more images, or improving the model, can help."),
+]
+_KNOWN_FAILURE_NAMES = {name for names, _ in _FAILURE_MESSAGES for name in names}
 
 
 def _to_xywh(box_norm: list, img_w: float, img_h: float) -> list[float]:
@@ -372,61 +416,21 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
         reason = (f"Validated. Your review of {reviewed_image_count} reviewed image(s) confirms this "
                   f"model's counts closely enough to use as a validation reference for results.{miss_note}")
     elif "passed_holdout" not in sweep:
-        # Stage-6 review: this branch must come before conf_censored/conf_floor_mismatch. Those two
-        # raw sweep keys are ALSO present (and often True/truthy) in the no-holdout branch's
-        # sweep_data, which has no "failures" list at all — checking the raw keys here misdirected a
-        # "too few images reviewed" session into "re-run at a low confidence" every time.
+        # Stage-6 review: this branch must come before the _FAILURE_MESSAGES lookup. conf_censored
+        # (and formerly conf_floor_mismatch) are ALSO present, often truthy, in the no-holdout
+        # branch's sweep_data, which has no "failures" list at all — checking those raw keys here
+        # misdirected a "too few images reviewed" session into "re-run at a low confidence" every
+        # time.
         reason = ("Not yet. Too few images have been reviewed — the check needs at least two fully "
                   "reviewed images so it can hold some back to test against. Review a few more, then "
                   "try again.")
-    elif "conf_censored" in failures:
-        reason = ("Not yet. The reviewed predictions were produced at too high a confidence cutoff, so "
-                  "the check can't see the borderline detections it needs. Re-run the predictions at a "
-                  "low confidence, review those, then try again.")
-    elif "insufficient_adjudication_coverage" in failures:
-        reason = ("Not yet. At least one of these reviewed images shows no evidence that missed "
-                  "objects were checked for. For images that had no ground truth before this "
-                  'review: uncheck "Reviewed" on that image to unlock it, use the "mark missed '
-                  'object" tool at least once — even just to confirm nothing was missed — then '
-                  'mark it Reviewed again. Then try again.')
-    elif "insufficient_calibration_gt" in failures or "insufficient_holdout_gt" in failures:
-        reason = ("Not yet. One side of the review split has no confirmed objects at all — an "
-                  "all-negative reference can't validate a count. Review some images with real "
-                  "objects represented on both sides, then try again.")
-    elif "insufficient_holdout_images" in failures:
-        reason = ("Not yet. Only one image was held back to check against — the platform needs at "
-                  "least two so it can judge how consistent the counts are, not just whether they "
-                  "happen to agree once. Review a few more images, then try again.")
-    elif "not_disjoint" in failures:
-        reason = ("Not yet. The reviewed images couldn't be split into independent groups to "
-                  "cross-check. Review more images, then try again.")
-    elif "train_disjointness_unresolvable" in failures:
-        reason = ("Not yet. This model's training record doesn't establish which images it trained "
-                  "on, so the platform can't confirm the reviewed images were actually held back. "
-                  "Retrain with the current data (which records this), or use a model whose training "
-                  "record is known.")
-    elif "train_disjointness_leaked" in failures:
-        reason = ("Not yet. Some of the reviewed images (or images from the same source, e.g. tiles "
-                  "of one photo) were also used to train this model, so they can't function as an "
-                  "independent check. Review a different set of images this model never trained on.")
-    elif "content_duplicated" in failures:
-        reason = ("Not yet. The held-back images you reviewed duplicate the calibration images' "
-                  "content, so they can't function as an independent check. Review a genuinely "
-                  "distinct set of images, then try again.")
-    elif "localization_quality_floor_failed" in failures:
-        reason = ("Not yet. On the held-back images, the counts happened to match, but the model's "
-                  "predictions didn't actually line up with what you confirmed — the agreement is "
-                  "coincidental, not real matching. Review more images, or improve the model.")
-    elif "count_error_dispersion_too_high" in failures:
-        reason = ("Not yet. On the held-back images, the counts agree on average, but individual "
-                  "images are far off in ways that cancel out overall — the count isn't reliable "
-                  "image-to-image yet. Review more images, or improve the model.")
-    elif "count_bias_exceeds_tolerance" in failures:
-        reason = ("Not yet. On the held-back images, the model's counts didn't agree closely enough "
-                  "with your review to trust them yet. Reviewing more images, or improving the model, "
-                  "can help.")
     else:
-        raise AssertionError(
-            f"resolve_operating_point reported unrecognized gate failure(s) {failures!r} — "
-            "describe_review_validation has no breeder-facing message for one of these yet.")
+        match = next((msg for names, msg in _FAILURE_MESSAGES if any(n in failures for n in names)),
+                     None)
+        if match is None:
+            raise AssertionError(
+                f"resolve_operating_point set an unvalidated result with a completed holdout gate "
+                f"but no recognized failure name (failures={failures!r}) — "
+                "describe_review_validation cannot explain this refusal.")
+        reason = match
     return {"validated": validated, "reference": reference, "conf": conf_value, "reason": reason}
