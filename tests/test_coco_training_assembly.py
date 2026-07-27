@@ -329,8 +329,8 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
 
     images, labels = _rail_fixture(tmp_path)
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
-    assert ds.sample_counts == {"annotated": 1, "confirmed_negative": 1,
-                                "skipped_unannotated": 1, "skipped_unconfirmed_empty": 1}
+    assert ds.sample_counts == {"annotated": 1, "confirmed_negative": 1, "skipped_unannotated": 1,
+                                "skipped_unconfirmed_empty": 1, "quarantined_stale_definition": 0}
 
 
 def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_path):
@@ -378,10 +378,15 @@ def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
 
 
 def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
-    """Silently returning nothing would discard every hard negative the review loop harvested."""
+    """Silently returning nothing would discard every hard negative the review loop harvested.
+
+    A flat ``labels/`` dir (the shape ``make_splits(materialize=True)`` emits) can't name its
+    subject from its path; the confirmations live dataset-native, a sibling of ``labels/``'s own
+    resolved root — not found by walking arbitrarily far up an ancestor chain (K13.5 slice 4).
+    """
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
-    labels = tmp_path / "some" / "flat" / "labels"
+    labels = tmp_path / "labels"
     labels.mkdir(parents=True)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
@@ -400,7 +405,7 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
     """
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
-    labels = tmp_path / "some" / "flat" / "labels"
+    labels = tmp_path / "labels"
     labels.mkdir(parents=True)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
@@ -437,3 +442,53 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
         if d.is_dir():
             carried |= confirmed_negative_names(d, subject="catkin")
     assert carried, "the split tree lost every human-confirmed negative"
+
+
+def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
+    """A split's carried negatives must get their own classes.json + digest stamp too — without it
+    quarantine can never fire on a split tree (stage-6 review finding, K13.5 slice 4)."""
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.dataset_layout import image_status_digest_path, status_bucket
+    from tcip_mcp.tools.data_tools import make_splits
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    registry = ClassRegistry(subjects=(
+        Subject(name="catkin", attributes=(
+            Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),
+        )),
+    ))
+    write_registry(tmp_path / "classes.json", registry)
+    expected_digest = class_registry.attribute_schema_digest(registry, "catkin")
+
+    _make_images(images, [f"i{n:02d}" for n in range(10)])
+    for n in range(10):
+        stem = f"i{n:02d}"
+        boxes = [] if n % 2 else [_box(4, 4, 12, 12)]
+        json_io.write_annotations(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    neg_names = {f"i{n:02d}.jpg" for n in range(1, 10, 2)}
+    (state / "image_status.json").write_text(json.dumps(
+        {"catkin": dict.fromkeys(neg_names, "negative")}))
+    (state / "image_status_digest.json").write_text(json.dumps(
+        {"catkin": {n: expected_digest for n in neg_names}}))
+
+    out = tmp_path / "splits"
+    make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin")
+
+    found = False
+    for split in ("train", "val", "test"):
+        split_root = out / split
+        digest_file = image_status_digest_path(split_root)
+        if not digest_file.is_file():
+            continue
+        stamps = json.loads(digest_file.read_text()).get(status_bucket("catkin", None), {})
+        carried_here = set(stamps) & neg_names
+        if carried_here:
+            assert (split_root / "classes.json").is_file()
+            assert all(stamps[n] == expected_digest for n in carried_here)
+            found = True
+    assert found, "no split carried both a negative and its schema stamp"
