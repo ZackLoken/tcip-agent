@@ -119,6 +119,10 @@ def main(argv: list[str] | None = None) -> int:
     bundle = resolve_operating_point(
         args.trait, dataset_hash=dh, calibration_records=_records(cal_stems),
         holdout_records=_records(hold_stems), tile_size=tile_size,
+        # K10 stage-6 review: tile_size read above IS the checkpoint's persisted training
+        # geometry when present — say so, or resolve_operating_point now (correctly) stamps
+        # any unclaimed value "default" rather than assuming truthiness means derived.
+        tile_size_source=("derived" if tile_size is not None else "default"),
         experiment_id=args.experiment_id, staged_conf_floor=applied.get("score_thresh"),
     )
     attach_split_policy_provenance(bundle, locked)
