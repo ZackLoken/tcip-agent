@@ -147,12 +147,31 @@ def materialize_dataset(
     negatives = {e["image"]: "negative" for e in manifest_images if e["status"] == "hard_negative"}
     neg_subject = subject or (next(iter(subjects)) if len(subjects) == 1 else None)
     if negatives and neg_subject:
-        from tcip_mcp.dataset_layout import status_bucket
+        from tcip_mcp.dataset_layout import image_status_path, status_bucket
 
-        status_file = out / ".tcip" / "state" / "image_status.json"
+        status_file = image_status_path(out)
         status_file.parent.mkdir(parents=True, exist_ok=True)
-        status_file.write_text(
-            json.dumps({status_bucket(neg_subject, None): negatives}, indent=2))
+        bucket_key = status_bucket(neg_subject, None)
+        status_file.write_text(json.dumps({bucket_key: negatives}, indent=2))
+
+        # Give the materialized dataset its own registry copy + a fresh per-image schema stamp, so
+        # quarantine can actually protect these review-harvested negatives later — without this,
+        # confirmed_negative_names has no classes.json to compare against and quarantine can never
+        # fire here (a permanent no-op, not the "admit until proven stale" default it should be).
+        from tcip_mcp.class_registry import attribute_schema_digest, read_registry
+        from tcip_mcp.dataset_layout import classes_path, dataset_root_of, image_status_digest_path
+
+        src_root = dataset_root_of(source_images_dir)
+        src_classes = classes_path(src_root) if src_root is not None else None
+        if src_classes is not None and src_classes.is_file():
+            try:
+                digest = attribute_schema_digest(read_registry(src_classes), neg_subject)
+            except (OSError, ValueError):
+                digest = None
+            if digest is not None:
+                shutil.copy2(src_classes, out / "classes.json")
+                image_status_digest_path(out).write_text(json.dumps(
+                    {bucket_key: {name: digest for name in negatives}}, indent=2))
 
     manifest = {
         "created": datetime.now(timezone.utc).isoformat(),
