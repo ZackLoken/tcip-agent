@@ -26,6 +26,13 @@ COUNT_UNBIASED = "count_unbiased"  # minimize signed per-image count bias E[FP-F
 DETECTION_F1 = "detection_f1"      # optimize matching quality; the phenotype is presence/localization
 PRESENCE = "presence"             # only whether the object is present
 
+# The single source of truth for which objective names exist — lives here (torch-free) rather than
+# in ``operating_point.py`` (which imports the torch-heavy ``pipelines.training.evaluation`` at
+# module level) so validating a config-authored ``count_objective`` never drags torch into
+# ``get_trait``/``registered_traits``. ``operating_point.py``'s picker/label registry
+# (``COUNT_OBJECTIVE_PICKERS``) shares these same keys rather than maintaining a second list.
+COUNT_OBJECTIVES = {COUNT_UNBIASED, DETECTION_F1, PRESENCE}
+
 # Localization — what counts as "finding" an object.
 CENTER_MATCH = "center_match"  # predicted center within a derived tolerance of a GT center
 IOU_MATCH = "iou_match"        # IoU >= a derived/def threshold
@@ -70,6 +77,13 @@ class TraitSpec:
     # as validated (a measurement decision — how unbiased the count must be to be trustworthy).
     # ABSOLUTE count/image, breeder-set per trait (D12) — never scaled to a "typical" count, never derived.
     count_bias_tolerance: float = 1.0
+    # Max acceptable p90 |per-image count error| (a TAIL statistic, not a mean — a population mean
+    # can hide one badly-off image among many) on the held-out split. NO DEFAULT: an invented number
+    # here would be platform-picked measurement semantics masquerading as a domain-expert one. `None`
+    # means "not yet authored for this trait" and the dispersion term is skipped, not gated on a
+    # guessed value — CATKIN does not set this; it needs the domain expert (or a derivation from real
+    # dense-imagery detector statistics), not a value picked by the agent. PROVISIONAL until authored.
+    count_error_tolerance: float | None = None
     # crops.yml controlled-vocab trait names this spec is authored to deliver — the anti-fabrication
     # anchor a config-loaded spec is cross-checked against (a spec can't claim a phenotype not in the vocab).
     delivers: tuple[str, ...] = ()
@@ -160,6 +174,17 @@ def _spec_from_config(data: dict, vocab: set[str]) -> TraitSpec | None:
         logger.warning("trait spec %r skipped: delivers must be non-empty and all in crops.yml "
                        "(off-vocab: %s)", name, off_vocab)
         return None
+    if "count_objective" in data:
+        # COUNT_OBJECTIVES (this module) is the single source of truth for which objectives exist —
+        # operating_point.py's picker/label registry shares these same keys, so validating here never
+        # needs to import that torch-heavy module. A value outside this set would otherwise silently
+        # fall into operating_point.py's permissive else-branch at resolution time instead of failing
+        # here.
+        objective = data["count_objective"]
+        if objective not in COUNT_OBJECTIVES:
+            logger.warning("trait spec %r skipped: count_objective %r is not one of %s",
+                           name, objective, sorted(COUNT_OBJECTIVES))
+            return None
     kwargs = {k: (tuple(v) if k in _TUPLE_FIELDS else v) for k, v in data.items()}
     try:
         return TraitSpec(**kwargs)
