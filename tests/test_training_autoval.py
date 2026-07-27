@@ -73,6 +73,38 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
     assert val_ds.transforms is None
 
 
+def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
+    """K1: an unrecognized split.group_by is a caller-config error and must propagate,
+    not degrade silently to (full_train_ds, None) like other failures in this function."""
+    images_dir, labels_dir, _all_stems = _detection_dataset(tmp_path / "ds")
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(labels_dir),
+        "subject": "catkin",
+        "auto_val": True,
+        "split": {"group_by": "not_a_real_grouping_key"},
+    }
+    with pytest.raises(ValueError):
+        _auto_train_val("detection", data_cfg, None)
+
+
+def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
+    """K1's narrowed except ValueError scope must not widen to a malformed val_ratio/seed —
+    those still degrade to (full_train_ds, None) exactly as every other non-grouping failure
+    in this function does, matching pre-K1 behavior."""
+    images_dir, labels_dir, all_stems = _detection_dataset(tmp_path / "ds")
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(labels_dir),
+        "subject": "catkin",
+        "auto_val": True,
+        "split": {"val_ratio": "not_a_number"},
+    }
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is None
+    assert sorted(train_ds.stems) == sorted(all_stems)
+
+
 def test_auto_train_val_ordinal_returns_none(tmp_path: Path):
     images_dir = tmp_path / "images"
     rows = []
