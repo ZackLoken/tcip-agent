@@ -182,9 +182,12 @@ class TrainContext:
     def calibrate(self, trait_name: str, **kwargs: Any) -> Any:
         """Resolve the trait's operating point (conf/tile/max_dets) from record sweeps — the derived,
         held-out-validated point, not a pin. Pass calibration_records/holdout_records (kwargs mirror
-        ``resolve_operating_point``)."""
+        ``resolve_operating_point``). Defaults ``experiment_id`` to this run's own id (K1), so the
+        train-disjointness gate checks the calibration/holdout images against the training split
+        this exact run drew — a caller-supplied ``experiment_id`` still wins."""
         from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
+        kwargs.setdefault("experiment_id", self.experiment_id)
         return resolve_operating_point(trait_name, **kwargs)
 
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
