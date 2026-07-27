@@ -273,6 +273,16 @@ export function ReviewTab() {
   const [colorEditKey, setColorEditKey] = useState<keyof ReviewColors | null>(null);
   const [edit, setEdit] = useState<EditShape | null>(null);
   const editDrag = useRef<EditDrag | null>(null);
+  // "Mark missed object" (Fix H's small affordance): draw a brand-new GT box with no detection
+  // selected, for a previously-unlabeled image the walkable TP/FP/FN list has nothing to seed from.
+  // `drawingMiss` = armed (next canvas drag draws the box); once drawn, the box moves into the
+  // SAME `edit` state the existing shape editor already handles (drag handles, Save/Cancel), with
+  // `pendingMiss` marking that a Save should submit a brand-new missed-object verdict, not an edit
+  // of `current`.
+  const [drawingMiss, setDrawingMiss] = useState(false);
+  const [missDraft, setMissDraft] = useState<[number, number, number, number] | null>(null);
+  const missDraftStart = useRef<[number, number] | null>(null);
+  const [pendingMiss, setPendingMiss] = useState(false);
   // One GT-mutating request at a time: key auto-repeat / double-clicks must not append
   // or delete twice, and no verdict may land while indices are stale mid-reload.
   const actionPending = useRef(false);
@@ -551,6 +561,63 @@ export function ReviewTab() {
     }
   }
 
+  // Submit a brand-new "missed object" box directly through the existing /api/review/action
+  // endpoint (no new backend route) — det_type "fn", gt_idx/pred_idx null, so record_action's
+  // _apply_gt_mutation appends a new GT annotation and records a proper gt-only verdict entry.
+  async function recordMissedObject(box: [number, number, number, number]): Promise<boolean> {
+    if (actionPending.current) return false;
+    if (reviewLocked) return false;
+    if (!dataset.project_root || !imgPath || !imgName) return false;
+    if (!dataset.subject) {
+      useStore
+        .getState()
+        .pushToast("No subject configured for this dataset — cannot record a missed object.");
+      return false;
+    }
+    actionPending.current = true;
+    try {
+      if (!(await ensureBackup())) return false;
+      const res = await api.review.action({
+        project_root: dataset.project_root,
+        image_name: imgName,
+        image_path: imgPath,
+        gt_path: paths.gt,
+        pred_path: paths.pred,
+        det_type: "fn",
+        class_name: dataset.subject,
+        conf: null,
+        iou: null,
+        gt_idx: null,
+        pred_idx: null,
+        bbox: box,
+        action: "edited",
+        edited_box: box,
+        edited_points: null,
+        iou_threshold: filters.iou_threshold,
+        conf_threshold: filters.conf_threshold,
+        filter_type: filters.filter_type,
+        filter_class: filters.filter_class,
+        user: useStore.getState().user,
+      });
+      setImageStatus(res.image_status);
+      if (imgName) setReviewImageStatus(imgName, res.image_status);
+      if (res.annotation_status) {
+        setStoreImageStatus(imgName, res.annotation_status);
+        applyMatches(res.matches, useStore.getState().gui.review.detection_idx);
+      }
+      return true;
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(
+          `Could not record the missed object: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      return false;
+    } finally {
+      actionPending.current = false;
+    }
+  }
+
   async function markImageComplete(completed: boolean) {
     if (!dataset.project_root || !imgName) return;
     try {
@@ -558,6 +625,7 @@ export function ReviewTab() {
         project_root: dataset.project_root,
         image_name: imgName,
         gt_path: paths.gt,
+        pred_dir: dataset.predictions_dir,
         completed,
       });
       setImageStatus(res.image_status); // local review badge
@@ -630,6 +698,7 @@ export function ReviewTab() {
   function cancelEdit() {
     setEdit(null);
     editDrag.current = null;
+    setPendingMiss(false);
   }
 
   async function commitEdit() {
@@ -640,7 +709,10 @@ export function ReviewTab() {
         useStore.getState().pushToast("Box too small to save — drag a corner to enlarge it.");
         return;
       }
-      if (await recordAction("edited", { box: edit.box })) cancelEdit();
+      const ok = pendingMiss
+        ? await recordMissedObject(edit.box)
+        : await recordAction("edited", { box: edit.box });
+      if (ok) cancelEdit();
       return;
     }
     if (edit.points.length < 3) {
@@ -651,10 +723,58 @@ export function ReviewTab() {
       cancelEdit();
   }
 
+  // ── Mark missed object: draw a brand-new box with no detection selected ──
+
+  function startMarkMissedObject() {
+    if (reviewLocked || edit) return;
+    setDrawingMiss(true);
+  }
+
+  function cancelMarkMissedObject() {
+    setDrawingMiss(false);
+    setMissDraft(null);
+    missDraftStart.current = null;
+  }
+
+  function onMissDown(x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) {
+    if (ev.evt.button !== 0) return;
+    missDraftStart.current = [x, y];
+    setMissDraft([x, y, x, y]);
+  }
+
+  function onMissMove(x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) {
+    if (!missDraftStart.current || ev.evt.buttons === 0) return;
+    const [sx, sy] = missDraftStart.current;
+    setMissDraft([Math.min(sx, x), Math.min(sy, y), Math.max(sx, x), Math.max(sy, y)]);
+  }
+
+  function onMissUp() {
+    const box = missDraft;
+    missDraftStart.current = null;
+    setMissDraft(null);
+    setDrawingMiss(false);
+    if (!box) return;
+    const [x1, y1, x2, y2] = box;
+    if (x2 - x1 < MIN_BOX_SIDE || y2 - y1 < MIN_BOX_SIDE) {
+      useStore
+        .getState()
+        .pushToast("Box too small — drag out a bigger area for the missed object.");
+      return;
+    }
+    setPendingMiss(true);
+    setEdit(
+      clampShapeToImage({ kind: "box", box }, matches?.img_width ?? 0, matches?.img_height ?? 0),
+    );
+  }
+
   // An edit belongs to one detection on one matches snapshot — leaving either discards it.
   useEffect(() => {
     setEdit(null);
     editDrag.current = null;
+    setPendingMiss(false);
+    setDrawingMiss(false);
+    setMissDraft(null);
+    missDraftStart.current = null;
   }, [detectionIdx, imgName, matches]);
 
   function onEditDown(x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) {
@@ -808,6 +928,22 @@ export function ReviewTab() {
               {validationResult.validated ? "Validated" : "Not yet"}
             </span>
           )}
+
+          {/* Fix H's small affordance: attest a missed object on ANY image, even one with no
+              existing detections to select — draws a brand-new box, submitted through the same
+              /api/review/action endpoint as an edited FN verdict. */}
+          <button
+            className="tcip-btn"
+            onClick={() => (drawingMiss ? cancelMarkMissedObject() : startMarkMissedObject())}
+            disabled={!imgName || reviewLocked || !!edit || !dataset.subject}
+            title={
+              drawingMiss
+                ? "Cancel drawing a missed object"
+                : "Draw a box around an object the model missed, even on an image with no existing detections"
+            }
+          >
+            {drawingMiss ? "Cancel drawing" : "＋ Mark missed object"}
+          </button>
 
           <span className="flex-1" />
 
@@ -966,10 +1102,16 @@ export function ReviewTab() {
           autoFit={false}
           imgWidth={imgW}
           imgHeight={imgH}
-          onPixelDown={edit ? onEditDown : undefined}
-          onPixelMove={edit ? onEditMove : undefined}
-          onPixelUp={edit ? onEditUp : undefined}
-          overlay={edit ? <EditShapeOverlay edit={edit} color={reviewColors.active} /> : undefined}
+          onPixelDown={edit ? onEditDown : drawingMiss ? onMissDown : undefined}
+          onPixelMove={edit ? onEditMove : drawingMiss ? onMissMove : undefined}
+          onPixelUp={edit ? onEditUp : drawingMiss ? onMissUp : undefined}
+          overlay={
+            edit ? (
+              <EditShapeOverlay edit={edit} color={reviewColors.active} />
+            ) : missDraft ? (
+              <EditShapeOverlay edit={{ kind: "box", box: missDraft }} color={reviewColors.fn} />
+            ) : undefined
+          }
         >
           {matches && (
             <ReviewOverlays
@@ -1101,21 +1243,23 @@ export function ReviewTab() {
             </button>
           </>
         )}
-        {current && edit && (
+        {edit && (current || pendingMiss) && (
           <>
             <span className="tcip-badge bg-transparent border border-tcip-pred text-tcip-pred">
-              Editing
+              {pendingMiss ? "Marking missed object" : "Editing"}
             </span>
             <button
               className="tcip-btn-primary"
               onClick={() => void commitEdit()}
               title={
-                current.det_type === "fp"
-                  ? "Write this shape to ground truth (Enter)"
-                  : "Replace the ground-truth shape with this one (Enter)"
+                pendingMiss
+                  ? "Save this missed object to ground truth (Enter)"
+                  : current?.det_type === "fp"
+                    ? "Write this shape to ground truth (Enter)"
+                    : "Replace the ground-truth shape with this one (Enter)"
               }
             >
-              ✓&nbsp;&nbsp;Save edit
+              ✓&nbsp;&nbsp;Save {pendingMiss ? "missed object" : "edit"}
             </button>
             <button
               className="tcip-btn"
