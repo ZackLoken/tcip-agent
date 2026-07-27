@@ -186,6 +186,8 @@ DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     "max class id + 1 in the label set": "tcip_mcp.pipelines.derivations.num_classes_from_distribution",
     "count-unbiased center-match sweep": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
     "count-unbiased center-match sweep over review verdicts": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
+    "F1-max center-match sweep": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
+    "F1-max center-match sweep over review verdicts": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
     "GT neighbor-IoU distribution (p99 + margin)": "tcip_mcp.pipelines.derivations.derive_cross_tile_nms",
     "~1.5x p99 GT objects/image": "tcip_mcp.pipelines.operating_point._max_dets_from_density",
     "model imgsz / persisted training geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
