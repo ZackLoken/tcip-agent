@@ -31,11 +31,18 @@ export function InferenceTab() {
   const [outputDir, setOutputDir] = useState<string>("");
   const [tile, setTile] = useState<boolean>(true);
   const [postprocess, setPostprocess] = useState<"nms" | "nmm">("nms");
-  const [conf, setConf] = useState<number>(0.25);
-  const [iou, setIou] = useState<number>(0.7);
-  const [sliceH, setSliceH] = useState<number>(640);
-  const [sliceW, setSliceW] = useState<number>(640);
-  const [overlap, setOverlap] = useState<number>(0.2);
+  // TRAP 4 step 1 (K6): these start UNSET, not frozen literals — a value is sent only once the
+  // breeder explicitly overrides it. Left unset, the backend derives conf/iou from resolution.py's
+  // own defaults and tile_size/overlap from the checkpoint's persisted training geometry
+  // (resolve_tile_geometry), instead of a GUI run silently diverging from the MCP door's count on
+  // the same checkpoint. Demoted behind "Advanced (override)" below (TRAP 4 step 4) — hiding these
+  // only makes sense now that step 1 is actually closed.
+  const [conf, setConf] = useState<number | undefined>(undefined);
+  const [iou, setIou] = useState<number | undefined>(undefined);
+  const [sliceH, setSliceH] = useState<number | undefined>(undefined);
+  const [sliceW, setSliceW] = useState<number | undefined>(undefined);
+  const [overlap, setOverlap] = useState<number | undefined>(undefined);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
   const [activeJob, setActiveJob] = useState<InferenceJob | null>(null);
   const streamRef = useRef<(() => void) | null>(null);
@@ -206,70 +213,98 @@ export function InferenceTab() {
           </label>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px] text-tcip-muted">
-          <label className="flex flex-col gap-1">
-            Conf
-            <input
-              className="tcip-input w-full"
-              type="number"
-              step="0.05"
-              min="0"
-              max="1"
-              value={conf}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                setConf(Number.isFinite(v) ? v : 0.25);
-              }}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            IoU
-            <input
-              className="tcip-input w-full"
-              type="number"
-              step="0.05"
-              min="0"
-              max="1"
-              value={iou}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                setIou(Number.isFinite(v) ? v : 0.7);
-              }}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            Slice H
-            <input
-              className="tcip-input w-full"
-              type="number"
-              value={sliceH}
-              onChange={(e) => setSliceH(parseInt(e.target.value, 10) || 640)}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            Slice W
-            <input
-              className="tcip-input w-full"
-              type="number"
-              value={sliceW}
-              onChange={(e) => setSliceW(parseInt(e.target.value, 10) || 640)}
-            />
-          </label>
-          <label className="col-span-2 flex flex-col gap-1">
-            Overlap
-            <input
-              className="tcip-input w-full"
-              type="number"
-              step="0.05"
-              min="0"
-              max="0.9"
-              value={overlap}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                setOverlap(Number.isFinite(v) ? v : 0.2);
-              }}
-            />
-          </label>
+        <div className="mb-3">
+          <button
+            type="button"
+            className="text-[11px] text-tcip-muted underline"
+            onClick={() => setShowAdvanced((v) => !v)}
+          >
+            {showAdvanced ? "Hide" : "Show"} advanced (override — unvalidated)
+          </button>
+          <p className="text-[11px] text-tcip-muted mt-1">
+            Left blank, conf/IoU come from the platform&apos;s own defaults and tile size/overlap
+            are derived from this checkpoint&apos;s own training geometry — the same operating point
+            the agent-facing door resolves. Setting a value here overrides that derivation and is
+            not a validated operating point.
+          </p>
+          {showAdvanced && (
+            <div className="grid grid-cols-2 gap-2 mt-2 text-[11px] text-tcip-muted">
+              <label className="flex flex-col gap-1">
+                Conf
+                <input
+                  className="tcip-input w-full"
+                  type="number"
+                  step="0.05"
+                  min="0"
+                  max="1"
+                  placeholder="derived"
+                  value={conf ?? ""}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    setConf(Number.isFinite(v) ? v : undefined);
+                  }}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                IoU
+                <input
+                  className="tcip-input w-full"
+                  type="number"
+                  step="0.05"
+                  min="0"
+                  max="1"
+                  placeholder="derived"
+                  value={iou ?? ""}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    setIou(Number.isFinite(v) ? v : undefined);
+                  }}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Slice H
+                <input
+                  className="tcip-input w-full"
+                  type="number"
+                  placeholder="from checkpoint"
+                  value={sliceH ?? ""}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    setSliceH(Number.isFinite(v) ? v : undefined);
+                  }}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                Slice W
+                <input
+                  className="tcip-input w-full"
+                  type="number"
+                  placeholder="from checkpoint"
+                  value={sliceW ?? ""}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    setSliceW(Number.isFinite(v) ? v : undefined);
+                  }}
+                />
+              </label>
+              <label className="col-span-2 flex flex-col gap-1">
+                Overlap
+                <input
+                  className="tcip-input w-full"
+                  type="number"
+                  step="0.05"
+                  min="0"
+                  max="0.9"
+                  placeholder="from checkpoint"
+                  value={overlap ?? ""}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    setOverlap(Number.isFinite(v) ? v : undefined);
+                  }}
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         <button
