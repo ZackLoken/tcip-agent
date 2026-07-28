@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
+from typing import Any
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
@@ -310,11 +311,16 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
             tiling_cfg["overlap"] = float(eff_overlap)
 
     sampler = build_sampler(train_config.sampler, train_ds)
+    # K11: seed the loader's shuffle/worker RNG from the run's own (create_run-resolved) seed —
+    # the same value set_seed uses, so a resumed run's data order is reproducible too.
+    from tcip_mcp.pipelines.training.generic_trainer import seeded_loader_kwargs
+    loader_kwargs = seeded_loader_kwargs(config.get("seed"))
     train_loader = DataLoader(
         train_ds, batch_size=train_config.batch_size,
         shuffle=(sampler is None), sampler=sampler,
         collate_fn=task_collate(task),
         num_workers=train_config.num_workers,
+        **loader_kwargs,
     )
     val_loader = None
     if val_ds is not None:
@@ -323,6 +329,7 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
             shuffle=False,
             collate_fn=task_collate(task),
             num_workers=train_config.num_workers,
+            **loader_kwargs,
         )
     if val_loader is None and task in ("detection", "instance_seg"):
         logger.warning(
@@ -447,17 +454,60 @@ def cancel_training(run_id: str) -> dict:
     return {"run_id": run_id, "status": get_run(run_id).status, "cancel_requested": True}
 
 
+# K11: keys _apply_hpo_params gives purpose-built handling (routed into nested optimizer/
+# training structures train() reads unconditionally) — tracking THEM by their own top-level
+# name would be meaningless. Only the "else"-routed passthrough keys (F1's actual risk case:
+# a swept axis that lands somewhere no consumer reads) are checked against consumption.
+_HPO_KNOWN_KEYS = {"lr", "batch_size", "weight_decay"}
+
+
+class _AccessTrackingConfig(dict):
+    """Dict subclass recording which top-level keys are ever read via ``__getitem__``/``get``/
+    ``__contains__`` (K11) — installed on ``run.config`` for one HPO trial's dispatch, so
+    ``unconsumed_params`` reflects genuine RUNTIME access (did anything read this key during
+    THIS trial), not a static comparison against ``train()``'s known key list, which would
+    falsely flag a bespoke ``training_source``'s own legitimate custom sweep key.
+
+    Real, stated limitations (never gates the run — warn-only, so a false positive costs a log
+    line, not a failed trial): top-level only (a nested read like
+    ``ctx.config["optimizer"]["custom_key"]`` isn't seen); ``dict(cfg)``/``**cfg`` copies bypass
+    the overrides entirely (CPython copies at the C level); whole-dict iteration
+    (``.items()``/``.values()``/``.keys()``) isn't tracked per-key.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.accessed: set[str] = set()
+
+    def __getitem__(self, key: Any) -> Any:
+        self.accessed.add(key)
+        return super().__getitem__(key)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self.accessed.add(key)
+        return super().get(key, default)
+
+    def __contains__(self, key: Any) -> bool:
+        self.accessed.add(key)
+        return super().__contains__(key)
+
+
 def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> None:
     """Train one HPO trial and ``report`` its composite objective (lower=better).
 
     ``report(value)`` feeds the Ray Tune searcher/scheduler; call it each epoch (so a
     scheduler can prune) and once at the end. Failures report ``+inf`` so a dead trial can
-    never win a minimize sweep. Trials train under the final run's regime (same augmentation
-    and imbalance handling), or the selected hyperparameters won't transfer.
+    never win a minimize sweep. Trials train under the final run's regime — same augmentation,
+    imbalance handling, AND dispatch (K11): a ``training_source`` in ``base_config`` actually
+    runs under that loop here too, not always the stock trainer — or the selected
+    hyperparameters won't transfer.
     """
     merged = _apply_hpo_params(base_config, config)
 
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, train, task_collate
+    from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        create_run, task_collate, seeded_loader_kwargs,
+    )
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from torch.utils.data import DataLoader
 
@@ -470,8 +520,12 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     train_cfg = merged.get("training", {})
     task = model_source.get("task") or data_cfg.get("task", "detection")
 
+    # K11: track which top-level keys the trial actually reads, so a swept param that never
+    # reaches any consumer is caught by OBSERVATION rather than gated by a whitelist that would
+    # forbid a bespoke training_source from sweeping its own custom axes.
+    tracked_config = _AccessTrackingConfig(merged)
     # Tag as an HPO trial so it stays out of the Training-tab run list.
-    run = create_run(merged, trial_dir, origin="hpo_trial")
+    run = create_run(tracked_config, trial_dir, origin="hpo_trial")
 
     try:
         transforms = None
@@ -485,27 +539,59 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         sampler = build_sampler(merged.get("sampler", "random"), train_ds)
         batch_size = train_cfg.get("batch_size", config.get("batch_size", 4))
         num_workers = train_cfg.get("num_workers", 0)
+        # run.config's seed is create_run-resolved (auto-drawn if base_config left it unset) —
+        # read it off run.config, not merged, so the loader is seeded with the value actually used.
+        loader_kwargs = seeded_loader_kwargs(run.config.get("seed"))
         train_loader = DataLoader(
             train_ds, batch_size=batch_size, shuffle=(sampler is None),
             sampler=sampler, collate_fn=task_collate(task), num_workers=num_workers,
+            **loader_kwargs,
         )
         val_loader = None
         if val_ds is not None:
             val_loader = DataLoader(
                 val_ds, batch_size=batch_size, shuffle=False,
                 collate_fn=task_collate(task), num_workers=num_workers,
+                **loader_kwargs,
             )
 
         def epoch_cb(epoch: int, metrics: dict) -> None:
-            value = metrics.get("val_objective", metrics.get("val_loss"))
+            # K9's resolve_selection_metric governs which key actually decides checkpoint
+            # choice once evaluation.trait/evaluation.selection_metric are set — prefer it over
+            # the raw composite so pruning ranks trials on the same criterion selection uses.
+            value = metrics.get("selection", metrics.get("val_objective", metrics.get("val_loss")))
             if value is not None:
                 report(value)  # composite lower=better; mode='min' keeps improving trials
 
-        train(run, train_loader, val_loader, task=task, epoch_callback=epoch_cb)
+        # K11: dispatch through the SAME training_source-or-default_train() decision the full
+        # audited envelope uses. experiment_id=None is deliberate — dispatch_train_body never
+        # reaches _finalize_run/register_model_from_experiment, so a trial stays isolated from
+        # the registry (origin="hpo_trial") while still actually training under a bespoke loop
+        # when base_config carries one, instead of silently falling back to the stock trainer.
+        # trial_report wires ctx.report_objective(value) for a bespoke loop whose own metrics
+        # don't share the stock trainer's key names, so it can still report progress for pruning.
+        ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader, task=task,
+                           experiment_id=None, epoch_hook=epoch_cb, trial_report=report)
+        dispatch_train_body(ctx)
         report(run.best_metric)  # final composite (inf if train() never produced a metric)
     except Exception as e:
         logger.warning("HPO trial failed: %s", e)
         report(float("inf"))
+    finally:
+        # K11: surface any swept param no consumer touched. Warn-only — never gates the trial.
+        unconsumed = sorted((set(config.keys()) - _HPO_KNOWN_KEYS) - tracked_config.accessed)
+        try:
+            from tcip_mcp.utils.atomic_io import atomic_write_json
+            Path(trial_dir).mkdir(parents=True, exist_ok=True)
+            atomic_write_json(Path(trial_dir) / "resolved_config.json",
+                              {**merged, "unconsumed_params": unconsumed})
+        except Exception:
+            logger.warning("could not persist resolved_config.json for %s", trial_dir, exc_info=True)
+        if unconsumed:
+            logger.warning(
+                "HPO trial %s: swept params %s were never read by the training body — check "
+                "_apply_hpo_params' routing, or (for a bespoke training_source) confirm the "
+                "loop actually reads them from ctx.config.", trial_dir, unconsumed)
 
 
 @mcp.tool()
@@ -607,16 +693,21 @@ def run_hpo(
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     """Apply flat HPO params onto a deep copy of ``base_config``, where ``train()`` reads them.
 
-    Architecture is owned by the bespoke ``model_source`` builder (unknown to the sweep),
-    so only optimizer / schedule / batch axes are applied here. Optimizer params go into
-    TOP-LEVEL ``config["optimizer"]`` and the unfreeze schedule into TOP-LEVEL
-    ``config["stages"]`` — the trainer reads both from the top level and never reads
-    ``training["stages"]`` or a stage's ``lr``:
+    Architecture is owned by the bespoke ``model_source`` builder (unknown to the sweep), so
+    only optimizer/batch axes get purpose-built handling here; ``base_config``'s own progressive-
+    unfreeze schedule is left untouched (K11 — it used to be silently overwritten with a hardcoded
+    3-stage recipe, discarding whatever schedule the agent configured):
 
-      - ``lr``           -> ``optimizer["head_lr"]`` (+ ``backbone_lr`` at lr*0.1) plus a
-                            3-stage ``freeze_to`` progressive-unfreeze schedule
+      - ``lr``           -> ``optimizer["head_lr"]``, plus ``optimizer["backbone_lr"]`` scaled by
+                            whatever backbone/head ratio ``base_config`` already expressed
+                            (derived, not pinned — a frozen ``lr*0.1`` would discard an agent's
+                            own deliberate ratio)
       - ``weight_decay`` -> ``optimizer["weight_decay"]``
-      - anything else (``batch_size``, ...) -> ``training``
+      - ``batch_size``   -> ``training["batch_size"]``
+      - anything else    -> the TOP LEVEL of ``cfg`` (not nested under ``training``, which runs
+                            AFTER ``normalize_train_config``'s hoist and would never reach
+                            ``train()``'s top-level config reads) — free for a bespoke
+                            ``training_source`` to sweep its own axes; no whitelist, no reject.
     """
     import copy
 
@@ -625,26 +716,28 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     cfg = normalize_train_config(copy.deepcopy(base_config))
     training = cfg.setdefault("training", {})
 
+    # K11: the ratio the agent already configured, read from base_config's OWN optimizer block
+    # before this loop overwrites head_lr. Default to 1.0 (not a frozen 0.1) only when the agent
+    # expressed no explicit backbone/head split at all.
+    base_optimizer = base_config.get("optimizer") or {}
+    base_backbone_lr = base_optimizer.get("backbone_lr")
+    base_head_lr = base_optimizer.get("head_lr")
+    backbone_head_ratio = (
+        base_backbone_lr / base_head_lr if (base_head_lr and base_backbone_lr) else 1.0
+    )
+
     for key, value in params.items():
         if key == "lr":
             lr = float(value)
             optimizer = cfg.setdefault("optimizer", {})
             optimizer["head_lr"] = lr
-            optimizer["backbone_lr"] = lr * 0.1
-            # 10 epochs total, matching the trainer's previous per-trial budget so a
-            # sweep's runtime doesn't double. No per-stage 'lr' keys: the trainer
-            # applies head_lr/backbone_lr per stage and ignores stage-level lr.
-            cfg["stages"] = [
-                {"freeze_to": -1, "epochs": 3},  # heads only
-                {"freeze_to": 2, "epochs": 4},   # unfreeze top stages
-                {"freeze_to": 0, "epochs": 3},   # full fine-tune
-            ]
+            optimizer["backbone_lr"] = lr * backbone_head_ratio
         elif key == "batch_size":
             training["batch_size"] = value
         elif key == "weight_decay":
             cfg.setdefault("optimizer", {})["weight_decay"] = value
         else:
-            training[key] = value
+            cfg[key] = value
     return cfg
 
 
