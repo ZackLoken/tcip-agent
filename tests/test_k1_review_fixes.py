@@ -386,7 +386,7 @@ def test_finding5_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path)
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
 
-    bundle, _dh = itools._calibrate_operating_point(
+    bundle, _dh, _n_excluded = itools._calibrate_operating_point(
         _CalStub(), "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
@@ -395,6 +395,51 @@ def test_finding5_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path)
     policy = bundle.get("conf").sweep["split_policy"]
     assert policy["seed"] == 7
     assert policy["holdout_ratio"] == pytest.approx(0.75)  # not the 0/0.5 defaults
+
+
+# ===========================================================================
+# Round 4 (task #26) — the calibration record builder's whole-image exclusion
+# for an unlabeled attribute instance must be COUNTED and disclosed, not a
+# silent filter (matching evaluation.py's n_excluded_incomplete_attribute).
+# ===========================================================================
+
+def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
+    """A stem with any instance unlabeled for `attribute` is dropped whole from the cal/holdout
+    record set (the missing-label-file precedent) — the count must travel back to the caller,
+    not vanish, so a caller can see the reference shrank rather than assume every stem measured."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+
+    root = tmp_path / "ds"
+    images_dir, labels_dir = root / "images", root / "labels"
+    write_registry(root / "classes.json", ClassRegistry(subjects=(
+        Subject(name="catkin", attributes=(
+            Attribute(name="state", type="categorical", values=("elongated", "dormant")),)),)))
+
+    stems = ["complete_a", "complete_b", "partial_a", "partial_b"]
+    for s in stems:
+        _save_png(images_dir / f"{s}.png")
+    for s in ("complete_a", "complete_b"):
+        json_io.write_annotations(str(labels_dir / f"{s}.json"), [
+            Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10), attributes={"state": "elongated"}),
+        ], IMG, IMG)
+    for s in ("partial_a", "partial_b"):
+        json_io.write_annotations(str(labels_dir / f"{s}.json"), [
+            Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10), attributes={"state": "elongated"}),
+            Annotation(subject="catkin", geometry=BBox(15, 15, 20, 20)),  # no `state` -- unlabeled
+        ], IMG, IMG)
+
+    stub = _CalStub()
+    stub.config = {"data": {"subject": "catkin", "attribute": "state"}}
+
+    _bundle, _dh, n_excluded = itools._calibrate_operating_point(
+        stub, "catkin", str(labels_dir), str(images_dir),
+        tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
+        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        group_by="stem", seed=0, holdout_ratio=0.5,
+    )
+
+    assert n_excluded == 2  # partial_a + partial_b, wherever the split put them
 
 
 # ===========================================================================
