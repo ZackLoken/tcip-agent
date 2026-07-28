@@ -86,6 +86,12 @@ for the full contract; the seams you use here are:
   provenance-snapshotted no matter what your loop does. `ctx.default_train()` is a convenience to
   call, extend, or replace.
 
+  Registration needs one more explicit fact (K11): save under `"model_best"`/`"model_final"`, or
+  call `ctx.set_final_weights(path)` yourself — otherwise a "completed" run with no discoverable
+  weights is marked `failed` rather than registering a nonexistent path. Under `run_hpo`, call
+  `ctx.report_objective(value)` to report trial progress for pruning if your loop's own metrics
+  don't share the stock trainer's key names.
+
 **Fit to the data in hand, don't transplant blind.** A paper's hyperparameters are for its dataset.
 Derive the operating points from *your* data at runtime (CLAUDE.md: derive, don't pin) — anchor sizes
 from your GT box distribution, norm choice from your real batch size, pyramid levels from your object
