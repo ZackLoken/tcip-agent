@@ -13,7 +13,9 @@ import os
 from pathlib import Path
 
 from tcip_annotation.json_io import (
+    UNLABELED,
     read_annotations,
+    target_class_id,
     to_coco_dataset,
     write_annotations,
 )
@@ -496,4 +498,86 @@ def test_to_coco_dataset_round_trips_through_format_io_parser(tmp_path: Path) ->
 
 def test_to_coco_dataset_empty_entries(tmp_path: Path) -> None:
     coco = to_coco_dataset([], subject="catkin", id_map={"catkin": 0})
-    assert coco == {"images": [], "annotations": [], "categories": [{"id": 0, "name": "catkin"}]}
+    assert coco == {"images": [], "annotations": [], "categories": [{"id": 0, "name": "catkin"}],
+                    "excluded_incomplete_attribute": []}
+
+
+# ── target_class_id — unlabeled vs. undecodable (K4/K5) ──────────────────────
+
+
+def test_target_class_id_distinguishes_unlabeled_from_undecodable() -> None:
+    id_map = {"elongated": 0, "dormant": 1}
+    unlabeled = Annotation(subject="catkin", geometry=BBox(0, 0, 1, 1), attributes={})
+    undecodable = Annotation(subject="catkin", geometry=BBox(0, 0, 1, 1),
+                             attributes={"elongation": "not-a-real-value"})
+    labeled = Annotation(subject="catkin", geometry=BBox(0, 0, 1, 1),
+                         attributes={"elongation": "dormant"})
+
+    # Default (allow_unlabeled=False): both failure shapes raise, unchanged original behavior.
+    try:
+        target_class_id(unlabeled, "catkin", "elongation", id_map)
+        raise AssertionError("expected a ValueError")
+    except ValueError:
+        pass
+
+    # allow_unlabeled=True: the soft gap becomes the distinguishable UNLABELED sentinel...
+    assert target_class_id(unlabeled, "catkin", "elongation", id_map, allow_unlabeled=True) == UNLABELED
+    # ...but a genuine decode bug (a value the registry doesn't know) still raises regardless.
+    try:
+        target_class_id(undecodable, "catkin", "elongation", id_map, allow_unlabeled=True)
+        raise AssertionError("expected a ValueError")
+    except ValueError:
+        pass
+
+    assert target_class_id(labeled, "catkin", "elongation", id_map, allow_unlabeled=True) == 1
+
+
+def test_to_coco_dataset_excludes_the_whole_image_when_any_instance_is_unlabeled(
+    tmp_path: Path,
+) -> None:
+    """K4/K5, stage-6 review N2/NEW-1: an instance the annotator hasn't assessed for `attribute`
+    yet must not abort the whole assembly with a raise (the original bug) -- but must also not be
+    silently narrowed to just its labeled subset, training the image's other real objects as
+    background (the N2 regression this fix corrects). The WHOLE image is excluded and disclosed,
+    the same treatment a missing label file already gets. A genuinely undecodable value still
+    raises -- that distinction is unaffected."""
+    mixed_path = tmp_path / "IMG_A.json"
+    write_annotations(mixed_path, [
+        Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30),
+                  attributes={"elongation": "dormant"}),
+        Annotation(subject="catkin", geometry=BBox(40, 40, 60, 60), attributes={}),  # unlabeled
+    ], 100, 100)
+    fully_labeled_path = tmp_path / "IMG_B.json"
+    write_annotations(fully_labeled_path, [
+        Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30),
+                  attributes={"elongation": "elongated"}),
+    ], 100, 100)
+
+    coco = to_coco_dataset(
+        [(str(mixed_path), "IMG_A.JPG"), (str(fully_labeled_path), "IMG_B.JPG")],
+        subject="catkin", id_map={"elongated": 0, "dormant": 1}, attribute="elongation",
+    )
+
+    # The mixed image is excluded WHOLESALE -- not present at all, not even with its labeled
+    # instance -- and the exclusion is disclosed, never silent.
+    assert [i["file_name"] for i in coco["images"]] == ["IMG_B.JPG"]
+    assert len(coco["annotations"]) == 1
+    assert coco["annotations"][0]["category_id"] == 0  # "elongated", from IMG_B only
+    # Names, not just a count: the downstream partition (trainable_stems) needs to know WHICH
+    # images left, or it attributes their absence to whichever category it resembles and reports
+    # a false reason (round-4 review).
+    assert coco["excluded_incomplete_attribute"] == ["IMG_A.JPG"]
+
+    undecodable_path = tmp_path / "IMG_C.json"
+    write_annotations(undecodable_path, [
+        Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30),
+                  attributes={"elongation": "not-a-real-value"}),
+    ], 100, 100)
+    try:
+        to_coco_dataset(
+            [(str(undecodable_path), "IMG_C.JPG")],
+            subject="catkin", id_map={"elongated": 0, "dormant": 1}, attribute="elongation",
+        )
+        raise AssertionError("expected a ValueError")
+    except ValueError:
+        pass
