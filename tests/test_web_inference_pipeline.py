@@ -81,3 +81,49 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     assert obj["subject"] == "0"                     # no recorded id_map -> id 0 stringified honestly
     assert obj["score"] == pytest.approx(0.9)        # per-object confidence preserved
     assert obj["bbox"] == [10.0, 10.0, 20.0, 20.0]   # pixel COCO xywh from xyxy [10,10,30,30]
+
+
+def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch):
+    """K3/Commit-1: the GUI door reads subject/attribute off predictor.config["data"] the same way
+    run_inference already does, and decodes predictions through the resolved id_map (never a raw
+    index string) — the case stage-6 review flagged as untested (FakePredictor had no .config)."""
+    pytest.importorskip("fastapi")
+    from PIL import Image
+
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
+    out_dir = tmp_path / "out"
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    class FakePredictor:
+        # A single-subject detector's config, the same shape run_inference reads
+        # (predictor.config["data"]["subject"]) — no classes.json needed, _resolve_registry_id_map
+        # synthesizes {subject: 0} for a plain single-class run.
+        config = {"data": {"subject": "catkin"}}
+
+        def __init__(self, checkpoint_path=None, **kwargs):
+            pass
+
+        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
+            return [{"image": p, "width": 100, "height": 100,
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
+                    for p in paths]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+
+    job = InferenceJob(
+        job_id="t2", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
+        slice_hw=(640, 640), overlap=0.2, postprocess="nms",
+    )
+    _worker(job)
+
+    assert job.status == "completed"
+    import json
+    obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
+    assert obj["subject"] == "catkin"  # resolved via id_map, not the raw index "0"
