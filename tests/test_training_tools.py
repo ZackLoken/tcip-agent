@@ -5,6 +5,8 @@ in get_worst_predictions."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 
@@ -143,7 +145,7 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
 
 def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
     """Suggested lr/weight_decay must survive the trainer's exact config reads
-    (top-level optimizer/stages) all the way into optimizer.param_groups."""
+    (top-level optimizer) all the way into optimizer.param_groups."""
     torch = pytest.importorskip("torch")
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
     from tcip_mcp.tools.training_tools import _apply_hpo_params
@@ -165,10 +167,52 @@ def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
     assert optimizer.param_groups[0]["lr"] == pytest.approx(3e-3)
     assert optimizer.param_groups[0]["weight_decay"] == pytest.approx(2e-4)
 
-    # The unfreeze schedule sits where train() reads it: top-level config["stages"].
-    stages = out.get("stages", [{"freeze_to": 0, "epochs": 10}])
-    assert [s["freeze_to"] for s in stages] == [-1, 2, 0]
-    assert sum(s["epochs"] for s in stages) == 10  # per-trial budget unchanged
+
+def test_apply_hpo_params_preserves_base_config_stages():
+    """K11: sweeping lr must NOT overwrite the agent's own progressive-unfreeze schedule with a
+    hardcoded recipe — base_config's stages (however it expressed them) survive unchanged."""
+    from tcip_mcp.tools.training_tools import _apply_hpo_params
+
+    custom_stages = [{"freeze_to": -1, "epochs": 2}, {"freeze_to": 0, "epochs": 8}]
+    base = {"model_source": {"builder": "x:y", "task": "detection"},
+            "training": {"stages": custom_stages}}
+    out = _apply_hpo_params(base, {"lr": 3e-3})
+    assert out["stages"] == custom_stages
+
+    # No stages configured at all -> still nothing invented here; generic_trainer.train()'s own
+    # single-stage fallback covers it.
+    base_no_stages = {"model_source": {"builder": "x:y", "task": "detection"}}
+    out2 = _apply_hpo_params(base_no_stages, {"lr": 3e-3})
+    assert "stages" not in out2
+
+
+def test_apply_hpo_params_derives_backbone_ratio_not_frozen():
+    """K11: backbone_lr must scale by whatever ratio the agent's own base_config expressed, not
+    a frozen *0.1 — a pinned constant here discards a deliberate agent choice (derive, don't pin)."""
+    from tcip_mcp.tools.training_tools import _apply_hpo_params
+
+    base = {"model_source": {"builder": "x:y", "task": "detection"},
+            "optimizer": {"backbone_lr": 2e-5, "head_lr": 1e-4}}  # ratio 0.2, not 0.1
+    out = _apply_hpo_params(base, {"lr": 0.02})
+    assert out["optimizer"]["head_lr"] == pytest.approx(0.02)
+    assert out["optimizer"]["backbone_lr"] == pytest.approx(0.004)  # 0.02 * 0.2, not 0.002
+
+    # No explicit ratio expressed at all -> default 1.0, not the old frozen 0.1.
+    base_no_ratio = {"model_source": {"builder": "x:y", "task": "detection"}}
+    out2 = _apply_hpo_params(base_no_ratio, {"lr": 0.02})
+    assert out2["optimizer"]["backbone_lr"] == pytest.approx(0.02)
+
+
+def test_apply_hpo_params_unrecognized_key_reaches_top_level():
+    """K11 (F1): a swept key outside the known optimizer/batch/weight_decay set must land at the
+    TOP LEVEL of the resolved config (where train() reads it), not nested under "training" after
+    normalize_train_config's hoist already ran — the bug that made it silently unreachable."""
+    from tcip_mcp.tools.training_tools import _apply_hpo_params
+
+    base = {"model_source": {"builder": "x:y", "task": "detection"}}
+    out = _apply_hpo_params(base, {"momentum": 0.9})
+    assert out["momentum"] == 0.9
+    assert "momentum" not in out.get("training", {})
 
 
 # --------------------------------------------------------------------------
@@ -214,7 +258,7 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
 
 
-def test_run_hpo_trial_reports_each_epoch_then_final_composite(monkeypatch):
+def test_run_hpo_trial_reports_each_epoch_then_final_composite(monkeypatch, tmp_path):
     """Every epoch's composite plus the final best_metric are reported (lower=better),
     so a min-mode scheduler sees the improving trace."""
     pytest.importorskip("torch")
@@ -231,11 +275,31 @@ def test_run_hpo_trial_reports_each_epoch_then_final_composite(monkeypatch):
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     reported: list = []
-    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), "trial_0")
+    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), str(tmp_path / "trial_0"))
     assert reported == [50.0, 40.0, 30.0, 30.0]  # per-epoch trace + final composite
 
 
-def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch):
+def test_run_hpo_trial_epoch_cb_prefers_selection_over_val_objective(monkeypatch, tmp_path):
+    """K11/K9: once a center-match trait sets which key governs checkpoint choice ('selection'),
+    HPO pruning must rank trials on that key, not the raw composite it can diverge from."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        if epoch_callback:
+            epoch_callback(0, {"val_objective": 99.0, "selection": 12.0})
+        run.best_metric = 12.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    reported: list = []
+    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), str(tmp_path / "trial_0"))
+    assert reported == [12.0, 12.0]  # the "selection" value, not 99.0
+
+
+def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch, tmp_path):
     """A crashed trial (or one with no model_source) reports +inf — the worst value under
     mode='min' — so it can never become the sweep's best."""
     pytest.importorskip("torch")
@@ -247,15 +311,15 @@ def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch):
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
     reported: list = []
-    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), "trial_0")
+    _run_hpo_trial({"lr": 3e-4}, reported.append, _detection_base(), str(tmp_path / "trial_0"))
     assert reported == [float("inf")]
 
     empty: list = []
-    _run_hpo_trial({"lr": 3e-4}, empty.append, {"data": {}}, "trial_1")  # no model_source
+    _run_hpo_trial({"lr": 3e-4}, empty.append, {"data": {}}, str(tmp_path / "trial_1"))  # no model_source
     assert empty == [float("inf")]
 
 
-def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch):
+def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
     """Trials train under the final run's regime: base_config augmentation reaches the train
     dataset, and the bespoke model_source is carried through. (Loss is owned by the builder.)"""
     pytest.importorskip("torch")
@@ -278,9 +342,61 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch):
         "training": {"batch_size": 2},
         "augmentation": {"horizontal_flip": 0.5},
     }
-    _run_hpo_trial({"lr": 3e-4}, [].append, base, "trial_0")
+    _run_hpo_trial({"lr": 3e-4}, [].append, base, str(tmp_path / "trial_0"))
     assert captured["transforms"] is not None       # augmentation was built + passed
     assert captured["model_source"]["builder"].endswith(":build_bespoke_classifier")
+
+
+def test_run_hpo_trial_writes_resolved_config_with_unconsumed_params(monkeypatch, tmp_path):
+    """K11 (F1): a swept key the training body never reads is surfaced by OBSERVATION, not
+    gated by a whitelist. resolved_config.json records which swept keys went unconsumed."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        run.config.get("lr")  # a known key, consumed -- but "totally_bogus_key" never read
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"lr": 3e-4, "totally_bogus_key": 5}, [].append, _detection_base(), str(trial_dir))
+
+    resolved = json.loads((trial_dir / "resolved_config.json").read_text())
+    assert resolved["unconsumed_params"] == ["totally_bogus_key"]
+
+
+def _bespoke_hpo_agent_train(ctx):
+    """Module-level (dotted-import-able) bespoke train(ctx) that reads its own swept key."""
+    ctx.config.get("custom_axis")  # the bespoke loop reads its own swept key
+    ctx.run.status = "completed"
+    ctx.run.best_metric = 1.0
+
+
+def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeypatch, tmp_path):
+    """K11 (F1): a bespoke training_source reading its OWN swept custom key must not be
+    falsely flagged unconsumed merely because generic_trainer.train() doesn't know it —
+    tracking is genuine runtime access, not a static comparison against train()'s key list."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+
+    import tcip_mcp.tools.training_tools as tt
+    monkeypatch.setattr(tt, "_auto_train_val",
+                        lambda task, data_cfg, transforms: (_FakeDataset(), _FakeDataset()))
+    import torch.utils.data as tud
+    monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
+    from tcip_mcp.pipelines.data import samplers
+    monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
+
+    base = {"model_source": {"builder": "x:y", "task": "detection"},
+            "training_source": f"{__name__}:_bespoke_hpo_agent_train"}
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"custom_axis": 42}, [].append, base, str(trial_dir))
+
+    resolved = json.loads((trial_dir / "resolved_config.json").read_text())
+    assert resolved["unconsumed_params"] == []
 
 
 # --------------------------------------------------------------------------
