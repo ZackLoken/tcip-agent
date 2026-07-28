@@ -554,7 +554,7 @@ def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=cal, holdout_records=hold,
                                      staged_conf_floor=0.01)
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H"))
+    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
     stub = _CalStub()
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
     monkeypatch.chdir(tmp_path)  # sweep artifact under .tcip/artifacts
@@ -591,7 +591,7 @@ def test_cv0_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=_op_records("c"),
                                      holdout_records=_op_records("h", shift=3.0))
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H"))
+    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
     monkeypatch.chdir(tmp_path)
 
@@ -616,7 +616,7 @@ def test_cv0_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypa
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=cal, holdout_records=hold,
                                      staged_conf_floor=0.01)
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H"))
+    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
     monkeypatch.chdir(tmp_path)
 
