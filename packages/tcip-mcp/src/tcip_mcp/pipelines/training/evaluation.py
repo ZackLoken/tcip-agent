@@ -432,7 +432,7 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
     — the dispersion + reference-sufficiency terms are per-conf statistics across ``per_image`` that
     the operating-point gate reads, never recomputes.
 
-    ``per_class`` (K4 #4) carries the SAME statistics measured within each class the records carry,
+    ``per_class`` (K4 #4) carries the same statistics measured within each class the records carry,
     keyed by ``str(category_id)`` (string keys so an in-memory sweep and one round-tripped through
     the JSON sidecar have the same shape). It exists because the pooled entry beside it cannot see a
     per-class error: matching is class-blind there, so a detector that calls every class-A object
@@ -453,7 +453,7 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
         pooled = _count_stats_at_conf(per_image, tolerance=tolerance, conf=conf, class_id=class_id)
         if len(class_ids) == 1:
             # Filtering to the only class present is a no-op on both gt and dt, so the pooled entry
-            # IS that class's entry — reused rather than recomputed, which keeps the single-class
+            # is that class's entry — reused rather than recomputed, which keeps the single-class
             # sweep (every reference the platform builds today) at its original cost.
             per_class = {str(class_ids[0]): pooled}
         else:
@@ -478,7 +478,7 @@ def worst_class_count_bias(entry: dict) -> float:
 
 
 def pick_count_unbiased(sweep: dict) -> float | None:
-    """The conf that minimizes the WORST per-class |mean per-image count bias| (tie-break: lower
+    """The conf that minimizes the worst per-class |mean per-image count bias| (tie-break: lower
     pooled |bias|, higher F1, lower |error|, higher conf).
 
     This is the count-trait operating point — where the model's totals match GT totals — which is
