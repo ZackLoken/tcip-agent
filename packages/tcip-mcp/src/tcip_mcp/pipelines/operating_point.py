@@ -34,6 +34,7 @@ from tcip_mcp.pipelines.resolution import (
     derived,
 )
 from tcip_mcp.pipelines.training.evaluation import (
+    classes_with_evidence,
     gt_class_avg_size,
     pick_count_unbiased,
     pick_f1_max,
@@ -497,6 +498,10 @@ def resolve_operating_point(
             # contain, or be anywhere near, the calibration-chosen conf).
             hold_sweep = sweep_operating_point(holdout_records, tolerance=hold_tol, conf_grid=[conf])
             hb = hold_sweep["curve"][0]  # the exact-conf holdout bias entry
+            # The calibration side re-measured at the SHIPPED conf (not read off its own grid, which
+            # need not contain it) — the only comparable basis for asking which classes the holdout
+            # was actually able to check, below.
+            cb = sweep_operating_point(calibration_records, tolerance=tol, conf_grid=[conf])["curve"][0]
             # content-overlap gate (K1): a holdout whose GT content is fully cloned from calibration
             # (same boxes, different image_id) can't function as an independent check.
             content = _content_overlap(calibration_records, holdout_records)
@@ -514,6 +519,30 @@ def resolve_operating_point(
             # easier) and needs no second, unrelated tolerance constant.
             count_bias_ok = _bias_equivalence_ok(
                 hb["count_bias_mean"], hb["count_bias_std"], hb["n_images"], trait.count_bias_tolerance)
+            # K4 #4: the pooled test above is blind to a per-class error. Its matcher ignores
+            # category, so a detector that calls every class-A object class B scores tp-only with
+            # zero bias, and one that over-detects A exactly as much as it under-detects B nets to
+            # zero too — either way a phenotype built from per-class counts (an elongated FRACTION,
+            # a per-class total) is wrong while the stamp says validated. So every class the holdout
+            # carries must clear the SAME equivalence test at the same trait tolerance, in the same
+            # per-image-mean unit, over the same images (a class absent from an image contributes a
+            # zero bias there, exactly as the pooled term does). Which class is the trait's positive
+            # one is deliberately not consulted: that needs a name->id registry read this does not
+            # have, and requiring every class to be unbiased is the stronger claim anyway.
+            per_class_bias_failures = sorted(
+                cid for cid, s in hb["per_class"].items()
+                if not _bias_equivalence_ok(s["count_bias_mean"], s["count_bias_std"],
+                                            s["n_images"], trait.count_bias_tolerance))
+            # ...and a class the holdout never carries is not a class that passed: its entry is all
+            # zeros, so the test above reads bias 0.0 and says nothing. Stage-6 review reached the
+            # very hole this gate exists to close through exactly that shape — the confused class
+            # sits wholly in the calibration half, so every per-class entry the gate can see reads
+            # clean and the stamp lands anyway (reproduced in
+            # `test_a_class_the_holdout_never_carries_cannot_be_validated_by_its_absence`). So every
+            # class the calibration reference actually evidences at the shipped conf must be
+            # evidenced in the holdout too, the same positive-evidence rule (never an inference from
+            # absence) the per-side `insufficient_*_gt` conjuncts already apply to the pooled count.
+            holdout_missing_classes = sorted(classes_with_evidence(cb) - classes_with_evidence(hb))
             # Fix B item 3: a real (still-categorical, not tuned) match-quality floor — mathematically
             # equivalent to tp > 0 (precision/recall are both 0 exactly when tp is 0), so it catches
             # the fully-degenerate case while count bias vanishes; it does NOT discriminate a trivial
@@ -526,6 +555,18 @@ def resolve_operating_point(
                 trait.count_error_tolerance is None
                 or hb["count_error_p90"] <= trait.count_error_tolerance
             )
+            # Both conjuncts above stay POOLED while count bias is now per-class, and the per-class
+            # statistics they would need are computed and persisted beside them. Left that way
+            # deliberately, not by oversight (stage-6 review raised both): each is its own
+            # measurement question rather than a mechanical repeat of the bias one — a per-class
+            # localization floor refuses a rare class whose single detection lands just outside
+            # tolerance, and a per-class dispersion floor reads a tolerance no trait has authored
+            # (count_error_tolerance is None everywhere today). A third, related residual is not
+            # fixable here at all: count_bias_tolerance is an ABSOLUTE per-image count by the
+            # breeder's own choice, so a class present on a few images of many is diluted toward
+            # zero and can be wrong by 100% in relative terms while clearing it. Making that
+            # judgement relative, or requiring a minimum per-class evidence, is trait semantics —
+            # the domain expert's call, not one to infer here.
 
             # Named-failure architecture: every gate condition below is named here, once, so
             # describe_review_validation (and any future caller) maps failures to breeder-legible
@@ -557,6 +598,10 @@ def resolve_operating_point(
                 failures.append("insufficient_holdout_images")
             if not count_bias_ok:
                 failures.append("count_bias_exceeds_tolerance")
+            if per_class_bias_failures:
+                failures.append("count_bias_exceeds_tolerance_per_class")
+            if holdout_missing_classes:
+                failures.append("holdout_missing_class")
             if not localization_floor_ok:
                 failures.append("localization_quality_floor_failed")
             if not dispersion_ok:
@@ -565,6 +610,9 @@ def resolve_operating_point(
 
             sweep_data = {"calibration": cal_sweep, "f1_max_conf": pick_f1_max(cal_sweep),
                           "holdout_bias": hb, "count_bias_tolerance": trait.count_bias_tolerance,
+                          "per_class_count_bias_failures": per_class_bias_failures,
+                          "holdout_missing_classes": holdout_missing_classes,
+                          "calibration_bias_at_conf": cb,
                           "count_error_tolerance": trait.count_error_tolerance,
                           "equivalence_z": _EQUIVALENCE_Z,
                           "disjoint": disjoint, "conf_censored": censored,
