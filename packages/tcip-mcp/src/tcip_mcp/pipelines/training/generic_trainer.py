@@ -62,6 +62,26 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
         torch.backends.cudnn.benchmark = False
 
 
+def seeded_loader_kwargs(seed: int | None) -> dict:
+    """DataLoader kwargs (``generator``, ``worker_init_fn``) making shuffling and worker-process
+    randomness reproducible from ``seed`` — the same value ``set_seed`` uses (K11). ``{}`` when
+    ``seed`` is ``None``: an unseeded run stays unseeded end to end, honestly, rather than
+    silently becoming reproducible only in its loader while everything else stays random.
+    """
+    if seed is None:
+        return {}
+    seed = int(seed)
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+
+    def _worker_init_fn(worker_id: int) -> None:
+        worker_seed = (seed + worker_id) % (2**32)
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    return {"generator": generator, "worker_init_fn": _worker_init_fn}
+
+
 # ====================================================================
 # TrainConfig
 # ====================================================================
@@ -106,6 +126,9 @@ class TrainRun:
     origin: str = "training"
     # Set by cancel_run() to request a graceful stop; the train loop polls it.
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
+    # K11: set on resume — True if the checkpoint carried RNG state and it was restored, False
+    # if the checkpoint predates RNG capture (fresh-seed stream stands). None on a non-resumed run.
+    rng_state_restored: bool | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -218,6 +241,12 @@ def _save_checkpoint(
         "global_step": global_step,
         "seed": seed,
         "metrics": metrics,
+        # K11: full RNG state at save time, so a resume can pick the streams up exactly where
+        # they were rather than silently re-seeding from stream position zero.
+        "python_rng_state": random.getstate(),
+        "numpy_rng_state": np.random.get_state(),
+        "torch_rng_state": torch.get_rng_state(),
+        "cuda_rng_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
     }, config), path)
 
 
@@ -538,6 +567,19 @@ def train(
             es_best = ckpt.get("es_best", es_best)
             es_counter = ckpt.get("es_counter", es_counter)
             global_step = ckpt.get("global_step", 0)
+            # K11: restore RNG state AFTER the fresh `set_seed()` call above (never skip that
+            # call — it also configures cudnn.deterministic/benchmark) so the resumed streams
+            # overwrite the freshly-seeded ones rather than starting over from stream position
+            # zero. Older checkpoints predating this field degrade gracefully to the fresh seed.
+            if "torch_rng_state" in ckpt:
+                torch.set_rng_state(ckpt["torch_rng_state"])
+                if torch.cuda.is_available() and ckpt.get("cuda_rng_state") is not None:
+                    torch.cuda.set_rng_state_all(ckpt["cuda_rng_state"])
+                np.random.set_state(ckpt["numpy_rng_state"])
+                random.setstate(ckpt["python_rng_state"])
+                run.rng_state_restored = True
+            else:
+                run.rng_state_restored = False
             logger.info("Resuming from %s at stage %d, stage_epoch %d (global epoch %d)",
                         resume_from, resume_stage, resume_stage_epoch, run.current_epoch)
 
