@@ -187,7 +187,7 @@ def test_single_class_reference_is_unaffected_by_the_conditioning():
     hb = sweep["holdout_bias"]
     assert b.params["conf"].validated_vs_gt == VALIDATED_HELD_OUT
     assert sweep["per_class_count_bias_failures"] == []
-    # The one class's statistics ARE the pooled ones, reused rather than recomputed.
+    # The one class's statistics are the pooled ones, reused rather than recomputed.
     assert list(hb["per_class"]) == ["1"]
     assert hb["per_class"]["1"]["count_bias_mean"] == hb["count_bias_mean"]
     assert hb["per_class"]["1"]["count_bias_std"] == hb["count_bias_std"]
