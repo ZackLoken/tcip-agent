@@ -22,7 +22,7 @@ import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
 interface DateRow {
   date: string;
-  [plantId: string]: number | string;
+  [plantId: string]: number | string | null;
 }
 
 /**
@@ -39,6 +39,11 @@ function dateKey(date: string): number {
   return y * 10000 + m * 100 + d;
 }
 
+// K4/K5: the trait a delivery is computed for is now a required, threaded parameter everywhere —
+// hardcoded to catkin here since a second trait's own UI affordance (a picker) is separate,
+// deferred GUI-design work, not this fix's scope (see Group A's design doc, Commit 3).
+const TRAIT = "catkin";
+
 export function ResultsTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = dataset.project_root;
@@ -47,15 +52,16 @@ export function ResultsTab() {
   const [mappingPath, setMappingPath] = useState(
     projectRoot ? `${projectRoot}/.tcip/state/plant_mapping.json` : "",
   );
-  // No baked-in dates: derived from the dataset (Prefill), or edited by hand.
-  const [predsByDate, setPredsByDate] = useState<string>("{}");
   // True unless a computed run reported that its predictions carried no elongation class.
   const [elongationUnclassified, setElongationUnclassified] = useState(false);
 
-  // Dataset tree (dates + prediction-model dir names) used for prefill.
+  // Dataset tree (dates + which models actually have predictions per date) drives the structured
+  // per-date picker below — never a hand-edited JSON blob (K15 #10: models_with_predictions is
+  // the same primitive the backend already computes this from, via api.dataset.tree).
   const [dates, setDates] = useState<string[]>([]);
-  const [models, setModels] = useState<string[]>([]);
-  const [predModel, setPredModel] = useState("");
+  const [modelsByDate, setModelsByDate] = useState<Record<string, string[]>>({});
+  // The model picked per date; "" means "skip this date" (dropped before compute()).
+  const [dateModel, setDateModel] = useState<Record<string, string>>({});
 
   // Plant-mapping build inputs.
   const [plantCsvText, setPlantCsvText] = useState("");
@@ -68,6 +74,10 @@ export function ResultsTab() {
   const [onset, setOnset] = useState<OnsetRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  // The last-computed predictions_by_date, kept so CSV export can send it for the classifier/
+  // count-operating-point reconciliation (K15: exportCsv now needs real bucket evidence, not a
+  // caller-asserted row string).
+  const [lastPredsMap, setLastPredsMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!datasetRoot) return;
@@ -75,19 +85,19 @@ export function ResultsTab() {
       .tree(datasetRoot)
       .then((t) => {
         setDates(t.dates_with_images);
-        setModels(t.model_names);
-        setPredModel((m) => m || t.model_names[0] || "");
+        setModelsByDate(t.models_by_date);
+        // Default each date to its first model with predictions; a date with none stays "" (skip).
+        setDateModel(
+          Object.fromEntries(t.dates_with_images.map((d) => [d, t.models_by_date[d]?.[0] ?? ""])),
+        );
       })
       .catch(() => {});
   }, [datasetRoot]);
 
-  function prefillPreds() {
-    if (!datasetRoot || dates.length === 0) return;
-    const map: Record<string, string> = {};
-    for (const d of dates) {
-      map[d] = predModel ? `${datasetRoot}/predictions/${predModel}/${d}/detect` : "";
-    }
-    setPredsByDate(JSON.stringify(map, null, 2));
+  // Same prediction-dir convention prefillPreds always used — kept as one place, now fed by the
+  // structured picker's selections instead of a hand-typed date -> path JSON object.
+  function predDirFor(date: string, model: string): string {
+    return model ? `${datasetRoot}/predictions/${model}/${date}/detect` : "";
   }
 
   async function buildMapping() {
@@ -127,15 +137,17 @@ export function ResultsTab() {
     setLoading(true);
     setError(null);
     try {
-      const predsMap: Record<string, string> = JSON.parse(predsByDate);
-      // Drop empty entries
-      for (const k of Object.keys(predsMap)) {
-        if (!predsMap[k]) delete predsMap[k];
+      const predsMap: Record<string, string> = {};
+      for (const d of dates) {
+        const dir = predDirFor(d, dateModel[d] ?? "");
+        if (dir) predsMap[d] = dir;
       }
+      setLastPredsMap(predsMap);
       const curveRes = await resultsApi.perPlantCurves({
         project_root: projectRoot,
         mapping_path: mappingPath,
         predictions_by_date: predsMap,
+        trait: TRAIT,
       });
       const unclassified = curveRes.elongation_classified === false;
       setElongationUnclassified(unclassified);
@@ -146,7 +158,7 @@ export function ResultsTab() {
         // disabled export buttons + the compute_phenology MCP tool's hard refusal).
         setOnset([]);
       } else {
-        const onsetRes = await resultsApi.onsetDates(curveRes.rows ?? []);
+        const onsetRes = await resultsApi.onsetDates(curveRes.rows ?? [], TRAIT);
         setOnset(onsetRes.rows ?? []);
       }
     } catch (e) {
@@ -156,10 +168,14 @@ export function ResultsTab() {
     }
   }
 
-  async function downloadCsv(rows: unknown[], filename: string) {
+  async function downloadCsv(
+    rows: unknown[],
+    filename: string,
+    exportKind: "phenology" | "diagnostic",
+  ) {
     if (rows.length === 0) return;
     try {
-      const blob = await resultsApi.exportCsv(rows, filename);
+      const blob = await resultsApi.exportCsv(rows, filename, exportKind, lastPredsMap);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -178,11 +194,13 @@ export function ResultsTab() {
   // case, so the GUI and the agent surface behave identically (see CLAUDE.md invariant).
   const downloadOnsetCsv = () => {
     if (elongationUnclassified) return;
-    void downloadCsv(onset, "catkin_phenology.csv");
+    void downloadCsv(onset, "catkin_phenology.csv", "phenology");
   };
   const downloadCurvesCsv = () => {
     if (elongationUnclassified) return;
-    void downloadCsv(curves, "catkin_curves.csv");
+    // A curve export is the same delivered bloom measurement as the milestone one, just
+    // un-summarised — it declares itself phenology and takes the identical gate.
+    void downloadCsv(curves, "catkin_curves.csv", "phenology");
   };
 
   const chartData: DateRow[] = useMemo(() => {
@@ -199,6 +217,27 @@ export function ResultsTab() {
     curves.forEach((r) => set.add(r.plant_id));
     return Array.from(set);
   }, [curves]);
+
+  // K4/K5: milestone columns are read generically off whatever the (threaded) trait's spec
+  // returned — never hardcoded to catkin's own column names, so a second trait's rows render
+  // instead of showing empty (round-2 finding RC-NEW-3's frontend half).
+  const milestoneColumns = useMemo(() => {
+    const known = new Set([
+      "plant_id",
+      "accession",
+      "n_datapoints",
+      "n_dates_unclassified",
+      "n_dates_missing_images",
+      "n_observed_dates",
+    ]);
+    const cols = new Set<string>();
+    onset.forEach((r) => {
+      Object.keys(r).forEach((k) => {
+        if (!known.has(k) && k.endsWith("_date")) cols.add(k);
+      });
+    });
+    return Array.from(cols).sort();
+  }, [onset]);
 
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
@@ -260,38 +299,49 @@ export function ResultsTab() {
         <div className="tcip-heading mb-3">Per-plant phenology curves</div>
         <div className="grid grid-cols-[1fr_180px] gap-3">
           <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <label className="tcip-label flex-1">
-                Predictions by date (JSON: date → detect/ dir)
-              </label>
-              <select
-                className="tcip-select text-[11px]"
-                value={predModel}
-                onChange={(e) => setPredModel(e.target.value)}
-                title="Prediction model dir under predictions/"
-              >
-                {models.length === 0 && <option value="">no models</option>}
-                {models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="tcip-btn text-[11px]"
-                onClick={prefillPreds}
-                disabled={dates.length === 0}
-                title="Fill from the dataset's dates + this model's prediction dirs"
-              >
-                Prefill from dataset
-              </button>
-            </div>
-            <textarea
-              className="tcip-input h-24 font-mono text-[11px] leading-4"
-              value={predsByDate}
-              onChange={(e) => setPredsByDate(e.target.value)}
-              spellCheck={false}
-            />
+            <label className="tcip-label">Predictions by date</label>
+            {dates.length === 0 ? (
+              <div className="text-[11px] text-tcip-muted">No dates in this dataset yet.</div>
+            ) : (
+              <div className="max-h-40 overflow-auto rounded border border-tcip-border">
+                <table className="w-full text-[11px]">
+                  <tbody>
+                    {dates.map((d) => {
+                      const opts = modelsByDate[d] ?? [];
+                      return (
+                        <tr key={d} className="border-t border-tcip-border first:border-t-0">
+                          <td className="py-1 pl-2 pr-2 font-mono tabular-nums">{d}</td>
+                          <td className="py-1 pr-2">
+                            <select
+                              className="tcip-select text-[11px] w-full"
+                              value={dateModel[d] ?? ""}
+                              onChange={(e) =>
+                                setDateModel((prev) => ({ ...prev, [d]: e.target.value }))
+                              }
+                              disabled={opts.length === 0}
+                              title={
+                                opts.length === 0
+                                  ? "No model has predictions for this date"
+                                  : "Model whose predictions to use for this date"
+                              }
+                            >
+                              <option value="">
+                                {opts.length === 0 ? "no predictions" : "— skip —"}
+                              </option>
+                              {opts.map((m) => (
+                                <option key={m} value={m}>
+                                  {m}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
           <div className="flex flex-col gap-2">
             <p className="text-[11px] text-tcip-muted">
@@ -384,24 +434,57 @@ export function ResultsTab() {
                   <th className="tcip-th">Plant ID</th>
                   <th className="tcip-th">Accession</th>
                   <th className="tcip-th">N points</th>
-                  <th className="tcip-th">Elongation date</th>
-                  <th className="tcip-th">05per date</th>
-                  <th className="tcip-th">50per date</th>
-                  <th className="tcip-th">95per date</th>
+                  <th className="tcip-th">Validity</th>
+                  {milestoneColumns.map((c) => (
+                    <th key={c} className="tcip-th">
+                      {c}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {onset.map((r) => (
-                  <tr key={r.plant_id} className="border-t border-tcip-border first:border-t-0">
-                    <td className="py-1.5 pr-3 font-mono">{r.plant_id}</td>
-                    <td className="pr-3">{r.accession ?? "—"}</td>
-                    <td className="pr-3 tabular-nums">{r.n_datapoints}</td>
-                    <td className="pr-3 tabular-nums">{r.catkin_elongation_date ?? "—"}</td>
-                    <td className="pr-3 tabular-nums">{r.catkin_05per_date ?? "—"}</td>
-                    <td className="pr-3 tabular-nums">{r.catkin_50per_date ?? "—"}</td>
-                    <td className="pr-3 tabular-nums">{r.catkin_95per_date ?? "—"}</td>
-                  </tr>
-                ))}
+                {onset.map((r) => {
+                  // K15 finding #9: gate the DERIVATION (matching the setOnset([]) pattern used
+                  // above) rather than a banner — a plant with any unclassified/missing date shows
+                  // as such, not silently blank milestone cells with no explanation.
+                  const rowValid = r.n_dates_unclassified === 0 && r.n_dates_missing_images === 0;
+                  // Stage-6 review N6: "valid" alone doesn't distinguish real bloom data from a
+                  // plant that was fully classified/observed but never had a single detection
+                  // (before emergence, or a genuinely empty scene) — that reads as no observations,
+                  // not blank cells next to a reassuring "valid".
+                  const neverObserved = rowValid && r.n_observed_dates === 0;
+                  return (
+                    <tr key={r.plant_id} className="border-t border-tcip-border first:border-t-0">
+                      <td className="py-1.5 pr-3 font-mono">{r.plant_id}</td>
+                      <td className="pr-3">{r.accession ?? "—"}</td>
+                      <td className="pr-3 tabular-nums">{r.n_datapoints}</td>
+                      <td className="pr-3">
+                        {neverObserved ? (
+                          <span
+                            className="text-tcip-muted"
+                            title="Fully classified and fully observed, but no detections on any date — nothing to derive milestones from."
+                          >
+                            no observations
+                          </span>
+                        ) : rowValid ? (
+                          <span className="text-tcip-muted">valid</span>
+                        ) : (
+                          <span
+                            className="text-tcip-fp"
+                            title={`${r.n_dates_unclassified} unclassified date(s), ${r.n_dates_missing_images} missing-image date(s)`}
+                          >
+                            incomplete
+                          </span>
+                        )}
+                      </td>
+                      {milestoneColumns.map((c) => (
+                        <td key={c} className="pr-3 tabular-nums">
+                          {(r[c] as string | null) ?? "—"}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
