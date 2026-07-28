@@ -89,10 +89,11 @@ A hand-rolled `train(ctx)` composes these instead of reimplementing them. `ctx.d
 | data | `ctx.build_dataset`, `ctx.tiled_dataset`, `ctx.task_collate`, `ctx.build_sampler`, `ctx.build_augmentation`, `ctx.auto_train_val` |
 | optimize / schedule / freeze | `ctx.build_optimizer`, `ctx.build_scheduler`, `ctx.apply_stage_freeze` (progressive-unfreeze + monotonic guard — the primitive the default trainer uses), `ctx.compute_lr_scale`, `ctx.set_seed`, `ctx.evaluate`, `ctx.compute_class_weights` |
 | measurement | `ctx.calibrate` (resolve a trait's operating point from record sweeps — the derived, held-out-validated point), `ctx.mask_geometry`, `ctx.instance_geometries` |
-| audited sinks | `ctx.log_metrics`, `ctx.save_checkpoint` (stamps kind + `model_source` + `experiment_id`), `ctx.record_artifact`, `ctx.should_cancel` |
+| audited sinks | `ctx.log_metrics`, `ctx.save_checkpoint` (stamps kind + `model_source` + `experiment_id`), `ctx.record_artifact`, `ctx.should_cancel`, `ctx.set_final_weights` (declare the deliverable checkpoint — K11), `ctx.report_objective` (report HPO trial progress for pruning, no-op outside HPO — K11) |
 
 Route metrics and checkpoints through the sinks and the run stays audited, immutably versioned, and
-provenance-snapshotted no matter what the loop does.
+provenance-snapshotted no matter what the loop does. Registration additionally needs the checkpoint
+to be findable: save under `"model_best"`/`"model_final"`, or call `ctx.set_final_weights` yourself.
 
 ## Hyperparameter search — Ray Tune (`pipelines.training.hpo`, `run_hpo`)
 
