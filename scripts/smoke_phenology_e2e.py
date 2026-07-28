@@ -21,6 +21,7 @@ Exits non-zero on the first failed assertion.
 from __future__ import annotations
 
 import csv
+import json
 import os
 import shutil
 import sys
@@ -49,7 +50,10 @@ PLANTS = [
 # Three capture dates; the elongated fraction rises 0.0 → 0.4 → 1.0.
 DATES = ["2026-02-11", "2026-02-25", "2026-03-11"]
 FRACTIONS = {"2026-02-11": 0.0, "2026-02-25": 0.4, "2026-03-11": 1.0}
-ELONGATED_CLASS = 1
+# The bucket's own recorded id_map (K4/K5: the positive class is resolved from THIS, on disk —
+# never a pinned integer — so this is the production id_map a real export_predictions run would
+# have stamped, not a magic constant compute_phenology reads directly).
+ID_MAP = {"dormant": 0, "elongated": 1}
 N_DETECTIONS = 10
 
 _failures = 0
@@ -90,12 +94,16 @@ def _write_geo_image(path: Path, lat: float, lon: float, when: datetime) -> None
 
 
 def _pred_boxes(n_elongated: int, n_total: int) -> list[Annotation]:
-    """Per-image name-based catkin predictions; first n_elongated carry elongation='elongated'."""
+    """Per-image classified predictions; first n_elongated decode to 'elongated', rest 'dormant'.
+
+    A real prediction's ``.subject`` IS the decoded class name directly (write_predictions_json
+    decodes the numeric label through the bucket's id_map straight into ``.subject``, leaving
+    ``.attributes`` empty) — NOT the GT-annotation shape (object-type subject + an attribute value).
+    """
     anns = []
     for i in range(n_total):
         value = "elongated" if i < n_elongated else "dormant"
-        anns.append(Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0),
-                               attributes={"elongation": value}, score=0.90))
+        anns.append(Annotation(subject=value, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.90))
     return anns
 
 
@@ -127,6 +135,10 @@ def main() -> int:
                     preds_root / date / f"{stem}.json",
                     _pred_boxes(n_elong, N_DETECTIONS), 8, 8,
                 )
+            # The bucket's own recorded id_map (K4/K5: count_by_class reads the positive class from
+            # THIS, per date, never a pinned integer) — the real shape export_predictions stamps.
+            (preds_root / date / "operating_point.json").write_text(
+                json.dumps({"id_map": ID_MAP}), encoding="utf-8")
 
         plant_csv = root / "plants.csv"
         with plant_csv.open("w", newline="", encoding="utf-8") as f:
@@ -151,23 +163,40 @@ def main() -> int:
               f"n_mapped={m.get('n_mapped')} n_unmapped={m.get('n_unmapped')}")
         check("mapping.json persisted", mapping_path.is_file())
 
-        # 3. compute_phenology — the elongation split is DEFERRED to K4/K5.
-        # count_by_class no longer reads an integer positive class off disk (elongation is now a
-        # name-based *attribute*, resolved by K4/K5). So there is no elongation split yet, the
-        # fraction is not a valid bloom measurement, and the rail must REFUSE to deliver a curve —
-        # exactly the measurement-integrity guard. This smoke asserts that refusal (the rail holding
-        # under the deferral); the delivered curve returns as a K4/K5 acceptance test.
-        print("\nStep 2: compute_phenology refuses an un-split curve (elongation split deferred to K4/K5)")
+        # 3. compute_phenology — K4/K5's real coverage rule + K3's classifier gate are both live.
+        # The positive class is resolved from each bucket's own recorded id_map (never a pinned
+        # int), and every image is classified (no bare single-class-detector buckets here), so the
+        # elongation split IS valid — this is Commit 2's promoted acceptance artifact, proving the
+        # delivery path genuinely produces a curve+milestones end to end, not just refuses.
+        print("\nStep 2: compute_phenology delivers a real bloom curve + milestones")
         r = compute_phenology(
+            trait="catkin",
             mapping_path=str(mapping_path),
             predictions_by_date=preds_by_date,
             output_csv_path=str(csv_out),
-            positive_class_id=ELONGATED_CLASS,
             acknowledge_unvalidated=True,
         )
-        check("elongation_classified false (split deferred)", r.get("elongation_classified") is False,
-              str(r.get("elongation_classified")))
-        check("no CSV written (delivery refused, not a fabricated curve)", not csv_out.exists())
+        check("no error", "error" not in r, str(r.get("error", "")))
+        check("elongation_classified true (every bucket fully classified)",
+              r.get("elongation_classified") is True, str(r.get("elongation_classified")))
+        check("CSV delivered", csv_out.is_file())
+
+        if csv_out.is_file():
+            with csv_out.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            check("one row per plant", len(rows) == len(PLANTS), str(len(rows)))
+            row = next((r2 for r2 in rows if r2.get("plant_id") == "P1"), None)
+            check("P1 row present", row is not None)
+            if row:
+                d05, d50, d95 = row.get("catkin_05per_date"), row.get("catkin_50per_date"), row.get("catkin_95per_date")
+                check("05/50/95per dates all populated (not a fabricated blank)",
+                      all([d05, d50, d95]), f"05={d05} 50={d50} 95={d95}")
+                if d05 and d50 and d95:
+                    check("milestones correctly ordered (05 <= 50 <= 95)", d05 <= d50 <= d95,
+                          f"05={d05} 50={d50} 95={d95}")
+                    check("milestones fall within the observed date range",
+                          DATES[0] <= d05 and d95 <= DATES[-1],
+                          f"range={DATES[0]}..{DATES[-1]} 05={d05} 95={d95}")
 
     print()
     if _failures:
