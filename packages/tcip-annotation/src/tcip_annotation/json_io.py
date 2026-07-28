@@ -228,21 +228,40 @@ def write_annotations(path, annotations, img_w: int, img_h: int, *, keep_empty: 
 # ── the one target-membership decision (shared by assembly and the loader) ───
 
 
+UNLABELED = "unlabeled"  # a real target this scope covers, but not yet assessed for `attribute`
+
+
 def target_class_id(a: Annotation, subject: str, attribute: str | None,
-                    id_map: dict[str, int]) -> int | None:
-    """The 0-indexed class id ``a`` trains as for ``(subject, attribute)``, or ``None`` if it is not a
-    detection/segmentation target for this scope (a different subject, or a geometry-less label).
+                    id_map: dict[str, int], *, allow_unlabeled: bool = False
+                    ) -> int | None | str:
+    """The 0-indexed class id ``a`` trains as for ``(subject, attribute)``.
+
+    Returns ``None`` if ``a`` is not a detection/segmentation target for this scope at all (a
+    different subject, or a geometry-less label) — unchanged, existing behavior. For a genuine
+    target, two DIFFERENT failure shapes exist and (K4/K5) must not be conflated: the instance was
+    never assessed for ``attribute`` at all (``a.attributes.get(attribute) is None`` — the annotator
+    hasn't gotten to it yet, a soft/expected gap), versus the instance WAS assessed but with a value
+    the registry cannot decode (a real decode bug — the registry and the labels disagree). The first
+    case returns the distinguishable sentinel ``UNLABELED`` when ``allow_unlabeled=True`` (opt-in,
+    default ``False`` preserves this function's original all-undecodable-cases-raise behavior for any
+    caller that hasn't been updated to handle the three-way split); the second always raises,
+    regardless of ``allow_unlabeled`` — a real annotation read as nothing is a measurement bug, never
+    something to drop silently.
 
     The single membership+id decision: :func:`to_coco_dataset` (training assembly) and the loader's
     per-image target reader both call this, so the assembled COCO and the calibration/eval GT can
-    never disagree about which annotation is a target or which class it is. Raises when ``a`` *is* a
-    target whose class ``id_map`` cannot decode — a real annotation read as nothing is a measurement
-    bug, not something to drop silently.
+    never disagree about which annotation is a target or which class it is.
     """
     if a.subject != subject or a.geometry is None:
         return None
     key = a.attributes.get(attribute) if attribute else subject
-    if key is None or key not in id_map:
+    if key is None:
+        if allow_unlabeled:
+            return UNLABELED
+        raise ValueError(
+            f"annotation of subject {subject!r} has no value for attribute {attribute!r} — "
+            "the registry cannot decode its own labels")
+    if key not in id_map:
         raise ValueError(
             f"annotation of subject {subject!r} has class key {key!r} not in the run's id map "
             f"(known: {sorted(id_map)}) — the registry cannot decode its own labels")
@@ -274,9 +293,20 @@ def to_coco_dataset(
     ``confirmed_negative_names`` (a human marked it Complete-with-nothing). ``categories`` are emitted
     from ``id_map``. An annotation whose class key is not in ``id_map`` raises — a real annotation the
     registry cannot decode is a measurement bug, not something to drop silently.
+
+    When ``attribute`` is set, an image with ANY instance never assessed for it is excluded
+    WHOLESALE (stage-6 review N2/NEW-1) — not trained on its labeled subset alone. Before this,
+    that shape made the whole call raise (a real refusal); silently narrowing to the labeled
+    instances instead would leave the image's other real, unlabeled objects to train as background
+    noise. The excluded ``file_name``s are reported in the returned dict's own
+    ``excluded_incomplete_attribute`` list, alongside ``images``/``annotations``/``categories``, so
+    a downstream partition (``trainable_stems``) can attribute the drop to its real reason rather
+    than re-deriving one from the image's mere absence — which reads identically to "empty label
+    file nobody confirmed" and would report a false reason for it (stage-6 review round 4).
     """
     categories = [{"id": cid, "name": name} for name, cid in sorted(id_map.items(), key=lambda kv: kv[1])]
-    coco: dict = {"images": [], "annotations": [], "categories": categories}
+    coco: dict = {"images": [], "annotations": [], "categories": categories,
+                 "excluded_incomplete_attribute": []}
     negatives = confirmed_negative_names or set()
     ann_id = 1
     img_id = 0
@@ -287,13 +317,19 @@ def to_coco_dataset(
         scoped = [a for a in _annotations_of(data) if a.subject == subject]
         if not scoped and file_name not in negatives:
             continue  # no annotations of this subject and not a confirmed negative — skip
+        # allow_unlabeled=True (stage-6 review, K4/K5): an instance never assessed for `attribute`
+        # yet is a soft, expected gap, not a decode bug — it must not raise and abort the whole
+        # assembly. Computed once per instance and reused below (never re-derived).
+        cids = [target_class_id(a, subject, attribute, id_map, allow_unlabeled=True) for a in scoped]
+        if attribute is not None and UNLABELED in cids:
+            coco["excluded_incomplete_attribute"].append(file_name)
+            continue  # incomplete GT for this scope — the whole image, not just the gap, is excluded
         img_id += 1
         coco["images"].append({
             "id": img_id, "file_name": file_name,
             "width": int(data.get("width", 0) or 0), "height": int(data.get("height", 0) or 0),
         })
-        for a in scoped:
-            cid = target_class_id(a, subject, attribute, id_map)
+        for a, cid in zip(scoped, cids):
             if cid is None or a.geometry is None:
                 continue  # image-level label: counts the image as annotated, no detection/seg target
             box = bbox_of(a.geometry)
