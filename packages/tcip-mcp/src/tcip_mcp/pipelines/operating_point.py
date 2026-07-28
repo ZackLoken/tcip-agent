@@ -498,7 +498,7 @@ def resolve_operating_point(
             # contain, or be anywhere near, the calibration-chosen conf).
             hold_sweep = sweep_operating_point(holdout_records, tolerance=hold_tol, conf_grid=[conf])
             hb = hold_sweep["curve"][0]  # the exact-conf holdout bias entry
-            # The calibration side re-measured at the SHIPPED conf (not read off its own grid, which
+            # The calibration side re-measured at the shipped conf (not read off its own grid, which
             # need not contain it) — the only comparable basis for asking which classes the holdout
             # was actually able to check, below.
             cb = sweep_operating_point(calibration_records, tolerance=tol, conf_grid=[conf])["curve"][0]
@@ -522,9 +522,9 @@ def resolve_operating_point(
             # K4 #4: the pooled test above is blind to a per-class error. Its matcher ignores
             # category, so a detector that calls every class-A object class B scores tp-only with
             # zero bias, and one that over-detects A exactly as much as it under-detects B nets to
-            # zero too — either way a phenotype built from per-class counts (an elongated FRACTION,
+            # zero too — either way a phenotype built from per-class counts (an elongated fraction,
             # a per-class total) is wrong while the stamp says validated. So every class the holdout
-            # carries must clear the SAME equivalence test at the same trait tolerance, in the same
+            # carries must clear the same equivalence test at the same trait tolerance, in the same
             # per-image-mean unit, over the same images (a class absent from an image contributes a
             # zero bias there, exactly as the pooled term does). Which class is the trait's positive
             # one is deliberately not consulted: that needs a name->id registry read this does not
@@ -555,14 +555,14 @@ def resolve_operating_point(
                 trait.count_error_tolerance is None
                 or hb["count_error_p90"] <= trait.count_error_tolerance
             )
-            # Both conjuncts above stay POOLED while count bias is now per-class, and the per-class
+            # Both conjuncts above stay pooled while count bias is now per-class, and the per-class
             # statistics they would need are computed and persisted beside them. Left that way
             # deliberately, not by oversight (stage-6 review raised both): each is its own
             # measurement question rather than a mechanical repeat of the bias one — a per-class
             # localization floor refuses a rare class whose single detection lands just outside
             # tolerance, and a per-class dispersion floor reads a tolerance no trait has authored
             # (count_error_tolerance is None everywhere today). A third, related residual is not
-            # fixable here at all: count_bias_tolerance is an ABSOLUTE per-image count by the
+            # fixable here at all: count_bias_tolerance is an absolute per-image count by the
             # breeder's own choice, so a class present on a few images of many is diluted toward
             # zero and can be wrong by 100% in relative terms while clearing it. Making that
             # judgement relative, or requiring a minimum per-class evidence, is trait semantics —
