@@ -146,10 +146,19 @@ class ModelRegistry:
             tags: Optional tags for filtering.
             kind: Model kind (``tcip_module``; open to a future foreign kind) so the GUI + agent
                 know how to run it; ``build_predictor`` can still sniff it at inference time.
+
+        Raises:
+            FileNotFoundError: ``checkpoint_path`` does not exist — refuses to register a
+                phantom deliverable (K11) rather than silently storing a null-checksum entry.
         """
         ckpt = Path(checkpoint_path)
-        sha256 = _compute_sha256(ckpt) if ckpt.is_file() else None
-        file_size = ckpt.stat().st_size if ckpt.is_file() else None
+        if not ckpt.is_file():
+            raise FileNotFoundError(
+                f"register_model: checkpoint_path {checkpoint_path!r} does not exist — "
+                "refusing to register a phantom registry entry."
+            )
+        sha256 = _compute_sha256(ckpt)
+        file_size = ckpt.stat().st_size
 
         entry = {
             "name": name,
