@@ -23,7 +23,7 @@ TOOLS_DIR = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "tools"
 def _decorated_tool_names() -> set[str]:
     """Function names decorated with `@mcp.tool(...)` across tools/*.py (via AST).
 
-    FastMCP registers a tool under its function name by default, and every tool in
+    MCPServer registers a tool under its function name by default, and every tool in
     this repo uses a bare `@mcp.tool()`, so the function name is the tool name.
     """
     names: set[str] = set()
