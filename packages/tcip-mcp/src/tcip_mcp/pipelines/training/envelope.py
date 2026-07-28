@@ -8,10 +8,15 @@ registration are wired, and any checkpoint it saves through ``ctx`` is stamped +
 
 ``TrainContext`` hands the training code the craft library (data / model / optim / eval utils)
 plus the envelope-owned sinks (``log_metrics`` / ``save_checkpoint`` / ``record_artifact`` /
-``should_cancel`` / ``tb``) — the seams that keep a hand-rolled loop audited + immutable.
+``should_cancel`` / ``tb`` / ``set_final_weights`` / ``report_objective``) — the seams that keep a
+hand-rolled loop audited + immutable.
 
 When no ``training_source`` is set, ``ctx.default_train()`` runs today's
 ``generic_trainer.train()``, and the envelope adds only provenance/audit *around* it.
+``dispatch_train_body`` is the shared dispatch-then-derive-final-weights step both the full
+envelope (``run_training_envelope``) and an HPO trial (``training_tools._run_hpo_trial``) call —
+a trial runs the SAME dispatch with ``experiment_id=None``, which keeps it isolated from
+provenance/registration entirely (``_finalize_run`` never fires for a trial).
 """
 
 from __future__ import annotations
@@ -40,6 +45,9 @@ class TrainContext:
     task: str = "detection"
     resume_from: str = ""
     experiment_id: str | None = None
+    epoch_hook: Any = None        # (epoch, metrics) -> None; the stock trainer's per-epoch signal (K11)
+    trial_report: Any = None      # (value: float) -> None; the raw HPO reporter, None outside HPO (K11)
+    final_weights: str | None = None  # the shippable checkpoint path (K11) — see set_final_weights
     _tb: Any = None
 
     # ---- config / reproducibility ----
@@ -211,7 +219,11 @@ class TrainContext:
 
     # ---- envelope-owned sinks: keep a custom loop audited + immutable ----
     def _epoch_sink(self, epoch: int, metrics: dict) -> None:
-        """Route epoch metrics into the experiment store (what _run_with_tracking used to do)."""
+        """Route epoch metrics into the experiment store, and fire ``epoch_hook`` if attached
+        (K11 — an HPO trial's per-epoch pruning signal; independent of ``experiment_id``, since a
+        trial runs with ``experiment_id=None``)."""
+        if self.epoch_hook is not None:
+            self.epoch_hook(epoch, metrics)
         if self.experiment_id is None:
             return
         try:
@@ -221,6 +233,24 @@ class TrainContext:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Experiment metric log failed (%s epoch %s): %s",
                            self.experiment_id, epoch, exc)
+
+    def set_final_weights(self, path: str) -> None:
+        """Declare the shippable checkpoint for this run (K11). ``dispatch_train_body`` derives
+        this automatically from the ``model_best.pt``/``model_final.pt`` convention after the
+        training body returns — call this yourself only when your loop's output doesn't follow
+        that convention (e.g. a non-standard tag via ``save_checkpoint``)."""
+        self.final_weights = path
+
+    def report_objective(self, value: float) -> None:
+        """Report a raw scalar directly to the active HPO trial's pruning scheduler (K11) — a
+        no-op outside HPO (``trial_report`` is ``None`` on any non-trial run, so this is always
+        safe to call unconditionally). The automatic ``epoch_hook`` path (fired from
+        ``log_metrics``/``_epoch_sink``) only recognizes the stock trainer's own metric keys
+        (``selection``/``val_objective``/``val_loss``); call this instead from a bespoke
+        ``train(ctx)`` whose metrics use different names, with whatever value your loop knows
+        represents trial progress (lower=better, matching the platform's minimize convention)."""
+        if self.trial_report is not None:
+            self.trial_report(float(value))
 
     def log_metrics(self, epoch: int, metrics: dict) -> None:
         """Custom-loop metric sink: experiment store + metrics.jsonl + TB (default_train writes
@@ -238,7 +268,15 @@ class TrainContext:
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
         """Stamped, atomic checkpoint save. Stamps ``kind`` + ``model_source`` + ``config`` so a
-        hand-rolled loop can't emit an unstamped, un-routable ``.pt``."""
+        hand-rolled loop can't emit an unstamped, un-routable ``.pt``.
+
+        The TAG CONTRACT (K11): ``tag="model_best"`` or ``"model_final"`` is found automatically
+        by ``dispatch_train_body`` after your loop returns and becomes the run's registered
+        deliverable. Any other tag — including the default, ``"checkpoint"`` — is saved and
+        stamped (audit/provenance are unconditional) but is NOT itself registered; call
+        ``ctx.set_final_weights(path)`` with the path this method returns if you want a
+        non-conventional tag to become the deliverable.
+        """
         from tcip_mcp.pipelines.model_build import stamp_model_ref
         from tcip_mcp.pipelines.training.generic_trainer import _atomic_torch_save
 
@@ -292,7 +330,9 @@ def _snapshot_run_provenance(ctx: TrainContext) -> None:
 
         kind = KIND_TCIP_MODULE
         env = {"env": capture_env(), "seed": ctx.seed, "model_kind": kind,
-               "run_id": ctx.run.run_id}
+               "run_id": ctx.run.run_id,
+               "resumed_from": ctx.resume_from or None,
+               "rng_state_restored": getattr(ctx.run, "rng_state_restored", None)}
         exp_dir = experiments_dir() / ctx.experiment_id
         if exp_dir.is_dir():
             atomic_write_json(exp_dir / "env.json", env)
@@ -303,13 +343,47 @@ def _snapshot_run_provenance(ctx: TrainContext) -> None:
         logger.debug("run provenance snapshot skipped", exc_info=True)
 
 
+def dispatch_train_body(ctx: TrainContext) -> None:
+    """Run the training body — an agent's ``training_source`` if set, else ``ctx.default_train()``
+    — then resolve ``ctx.final_weights`` GENERICALLY for either path (K11).
+
+    The ``model_best.pt``/``model_final.pt`` convention must not live inside ``default_train()``
+    alone, or a bespoke loop that never calls ``ctx.set_final_weights()`` itself would leave
+    ``final_weights`` unset and its otherwise-legitimate run would be treated as producing no
+    deliverable. This is the ONE dispatch decision both the full audited envelope
+    (``run_training_envelope``) and an HPO trial (``_run_hpo_trial``) make — call one from the
+    other, don't reimplement it.
+    """
+    run = ctx.run
+    training_source = run.config.get("training_source")
+    if training_source:
+        from tcip_mcp.pipelines.model_build import _import_dotted
+
+        agent_train = _import_dotted(training_source)
+        agent_train(ctx)  # the agent's custom loop drives training through ctx
+        if run.status not in ("completed", "failed", "cancelled"):
+            # A custom loop that never set a terminal status is treated as completed
+            # (it returned without cancelling or raising).
+            run.status = "cancelled" if run.cancel_event.is_set() else "completed"
+    else:
+        ctx.default_train()  # today's trainer
+
+    if ctx.final_weights is None:
+        out = Path(run.output_dir)
+        best, final = out / "model_best.pt", out / "model_final.pt"
+        if best.is_file():
+            ctx.set_final_weights(str(best))
+        elif final.is_file():
+            ctx.set_final_weights(str(final))
+
+
 def run_training_envelope(ctx: TrainContext) -> None:
     """Run a training body inside the audited integrity envelope (background-thread entry).
 
-    In order: snapshot source/env → OPEN an audit event around the body → dispatch
-    (agent ``train(ctx)`` if ``training_source`` set, else ``ctx.default_train()``) → close status
-    → register model + lineage + record artifact → CLOSE the audit event. Steps other than the
-    dispatch happen regardless of what the training code does or omits.
+    In order: snapshot source/env → OPEN an audit event around the body → dispatch via
+    ``dispatch_train_body`` → re-snapshot source/env (the resume/RNG outcome is only known after
+    the body ran) → close status → register model + lineage + record artifact → CLOSE the audit
+    event. Steps other than the dispatch happen regardless of what the training code does or omits.
     """
     from tcip_mcp.audit import record_event
 
@@ -322,24 +396,14 @@ def run_training_envelope(ctx: TrainContext) -> None:
     record_event("training_run", audit_args, status="running")
     t0 = time.monotonic()
     try:
-        training_source = run.config.get("training_source")
-        if training_source:
-            from tcip_mcp.pipelines.model_build import _import_dotted
-
-            agent_train = _import_dotted(training_source)
-            agent_train(ctx)  # the agent's custom loop drives training through ctx
-            if run.status not in ("completed", "failed", "cancelled"):
-                # A custom loop that never set a terminal status is treated as completed
-                # (it returned without cancelling or raising).
-                run.status = "cancelled" if run.cancel_event.is_set() else "completed"
-        else:
-            ctx.default_train()  # today's trainer
+        dispatch_train_body(ctx)
     except Exception as exc:  # noqa: BLE001
         if run.status not in ("failed", "cancelled"):
             run.status = "failed"
         run.error = run.error or str(exc)
         logger.exception("Training body failed for %s: %s", run.run_id, exc)
 
+    _snapshot_run_provenance(ctx)  # refresh with the real resume/RNG-restore outcome (K11)
     _finalize_run(ctx)
 
     record_event("training_run", {**audit_args, "best_metric": run.best_metric},
@@ -360,13 +424,21 @@ def _finalize_run(ctx: TrainContext) -> None:
             update_status,
         )
 
-        if run.status == "completed":
-            out = Path(run.output_dir)
-            best = out / "model_best.pt"
-            weights = str(best if best.is_file() else out / "model_final.pt")
+        if run.status == "completed" and ctx.final_weights is not None:
             update_status(exp_id, "completed")
-            register_model_from_experiment(exp_id, weights)
-            record_artifact(exp_id, "model_weights", weights)
+            register_model_from_experiment(exp_id, ctx.final_weights)
+            record_artifact(exp_id, "model_weights", ctx.final_weights)
+        elif run.status == "completed":
+            # K11: "completed" with no discoverable weights (no model_best.pt/model_final.pt,
+            # and ctx.set_final_weights() was never called) is a phantom deliverable, not a
+            # real one — refuse rather than register a nonexistent path.
+            logger.warning(
+                "Run %s completed but produced no discoverable weights (no model_best.pt/"
+                "model_final.pt and ctx.set_final_weights() was never called) — marking failed "
+                "instead of registering a nonexistent path.", run.run_id)
+            run.status = "failed"
+            run.error = run.error or "training completed but produced no final weights file"
+            update_status(exp_id, "failed")
         else:
             update_status(exp_id, run.status or "failed")  # "failed" or "cancelled"
     except Exception as exc:  # noqa: BLE001
