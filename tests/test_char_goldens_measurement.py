@@ -36,6 +36,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     pick_f1_max,
     sweep_operating_point,
 )
+from tcip_mcp.traits import CATKIN  # noqa: E402
 from tests._dense_op_fixtures import dense_records  # noqa: E402
 
 _N_IMAGES = 20
@@ -173,62 +174,67 @@ _PHENO_SERIES = [
 
 
 def test_golden_crossing_dates_interpolated():
-    assert PH.crossing_date(_PHENO_SERIES, 0.05) == "2026-02-15"  # midway 0.0→0.10 over 10 days
-    assert PH.crossing_date(_PHENO_SERIES, 0.50) == "2026-03-01"
-    assert PH.crossing_date(_PHENO_SERIES, 0.95) == "2026-03-12"
+    # K4: the return is now a Crossing record (date + evidentiary bound), not a bare string.
+    assert PH.crossing_date(_PHENO_SERIES, 0.05).date == "2026-02-15"  # midway 0.0→0.10, 10 days
+    assert PH.crossing_date(_PHENO_SERIES, 0.50).date == "2026-03-01"
+    assert PH.crossing_date(_PHENO_SERIES, 0.95).date == "2026-03-12"
+    assert PH.crossing_date(_PHENO_SERIES, 0.95).bound == "interpolated"  # 0.97 observed, not 0.95 exactly
+    assert PH.crossing_date(_PHENO_SERIES, 0.97).bound == "exact"
     assert PH.crossing_date(_PHENO_SERIES, 0.99) is None  # never reached
 
 
 def test_golden_plant_milestones_shape_and_values():
-    ms = PH.plant_milestones(_PHENO_SERIES)
-    assert ms == {
-        "catkin_05per_date": "2026-02-15",
-        "catkin_50per_date": "2026-03-01",
-        "catkin_95per_date": "2026-03-12",
-        # provisional (breeders to confirm): elongation == the 95% majority crossing
-        "catkin_elongation_date": "2026-03-12",
-    }
+    ms = PH.plant_milestones(_PHENO_SERIES, CATKIN)
+    assert ms["catkin_05per_date"] == "2026-02-15"
+    assert ms["catkin_50per_date"] == "2026-03-01"
+    assert ms["catkin_95per_date"] == "2026-03-12"
+    # provisional (breeders to confirm): elongation == the 95% majority crossing
+    assert ms["catkin_elongation_date"] == "2026-03-12"
 
 
-def _write_preds(d: Path, stem: str, lines: list[str]) -> None:
+_ID_MAP = {"dormant": 0, "elongated": 1}
+
+
+def _write_preds(d: Path, stem: str, subjects: list[str]) -> None:
     d.mkdir(parents=True, exist_ok=True)
-    # Elongation is deferred (K4/K5): the leading class id no longer drives a name-based prediction,
-    # so only geometry + confidence are written. The detection COUNT is what still carries meaning.
-    anns = [Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0),
-                       score=float(ln.split()[1])) for ln in lines]
+    anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9) for s in subjects]
     json_io.write_annotations(d / f"{stem}.json", anns, 8, 8)
+
+
+def _write_id_map_sidecar(d: Path, id_map: dict) -> None:
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "operating_point.json").write_text(json.dumps({"id_map": id_map}), encoding="utf-8")
 
 
 def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
-    _write_preds(d1, "P1_a", ["0 0.9", "0 0.9", "0 0.9", "1 0.9"])  # 1/4 elongated -> 0.25
-    _write_preds(d2, "P1_b", ["1 0.9", "1 0.9", "1 0.9", "0 0.9"])  # 3/4 elongated -> 0.75
+    _write_preds(d1, "P1_a", ["dormant", "dormant", "dormant", "elongated"])  # 1/4 -> 0.25
+    _write_id_map_sidecar(d1, _ID_MAP)
+    _write_preds(d2, "P1_b", ["elongated", "elongated", "elongated", "dormant"])  # 3/4 -> 0.75
+    _write_id_map_sidecar(d2, _ID_MAP)
     mapping = {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     }
     res = PH.per_plant_phenology(
-        mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)}, elongated_class_id=1)
+        mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        positive_class_name="elongated", spec=CATKIN)
 
-    # Deferred (K4/K5): the elongated fraction is not produced, so no bloom milestone is delivered;
-    # the per-date detection totals are still counted honestly (elongated split is 0).
-    assert res["elongation_classified"] is False
-    assert res["classes_seen"] == []
+    # K4/K5: both buckets are fully classified, so the fraction IS produced and delivered.
+    assert res["elongation_classified"] is True
     assert len(res["rows"]) == 1
     row = res["rows"][0]
     assert row["plant_id"] == "P1"
     assert row["accession"] == "acc-9"
     assert row["n_dates"] == 2
     assert row["n_observed_dates"] == 2
-    assert row["series"] == [
-        {"date": "2026-02-11", "n_total": 4, "n_elongated": 0, "ratio": 0.0},
-        {"date": "2026-03-09", "n_total": 4, "n_elongated": 0, "ratio": 0.0},
-    ]
-    # no elongated fraction -> every crossing is None; no milestone date is manufactured.
-    assert row["catkin_05per_date"] is None
-    assert row["catkin_50per_date"] is None
-    assert row["catkin_95per_date"] is None
-    assert row["catkin_elongation_date"] is None
+    assert row["n_dates_unclassified"] == 0
+    assert row["n_dates_missing_images"] == 0
+    assert [s["n_total"] for s in row["series"]] == [4, 4]
+    assert [s["n_positive"] for s in row["series"]] == [1, 3]
+    assert [s["ratio"] for s in row["series"]] == [0.25, 0.75]
+    # 0.25 -> 0.75 crosses 50% at the midpoint between the two dates.
+    assert row["catkin_50per_date"] == "2026-02-24"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -501,23 +507,41 @@ def test_golden_coco_matching_is_iou_threshold_sensitive():
 # 6. compute_phenology gate behavior
 # ══════════════════════════════════════════════════════════════════════════
 
-def _write_op_sidecar(d: Path, *, validated: bool, conf: float = 0.4) -> None:
+def _write_op_sidecar(d: Path, *, validated: bool, conf: float = 0.4, id_map: dict | None = None) -> None:
     """The operating_point.json stamp export_predictions writes beside a bucket's labels — the
-    on-disk validity compute_phenology now reconciles against (W1-R3)."""
+    on-disk validity compute_phenology reconciles against (K3), including id_map (K4/K5)."""
     ref = "validated_held_out" if validated else "false"
+    d.mkdir(parents=True, exist_ok=True)
     (d / "operating_point.json").write_text(json.dumps({
         "validated": validated,
         "operating_point": {"conf": {"value": conf, "validated_vs_gt": ref}},
+        "id_map": id_map,
+    }), encoding="utf-8")
+
+
+def _write_classifier_sidecar(d: Path, *, validated: bool, trait: str | None = "catkin") -> None:
+    ref = "validated_held_out" if validated else "false"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "classifier_operating_point.json").write_text(json.dumps({
+        "validated": validated,
+        "operating_point": {"classifier": {"value": "elongated", "validated_vs_gt": ref}},
+        "trait": trait,
     }), encoding="utf-8")
 
 
 def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None = None):
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
-    _write_preds(d1, "P1_a", ["0 0.9"])
-    _write_preds(d2, "P1_b", ["1 0.9" if elongated else "0 0.9"])
+    id_map = {"dormant": 0, "elongated": 1} if elongated else {"catkin": 0}
+    _write_preds(d1, "P1_a", ["catkin"] if not elongated else ["dormant"])
+    _write_preds(d2, "P1_b", ["elongated"] if elongated else ["catkin"])
     if op_validated is not None:
-        _write_op_sidecar(d1, validated=op_validated)
-        _write_op_sidecar(d2, validated=op_validated)
+        _write_op_sidecar(d1, validated=op_validated, id_map=id_map)
+        _write_op_sidecar(d2, validated=op_validated, id_map=id_map)
+    else:
+        # count-operating-point sidecar still needs an id_map for the coverage rule even when its
+        # own validity isn't the thing under test — a bucket with NO sidecar at all is the
+        # "no operating_point.json" case, tested separately.
+        pass
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     mapping_path.write_text(json.dumps({
@@ -530,17 +554,15 @@ def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None =
 def test_golden_compute_phenology_refuses_without_elongation_class(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=False)  # no class-1 anywhere
+    mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=False, op_validated=True)  # bare detector
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
+        trait="catkin",
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        positive_class_id=1,
     )
     assert "error" in res
-    assert res["elongation_classified"] is False
-    assert res["classes_seen"] == []
     assert not out_csv.exists()
 
 
@@ -549,58 +571,54 @@ def test_golden_compute_phenology_requires_both_validated_flags(tmp_path: Path):
 
     mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True)  # no operating_point.json sidecars
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
-    # Deferred (K4/K5): the elongated fraction is not produced, so compute_phenology refuses at the
-    # elongation-classified guard (before the validation gate the flags would drive) — no CSV.
     res = compute_phenology(
+        trait="catkin",
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        positive_class_id=1,
     )
     assert "error" in res
-    assert res["elongation_classified"] is False
     assert not out_csv.exists()
 
 
 def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sidecar(tmp_path: Path):
-    # Deferred (K4/K5): elongation is not produced, so compute_phenology refuses at the elongation
-    # guard before ever reconciling the on-disk operating-point validity — no CSV either way. (When
-    # K4/K5 rewires elongation, the op-validity floor this golden pinned re-enters at the count gate.)
+    # K3: an asserted validity string is floored by the on-disk sidecar's real (false) state —
+    # never trusted. The predictions ARE classified (a real id_map is on disk), but the sidecar's
+    # own conf.validated_vs_gt is "false" — a caller asserting "validated_held_out" cannot override it.
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True)  # no sidecars written
+    mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=False)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
+        trait="catkin",
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        positive_class_id=1,
-        classifier_validated="validated_held_out",
         operating_point_conf=0.4,
         operating_point_validated="validated_held_out",  # asserted, but unbacked on disk
     )
     assert "error" in res
-    assert res["elongation_classified"] is False
+    assert res["operating_point_validated"] == "false"
     assert not out_csv.exists()
 
 
 def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    # Deferred (K4/K5): the elongated fraction is not produced, so even a fully-validated call
-    # (classifier + count operating point both validated on disk) refuses rather than deliver a
-    # bloom CSV it cannot honestly measure. This golden re-flips to a delivery when K4/K5 lands.
+    # K4/K5: the elongated fraction IS now produced, so a fully-validated call (classifier + count
+    # operating point both validated on disk) delivers a real bloom CSV.
     mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=True)
+    _write_classifier_sidecar(d1, validated=True)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
+        trait="catkin",
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        positive_class_id=1,
-        classifier_validated="validated_held_out",
+        classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4,
         operating_point_validated="validated_held_out",
     )
-    assert "error" in res
-    assert res["elongation_classified"] is False
-    assert not out_csv.exists()
+    assert "error" not in res, res
+    assert res["elongation_classified"] is True
+    assert out_csv.exists()
