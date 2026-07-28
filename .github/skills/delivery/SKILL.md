@@ -60,11 +60,15 @@ validated against a reference sized to the trait (held-out GT **or** a breeder-c
 sample — see the `evaluation` and `cv-research` skills), read from the predictions' own
 `operating_point.json` sidecar, not a caller-asserted string.
 
-- `compute_phenology` gates both the elongation classifier and the count operating point; the web
-  `/export_csv` phenology branch gates the same, per row.
-- `tabulate_counts` gates the count operating point on the run's resolved bundle; `export_detection_csv`
-  and `export_aggregated_csv` gate at the writer (they have no calibrated wrapper) — pass
-  `measurement_validated` (a shippable reference) or `pred_dirs` to reconcile it from the sidecars.
+- `compute_phenology` gates both the elongation classifier (reconciled from
+  `classifier_operating_point.json` — see `calibrate_classifier_operating_point`) and the count
+  operating point; the web `/export_csv` phenology branch gates the same, per row.
+- `tabulate_counts` gates the count operating point on the run's resolved bundle. `export_detection_csv`
+  and `export_aggregated_csv` gate at the writer: pass `pred_dirs` for a count trait so the validity is
+  reconciled from each bucket's `operating_point.json` sidecar. **`measurement_validated` alone, with
+  no `pred_dirs`, is never trusted as a bare caller string** — a continuous/ordinal trait has no
+  on-disk measurement-validity producer today, so without `pred_dirs` the only route to delivery is
+  the explicit acknowledge below.
 - To ship a **provisional** result, pass `acknowledge_unvalidated=True`: the door writes but stamps
   `measurement_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
   provisional delivery, never for silently shipping a bare number.
