@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import statistics
 from typing import Any, Callable
 
 from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
@@ -69,6 +70,32 @@ assert set(COUNT_OBJECTIVE_PICKERS) == COUNT_OBJECTIVES, (
 # CV-derivation convention, not a breeder-semantics decision, so it lives here as a named constant
 # rather than buried in a formula.
 _EQUIVALENCE_Z = 1.645
+
+# K3's compensating-error floor, interim default (stage-6 review Finding B — corrected from the
+# prior framing, which wrongly called this "a cited convention, like _EQUIVALENCE_Z"). Landis &
+# Koch (1977)'s kappa scale is a descriptive LABEL for a magnitude, not a distributional fact
+# entailed by a stated confidence level the way _EQUIVALENCE_Z's z-score is — "how much classifier
+# agreement is enough to trust this trait's phenotype" is measurement semantics, the domain expert's
+# call, the same as `TraitSpec.count_error_tolerance`. This value is a PROVISIONAL, platform-chosen
+# placeholder used only when a trait hasn't authored `TraitSpec.classifier_agreement_floor` (None) —
+# see that field's docstring. kappa==0 is exactly chance agreement; a floor there alone admits a
+# classifier whose errors are compensating (net count-bias ~0) but substantial (round 1's finding).
+_PROVISIONAL_KAPPA_FLOOR = 0.41
+
+
+def _bias_equivalence_ok(mean: float, std: float, n: int, tolerance: float) -> bool:
+    """Mean-plus-SE equivalence test: is a bias measured across ``n`` per-image samples small
+    enough, relative to its own sampling uncertainty, to conclude equivalence with zero? Not a bare
+    mean check — this degrades correctly at small ``n`` (SE grows, so less evidence is HARDER to
+    pass, never easier). Shared by the detection path (:func:`resolve_operating_point`) and the
+    classifier path (:func:`resolve_classifier_operating_point`) so both judge count bias in the
+    same statistical shape and unit — a per-image mean — never two independently-derived criteria
+    that happen to share a name and a tolerance field.
+    """
+    if n == 0:
+        return False
+    se = std / math.sqrt(n)
+    return abs(mean) + _EQUIVALENCE_Z * se <= tolerance
 
 
 def set_detector_operating_point(model: Any, *, score_thresh: float | None = None,
@@ -218,6 +245,20 @@ def _content_overlap(cal_records: list[dict], hold_records: list[dict]) -> dict:
     calibration (partially overlapping content) is not penalized; only a holdout whose entire
     content already exists in calibration (a byte-identical or re-labeled-copy holdout, unable to
     function as an independent check) is refused.
+
+    Known residual (stage-6 review N7, not fixed here — a design tradeoff to revisit, not an
+    oversight): the classifier path calls this at INSTANCE granularity (one record per matched
+    detection, via ``resolve_classifier_operating_point``'s ``_as_record``), where full-containment
+    was designed for IMAGE-granularity records. This cuts both ways, not just one: (a) one extra,
+    genuinely-independent instance in an otherwise wholesale-cloned holdout defeats the subset check
+    — real duplication ESCAPES, the rail too permissive; and (b) two genuinely independent images
+    that happen to share dimensions and produce a detection at the same pixel coordinates (plausible
+    for a fixed-camera rig or center-cropped tiles) hash identically even though nothing was cloned —
+    a valid, independent holdout can be FLAGGED duplicated, the rail too strict (the CLAUDE.md "a
+    rail must admit valid work" failure mode, not just the more obvious permissive one).
+    ``content_overlap_frac`` is computed but never itself gated (only the boolean ``duplicated`` is).
+    A tighter classifier-path criterion (e.g. gating on the fraction directly, or grouping instances
+    back to per-image records) is real follow-up work, not attempted in this pass.
     """
     cal_hashes = {h for h in (_record_content_hash(r) for r in cal_records) if h is not None}
     hold_hashes = {h for h in (_record_content_hash(r) for r in hold_records) if h is not None}
@@ -471,8 +512,8 @@ def resolve_operating_point(
             # Fix C items 2-4: the mean+SE equivalence/CI criterion, replacing a bare mean check —
             # degrades correctly at small n (SE grows, so less evidence is HARDER to pass, not
             # easier) and needs no second, unrelated tolerance constant.
-            se = hb["count_bias_std"] / math.sqrt(hb["n_images"]) if hb["n_images"] else 0.0
-            count_bias_ok = abs(hb["count_bias_mean"]) + _EQUIVALENCE_Z * se <= trait.count_bias_tolerance
+            count_bias_ok = _bias_equivalence_ok(
+                hb["count_bias_mean"], hb["count_bias_std"], hb["n_images"], trait.count_bias_tolerance)
             # Fix B item 3: a real (still-categorical, not tuned) match-quality floor — mathematically
             # equivalent to tp > 0 (precision/recall are both 0 exactly when tp is 0), so it catches
             # the fully-degenerate case while count bias vanishes; it does NOT discriminate a trivial
@@ -604,3 +645,186 @@ def resolve_operating_point(
         if max_dets is not None else default("max_dets", DEFAULT_MAX_DETS)
     )
     return ResolvedBundle(trait=trait_name, dataset_hash=dataset_hash, params=params)
+
+
+def _classification_kappa(items: list[dict]) -> float | None:
+    """Cohen's kappa between true and predicted positive/negative class over classification items.
+
+    A derived-at-runtime compensating-error floor (K3): a mean count-bias check alone is blind to a
+    classifier that flips k true positives to negative and k true negatives to positive (net bias
+    ~0), and the detection path's own localization-quality floor (``recall > 0 and precision > 0``)
+    admits any single true positive regardless of how corrupted the rest of the population is — the
+    same gap applies here. Kappa corrects for chance agreement from the reference's OWN observed base
+    rates (never an authored constant), so a classifier no better than always-guessing-the-majority-
+    class scores ~0, and a classifier that inverts the call scores negative. ``None`` when there are
+    too few items or only one class present to define a base rate (kappa undefined).
+    """
+    n = len(items)
+    if n == 0:
+        return None
+    true_pos = sum(1 for it in items if it["is_true_positive"])
+    pred_pos = sum(1 for it in items if it["is_pred_positive"])
+    agree = sum(1 for it in items if it["is_true_positive"] == it["is_pred_positive"])
+    if true_pos in (0, n) or pred_pos in (0, n):
+        return None  # a single-class reference/prediction set has no chance-agreement rate to derive
+    po = agree / n
+    p_true_pos, p_pred_pos = true_pos / n, pred_pos / n
+    pe = p_true_pos * p_pred_pos + (1 - p_true_pos) * (1 - p_pred_pos)
+    if pe >= 1.0:
+        return None
+    return (po - pe) / (1 - pe)
+
+
+def resolve_classifier_operating_point(
+    trait_name: str,
+    *,
+    calibration_items: list[dict] | None = None,
+    holdout_items: list[dict] | None = None,
+    experiment_id: str | None = None,
+    validated_reference: str = VALIDATED_HELD_OUT,
+    adjudication_covered: Callable[[dict], bool] | None = None,
+) -> dict:
+    """Classification-mode calibration gate for a trait's positive-class call (K3).
+
+    Mirrors :func:`resolve_operating_point`'s rigor for a CLASSIFIER's call, not a detector's
+    box-finding — calls the same shared primitives (:func:`_content_overlap`,
+    :func:`_train_disjointness`) rather than reimplementing them, replacing the detection path's
+    localization-quality floor with a derived compensating-error floor (:func:`_classification_kappa`)
+    since there is no bbox-match concept here.
+
+    Each item in ``calibration_items``/``holdout_items`` is one classified, already-localized
+    instance: ``{"image_id": str, "is_true_positive": bool, "is_pred_positive": bool,
+    "bbox": [x1, y1, x2, y2]}`` — whether the GT/reviewer-confirmed label and the classifier's own
+    call are the trait's positive state, plus the instance's own GT geometry (required — see
+    ``_as_record`` below for why a placeholder box cannot substitute for it).
+
+    Returns a dict **structurally distinct** from a ``ResolvedParam``/``ResolvedBundle`` — never a
+    shape a generic writer could mistake for the count operating point's ``conf`` param and stamp
+    into the wrong sidecar (K3's distinct-return-shape requirement):
+    ``{"validated_vs_gt", "passed", "failures", "sweep_data"}``. Callers write this into a
+    classifier-scoped sidecar (``classifier_operating_point.json``, never ``operating_point.json``'s
+    own fields) via :func:`tcip_mcp.pipelines.resolution.reconcile_classifier_validity`.
+
+    ``experiment_id is None`` (a foreign/unregistered checkpoint) skips the train-disjointness check
+    rather than failing closed, the same owner decision :func:`resolve_operating_point` follows — the
+    classifier-validity *stamp* is still reachable for a foreign checkpoint whose cal/holdout is
+    otherwise disjoint and unbiased; it is not reachable at all when no calibration/holdout is given.
+    """
+    if validated_reference not in VALIDATED_SHIPPABLE:
+        raise ValueError(f"validated_reference must be one of {VALIDATED_SHIPPABLE}, got {validated_reference!r}")
+    get_trait(trait_name)  # validates the trait exists; classification mode needs no trait-shaped fields today
+    if not calibration_items or not holdout_items:
+        return {
+            "validated_vs_gt": VALIDATED_FALSE, "passed": False,
+            "failures": ["no_calibration_or_holdout"],
+            "sweep_data": {"note": "classifier calibration requires both calibration and holdout items"},
+        }
+
+    adjudication_ok = adjudication_covered is None or (
+        all(adjudication_covered(r) for r in calibration_items)
+        and all(adjudication_covered(r) for r in holdout_items)
+    )
+
+    cal_ids = {it["image_id"] for it in calibration_items if "image_id" in it}
+    hold_ids = {it["image_id"] for it in holdout_items if "image_id" in it}
+    disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
+
+    # Reuse the detection path's content-overlap/train-disjointness primitives by shaping each
+    # classification item as a one-annotation image record — never a second implementation of
+    # "is this holdout content actually cloned from calibration" or "was this in the training split".
+    # The item's REAL GT bbox is required here, not a placeholder: _record_content_hash's whole
+    # purpose is a per-instance content fingerprint, and every item of the same class would collapse
+    # to one identical hash if the geometry were faked (stage-6 review, K3: this made the
+    # content-duplication check fire on every well-formed reference and pass only a degenerate
+    # single-class one — the exact inversion of what it's meant to catch).
+    def _as_record(it: dict) -> dict:
+        cid = 1 if it["is_true_positive"] else 0
+        return {"image_id": it.get("image_id"), "width": 0, "height": 0,
+                "gt": [{"category_id": cid, "bbox": it["bbox"]}]}
+
+    content = _content_overlap([_as_record(it) for it in calibration_items],
+                               [_as_record(it) for it in holdout_items])
+    td = _train_disjointness(experiment_id, cal_ids, hold_ids)
+
+    cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
+    hold_pos = sum(1 for it in holdout_items if it["is_true_positive"])
+    trait = get_trait(trait_name)
+    # Per-image mean count-bias, via the SAME mean+SE equivalence test the detection path gates on
+    # (stage-6 review, K3: the prior version summed a whole-holdout total and gated it against
+    # trait.count_bias_tolerance — a per-image mean by its own docstring — so the gate silently got
+    # stricter as the holdout grew, despite a comment claiming "the same absolute unit"). Grouped by
+    # image_id since one image can carry several classified instances.
+    by_image: dict[str | None, list[dict]] = {}
+    for it in holdout_items:
+        by_image.setdefault(it.get("image_id"), []).append(it)
+    per_image_bias = [
+        sum(1 for it in its if it["is_pred_positive"]) - sum(1 for it in its if it["is_true_positive"])
+        for its in by_image.values()
+    ]
+    n_bias_images = len(per_image_bias)
+    count_bias = statistics.fmean(per_image_bias) if per_image_bias else 0.0
+    # Sample stdev (ddof=1/Bessel's correction), matching the detection path's np.std(biases,
+    # ddof=1) exactly (stage-6 review Finding C/N4) — pstdev's population estimator was
+    # systematically more permissive, worst at small n, which is exactly where the equivalence
+    # test's SE penalty is supposed to bite hardest.
+    count_bias_std = statistics.stdev(per_image_bias) if n_bias_images > 1 else 0.0
+    count_bias_ok = _bias_equivalence_ok(
+        count_bias, count_bias_std, n_bias_images, trait.count_bias_tolerance)
+
+    kappa = _classification_kappa(holdout_items)
+    # kappa is None only when the holdout is degenerate (a single class throughout) — a real
+    # reference for a trait with two states should not be, so treat that as a failure to derive
+    # rather than a pass. Two floors (stage-6 review Finding B): kappa > 0 is the universal,
+    # domain-input-free minimum (better than pure chance — a classifier that flips a full 40% of
+    # calls symmetrically, net count-bias ~0, clears this alone at kappa=0.2, exactly the
+    # compensating-error case this check exists to catch); `agreement_floor` is the trait's own
+    # authored bar (`TraitSpec.classifier_agreement_floor`), falling back to the platform's
+    # provisional interim default only when the trait hasn't set one.
+    agreement_floor = (
+        trait.classifier_agreement_floor
+        if trait.classifier_agreement_floor is not None else _PROVISIONAL_KAPPA_FLOOR)
+    compensating_error_ok = kappa is not None and kappa > 0.0 and kappa > agreement_floor
+
+    failures: list[str] = []
+    if not adjudication_ok:
+        failures.append("insufficient_adjudication_coverage")
+    if not disjoint:
+        failures.append("not_disjoint")
+    if content["duplicated"]:
+        failures.append("content_duplicated")
+    if td["unresolvable"]:
+        failures.append("train_disjointness_unresolvable")
+    if td["leaked_groups"] or td["leaked_stems"]:
+        failures.append("train_disjointness_leaked")
+    if cal_pos == 0:
+        failures.append("insufficient_calibration_positive_evidence")
+    if hold_pos == 0:
+        failures.append("insufficient_holdout_positive_evidence")
+    if len(holdout_items) < 2:
+        failures.append("insufficient_holdout_items")
+    if n_bias_images < 2:
+        # Same minimum the detection path requires (hb["n_images"] < 2) — stage-6 review Finding
+        # C/N4: without this, a single-image holdout forces count_bias_std to 0.0 (no images to
+        # vary across), so the equivalence test's SE penalty vanishes and a lone image can pass at
+        # exactly the tolerance with zero uncertainty discount.
+        failures.append("insufficient_holdout_images")
+    if not count_bias_ok:
+        failures.append("count_bias_exceeds_tolerance")
+    if not compensating_error_ok:
+        failures.append("compensating_error_floor_failed")
+    passed = not failures
+
+    sweep_data = {
+        "content_overlap_frac": content["content_overlap_frac"], "content_duplicated": content["duplicated"],
+        "train_disjointness": td, "disjoint": disjoint, "adjudication_covered": adjudication_ok,
+        "count_bias": count_bias, "count_bias_std": count_bias_std, "count_bias_n_images": n_bias_images,
+        "count_bias_tolerance": trait.count_bias_tolerance,
+        "kappa": kappa, "kappa_floor": agreement_floor,
+        "kappa_floor_source": ("trait" if trait.classifier_agreement_floor is not None
+                               else "platform_provisional_default"),
+        "n_calibration": len(calibration_items), "n_holdout": len(holdout_items),
+    }
+    return {
+        "validated_vs_gt": validated_reference if passed else VALIDATED_FALSE,
+        "passed": passed, "failures": failures, "sweep_data": sweep_data,
+    }
