@@ -84,6 +84,18 @@ class TraitSpec:
     # guessed value — CATKIN does not set this; it needs the domain expert (or a derivation from real
     # dense-imagery detector statistics), not a value picked by the agent. PROVISIONAL until authored.
     count_error_tolerance: float | None = None
+    # Min acceptable Cohen's kappa (chance-corrected classifier/GT agreement) on the held-out split
+    # for K3's classifier operating point to count as validated — catches a compensating-error
+    # classifier (flips k positives to negative and k negatives to positive, net count-bias ~0) a
+    # bare count-bias check can't see. How much agreement is "enough" for a trait's own phenotype is
+    # measurement semantics, the same shape as `count_error_tolerance` above: `None` means "not yet
+    # authored for this trait" (stage-6 review Finding B — CATKIN does not set this either; it needs
+    # the domain expert, not a value picked by the agent). Unlike `count_error_tolerance`'s dispersion
+    # term, an unauthored floor here does NOT skip the check: `operating_point.py`'s
+    # `_PROVISIONAL_KAPPA_FLOOR` (0.41, platform-chosen, not domain-authored) applies as the real
+    # operative floor until a trait sets its own — the gate is never satisfied by the bare
+    # mathematical minimum `kappa > 0` alone once the platform default is in effect.
+    classifier_agreement_floor: float | None = None
     # crops.yml controlled-vocab trait names this spec is authored to deliver — the anti-fabrication
     # anchor a config-loaded spec is cross-checked against (a spec can't claim a phenotype not in the vocab).
     delivers: tuple[str, ...] = ()
