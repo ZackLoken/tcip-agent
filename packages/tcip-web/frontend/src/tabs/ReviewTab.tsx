@@ -52,10 +52,12 @@ import type {
   ReviewStatusFilter,
 } from "@/store/types";
 
+// K15: plain-language labels for a breeder audience — the TP/FP/FN tag stays as a short code next
+// to it, not as the primary label a non-CV user has to decode.
 const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashed?: boolean }[] = [
-  { key: "tp", label: "Matched (TP)", tag: "TP" },
-  { key: "fp", label: "False positive (FP)", tag: "FP" },
-  { key: "fn", label: "Missed (FN)", tag: "FN" },
+  { key: "tp", label: "Matches ground truth", tag: "TP" },
+  { key: "fp", label: "Extra detection", tag: "FP" },
+  { key: "fn", label: "Missed by the model", tag: "FN" },
   { key: "active", label: "Under review", tag: "active", dashed: true },
 ];
 const MIN_BOX_SIDE = 3;
@@ -208,6 +210,38 @@ export function ReviewTab() {
   useEffect(() => {
     setValidationResult(null);
   }, [visKey]);
+  // K15: the bucket's own generation confidence, fetched once per prediction dir (read-only, no
+  // gate run) so the "Conf ≥" filter can warn live — see the filter shelf below.
+  const [generationConf, setGenerationConf] = useState<number | null>(null);
+  useEffect(() => {
+    setGenerationConf(null);
+    if (!dataset.predictions_dir) return;
+    let cancelled = false;
+    void api.review.generationConf(dataset.predictions_dir).then(
+      (res) => {
+        if (!cancelled) setGenerationConf(res.generation_conf);
+      },
+      () => {
+        // Fetch failed — stay null. Correctly still warns below: no known generation_conf reads
+        // exactly like a missing sidecar (a foreign checkpoint, a not-yet-staged bucket), and the
+        // backend's own _conf_censored treats staged_conf_floor is None as ALWAYS censored, not as
+        // "nothing to check" — so this must warn too, not go quiet.
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [dataset.predictions_dir]);
+  // Raising this filter above the predictions' own generation confidence hides low-confidence
+  // detections from review; any verdict then recorded under it raises review_conf_threshold past
+  // generation_conf, which validate_reference's identical gate reads as conf_censored (K15 #7's
+  // sibling finding — same signal, surfaced here before a review is even complete). A bucket with
+  // NO recorded generation_conf warns too (stage-6 review): the backend's own staged_conf_floor is
+  // None branch is always-censored, never "no evidence, so nothing to warn about" — going quiet
+  // here would be silent in exactly the case the real gate refuses hardest.
+  const confFilterCensoring =
+    !!dataset.predictions_dir &&
+    (generationConf === null || filters.conf_threshold > generationConf);
   // User-tunable symbology colours (persisted + shared with the status bar); legend swatches
   // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
   const [reviewColors, setReviewColors] = useReviewColors();
@@ -493,6 +527,15 @@ export function ReviewTab() {
     if (actionPending.current) return false;
     if (reviewLocked) return false; // a completed/reviewed image is locked until reopened
     if (!current || !dataset.project_root || !imgPath || !imgName) return false;
+    // K15 finding #6: Reject on a detection that HAS ground truth (TP/FN) deletes that GT box —
+    // a destructive, irreversible action (CLAUDE.md "confirm before destructive actions"). Reject
+    // on an FP is safe (discards a prediction, GT unchanged) and needs no confirmation.
+    if (action === "rejected" && current.det_type !== "fp") {
+      const confirmed = window.confirm(
+        "This deletes the existing ground-truth box for this object. This cannot be undone. Continue?",
+      );
+      if (!confirmed) return false;
+    }
     actionPending.current = true;
     try {
       // The .original snapshot must exist before the first GT write — awaited, and a
@@ -883,7 +926,25 @@ export function ReviewTab() {
           {/* Live summary — always shows every filter, so the shelf can stay collapsed. */}
           <span className="flex items-center gap-1.5 tabular-nums">
             <FilterChip>IoU ≥ {filters.iou_threshold.toFixed(2)}</FilterChip>
-            <FilterChip>Conf ≥ {filters.conf_threshold.toFixed(2)}</FilterChip>
+            <FilterChip
+              warn={confFilterCensoring}
+              title={
+                generationConf === null
+                  ? "This bucket has no recorded generation confidence, so it always reads as conf-censored for validation, regardless of this filter."
+                  : "Raising this above the predictions' own generation confidence hides low-confidence detections from review; verdicts recorded from here on will read as conf-censored for validation."
+              }
+            >
+              {confFilterCensoring ? "⚠ " : ""}Conf ≥ {filters.conf_threshold.toFixed(2)}
+            </FilterChip>
+            {/* K15: not tooltip-only (same reasoning as the validation-reason fix below) — a
+                breeder who raises this filter needs to see why it matters without hovering. */}
+            {confFilterCensoring && (
+              <span className="text-tcip-warn max-w-[280px]">
+                {generationConf === null
+                  ? "no recorded generation confidence for this bucket — always conf-censored for validation"
+                  : `above this bucket's own generation confidence (${generationConf.toFixed(2)}) — new verdicts will be conf-censored for validation`}
+              </span>
+            )}
             <FilterChip>
               {filters.filter_type === "all" ? "All types" : filters.filter_type.toUpperCase()}
             </FilterChip>
@@ -917,15 +978,24 @@ export function ReviewTab() {
             {validating ? "Checking…" : "Use review as validation reference"}
           </button>
           {validationResult && (
-            <span
-              className={`tcip-badge ${
-                validationResult.validated
-                  ? "bg-tcip-tp/20 text-tcip-tp"
-                  : "bg-tcip-fn/20 text-tcip-fn"
-              }`}
-              title={validationResult.reason}
-            >
-              {validationResult.validated ? "Validated" : "Not yet"}
+            <span className="flex items-center gap-1.5">
+              <span
+                className={`tcip-badge ${
+                  validationResult.validated
+                    ? "bg-tcip-tp/20 text-tcip-tp"
+                    : "bg-tcip-fn/20 text-tcip-fn"
+                }`}
+                title={validationResult.reason}
+              >
+                {validationResult.validated ? "Validated" : "Not yet"}
+              </span>
+              {/* K15 finding #7: the reason was tooltip-only, with no visible next step — a
+                  breeder who hits "Not yet" needs to see WHY without hovering, and what to try. */}
+              {!validationResult.validated && (
+                <span className="text-[11px] text-tcip-muted max-w-[360px]">
+                  {validationResult.reason}
+                </span>
+              )}
             </span>
           )}
 
@@ -1287,9 +1357,24 @@ export function ReviewTab() {
   );
 }
 
-function FilterChip({ children }: { children: ReactNode }) {
+function FilterChip({
+  children,
+  warn,
+  title,
+}: {
+  children: ReactNode;
+  warn?: boolean;
+  title?: string;
+}) {
   return (
-    <span className="rounded border border-tcip-border bg-tcip-bg px-1.5 py-0.5 text-tcip-muted">
+    <span
+      title={title}
+      className={
+        warn
+          ? "rounded border border-tcip-warn bg-tcip-warn/10 px-1.5 py-0.5 text-tcip-warn"
+          : "rounded border border-tcip-border bg-tcip-bg px-1.5 py-0.5 text-tcip-muted"
+      }
+    >
       {children}
     </span>
   );
