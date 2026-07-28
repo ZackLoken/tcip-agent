@@ -1,6 +1,6 @@
 """Integration test — spawn the real Python MCP server and talk JSON-RPC over stdio.
 
-Validates the full path: subprocess → stdin JSON-RPC → FastMCP → tool call → response.
+Validates the full path: subprocess → stdin JSON-RPC → MCPServer → tool call → response.
 """
 
 from __future__ import annotations
