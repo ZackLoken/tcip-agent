@@ -25,7 +25,16 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                                tile_size_source="default", tiled_source="default",
                                group_by="tile_prefix", group_key_map=None, experiment_id=None,
                                seed=0, holdout_ratio=0.5):
-    """Resolve a per-dataset operating point from a labeled split (CV0). Returns (bundle, hash).
+    """Resolve a per-dataset operating point from a labeled split (CV0).
+
+    Returns ``(bundle, hash, n_excluded_incomplete_attribute)`` — the third value is the count of
+    cal/holdout stems dropped whole because an instance was unlabeled for ``attribute`` (see
+    ``_records`` below); returned to the caller rather than silently filtered, matching
+    ``evaluation.py``'s ``n_excluded_incomplete_attribute`` for the same exclusion. It is a separate
+    return value, NOT a field on the bundle: ``run_inference`` surfaces it on its own response dict,
+    and it does not travel into the persisted ``operating_point.json`` sidecar that
+    ``export_predictions`` writes (round-4 review — an earlier version of this line said "disclosed
+    on the returned bundle", which would have implied a persistence this has never had).
 
     The count-unbiased center-match sweep + held-out bias check run the SAME predictor path the
     delivery will use (same tile/tile_size/overlap/nms/postprocess) over a disjoint, LOCKED
@@ -91,7 +100,10 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     applied = set_detector_operating_point(predictor.model, score_thresh=0.01)
     predictor.score_threshold = applied.get("score_thresh", 0.01)
 
+    n_excluded_incomplete_attribute = 0
+
     def _records(sub_stems):
+        nonlocal n_excluded_incomplete_attribute
         if not sub_stems:
             return []
         results = predictor.predict_batch(
@@ -107,7 +119,15 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             # id map); with no run subject in scope, fall back to a single-class read of every box.
             gt_path = str(labels_p / f"{s}.json")
             if _subject and _cal_id_map is not None:
-                gboxes, glabels = _json_det_targets(gt_path, _subject, _attribute, _cal_id_map)
+                gboxes, glabels, n_unlabeled = _json_det_targets(gt_path, _subject, _attribute, _cal_id_map)
+                # Stage-6 review N2: an image with any instance unlabeled for `attribute` has
+                # incomplete GT for this scope — excluded from the calibration/holdout record set
+                # entirely (whole-image, the missing-label-file precedent), never scored against
+                # its labeled subset alone. Counted and disclosed on the returned bundle (matching
+                # evaluation.py's n_excluded_incomplete_attribute), not a silent filter.
+                if n_unlabeled:
+                    n_excluded_incomplete_attribute += 1
+                    continue
                 gt = [{"category_id": int(lab), "bbox": [x1, y1, x2 - x1, y2 - y1], "iscrowd": 0}
                       for (x1, y1, x2, y2), lab in zip(gboxes, glabels)]
             else:
@@ -133,7 +153,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         staged_conf_floor=applied.get("score_thresh"),
     )
     attach_split_policy_provenance(bundle, locked)
-    return bundle, dh
+    return bundle, dh, n_excluded_incomplete_attribute
 
 
 def _sweep_summary(conf_param) -> dict:
@@ -456,7 +476,7 @@ def run_inference(
     if trait and calibration_labels_dir:
         cal_images = calibration_images_dir or images_dir
         try:
-            bundle, cal_hash = _calibrate_operating_point(
+            bundle, cal_hash, n_excluded_incomplete_attribute = _calibrate_operating_point(
                 predictor, trait, calibration_labels_dir, cal_images,
                 tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
                 tile_size_source=tile_size_source, tiled_source=tiled_source,
@@ -520,6 +540,7 @@ def run_inference(
             "conf_source": "calibration",
             "dataset_hash": cal_hash,
             "sweep_summary": _sweep_summary(conf_param),
+            "n_excluded_incomplete_attribute": n_excluded_incomplete_attribute,
         }
         # The full sweep can be large — persist it and return the path (provenance emits has_sweep).
         try:
