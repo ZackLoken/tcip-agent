@@ -122,6 +122,9 @@ beforeEach(() => {
   statusesSpy = vi
     .spyOn(api.review, "imageStatuses")
     .mockResolvedValue({ statuses: {}, detection_stems: ["img1", "img2"] });
+  // Default: no recorded generation confidence -> no Conf >= censoring warning. Tests exercising
+  // K15's warning override this per-case.
+  vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: null });
 });
 
 afterEach(() => {
@@ -211,6 +214,40 @@ describe("ReviewTab validation-reference affordance", () => {
     fireEvent.click(refBtn());
     expect(await screen.findByText("Not yet")).toBeInTheDocument();
     expect(screen.queryByText("Validated")).not.toBeInTheDocument();
+  });
+});
+
+describe("ReviewTab Conf >= filter censoring warning (K15)", () => {
+  it("shows no warning today when the filter sits at or below generation confidence (fail-before baseline)", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: 0.5 });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getAllByText(/Conf ≥ 0\.25/).length).toBeGreaterThan(0));
+    expect(screen.queryByText(/conf-censored/)).not.toBeInTheDocument();
+  });
+
+  it("warns when the filter has been raised above the bucket's own generation confidence", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: 0.1 });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText(/⚠ Conf ≥ 0\.25/)).toBeInTheDocument());
+    expect(screen.getByText(/conf-censored/)).toBeInTheDocument();
+  });
+
+  it("warns when the bucket has no recorded generation confidence (always conf-censored, per _conf_censored's own None branch)", async () => {
+    vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: null });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText(/⚠ Conf ≥ 0\.25/)).toBeInTheDocument());
+    expect(screen.getByText(/conf-censored/)).toBeInTheDocument();
+  });
+
+  it("stays silent when there is no predictions directory selected at all", async () => {
+    setupDataset({ predDir: null });
+    vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: null });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    expect(screen.queryByText(/conf-censored/)).not.toBeInTheDocument();
   });
 });
 
