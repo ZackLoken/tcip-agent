@@ -22,7 +22,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 # --- vocabularies ---------------------------------------------------------
 SOURCES = ("explicit", "derived", "default")
@@ -458,16 +458,35 @@ def read_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
         return None
 
 
-def _sidecar_reference(sidecar: dict | None) -> str:
-    """Which reference the sidecar's conf operating point cleared — held_out / review_confirmed / false.
+def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
+    """The bucket's ``classifier_operating_point.json`` stamp, or ``None`` if absent/unreadable.
+
+    A file distinct from ``operating_point.json`` (K3) — the classifier-validity dimension is
+    structurally independent from the count operating point's, so the two are never written to the
+    same fields a generic writer could conflate (``_sidecar_reference`` reads exactly
+    ``validated``/``operating_point.conf.validated_vs_gt``, which must stay the count dimension's
+    alone).
+    """
+    p = Path(pred_dir) / "classifier_operating_point.json"
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _sidecar_reference(sidecar: dict | None, *, param_key: str = "conf") -> str:
+    """Which reference the sidecar's named param cleared — held_out / review_confirmed / false.
 
     Falls back to the top-level ``validated`` bool (a shippable stamp) when the per-param reference is
-    missing, but never upgrades an unvalidated stamp.
+    missing, but never upgrades an unvalidated stamp. ``param_key`` lets a differently-shaped sidecar
+    (e.g. a classifier stamp's ``classifier`` param) reuse this same read.
     """
     if not sidecar or not sidecar.get("validated"):
         return VALIDATED_FALSE
-    conf = (sidecar.get("operating_point") or {}).get("conf") or {}
-    ref = conf.get("validated_vs_gt")
+    param = (sidecar.get("operating_point") or {}).get(param_key) or {}
+    ref = param.get("validated_vs_gt")
     return ref if ref in VALIDATED_SHIPPABLE else VALIDATED_HELD_OUT
 
 
@@ -478,16 +497,16 @@ def _validity_rank(state: str | None) -> int:
     return 1 if state in VALIDATED_SHIPPABLE else 0
 
 
-def reconcile_operating_point_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+def _reconcile_validity(
+    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None,
+    read_sidecar: Callable[[str | Path], dict | None], param_key: str,
 ) -> dict:
-    """Floor the operating-point validity against every bucket's on-disk sidecar (T5-3 fix).
+    """Floor a validity dimension against every bucket's on-disk sidecar (T5-3 fix), generalized.
 
-    The delivery gate must not trust a caller's asserted string: it reads each prediction bucket's
-    ``operating_point.json`` and takes the FLOOR of asserted-vs-on-disk. A missing/unreadable sidecar,
-    or any bucket stamped ``validated=false``, floors the whole curve to ``false`` — never a crash. An
-    asserted string can only lower the on-disk result, never raise it (prefer the on-disk truth). The
-    on-disk reference (held_out vs review_confirmed) is preserved so provenance still records which one.
+    Shared by :func:`reconcile_operating_point_validity` and :func:`reconcile_classifier_validity` —
+    the flooring logic (read on-disk, never trust a caller string, an asserted value may only lower
+    the result) is identical for both dimensions; only which sidecar file and which param key is read
+    differs, threaded in by the two thin public wrappers below.
 
     Returns ``{validated, on_disk_validated, missing_sidecars, unvalidated_buckets, conf, per_bucket}``.
     """
@@ -498,17 +517,17 @@ def reconcile_operating_point_validity(
     confs: list[float] = []
     all_validated = bool(pred_dirs)
     for d in pred_dirs:
-        sc = read_operating_point_sidecar(d)
+        sc = read_sidecar(d)
         if sc is None:
             missing.append(str(d))
             per_bucket[str(d)] = VALIDATED_FALSE
             all_validated = False
             continue
-        ref = _sidecar_reference(sc)
+        ref = _sidecar_reference(sc, param_key=param_key)
         per_bucket[str(d)] = ref
         if ref in VALIDATED_SHIPPABLE:
             refs.add(ref)
-            conf_val = ((sc.get("operating_point") or {}).get("conf") or {}).get("value")
+            conf_val = ((sc.get("operating_point") or {}).get(param_key) or {}).get("value")
             if isinstance(conf_val, (int, float)):
                 confs.append(float(conf_val))
         else:
@@ -530,6 +549,39 @@ def reconcile_operating_point_validity(
         "conf": (confs[0] if len(set(confs)) == 1 else None),
         "per_bucket": per_bucket,
     }
+
+
+def reconcile_operating_point_validity(
+    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+) -> dict:
+    """Floor the count operating-point validity against every bucket's ``operating_point.json``.
+
+    The delivery gate must not trust a caller's asserted string: it reads each prediction bucket's
+    on-disk sidecar and takes the FLOOR of asserted-vs-on-disk. A missing/unreadable sidecar, or any
+    bucket stamped ``validated=false``, floors the whole curve to ``false`` — never a crash. See
+    :func:`_reconcile_validity` for the shared mechanism.
+    """
+    return _reconcile_validity(
+        pred_dirs, asserted=asserted,
+        read_sidecar=read_operating_point_sidecar, param_key="conf",
+    )
+
+
+def reconcile_classifier_validity(
+    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+) -> dict:
+    """Floor the classifier validity against every bucket's ``classifier_operating_point.json``.
+
+    Structurally the same reconciliation :func:`reconcile_operating_point_validity` performs for the
+    count operating point — the same function, parameterized to a different sidecar file and param
+    key (K3) — never a hand-written sibling. A bucket with no persisted classifier-calibration run
+    floors to ``false``: there is no legitimate way to earn a classifier-validated stamp without one
+    (TRAP 2), so this never falls back to a caller-asserted string.
+    """
+    return _reconcile_validity(
+        pred_dirs, asserted=asserted,
+        read_sidecar=read_classifier_operating_point_sidecar, param_key="classifier",
+    )
 
 
 # --- the delivery gate (one refuse-or-stamp check shared by every phenotype-delivery door) ---
