@@ -363,6 +363,62 @@ def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: 
             "recall": round(recall, 6), "f1": round(f1, 6), "criterion": criterion}
 
 
+def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float,
+                         class_id: int | None) -> dict:
+    """Center-match counting statistics over ``per_image`` at one conf, optionally for one class.
+
+    The single implementation of "match, count, and take the per-image count bias" — the class-pooled
+    curve entry and every per-class entry beside it both come from here, so a per-class bias can
+    never be measured by a second matcher that drifts from the pooled one.
+    """
+    tp = fp = fn = 0
+    biases: list[int] = []
+    for rec in per_image:
+        gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
+        dt = sorted(
+            (d for d in rec.get("dt", [])
+             if d["score"] >= conf and (class_id is None or d["category_id"] == class_id)),
+            key=lambda d: -d["score"],
+        )
+        t, f, n = _center_match_image(gt, dt, tolerance)
+        tp += t
+        fp += f
+        fn += n
+        biases.append(f - n)
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    abs_biases = [abs(b) for b in biases]
+    return {
+        "tp": tp, "fp": fp, "fn": fn,
+        "precision": precision, "recall": recall, "f1": f1,
+        "count_bias_mean": float(np.mean(biases)) if biases else 0.0,
+        "abs_count_error_mean": float(np.mean(abs_biases)) if biases else 0.0,
+        # Tail dispersion (Fix B) — a p90 of |bias|, not another mean, since a mean can hide one
+        # badly-off image among many. Reference-sufficiency terms (Fix C) — computed here, once,
+        # so the gate never re-derives a second matcher over the same per-image biases.
+        "count_error_p90": float(np.quantile(abs_biases, 0.9)) if abs_biases else 0.0,
+        "count_bias_std": float(np.std(biases, ddof=1)) if len(biases) > 1 else 0.0,
+        "n_images": len(biases),
+    }
+
+
+def _class_ids_present(per_image: list[dict], class_id: int | None = None) -> list[int]:
+    """The class ids to break the sweep down by: those the records carry in gt or dt, derived from
+    the data in hand rather than a registry read or a pinned id space.
+
+    An explicit ``class_id`` is returned as-is — the caller has already scoped the sweep to it, and
+    it stays the breakdown's one key even on records that turn out to carry none of it. Every
+    annotation and detection must carry ``category_id``; a per-class breakdown of records that do
+    not identify their classes is not something to guess at.
+    """
+    if class_id is not None:
+        return [class_id]
+    ids = {a["category_id"] for rec in per_image for a in rec.get("gt", [])}
+    ids |= {d["category_id"] for rec in per_image for d in rec.get("dt", [])}
+    return sorted(ids)
+
+
 def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: int | None = None,
                           conf_grid: list[float] | None = None, max_thresholds: int = 80) -> dict:
     """Sweep the confidence threshold over ``per_image`` records via center-matching.
@@ -372,9 +428,17 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
     Passing an explicit ``conf_grid`` (e.g. a single-element ``[conf]``) skips grid construction and
     evaluates EXACTLY those points — the exact-conf holdout evaluation (no nearest-neighbor snap)
     relies on this. Returns ``{tolerance, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
-    count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images}]}`` — the last
-    three are per-conf statistics across ``per_image`` (dispersion + reference-sufficiency terms the
-    operating-point gate reads, never recomputes).
+    count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images, per_class}]}``
+    — the dispersion + reference-sufficiency terms are per-conf statistics across ``per_image`` that
+    the operating-point gate reads, never recomputes.
+
+    ``per_class`` (K4 #4) carries the SAME statistics measured within each class the records carry,
+    keyed by ``str(category_id)`` (string keys so an in-memory sweep and one round-tripped through
+    the JSON sidecar have the same shape). It exists because the pooled entry beside it cannot see a
+    per-class error: matching is class-blind there, so a detector that calls every class-A object
+    class B reports tp-only, zero pooled bias — while the delivered per-class counts, which are the
+    phenotype for a fraction/ratio trait, are both wrong. Class ids come from the records themselves;
+    which of them is the trait's positive class is not read here and is not needed to measure bias.
     """
     scores = sorted({d["score"] for rec in per_image for d in rec.get("dt", [])})
     if conf_grid is None:
@@ -383,47 +447,52 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
         else:
             conf_grid = list(scores)
         conf_grid = sorted(set([0.0, *conf_grid]))
+    class_ids = _class_ids_present(per_image, class_id)
     curve: list[dict] = []
     for conf in conf_grid:
-        tp = fp = fn = 0
-        biases: list[int] = []
-        for rec in per_image:
-            gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
-            dt = sorted(
-                (d for d in rec.get("dt", [])
-                 if d["score"] >= conf and (class_id is None or d["category_id"] == class_id)),
-                key=lambda d: -d["score"],
-            )
-            t, f, n = _center_match_image(gt, dt, tolerance)
-            tp += t
-            fp += f
-            fn += n
-            biases.append(f - n)
-        precision = tp / (tp + fp) if (tp + fp) else 0.0
-        recall = tp / (tp + fn) if (tp + fn) else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-        abs_biases = [abs(b) for b in biases]
-        curve.append({
-            "conf": float(conf), "tp": tp, "fp": fp, "fn": fn,
-            "precision": precision, "recall": recall, "f1": f1,
-            "count_bias_mean": float(np.mean(biases)) if biases else 0.0,
-            "abs_count_error_mean": float(np.mean(abs_biases)) if biases else 0.0,
-            # Tail dispersion (Fix B) — a p90 of |bias|, not another mean, since a mean can hide one
-            # badly-off image among many. Reference-sufficiency terms (Fix C) — computed here, once,
-            # so the gate never re-derives a second matcher over the same per-image biases.
-            "count_error_p90": float(np.quantile(abs_biases, 0.9)) if abs_biases else 0.0,
-            "count_bias_std": float(np.std(biases, ddof=1)) if len(biases) > 1 else 0.0,
-            "n_images": len(biases),
-        })
+        pooled = _count_stats_at_conf(per_image, tolerance=tolerance, conf=conf, class_id=class_id)
+        if len(class_ids) == 1:
+            # Filtering to the only class present is a no-op on both gt and dt, so the pooled entry
+            # IS that class's entry — reused rather than recomputed, which keeps the single-class
+            # sweep (every reference the platform builds today) at its original cost.
+            per_class = {str(class_ids[0]): pooled}
+        else:
+            per_class = {str(cid): _count_stats_at_conf(per_image, tolerance=tolerance, conf=conf,
+                                                        class_id=cid)
+                         for cid in class_ids}
+        curve.append({"conf": float(conf), **pooled, "per_class": per_class})
     return {"tolerance": float(tolerance), "class_id": class_id, "curve": curve}
 
 
+def worst_class_count_bias(entry: dict) -> float:
+    """The largest |mean per-image count bias| over the classes in one curve entry — the class this
+    conf serves worst, and the one the gate's per-class equivalence test refuses on.
+
+    Falls back to the pooled bias for an entry with no per-class breakdown; a single-class sweep
+    reuses the pooled entry as its one class, so the two agree there by construction.
+    """
+    per_class = entry.get("per_class") or {}
+    if not per_class:
+        return abs(entry["count_bias_mean"])
+    return max(abs(s["count_bias_mean"]) for s in per_class.values())
+
+
 def pick_count_unbiased(sweep: dict) -> float | None:
-    """The conf that minimizes |mean per-image count bias| (tie-break: higher F1, lower |error|,
-    higher conf).
+    """The conf that minimizes the WORST per-class |mean per-image count bias| (tie-break: lower
+    pooled |bias|, higher F1, lower |error|, higher conf).
 
     This is the count-trait operating point — where the model's totals match GT totals — which is
     generally not the F1-max point (that optimizes matching, not count agreement).
+
+    Aimed at the worst class rather than the pooled bias (K4 #4) so the pick and the gate optimize
+    the same thing. With two classes of opposite sign the two objectives coincide, which is why the
+    first draft of this fix left the pick pooled — but that reasoning does not survive a third class:
+    a conf can buy pooled balance by trading one class's over-count against another's under-count and
+    be strictly worse for the worst class than a conf on the same curve that the gate would accept
+    (see ``test_pick_serves_the_worst_class_not_the_pooled_total``). Picking pooled there refuses a
+    model that has a valid operating point, and tells the breeder to fix a model that is not broken.
+    On a single-class reference the two objectives are the same number, so this changes no operating
+    point the platform picks today.
 
     The final ``-c["conf"]`` tie-break (K2, stage-6 review) is a completion of the existing
     tie-break, not a new selection objective: when |bias| and F1 and |abs error| are ALL exactly
@@ -438,9 +507,21 @@ def pick_count_unbiased(sweep: dict) -> float | None:
     curve = sweep.get("curve") or []
     if not curve:
         return None
-    best = min(curve, key=lambda c: (abs(c["count_bias_mean"]), -c["f1"], c["abs_count_error_mean"],
-                                     -c["conf"]))
+    best = min(curve, key=lambda c: (worst_class_count_bias(c), abs(c["count_bias_mean"]), -c["f1"],
+                                     c["abs_count_error_mean"], -c["conf"]))
     return best["conf"]
+
+
+def classes_with_evidence(entry: dict) -> set[str]:
+    """The classes one curve entry actually says something about: those with a GT object or a
+    surviving detection at that conf (``tp + fp + fn > 0``).
+
+    A class whose entry is all zeros is not evidence of an unbiased count for it — the records
+    simply hold none of it at this conf, and a bias of 0.0 there is arithmetic, not measurement.
+    Read off the sweep's own statistics so no caller re-derives a second notion of "present".
+    """
+    return {cid for cid, s in (entry.get("per_class") or {}).items()
+            if s["tp"] + s["fp"] + s["fn"] > 0}
 
 
 def pick_f1_max(sweep: dict) -> float | None:
