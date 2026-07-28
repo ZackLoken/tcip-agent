@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
-mcp = FastMCP("tcip-pipeline")
+mcp = MCPServer("tcip-pipeline")
 logger = logging.getLogger(__name__)
 
 # Import tool modules to register their handlers with the server.
