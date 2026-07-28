@@ -116,20 +116,28 @@ export interface PerPlantRow {
   date: string;
   n_images: number;
   n_total: number;
-  n_elongated: number;
-  ratio: number;
+  n_positive: number;
+  n_unclassified: number;
+  n_missing: number;
+  // null when this date was not fully classified/observed (K4/K5) — never a fabricated ratio.
+  ratio: number | null;
 }
 
+// K4/K5: milestone column names are derived from the threaded trait's own spec, not hardcoded to
+// catkin — the fixed fields below are the columns every phenology delivery carries regardless of
+// trait; the trait-specific milestone/date columns (e.g. catkin_05per_date) arrive as additional
+// keys and are read generically (see ResultsTab.tsx's milestoneColumns helper).
 export interface OnsetRow {
   plant_id: string;
   accession: string | null;
   n_datapoints: number;
-  // Dates the elongated fraction crosses each level.
-  catkin_05per_date: string | null;
-  catkin_50per_date: string | null;
-  catkin_95per_date: string | null;
-  // Date most catkins have elongated (crops.yml) — the 95% majority crossing.
-  catkin_elongation_date: string | null;
+  n_dates_unclassified: number;
+  n_dates_missing_images: number;
+  // Dates with a real, non-zero-detection observation (stage-6 review N6) — a plant can be fully
+  // classified AND fully observed (0 unclassified, 0 missing) while still never having detected
+  // anything, e.g. before emergence; that reads as "no observations", not "valid".
+  n_observed_dates: number;
+  [milestoneColumn: string]: string | number | null;
 }
 
 export const resultsApi = {
@@ -157,27 +165,50 @@ export const resultsApi = {
     project_root: string;
     mapping_path: string;
     predictions_by_date: Record<string, string>;
-    elongated_class_id?: number;
+    trait: string;
   }) =>
     postJson<{
       rows: PerPlantRow[];
       n_plants: number;
-      classes_seen: number[];
-      // False when the predictions carry no elongation class — the ratios are then not a
-      // valid bloom measurement (run + validate the classifier first).
+      positive_class_id: number | null;
+      // False when nothing was ever classified along the trait's positive-class axis — the ratios
+      // are then not a valid bloom measurement (run + validate the classifier first).
       elongation_classified: boolean;
     }>("/api/results/per_plant_curves", body),
 
-  onsetDates: (curves: PerPlantRow[]) =>
-    postJson<{ rows: OnsetRow[] }>("/api/results/onset_dates", { curves }),
+  onsetDates: (curves: PerPlantRow[], trait: string) =>
+    postJson<{ rows: OnsetRow[] }>("/api/results/onset_dates", { curves, trait }),
 
-  exportCsv: async (rows: unknown[], filename: string): Promise<Blob> => {
+  // `exportKind` states what the export IS. The backend gates on this declaration rather than
+  // guessing from the rows' column names — three successive guessing rules were each defeated,
+  // because the caller controls the column names (see the export_csv route's own comment).
+  exportCsv: async (
+    rows: unknown[],
+    filename: string,
+    exportKind: "phenology" | "diagnostic",
+    predictions_by_date?: Record<string, string>,
+  ): Promise<Blob> => {
     const resp = await fetch("/api/results/export_csv", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows, filename }),
+      body: JSON.stringify({
+        rows,
+        filename,
+        export_kind: exportKind,
+        predictions_by_date,
+      }),
     });
-    if (!resp.ok) throw new Error(`export_csv failed: ${resp.status}`);
+    if (!resp.ok) {
+      // K15: surface the server's actual reason instead of discarding the response body.
+      let detail = `export_csv failed: ${resp.status}`;
+      try {
+        const body = (await resp.json()) as { detail?: string };
+        if (body.detail) detail = body.detail;
+      } catch {
+        // response body wasn't JSON — keep the status-only message
+      }
+      throw new Error(detail);
+    }
     return await resp.blob();
   },
 };
