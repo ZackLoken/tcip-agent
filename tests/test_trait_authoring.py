@@ -125,19 +125,23 @@ def test_builtin_delivers_are_all_in_crops_vocab():
         assert name in vocab, name
 
 
-# ── R2: elongated class id derived from classes.json by name ──────────────
+# ── K4/K5: positive class id resolved from a prediction bucket's own recorded id_map ───────
 
-def _classes_json(path: Path, mapping: dict[int, str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({str(cid): {"name": n} for cid, n in mapping.items()}), encoding="utf-8")
+def _op_sidecar(dir_path: Path, id_map: dict | None) -> None:
+    dir_path.mkdir(parents=True, exist_ok=True)
+    (dir_path / "operating_point.json").write_text(json.dumps({
+        "validated": True,
+        "operating_point": {"conf": {"value": 0.4, "validated_vs_gt": "validated_held_out"}},
+        "id_map": id_map,
+    }), encoding="utf-8")
 
 
 def test_resolve_positive_class_id_by_name(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import _resolve_positive_class_id
 
-    cj = tmp_path / "classes.json"
-    _classes_json(cj, {0: "dormant", 1: "elongated"})
-    cid, msg = _resolve_positive_class_id("catkin", str(cj))
+    d = tmp_path / "preds"
+    _op_sidecar(d, {"dormant": 0, "elongated": 1})
+    cid, msg = _resolve_positive_class_id("catkin", {"2026-02-11": str(d)})
     assert cid == 1
     assert "elongated" in msg
 
@@ -145,9 +149,9 @@ def test_resolve_positive_class_id_by_name(tmp_path: Path):
 def test_resolve_positive_class_id_honest_fail_when_absent(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import _resolve_positive_class_id
 
-    cj = tmp_path / "classes.json"
-    _classes_json(cj, {0: "dormant", 1: "catkin"})  # no 'elongated' class
-    cid, msg = _resolve_positive_class_id("catkin", str(cj))
+    d = tmp_path / "preds"
+    _op_sidecar(d, {"dormant": 0, "catkin": 1})  # no 'elongated' class
+    cid, msg = _resolve_positive_class_id("catkin", {"2026-02-11": str(d)})
     assert cid is None  # never silently defaults to 1
     assert "elongated" in msg
 
@@ -155,27 +159,25 @@ def test_resolve_positive_class_id_honest_fail_when_absent(tmp_path: Path):
 def test_resolve_positive_class_id_no_map_is_none(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import _resolve_positive_class_id
 
-    cid, _ = _resolve_positive_class_id("catkin", str(tmp_path / "missing.json"))
+    cid, _ = _resolve_positive_class_id("catkin", {"2026-02-11": str(tmp_path / "missing")})
     assert cid is None
 
 
-# ── R2/R3 end-to-end through compute_phenology ────────────────────────────
+# ── K4/K5 end-to-end through compute_phenology ────────────────────────────
 
-def _pheno_fixture(tmp_path: Path, *, elongated_id: int):
+def _pheno_fixture(tmp_path: Path, *, classified: bool):
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    id_map = {"dormant": 0, "elongated": 1} if classified else {"catkin": 0}
+    subject = "elongated" if classified else "catkin"
     for d in (d1, d2):
         d.mkdir(parents=True, exist_ok=True)
-        # Elongation is deferred (K4/K5): a prediction carries a subject + geometry, not a class id.
         json_io.write_annotations(
             d / "P1.json",
-            [Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
-        (d / "operating_point.json").write_text(json.dumps({
-            "validated": True,
-            "operating_point": {"conf": {"value": 0.4, "validated_vs_gt": "validated_held_out"}},
-        }), encoding="utf-8")
+            [Annotation(subject=subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
+        _op_sidecar(d, id_map)
     mapping_path = tmp_path / "plant_mapping.json"
     mapping_path.write_text(json.dumps({
         "2026-02-11": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -184,46 +186,44 @@ def _pheno_fixture(tmp_path: Path, *, elongated_id: int):
     return mapping_path, d1, d2
 
 
-def test_compute_phenology_derives_class_id_and_stamps_provisional(tmp_path: Path):
+def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    mapping_path, d1, d2 = _pheno_fixture(tmp_path, elongated_id=1)
-    cj = tmp_path / "classes.json"
-    _classes_json(cj, {0: "dormant", 1: "elongated"})
+    mapping_path, d1, d2 = _pheno_fixture(tmp_path, classified=True)
     out_csv = tmp_path / "out.csv"
+    (d1 / "classifier_operating_point.json").write_text(json.dumps({
+        "validated": True,
+        "operating_point": {"classifier": {"value": "elongated", "validated_vs_gt": "validated_held_out"}},
+        "trait": "catkin",
+    }), encoding="utf-8")
 
     res = compute_phenology(
+        trait="catkin",
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        classes_json_path=str(cj),  # positive_class_id=None -> derived from the map by name
-        classifier_validated="validated_held_out",
+        classifier_pred_dirs=[str(d1)],
         operating_point_validated="validated_held_out",
     )
-    # The positive class id still resolves by name from the flat classes.json, but elongation is
-    # deferred (K4/K5): the fraction is not produced, so delivery is refused — no CSV, no stamp yet.
-    assert "error" in res
-    assert res["elongation_classified"] is False
-    assert not out_csv.exists()
-    # The provisional-read marker still belongs to the trait's delivery schema (asserted directly).
-    assert "catkin_elongation_provisional" in phenology.PHENOLOGY_CSV_COLUMNS
+    # The positive class id resolves from the buckets' own recorded id_map; both dimensions are
+    # validated, so this delivers.
+    assert "error" not in res, res
+    assert res["elongation_classified"] is True
+    assert out_csv.exists()
+    assert "catkin_elongation_provisional" in phenology.phenology_csv_columns(get_trait("catkin"))
 
 
 def test_compute_phenology_refuses_when_class_id_unresolvable(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    mapping_path, d1, d2 = _pheno_fixture(tmp_path, elongated_id=1)
-    cj = tmp_path / "classes.json"
-    _classes_json(cj, {0: "dormant", 1: "catkin"})  # no 'elongated' -> cannot derive
+    mapping_path, d1, d2 = _pheno_fixture(tmp_path, classified=False)  # no 'elongated' anywhere
     res = compute_phenology(
+        trait="catkin",
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(tmp_path / "out.csv"),
-        classes_json_path=str(cj),
-        classifier_validated="validated_held_out",
         operating_point_validated="validated_held_out",
     )
     assert "error" in res
-    assert "elongated class id" in res["error"]
     assert not (tmp_path / "out.csv").exists()
