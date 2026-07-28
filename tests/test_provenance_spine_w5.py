@@ -212,11 +212,14 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     out = tmp_path / "agg.csv"
+    # K3: no on-disk measurement-validity source for a bare trait_name="count" call with no
+    # pred_dirs — acknowledge the provisional delivery explicitly (the provenance stamp itself is
+    # unaffected by that).
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2}], str(out), trait_name="count",
         provenance={"producer_model_sha256": "def", "experiment_id": "expA",
                     "produced_at": "2026-07-19T00:00:00Z"},
-        measurement_validated="validated_held_out")
+        measurement_validated="validated_held_out", acknowledge_unvalidated=True)
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == "def"
     assert rows[0]["experiment_id"] == "expA"
@@ -225,7 +228,9 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
 # ── R2: phenology CSV schema carries producing-model identity ─────────────────
 
 def test_phenology_columns_include_producer_identity():
-    from tcip_mcp.pipelines.postprocessing.phenology import PHENOLOGY_CSV_COLUMNS
+    from tcip_mcp.pipelines.postprocessing.phenology import phenology_csv_columns
+    from tcip_mcp.traits import CATKIN
 
-    assert "producer_model_sha256" in PHENOLOGY_CSV_COLUMNS
-    assert "producer_experiment_id" in PHENOLOGY_CSV_COLUMNS
+    columns = phenology_csv_columns(CATKIN)
+    assert "producer_model_sha256" in columns
+    assert "producer_experiment_id" in columns
