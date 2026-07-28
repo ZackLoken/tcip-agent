@@ -324,6 +324,14 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
+    // The prediction bucket's own generation confidence — read-only, no gate run, no stamp. Lets
+    // the Review tab warn as soon as the "Conf >=" filter is raised above it (K15), rather than
+    // only after clicking "Use review as validation reference".
+    generationConf: (pred_dir: string) =>
+      call<{ generation_conf: number | null }>(
+        `/api/review/generation_conf?${new URLSearchParams({ pred_dir }).toString()}`,
+      ),
+
     // Batch review status + detection presence for a whole (subject, date): drives the image-level
     // Reviewed/Unreviewed nav filter and lets the tab skip images with nothing to review.
     imageStatuses: (params: {
