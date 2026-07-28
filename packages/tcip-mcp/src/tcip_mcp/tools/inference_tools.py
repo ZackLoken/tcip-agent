@@ -181,6 +181,12 @@ def _sweep_summary(conf_param) -> dict:
         "count_unbiased_conf": conf_param._raw,
         "f1_max_conf": sweep.get("f1_max_conf"),
         "holdout_bias": hb.get("count_bias_mean") if isinstance(hb, dict) else None,
+        # The pooled bias above is the one number a class-compensating refusal reads "fine" on, so
+        # the per-class biases the gate actually judged travel beside it (K4 #4).
+        "per_class_holdout_bias": {cid: s["count_bias_mean"]
+                                   for cid, s in (hb.get("per_class") or {}).items()},
+        "per_class_count_bias_failures": sweep.get("per_class_count_bias_failures"),
+        "holdout_missing_classes": sweep.get("holdout_missing_classes"),
         "passed_holdout": sweep.get("passed_holdout"),
         "failures": sweep.get("failures"),
         "conf_censored": sweep.get("conf_censored"),
