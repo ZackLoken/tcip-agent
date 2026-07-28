@@ -47,9 +47,13 @@ _POSITIVE_ACTIONS = {"accepted", "edited"}
 # by hand).
 _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
     (("conf_censored",),
-     "Not yet. The reviewed predictions were produced at too high a confidence cutoff, so the check "
-     "can't see the borderline detections it needs. Re-run the predictions at a low confidence, "
-     "review those, then try again."),
+     "Not yet. The check can't see the borderline detections it needs — either the predictions were "
+     "generated at too high a confidence cutoff, or this review session's own \"Conf ≥\" display "
+     "filter hid the low-confidence detections from view (K15: a session filter censors the reference "
+     "exactly the same way a high generation cutoff does). If you set a Conf ≥ filter above 0, "
+     "lower it and re-review the newly-visible detections first — that's usually the faster fix. If "
+     "the filter is already at 0, re-run the predictions at a lower confidence, review those, then "
+     "try again."),
     (("insufficient_adjudication_coverage",),
      'Not yet. At least one of these reviewed images shows no evidence that missed objects were '
      'checked for. For images that had no ground truth before this review: uncheck "Reviewed" on '
@@ -304,7 +308,9 @@ def resolve_operating_point_from_review(
     image_dims: dict[str, tuple[int, int]] | None = None,
     only_completed: bool = True,
     tile_size: int | None = None,
+    tile_size_source: str = "default",
     tiled: bool | None = None,
+    tiled_source: str = "default",
     cross_tile_nms: float | None = None,
     max_dets: int | None = None,
     group_by: str = "tile_prefix",
@@ -365,7 +371,8 @@ def resolve_operating_point_from_review(
         trait_name, dataset_hash=ref_hash,
         calibration_records=cal_records or None,
         holdout_records=hold_records or None,
-        tile_size=tile_size, tiled=tiled, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
+        tile_size=tile_size, tile_size_source=tile_size_source,
+        tiled=tiled, tiled_source=tiled_source, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         validated_reference=VALIDATED_REVIEW_CONFIRMED,
         experiment_id=experiment_id, staged_conf_floor=staged_conf_floor,
         adjudication_covered=lambda r: bool(r.get("adjudication_covered")),
