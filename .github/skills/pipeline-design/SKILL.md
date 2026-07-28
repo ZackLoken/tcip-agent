@@ -122,6 +122,17 @@ the derivations, the `ctx` craft library, and the proposal-engine and scorer reg
   versioned, and provenance-snapshotted no matter what your loop does. `ctx.default_train()` is
   **one convenience**, not a requirement — call it, extend it, or replace it entirely.
 
+  **Registration needs one more fact your loop states explicitly (K11).** A checkpoint saved via
+  `ctx.save_checkpoint(state, "model_best")` or `"model_final"` is found automatically after your
+  loop returns; any other tag (or the default, untagged `ctx.save_checkpoint(state)`) is not
+  registered as the run's deliverable unless you call `ctx.set_final_weights(path)` yourself. A
+  "completed" run with no discoverable weights and no `set_final_weights` call is marked `failed`
+  rather than registering a nonexistent path — audit/provenance are unconditional, registration
+  is not. Under `run_hpo`, a bespoke loop whose own metrics don't share the stock trainer's key
+  names (`selection`/`val_objective`/`val_loss`, the only ones the automatic per-epoch pruning
+  signal recognizes) can call `ctx.report_objective(value)` directly to report trial progress for
+  pruning — a no-op outside HPO, safe to call unconditionally.
+
 When the plain blocks and your own primitives both plateau on a trait, the next move is to research the
 literature for a technique that fits — see the `cv-research` skill for the research→implement→validate
 loop (and the rule that a new method must beat the baseline on the *measured phenotype* before you
