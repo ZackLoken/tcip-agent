@@ -113,7 +113,7 @@ another (`post_chat_reply`).
 
 ### Option D — run `tcip-mcp` as streamable-HTTP and add a separate agent-host service
 
-FastMCP can serve streamable HTTP instead of stdio, so a long-lived `tcip-mcp` could
+MCPServer can serve streamable HTTP instead of stdio, so a long-lived `tcip-mcp` could
 be shared by the terminal client and a new agent-host daemon.
 
 - **Pros**: single MCP server instance; network-reachable MCP if that's ever wanted.
