@@ -67,6 +67,14 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "Not yet. Only one image was held back to check against — the platform needs at least two so "
      "it can judge how consistent the counts are, not just whether they happen to agree once. "
      "Review a few more images, then try again."),
+    # An evidence-sufficiency refusal, so it sits with the two above rather than down among the
+    # accuracy ones: nothing about the counts has been judged wrong, there is simply nothing held
+    # back to judge this kind of object against.
+    (("holdout_missing_class",),
+     "Not yet. One kind of object appears in the images used to set the threshold but in none of "
+     "the images held back to check it, so there is no independent evidence that the model counts "
+     "that kind correctly. Review more images containing every kind of object you care about, then "
+     "try again."),
     (("not_disjoint",),
      "Not yet. The reviewed images couldn't be split into independent groups to cross-check. Review "
      "more images, then try again."),
@@ -93,6 +101,14 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
     (("count_bias_exceeds_tolerance",),
      "Not yet. On the held-back images, the model's counts didn't agree closely enough with your "
      "review to trust them yet. Reviewing more images, or improving the model, can help."),
+    # Placed after the pooled entry deliberately: this message's "the total looks right" claim holds
+    # only when the pooled check passed, which is exactly what first-match-wins ordering guarantees.
+    (("count_bias_exceeds_tolerance_per_class",),
+     "Not yet. The overall number of objects on the held-back images looks right, but the split "
+     "between KINDS of object doesn't — the model is finding too many of one kind and too few of "
+     "another, and in the total those two errors hide each other. Any result that separates the "
+     "kinds (a percentage of one kind, for instance) would be wrong. Correcting the mislabelled "
+     "kinds in your review, or improving the model, can help."),
 ]
 _KNOWN_FAILURE_NAMES = {name for names, _ in _FAILURE_MESSAGES for name in names}
 
