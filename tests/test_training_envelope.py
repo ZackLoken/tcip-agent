@@ -85,6 +85,147 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
 # Default path — no training_source → ctx.default_train() (today's trainer), still audited.
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# F6 — a phantom deliverable (no discoverable weights) must fail the run, not register a
+# nonexistent path. An explicit ctx.set_final_weights() override still works.
+# --------------------------------------------------------------------------
+
+def _agent_train_default_tag_no_override(ctx):
+    """Saves under the DEFAULT tag ("checkpoint") — not model_best/model_final, and never
+    calls set_final_weights. A loop like this produces no discoverable deliverable."""
+    ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}})
+
+
+def test_envelope_default_tag_with_no_override_fails_run_and_registers_nothing(tmp_path):
+    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.model_registry import ModelRegistry
+
+    out = tmp_path / "out"
+    config = {
+        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "training_source": f"{__name__}:_agent_train_default_tag_no_override",
+        "device": "cpu",
+    }
+    create_experiment("expF", config, data_source="imgs")
+    update_status("expF", "running")
+    run = create_run(config, str(out))
+
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
+                       experiment_id="expF")
+    run_training_envelope(ctx)
+
+    assert run.status == "failed"
+    assert "final weights" in (run.error or "")
+    assert ModelRegistry(str(tmp_path)).get_model("expF") is None
+    events = _audit_events(tmp_path)
+    assert [e["status"] for e in events] == ["running", "failed"]
+
+
+def _agent_train_explicit_override(ctx):
+    """Saves under a non-conventional tag, but explicitly declares it the deliverable."""
+    path = ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "custom_tag")
+    ctx.set_final_weights(path)
+
+
+def test_envelope_explicit_set_final_weights_overrides_convention(tmp_path):
+    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.model_registry import ModelRegistry
+
+    out = tmp_path / "out"
+    config = {
+        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "training_source": f"{__name__}:_agent_train_explicit_override",
+        "device": "cpu",
+    }
+    create_experiment("expG", config, data_source="imgs")
+    update_status("expG", "running")
+    run = create_run(config, str(out))
+
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
+                       experiment_id="expG")
+    run_training_envelope(ctx)
+
+    assert run.status == "completed"
+    entry = ModelRegistry(str(tmp_path)).get_model("expG")
+    assert entry is not None
+    assert entry["checkpoint_path"].endswith("custom_tag.pt")
+
+
+# --------------------------------------------------------------------------
+# F5 — resume provenance: env.json records the resume request + whether RNG state was
+# actually restored, refreshed after dispatch (not just the pre-dispatch request).
+# --------------------------------------------------------------------------
+
+def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
+    pytest.importorskip("torchvision")
+    import csv
+    from PIL import Image
+    from torch.utils.data import DataLoader
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.training.generic_trainer import create_run as gt_create_run, task_collate, train
+    from tcip_mcp.experiments import create_experiment, update_status
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for i in range(6):
+        Image.new("RGB", (32, 32), (40 * (i % 5), 50, 60)).save(images_dir / f"img{i}.png")
+        rows.append((f"img{i}", i % 2))
+    csv_path = tmp_path / "labels.csv"
+    with open(csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(("stem", "label"))
+        w.writerows(rows)
+
+    def build_loader():
+        ds = build_dataset("classification", images_dir=str(images_dir), csv_path=str(csv_path), num_classes=2)
+        return DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
+        "device": "cpu", "stages": [{"freeze_to": -1, "epochs": 2}], "mixed_precision": False,
+        "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
+        "early_stopping": {"enabled": False}, "checkpoint_every_n_epochs": 1,
+    }
+    # Generate the resumable checkpoint directly (not through the envelope).
+    train(gt_create_run(dict(cfg), str(tmp_path / "out")), build_loader(), task="classification")
+    ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
+    assert ckpt.is_file()
+
+    # Resume through the FULL audited envelope — env.json must reflect the real outcome.
+    create_experiment("expH", cfg)
+    update_status("expH", "running")
+    run = gt_create_run(dict(cfg), str(tmp_path / "out2"))
+    ctx = TrainContext(run=run, train_loader=build_loader(), val_loader=None, task="classification",
+                       experiment_id="expH", resume_from=str(ckpt))
+    run_training_envelope(ctx)
+
+    assert run.status == "completed"
+    env = json.loads((tmp_path / ".tcip" / "experiments" / "expH" / "env.json").read_text())
+    assert env["resumed_from"] == str(ckpt)
+    assert env["rng_state_restored"] is True
+
+
+# --------------------------------------------------------------------------
+# K11: ctx.report_objective — a bespoke train(ctx)'s explicit primitive for reporting HPO
+# trial progress, independent of the automatic epoch_hook/metric-key-guessing path.
+# --------------------------------------------------------------------------
+
+def test_report_objective_calls_trial_report_when_attached(tmp_path):
+    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"))
+    reported: list = []
+    ctx = TrainContext(run=run, train_loader=None, trial_report=reported.append)
+    ctx.report_objective(3.14)
+    assert reported == [3.14]
+
+
+def test_report_objective_is_noop_outside_hpo(tmp_path):
+    run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"))
+    ctx = TrainContext(run=run, train_loader=None)  # no trial_report — not an HPO trial
+    ctx.report_objective(3.14)  # must not raise
+
+
 def test_envelope_default_path_runs_default_train_and_audits(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.training.generic_trainer as gt
     from tcip_mcp.experiments import create_experiment, update_status
