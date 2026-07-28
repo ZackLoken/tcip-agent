@@ -147,24 +147,41 @@ def _coco_det_targets(coco, file_name):
 
 
 def _json_det_targets(path, subject, attribute, id_map):
-    """Pixel-xyxy boxes + 1-indexed labels for one image from the name-based per-image JSON.
+    """``(boxes, labels, n_unlabeled)`` for one image from the name-based per-image JSON.
 
     Filters to ``subject`` + a box-derivable geometry, then maps each kept annotation to its
     0-indexed id via ``id_map`` (the single ``assign_class_ids`` map), +1 for background. An
     annotation the registry cannot decode raises — a real label read as nothing is a measurement bug.
+
+    ``n_unlabeled`` counts instances of ``subject`` never assessed for ``attribute`` yet (a soft,
+    expected gap, not a decode bug — excluded from ``boxes``/``labels`` rather than raising).
+    Returning the count, not just silently dropping it, is what stage-6 review N2 requires: an
+    image with any unlabeled instance has INCOMPLETE ground truth for this scope, and a caller
+    scoring/training only the labeled subset turns its real, unlabeled objects into silent false
+    positives or background noise. Callers that build per-image records fresh each call (delivery
+    evaluation, operating-point calibration) must exclude the WHOLE image when ``n_unlabeled > 0``
+    — the same precedent already applied to a missing label file — rather than partially trusting
+    it; a caller bound to a fixed per-image dataset length (a `Dataset.__getitem__`) cannot do that
+    without a deeper stems-selection change, and currently only surfaces the count.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import bbox_of
 
     boxes, labels = [], []
+    n_unlabeled = 0
     for a in json_io.read_annotations(path):
-        cid = json_io.target_class_id(a, subject, attribute, id_map)
+        # allow_unlabeled=True (stage-6 review, K4/K5): an instance never assessed for `attribute`
+        # yet is a soft, expected gap, not a decode bug — must not raise and abort the whole read.
+        cid = json_io.target_class_id(a, subject, attribute, id_map, allow_unlabeled=True)
+        if cid == json_io.UNLABELED:
+            n_unlabeled += 1
+            continue
         if cid is None or a.geometry is None:
             continue
         box = bbox_of(a.geometry)
         boxes.append([box.x1, box.y1, box.x2, box.y2])
         labels.append(cid + 1)
-    return boxes, labels
+    return boxes, labels, n_unlabeled
 
 
 def dir_label_format(labels_dir) -> str | None:
@@ -190,6 +207,7 @@ def dir_label_format(labels_dir) -> str | None:
 def trainable_stems(
     labels_dir, images_dir, stems=None, *, subject: str | None = None, date=None,
     label_format: str = "json", coco: dict | None = None,
+    attribute: str | None = None, id_map: dict[str, int] | None = None,
 ) -> tuple[list[str], dict[str, int]]:
     """The stems that may train, plus the partition that produced them.
 
@@ -204,12 +222,26 @@ def trainable_stems(
     project where the breeder labelled 30 of 400 images trained on 370 images asserted to be empty.
 
     Returns ``(stems, counts)`` where counts carries ``annotated`` / ``confirmed_negative`` /
-    ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` / ``quarantined_stale_definition`` so a
-    run can record what it dropped. The last is distinct from ``skipped_unconfirmed_empty``: it means
+    ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` / ``skipped_incomplete_attribute`` /
+    ``quarantined_stale_definition`` so a run can record what it dropped.
+    ``quarantined_stale_definition`` is distinct from ``skipped_unconfirmed_empty``: it means
     a human DID confirm the image negative, but the subject's attribute schema has since changed and
     the confirmation can no longer be trusted as-is — a different situation from nobody ever having
     looked, and one a reproduce-a-number chain must be able to tell apart (see
     ``confirmed_negative_names``'s quarantine logic).
+
+    ``skipped_incomplete_attribute`` (stage-6 review round 4) is the whole-image attribute-completeness
+    rail: with ``attribute`` set, an image carrying ANY instance never assessed for it has incomplete
+    ground truth for this scope and is dropped ENTIRELY, never trained on its labelled subset (which
+    would leave its real, unlabelled objects to train as background). It lives here, in the one
+    partition that already decides admission, rather than as a second filter over this function's
+    output — a filter downstream cannot record *why* a stem left, and the round-4 attempt that tried
+    corrupted these counts outright. Both label paths reach the same verdict from one implementation:
+    the COCO path reads the ``excluded_incomplete_attribute`` names ``to_coco_dataset`` already
+    computed during assembly (never re-deriving them, and never mistaking that absence for
+    "empty label file nobody confirmed"), and the direct-JSON path applies the rail through
+    ``_json_det_targets`` — the same reader the loader itself uses. ``attribute``/``id_map`` unset
+    (every non-attribute run) applies no such rail.
     """
     names = image_name_map(images_dir)
     candidates = list(stems) if stems is not None else sorted(names)
@@ -217,22 +249,46 @@ def trainable_stems(
     negatives = confirmed_negative_names(labels_dir, subject=subject, date=date,
                                          quarantined_out=quarantined)
     counts = {"annotated": 0, "confirmed_negative": 0, "skipped_unannotated": 0,
-              "skipped_unconfirmed_empty": 0, "quarantined_stale_definition": 0}
+              "skipped_unconfirmed_empty": 0, "skipped_incomplete_attribute": 0,
+              "quarantined_stale_definition": 0}
 
     coco_names: set[str] | None = None
     coco_annotated: set[str] = set()
+    incomplete_names: set[str] = set()
     if coco is not None:
         # assemble_coco already applied this rail to build ``images``; intersecting with it *is*
         # the rail, so the two can never disagree about which samples exist.
         by_id = {e.get("id"): str(e.get("file_name", "")) for e in coco.get("images", [])}
         coco_names = set(by_id.values())
         coco_annotated = {by_id.get(a.get("image_id"), "") for a in coco.get("annotations", [])}
+        # Which images to_coco_dataset dropped for attribute-incompleteness, read from its own
+        # record rather than re-derived — their absence from ``images`` is otherwise
+        # indistinguishable from an unconfirmed-empty one, and reporting that reason would be a lie.
+        incomplete_names = {str(n) for n in coco.get("excluded_incomplete_attribute", [])}
+    elif attribute is not None and id_map is not None:
+        # Direct-JSON path: the same rail, through the same reader the loader uses.
+        for stem in candidates:
+            image_name = names.get(stem)
+            if image_name is None:
+                continue
+            label_path = Path(labels_dir) / f"{stem}.json"
+            if not label_path.is_file():
+                continue
+            _boxes, _labels, n_unlabeled = _json_det_targets(
+                str(label_path), subject, attribute, id_map)
+            if n_unlabeled:
+                incomplete_names.add(image_name)
 
     keep: list[str] = []
     for stem in candidates:
         image_name = names.get(stem)
         if image_name is None:
             counts["skipped_unannotated"] += 1
+            continue
+        if image_name in incomplete_names:
+            # Checked before every other verdict: an image with incomplete attribute GT is dropped
+            # for THAT reason, not for whichever downstream category its absence happens to resemble.
+            counts["skipped_incomplete_attribute"] += 1
             continue
         if coco_names is not None:
             if image_name not in coco_names:
@@ -285,12 +341,22 @@ def _require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> No
         f"attribute schema changed since — re-confirm them or revert the schema edit."
         if quarantined else ""
     )
+    # Read defensively: this is the refusal path, and a counts dict missing a key here would
+    # replace the explanation with a bare KeyError — exactly the round-4 regression this names.
+    incomplete = counts.get("skipped_incomplete_attribute", 0)
+    incomplete_note = (
+        f" {incomplete} more carry at least one instance never assessed for this run's attribute, "
+        f"so their ground truth is incomplete for this scope and the whole image is held out "
+        f"rather than trained on its labelled subset — finish attributing them, or run without "
+        f"an attribute scope."
+        if incomplete else ""
+    )
     raise ValueError(
-        f"no trainable samples in {labels_dir}: {counts['skipped_unannotated']} image(s) have no "
-        f"label record and {counts['skipped_unconfirmed_empty']} have an empty one nobody "
-        f"confirmed. An empty label file is a negative only once a human marks that image "
+        f"no trainable samples in {labels_dir}: {counts.get('skipped_unannotated', 0)} image(s) "
+        f"have no label record and {counts.get('skipped_unconfirmed_empty', 0)} have an empty one "
+        f"nobody confirmed. An empty label file is a negative only once a human marks that image "
         f"Complete; until then it reads as unannotated. Annotate some images, or mark the "
-        f"genuinely-empty ones Complete.{quarantine_note}"
+        f"genuinely-empty ones Complete.{incomplete_note}{quarantine_note}"
     )
 
 
@@ -583,9 +649,17 @@ class DetectionDataset(BaseImageDataset):
             _reg, id_map = _resolve_registry_id_map(self.labels_dir, subject, attribute)
             self._num_classes = len(id_map)
         self.id_map = id_map
+        # The attribute-completeness rail (an image with ANY instance never assessed for `attribute`
+        # is held out WHOLE, never trained on its labelled subset) lives inside trainable_stems, the
+        # one partition that already decides admission and records why — see its docstring. Round 4
+        # first tried it as a second filter over trainable_stems' *output*, which both corrupted
+        # those counts and never ran at all on the real build_dataset path (which assembles COCO and
+        # so takes the `label_format == "coco"` branch). Applying it at the partition covers both
+        # label paths from one implementation and reports a truthful reason for each drop.
         self.stems, self.sample_counts = trainable_stems(
             self.labels_dir, self.images_dir, stems,
             subject=subject, date=date, label_format=self.label_format, coco=self._coco,
+            attribute=attribute, id_map=self.id_map,
         )
         _require_samples(self.stems, self.sample_counts, self.labels_dir)
         # Real on-disk filenames, for matching a stem to the COCO's ``file_name`` (which carries the
@@ -594,11 +668,19 @@ class DetectionDataset(BaseImageDataset):
         self._image_names = image_name_map(self.images_dir)
 
     def _det_targets(self, stem: str, file_name: str) -> tuple[list, list]:
-        """Pixel-xyxy boxes + 1-indexed labels for one image (coco or name-based json)."""
+        """Pixel-xyxy boxes + 1-indexed labels for one image (coco or name-based json).
+
+        ``self.stems`` already excludes any image with an instance unlabeled for ``attribute``
+        (``trainable_stems``' ``skipped_incomplete_attribute`` rail — a fixed-length dataset can't
+        act on this per-``__getitem__`` call, only once, up front), so ``n_unlabeled`` is always 0
+        here by construction; the 3-tuple is unpacked for the shared ``_json_det_targets``
+        signature, not because a nonzero count is expected at this point.
+        """
         if self.label_format == "coco":
             return _coco_det_targets(self._coco, file_name)
-        return _json_det_targets(
+        boxes, labels, _n_unlabeled = _json_det_targets(
             str(self.labels_dir / f"{stem}.json"), self.subject, self.attribute, self.id_map)
+        return boxes, labels
 
     @property
     def num_classes(self) -> int:
