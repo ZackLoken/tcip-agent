@@ -1,9 +1,13 @@
 /**
- * HPO search-space model for the Tuning tab's structured form. Covers exactly the params
- * the backend's `_apply_hpo_params` actually sweeps (lr / weight_decay / batch_size) and
- * builds the typed param-space the `run_hpo` tool feeds to Ray Tune — so users configure a
- * sweep with a form instead of hand-writing JSON. Architecture axes are model-specific
- * (`builder_kwargs`, unknown to the GUI) and not swept generically.
+ * HPO search-space model for the Tuning tab's structured form. Builds the typed param-space
+ * the `run_hpo` tool feeds to Ray Tune, for a fixed set of purpose-built axes — lr / weight_decay
+ * / batch_size — each with dedicated GUI handling (a log-uniform range, a numeric list, ...).
+ *
+ * This is NOT the full sweep surface: the backend's `_apply_hpo_params` (K11) also accepts any
+ * other top-level config key on the sweep dict, routed straight to the resolved config for a
+ * bespoke `training_source` to read from `ctx.config` — there is no purpose-built GUI affordance
+ * for an arbitrary custom axis yet (would need a free-form key/value add-on, not a mechanical
+ * change to this file). Use `run_hpo`'s `param_space` argument directly for that case.
  */
 
 export type HpoParam =
