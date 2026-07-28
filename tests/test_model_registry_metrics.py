@@ -38,6 +38,20 @@ def test_select_best_model_requires_explicit_metric(tmp_path, monkeypatch):
     assert res["n_models"] == 2
 
 
+def test_register_model_refuses_nonexistent_checkpoint(tmp_path, monkeypatch):
+    """K11 (F6): register_model must refuse a phantom deliverable, not silently store a
+    null-checksum entry — the shared chokepoint both register_model_from_experiment and
+    model_tools.register_model's explicit mode route through."""
+    import pytest as _pytest
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.model_registry import ModelRegistry
+
+    reg = ModelRegistry(".")
+    with _pytest.raises(FileNotFoundError):
+        reg.register_model("ghost", str(tmp_path / "nonexistent.pt"), {})
+    assert reg.get_model("ghost") is None
+
+
 def test_best_model_lower_is_better_for_loss(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.model_registry import ModelRegistry
