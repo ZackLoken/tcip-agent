@@ -30,7 +30,7 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
     DEFAULT_MAX_DETS,
     DEFAULT_NMS_IOU,
-    DEFAULT_TILE_SIZE,
+    DEFAULT_OVERLAP,
     DEFAULT_TILED,
 )
 from tcip_web.paths import assert_path_allowed
@@ -64,6 +64,9 @@ class InferenceJob:
     # the sidecar's provenance can tell the two apart, same as the MCP door's run_inference already
     # does for its own `tile` param.
     tile_source: str = "default"
+    # TRAP 4 step 2 (K6): whether slice_hw was the breeder's explicit override or should be
+    # re-derived from the checkpoint's own persisted training geometry (resolve_tile_geometry).
+    slice_source: str = "default"
     total: int = 0
     done: int = 0
     status: str = "pending"  # pending | running | completed | failed | cancelled
@@ -171,20 +174,30 @@ def _worker(job: InferenceJob) -> None:
         from tcip_mcp.pipelines.resolution import raw_operating_point
         from tcip_mcp.utils.atomic_io import atomic_write_json
 
+        predictor = build_predictor(
+            checkpoint_path=job.checkpoint_path,
+            device=None,  # auto: cuda if available, else cpu
+            score_threshold=job.conf,  # conf is an unvalidated documented default either way —
+            nms_iou=job.iou,           # raw_operating_point below wraps the same raw value, never
+            max_dets=job.max_dets,     # transforms it (see its own docstring).
+        )
+
+        # Derive tile_size/overlap from the checkpoint's own persisted training geometry (K6/TRAP 4
+        # step 2) — the same resolver run_inference uses, so the GUI door can't silently diverge
+        # from the MCP door on the object count's scale for the same checkpoint. An explicit
+        # caller-chosen tile size (job.tile_source == "explicit") still wins over the derivation.
+        from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+
+        resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
+            predictor, tile_size=job.slice_hw[0] if job.slice_source == "explicit" else None,
+            overlap=job.overlap if job.slice_source == "explicit" else None,
+        )
+
         # Resolve the operating point through the SAME firewalled bundle as the MCP door: conf is a
         # documented default with no per-dataset GT, so it is unvalidated and stamped validated=false.
         op_bundle = raw_operating_point(
             conf=job.conf, cross_tile_nms=job.iou, tiled=job.tile, tiled_source=job.tile_source,
-            tile_size=job.slice_hw[0], max_dets=job.max_dets,
-        )
-        conf = op_bundle.get("conf").unvalidated_value(acknowledge_unvalidated=True)
-
-        predictor = build_predictor(
-            checkpoint_path=job.checkpoint_path,
-            device=None,  # auto: cuda if available, else cpu
-            score_threshold=conf,
-            nms_iou=job.iou,
-            max_dets=job.max_dets,
+            tile_size=resolved_tile, tile_size_source=tile_size_source, max_dets=job.max_dets,
         )
 
         # Stamp the operating point next to the predictions so a GUI-produced set carries the same
@@ -201,10 +214,32 @@ def _worker(job: InferenceJob) -> None:
         from tcip_mcp.model_registry import resolve_model_identity
 
         identity = resolve_model_identity(job.checkpoint_path)
+
+        # This run's name->id map (K6/K3): resolved the same way the MCP door's run_inference does
+        # (predictor.config["data"]["subject"]/["attribute"] -> the inference dataset's registry),
+        # never a second implementation — without this, every GUI-produced bucket decodes to raw
+        # index-string subjects and permanently fails the coverage/classifier-validity mechanism.
+        id_map = None
+        try:
+            data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
+            subject = data_cfg.get("subject")
+            if subject and job.images_dir:
+                from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
+
+                _reg, id_map = _resolve_registry_id_map(job.images_dir, subject, data_cfg.get("attribute"))
+        except Exception:  # noqa: BLE001 — no run scope for the map; predictions decode by raw id
+            id_map = None
+
         provenance = op_bundle.to_provenance()
         provenance["validated"] = op_bundle.is_shippable
         provenance["checkpoint_sha256"] = identity["sha256"]
         provenance["experiment_id"] = identity["experiment_id"]
+        provenance["id_map"] = id_map
+        # overlap has no home in ResolvedBundle's tracked params (only conf/cross_tile_nms/tiled/
+        # tile_size/max_dets are) — surface the value + source this run actually used directly,
+        # matching the MCP door's own run_inference (inference_tools.py).
+        provenance["overlap"] = resolved_overlap
+        provenance["overlap_source"] = overlap_source
         atomic_write_json(output_dir / "operating_point.json", provenance)
 
         for img in images:
@@ -213,13 +248,13 @@ def _worker(job: InferenceJob) -> None:
             results = predictor.predict_batch(
                 [str(img)],
                 tile=job.tile,
-                tile_size=job.slice_hw[0],
-                overlap=job.overlap,
+                tile_size=resolved_tile,
+                overlap=resolved_overlap,
                 global_nms_iou=job.iou,
                 postprocess=job.postprocess,
             )
             write_predictions_json(output_dir / f"{img.stem}.json", results[0],
-                                   created_by=f"model:{Path(job.checkpoint_path).stem}")
+                                   created_by=f"model:{Path(job.checkpoint_path).stem}", id_map=id_map)
             job.results.append({"image": img.name, "n_detections": results[0]["count"]})
             job.done += 1
 
@@ -246,11 +281,16 @@ class LaunchInferencePayload(BaseModel):
     # K10 finding 3: None (default) is a documented fallback, not an implicit True — distinguished
     # from an explicit caller choice so the job's provenance can say which one happened.
     tile: bool | None = None
-    conf: float = DEFAULT_CONF
-    iou: float = DEFAULT_NMS_IOU
-    slice_h: int = DEFAULT_TILE_SIZE
-    slice_w: int = DEFAULT_TILE_SIZE
-    overlap: float = 0.2
+    # TRAP 4 step 1 (K6): conf/iou/slice_h/slice_w/overlap are all None-by-default now — an omitted
+    # field is a real "let the platform derive it" request, distinguished from an explicit choice
+    # that happens to match the default, the same way `tile` already works. Without this, the GUI
+    # transmitted a frozen literal on every launch, permanently shadowing resolve_tile_geometry's
+    # checkpoint-derived tile_size/overlap and the shared conf/iou defaults below.
+    conf: float | None = None
+    iou: float | None = None
+    slice_h: int | None = None
+    slice_w: int | None = None
+    overlap: float | None = None
     max_dets: int = DEFAULT_MAX_DETS
     postprocess: str = "nms"
     # Write into output_dir even if it exists. Refused if the bucket has review verdicts; the
@@ -297,6 +337,15 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     # deliberate difference in what "explicit" means per door, not a labeling bug.
     resolved_tile = DEFAULT_TILED if payload.tile is None else payload.tile
     tile_source = "explicit" if payload.tile is not None else "default"
+    # conf/iou: no checkpoint-derivation concept applies (unlike tile_size) — an omitted value
+    # falls back to the same shared defaults resolution.py names, matching the MCP door.
+    resolved_conf = DEFAULT_CONF if payload.conf is None else payload.conf
+    resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou
+    # slice_h/slice_w/overlap: the "explicit" signal resolve_tile_geometry needs (TRAP 4 step 2) —
+    # None here means "derive from the checkpoint's training geometry," resolved in the worker
+    # once the predictor is built. slice_hw stays a concrete tuple everywhere else (0 sentinel is
+    # never read as a real value; the worker only branches on slice_source).
+    slice_source = "explicit" if payload.slice_h is not None else "default"
 
     job = InferenceJob(
         job_id=f"inf-{uuid.uuid4().hex[:8]}",
@@ -305,10 +354,11 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         output_dir=resolved_output_dir,
         tile=resolved_tile,
         tile_source=tile_source,
-        conf=payload.conf,
-        iou=payload.iou,
-        slice_hw=(payload.slice_h, payload.slice_w),
-        overlap=payload.overlap,
+        conf=resolved_conf,
+        iou=resolved_iou,
+        slice_hw=(payload.slice_h or 0, payload.slice_w or 0),
+        slice_source=slice_source,
+        overlap=payload.overlap if payload.overlap is not None else DEFAULT_OVERLAP,
         max_dets=payload.max_dets,
         postprocess=payload.postprocess,
     )
