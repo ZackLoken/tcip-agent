@@ -119,23 +119,28 @@ def aggregate_per_plant(
 
 
 def _agg_count(items: list[dict], value_key: str) -> dict:
-    """Median count across images."""
-    values = [r.get(value_key, 0) for r in items]
+    """Median count across images. A missing value_key is a missing observation, not a measured 0."""
+    values = [r[value_key] for r in items if value_key in r]
+    n_missing = len(items) - len(values)
     return {
-        "value": statistics.median(values) if values else 0,
-        "min_count": min(values) if values else 0,
-        "max_count": max(values) if values else 0,
+        "value": statistics.median(values) if values else None,
+        "min_count": min(values) if values else None,
+        "max_count": max(values) if values else None,
+        "n_missing": n_missing,
     }
 
 
 def _agg_mean(items: list[dict], value_key: str) -> dict:
-    """Arithmetic mean of continuous values."""
+    """Arithmetic mean of continuous values. All-absent yields None, never a fabricated 0.0 — a
+    missing measurement must never read as a measured zero (K4)."""
     values = [r.get(value_key, 0.0) for r in items if value_key in r]
+    n_observations_with_value = len(values)
     if not values:
-        return {"value": 0.0}
+        return {"value": None, "n_observations_with_value": 0}
     return {
         "value": round(statistics.mean(values), 4),
         "std": round(statistics.stdev(values), 4) if len(values) > 1 else 0.0,
+        "n_observations_with_value": n_observations_with_value,
     }
 
 
@@ -154,9 +159,11 @@ def _agg_mode(items: list[dict], value_key: str) -> dict:
 
 
 def _agg_sum(items: list[dict], value_key: str) -> dict:
-    """Sum of values (for area traits)."""
+    """Sum of values (for area traits). All-absent yields None, never a fabricated 0 (K4)."""
     values = [r.get(value_key, 0.0) for r in items if value_key in r]
-    return {"value": sum(values)}
+    if not values:
+        return {"value": None, "n_observations_with_value": 0}
+    return {"value": sum(values), "n_observations_with_value": len(values)}
 
 
 # note: catkin bloom phenology (05/50/95-per-date milestones) is not an aggregation
@@ -202,9 +209,12 @@ def export_aggregated_csv(
     with no acknowledgement) via the shared ``check_delivery_gate`` and stamps the reconciled validity
     into every row. For a count trait, pass ``pred_dirs`` (the prediction buckets the counts came from)
     so the count operating point's validity is read from each ``operating_point.json`` sidecar and
-    floored against ``measurement_validated``. For a continuous/ordinal trait with no conf op-point,
-    pass ``measurement_validated`` directly (its own validation reference). ``acknowledge_unvalidated``
-    ships a clearly-flagged provisional CSV stamped ``validated=false``.
+    floored against ``measurement_validated``. For a continuous/ordinal trait with no conf op-point
+    (``pred_dirs`` empty/omitted), ``measurement_validated`` is currently NOT honored (stage-6 review
+    Finding G corrected this docstring, which previously claimed it was) — no on-disk source exists
+    yet for that dimension's validity (K3 finding #3), so the state floors to unvalidated
+    unconditionally; the only route to delivery is the explicit acknowledge below.
+    ``acknowledge_unvalidated`` ships a clearly-flagged provisional CSV stamped ``validated=false``.
 
     Args:
         results: Output from aggregate_per_plant().
@@ -213,7 +223,9 @@ def export_aggregated_csv(
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
         provenance: Optional producing-model stamp added as trailing columns.
-        measurement_validated: The trait measurement's validation reference (a shippable reference).
+        measurement_validated: Honored only when ``pred_dirs`` is also given (floors the count
+            operating point's on-disk validity, never raises it). Ignored, not a delivery path, when
+            ``pred_dirs`` is empty — see the note above.
         pred_dirs: Prediction buckets to reconcile the count operating point's validity from (count
             traits); floored against ``measurement_validated``.
         acknowledge_unvalidated: Write an unvalidated phenotype as a flagged provisional CSV.
@@ -222,15 +234,21 @@ def export_aggregated_csv(
         Path to the written CSV file.
     """
     from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
         check_delivery_gate,
         reconcile_operating_point_validity,
     )
 
-    state = measurement_validated
     if pred_dirs:
         # A count trait: the measurement validity IS the count operating point's, read from the
         # buckets' sidecars and floored against any caller assertion (never trusted from the string).
         state = reconcile_operating_point_validity(pred_dirs, asserted=measurement_validated)["validated"]
+    else:
+        # No on-disk source exists for a continuous/ordinal trait's measurement validity today (K3
+        # finding #3) — a bare caller-asserted `measurement_validated` string is never trusted on its
+        # own. The only route to delivery without a producer is the explicit acknowledge below; this
+        # never auto-sets it on the writer's own initiative.
+        state = VALIDATED_FALSE
     gate = check_delivery_gate({"measurement": state},
                                acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
