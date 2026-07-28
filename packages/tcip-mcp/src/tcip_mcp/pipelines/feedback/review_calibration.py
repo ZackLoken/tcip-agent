@@ -105,7 +105,7 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
     # only when the pooled check passed, which is exactly what first-match-wins ordering guarantees.
     (("count_bias_exceeds_tolerance_per_class",),
      "Not yet. The overall number of objects on the held-back images looks right, but the split "
-     "between KINDS of object doesn't — the model is finding too many of one kind and too few of "
+     "between kinds of object doesn't — the model is finding too many of one kind and too few of "
      "another, and in the total those two errors hide each other. Any result that separates the "
      "kinds (a percentage of one kind, for instance) would be wrong. Correcting the mislabelled "
      "kinds in your review, or improving the model, can help."),
