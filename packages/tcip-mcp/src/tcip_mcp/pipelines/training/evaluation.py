@@ -956,21 +956,30 @@ def run_full_frame_evaluation(
         sample_counts = {}
         paths = sorted(p for p in img_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS)
     per_image: list[dict] = []
+    n_excluded_incomplete = 0
     for p in paths:
-        r = predictor.predict_tiled(str(p), tile_size=tile_size, overlap=overlap,
-                                    global_nms_iou=global_nms_iou, postprocess=postprocess)
-        w, h = int(r["width"]), int(r["height"])
-        dt = [{"category_id": int(lab), "bbox": _xyxy_to_xywh(*b), "score": float(s)}
-              for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
         gt = []
         gt_file = lbl_dir / f"{p.stem}.json"
         if gt_file.is_file() and _gt_id_map is not None:
             # Same loader-side reader + id map the training targets use (1-indexed to match the
             # predictor's torchvision labels), so this delivery-grade GT can't diverge from training.
-            gboxes, glabels = _json_det_targets(str(gt_file), subject, attribute, _gt_id_map)
+            gboxes, glabels, n_unlabeled = _json_det_targets(str(gt_file), subject, attribute, _gt_id_map)
+            # Stage-6 review N2: an image with ANY instance unlabeled for `attribute` has
+            # incomplete GT for this scope — excluded from delivery-grade scoring entirely (the
+            # same precedent applied to a missing label file just above), never scored against its
+            # labeled subset alone, which would turn its real, unlabeled objects into false
+            # positives against the very number this function's docstring calls the delivery gate.
+            if n_unlabeled:
+                n_excluded_incomplete += 1
+                continue
             for (x1, y1, x2, y2), lab in zip(gboxes, glabels):
                 gt.append({"category_id": int(lab),
                            "bbox": _xyxy_to_xywh(x1, y1, x2, y2), "iscrowd": 0})
+        r = predictor.predict_tiled(str(p), tile_size=tile_size, overlap=overlap,
+                                    global_nms_iou=global_nms_iou, postprocess=postprocess)
+        w, h = int(r["width"]), int(r["height"])
+        dt = [{"category_id": int(lab), "bbox": _xyxy_to_xywh(*b), "score": float(s)}
+              for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
         rec = build_coco_image_record(w, h, gt, dt, image_id=p.stem)
         # K10 finding 2 residual: max_dets is honored verbatim on this gating path (no rescuing
         # sentinel) — stamp per-image cap saturation so a caller-explicit low max_dets that
@@ -992,8 +1001,11 @@ def run_full_frame_evaluation(
         "overlap": overlap, "overlap_source": overlap_source,
         "tiled": True, "eval_regime": "full-frame-tiled-inference",
         # Which images this number was computed over, and which were held out for having no
-        # ground truth — so a reviewer can reconstruct the denominator, not just the metric.
-        "scored_images": len(paths), "sample_counts": sample_counts,
+        # ground truth or incomplete attribute labeling — so a reviewer can reconstruct the
+        # denominator, not just the metric (stage-6 review N2: an excluded-incomplete image is
+        # disclosed here, not silently scored against its labeled subset).
+        "scored_images": len(per_image), "sample_counts": sample_counts,
+        "n_excluded_incomplete_attribute": n_excluded_incomplete,
     }
     # R3/D9: for a count trait, the delivery-grade count that gates the phenotype is the derived
     # criterion's tp/fp/fn (center-match for catkin), NOT AP@0.5 — kept alongside, clearly labeled.
