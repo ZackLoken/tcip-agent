@@ -330,7 +330,8 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
     images, labels = _rail_fixture(tmp_path)
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
     assert ds.sample_counts == {"annotated": 1, "confirmed_negative": 1, "skipped_unannotated": 1,
-                                "skipped_unconfirmed_empty": 1, "quarantined_stale_definition": 0}
+                                "skipped_unconfirmed_empty": 1, "skipped_incomplete_attribute": 0,
+                                "quarantined_stale_definition": 0}
 
 
 def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_path):
@@ -492,3 +493,99 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
             assert all(stamps[n] == expected_digest for n in carried_here)
             found = True
     assert found, "no split carried both a negative and its schema stamp"
+
+
+def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
+    """K4/K5, stage-6 review: the loader's own per-image target reader must accept the same
+    partially-attributed data to_coco_dataset does — an unlabeled instance is excluded, not a
+    hard abort, while an undecodable value still raises."""
+    from tcip_mcp.pipelines.data.datasets import _json_det_targets
+
+    path = tmp_path / "IMG_A.json"
+    json_io.write_annotations(path, [
+        Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30),
+                  attributes={"elongation": "dormant"}),
+        Annotation(subject="catkin", geometry=BBox(40, 40, 60, 60), attributes={}),  # unlabeled
+    ], 100, 100)
+
+    id_map = {"elongated": 0, "dormant": 1}
+    boxes, labels, n_unlabeled = _json_det_targets(str(path), "catkin", "elongation", id_map)
+    assert len(boxes) == 1 and labels == [2]  # 0-indexed 1 ("dormant") + 1 for background
+    assert n_unlabeled == 1  # the second instance, disclosed rather than silently dropped
+
+    undecodable = tmp_path / "IMG_B.json"
+    json_io.write_annotations(undecodable, [
+        Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30),
+                  attributes={"elongation": "not-a-real-value"}),
+    ], 100, 100)
+    with pytest.raises(ValueError):
+        _json_det_targets(str(undecodable), "catkin", "elongation", id_map)
+
+
+def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_path):
+    """Stage-6 review N2/NEW-1: DetectionDataset's fixed-length self.stems must not include a stem
+    with any instance unlabeled for `attribute` -- __getitem__ can't act on this per-call (the
+    dataset length is fixed at construction), so the exclusion has to happen here, matching the
+    delivery-gating paths (run_full_frame_evaluation, operating-point calibration) that already
+    exclude the whole image rather than silently training on its labeled subset."""
+    from tcip_mcp.pipelines.data.datasets import DetectionDataset
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _make_images(images_dir, ["complete", "partial"])
+    labels_dir.mkdir()
+    json_io.write_annotations(labels_dir / "complete.json", [
+        _box(10, 10, 30, 30, elongation="elongated"),
+    ], 100, 100)
+    json_io.write_annotations(labels_dir / "partial.json", [
+        _box(10, 10, 30, 30, elongation="dormant"),
+        _box(40, 40, 60, 60),  # unlabeled -- no elongation attribute at all
+    ], 100, 100)
+    _reg, id_map = _reg_id_map(attribute="elongation", values=("elongated", "dormant"))
+
+    ds = DetectionDataset(str(images_dir), str(labels_dir), subject=CATKIN,
+                          attribute="elongation", id_map=id_map)
+
+    assert ds.stems == ["complete"]
+    # The drop is recorded in the partition's own counts, under its real reason -- round 4's first
+    # attempt tracked it on a separate attribute AND filtered this category-keyed dict with stem
+    # names, which wiped it to {} (and made the all-excluded case die on a bare KeyError).
+    assert ds.sample_counts["skipped_incomplete_attribute"] == 1
+    assert ds.sample_counts["annotated"] == 1
+    assert ds.sample_counts["skipped_unconfirmed_empty"] == 0  # not a false reason
+    # The surviving stem's own target read is unaffected -- one real box, fully labeled.
+    boxes, labels = ds._det_targets("complete", "")
+    assert len(boxes) == 1
+
+
+def test_detection_dataset_excludes_incomplete_attribute_on_the_real_build_dataset_path(tmp_path):
+    """Round-4 review: the exclusion above must also fire on the path build_dataset ACTUALLY takes.
+    build_dataset assembles an in-memory COCO and passes it as coco_data, which forces
+    label_format='coco' -- so round 4's first attempt (guarded by label_format == 'json') was inert
+    exactly where it mattered, and the dropped image was reported under the false reason
+    'skipped_unconfirmed_empty'."""
+    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    root = tmp_path / "ds"
+    images_dir, labels_dir = root / "images", root / "annotations"
+    _make_images(images_dir, ["complete_a", "complete_b", "partial"])
+    labels_dir.mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(
+        Subject(name=CATKIN, attributes=(
+            Attribute(name="elongation", type="categorical", values=("elongated", "dormant")),)),)))
+    for stem in ("complete_a", "complete_b"):
+        json_io.write_annotations(labels_dir / f"{stem}.json", [
+            _box(10, 10, 30, 30, elongation="elongated")], 100, 100)
+    json_io.write_annotations(labels_dir / "partial.json", [
+        _box(10, 10, 30, 30, elongation="dormant"),
+        _box(40, 40, 60, 60),  # unlabeled
+    ], 100, 100)
+
+    built = build_dataset(task="detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
+                          subject=CATKIN, attribute="elongation")
+    ds = built.dataset if hasattr(built, "dataset") else built
+
+    assert ds.label_format == "coco"  # the branch round 4's first attempt never entered
+    assert "partial" not in ds.stems
+    assert ds.sample_counts["skipped_incomplete_attribute"] == 1
+    assert ds.sample_counts["skipped_unconfirmed_empty"] == 0
