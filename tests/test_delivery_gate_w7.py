@@ -99,15 +99,29 @@ def test_export_aggregated_csv_reconciles_sidecar_floor(tmp_path):
                               measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
-def test_export_aggregated_csv_continuous_trait_accepts_measurement_flag(tmp_path):
-    # A continuous/ordinal trait has no conf op-point — it ships on its own measurement reference.
+def test_export_aggregated_csv_continuous_trait_bare_string_never_trusted(tmp_path):
+    # K3 finding #3: a continuous/ordinal trait has no on-disk measurement-validity producer today —
+    # a bare caller-asserted measurement_validated string, with no pred_dirs to reconcile against,
+    # must never be trusted directly. Refuses without an explicit acknowledge.
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    out = tmp_path / "o.csv"
+    with pytest.raises(ValueError):
+        export_aggregated_csv([{"plant_id": "p1", "value": 4.2, "observations": 3}], str(out),
+                              trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT)
+
+
+def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowledged(tmp_path):
+    # rails-admit-valid-work: the honest provisional path still ships (stamped false), it just
+    # can't masquerade as validated on a bare string.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     out = tmp_path / "o.csv"
     export_aggregated_csv([{"plant_id": "p1", "value": 4.2, "observations": 3}], str(out),
-                          trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT)
+                          trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
+                          acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["measurement_validated"] == VALIDATED_FALSE
 
 
 # ── tabulate_counts reads the run's resolved validity, not a caller string ─
