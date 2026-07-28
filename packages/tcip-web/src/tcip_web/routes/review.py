@@ -680,10 +680,32 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         else None
     )
 
+    # K10-deferred item, closed here (K6): thread tile_size/tiled + their sources off the same
+    # sidecars already loaded above, so a review-confirmed bundle honestly reports "derived"/
+    # "explicit" instead of always falling back to "default" regardless of what the buckets
+    # actually carry. A single bucket's own stamp is used; a mixed set of sources across buckets
+    # is not resolvable to one fact, so it falls back to the honest default.
+    tile_sizes = {((sc.get("operating_point") or {}).get("tile_size") or {}).get("value")
+                  for sc in sidecars.values()}
+    tile_size_sources = {((sc.get("operating_point") or {}).get("tile_size") or {}).get("source")
+                         for sc in sidecars.values()}
+    tiled_vals = {((sc.get("operating_point") or {}).get("tiled") or {}).get("value")
+                 for sc in sidecars.values()}
+    tiled_sources = {((sc.get("operating_point") or {}).get("tiled") or {}).get("source")
+                     for sc in sidecars.values()}
+    review_tile_size = next(iter(tile_sizes)) if len(tile_sizes) == 1 else None
+    review_tile_size_source = (next(iter(tile_size_sources)) if len(tile_size_sources) == 1
+                               and review_tile_size is not None else "default")
+    review_tiled = next(iter(tiled_vals)) if len(tiled_vals) == 1 else None
+    review_tiled_source = (next(iter(tiled_sources)) if len(tiled_sources) == 1
+                           and review_tiled is not None else "default")
+
     try:
         bundle = resolve_operating_point_from_review(
             review_state, req.trait, only_completed=True, experiment_id=review_experiment_id,
-            bucket_identities=bucket_identities, staged_conf_floor=staged_conf_floor)
+            bucket_identities=bucket_identities, staged_conf_floor=staged_conf_floor,
+            tile_size=review_tile_size, tile_size_source=review_tile_size_source,
+            tiled=review_tiled, tiled_source=review_tiled_source)
     except TraitUnknownError:
         raise HTTPException(
             400,
@@ -798,3 +820,30 @@ def image_statuses(
         statuses=engine.get_all_image_statuses(),
         detection_stems=sorted(_stems_with_objects(gt_dir, pred_dir)),
     )
+
+
+class GenerationConfResponse(BaseModel):
+    # The bucket's own recorded generation confidence (the Conf floor predictions were exported
+    # at), or None when the bucket has no sidecar / no recorded value. Read-only — this is the
+    # same fact validate_reference reads to derive staged_conf_floor, exposed here without the
+    # gate run or the sidecar stamp validate_reference performs, so the Review tab can warn as
+    # soon as the breeder raises the filter (K15) instead of only after a review is complete.
+    generation_conf: Optional[float]
+
+
+@router.get("/generation_conf")
+def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
+    """The prediction bucket's own generation confidence, for the Conf >= filter warning (K15).
+
+    Raising the review's own "Conf >=" filter above this value hides low-confidence detections
+    from review; any verdict then recorded raises review_conf_threshold above it, which
+    validate_reference's identical gate reads as conf_censored. This endpoint exposes the one
+    fact needed to warn about that live, in the filter shelf, before a review is even complete.
+    """
+    _guard_path(pred_dir)
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    sidecar = read_operating_point_sidecar(pred_dir) or {}
+    conf = ((sidecar.get("operating_point") or {}).get("conf") or {}).get("value")
+    return GenerationConfResponse(
+        generation_conf=float(conf) if isinstance(conf, (int, float)) else None)
