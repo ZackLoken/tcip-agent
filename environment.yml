@@ -27,7 +27,7 @@ dependencies:
   - pip
   - pip:
       # --- core runtime ---
-      - mcp>=1.0
+      - mcp>=2
       - numpy
       - pillow>=9.0
       - tifffile>=2023.1
