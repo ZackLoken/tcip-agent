@@ -25,6 +25,10 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
+# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# catkin.yml into this test's pinned project root so trait/subject="catkin" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Finding 2 — max_dets honored verbatim (no rescuing sentinel)
