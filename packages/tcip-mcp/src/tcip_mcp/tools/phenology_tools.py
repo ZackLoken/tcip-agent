@@ -515,10 +515,8 @@ def compute_phenology(
     # held-out GT — presence of the class is not enough. Refuse unless explicitly acknowledged,
     # and in that case stamp the CSV validated=false so the un-trustworthiness travels downstream.
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE,
+        bind_classifier_validity,
         check_delivery_gate,
-        read_classifier_operating_point_sidecar,
-        read_operating_point_sidecar,
         reconcile_classifier_validity,
         reconcile_operating_point_validity,
     )
@@ -545,35 +543,9 @@ def compute_phenology(
     # recorded `trait`/`experiment_id` (written by calibrate_classifier_operating_point) must agree
     # with what's actually being delivered here; a foreign/unregistered checkpoint calibration
     # (experiment_id=None, the K3 owner decision) is not rejected for lacking one to compare against.
-    classifier_binding_note = ""
-    if classifier_state not in (None, VALIDATED_FALSE):
-        producing_experiment_ids = {
-            sc["experiment_id"]
-            for d in predictions_by_date.values()
-            if (sc := read_operating_point_sidecar(d)) is not None and sc.get("experiment_id")
-        }
-        for d in (classifier_pred_dirs or []):
-            csc = read_classifier_operating_point_sidecar(d) or {}
-            stamped_trait = csc.get("trait")
-            stamped_exp = csc.get("experiment_id")
-            # stage-6 review NEW-7 (round 4): stamped_trait is a required arg on the real writer
-            # (calibrate_classifier_operating_point) -- unlike experiment_id, a foreign checkpoint
-            # never legitimates a missing one, so None here is never trusted either, only a real
-            # match is (a bypass a hand-edited or foreign sidecar with trait/experiment_id both
-            # null would otherwise sail through unchecked, defense-in-depth against a case the real
-            # writer can't produce).
-            if stamped_trait != trait:
-                classifier_binding_note = (
-                    f"classifier_operating_point.json at {d!r} was calibrated for trait "
-                    f"{stamped_trait!r}, not {trait!r} — the stamp is not trusted for this delivery.")
-            elif stamped_exp is not None and producing_experiment_ids and stamped_exp not in producing_experiment_ids:
-                classifier_binding_note = (
-                    f"classifier_operating_point.json at {d!r} was calibrated against experiment "
-                    f"{stamped_exp!r}, not the producing run ({sorted(producing_experiment_ids)}) — "
-                    "the stamp is not trusted for this delivery.")
-            if classifier_binding_note:
-                classifier_state = VALIDATED_FALSE
-                break
+    classifier_state, classifier_binding_note = bind_classifier_validity(
+        classifier_state, classifier_pred_dirs, list(predictions_by_date.values()), trait=trait,
+    )
 
     # A delivered phenotype needs BOTH the classifier and the count operating point validated against a
     # reference sized to the trait — the one shared refuse-or-stamp gate, or an explicit acknowledge.
@@ -617,16 +589,19 @@ def compute_phenology(
     # Carry the majority-date read-semantics marker with the delivery: whether the trait's "most in
     # state" mapping to a milestone crossing is still provisional (breeders to confirm), read from the
     # spec. The column name derives from the spec too, matching phenology_csv_columns.
-    provisional = "true" if spec.majority_provisional else "false"
-    provisional_col = f"{spec.phenology_prefix}_{spec.majority_label}_provisional"
     stamp = {
         "operating_point_conf": operating_point_conf,
         "operating_point_validated": gate.stamp["operating_point"],
         "positive_state_classifier_validated": gate.stamp["classifier"],
-        provisional_col: provisional,
         "producer_model_sha256": producer.get("sha256"),
         "producer_experiment_id": producer.get("experiment_id"),
     }
+    # Only when the spec names a majority crossing — the marker qualifies that alias, and
+    # phenology_csv_columns declares the column under the same condition, so stamping it for a trait
+    # without one would raise on an unknown stamp key rather than ship a permanently-blank column.
+    if spec.majority_milestone:
+        stamp[f"{spec.phenology_prefix}_{spec.majority_label}_provisional"] = (
+            "true" if spec.majority_provisional else "false")
     csv_path = phenology.write_phenology_csv(rows, Path(output_csv_path), spec, stamp=stamp)
     # Per-milestone summary (TRAP 3 fix, K5): report reached-counts for each milestone the SPEC
     # actually declares, not a single hardcoded "50per" key — a trait authored with different
