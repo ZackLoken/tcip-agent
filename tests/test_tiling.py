@@ -132,12 +132,44 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
                               256, 256, keep_empty=True)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
                        subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
-    # Sliver cutoff is DERIVED from the class-average box size, not pinned.
+    # class_avg_size is DERIVED from the class-average box size. sliver_frac would be too, but a
+    # single box is too few to measure a size spread from (derive_sliver_frac's own min_samples
+    # guard) — an honest "underivable", not a value dressed as derived, so it falls back to 0.5.
     assert ds.class_avg_size == pytest.approx(25.6, abs=1.0)
+    assert ds.sliver_frac == pytest.approx(0.5)
+    assert ds.sliver_frac_source == "documented default (underivable: too few GT boxes to measure a spread)"
     assert ds.min_box_size == pytest.approx(0.5 * ds.class_avg_size)
     # skip_empty now defaults False -> tiles far from the object are kept as valid negatives.
     empties = sum(1 for i in range(len(ds)) if ds[i][1]["boxes"].shape[0] == 0)
     assert empties > 0
+
+
+def test_tiled_dataset_derives_sliver_frac_with_enough_boxes(tmp_path):
+    # With real spread and enough boxes (>= min_samples), the sliver cutoff is genuinely derived,
+    # end to end through build_dataset — not just the pure function in test_derivations.py.
+    pytest.importorskip("torch")
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.derivations import derive_sliver_frac
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (256, 256), (120, 120, 120)).save(images_dir / "a.jpg")
+    # 6 boxes with real size spread (10..90px char size), all near the top-left so tiling geometry
+    # is not the point of this test.
+    sizes = [10.0, 26.0, 42.0, 58.0, 74.0, 90.0]
+    anns = [Annotation(subject="catkin", geometry=BBox(2.0, 2.0 + 5.0 * i, 2.0 + s, 2.0 + 5.0 * i + s))
+            for i, s in enumerate(sizes)]
+    json_io.write_annotations(str(labels_dir / "a.json"), anns, 256, 256, keep_empty=True)
+    ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
+                       subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
+    assert ds.sliver_frac_source == "GT characteristic-size spread (p10 / mean)"
+    assert ds.sliver_frac == pytest.approx(derive_sliver_frac(sizes))
+    assert ds.sliver_frac != 0.5  # genuinely derived, not the pinned constant it replaces
 
 
 def test_tiled_dataset_collate_roundtrip(tmp_path):
