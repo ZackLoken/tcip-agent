@@ -13,6 +13,7 @@ import {
 import { api } from "@/api/client";
 import {
   resultsApi,
+  type BloomRequest,
   type OnsetRow,
   type PerPlantRow,
   type PlantMappingSummary,
@@ -74,10 +75,14 @@ export function ResultsTab() {
   const [onset, setOnset] = useState<OnsetRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  // The last-computed predictions_by_date, kept so CSV export can send it for the classifier/
-  // count-operating-point reconciliation (K15: exportCsv now needs real bucket evidence, not a
-  // caller-asserted row string).
-  const [lastPredsMap, setLastPredsMap] = useState<Record<string, string>>({});
+  // The exact request the displayed numbers came from — the CSV door recomputes from these inputs
+  // rather than being handed the rows, so export and screen share one producer.
+  const [lastRequest, setLastRequest] = useState<BloomRequest | null>(null);
+  // Reconciled evidence for what is currently displayed. `provisional` is true whenever a dimension
+  // lacked on-disk backing, so the tables can say so instead of rendering a bloom date as "valid".
+  const [provisional, setProvisional] = useState(false);
+  const [validity, setValidity] = useState<Record<string, string>>({});
+  const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<string | null>(null);
 
   useEffect(() => {
     if (!datasetRoot) return;
@@ -132,7 +137,7 @@ export function ResultsTab() {
     }
   }
 
-  async function compute() {
+  async function compute(acknowledgeUnvalidated = false) {
     if (!projectRoot) return;
     setLoading(true);
     setError(null);
@@ -142,13 +147,20 @@ export function ResultsTab() {
         const dir = predDirFor(d, dateModel[d] ?? "");
         if (dir) predsMap[d] = dir;
       }
-      setLastPredsMap(predsMap);
-      const curveRes = await resultsApi.perPlantCurves({
+      const request = {
         project_root: projectRoot,
         mapping_path: mappingPath,
         predictions_by_date: predsMap,
         trait: TRAIT,
-      });
+        acknowledge_unvalidated: acknowledgeUnvalidated,
+      };
+      setLastRequest(request);
+      const curveRes = await resultsApi.perPlantCurves(request);
+      // The numbers and the evidence that qualifies them arrive together, so the tables below can
+      // never render an unvalidated bloom measurement as though it were a delivery.
+      setProvisional(curveRes.provisional);
+      setValidity(curveRes.validated);
+      setUnvalidatedRefusal(null);
       const unclassified = curveRes.elongation_classified === false;
       setElongationUnclassified(unclassified);
       setCurves(curveRes.rows ?? []);
@@ -158,24 +170,32 @@ export function ResultsTab() {
         // disabled export buttons + the compute_phenology MCP tool's hard refusal).
         setOnset([]);
       } else {
-        const onsetRes = await resultsApi.onsetDates(curveRes.rows ?? [], TRAIT);
+        // Same inputs, not the curve rows: the server recomputes rather than trusting a table the
+        // client hands back, so a milestone date and the curve it was read off cannot disagree.
+        const onsetRes = await resultsApi.onsetDates(request);
         setOnset(onsetRes.rows ?? []);
       }
     } catch (e) {
-      setError(String(e));
+      // The server refuses unvalidated evidence by default. Surface WHY, plus the one-click way to
+      // see the numbers anyway (clearly marked provisional), so an uncalibrated operating point is
+      // a signposted next step rather than a dead end.
+      const detail = e instanceof Error ? e.message : String(e);
+      if (!acknowledgeUnvalidated && /unvalidated|not validated/i.test(detail)) {
+        setUnvalidatedRefusal(detail);
+        setCurves([]);
+        setOnset([]);
+      } else {
+        setError(detail);
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  async function downloadCsv(
-    rows: unknown[],
-    filename: string,
-    exportKind: "phenology" | "diagnostic",
-  ) {
-    if (rows.length === 0) return;
+  async function downloadCsv(payload: "curves" | "milestones", filename: string) {
+    if (!lastRequest) return;
     try {
-      const blob = await resultsApi.exportCsv(rows, filename, exportKind, lastPredsMap);
+      const blob = await resultsApi.exportCsv(lastRequest, payload, filename);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -189,18 +209,20 @@ export function ResultsTab() {
     }
   }
 
-  // Measurement-integrity guard: never export a bloom CSV built on predictions that carry
-  // no elongation class. Mirrors the compute_phenology MCP tool, which hard-refuses the same
-  // case, so the GUI and the agent surface behave identically (see CLAUDE.md invariant).
+  // Measurement-integrity guard: never export a bloom CSV built on predictions that carry no
+  // elongation class, or on provisional evidence. Mirrors compute_phenology, which hard-refuses
+  // both, so the GUI and the agent surface behave identically (see CLAUDE.md invariant). The
+  // server refuses either case regardless; these keep the button from promising what it can't do.
+  const exportBlocked = elongationUnclassified || provisional;
   const downloadOnsetCsv = () => {
-    if (elongationUnclassified) return;
-    void downloadCsv(onset, "catkin_phenology.csv", "phenology");
+    if (exportBlocked) return;
+    void downloadCsv("milestones", "catkin_phenology.csv");
   };
   const downloadCurvesCsv = () => {
-    if (elongationUnclassified) return;
+    if (exportBlocked) return;
     // A curve export is the same delivered bloom measurement as the milestone one, just
-    // un-summarised — it declares itself phenology and takes the identical gate.
-    void downloadCsv(curves, "catkin_curves.csv", "phenology");
+    // un-summarised — same producer, same gate.
+    void downloadCsv("curves", "catkin_curves.csv");
   };
 
   const chartData: DateRow[] = useMemo(() => {
@@ -233,6 +255,8 @@ export function ResultsTab() {
     const cols = new Set<string>();
     onset.forEach((r) => {
       Object.keys(r).forEach((k) => {
+        // `_date` only: each milestone's `*_date_bound` is rendered beside its own date below
+        // rather than as a column of its own.
         if (!known.has(k) && k.endsWith("_date")) cols.add(k);
       });
     });
@@ -355,21 +379,48 @@ export function ResultsTab() {
                 measurement, so CSV export is disabled. Run the elongation classifier first.
               </div>
             )}
-            <button className="tcip-btn-primary" onClick={compute} disabled={loading}>
+            {unvalidatedRefusal && (
+              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
+                <div>
+                  These predictions have no validated operating point on disk, so this is not yet a
+                  deliverable bloom measurement. Calibrate first — or look at the numbers as
+                  provisional, which will not let you export them.
+                </div>
+                <div className="text-tcip-muted">{unvalidatedRefusal}</div>
+                <button
+                  className="tcip-btn text-[11px] self-start"
+                  onClick={() => void compute(true)}
+                  disabled={loading}
+                >
+                  Show provisional numbers
+                </button>
+              </div>
+            )}
+            {provisional && (
+              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
+                Provisional — shown for inspection only, not a deliverable phenotype. Unvalidated:{" "}
+                {Object.entries(validity)
+                  .filter(([, state]) => state === "false")
+                  .map(([dim]) => dim)
+                  .join(", ") || "unknown"}
+                . CSV export stays disabled until both dimensions are validated on disk.
+              </div>
+            )}
+            <button className="tcip-btn-primary" onClick={() => void compute()} disabled={loading}>
               {loading ? "Computing…" : "Compute curves + onset dates"}
             </button>
             <div className="flex gap-1">
               <button
                 className="tcip-btn flex-1 text-[11px]"
                 onClick={downloadCurvesCsv}
-                disabled={curves.length === 0 || elongationUnclassified}
+                disabled={curves.length === 0 || exportBlocked}
               >
                 Curves CSV
               </button>
               <button
                 className="tcip-btn-primary flex-1 text-[11px]"
                 onClick={downloadOnsetCsv}
-                disabled={onset.length === 0 || elongationUnclassified}
+                disabled={onset.length === 0 || exportBlocked}
               >
                 Onset CSV
               </button>
@@ -457,7 +508,7 @@ export function ResultsTab() {
                     <tr key={r.plant_id} className="border-t border-tcip-border first:border-t-0">
                       <td className="py-1.5 pr-3 font-mono">{r.plant_id}</td>
                       <td className="pr-3">{r.accession ?? "—"}</td>
-                      <td className="pr-3 tabular-nums">{r.n_datapoints}</td>
+                      <td className="pr-3 tabular-nums">{r.n_dates}</td>
                       <td className="pr-3">
                         {neverObserved ? (
                           <span
@@ -465,6 +516,18 @@ export function ResultsTab() {
                             title="Fully classified and fully observed, but no detections on any date — nothing to derive milestones from."
                           >
                             no observations
+                          </span>
+                        ) : rowValid && provisional ? (
+                          // Coverage is complete, but the measurement behind these dates has no
+                          // validated operating point. The banner announcing that sits two panels
+                          // up and scrolls out of view, so the row must say so where it is read —
+                          // a bloom date beside a plain "valid" is exactly the unearned precision
+                          // claim this round exists to prevent.
+                          <span
+                            className="text-tcip-fp"
+                            title="Coverage is complete, but the operating point behind these dates is not validated on disk — provisional, not a deliverable phenotype."
+                          >
+                            provisional
                           </span>
                         ) : rowValid ? (
                           <span className="text-tcip-muted">valid</span>
@@ -477,11 +540,36 @@ export function ResultsTab() {
                           </span>
                         )}
                       </td>
-                      {milestoneColumns.map((c) => (
-                        <td key={c} className="pr-3 tabular-nums">
-                          {(r[c] as string | null) ?? "—"}
-                        </td>
-                      ))}
+                      {milestoneColumns.map((c) => {
+                        const date = r[c] as string | null;
+                        const bound = r[`${c}_bound`] as string | null;
+                        // A left-censored crossing means the FIRST observation already met the
+                        // target, so the true date is only an upper bound — rendering it as a plain
+                        // date is a precision claim the data does not support. The bound column was
+                        // dropped entirely here until now, while the CSV has carried it since
+                        // round 5.
+                        return (
+                          <td key={c} className="pr-3 tabular-nums">
+                            {date ?? "—"}
+                            {date && bound && bound !== "exact" && (
+                              <span
+                                className={
+                                  bound === "left_censored"
+                                    ? "ml-1 text-tcip-fp"
+                                    : "ml-1 text-tcip-muted"
+                                }
+                                title={
+                                  bound === "left_censored"
+                                    ? "Left-censored: the first observation already met this target, so the true date is at or before this one."
+                                    : "Interpolated between two observed dates."
+                                }
+                              >
+                                {bound === "left_censored" ? "≤" : "~"}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   );
                 })}
