@@ -26,6 +26,10 @@ from pathlib import Path
 
 import pytest
 
+# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# catkin.yml into this test's pinned project root so trait="catkin" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+
 torch = pytest.importorskip("torch")
 
 from tcip_annotation import json_io  # noqa: E402
