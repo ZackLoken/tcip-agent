@@ -49,6 +49,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # Pydantic schema: type/structure of data/training.
     issues: list[str] = list(validate_train_config_schema(config))
+    warnings: list[str] = []
 
     # model_source presence + builder importability (the one build path).
     model_source = config.get("model_source")
@@ -144,6 +145,35 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 except ValueError as exc:
                     issues.append(f"data.split: {exc}")
 
+    # Trainable-sample coverage (round 12, 2026-07-29): trainable_stems' own partition was computed
+    # by DetectionDataset/InstanceSegDataset and then thrown away — a run whose label store admits
+    # only a fraction of its annotated images (an unconfirmed-empty backlog, a stale-schema
+    # quarantine, incomplete attribute coverage) reported "valid, no warnings" with no visibility
+    # into what would silently train on far fewer images than the operator expects. Never gating —
+    # a real project legitimately has unconfirmed/unannotated images — and only fires for the known
+    # loaders (a dataset_source's own admission logic is the agent's to report, not this rail's).
+    task_for_coverage = (model_source.get("task") if isinstance(model_source, dict) else None) \
+        or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
+    if (isinstance(data_cfg, dict) and data_cfg.get("dataset_source") is None
+            and task_for_coverage in ("detection", "instance_seg")):
+        images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
+        if images_dir and labels_dir and Path(images_dir).is_dir() and Path(labels_dir).is_dir():
+            try:
+                from tcip_mcp.pipelines.data.datasets import trainable_stems
+                stems, sample_counts = trainable_stems(
+                    labels_dir, images_dir, subject=data_cfg.get("subject"), date=data_cfg.get("date"))
+            except Exception:
+                stems, sample_counts = None, None
+            if sample_counts:
+                dropped = {k: v for k, v in sample_counts.items()
+                          if k not in ("annotated", "confirmed_negative") and v}
+                total = sum(sample_counts.values())
+                n_dropped = sum(dropped.values())
+                if n_dropped and total:
+                    warnings.append(
+                        f"data: {n_dropped}/{total} candidate images ({n_dropped / total:.0%}) will "
+                        f"not train — {dict(sorted(dropped.items()))}. {len(stems)} stem(s) admitted.")
+
     # Training config validation
     train_cfg = config.get("training", {})
     batch_size = train_cfg.get("batch_size", 2)
@@ -153,7 +183,6 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     # Per-stage 'epochs' is required; 'lr' is optional (StageSpec) and the trainer
     # reads learning rates from config['optimizer'], never from a stage. Absent
     # stages are fine — launch_training supplies its own default schedule.
-    warnings: list[str] = []
     for i, stage in enumerate(train_cfg.get("stages") or []):
         if "epochs" not in stage:
             issues.append(f"Stage {i} missing 'epochs'")
