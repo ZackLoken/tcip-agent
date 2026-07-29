@@ -9,6 +9,10 @@ import json
 
 import pytest
 
+# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# catkin.yml into this test's pinned project root so trait="catkin" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+
 
 # --------------------------------------------------------------------------
 # preflight_config — per-stage 'lr' is optional (trainer never reads it)
@@ -64,6 +68,64 @@ def test_preflight_config_warns_on_ignored_per_stage_lr(tmp_path):
 
     # No per-stage lr -> no warning.
     cfg["training"]["stages"] = [{"freeze_to": -1, "epochs": 5}]
+    assert preflight_config(cfg)["warnings"] == []
+
+
+def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
+    """Round 12 (2026-07-29): trainable_stems' own partition was computed by
+    DetectionDataset/InstanceSegDataset and thrown away — a run whose label store admits only a
+    fraction of its candidate images used to report "valid, no warnings" with no visibility into
+    what would silently train on far fewer images than the operator expects."""
+    pytest.importorskip("torch")
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "annotations"
+    imgs.mkdir()
+    lbls.mkdir()
+    # 1 annotated, 3 unannotated (no label file at all) -> 75% of candidates won't train.
+    Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
+    json_io.write_annotations(lbls / "ann.json",
+                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+    for stem in ("a", "b", "c"):
+        Image.new("RGB", (20, 20)).save(imgs / f"{stem}.jpg")
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin"},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg)
+    assert r["valid"] is True  # informational only, never gating
+    assert any("3/4 candidate images (75%) will not train" in w for w in r["warnings"]), r["warnings"]
+    assert any("skipped_unannotated" in w for w in r["warnings"])
+
+
+def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
+    pytest.importorskip("torch")
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "annotations"
+    imgs.mkdir()
+    lbls.mkdir()
+    Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
+    json_io.write_annotations(lbls / "ann.json",
+                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin"},
+        "training": {"batch_size": 2},
+    }
     assert preflight_config(cfg)["warnings"] == []
 
 
