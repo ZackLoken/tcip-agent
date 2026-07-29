@@ -70,6 +70,29 @@ def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
 
 
+@pytest.fixture
+def seed_catkin_trait_spec(tmp_path: Path, _pin_platform_root):
+    """Seed a real catkin.yml into this test's pinned project root (round 10, 2026-07-29).
+
+    There are no built-in traits anymore — ``get_trait("catkin")`` only resolves where a config
+    file actually exists (``traits.py``). Writing the same values ``tests/_trait_fixtures.CATKIN``
+    holds keeps a test that calls ``get_trait("catkin")``/``registered_traits()`` without authoring
+    its own config working, the same as when a builtin was unconditionally present. NOT autouse: an
+    unrelated test's project root should stay exactly as empty as it would without this cluster's
+    change — request this explicitly in a test that actually needs catkin registered.
+    """
+    import dataclasses
+
+    import yaml
+
+    from tests._trait_fixtures import CATKIN
+
+    specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    data = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(CATKIN).items()}
+    (specs_dir / "catkin.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
 #: The single detection subject the canonical test dataset declares (``data_dir``).
 DATA_DIR_SUBJECT = "catkin"
 
