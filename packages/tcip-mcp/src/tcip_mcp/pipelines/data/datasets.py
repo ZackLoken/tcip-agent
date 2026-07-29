@@ -738,7 +738,7 @@ class TiledDetectionDataset(BaseImageDataset):
         base: "DetectionDataset",
         tile_size: int = 224,
         overlap: float = 0.2,
-        sliver_frac: float = 0.5,
+        sliver_frac: float | None = None,
         dedup_iou: float = 0.8,
         skip_empty: bool = False,
         transforms: Any = None,
@@ -746,6 +746,7 @@ class TiledDetectionDataset(BaseImageDataset):
         from tcip_mcp.pipelines.data.tiling import (
             compute_stride, tile_positions, clip_boxes_to_tile, dedup_boxes,
         )
+        from tcip_mcp.pipelines.derivations import derive_sliver_frac
 
         self.base = base
         # This wrapper does its own channel-aware reads rather than delegating to base. Inherit the
@@ -802,6 +803,21 @@ class TiledDetectionDataset(BaseImageDataset):
             self._decoded_frame[stem] = (int(w), int(h))
 
         self.class_avg_size = float(np.mean(char_sizes)) if char_sizes else 0.0
+        # A caller-supplied fraction wins; otherwise derive it from this dataset's own size spread
+        # (a class with wide natural size variation needs a lower cutoff than a tightly-sized one —
+        # a fixed fraction can't tell a genuinely small-but-complete object from a real tile-seam
+        # fragment). Falls back to 0.5 only when the spread itself is underivable (too few boxes to
+        # measure a spread from, or none at all).
+        if sliver_frac is None:
+            sliver_frac = derive_sliver_frac(char_sizes)
+            self.sliver_frac_source = (
+                "GT characteristic-size spread (p10 / mean)" if sliver_frac is not None
+                else "documented default (underivable: too few GT boxes to measure a spread)")
+            if sliver_frac is None:
+                sliver_frac = 0.5
+        else:
+            self.sliver_frac_source = "explicit"
+        self.sliver_frac = sliver_frac
         self.min_box_size = sliver_frac * self.class_avg_size
 
         # Pass 2: tile using the derived sliver cutoff.
