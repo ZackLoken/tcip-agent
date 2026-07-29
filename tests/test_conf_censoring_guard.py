@@ -24,6 +24,11 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     resolve_operating_point,
 )
 
+# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# catkin.yml into this test's pinned project root so resolve_operating_point("catkin", ...) keeps
+# resolving by default.
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+
 N_IMAGES = 20
 OBJECTS_PER_IMAGE = 80
 
