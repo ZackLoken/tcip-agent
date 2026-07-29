@@ -229,7 +229,7 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
 
 def test_phenology_columns_include_producer_identity():
     from tcip_mcp.pipelines.postprocessing.phenology import phenology_csv_columns
-    from tcip_mcp.traits import CATKIN
+    from tests._trait_fixtures import CATKIN
 
     columns = phenology_csv_columns(CATKIN)
     assert "producer_model_sha256" in columns
