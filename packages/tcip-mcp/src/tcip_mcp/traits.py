@@ -48,9 +48,10 @@ class TraitSpec:
     # What "a hit" means when validating counts. For small objects, center-match (IoU is noise).
     localization: str = CENTER_MATCH
     # How the localization tolerance is derived (the recipe string names it; ``localization_tolerance_frac``
-    # is the single owner of the multiplier it names, read by the operating-point / eval surfaces).
+    # is the fallback multiplier when a caller has no GT to derive one from — the real per-dataset
+    # value comes from ``derivations.derive_localization_tolerance_frac`` at runtime).
     localization_tolerance: str = "half_class_avg_size"
-    localization_tolerance_frac: float = 0.5  # the "half" in half_class_avg_size — one owner, no scattered 0.5s
+    localization_tolerance_frac: float = 0.5  # fallback only — see derive_localization_tolerance_frac
     # The class the elongated/positive call resolves to in classes.json, by NAME (the id is a mapping
     # FACT derived from the labels, not a pinned magic number). Empty = the trait has no positive class.
     positive_class_name: str = ""
@@ -69,8 +70,11 @@ class TraitSpec:
     # than from literals in the phenology module (catkin -> catkin_elongation_date / catkin_05per_date).
     phenology_prefix: str = ""
     majority_label: str = ""
-    # How the tile-seam sliver cutoff is derived (the policy string names the basis; ``sliver_frac`` owns
-    # the multiplier). Partial objects count unless below ``sliver_frac * class_avg_size``.
+    # How the tile-seam sliver cutoff is derived (the policy string names the basis). Partial objects
+    # count unless below ``sliver_frac * class_avg_size``. Not read by ``TiledDetectionDataset``
+    # directly — it derives its own default from the dataset's own size spread
+    # (``derivations.derive_sliver_frac``) unless the caller passes an explicit override; this field
+    # is that optional override, not a value the platform applies for you.
     sliver_policy: str = "class_avg_size"
     sliver_frac: float = 0.5
     # Max acceptable mean per-image count bias on the held-out split for the operating point to count
