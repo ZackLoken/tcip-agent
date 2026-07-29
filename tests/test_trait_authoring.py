@@ -3,7 +3,11 @@
 Pins the softened scope-provisional behavior: registering trait #2 is a breeder-authored config
 edit (cross-checked against the crops.yml controlled vocab, never agent-invented), the elongated
 class id is a mapping fact derived from classes.json by name (never a pinned default), and the
-provisional 95%-mapping marker travels with the delivery. Catkin's built-in semantics are unchanged.
+provisional 95%-mapping marker travels with the delivery. There are no built-in traits (round 10,
+2026-07-29) — catkin is authored the same way as any other trait; this module's ``pytestmark``
+requests ``conftest.py``'s ``seed_catkin_trait_spec``, which writes a real config file matching
+``tests/_trait_fixtures.CATKIN`` into this test's pinned project root, so ``get_trait("catkin")``
+keeps resolving by default the way it did when a builtin was unconditionally present.
 """
 
 from __future__ import annotations
@@ -15,12 +19,14 @@ import pytest
 
 from tcip_mcp import traits
 from tcip_mcp.traits import (
-    CATKIN,
     TraitUnknownError,
     get_trait,
     load_trait_specs,
     registered_traits,
 )
+from tests._trait_fixtures import CATKIN
+
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
 # ── R1: config-driven authoring, crops.yml-cross-checked ──────────────────
@@ -80,23 +86,25 @@ def test_missing_specs_dir_yields_no_config(tmp_path: Path):
     assert load_trait_specs(specs_dir=tmp_path / "nope") == []
 
 
-def test_registry_unions_builtins_and_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    # Point the default specs dir at an absolute tmp path (resolve_state returns it unchanged).
+def test_registry_reads_every_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # Point the default specs dir at an absolute tmp path (resolve_state returns it unchanged), with
+    # two authored files — the registry must read every one, not just the first (no builtin to fall
+    # back to if it stopped short).
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
+    _write_spec(tmp_path, "catkin", {"delivers": ["catkin_05per_date"]})
     _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"]})
-    assert "catkin" in registered_traits()
+    assert set(registered_traits()) == {"catkin", "leaf"}
     assert get_trait("leaf").delivers == ("leaf_length",)
 
 
-def test_builtins_win_on_name_collision(tmp_path: Path):
-    # A config file cannot redefine a built-in trait's semantics.
+def test_config_authored_catkin_is_the_real_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # Round 10 (2026-07-29) removed the prior precedence bug where a built-in Python object silently
+    # outranked a config file authoring the same trait name. There is no built-in anymore, so an
+    # authored catkin.yml is simply what get_trait("catkin") returns — proven here by a value a real
+    # builtin would never have carried.
+    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
     _write_spec(tmp_path, "catkin", {"delivers": ["catkin_05per_date"], "count_bias_tolerance": 99.0})
-    specs = load_trait_specs(specs_dir=tmp_path)
-    assert specs and specs[0].count_bias_tolerance == 99.0  # the config parses...
-    # ...but the live registry keeps the built-in (guaranteed by _all_traits' update order).
-    merged = {s.name: s for s in specs}
-    merged.update({t.name: t for t in (CATKIN,)})
-    assert merged["catkin"].count_bias_tolerance == 1.0
+    assert get_trait("catkin").count_bias_tolerance == 99.0
 
 
 def test_unknown_trait_still_hard_fails():
@@ -104,9 +112,13 @@ def test_unknown_trait_still_hard_fails():
         get_trait("banana")
 
 
-def test_catkin_builtin_semantics_unchanged():
+def test_catkin_config_semantics_match_reference_fixture():
+    # This module's pytestmark seeds a real catkin.yml (round 10) matching tests/_trait_fixtures.CATKIN
+    # — proves the config path round-trips every field faithfully, not just the ones this test
+    # happens to check by name below. Config-loaded specs are rebuilt fresh per call (traits.py),
+    # never module-load singletons, so this is value equality, not identity.
     t = get_trait("catkin")
-    assert t is CATKIN
+    assert t == CATKIN
     assert t.positive_class_name == "elongated"
     assert t.localization_tolerance_frac == 0.5
     assert t.sliver_frac == 0.5
@@ -117,8 +129,9 @@ def test_catkin_builtin_semantics_unchanged():
         "catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"}
 
 
-def test_builtin_delivers_are_all_in_crops_vocab():
-    # Guardrail: the built-in specs must themselves obey the controlled vocab they enforce on config.
+def test_reference_fixture_delivers_are_all_in_crops_vocab():
+    # Guardrail: the local test fixture must itself obey the controlled vocab it enforces on config —
+    # else this whole suite would be exercising an off-vocab trait shape no real config could load.
     vocab = traits._crops_vocab()
     assert vocab, "crops.yml vocab should be loadable in the repo checkout"
     for name in CATKIN.delivers:
