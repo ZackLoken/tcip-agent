@@ -194,9 +194,14 @@ class Crossing:
         may have happened any time before it; this date is an upper bound, not a measured crossing
         (K4: the prior bare-tuple return made this indistinguishable from an interpolated date).
       - ``"interpolated"``: linearly interpolated between the two bracketing observed dates.
+      - ``"right_censored"``: the LAST observed point still hasn't met the target — the true crossing,
+        if it happens at all, is after this date; this date is a lower bound, the mirror of
+        ``left_censored`` at the other end of the observed window (round 12, 2026-07-29: the prior
+        bare ``None`` made "not yet reached, but we watched through this date" indistinguishable from
+        "no information at all").
     ``gap_days``: for ``interpolated``, the number of days between the two bracketing observations
     (a wide gap is weaker evidence for the same interpolated date) — ``0`` for ``exact``/unknown for
-    ``left_censored`` (no left bracket exists).
+    ``left_censored``/``right_censored`` (no bracket on the censored side exists).
     """
 
     date: str
@@ -208,9 +213,10 @@ def crossing_date(series: list[tuple[str, float]], target: float) -> Optional[Cr
     """Earliest date the fraction curve reaches ``>= target``, with its evidentiary bound (K4).
 
     Linear interpolation between neighbouring observed dates when the crossing falls between two
-    points; a left-censored crossing (the first observed point already meets the target) is flagged
-    as such rather than silently returned as if it were a real single-date crossing. ``None`` if the
-    curve never reaches the target.
+    points; a left-censored crossing (the first observed point already meets the target) or a
+    right-censored one (the last observed point still hasn't) is flagged as such rather than
+    silently returned as if it were a real single-date crossing, or as a bare ``None`` indistinguishable
+    from no observations at all. ``None`` only when there are no real observed points to begin with.
     """
     points = _real_points(series)
     if not points:
@@ -227,7 +233,7 @@ def crossing_date(series: list[tuple[str, float]], target: float) -> Optional[Cr
             t = max(0.0, min(1.0, (target - r1) / (r2 - r1))) if r2 != r1 else 1.0
             est = date(y1, m1, day1) + timedelta(days=round(t * gap))
             return Crossing(est.isoformat(), "interpolated", gap_days=gap)
-    return None
+    return Crossing(iso(points[-1][0]), "right_censored")
 
 
 def elongation_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
