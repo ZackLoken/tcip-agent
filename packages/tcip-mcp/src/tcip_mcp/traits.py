@@ -107,13 +107,9 @@ class TraitUnknownError(KeyError):
 
 
 # --- Built-in specs ---------------------------------------------------------
-# Hazelnut catkin bloom (Phase 1). Semantics confirmed with the domain expert 2026-07-10:
-#   1. elongated = a learned texture call (salt-and-peppery frills/gills), not geometry
-#      (length:width too variable); how the call is produced is the agent's pipeline choice.
-#   2. "a hit" = center within ~half the class's average size (IoU is noise at ~40px).
-#   3. phenotype = count-unbiased on elongated and total counts -> the elongated fraction.
-#   4. milestones 0.05/0.50/0.95 on the elongated fraction.
-#   5. tile-seam slivers dropped below a class-average-size threshold.
+# Working assumptions, not a validated definition (2026-07-29: the prior "confirmed with the domain
+# expert" claim here was fabricated and removed) — and arguably shouldn't be a hardcoded builtin at
+# all rather than authored via the config path below. See project chat, not this comment, for detail.
 CATKIN = TraitSpec(
     name="catkin",
     count_objective=COUNT_UNBIASED,
