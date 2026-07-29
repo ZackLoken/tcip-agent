@@ -20,6 +20,10 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     evaluate,
 )
 
+# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# catkin.yml into this test's pinned project root so trait="catkin" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+
 
 # ======================================================================
 # CV9 — detection val-loss must include all-negative images
