@@ -102,6 +102,87 @@ def _neighbor_max_ious(boxes: Sequence[Sequence[float]]) -> list[float]:
     return iou.max(axis=1).tolist()
 
 
+def _neighbor_min_center_distances(boxes: Sequence[Sequence[float]]) -> list[float]:
+    """Each box's distance to its nearest same-image neighbor's center (xywh px); fewer than 2 boxes -> []."""
+    import numpy as np
+    if len(boxes) < 2:
+        return []
+    b = np.asarray(boxes, dtype=float)
+    cx, cy = b[:, 0] + b[:, 2] / 2.0, b[:, 1] + b[:, 3] / 2.0
+    dx = cx[:, None] - cx[None, :]
+    dy = cy[:, None] - cy[None, :]
+    dist = np.sqrt(dx ** 2 + dy ** 2)
+    np.fill_diagonal(dist, np.inf)
+    return dist.min(axis=1).tolist()
+
+
+def derive_localization_tolerance_frac(
+    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
+    percentile: float = 10.0, margin_frac: float = 0.5,
+    clamp: tuple[float, float] = (0.1, 0.75),
+) -> float | None:
+    """Center-match tolerance, as a fraction of the class's characteristic size, from the GT's own
+    nearest-neighbor spacing — or ``None`` if underivable.
+
+    A tolerance that reaches into a neighboring object's territory starts double-matching two
+    distinct nearby objects to the same detection, so it has to stay well inside how close real
+    same-class neighbors actually sit: take each GT box's distance to its nearest same-image
+    neighbor, pool that across images, take a low percentile (the closest real pairs set the
+    ceiling a safe tolerance cannot cross) with a safety margin, and normalize by the same
+    characteristic size ``gt_class_avg_size`` measures, so the fraction is comparable across
+    datasets. No image anywhere has two or more of this class -> ``None`` (underivable; the caller
+    stamps an honest default, never a derivation label on that number).
+
+    ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
+    filtered to the trait's own class.
+    """
+    import numpy as np
+    dists: list[float] = []
+    sizes: list[float] = []
+    for boxes in gt_boxes_per_image:
+        dists.extend(_neighbor_min_center_distances(boxes))
+        sizes.extend((max(w, 0.0) * max(h, 0.0)) ** 0.5 for _, _, w, h in boxes)
+    if not dists or not sizes:
+        return None
+    avg_size = float(np.mean(sizes))
+    if avg_size <= 0:
+        return None
+    lo, hi = clamp
+    raw = float(np.percentile(dists, percentile)) * margin_frac / avg_size
+    return float(min(max(raw, lo), hi))
+
+
+def derive_sliver_frac(
+    char_sizes: Sequence[float], *, percentile: float = 10.0,
+    clamp: tuple[float, float] = (0.25, 0.9), min_samples: int = 5,
+) -> float | None:
+    """Tile-seam sliver cutoff, as a fraction of the class's characteristic size, from the GT's own
+    size spread — or ``None`` if underivable.
+
+    The cutoff has to tell a genuinely small-but-complete object (natural size variation, e.g. an
+    earlier growth/bloom stage) from a real object a tile boundary clipped down to a fragment — a
+    fixed fraction can't: a class with wide natural size variation needs a lower cutoff or it
+    discards real small instances as slivers, while a tightly-sized class can use a higher one. So
+    take a low percentile of this dataset's own characteristic-size distribution (the small end of
+    genuinely complete objects) relative to its mean, clamped to a sane range. Fewer than
+    ``min_samples`` boxes -> ``None``: a percentile from a handful of points is not a spread, it is
+    noise (with 1-2 boxes the ratio is trivially ~1.0 regardless of the class's real variation) — the
+    caller stamps an honest default, never a derivation label on that number.
+
+    ``char_sizes`` is ``sqrt(w*h)`` per GT box (px), already filtered to the trait's own class.
+    """
+    import numpy as np
+    sizes = [float(s) for s in char_sizes if s > 0]
+    if len(sizes) < min_samples:
+        return None
+    mean = float(np.mean(sizes))
+    if mean <= 0:
+        return None
+    lo, hi = clamp
+    raw = float(np.percentile(sizes, percentile)) / mean
+    return float(min(max(raw, lo), hi))
+
+
 def band_normalization_stats(
     image_paths: Sequence[str | Path], num_channels: int, *, max_images: int = 50,
 ) -> tuple[list[float], list[float]] | None:
@@ -189,6 +270,8 @@ DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     "F1-max center-match sweep": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
     "F1-max center-match sweep over review verdicts": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
     "GT neighbor-IoU distribution (p99 + margin)": "tcip_mcp.pipelines.derivations.derive_cross_tile_nms",
+    "GT nearest-neighbor spacing (p10 + margin)": "tcip_mcp.pipelines.derivations.derive_localization_tolerance_frac",
+    "GT characteristic-size spread (p10 / mean)": "tcip_mcp.pipelines.derivations.derive_sliver_frac",
     "~1.5x p99 GT objects/image": "tcip_mcp.pipelines.operating_point._max_dets_from_density",
     "model imgsz / persisted training geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
     "persisted training tile geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
