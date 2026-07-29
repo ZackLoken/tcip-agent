@@ -195,4 +195,25 @@ describe("ResultsTab onset table validity marker", () => {
     expect(screen.queryByText("valid")).not.toBeInTheDocument();
     expect(screen.queryByText("incomplete")).not.toBeInTheDocument();
   });
+
+  it("renders a right-censored milestone with its own marker, not the interpolated one (round 12)", async () => {
+    await computeWithOnsetRows([
+      {
+        plant_id: "P1",
+        accession: null,
+        n_dates: 1,
+        n_dates_unclassified: 0,
+        n_dates_missing_images: 0,
+        n_observed_dates: 1,
+        catkin_95per_date: "2026-03-12",
+        catkin_95per_date_bound: "right_censored",
+      },
+    ]);
+    expect(screen.getByText("2026-03-12")).toBeInTheDocument();
+    const marker = screen.getByTitle(
+      "Right-censored: the last observation still hadn't met this target, so the true date, if any, is after this one.",
+    );
+    expect(marker).toHaveTextContent(">");
+    expect(screen.queryByTitle("Interpolated between two observed dates.")).not.toBeInTheDocument();
+  });
 });
