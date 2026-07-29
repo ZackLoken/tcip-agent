@@ -124,6 +124,39 @@ def test_assemble_coco_skips_stem_without_image(tmp_path):
     assert [im["file_name"] for im in coco["images"]] == ["img0.jpg"]
 
 
+def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
+    """Round 12 (2026-07-29): training_tools.py's auto train/val split assembles the dataset-level
+    COCO ONCE and threads the SAME dict into the full/train/val builds (Backend#3, to avoid
+    re-assembling it three times) — so ``self._coco`` covers the WHOLE dataset for every split, while
+    ``self.stems`` is correctly narrowed per split. ``class_distribution``'s COCO branch used to
+    iterate ``self._coco["annotations"]`` directly, ignoring ``self.stems`` entirely, so train and val
+    reported the identical, unsplit whole-dataset distribution instead of their own."""
+    from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset, _resolve_registry_id_map
+
+    images, labels = tmp_path / "images", tmp_path / "annotations"
+    stems = [f"img{i}" for i in range(4)]
+    _make_images(images, stems)
+    labels.mkdir(parents=True)
+    for i, stem in enumerate(stems):
+        json_io.write_annotations(labels / f"{stem}.json", [_box(10, 10, 30, 30)] * (i + 1), 100, 100)
+
+    _reg, id_map = _resolve_registry_id_map(labels, CATKIN, None)
+    shared_coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)  # over ALL 4 stems
+
+    train_ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
+                             subject=CATKIN, coco_data=shared_coco, label_format="coco",
+                             stems=stems[:2])
+    val_ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
+                           subject=CATKIN, coco_data=shared_coco, label_format="coco",
+                           stems=stems[2:])
+
+    assert train_ds._coco is val_ds._coco is shared_coco  # the actual sharing this bug depends on
+    # img0 (1 box) + img1 (2 boxes) = 3; img2 (3 boxes) + img3 (4 boxes) = 7 -- not the shared
+    # dict's own total of 10, and not identical between the two splits.
+    assert train_ds.class_distribution == {0: 3}
+    assert val_ds.class_distribution == {0: 7}
+
+
 # ── build_dataset auto-routes per-image JSON onto the COCO path ──────────────
 
 def test_build_dataset_detection_autoresolves_json(tmp_path):
@@ -265,6 +298,33 @@ def test_instance_seg_applies_the_same_rail(tmp_path):
     ds = build_dataset("instance_seg", images_dir=str(images), labels_dir=str(labels),
                        subject=CATKIN)
     assert ds.stems == ["ann"]
+
+
+def test_instance_seg_dataset_excludes_partially_labeled_stem_from_training(tmp_path):
+    """Round 12 (2026-07-29): InstanceSegDataset's own trainable_stems call never threaded
+    attribute/id_map through, so the direct-JSON instance_seg path had no attribute-completeness
+    rail at all -- an image with any instance never assessed for `attribute` trained on its labeled
+    subset instead of being held out whole, unlike DetectionDataset's identical call (N2/NEW-1)."""
+    from tcip_mcp.pipelines.data.datasets import InstanceSegDataset
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    _make_images(images_dir, ["complete", "partial"])
+    labels_dir.mkdir()
+    json_io.write_annotations(labels_dir / "complete.json", [
+        _poly([(4, 4), (12, 4), (12, 12), (4, 12)], elongation="elongated"),
+    ], 100, 100)
+    json_io.write_annotations(labels_dir / "partial.json", [
+        _poly([(4, 4), (12, 4), (12, 12), (4, 12)], elongation="dormant"),
+        _poly([(40, 40), (60, 40), (60, 60), (40, 60)]),  # unlabeled -- no elongation attribute
+    ], 100, 100)
+    _reg, id_map = _reg_id_map(attribute="elongation", values=("elongated", "dormant"))
+
+    ds = InstanceSegDataset(str(images_dir), str(labels_dir), subject=CATKIN,
+                            attribute="elongation", id_map=id_map)
+
+    assert ds.stems == ["complete"]
+    assert ds.sample_counts["skipped_incomplete_attribute"] == 1
+    assert ds.sample_counts["annotated"] == 1
 
 
 @pytest.mark.parametrize("ext", [".jpg", ".JPG"])
@@ -493,6 +553,48 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
             assert all(stamps[n] == expected_digest for n in carried_here)
             found = True
     assert found, "no split carried both a negative and its schema stamp"
+
+
+def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path):
+    """Round 12 (2026-07-29): the COCO-assembly branch of ``trainable_stems`` never checked
+    quarantine for an image ``assemble_coco`` had already dropped from ``images`` — it only asked
+    ``has_record``, so a human-confirmed-but-schema-stale negative read as ``skipped_unconfirmed_empty``
+    ("nobody ever looked") there, while the direct-JSON branch on the identical fixture correctly read
+    ``quarantined_stale_definition`` ("looked, but the schema changed since"). Same image, same real
+    reason, two different label paths disagreeing on which it was."""
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.pipelines.data.datasets import assemble_coco, trainable_stems
+
+    images = tmp_path / "images"
+    labels = tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    registry = ClassRegistry(subjects=(
+        Subject(name=CATKIN, attributes=(
+            Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),
+        )),
+    ))
+    write_registry(tmp_path / "classes.json", registry)
+    current_digest = class_registry.attribute_schema_digest(registry, CATKIN)
+
+    _make_images(images, ["a"])
+    json_io.write_annotations(labels / "a.json", [], 100, 100, keep_empty=True)
+
+    state = tmp_path / ".tcip" / "state"
+    state.mkdir(parents=True)
+    (state / "image_status.json").write_text(json.dumps({CATKIN: {"a.jpg": "negative"}}))
+    # Stamped with a digest that does NOT match the current schema -> quarantined, not trusted.
+    assert current_digest != "stale-digest"
+    (state / "image_status_digest.json").write_text(
+        json.dumps({CATKIN: {"a.jpg": "stale-digest"}}))
+
+    _, id_map = _reg_id_map()
+    _, counts_json = trainable_stems(str(labels), str(images), subject=CATKIN)
+    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
+    _, counts_coco = trainable_stems(str(labels), str(images), subject=CATKIN, coco=coco)
+
+    assert counts_json["quarantined_stale_definition"] == 1
+    assert counts_json == counts_coco
 
 
 def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
