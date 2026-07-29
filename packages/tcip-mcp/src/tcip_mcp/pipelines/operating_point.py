@@ -17,7 +17,7 @@ import math
 import statistics
 from typing import Any, Callable
 
-from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
+from tcip_mcp.pipelines.derivations import derive_cross_tile_nms, derive_localization_tolerance_frac
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
     DEFAULT_MAX_DETS,
@@ -474,7 +474,22 @@ def resolve_operating_point(
 
     # --- conf: the count operating point (calibration) ---
     if calibration_records:
-        tol = trait.localization_tolerance_frac * gt_class_avg_size(calibration_records)  # spec owns the "half"
+        # Derived once from the calibration GT's own nearest-neighbor spacing, then reused for the
+        # holdout tolerance below too (Fix F's "exact-conf, not independently re-picked" discipline
+        # applied to the tolerance the same way it already applies to conf) — never re-derived per
+        # side, or calibration and holdout could disagree on what "a hit" means.
+        loc_frac = derive_localization_tolerance_frac(
+            [[a["bbox"] for a in rec.get("gt", [])] for rec in calibration_records])
+        if loc_frac is not None:
+            params["localization_tolerance_frac"] = derived(
+                "localization_tolerance_frac", loc_frac, derivation_class="distribution",
+                derived_from="GT nearest-neighbor spacing (p10 + margin)")
+        else:
+            loc_frac = trait.localization_tolerance_frac
+            params["localization_tolerance_frac"] = default(
+                "localization_tolerance_frac", loc_frac, derivation_class="distribution",
+                derived_from="trait default (underivable: no same-class neighbor in this GT)")
+        tol = loc_frac * gt_class_avg_size(calibration_records)
         cal_sweep = sweep_operating_point(calibration_records, tolerance=tol)
         conf = picker(cal_sweep)
         conf = DEFAULT_CONF if conf is None else conf
@@ -491,7 +506,7 @@ def resolve_operating_point(
             hold_ids = {r["image_id"] for r in holdout_records if "image_id" in r}
             disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
             floor_mismatch = floor_mismatch or _floor_mismatch(holdout_records, staged_conf_floor)
-            hold_tol = trait.localization_tolerance_frac * gt_class_avg_size(holdout_records)
+            hold_tol = loc_frac * gt_class_avg_size(holdout_records)  # same frac as calibration, above
             # Fix F: exact-conf evaluation, not a nearest-grid-point snap — an explicit single-point
             # conf_grid makes sweep_operating_point evaluate EXACTLY the conf that will ship, never
             # an approximation from the holdout's own independently-built grid (which need not
@@ -532,7 +547,7 @@ def resolve_operating_point(
             per_class_bias_failures = sorted(
                 cid for cid, s in hb["per_class"].items()
                 if not _bias_equivalence_ok(s["count_bias_mean"], s["count_bias_std"],
-                                            s["n_images"], trait.count_bias_tolerance))
+                                            s["n_present"], trait.count_bias_tolerance))
             # ...and a class the holdout never carries is not a class that passed: its entry is all
             # zeros, so the test above reads bias 0.0 and says nothing. Stage-6 review reached the
             # very hole this gate exists to close through exactly that shape — the confused class
@@ -561,12 +576,14 @@ def resolve_operating_point(
             # measurement question rather than a mechanical repeat of the bias one — a per-class
             # localization floor refuses a rare class whose single detection lands just outside
             # tolerance, and a per-class dispersion floor reads a tolerance no trait has authored
-            # (count_error_tolerance is None everywhere today). A third, related residual is not
-            # fixable here at all: count_bias_tolerance is an absolute per-image count by the
-            # breeder's own choice, so a class present on a few images of many is diluted toward
-            # zero and can be wrong by 100% in relative terms while clearing it. Making that
-            # judgement relative, or requiring a minimum per-class evidence, is trait semantics —
-            # the domain expert's call, not one to infer here.
+            # (count_error_tolerance is None everywhere today). A related residual (2026-07-29,
+            # Zack sign-off): the per-class equivalence test's SE now uses presence-count
+            # (hb["per_class"][cid]["n_present"]), not the whole-holdout count, so a class scarce
+            # in the reference no longer borrows statistical confidence it doesn't have — the mean
+            # itself stays pooled over the whole holdout, per count_bias_tolerance's own absolute,
+            # never-scaled shape. Still genuinely open, and still trait semantics: whether
+            # count_bias_tolerance itself should be relative rather than absolute per class. Filed
+            # `needs_human_judgment` for the domain expert, not decided here.
 
             # Named-failure architecture: every gate condition below is named here, once, so
             # describe_review_validation (and any future caller) maps failures to breeder-legible
@@ -650,6 +667,9 @@ def resolve_operating_point(
         params["conf"] = derived("conf", DEFAULT_CONF, derivation_class="calibration",
                                  derived_from="no GT for this dataset; unvalidated placeholder",
                                  validated_vs_gt=VALIDATED_FALSE, dataset_scoped=True, dataset_hash=dataset_hash)
+        params["localization_tolerance_frac"] = default(
+            "localization_tolerance_frac", trait.localization_tolerance_frac,
+            derivation_class="distribution", derived_from="trait default (no GT for this dataset)")
 
     # --- deterministic / distribution / documented-default params ---
     if tile_size and tile_size_source == "explicit":
