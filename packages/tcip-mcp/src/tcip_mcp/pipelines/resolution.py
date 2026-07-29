@@ -584,6 +584,53 @@ def reconcile_classifier_validity(
     )
 
 
+def bind_classifier_validity(
+    classifier_state: str | None,
+    classifier_dirs: list[str] | tuple[str, ...] | None,
+    producing_dirs: list[str] | tuple[str, ...],
+    *,
+    trait: str,
+) -> tuple[str | None, str]:
+    """Floor a reconciled classifier stamp to the delivery it is being used to validate.
+
+    Unlike the count dimension (which reconciles from the same buckets it delivers),
+    :func:`reconcile_classifier_validity` alone cannot see whether a genuinely-validated stamp was
+    calibrated for an unrelated model or trait — it reads only the validity field. A sidecar's own
+    recorded ``trait``/``experiment_id`` (written by ``calibrate_classifier_operating_point``) must
+    agree with what is actually being delivered. A foreign/unregistered checkpoint calibration
+    (``experiment_id=None``, the K3 owner decision) is not rejected for lacking one to compare
+    against; a ``trait`` mismatch always is, since the real writer always records one.
+
+    Returns ``(state, note)`` — ``state`` floored to ``VALIDATED_FALSE`` on a mismatch, and a
+    breeder-readable ``note`` naming which sidecar failed and why (empty when nothing was floored).
+
+    Every delivery door must call this after reconciling, not just the one that first needed it:
+    ``compute_phenology`` and the web Results doors share it rather than each composing the flag,
+    so the two surfaces cannot disagree about what a classifier stamp means.
+    """
+    if classifier_state in (None, VALIDATED_FALSE):
+        return classifier_state, ""
+    producing_experiment_ids = {
+        sc["experiment_id"]
+        for d in producing_dirs
+        if (sc := read_operating_point_sidecar(d)) is not None and sc.get("experiment_id")
+    }
+    for d in (classifier_dirs or []):
+        csc = read_classifier_operating_point_sidecar(d) or {}
+        stamped_trait = csc.get("trait")
+        stamped_exp = csc.get("experiment_id")
+        if stamped_trait != trait:
+            return VALIDATED_FALSE, (
+                f"classifier_operating_point.json at {d!r} was calibrated for trait "
+                f"{stamped_trait!r}, not {trait!r} — the stamp is not trusted for this delivery.")
+        if stamped_exp is not None and producing_experiment_ids and stamped_exp not in producing_experiment_ids:
+            return VALIDATED_FALSE, (
+                f"classifier_operating_point.json at {d!r} was calibrated against experiment "
+                f"{stamped_exp!r}, not the producing run ({sorted(producing_experiment_ids)}) — "
+                "the stamp is not trusted for this delivery.")
+    return classifier_state, ""
+
+
 # --- the delivery gate (one refuse-or-stamp check shared by every phenotype-delivery door) ---
 
 @dataclass(frozen=True)
