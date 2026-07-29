@@ -544,27 +544,39 @@ export function ResultsTab() {
                         const date = r[c] as string | null;
                         const bound = r[`${c}_bound`] as string | null;
                         // A left-censored crossing means the FIRST observation already met the
-                        // target, so the true date is only an upper bound — rendering it as a plain
-                        // date is a precision claim the data does not support. The bound column was
-                        // dropped entirely here until now, while the CSV has carried it since
-                        // round 5.
+                        // target, so the true date is only an upper bound; a right-censored one
+                        // (round 12) means the LAST observation still hadn't, so the true date (if
+                        // any) is after this one, a lower bound — rendering either as a plain date is
+                        // a precision claim the data does not support. The bound column was dropped
+                        // entirely here until now, while the CSV has carried it since round 5.
+                        const marker =
+                          bound === "left_censored"
+                            ? {
+                                symbol: "≤",
+                                className: "text-tcip-fp",
+                                title:
+                                  "Left-censored: the first observation already met this target, so the true date is at or before this one.",
+                              }
+                            : bound === "right_censored"
+                              ? {
+                                  symbol: ">",
+                                  className: "text-tcip-fp",
+                                  title:
+                                    "Right-censored: the last observation still hadn't met this target, so the true date, if any, is after this one.",
+                                }
+                              : bound === "interpolated"
+                                ? {
+                                    symbol: "~",
+                                    className: "text-tcip-muted",
+                                    title: "Interpolated between two observed dates.",
+                                  }
+                                : null;
                         return (
                           <td key={c} className="pr-3 tabular-nums">
                             {date ?? "—"}
-                            {date && bound && bound !== "exact" && (
-                              <span
-                                className={
-                                  bound === "left_censored"
-                                    ? "ml-1 text-tcip-fp"
-                                    : "ml-1 text-tcip-muted"
-                                }
-                                title={
-                                  bound === "left_censored"
-                                    ? "Left-censored: the first observation already met this target, so the true date is at or before this one."
-                                    : "Interpolated between two observed dates."
-                                }
-                              >
-                                {bound === "left_censored" ? "≤" : "~"}
+                            {date && marker && (
+                              <span className={`ml-1 ${marker.className}`} title={marker.title}>
+                                {marker.symbol}
                               </span>
                             )}
                           </td>
