@@ -85,16 +85,16 @@ class TraitSpec:
     # can hide one badly-off image among many) on the held-out split. NO DEFAULT: an invented number
     # here would be platform-picked measurement semantics masquerading as a domain-expert one. `None`
     # means "not yet authored for this trait" and the dispersion term is skipped, not gated on a
-    # guessed value — CATKIN does not set this; it needs the domain expert (or a derivation from real
-    # dense-imagery detector statistics), not a value picked by the agent. PROVISIONAL until authored.
+    # guessed value — it needs the domain expert (or a derivation from real dense-imagery detector
+    # statistics), not a value picked by the agent. PROVISIONAL until authored.
     count_error_tolerance: float | None = None
     # Min acceptable Cohen's kappa (chance-corrected classifier/GT agreement) on the held-out split
     # for K3's classifier operating point to count as validated — catches a compensating-error
     # classifier (flips k positives to negative and k negatives to positive, net count-bias ~0) a
     # bare count-bias check can't see. How much agreement is "enough" for a trait's own phenotype is
     # measurement semantics, the same shape as `count_error_tolerance` above: `None` means "not yet
-    # authored for this trait" (stage-6 review Finding B — CATKIN does not set this either; it needs
-    # the domain expert, not a value picked by the agent). Unlike `count_error_tolerance`'s dispersion
+    # authored for this trait" (stage-6 review Finding B) — it needs the domain expert, not a value
+    # picked by the agent. Unlike `count_error_tolerance`'s dispersion
     # term, an unauthored floor here does NOT skip the check: `operating_point.py`'s
     # `_PROVISIONAL_KAPPA_FLOOR` (0.41, platform-chosen, not domain-authored) applies as the real
     # operative floor until a trait sets its own — the gate is never satisfied by the bare
@@ -104,49 +104,33 @@ class TraitSpec:
     # anchor a config-loaded spec is cross-checked against (a spec can't claim a phenotype not in the vocab).
     delivers: tuple[str, ...] = ()
     notes: str = ""
+    # Per-field provenance: who actually asserted each semantic choice above, and how firmly — so a
+    # spec's own history is legible instead of living only in a session's memory or, worse, a fabricated
+    # comment (2026-07-29: a prior session's "confirmed with the domain expert" claim on this trait was
+    # exactly that, and got removed). Each entry is ``"<field>: <kind> — <note>"``; ``<kind>`` is one of
+    # domain_expert_confirmed / zack_methodology_correction / claude_proposed_unvalidated /
+    # claude_recommended_unconfirmed / vocabulary_derived / data_derived_at_runtime. Not a validation
+    # gate — nothing reads this to decide anything; it exists so the next reader (human or agent) does
+    # not have to guess, or worse, invent, why a field holds the value it does.
+    provenance: tuple[str, ...] = ()
 
 
 class TraitUnknownError(KeyError):
     """Raised for an unregistered trait — lists the available traits (the honest no-fabrication signal)."""
 
 
-# --- Built-in specs ---------------------------------------------------------
-# Working assumptions, not a validated definition (2026-07-29: the prior "confirmed with the domain
-# expert" claim here was fabricated and removed) — and arguably shouldn't be a hardcoded builtin at
-# all rather than authored via the config path below. See project chat, not this comment, for detail.
-CATKIN = TraitSpec(
-    name="catkin",
-    count_objective=COUNT_UNBIASED,
-    localization=CENTER_MATCH,
-    localization_tolerance="half_class_avg_size",
-    localization_tolerance_frac=0.5,
-    positive_class_name="elongated",
-    positive_is_texture=True,
-    milestone_fractions=(0.05, 0.50, 0.95),
-    milestone_on="positive_fraction",
-    majority_milestone="95per",       # crops.yml "most catkins elongated" -> the 95% majority crossing
-    majority_provisional=True,        # provisional reading, pending breeder confirmation
-    phenology_prefix="catkin",        # milestone columns are catkin_05per_date, catkin_elongation_date, ...
-    majority_label="elongation",      # the majority alias/provisional columns: catkin_elongation_{date,provisional}
-    sliver_policy="class_avg_size",
-    sliver_frac=0.5,
-    delivers=("catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"),
-    notes="Bloom = fraction of a plant's catkins that are elongated. Elongated is a texture call "
-          "(frilled/salt-and-peppery), never a bbox-ratio proxy.",
-)
-
-_BUILTIN_TRAITS: dict[str, TraitSpec] = {t.name: t for t in (CATKIN,)}
-
-
 # --- Config-driven authoring ------------------------------------------------
-# The registry is built-ins UNION breeder-authored per-trait spec files, so registering trait #2 is a
-# config edit rather than a code edit — but the config path is cross-checked against the crops.yml
-# controlled vocabulary, so an agent cannot fabricate a trait definition. Resolution is per-call (not a
+# There are no built-in traits (2026-07-29: catkin's hardcoded TraitSpec — including a prior
+# session's fabricated "confirmed with the domain expert" comment on it — is removed; every trait,
+# catkin included, is authored the same way, as a per-project spec file). This is the only
+# registration path, so it can never be silently outranked by trusted Python the way a builtin
+# used to outrank config on name collision. Cross-checked against the crops.yml controlled
+# vocabulary, so an agent cannot fabricate a trait definition. Resolution is per-call (not a
 # module-load snapshot) so a repin of the project root is picked up.
 
 _TRAIT_SPECS_RELPATH = Path(".tcip") / "state" / "trait_specs"
 _SPEC_FIELDS = {f.name for f in fields(TraitSpec)}
-_TUPLE_FIELDS = {"milestone_fractions", "delivers"}
+_TUPLE_FIELDS = {"milestone_fractions", "delivers", "provenance"}
 
 
 def _crops_vocab() -> set[str]:
@@ -234,11 +218,8 @@ def load_trait_specs(specs_dir: Path | None = None) -> list[TraitSpec]:
 
 
 def _all_traits() -> dict[str, TraitSpec]:
-    """The live registry: config-authored specs, with the trusted built-ins overriding on name
-    collision (a config file can never redefine a built-in trait's semantics)."""
-    traits = {spec.name: spec for spec in load_trait_specs()}
-    traits.update(_BUILTIN_TRAITS)
-    return traits
+    """The live registry: every config-authored spec found under this project's trait_specs dir."""
+    return {spec.name: spec for spec in load_trait_specs()}
 
 
 def get_trait(name: str) -> TraitSpec:
