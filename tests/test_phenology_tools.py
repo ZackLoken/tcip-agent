@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from tcip_annotation import json_io
@@ -26,6 +27,10 @@ from tcip_mcp.tools.phenology_tools import (
     calibrate_classifier_operating_point,
     compute_phenology,
 )
+
+# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# catkin.yml into this test's pinned project root so get_trait("catkin") keeps resolving by default.
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
 def _plant_csv(path: Path) -> None:
@@ -538,7 +543,7 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     from dataclasses import replace
 
     from tcip_mcp.pipelines import operating_point as op_mod
-    from tcip_mcp.traits import CATKIN
+    from tests._trait_fixtures import CATKIN
 
     strict_catkin = replace(CATKIN, classifier_agreement_floor=0.9)
     monkeypatch.setattr(op_mod, "get_trait", lambda name: strict_catkin)
