@@ -21,6 +21,10 @@ from tcip_mcp.pipelines.resolution import (
     derived,
 )
 
+# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# catkin.yml into this test's pinned project root so trait="catkin" call sites keep resolving.
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+
 
 def _bundle(*, validated: str, sweep: dict) -> ResolvedBundle:
     conf = derived("conf", 0.42, derivation_class="calibration",
