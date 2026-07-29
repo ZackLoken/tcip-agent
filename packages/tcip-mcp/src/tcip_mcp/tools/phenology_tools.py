@@ -184,11 +184,9 @@ def _center(a) -> tuple[float, float]:
 def _match_gt_to_predictions(gt: list, preds: list, *, spec,
                              center_match_tolerance: float | None = None) -> list[tuple]:
     """Match GT to predictions using the TRAIT's own declared localization criterion — never a
-    pinned IoU threshold regardless of what the trait's own spec calls meaningful at its object
-    size (stage-6 review, K3: a pinned IoU=0.3 silently paired catkins by the criterion the domain
-    expert's own trait spec calls noise at this scale — ``traits.py``'s ``localization_tolerance``
-    docstring: "IoU is noise at ~40px" — so real classification calibration pairs were silently
-    dropped from the reference with no disclosure).
+    pinned IoU threshold (stage-6 review, K3: a pinned IoU=0.3 silently paired catkins by a
+    criterion different from the trait's own ``localization=CENTER_MATCH`` choice, dropping real
+    classification calibration pairs from the reference with no disclosure).
 
     Unlike ``tcip_annotation.matching.compute_matches`` (which only matches within the same
     ``subject`` name), a classification calibration must match a GT box (subject = the trait's
