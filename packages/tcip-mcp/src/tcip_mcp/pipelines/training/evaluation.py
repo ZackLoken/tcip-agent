@@ -254,8 +254,10 @@ def coco_detection_metrics(
 # ====================================================================
 # Center-match counting sweep (for count-unbiased operating-point calibration)
 # ====================================================================
-# For small objects (e.g. ~40px catkins) IoU is noise; a detection counts as finding an object when
-# its center lands within a derived tolerance of a GT center. The operating point (conf) is then
+# For small objects IoU is noisy relative to annotation jitter; a detection counts as finding an
+# object when its center lands within a derived tolerance of a GT center (the object's actual
+# scale for a given trait/dataset is gt_class_avg_size's job to measure, not a pinned constant
+# here). The operating point (conf) is then
 # derived to minimize the signed per-image count bias E[FP-FN] — not F1 — because the phenotype is a
 # count (Sigma pred ~= Sigma gt). See traits.py (count_objective=count_unbiased, localization=center_match).
 
@@ -315,13 +317,22 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     if not trait_name:
         return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
                 "derived_from": "comparability convention (AP@0.5)", "trait": None}
+    from tcip_mcp.pipelines.derivations import derive_localization_tolerance_frac
     from tcip_mcp.traits import CENTER_MATCH, get_trait
 
     spec = get_trait(trait_name)
     if spec.localization == CENTER_MATCH:
+        boxes_per_image = [[a["bbox"] for a in rec.get("gt", [])
+                            if class_id is None or a["category_id"] == class_id]
+                           for rec in per_image]
+        frac = derive_localization_tolerance_frac(boxes_per_image)
+        frac_source = "GT nearest-neighbor spacing (p10 + margin)"
+        if frac is None:
+            frac = spec.localization_tolerance_frac
+            frac_source = f"trait default (underivable: no same-class neighbor in this GT), {spec.localization_tolerance}"
         return {"kind": "center_match",
-                "tolerance": float(spec.localization_tolerance_frac * gt_class_avg_size(per_image, class_id=class_id)),
-                "derived_from": f"{spec.localization_tolerance} over GT in hand", "trait": trait_name}
+                "tolerance": float(frac * gt_class_avg_size(per_image, class_id=class_id)),
+                "derived_from": frac_source, "trait": trait_name}
     return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
             "derived_from": f"trait localization={spec.localization}", "trait": trait_name}
 
@@ -373,6 +384,7 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
     """
     tp = fp = fn = 0
     biases: list[int] = []
+    n_present = 0
     for rec in per_image:
         gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
         dt = sorted(
@@ -385,6 +397,8 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
         fp += f
         fn += n
         biases.append(f - n)
+        if gt or dt:
+            n_present += 1
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
@@ -400,6 +414,10 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
         "count_error_p90": float(np.quantile(abs_biases, 0.9)) if abs_biases else 0.0,
         "count_bias_std": float(np.std(biases, ddof=1)) if len(biases) > 1 else 0.0,
         "n_images": len(biases),
+        # Images that actually carried this class (gt or a surviving dt) — distinct from n_images
+        # (the whole holdout) because a class scarce in the reference gets its SE denominator from
+        # how much evidence there really is, not diluted by images that say nothing about it.
+        "n_present": n_present,
     }
 
 
@@ -428,7 +446,8 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
     Passing an explicit ``conf_grid`` (e.g. a single-element ``[conf]``) skips grid construction and
     evaluates EXACTLY those points — the exact-conf holdout evaluation (no nearest-neighbor snap)
     relies on this. Returns ``{tolerance, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
-    count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images, per_class}]}``
+    count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images, n_present,
+    per_class}]}``
     — the dispersion + reference-sufficiency terms are per-conf statistics across ``per_image`` that
     the operating-point gate reads, never recomputes.
 
