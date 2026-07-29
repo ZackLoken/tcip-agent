@@ -241,7 +241,10 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
 # 3. operating_point.json stamp shape + the validated flag path
 # ══════════════════════════════════════════════════════════════════════════
 
+# raw_operating_point (no trait/dataset resolution) carries no localization_tolerance_frac; only
+# resolve_operating_point (trait-aware) derives and stamps it.
 _OP_PARAM_KEYS = {"conf", "cross_tile_nms", "tiled", "tile_size", "max_dets"}
+_RESOLVED_OP_PARAM_KEYS = _OP_PARAM_KEYS | {"localization_tolerance_frac"}
 _PARAM_PROVENANCE_KEYS = {
     "name", "value", "source", "derivation_class", "derived_from",
     "validated_vs_gt", "dataset_scoped", "dataset_hash", "has_sweep",
@@ -266,7 +269,7 @@ def test_golden_stamp_shape_calibrated_validated():
     assert stamp["validated"] is True  # held-out calibration passed
     assert stamp["shippable_issues"] == []
     op = stamp["operating_point"]
-    assert set(op.keys()) == _OP_PARAM_KEYS
+    assert set(op.keys()) == _RESOLVED_OP_PARAM_KEYS
     for name, prov in op.items():
         assert set(prov.keys()) == _PARAM_PROVENANCE_KEYS
     conf = op["conf"]
