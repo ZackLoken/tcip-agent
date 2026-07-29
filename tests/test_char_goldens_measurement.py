@@ -185,7 +185,12 @@ def test_golden_crossing_dates_interpolated():
     assert PH.crossing_date(_PHENO_SERIES, 0.95).date == "2026-03-12"
     assert PH.crossing_date(_PHENO_SERIES, 0.95).bound == "interpolated"  # 0.97 observed, not 0.95 exactly
     assert PH.crossing_date(_PHENO_SERIES, 0.97).bound == "exact"
-    assert PH.crossing_date(_PHENO_SERIES, 0.99) is None  # never reached
+    # never reached within the observed window -> right-censored at the LAST observed date, not a
+    # bare None (round 12, 2026-07-29): distinguishable from "no observations at all".
+    c99 = PH.crossing_date(_PHENO_SERIES, 0.99)
+    assert c99.date == "2026-03-12"
+    assert c99.bound == "right_censored"
+    assert PH.crossing_date([], 0.99) is None  # no observations at all -> still None
 
 
 def test_golden_plant_milestones_shape_and_values():
