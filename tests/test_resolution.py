@@ -14,7 +14,12 @@ from tcip_mcp.pipelines.resolution import (
     derived,
     validate_resolved_bundle,
 )
-from tcip_mcp.traits import CATKIN, TraitUnknownError, get_trait, registered_traits
+from tcip_mcp.traits import TraitUnknownError, get_trait, registered_traits
+from tests._trait_fixtures import CATKIN
+
+# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# catkin.yml into this test's pinned project root so get_trait("catkin") keeps resolving by default.
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
 # --- the firewall: an unvalidated calibration op-point is un-consumable ---
@@ -223,8 +228,10 @@ def test_validate_bundle_surfaces_all_firewall_issues_at_export():
 # --- trait knowledge ---
 
 def test_catkin_trait_semantics():
+    # config-loaded specs are rebuilt fresh per call (traits.py), never module-load singletons, so
+    # value equality against the same-valued local fixture, not identity.
     t = get_trait("catkin")
-    assert t is CATKIN
+    assert t == CATKIN
     assert t.count_objective == "count_unbiased"
     assert t.localization == "center_match"
     assert t.localization_tolerance == "half_class_avg_size"
