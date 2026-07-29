@@ -55,245 +55,406 @@ def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: 
     assert body["mapping"] == {}
 
 
-def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: Path) -> None:
-    # Fabricate a mapping + predictions for two dates, two plants
+def _bloom_fixture(
+    tmp_path: Path, *, validated: bool, images_per_plant: int = 1,
+    fractions: tuple[float, ...] = (0.0, 0.10, 0.60, 1.0), id_map: dict | None = None,
+    detections: int = 10,
+) -> dict:
+    """A mapping + per-date prediction buckets, written through the platform's own writers.
+
+    ``validated`` controls only the sidecars' recorded validity, so the same numbers can be driven
+    through every door with and without the evidence that qualifies them.
+    """
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+
+    id_map = id_map or _ID_MAP
+    dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
+    positive = "elongated" if "elongated" in id_map else None
+    mapping, preds = {}, {}
+    for date_str, frac in zip(dates, fractions):
+        bucket = tmp_path / "preds" / date_str
+        bucket.mkdir(parents=True, exist_ok=True)
+        sidecar: dict = {"id_map": id_map}
+        if validated:
+            sidecar.update({
+                "validated": True,
+                "operating_point": {"conf": {"value": 0.4, "validated_vs_gt": "validated_held_out"}},
+                "experiment_id": "exp-1",
+                "checkpoint_sha256": "abc123",
+            })
+            (bucket / "classifier_operating_point.json").write_text(json.dumps({
+                "validated": True, "trait": "catkin", "experiment_id": "exp-1",
+                "operating_point": {"classifier": {"value": "elongated",
+                                                   "validated_vs_gt": "validated_held_out"}},
+            }), encoding="utf-8")
+        (bucket / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
+        assigns = []
+        for plant in ("PLANT_A", "PLANT_B"):
+            for i in range(images_per_plant):
+                stem = f"{plant}_{date_str}_{i}"
+                n_pos = int(round(frac * detections))
+                if positive:
+                    subjects = [positive] * n_pos + ["dormant"] * (detections - n_pos)
+                else:
+                    subjects = [next(iter(id_map))] * detections
+                write_predictions_json(
+                    bucket / f"{stem}.json",
+                    {"boxes": [[j, 0, j + 4, 4] for j in range(detections)],
+                     "labels": [id_map[s] + 1 for s in subjects],
+                     "scores": [0.9] * detections, "width": 100, "height": 100},
+                    id_map=id_map)
+                assigns.append({"image_path": f"{stem}.tif", "stem": stem, "plot_name": plant,
+                                "accession_name": f"Acc{plant[-1]}", "distance_m": 1.0})
+        mapping[date_str] = assigns
+        preds[date_str] = str(bucket)
     mapping_path = tmp_path / "mapping.json"
-    mapping_data = {
-        "2026-02-11": [
-            {
-                "image_path": "/x/IMG_A.JPG",
-                "stem": "IMG_A",
-                "date_folder": "2026-02-11",
-                "plot_name": "PLANT_A",
-                "accession_name": "AccA",
-                "confidence": 0.9,
-                "source": "sequence",
-                "distance_m": 1.0,
-            },
-            {
-                "image_path": "/x/IMG_B.JPG",
-                "stem": "IMG_B",
-                "date_folder": "2026-02-11",
-                "plot_name": "PLANT_B",
-                "accession_name": "AccB",
-                "confidence": 0.9,
-                "source": "sequence",
-                "distance_m": 1.0,
-            },
-        ],
-        "2026-03-24": [
-            {
-                "image_path": "/x/IMG_A2.JPG",
-                "stem": "IMG_A2",
-                "date_folder": "2026-03-24",
-                "plot_name": "PLANT_A",
-                "accession_name": "AccA",
-                "confidence": 0.9,
-                "source": "sequence",
-                "distance_m": 1.0,
-            },
-        ],
-    }
-    mapping_path.write_text(json.dumps(mapping_data), encoding="utf-8")
+    mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+    return {"project_root": str(tmp_path), "mapping_path": str(mapping_path),
+            "predictions_by_date": preds, "trait": "catkin"}
 
-    preds_211 = tmp_path / "preds_2-11-26"
-    preds_324 = tmp_path / "preds_3-24-26"
-    preds_211.mkdir()
-    preds_324.mkdir()
-    # K4/K5: classified predictions (real elongated/dormant subjects), each bucket carrying its own
-    # recorded id_map so the coverage rule admits them.
-    _write_preds(preds_211 / "IMG_A.json", ["elongated"] * 3 + ["dormant"])   # PLANT_A: 3/4
-    _write_preds(preds_211 / "IMG_B.json", ["dormant", "dormant"])            # PLANT_B: 0/2
-    _write_preds(preds_324 / "IMG_A2.json", ["elongated"] * 3)                # PLANT_A: 3/3
-    _write_id_map_sidecar(preds_211, _ID_MAP)
-    _write_id_map_sidecar(preds_324, _ID_MAP)
 
-    resp = client.post(
-        "/api/results/per_plant_curves",
-        json={
-            "project_root": str(tmp_path),
-            "mapping_path": str(mapping_path),
-            "predictions_by_date": {
-                "2026-02-11": str(preds_211),
-                "2026-03-24": str(preds_324),
-            },
-            "trait": "catkin",
-        },
-    )
-    body = resp.json()
-    assert body["n_plants"] == 2
-    assert body["elongation_classified"] is True
-
-    by_key = {(r["plant_id"], r["date"]): r for r in body["rows"]}
+def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: Path) -> None:
+    body = _bloom_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
+    resp = client.post("/api/results/per_plant_curves", json=body)
+    assert resp.status_code == 200
+    out = resp.json()
+    assert out["n_plants"] == 2
+    assert out["elongation_classified"] is True
+    by_key = {(r["plant_id"], r["date"]): r for r in out["rows"]}
     assert by_key[("PLANT_A", "2026-02-11")]["n_total"] == 4
     assert by_key[("PLANT_A", "2026-02-11")]["ratio"] == 0.75
-    assert by_key[("PLANT_B", "2026-02-11")]["n_total"] == 2
-    assert by_key[("PLANT_B", "2026-02-11")]["ratio"] == 0.0
-    assert by_key[("PLANT_A", "2026-03-24")]["n_total"] == 3
-    assert by_key[("PLANT_A", "2026-03-24")]["ratio"] == 1.0
+    assert by_key[("PLANT_B", "2026-02-25")]["ratio"] == 1.0
+
+
+def test_per_plant_curves_reports_the_real_image_count_not_a_hardcoded_one(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # The row used to assert `n_images: 1` unconditionally while per_plant_series aggregates every
+    # image the mapping names for that (plant, date) — the one field in a delivered row derived from
+    # nothing at all. Three images per plant per date must read as 3, with counts aggregated over
+    # all of them.
+    body = _bloom_fixture(tmp_path, validated=True, images_per_plant=3, fractions=(0.5,),
+                          detections=4)
+    rows = client.post("/api/results/per_plant_curves", json=body).json()["rows"]
+    row = next(r for r in rows if r["plant_id"] == "PLANT_A")
+    assert row["n_images"] == 3
+    assert row["n_total"] == 12
 
 
 def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp_path: Path) -> None:
-    # Single-class detector output (no elongation classification) must not be passed off as
-    # a bloom measurement — the endpoint reports elongation_classified=False.
-    mapping_path = tmp_path / "m.json"
-    mapping_path.write_text(
-        json.dumps(
-            {
-                "2026-02-11": [
-                    {
-                        "image_path": "/x/IMG_A.JPG",
-                        "stem": "IMG_A",
-                        "date_folder": "2026-02-11",
-                        "plot_name": "PLANT_A",
-                        "accession_name": "AccA",
-                        "confidence": 0.9,
-                        "source": "sequence",
-                        "distance_m": 1.0,
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    preds = tmp_path / "preds"
-    preds.mkdir()
-    # Bare single-class detector output — id_map has no attribute axis at all (the round-3/4/5
-    # canonical case). Must refuse, never report full coverage.
-    _write_preds(preds / "IMG_A.json", ["catkin", "catkin"])
-    _write_id_map_sidecar(preds, {"catkin": 0})
-
-    body = client.post(
-        "/api/results/per_plant_curves",
-        json={
-            "project_root": str(tmp_path),
-            "mapping_path": str(mapping_path),
-            "predictions_by_date": {"2026-02-11": str(preds)},
-            "trait": "catkin",
-        },
-    ).json()
-    assert body["elongation_classified"] is False
-    # Isolate the real mechanism, not just the top-level flag (stage-6 review: an unwired stub
-    # that always returns elongation_classified=False regardless of input would pass the assertion
-    # above too). The row must show the 2 real detections counted, entirely unclassified — not a
-    # stub's always-empty (0 total, 0 positive) shape.
-    row = body["rows"][0]
+    # Bare single-class detector output — the bucket's id_map has no attribute axis, so the run
+    # never assessed elongation. Must disclose that rather than pass the counts off as a bloom
+    # measurement, and must never report a fabricated ratio.
+    body = _bloom_fixture(tmp_path, validated=True, fractions=(0.0,), id_map={"catkin": 0},
+                          detections=2)
+    out = client.post("/api/results/per_plant_curves", json=body).json()
+    assert out["elongation_classified"] is False
+    row = out["rows"][0]
     assert row["n_total"] == 2
     assert row["n_unclassified"] == 2
     assert row["ratio"] is None
 
 
-def test_onset_dates_finds_crossings(client: TestClient) -> None:
-    curves = [
-        {
-            "plant_id": "PLANT_A",
-            "accession": "A",
-            "date": "2026-02-11",
-            "n_images": 1,
-            "n_total": 100,
-            "n_elongated": 0,
-            "ratio": 0.0,
-            "n_unclassified": 0,
-            "n_missing": 0,
-        },
-        {
-            "plant_id": "PLANT_A",
-            "accession": "A",
-            "date": "2026-03-02",
-            "n_images": 1,
-            "n_total": 100,
-            "n_elongated": 10,
-            "ratio": 0.10,
-            "n_unclassified": 0,
-            "n_missing": 0,
-        },
-        {
-            "plant_id": "PLANT_A",
-            "accession": "A",
-            "date": "2026-03-09",
-            "n_images": 1,
-            "n_total": 100,
-            "n_elongated": 60,
-            "ratio": 0.60,
-            "n_unclassified": 0,
-            "n_missing": 0,
-        },
-        {
-            "plant_id": "PLANT_A",
-            "accession": "A",
-            "date": "2026-03-18",
-            "n_images": 1,
-            "n_total": 100,
-            "n_elongated": 100,
-            "ratio": 1.0,
-            "n_unclassified": 0,
-            "n_missing": 0,
-        },
-    ]
-    resp = client.post("/api/results/onset_dates", json={"curves": curves, "trait": "catkin"})
-    rows = resp.json()["rows"]
-    assert len(rows) == 1
-    onset = rows[0]
-    assert onset["catkin_05per_date"] is not None  # reached between 2-11 and 3-2
-    assert onset["catkin_50per_date"] is not None  # reached between 3-2 and 3-9
-    assert onset["catkin_95per_date"] is not None  # reached between 3-9 and 3-18
-    # catkin_elongation_date = "most catkins elongated" (crops.yml) = the 95% majority crossing,
-    # synonymous with catkin_95per_date.
+def test_onset_dates_finds_crossings(client: TestClient, tmp_path: Path) -> None:
+    body = _bloom_fixture(tmp_path, validated=True, detections=100)
+    rows = client.post("/api/results/onset_dates", json=body).json()["rows"]
+    onset = next(r for r in rows if r["plant_id"] == "PLANT_A")
+    assert onset["catkin_05per_date"] is not None
+    assert onset["catkin_50per_date"] is not None
+    assert onset["catkin_95per_date"] is not None
+    # catkin_elongation_date = "most catkins elongated" (crops.yml) = the 95% majority crossing.
     assert onset["catkin_elongation_date"] == onset["catkin_95per_date"]
 
 
-def test_onset_dates_ignores_undated_bucket(client: TestClient) -> None:
-    # The ingest 'undated/' bucket (and any non-ISO folder) sorts to the (0,0,0) sentinel.
-    # It must not crash interpolation (date(0,0,0)) or leak '0000-00-00' into the CSV.
-    curves = [
-        {"plant_id": "P", "accession": "A", "date": "undated", "ratio": 0.9, "n_unclassified": 0, "n_missing": 0},
-        {"plant_id": "P", "accession": "A", "date": "2026-02-11", "ratio": 0.0, "n_unclassified": 0, "n_missing": 0},
-        {"plant_id": "P", "accession": "A", "date": "2026-03-09", "ratio": 1.0, "n_unclassified": 0, "n_missing": 0},
-    ]
-    resp = client.post("/api/results/onset_dates", json={"curves": curves, "trait": "catkin"})
-    assert resp.status_code == 200
-    onset = resp.json()["rows"][0]
-    for key in ("catkin_05per_date", "catkin_50per_date", "catkin_95per_date"):
-        assert onset[key] != "0000-00-00"
-        if onset[key] is not None:
-            assert onset[key].startswith("2026-")
+def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) -> None:
+    # The ingest 'undated/' bucket (and any non-ISO folder) sorts to the (0,0,0) sentinel. It must
+    # not crash interpolation or leak '0000-00-00' into a delivered date.
+    body = _bloom_fixture(tmp_path, validated=True, fractions=(0.0, 1.0), detections=10)
+    mapping_path = Path(body["mapping_path"])
+    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+    mapping["undated"] = mapping["2026-02-11"]
+    mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+    body["predictions_by_date"]["undated"] = body["predictions_by_date"]["2026-02-11"]
+    rows = client.post("/api/results/onset_dates", json=body).json()["rows"]
+    for row in rows:
+        for key in ("catkin_05per_date", "catkin_50per_date", "catkin_95per_date"):
+            assert row[key] != "0000-00-00"
+            if row[key] is not None:
+                assert row[key].startswith("2026-")
 
 
-def test_onset_dates_rejects_row_missing_required_field(client: TestClient) -> None:
-    # A malformed row (missing plant_id) must be a structured 422, not an unhandled
-    # KeyError/500 — onset_dates dereferences plant_id/date/ratio directly.
-    curves = [{"accession": "A", "date": "2026-02-11", "ratio": 0.0}]
-    resp = client.post("/api/results/onset_dates", json={"curves": curves, "trait": "catkin"})
-    assert resp.status_code == 422
-
-
-def test_onset_dates_rejects_row_missing_coverage_disclosure_fields(client: TestClient) -> None:
-    # Stage-6 review Finding E: n_unclassified/n_missing are required, not `= 0` defaults — a
-    # payload that omits them must be a structured 422, never silently read as "fully classified"
-    # (the plant_fully_classified predicate dereferences them directly).
-    curves = [{"plant_id": "P", "date": "2026-02-11", "ratio": 0.0}]
-    resp = client.post("/api/results/onset_dates", json={"curves": curves, "trait": "catkin"})
-    assert resp.status_code == 422
-
-
-def test_onset_dates_discloses_zero_observations_distinctly_from_valid(client: TestClient) -> None:
-    # Stage-6 review N6: a plant fully classified AND fully observed (0 unclassified, 0 missing)
-    # can still have zero real detections on every date (e.g. before emergence) — n_observed_dates
-    # lets the GUI distinguish "no observations" from real bloom data, both of which otherwise read
-    # identically as "valid" next to blank milestone cells.
-    curves = [
-        {"plant_id": "P", "date": "2026-02-11", "ratio": None, "n_total": 0,
-         "n_unclassified": 0, "n_missing": 0},
-        {"plant_id": "P", "date": "2026-02-18", "ratio": None, "n_total": 0,
-         "n_unclassified": 0, "n_missing": 0},
-    ]
-    resp = client.post("/api/results/onset_dates", json={"curves": curves, "trait": "catkin"})
-    assert resp.status_code == 200
-    row = resp.json()["rows"][0]
+def test_onset_dates_discloses_zero_observations_distinctly_from_valid(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # A plant fully classified AND fully observed can still have zero real detections on every date
+    # (e.g. before emergence) — n_observed_dates lets the GUI distinguish "no observations" from real
+    # bloom data, which otherwise read identically as "valid" next to blank milestone cells.
+    body = _bloom_fixture(tmp_path, validated=True, fractions=(0.0, 0.0), detections=0)
+    row = client.post("/api/results/onset_dates", json=body).json()["rows"][0]
     assert row["n_dates_unclassified"] == 0
     assert row["n_dates_missing_images"] == 0
     assert row["n_observed_dates"] == 0
     assert row["catkin_95per_date"] is None
+
+
+def test_bloom_doors_reject_a_malformed_payload_with_422_not_500(client: TestClient) -> None:
+    # A payload missing required inputs is a structured 422, never an unhandled KeyError/500.
+    for route in ("per_plant_curves", "onset_dates", "export_csv"):
+        resp = client.post(f"/api/results/{route}", json={"trait": "catkin"})
+        assert resp.status_code == 422, route
+
+
+GATE_DOORS = ("per_plant_curves", "onset_dates")
+
+
+def _export(client: TestClient, body: dict, payload: str = "milestones", **extra):
+    return client.post("/api/results/export_csv",
+                       json={**body, "payload": payload, "filename": "x.csv", **extra})
+
+
+def test_every_bloom_door_refuses_unvalidated_evidence(client: TestClient, tmp_path: Path) -> None:
+    # The round-7 defect: only the CSV door reconciled anything, so the curve and milestone doors
+    # returned the same phenotype with no gate at all — the breeder read unvalidated bloom dates on
+    # screen and met the refusal only on clicking Download. All three now read the same evidence.
+    body = _bloom_fixture(tmp_path, validated=False)
+    for route in GATE_DOORS:
+        resp = client.post(f"/api/results/{route}", json=body)
+        assert resp.status_code == 400, route
+        assert "operating_point" in resp.json()["detail"], route
+    for payload in ("curves", "milestones"):
+        assert _export(client, body, payload).status_code == 400, payload
+
+
+def test_every_bloom_door_delivers_on_real_bucket_evidence(client: TestClient, tmp_path: Path) -> None:
+    # The rail must admit valid work: the identical numbers, with the evidence on disk, ship
+    # through every door. Without this the refusals above are satisfiable by a door that always
+    # refuses.
+    body = _bloom_fixture(tmp_path, validated=True)
+    for route in GATE_DOORS:
+        resp = client.post(f"/api/results/{route}", json=body)
+        assert resp.status_code == 200, route
+        assert resp.json()["provisional"] is False, route
+        assert resp.json()["rows"], route
+    for payload in ("curves", "milestones"):
+        resp = _export(client, body, payload)
+        assert resp.status_code == 200, payload
+        assert resp.headers["content-type"].startswith("text/csv")
+        assert len(resp.text.strip().splitlines()) > 1, payload
+
+
+def test_acknowledge_reveals_provisional_numbers_on_screen_but_never_in_a_file(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # The non-stranding escape, mirroring compute_phenology's acknowledge_unvalidated: a breeder
+    # whose operating point is not yet calibrated can LOOK at what they have, clearly marked. A file
+    # leaving the platform has no such escape, so the same flag must not open the CSV door.
+    body = _bloom_fixture(tmp_path, validated=False)
+    for route in GATE_DOORS:
+        resp = client.post(f"/api/results/{route}", json={**body, "acknowledge_unvalidated": True})
+        assert resp.status_code == 200, route
+        assert resp.json()["provisional"] is True, route
+        assert resp.json()["validated"]["operating_point"] == "false", route
+    assert _export(client, body, "milestones", acknowledge_unvalidated=True).status_code == 400
+    assert _export(client, body, "curves", acknowledge_unvalidated=True).status_code == 400
+
+
+def test_export_refuses_when_nothing_was_ever_classified(client: TestClient, tmp_path: Path) -> None:
+    # The same refusal compute_phenology makes: with no positive-class axis anywhere, the fraction
+    # is not a measurement. Previously only the frontend guarded this on the web side.
+    body = _bloom_fixture(tmp_path, validated=True, id_map={"catkin": 0})
+    resp = _export(client, body, "milestones")
+    assert resp.status_code == 400
+    assert "elongated" in resp.json()["detail"]
+
+
+def test_the_old_declaration_bypass_no_longer_reaches_the_door(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # Round 6's finding, as its own regression: declaring export_kind="diagnostic" and handing over
+    # a table shipped a real per-plant bloom curve with 200 and zero validity evidence, because a
+    # curve row carries no registry milestone column for the retained floor to catch. The same three
+    # payloads that shipped then (a curve, a per-plant count table, milestone dates under renamed
+    # columns) can no longer be handed to this door at all: it computes what it exports.
+    for rows in (
+        [{"plant_id": "P1", "date": "2026-03-01", "n_total": 20, "n_positive": 1, "ratio": 0.05,
+          "n_unclassified": 0, "n_missing": 0}],
+        [{"plant_id": "P1", "date": "2026-03-15", "catkin_count": 42}],
+        [{"plant_id": "P1", "bloom_start": "2026-03-01", "bloom_end": "2026-04-02"}],
+    ):
+        resp = client.post("/api/results/export_csv", json={
+            "rows": rows, "filename": "x.csv", "export_kind": "diagnostic"})
+        assert resp.status_code == 422
+        assert not resp.text.startswith("plant_id")
+
+
+def test_no_caller_field_can_raise_the_reconciled_validity(client: TestClient, tmp_path: Path) -> None:
+    # Validity is read from the buckets' own sidecars, so an optimistic caller assertion — under the
+    # stamp column names the delivered CSV itself uses — must be inert. Extra fields are ignored by
+    # the payload model, so the refusal is byte-identical to the one with no assertion at all.
+    body = _bloom_fixture(tmp_path, validated=False)
+    bare = client.post("/api/results/per_plant_curves", json=body)
+    optimistic = client.post("/api/results/per_plant_curves", json={
+        **body,
+        "operating_point_validated": "validated_held_out",
+        "positive_state_classifier_validated": "validated_held_out",
+        "validated": {"operating_point": "validated_held_out", "classifier": "validated_held_out"},
+        "provisional": False,
+    })
+    assert bare.status_code == optimistic.status_code == 400
+    assert bare.json()["detail"] == optimistic.json()["detail"]
+
+
+def test_a_genuinely_unvalidated_classifier_refuses_even_when_the_count_is_validated(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # The two dimensions are reconciled separately: a validated count operating point must not
+    # carry an unvalidated classifier through. Names the failing dimension so the breeder knows
+    # which one to fix.
+    body = _bloom_fixture(tmp_path, validated=True)
+    for bucket in body["predictions_by_date"].values():
+        (Path(bucket) / "classifier_operating_point.json").write_text(json.dumps({
+            "validated": False, "trait": "catkin",
+            "operating_point": {"classifier": {"value": "elongated", "validated_vs_gt": "false"}},
+        }), encoding="utf-8")
+    resp = client.post("/api/results/onset_dates", json=body)
+    assert resp.status_code == 400
+    assert "['classifier']" in resp.json()["detail"]
+
+
+def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # The web CSV used to write whatever keys the caller's rows carried, so it lacked the MCP door's
+    # provenance columns entirely. It now writes phenology_csv_columns and stamps it from the same
+    # reconciliation the gate used — and every column the schema declares is filled, or it would be
+    # the same phantom this round removed from the schema itself.
+    from tcip_mcp.pipelines.postprocessing.phenology import phenology_csv_columns
+    from tcip_mcp.traits import get_trait
+
+    body = _bloom_fixture(tmp_path, validated=True)
+    resp = _export(client, body, "milestones")
+    assert resp.status_code == 200
+    header, first = resp.text.splitlines()[0].split(","), resp.text.splitlines()[1].split(",")
+    assert header == phenology_csv_columns(get_trait("catkin"))
+    cells = dict(zip(header, first))
+    assert cells["operating_point_validated"] == "validated_held_out"
+    assert cells["positive_state_classifier_validated"] == "validated_held_out"
+    assert cells["operating_point_conf"] == "0.4"
+    assert cells["producer_experiment_id"] == "exp-1"
+    assert cells["producer_model_sha256"] == "abc123"
+    assert [c for c, v in cells.items() if v == ""] == []
+
+
+def test_curve_and_milestone_doors_report_the_same_measurement(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # Both doors project one per_plant_phenology result, so a milestone date and the curve it was
+    # read off cannot come from different numbers. The milestone door used to recompute from rows
+    # the client handed back.
+    body = _bloom_fixture(tmp_path, validated=True, detections=100)
+    curves = client.post("/api/results/per_plant_curves", json=body).json()["rows"]
+    milestones = client.post("/api/results/onset_dates", json=body).json()["rows"]
+    a_curve = sorted((r for r in curves if r["plant_id"] == "PLANT_A"), key=lambda r: r["date"])
+    a_row = next(r for r in milestones if r["plant_id"] == "PLANT_A")
+    assert a_row["n_dates"] == len(a_curve)
+    assert a_row["n_observed_dates"] == sum(1 for r in a_curve if r["ratio"] is not None)
+    # The 95% crossing must fall inside the dates whose ratios actually bracket it.
+    assert a_curve[-1]["ratio"] == 1.0
+    assert a_row["catkin_95per_date"] <= a_curve[-1]["date"]
+
+
+def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
+    for bucket in body["predictions_by_date"].values():
+        sidecar = {"validated": True, "trait": "catkin", "experiment_id": "exp-1",
+                   "operating_point": {"classifier": {"value": "elongated",
+                                                      "validated_vs_gt": "validated_held_out"}}}
+        sidecar.update(overrides)
+        (Path(bucket) / "classifier_operating_point.json").write_text(
+            json.dumps(sidecar), encoding="utf-8")
+
+
+def test_a_classifier_calibrated_for_another_trait_does_not_validate_this_delivery(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # compute_phenology binds the classifier stamp to the delivery — a sidecar recorded against a
+    # different trait, or against a run that did not produce these predictions, is not trusted. The
+    # web door reconciled without that binding, so it accepted a stamp the MCP door rejects, and
+    # then wrote it into the delivered CSV as positive_state_classifier_validated. Both doors now
+    # call the one shared binding.
+    body = _bloom_fixture(tmp_path, validated=True)
+    _rewrite_classifier_sidecars(body, trait="chestnut_bur")
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "x.csv"})
+    assert resp.status_code == 400
+    assert "calibrated for trait" in resp.json()["detail"]
+    assert client.post("/api/results/onset_dates", json=body).status_code == 400
+
+
+def test_a_classifier_calibrated_against_another_experiment_does_not_validate_this_delivery(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    body = _bloom_fixture(tmp_path, validated=True)
+    _rewrite_classifier_sidecars(body, experiment_id="exp-OTHER")
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "x.csv"})
+    assert resp.status_code == 400
+    assert "calibrated against experiment" in resp.json()["detail"]
+
+
+def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_path: Path) -> None:
+    # The refusals above must not be satisfiable by a door that refuses every classifier stamp.
+    body = _bloom_fixture(tmp_path, validated=True)
+    _rewrite_classifier_sidecars(body, trait="catkin", experiment_id="exp-1")
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "x.csv"})
+    assert resp.status_code == 200
+    # A foreign checkpoint with no recorded experiment_id is not rejected for lacking one to
+    # compare against (the K3 owner decision) — only a real mismatch is.
+    _rewrite_classifier_sidecars(body, trait="catkin", experiment_id=None)
+    assert client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "x.csv"}).status_code == 200
+
+
+def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # A curve is the same delivered bloom measurement, un-summarised — which is why it takes the
+    # identical gate. It must therefore carry the identical evidence: the milestone branch was
+    # stamped while the curve branch wrote the bare aggregation, so half of what this door delivers
+    # was unauditable.
+    # The expected names are spelled out rather than imported from the module under test, so this
+    # fails on the delivered BYTES when the stamp is absent, not on a missing symbol.
+    provenance = ["operating_point_conf", "operating_point_validated",
+                  "positive_state_classifier_validated", "producer_model_sha256",
+                  "producer_experiment_id"]
+    body = _bloom_fixture(tmp_path, validated=True)
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "curves", "filename": "c.csv"})
+    assert resp.status_code == 200
+    header = resp.text.splitlines()[0].split(",")
+    assert header[-len(provenance):] == provenance
+    cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
+    for col in provenance:
+        assert cells[col] != "", col
+    assert cells["operating_point_validated"] == "validated_held_out"
+    assert cells["producer_experiment_id"] == "exp-1"
+
+
+def test_export_refuses_a_bucket_whose_id_map_never_carried_the_positive_class(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    # compute_phenology's first guard is that the positive class id resolves from some bucket's own
+    # recorded id_map. per_plant_phenology's elongation_classified flag is not a substitute: a date
+    # with ZERO detections is trivially "fully classified", so an axis-less bucket with no
+    # detections read as classified and the export door had nothing left to refuse on.
+    body = _bloom_fixture(tmp_path, validated=True, id_map={"catkin": 0}, detections=0)
+    curves = client.post("/api/results/per_plant_curves", json=body)
+    assert curves.status_code == 200
+    assert curves.json()["elongation_classified"] is False
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "x.csv"})
+    assert resp.status_code == 400
+    assert "elongated" in resp.json()["detail"]
 
 
 def test_registered_models_confines_project_path_to_allowed_roots(
@@ -315,186 +476,6 @@ def test_registered_models_unconfined_when_no_image_roots(
     resp = client.get("/api/results/models/registered", params={"project_path": str(tmp_path)})
     assert resp.status_code == 200
     assert resp.json()["models"] == []
-
-
-def test_export_csv_row_stamp_alone_is_never_trusted(client: TestClient) -> None:
-    # K3: both dimensions reconcile from the buckets' own sidecars, never a row-asserted string
-    # alone. The original version of this test only asserted 400 with no predictions_by_date given
-    # — vacuous, since test_export_csv_refuses_unvalidated_phenology already covers "no evidence ->
-    # refuse" for a row with NO stamp at all, and a row's stamp claim was never read on this path
-    # either way. What actually needs proving is that the stamp is INERT: two rows differing only in
-    # what they optimistically claim must produce the identical refusal (same status, same reason),
-    # since the code never looks at the claim to decide.
-    optimistic = {"positive_state_classifier_validated": "validated_held_out",
-                 "operating_point_validated": "validated_held_out"}
-    pessimistic = {"positive_state_classifier_validated": "false", "operating_point_validated": "false"}
-    resp_optimistic = client.post("/api/results/export_csv", json={
-        "rows": [{"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15", **optimistic}],
-        "filename": "test.csv", "export_kind": "phenology"})
-    resp_pessimistic = client.post("/api/results/export_csv", json={
-        "rows": [{"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15", **pessimistic}],
-        "filename": "test.csv", "export_kind": "phenology"})
-    assert resp_optimistic.status_code == resp_pessimistic.status_code == 400
-    assert resp_optimistic.json()["detail"] == resp_pessimistic.json()["detail"]
-    assert "predictions_by_date" in resp_optimistic.json()["detail"]
-
-
-def test_export_csv_row_stamp_cannot_override_a_genuinely_unvalidated_classifier(
-    client: TestClient, tmp_path: Path,
-) -> None:
-    # The actual pre-K3 vulnerability, reproduced directly: the row claims a validated classifier
-    # via the OLD, pre-rename field name (elongation_classifier_validated) that the code used to
-    # read straight off the row with no reconciliation at all — while the real, on-disk classifier
-    # sidecar is genuinely unvalidated, and the count dimension is genuinely validated (so THAT
-    # can't be why this refuses). Before K3, this combination shipped a 200 (the row's optimistic
-    # old-field claim was trusted outright); after K3, the classifier dimension is reconciled from
-    # classifier_operating_point.json regardless of what the row claims, under any field name.
-    d = tmp_path / "preds"
-    d.mkdir()
-    (d / "operating_point.json").write_text(json.dumps({
-        "validated": True,
-        "operating_point": {"conf": {"value": 0.4, "validated_vs_gt": "validated_held_out"}},
-        "id_map": _ID_MAP,
-    }), encoding="utf-8")
-    (d / "classifier_operating_point.json").write_text(json.dumps({
-        "validated": False,
-        "operating_point": {"classifier": {"value": "elongated", "validated_vs_gt": "false"}},
-    }), encoding="utf-8")
-    stamp = {"elongation_classifier_validated": "validated_held_out",
-             "operating_point_validated": "validated_held_out"}
-    rows = [{"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15", **stamp}]
-    resp = client.post(
-        "/api/results/export_csv",
-        json={"rows": rows, "filename": "test.csv", "export_kind": "phenology",
-              "predictions_by_date": {"2026-02-11": str(d)}},
-    )
-    assert resp.status_code == 400
-    # Specifically the classifier dimension refused, not the (genuinely validated) count one.
-    assert "Unvalidated: ['classifier']" in resp.json()["detail"]
-
-
-def test_export_csv_delivers_with_real_bucket_evidence(client: TestClient, tmp_path: Path) -> None:
-    d = tmp_path / "preds"
-    d.mkdir()
-    (d / "operating_point.json").write_text(json.dumps({
-        "validated": True,
-        "operating_point": {"conf": {"value": 0.4, "validated_vs_gt": "validated_held_out"}},
-        "id_map": _ID_MAP,
-    }), encoding="utf-8")
-    (d / "classifier_operating_point.json").write_text(json.dumps({
-        "validated": True,
-        "operating_point": {"classifier": {"value": "elongated", "validated_vs_gt": "validated_held_out"}},
-    }), encoding="utf-8")
-    rows = [
-        {"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15"},
-        {"plant_id": "PLANT_B", "catkin_05per_date": "2026-03-05"},
-    ]
-    resp = client.post(
-        "/api/results/export_csv",
-        json={"rows": rows, "filename": "test.csv", "export_kind": "phenology",
-              "predictions_by_date": {"2026-02-11": str(d)}},
-    )
-    assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("text/csv")
-    body = resp.text
-    lines = body.strip().split("\n")
-    assert len(lines) == 3
-    assert "plant_id" in lines[0]
-    assert "PLANT_A" in lines[1]
-    assert "PLANT_B" in lines[2]
-
-
-def test_export_csv_refuses_unvalidated_phenology(client: TestClient) -> None:
-    # Milestone rows without the held-out-validated stamp must not ship (the second-door hole).
-    rows = [{"plant_id": "PLANT_A", "catkin_05per_date": "2026-02-15"}]
-    resp = client.post("/api/results/export_csv",
-                       json={"rows": rows, "filename": "x.csv", "export_kind": "phenology"})
-    assert resp.status_code == 400
-
-
-def test_export_csv_non_phenology_unaffected(client: TestClient) -> None:
-    # A diagnostic / inventory export (no trait_name + value) is not a phenotype delivery — not gated.
-    rows = [{"plant_id": "PLANT_A", "some_metric": 42}]
-    resp = client.post("/api/results/export_csv",
-                       json={"rows": rows, "filename": "x.csv", "export_kind": "diagnostic"})
-    assert resp.status_code == 200
-
-
-def test_export_csv_requires_an_explicit_export_kind(client: TestClient) -> None:
-    # Round-4 review: three successive attempts to INFER whether an export was a phenology delivery
-    # from its row keys were each defeated, in both directions. The caller now declares it, and an
-    # omitted declaration fails closed (422) rather than defaulting to the ungated branch.
-    rows = [{"plant_id": "PLANT_A", "date": "2026-02-11", "ratio": 0.7}]
-    resp = client.post("/api/results/export_csv", json={"rows": rows, "filename": "x.csv"})
-    assert resp.status_code == 422
-
-
-def test_export_csv_declared_phenology_is_gated_whatever_the_row_shape(client: TestClient) -> None:
-    """Round-4 review: every real curve shape that defeated the previous key-sniffing rules must now
-    be refused without evidence. Each of these is a genuine per-plant-per-date bloom curve; under the
-    round-4 identity-pair rule the last three shipped 200 merely by naming their columns differently
-    — `plot_name` being the platform's OWN name for the plant (per_plant_series reads it to build
-    plant_id), so this was not an exotic payload."""
-    shapes = [
-        {"plant_id": "PLANT_A", "date": "2026-02-11", "ratio": 0.7, "n_total": 10, "n_positive": 7},
-        {"accession": "acc-9", "date": "2026-02-11", "ratio": 0.7, "n_total": 10},
-        {"plot_name": "PLANT_A", "date": "2026-02-11", "ratio": 0.7, "n_total": 10},
-        {"plant_id": "PLANT_A", "observation_date": "2026-02-11", "ratio": 0.7},
-    ]
-    for row in shapes:
-        resp = client.post("/api/results/export_csv",
-                           json={"rows": [row], "filename": "x.csv", "export_kind": "phenology"})
-        assert resp.status_code == 400, row
-
-
-def test_export_csv_declared_diagnostic_still_cannot_ship_milestone_rows(client: TestClient) -> None:
-    # The declaration is not a bypass: milestone column names come from the trait registry, not the
-    # payload, so they remain a structural floor beneath whatever the caller declares.
-    rows = [{"plant_id": "PLANT_A", "catkin_95per_date": "2026-03-10"}]
-    resp = client.post("/api/results/export_csv",
-                       json={"rows": rows, "filename": "x.csv", "export_kind": "diagnostic"})
-    assert resp.status_code == 400
-
-
-def test_export_csv_declared_diagnostic_per_plant_date_tables_still_ship(client: TestClient) -> None:
-    """CLAUDE.md 'a rail must admit valid work'. Round 4's identity-pair rule 400'd every one of
-    these legitimate non-phenology tables — any table keyed by plant and date carrying one generic
-    numeric column collided with it. They are diagnostics, and they ship."""
-    tables = [
-        {"plant_id": "PLANT_A", "date": "2026-02-11", "n_total": 42},          # per-date inventory
-        {"plant_id": "PLANT_A", "date": "2026-02-11", "ratio": 0.7},           # a QC ratio
-        {"plant_id": "PLANT_A", "date": "2026-02-11", "n_missing": 3},         # coverage audit
-        {"class": "catkin", "n_positive": 7, "n_negative": 3},                 # class balance
-        {"plant_id": "PLANT_A", "split": "train", "ratio": 0.7},               # split table
-    ]
-    for row in tables:
-        resp = client.post("/api/results/export_csv",
-                           json={"rows": [row], "filename": "x.csv", "export_kind": "diagnostic"})
-        assert resp.status_code == 200, row
-
-
-def test_export_csv_refuses_unvalidated_per_plant_phenotype(client: TestClient) -> None:
-    # A per-plant phenotype row (trait_name + value) with no validation stamp must not ship (R4:
-    # the non-phenology delivery door is gated too).
-    rows = [{"plant_id": "PLANT_A", "trait_name": "catkin_count", "value": 7}]
-    resp = client.post("/api/results/export_csv",
-                       json={"rows": rows, "filename": "x.csv", "export_kind": "diagnostic"})
-    assert resp.status_code == 400
-
-
-def test_export_csv_ships_validated_per_plant_phenotype(client: TestClient) -> None:
-    # The same per-plant phenotype row ships once it carries a shippable measurement reference.
-    rows = [{"plant_id": "PLANT_A", "trait_name": "catkin_count", "value": 7,
-             "measurement_validated": "validated_held_out"}]
-    resp = client.post("/api/results/export_csv",
-                       json={"rows": rows, "filename": "x.csv", "export_kind": "diagnostic"})
-    assert resp.status_code == 200
-
-
-def test_export_csv_empty_rejected(client: TestClient) -> None:
-    resp = client.post("/api/results/export_csv",
-                       json={"rows": [], "filename": "x.csv", "export_kind": "diagnostic"})
-    assert resp.status_code == 400
 
 
 def test_inference_launch_missing_checkpoint(client: TestClient, tmp_path: Path) -> None:
