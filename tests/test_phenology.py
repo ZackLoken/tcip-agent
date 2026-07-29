@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import sys
+
+import pytest
 from pathlib import Path
 
 _MCP_SRC = Path(__file__).resolve().parents[1] / "packages" / "tcip-mcp" / "src"
@@ -27,7 +29,7 @@ if str(_MCP_SRC) not in sys.path:
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
-from tcip_mcp.traits import CATKIN  # noqa: E402
+from tcip_mcp.traits import CATKIN, TraitSpec  # noqa: E402
 
 
 def _sidecar(dir_path: Path, id_map: dict | None) -> None:
@@ -388,17 +390,93 @@ def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
         assert values[header.index(f"{col}_bound")] == "left_censored", col
 
 
-def test_phenology_csv_columns_name_no_column_without_a_producer(tmp_path):
-    """The other half of the bound fix: every trait-prefixed column the schema names must actually
-    be filled by plant_milestones, or the CSV ships a permanently-blank column — the same phantom
-    the round-4 review found claimed (a `gap_days` column no producer emits)."""
+_SPEC_SHAPES = [
+    # The shape a config-authored trait produces by simply omitting both majority fields — both at
+    # their dataclass defaults, which made the phantom names doubly malformed (`b__date`).
+    TraitSpec(name="b", milestone_fractions=(0.1, 0.9), phenology_prefix="b"),
+    # A majority LABEL with no majority milestone: the label alone used to build a date column.
+    TraitSpec(name="b", milestone_fractions=(0.1, 0.9), phenology_prefix="b",
+              majority_label="peak"),
+    # A majority milestone naming a crossing the trait does not compute — the column is real (the
+    # spec names it) and its value is honestly None, which is not the same as a phantom.
+    TraitSpec(name="b", milestone_fractions=(0.1, 0.9), phenology_prefix="b",
+              majority_milestone="95per", majority_label="peak"),
+    CATKIN,
+]
+
+
+@pytest.mark.parametrize("spec", _SPEC_SHAPES, ids=lambda s: f"{s.name}-{s.majority_milestone or 'nomajority'}")
+def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
+    """Every trait-prefixed column the schema names must be filled by a producer, or the delivered
+    CSV carries a permanently-blank column.
+
+    The version this replaces exercised only CATKIN, whose ``majority_milestone`` IS set — so it
+    passed while a trait without one declared a majority date, its bound, and its provisional marker
+    that ``plant_milestones`` never emits. It also hand-exempted the provisional column, which hid
+    the third phantom. The schema and the producer now share ``_milestone_columns``, so this holds by
+    construction for any spec shape rather than by two conditions happening to match.
+    """
     series = [("2026-02-01", 0.0), ("2026-02-10", 0.5), ("2026-02-20", 1.0)]
-    produced = set(phenology.plant_milestones(series, CATKIN))
-    schema = set(phenology.phenology_csv_columns(CATKIN))
-    prefixed = {c for c in schema if c.startswith(CATKIN.phenology_prefix + "_")}
-    provisional = f"{CATKIN.phenology_prefix}_{CATKIN.majority_label}_provisional"  # stamped, not computed
-    assert prefixed - produced - {provisional} == set()
+    produced = set(phenology.plant_milestones(series, spec))
+    schema = set(phenology.phenology_csv_columns(spec))
+    prefixed = {c for c in schema if c.startswith(spec.phenology_prefix + "_")}
+    # The provisional marker is stamped by the delivery tool rather than computed here, and exists
+    # only when the spec names a majority alias for it to qualify.
+    stamped = ({f"{spec.phenology_prefix}_{spec.majority_label}_provisional"}
+               if spec.majority_milestone else set())
+    assert prefixed - produced - stamped == set()
     assert produced - schema == set()  # and nothing computed is silently dropped
+    assert not any(c.startswith(f"{spec.phenology_prefix}__") for c in schema)
+
+
+def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_path):
+    """A plant excluded from milestone computation must have the same row SHAPE as an included one.
+
+    The exclusion branch rebuilt its keys from ``milestone_date_columns``, which names the dates but
+    not their ``*_date_bound`` companions — so an excluded plant's row was missing four keys an
+    included plant's row carried, within one delivery. Both branches now go through the producer.
+    """
+    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    id_map = {"dormant": 0, "elongated": 1}
+    for d in (d1, d2):
+        _sidecar(d, id_map)
+    _preds(d1, "GOOD", ["elongated", "dormant"])
+    _preds(d2, "GOOD", ["elongated", "elongated"])
+    _preds(d1, "BAD", ["elongated", "mystery"])  # unclassifiable -> plant excluded
+    _preds(d2, "BAD", ["elongated", "elongated"])
+    mapping = {
+        "2026-02-11": [_Assignment("GOOD", "GOOD", "a"), _Assignment("BAD", "BAD", "b")],
+        "2026-03-09": [_Assignment("GOOD", "GOOD", "a"), _Assignment("BAD", "BAD", "b")],
+    }
+    res = phenology.per_plant_phenology(
+        mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        positive_class_name="elongated", spec=CATKIN)
+    by_plant = {r["plant_id"]: r for r in res["rows"]}
+    assert by_plant["BAD"]["n_dates_unclassified"] == 1  # genuinely excluded
+    assert set(by_plant["GOOD"]) == set(by_plant["BAD"])
+    assert "catkin_95per_date_bound" in by_plant["BAD"]
+
+
+def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
+    """``n_images`` is derived where the images are counted, not asserted by a consumer.
+
+    The web curve row hardcoded ``n_images: 1`` while this function aggregates every image for a
+    (plant, date), so a breeder auditing coverage could not tell a well-sampled plant from a
+    single-photo one.
+    """
+    d = tmp_path / "2026-02-11"
+    _sidecar(d, {"dormant": 0, "elongated": 1})
+    for i in range(3):
+        _preds(d, f"IMG{i}", ["elongated", "dormant"])
+    mapping = {"2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
+               + [_Assignment("GONE", "P1", "a")]}  # named, no prediction file
+    series = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
+                                        positive_class_name="elongated")["P1"]["series"]
+    (_date, total, positive, unclassified, missing, n_images) = series[0]
+    assert (total, positive, unclassified, missing) == (6, 3, 0, 1)
+    # 4 images NAMED for this (plant, date) — the coverage the entry summarises — of which one is
+    # missing, not 3 (the files that happened to exist).
+    assert n_images == 4
 
 
 def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
