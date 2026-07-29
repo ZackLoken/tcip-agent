@@ -8,6 +8,8 @@ from PIL import Image
 
 from tcip_mcp.pipelines.derivations import (
     derive_cross_tile_nms,
+    derive_localization_tolerance_frac,
+    derive_sliver_frac,
     gt_aspect_ratios,
     num_classes_from_distribution,
     probe_channels,
@@ -60,6 +62,55 @@ def test_derive_cross_tile_nms_clamped_to_upper_bound():
     # Near-duplicate boxes (IoU ~0.90) would exceed the range; the result is clamped to the ceiling.
     boxes = [[(0, 0, 20, 20), (1, 0, 20, 20)]]
     assert derive_cross_tile_nms(boxes) == pytest.approx(0.8)
+
+
+def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loose():
+    # Same box size (20x20, char size 20) both times; only neighbor spacing differs. Tight spacing
+    # (10px between centers) must derive a smaller fraction than loose spacing (100px) — the
+    # tolerance has to stay well inside how close real neighbors actually get, or two distinct
+    # nearby objects start double-matching to one detection.
+    tight = [[(0, 0, 20, 20), (10, 0, 20, 20), (20, 0, 20, 20), (30, 0, 20, 20), (40, 0, 20, 20)]]
+    loose = [[(0, 0, 20, 20), (100, 0, 20, 20), (200, 0, 20, 20)]]
+    t_tight = derive_localization_tolerance_frac(tight)
+    t_loose = derive_localization_tolerance_frac(loose)
+    assert t_tight is not None and t_loose is not None
+    assert t_tight < t_loose
+    # p10 nn-dist (10) * margin_frac (0.5) / char_size (20) = 0.25, no clamping.
+    assert t_tight == pytest.approx(0.25)
+    # Loose spacing's raw fraction (2.5) exceeds the clamp ceiling.
+    assert t_loose == pytest.approx(0.75)
+
+
+def test_derive_localization_tolerance_frac_no_same_image_neighbor_returns_none():
+    # Every image holds at most one box of this class -> no neighbor spacing to measure from.
+    assert derive_localization_tolerance_frac([[(0, 0, 20, 20)], [(0, 0, 10, 10)]]) is None
+    assert derive_localization_tolerance_frac([]) is None
+
+
+def test_derive_sliver_frac_wide_spread_lower_than_tight_spread():
+    # A class with wide natural size variation (e.g. across a growth/bloom stage) needs a lower
+    # cutoff, or it discards real small-but-complete instances as tile-seam slivers; a tightly-sized
+    # class can use a higher one without losing anything real.
+    tight = list(np.linspace(38, 42, 20))
+    wide = list(np.linspace(10, 90, 20))
+    f_tight = derive_sliver_frac(tight)
+    f_wide = derive_sliver_frac(wide)
+    assert f_tight is not None and f_wide is not None
+    assert f_wide < f_tight
+    assert f_wide == pytest.approx(0.36, abs=1e-2)
+    assert f_tight == pytest.approx(0.9)  # clamped to the ceiling
+
+
+def test_derive_sliver_frac_no_boxes_returns_none():
+    assert derive_sliver_frac([]) is None
+    assert derive_sliver_frac([0.0, 0.0]) is None
+
+
+def test_derive_sliver_frac_too_few_samples_returns_none():
+    # A single box's ratio to itself is trivially ~1.0 regardless of the class's real variation —
+    # not a spread, just noise. Below min_samples must refuse rather than derive from it.
+    assert derive_sliver_frac([25.6]) is None
+    assert derive_sliver_frac([10.0, 20.0, 30.0, 40.0]) is None  # 4 < default min_samples=5
 
 
 def test_write_class_map(tmp_path):
