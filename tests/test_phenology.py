@@ -110,9 +110,19 @@ def test_crossing_exact_match_is_not_censored():
     assert c.bound == "exact"
 
 
-def test_crossing_never_reached_returns_none():
+def test_crossing_never_reached_is_right_censored():
+    # Round 12 (2026-07-29): the LAST observed point still hasn't met the target -> the true
+    # crossing, if it happens at all, is after this date. Distinguishable from "no observations at
+    # all" (which stays None, see below) -- a bare None used to collapse both.
     series = [("2024-05-01", 0.0), ("2024-05-05", 0.3)]
-    assert phenology.crossing_date(series, 0.95) is None
+    c = phenology.crossing_date(series, 0.95)
+    assert c.date == "2024-05-05"
+    assert c.bound == "right_censored"
+    assert c.gap_days is None
+
+
+def test_crossing_no_observations_is_none():
+    assert phenology.crossing_date([], 0.95) is None
 
 
 def test_elongation_onset_is_first_nonzero_date():
