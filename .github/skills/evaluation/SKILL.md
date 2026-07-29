@@ -19,7 +19,7 @@ These are **labeled comparability metrics** — a fixed-convention number (mAP@5
 lets runs be compared on the same ruler. They do **not** govern the phenotype. The criterion that
 governs the delivered measurement (which detections are a hit, what the count is) is the *trait's*
 localization criterion with a tolerance derived from the data in hand — e.g. a center-match with
-`half_class_avg_size` tolerance for ~40px catkins, not a frozen IoU@0.5. Choose the governing
+`half_class_avg_size` tolerance for small, thin objects like catkins, not a frozen IoU@0.5. Choose the governing
 criterion per trait/data; keep mAP@50 alongside only as the comparability label (see `operating_point`
 / the derive-don't-pin rail). There is no single mandated "primary" metric per task.
 
