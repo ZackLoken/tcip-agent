@@ -47,17 +47,31 @@ def _milestone_targets(spec) -> dict[str, float]:
     return {f"{int(round(f * 100)):02d}per": f for f in spec.milestone_fractions}
 
 
-def milestone_date_columns(spec) -> list[str]:
-    """The milestone/date columns a trait's phenology delivery carries — a proper subset of
-    ``phenology_csv_columns`` (no ``plant_id``/provenance columns), shared by the export gate's
-    trigger and the CSV writer (K5/K6 TRAP 1) so they can never drift apart. Deriving the gate's
-    trigger from the FULL row schema would 400 a legitimate non-phenology export that merely shares
-    ``plant_id`` with a phenology row — this is the narrower, correct set.
+def _milestone_columns(spec) -> list[tuple[str, str]]:
+    """``(column_suffix, crossing_key)`` for every milestone this trait actually delivers.
+
+    The single owner of which milestone columns exist. ``plant_milestones`` iterates it to emit each
+    date and its bound; the schema functions map it to names. The majority alias enters only when the
+    spec names a crossing for it, so declared and produced can no longer disagree for any spec shape:
+    each side used to apply that condition independently, and a trait with no ``majority_milestone``
+    declared a majority date/bound/provisional column no producer ever filled (invisible for catkin,
+    which names one).
     """
-    prefix = spec.phenology_prefix
-    majority = f"{prefix}_{spec.majority_label}_date"
-    fraction_cols = [f"{prefix}_{key}_date" for key in _milestone_targets(spec)]
-    return [majority, *fraction_cols]
+    cols = [(key, key) for key in _milestone_targets(spec)]
+    if spec.majority_milestone:
+        cols.insert(0, (spec.majority_label, spec.majority_milestone))
+    return cols
+
+
+def milestone_date_columns(spec) -> list[str]:
+    """The milestone/date column NAMES a trait's phenology delivery carries — a proper subset of
+    ``phenology_csv_columns`` (no ``plant_id``/provenance columns).
+
+    Consumed by ``phenology_csv_columns``, which pairs each with its ``_bound``. It no longer feeds
+    an export gate: the web door used to trigger on these names appearing in a caller-supplied
+    table, which round 7 replaced with a door that computes what it exports.
+    """
+    return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
 
 
 def phenology_csv_columns(spec) -> list[str]:
@@ -70,7 +84,11 @@ def phenology_csv_columns(spec) -> list[str]:
     provenance columns (operating point, classifier validation, producer identity, coverage
     disclosure) are genuinely trait-neutral.
     """
-    provisional = f"{spec.phenology_prefix}_{spec.majority_label}_provisional"
+    # Only when the spec names a majority crossing — the alias's provisional marker qualifies that
+    # alias, so without one there is nothing for it to mark (``phenology_tools`` gates its stamp on
+    # the same condition; the two must agree or ``write_phenology_csv`` raises on an unknown key).
+    provisional = ([f"{spec.phenology_prefix}_{spec.majority_label}_provisional"]
+                   if spec.majority_milestone else [])
     return [
         "plant_id",
         "accession",
@@ -91,16 +109,39 @@ def phenology_csv_columns(spec) -> list[str]:
         # was delivered indistinguishable from a measured one. That is a precision claim the data
         # does not support, which is the failure mode this platform exists to prevent.
         *[f"{c}_bound" for c in milestone_date_columns(spec)],
-        provisional,
-        # Provenance stamp: how the counts behind these milestones were produced, and whether the
-        # measurement is trustworthy. A delivered phenotype must carry this so it can be traced.
-        "operating_point_conf",
-        "operating_point_validated",
-        "positive_state_classifier_validated",
-        # Producing-model identity — the exact checkpoint (content hash) + run behind the counts.
-        "producer_model_sha256",
-        "producer_experiment_id",
+        *provisional,
+        *PROVENANCE_COLUMNS,
     ]
+
+
+# How the counts behind a delivered number were produced, and whether the measurement is
+# trustworthy — a delivered phenotype must carry this so it can be traced. Trait-neutral, and the
+# single owner of the tail, so every delivered shape (milestones, curves) carries the same chain
+# rather than each door listing its own.
+PROVENANCE_COLUMNS = [
+    "operating_point_conf",
+    "operating_point_validated",
+    "positive_state_classifier_validated",
+    # Producing-model identity — the exact checkpoint (content hash) + run behind the counts.
+    "producer_model_sha256",
+    "producer_experiment_id",
+]
+
+# The per-(plant, date) columns ``per_plant_series`` produces, before the provenance tail.
+CURVE_MEASUREMENT_COLUMNS = [
+    "plant_id", "accession", "date",
+    "n_images", "n_total", "n_positive", "n_unclassified", "n_missing", "ratio",
+]
+
+
+def curve_csv_columns() -> list[str]:
+    """The delivered per-(plant, date) curve CSV schema.
+
+    A curve is the same bloom measurement as the milestone summary, un-summarised — which is why it
+    takes the identical delivery gate — so it carries the identical provenance tail. Trait-neutral:
+    unlike the milestone schema it names no crossings, only the counts the fraction is built from.
+    """
+    return [*CURVE_MEASUREMENT_COLUMNS, *PROVENANCE_COLUMNS]
 
 
 # ── ISO date helpers ─────────────────────────────────────────────────────
@@ -209,19 +250,14 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
     prefix = spec.phenology_prefix
     crossings = {key: crossing_date(series, frac) for key, frac in _milestone_targets(spec).items()}
     out: dict = {}
-    for key, crossing in crossings.items():
-        out[f"{prefix}_{key}_date"] = crossing.date if crossing else None
-        out[f"{prefix}_{key}_date_bound"] = crossing.bound if crossing else None
-    # e.g. catkin's crops.yml "most catkins elongated" maps to the majority milestone the spec names
-    # (95% crossing; a provisional reading pending breeder confirmation — see spec.majority_provisional).
-    if spec.majority_milestone:
-        majority_crossing = crossings.get(spec.majority_milestone)
-        out[f"{prefix}_{spec.majority_label}_date"] = majority_crossing.date if majority_crossing else None
-        # The alias carries its own bound, like every other milestone date (round-4 review): it is
-        # the same delivered crossing under the breeder's own name, so it needs the same evidence
-        # beside it — and without this the schema would name a column no producer ever fills.
-        out[f"{prefix}_{spec.majority_label}_date_bound"] = (
-            majority_crossing.bound if majority_crossing else None)
+    # The majority alias (e.g. catkin's crops.yml "most catkins elongated") is just another entry in
+    # ``_milestone_columns`` pointing at the crossing the spec names for it, so it carries the same
+    # date + evidentiary bound as every other milestone and cannot be emitted under a different
+    # condition than the schema declares it under.
+    for sfx, key in _milestone_columns(spec):
+        crossing = crossings.get(key)
+        out[f"{prefix}_{sfx}_date"] = crossing.date if crossing else None
+        out[f"{prefix}_{sfx}_date_bound"] = crossing.bound if crossing else None
     return out
 
 
@@ -343,15 +379,18 @@ def per_plant_series(
         pred_dir = predictions_by_date.get(date_str)
         pred_path = Path(pred_dir) if pred_dir else None
         id_map = _bucket_id_map(pred_path) if pred_path is not None else None
-        # [total, positive, unclassified, missing] per plant, accumulated across that plant's images
-        # on this date.
+        # [total, positive, unclassified, missing, n_images] per plant, accumulated across that
+        # plant's images on this date. ``n_images`` counts every image the mapping NAMES for this
+        # (plant, date) — including ones with no prediction file, which ``missing`` counts too —
+        # since it is the coverage the series entry summarises, not the files that happened to exist.
         by_plant: dict[str, list[int]] = {}
         accession: dict[str, Optional[str]] = {}
         for a in mapping[date_str]:
             plant_id = _attr(a, "plot_name")
             if not plant_id:
                 continue
-            acc = by_plant.setdefault(plant_id, [0, 0, 0, 0])
+            acc = by_plant.setdefault(plant_id, [0, 0, 0, 0, 0])
+            acc[4] += 1
             accession.setdefault(plant_id, _attr(a, "accession_name"))
             img_path = pred_path / f"{_attr(a, 'stem')}.json" if pred_path is not None else None
             if img_path is None or not img_path.is_file():
@@ -361,9 +400,9 @@ def per_plant_series(
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified
-        for plant_id, (total, positive, unclassified, missing) in by_plant.items():
+        for plant_id, (total, positive, unclassified, missing, n_images) in by_plant.items():
             entry = per_plant.setdefault(plant_id, {"accession": accession.get(plant_id), "series": []})
-            entry["series"].append((date_str, total, positive, unclassified, missing))
+            entry["series"].append((date_str, total, positive, unclassified, missing, n_images))
     return per_plant
 
 
@@ -390,12 +429,11 @@ def per_plant_phenology(
     rows = []
     any_classified_date = False
     for plant_id, info in sorted(per_plant.items()):
-        usable_dates = [(d, total, positive) for (d, total, positive, unclassified, missing) in info["series"]
+        usable_dates = [(d, total, positive)
+                        for (d, total, positive, unclassified, missing, _n_images) in info["series"]
                         if unclassified == 0 and missing == 0]
-        n_dates_unclassified = sum(1 for (d, total, positive, unclassified, missing) in info["series"]
-                                   if unclassified > 0)
-        n_dates_missing_images = sum(1 for (d, total, positive, unclassified, missing) in info["series"]
-                                     if missing > 0)
+        n_dates_unclassified = sum(1 for s in info["series"] if s[3] > 0)
+        n_dates_missing_images = sum(1 for s in info["series"] if s[4] > 0)
         if usable_dates:
             any_classified_date = True
         # total==0 detected no objects, so it's not an observation of the positive fraction
@@ -412,15 +450,17 @@ def per_plant_phenology(
             "n_dates_missing_images": n_dates_missing_images,
             "series": [
                 {"date": d, "n_total": total, "n_positive": positive, "n_unclassified": unclassified,
-                 "n_missing": missing,
+                 "n_missing": missing, "n_images": n_images,
                  "ratio": (positive / total if total and unclassified == 0 and missing == 0 else None)}
-                for (d, total, positive, unclassified, missing) in info["series"]
+                for (d, total, positive, unclassified, missing, n_images) in info["series"]
             ],
         }
-        if plant_fully_classified:
-            row.update(plant_milestones(frac_series, spec))
-        else:
-            row.update({col: None for col in milestone_date_columns(spec)})
+        # A plant with any unclassified/missing date earns no milestone dates, but must still carry
+        # the same keys as one that does — so both branches go through the producer (an empty series
+        # crosses nothing) rather than one of them rebuilding the key set from the column names. The
+        # rebuild used to omit every ``*_date_bound``, so an excluded plant's row shape differed from
+        # an included one's within a single delivery.
+        row.update(plant_milestones(frac_series if plant_fully_classified else [], spec))
         rows.append(row)
     return {"rows": rows, "elongation_classified": any_classified_date}
 
