@@ -206,7 +206,7 @@ def dir_label_format(labels_dir) -> str | None:
 
 def trainable_stems(
     labels_dir, images_dir, stems=None, *, subject: str | None = None, date=None,
-    label_format: str = "json", coco: dict | None = None,
+    coco: dict | None = None,
     attribute: str | None = None, id_map: dict[str, int] | None = None,
 ) -> tuple[list[str], dict[str, int]]:
     """The stems that may train, plus the partition that produced them.
@@ -292,8 +292,17 @@ def trainable_stems(
             continue
         if coco_names is not None:
             if image_name not in coco_names:
-                # assemble_coco already dropped it, but not why. Read the record so the operator is
-                # told the truth: "annotate this" and "confirm this empty one" are different jobs.
+                # assemble_coco already dropped it, but not why. A quarantined negative is dropped
+                # the same way an unconfirmed one is (assemble_coco's confirmed_negative_names call
+                # never sees a quarantined name as a negative), so it must be checked here too, or a
+                # human-confirmed-but-schema-stale negative reads as "nobody ever looked" instead of
+                # "looked, but the schema changed since" — the exact distinction this count exists
+                # to preserve, and the one the direct-JSON branch below already gets right.
+                if image_name in quarantined:
+                    counts["quarantined_stale_definition"] += 1
+                    continue
+                # Read the record so the operator is told the truth: "annotate this" and "confirm
+                # this empty one" are different jobs.
                 has_record, _ = _label_record_state(stem, labels_dir, subject)
                 counts["skipped_unconfirmed_empty" if has_record
                        else "skipped_unannotated"] += 1
@@ -658,7 +667,7 @@ class DetectionDataset(BaseImageDataset):
         # label paths from one implementation and reports a truthful reason for each drop.
         self.stems, self.sample_counts = trainable_stems(
             self.labels_dir, self.images_dir, stems,
-            subject=subject, date=date, label_format=self.label_format, coco=self._coco,
+            subject=subject, date=date, coco=self._coco,
             attribute=attribute, id_map=self.id_map,
         )
         _require_samples(self.stems, self.sample_counts, self.labels_dir)
@@ -694,8 +703,17 @@ class DetectionDataset(BaseImageDataset):
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
         if self.label_format == "coco" and self._coco:
+            # self._coco may be shared across a full/train/val split trio (training_tools.py's
+            # Backend#3: assembled once, threaded into all three builds rather than re-assembled
+            # per split) — its annotations cover the WHOLE dataset, not just this dataset's own
+            # self.stems, so every consumer must filter to its own image set or a split's
+            # class_distribution reports the identical, unsplit whole for train and val alike.
+            own_names = {self._image_names.get(s, "") for s in self.stems}
+            image_names_by_id = {e.get("id"): str(e.get("file_name", ""))
+                                 for e in self._coco.get("images", [])}
             for ann in self._coco.get("annotations", []):
-                counts[ann.get("category_id", 0)] += 1
+                if image_names_by_id.get(ann.get("image_id")) in own_names:
+                    counts[ann.get("category_id", 0)] += 1
         else:  # json: parse each image's annotation
             for stem in self.stems:
                 _, labels = self._det_targets(stem, "")
@@ -919,9 +937,14 @@ class InstanceSegDataset(BaseImageDataset):
             _reg, id_map = _resolve_registry_id_map(self.labels_dir, subject, attribute)
             self._num_classes = len(id_map)
         self.id_map = id_map
+        # attribute/id_map threaded through (round 12, 2026-07-29): without them the direct-JSON
+        # instance_seg path had no attribute-completeness rail at all — an image with any instance
+        # never assessed for `attribute` trained on its labeled subset instead of being held out
+        # whole, exactly the gap DetectionDataset's own call already closed.
         self.stems, self.sample_counts = trainable_stems(
             self.labels_dir, self.images_dir, stems,
-            subject=subject, date=date, label_format=self.label_format, coco=self._coco,
+            subject=subject, date=date, coco=self._coco,
+            attribute=attribute, id_map=self.id_map,
         )
         _require_samples(self.stems, self.sample_counts, self.labels_dir)
         # Real on-disk filenames for the COCO ``file_name`` match (see DetectionDataset / image_name_map).
