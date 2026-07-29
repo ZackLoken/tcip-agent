@@ -29,7 +29,8 @@ if str(_MCP_SRC) not in sys.path:
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
-from tcip_mcp.traits import CATKIN, TraitSpec  # noqa: E402
+from tcip_mcp.traits import TraitSpec  # noqa: E402
+from tests._trait_fixtures import CATKIN  # noqa: E402
 
 
 def _sidecar(dir_path: Path, id_map: dict | None) -> None:
