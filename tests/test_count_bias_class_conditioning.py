@@ -195,7 +195,7 @@ def test_single_class_reference_is_unaffected_by_the_conditioning():
     # same records must produce the same statistics the shortcut hands back.
     explicit = sweep_operating_point(hold, tolerance=sweep["calibration"]["tolerance"],
                                      class_id=1, conf_grid=[hb["conf"]])["curve"][0]
-    for key in ("tp", "fp", "fn", "count_bias_mean", "count_bias_std", "n_images"):
+    for key in ("tp", "fp", "fn", "count_bias_mean", "count_bias_std", "n_images", "n_present"):
         assert hb["per_class"]["1"][key] == pytest.approx(explicit[key])
 
 
@@ -211,6 +211,58 @@ def test_a_class_the_holdout_never_carries_cannot_be_validated_by_its_absence():
     assert sweep["per_class_count_bias_failures"] == []   # the holdout has nothing to fail on
     assert sweep["holdout_missing_classes"] == ["2"]
     assert "holdout_missing_class" in sweep["failures"]
+    assert b.params["conf"].validated_vs_gt == VALIDATED_FALSE
+
+
+def _sparse_class_records(prefix, n_images, *, offset=0.0):
+    """Class 1 present and correctly detected on every image; class 2 present (and missed
+    entirely) on only the first two — the dilution shape report ``51eb`` described: thin evidence
+    diluted toward zero by images that say nothing about the class.
+    """
+    recs = []
+    for i in range(n_images):
+        gt, dt = [], []
+        for k in range(2):
+            box = [100.0 * k + offset, 50.0 + i, 40.0, 40.0]
+            gt.append({"bbox": box, "category_id": 1})
+            dt.append({"bbox": box, "category_id": 1, "score": 0.9})
+        if i < 2:
+            for k in range(4):
+                box = [500.0 + 100.0 * k + offset, 50.0 + i, 40.0, 40.0]
+                gt.append({"bbox": box, "category_id": 2})  # no dt: guaranteed FN
+        recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+    return recs
+
+
+def _sparse_class_calibration(prefix, n, *, offset):
+    recs = []
+    for i in range(n):
+        gt, dt = [], []
+        for cat in (1, 2):
+            box = [100.0 * cat + offset, 50.0 + i, 40.0, 40.0]
+            gt.append({"bbox": box, "category_id": cat})
+            dt.append({"bbox": box, "category_id": cat, "score": 0.9})
+        recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+    return recs
+
+
+def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
+    # Class 2 is present on 2 of 20 holdout images and missed outright both times — wrong every
+    # time there is anything to be wrong about. Pooled over all 20 images the mean reads -0.4,
+    # comfortably inside catkin's tolerance of 1.0; only weighting the equivalence test's standard
+    # error by the 2 images that actually carried the class (not the 20 that said nothing about
+    # it) surfaces that this reference has almost no real evidence backing that mean.
+    cal = _sparse_class_calibration("cal", 4, offset=0.0)
+    hold = _sparse_class_records("hold", 20, offset=5000.0)
+    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+                                calibration_records=cal, holdout_records=hold)
+    sweep = b.params["conf"].sweep
+    c2 = sweep["holdout_bias"]["per_class"]["2"]
+    assert c2["n_images"] == 20
+    assert c2["n_present"] == 2
+    assert c2["count_bias_mean"] == pytest.approx(-0.4)
+    assert "2" in sweep["per_class_count_bias_failures"]
+    assert "count_bias_exceeds_tolerance_per_class" in sweep["failures"]
     assert b.params["conf"].validated_vs_gt == VALIDATED_FALSE
 
 
