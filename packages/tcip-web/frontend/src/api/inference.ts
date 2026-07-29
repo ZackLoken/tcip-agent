@@ -130,7 +130,7 @@ export interface PerPlantRow {
 export interface OnsetRow {
   plant_id: string;
   accession: string | null;
-  n_datapoints: number;
+  n_dates: number;
   n_dates_unclassified: number;
   n_dates_missing_images: number;
   // Dates with a real, non-zero-detection observation (stage-6 review N6) — a plant can be fully
@@ -138,6 +138,35 @@ export interface OnsetRow {
   // anything, e.g. before emergence; that reads as "no observations", not "valid".
   n_observed_dates: number;
   [milestoneColumn: string]: string | number | null;
+}
+
+// The inputs a bloom measurement is computed FROM. Every Results door takes this same shape — none
+// accepts rows, so no caller-composed table can be mistaken for (or declared to be) a delivery.
+export interface BloomRequest {
+  project_root: string;
+  mapping_path: string;
+  predictions_by_date: Record<string, string>;
+  trait: string;
+  // Show provisional numbers instead of refusing. The server still marks them provisional, and it
+  // never applies to a CSV.
+  acknowledge_unvalidated?: boolean;
+}
+
+// Every door returns the evidence that qualifies its numbers alongside them, so no surface can
+// render a bloom measurement bare.
+export interface BloomResponse<Row> {
+  rows: Row[];
+  // Per-dimension reconciled state, e.g. { operating_point: "validated_held_out", classifier: "false" }.
+  validated: Record<string, string>;
+  // True when any dimension lacked on-disk evidence — including when the caller acknowledged it,
+  // which is exactly when these numbers must not be rendered as valid.
+  provisional: boolean;
+  validity_detail: Record<string, unknown>;
+  // False when nothing was ever classified along the trait's positive-class axis — the ratios are
+  // then not a valid bloom measurement (run + validate the classifier first).
+  elongation_classified: boolean;
+  n_plants?: number;
+  positive_class_id?: number | null;
 }
 
 export const resultsApi = {
@@ -161,42 +190,27 @@ export const resultsApi = {
   loadPlantMapping: (persist_path: string) =>
     postJson<{ mapping: unknown }>("/api/results/plant_mapping/load", { persist_path }),
 
-  perPlantCurves: (body: {
-    project_root: string;
-    mapping_path: string;
-    predictions_by_date: Record<string, string>;
-    trait: string;
-  }) =>
-    postJson<{
-      rows: PerPlantRow[];
-      n_plants: number;
-      positive_class_id: number | null;
-      // False when nothing was ever classified along the trait's positive-class axis — the ratios
-      // are then not a valid bloom measurement (run + validate the classifier first).
-      elongation_classified: boolean;
-    }>("/api/results/per_plant_curves", body),
+  perPlantCurves: (body: BloomRequest) =>
+    postJson<BloomResponse<PerPlantRow>>("/api/results/per_plant_curves", body),
 
-  onsetDates: (curves: PerPlantRow[], trait: string) =>
-    postJson<{ rows: OnsetRow[] }>("/api/results/onset_dates", { curves, trait }),
+  onsetDates: (body: BloomRequest) =>
+    postJson<BloomResponse<OnsetRow>>("/api/results/onset_dates", body),
 
-  // `exportKind` states what the export IS. The backend gates on this declaration rather than
-  // guessing from the rows' column names — three successive guessing rules were each defeated,
-  // because the caller controls the column names (see the export_csv route's own comment).
+  // The server computes what it exports: this sends the INPUTS a bloom measurement is derived from
+  // plus which computation to run, never a table of rows. Rounds 2-5 sent rows and had the backend
+  // decide what they meant — four column-shape predicates and one `export_kind` declaration were
+  // each defeated in turn, because the caller controls both the columns and the declaration.
   exportCsv: async (
-    rows: unknown[],
+    body: BloomRequest,
+    payload: "curves" | "milestones",
     filename: string,
-    exportKind: "phenology" | "diagnostic",
-    predictions_by_date?: Record<string, string>,
   ): Promise<Blob> => {
     const resp = await fetch("/api/results/export_csv", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        rows,
-        filename,
-        export_kind: exportKind,
-        predictions_by_date,
-      }),
+      // acknowledge_unvalidated is deliberately dropped: it may reveal provisional numbers on
+      // screen, never write them to a file that leaves the platform.
+      body: JSON.stringify({ ...body, acknowledge_unvalidated: false, payload, filename }),
     });
     if (!resp.ok) {
       // K15: surface the server's actual reason instead of discarding the response body.
