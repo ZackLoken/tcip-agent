@@ -8,6 +8,15 @@ import { ResultsTab } from "@/tabs/ResultsTab";
 
 const initialStoreState = useStore.getState();
 
+// Every Results door now returns the reconciled evidence beside its rows, so a mock that omits it
+// would be describing a response the server cannot produce.
+const VALIDATED = {
+  validated: { operating_point: "validated_held_out", classifier: "validated_held_out" },
+  provisional: false,
+  validity_detail: {},
+  elongation_classified: true,
+};
+
 function setupDataset() {
   useStore.setState((s) => ({
     gui: {
@@ -45,9 +54,9 @@ describe("ResultsTab structured predictions-by-date picker (K15 #10)", () => {
       rows: [],
       n_plants: 0,
       positive_class_id: 1,
-      elongation_classified: true,
+      ...VALIDATED,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [] });
+    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [], ...VALIDATED });
 
     render(<ResultsTab />);
     await waitFor(() => expect(api.dataset.tree).toHaveBeenCalledWith("C:/data"));
@@ -82,9 +91,9 @@ describe("ResultsTab structured predictions-by-date picker (K15 #10)", () => {
       rows: [],
       n_plants: 0,
       positive_class_id: 1,
-      elongation_classified: true,
+      ...VALIDATED,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [] });
+    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [], ...VALIDATED });
 
     render(<ResultsTab />);
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
@@ -126,9 +135,9 @@ describe("ResultsTab onset table validity marker", () => {
       ],
       n_plants: 1,
       positive_class_id: 1,
-      elongation_classified: true,
+      ...VALIDATED,
     });
-    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows });
+    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows, ...VALIDATED });
 
     render(<ResultsTab />);
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
@@ -141,7 +150,7 @@ describe("ResultsTab onset table validity marker", () => {
       {
         plant_id: "P1",
         accession: null,
-        n_datapoints: 1,
+        n_dates: 1,
         n_dates_unclassified: 0,
         n_dates_missing_images: 0,
         n_observed_dates: 1,
@@ -158,7 +167,7 @@ describe("ResultsTab onset table validity marker", () => {
       {
         plant_id: "P1",
         accession: null,
-        n_datapoints: 1,
+        n_dates: 1,
         n_dates_unclassified: 1,
         n_dates_missing_images: 0,
         n_observed_dates: 0,
@@ -175,7 +184,7 @@ describe("ResultsTab onset table validity marker", () => {
       {
         plant_id: "P1",
         accession: null,
-        n_datapoints: 2,
+        n_dates: 2,
         n_dates_unclassified: 0,
         n_dates_missing_images: 0,
         n_observed_dates: 0,
