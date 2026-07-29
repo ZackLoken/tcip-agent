@@ -12,6 +12,10 @@ from tcip_annotation.state import Annotation, BBox
 
 from tcip_web.app import app
 
+# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# catkin.yml into this test's pinned project root so get_trait("catkin") keeps resolving by default.
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+
 
 @pytest.fixture
 def client() -> TestClient:
