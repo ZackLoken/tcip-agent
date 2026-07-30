@@ -112,11 +112,37 @@ class TestRenderSegmentations:
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
         polys = [
-            {"points": [(100, 100), (200, 100), (200, 200), (100, 200)], "class_id": 0},
+            {"rings": [[(100, 100), (200, 100), (200, 200), (100, 200)]], "class_id": 0},
         ]
         out = str(viz_dataset / "test_seg.png")
         result = render_segmentations(img_path, polys, output_path=out)
         assert Path(result).is_file()
+
+    def test_renders_every_ring_of_an_occlusion_split_instance(self, viz_dataset: Path):
+        """An instance's rings all get drawn, and it is labelled once — not once per contour."""
+        from tcip_annotation.viz import render_segmentations
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        polys = [{"rings": [[(50, 50), (120, 50), (120, 150), (50, 150)],
+                            [(300, 60), (380, 60), (380, 140), (300, 140)]],
+                  "class_id": 0}]
+        one_ring = [{"rings": [polys[0]["rings"][0]], "class_id": 0}]
+
+        both = str(viz_dataset / "seg_two_rings.png")
+        first_only = str(viz_dataset / "seg_one_ring.png")
+        render_segmentations(img_path, polys, output_path=both)
+        render_segmentations(img_path, one_ring, output_path=first_only)
+
+        # The second ring really is painted: the two renders differ.
+        assert Path(both).read_bytes() != Path(first_only).read_bytes()
+
+    def test_polygon_without_rings_key_is_skipped_not_crashed(self, viz_dataset: Path):
+        """The renderer's rail admits an entry with no drawable ring rather than raising."""
+        from tcip_annotation.viz import render_segmentations
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        out = str(viz_dataset / "seg_empty.png")
+        assert Path(render_segmentations(img_path, [{"class_id": 0}], output_path=out)).is_file()
 
 
 class TestRenderComparison:
@@ -286,7 +312,7 @@ class TestRenderCandidates:
                 "area": 10000,
                 "stability_score": 0.95,
                 "predicted_iou": 0.90,
-                "polygon": [(100, 100), (200, 100), (200, 200), (100, 200)],
+                "rings": [[(100, 100), (200, 100), (200, 200), (100, 200)]],
             },
             {
                 "candidate_id": 1,
@@ -294,7 +320,7 @@ class TestRenderCandidates:
                 "area": 5000,
                 "stability_score": 0.88,
                 "predicted_iou": 0.85,
-                "polygon": [(300, 300), (400, 300), (400, 400), (300, 400)],
+                "rings": [[(300, 300), (400, 300), (400, 400), (300, 400)]],
             },
         ]
         out = render_candidates(img_path, candidates)
@@ -412,8 +438,8 @@ class TestSamPredictorCache:
         img_path = str(tmp_path / "cache_test.jpg")
         Image.new("RGB", (16, 16), color=(120, 120, 120)).save(img_path)
 
-        polygon = sam_wrapper.predict_from_point(img_path, 8, 8, model_type="hiera_t")
-        assert len(polygon) >= 3
+        rings = sam_wrapper.predict_from_point(img_path, 8, 8, model_type="hiera_t")
+        assert len(rings) == 1 and len(rings[0]) >= 3
         assert len(set_image_calls) == 1
 
         # Same image + same model: embedding cache hit, no new set_image.
@@ -493,7 +519,7 @@ class TestAcceptProposalsTool:
                 "score": 0.90,
                 "engine": "sam",
                 "engine_meta": {"stability_score": 0.95, "predicted_iou": 0.90},
-                "polygon": [[100, 100], [200, 100], [200, 200], [100, 200]],
+                "rings": [[[100, 100], [200, 100], [200, 200], [100, 200]]],
             },
             {
                 "candidate_id": 1,
@@ -502,7 +528,7 @@ class TestAcceptProposalsTool:
                 "score": 0.85,
                 "engine": "sam",
                 "engine_meta": {"stability_score": 0.88, "predicted_iou": 0.85},
-                "polygon": [[300, 300], [400, 300], [400, 400], [300, 400]],
+                "rings": [[[300, 300], [400, 300], [400, 400], [300, 400]]],
             },
         ]
         (state_dir / "proposals_img_001.json").write_text(
@@ -549,9 +575,9 @@ MOCK_CANDIDATES = [
         "score": 0.93,
         "engine": "sam",
         "engine_meta": {"stability_score": 0.96, "predicted_iou": 0.93},
-        "polygon": [
+        "rings": [[
             (50, 40), (200, 40), (200, 180), (50, 180),
-        ],
+        ]],
     },
     {
         "candidate_id": 1,
@@ -560,9 +586,9 @@ MOCK_CANDIDATES = [
         "score": 0.88,
         "engine": "sam",
         "engine_meta": {"stability_score": 0.91, "predicted_iou": 0.88},
-        "polygon": [
+        "rings": [[
             (300, 250), (450, 250), (450, 400), (300, 400),
-        ],
+        ]],
     },
     {
         "candidate_id": 2,
@@ -571,9 +597,9 @@ MOCK_CANDIDATES = [
         "score": 0.80,
         "engine": "sam",
         "engine_meta": {"stability_score": 0.85, "predicted_iou": 0.80},
-        "polygon": [
+        "rings": [[
             (500, 100), (600, 100), (600, 200), (500, 200),
-        ],
+        ]],
     },
 ]
 
@@ -646,8 +672,8 @@ class TestSamAutoMask:
             assert "candidate_id" in c
             assert "bbox" in c
             assert len(c["bbox"]) == 4
-            assert "polygon" in c
-            assert len(c["polygon"]) >= 3
+            assert "rings" in c
+            assert c["rings"] and all(len(r) >= 3 for r in c["rings"])
             assert "area" in c
             assert c["area"] > 0
             assert 0.0 <= c["stability_score"] <= 1.0
@@ -661,12 +687,12 @@ class TestSamAutoMask:
         assert areas == sorted(areas, reverse=True)
 
     def test_auto_mask_polygon_within_image(self, real_image: str):
-        """All polygon vertices should be within image bounds."""
+        """All polygon vertices, in every ring, should be within image bounds."""
         from tcip_annotation.sam_wrapper import auto_mask
 
         candidates = auto_mask(real_image, model_type=SAM_TEST_MODEL, points_per_side=16)
         for c in candidates:
-            for x, y in c["polygon"]:
+            for x, y in (pt for ring in c["rings"] for pt in ring):
                 assert 0 <= x <= 512, f"x={x} out of bounds"
                 assert 0 <= y <= 512, f"y={y} out of bounds"
 
@@ -694,10 +720,11 @@ class TestSamPredictFromGrid:
         result = segment_prompt(
             image_path=img_path,
             grid_cells=["B2"],
+            cols=8, rows=6,
             engine_params={"model_type": SAM_TEST_MODEL},
         )
         assert "error" not in result
-        assert "polygon" in result
+        assert result["rings"] and all(len(r) >= 3 for r in result["rings"])
         assert result["vertex_count"] >= 3
 
 
@@ -762,9 +789,9 @@ MOCK_CANDIDATES = [
         "score": 0.93,
         "engine": "sam",
         "engine_meta": {"stability_score": 0.96, "predicted_iou": 0.93},
-        "polygon": [
+        "rings": [[
             (50, 40), (200, 40), (200, 180), (50, 180),
-        ],
+        ]],
     },
     {
         "candidate_id": 1,
@@ -773,9 +800,9 @@ MOCK_CANDIDATES = [
         "score": 0.88,
         "engine": "sam",
         "engine_meta": {"stability_score": 0.91, "predicted_iou": 0.88},
-        "polygon": [
+        "rings": [[
             (300, 250), (450, 250), (450, 400), (300, 400),
-        ],
+        ]],
     },
     {
         "candidate_id": 2,
@@ -784,9 +811,9 @@ MOCK_CANDIDATES = [
         "score": 0.80,
         "engine": "sam",
         "engine_meta": {"stability_score": 0.85, "predicted_iou": 0.80},
-        "polygon": [
+        "rings": [[
             (500, 100), (600, 100), (600, 200), (500, 200),
-        ],
+        ]],
     },
 ]
 
@@ -808,11 +835,13 @@ class TestCandidateCacheRoundTrip:
             assert abs(orig["score"] - restored["score"]) < 1e-6
             assert abs(orig["engine_meta"]["stability_score"]
                        - restored["engine_meta"]["stability_score"]) < 1e-6
-            # Polygon vertices â€” JSON turns tuples into lists
-            for (ox, oy), rp in zip(orig["polygon"], restored["polygon"]):
-                rx, ry = rp if isinstance(rp, (list, tuple)) else (rp["x"], rp["y"])
-                assert abs(ox - rx) < 1e-6
-                assert abs(oy - ry) < 1e-6
+            # Every ring, every vertex â€” JSON turns tuples into lists
+            assert len(orig["rings"]) == len(restored["rings"])
+            for o_ring, r_ring in zip(orig["rings"], restored["rings"]):
+                for (ox, oy), rp in zip(o_ring, r_ring):
+                    rx, ry = rp if isinstance(rp, (list, tuple)) else (rp["x"], rp["y"])
+                    assert abs(ox - rx) < 1e-6
+                    assert abs(oy - ry) < 1e-6
 
     def test_empty_candidates_roundtrip(self, tmp_path: Path):
         state_file = tmp_path / "candidates_empty.json"
@@ -894,9 +923,9 @@ class TestFullPipelineIntegration:
         anns = json_io.read_annotations(pred_file)
         assert len(anns) == 1
         assert {a.subject for a in anns} == {"bud"}
-        pts = anns[0].geometry.points
-        assert len(pts) >= 3
-        for x, y in pts:
+        rings = anns[0].geometry.rings
+        assert rings and all(len(r) >= 3 for r in rings)
+        for x, y in (pt for ring in rings for pt in ring):
             assert 0.0 <= x <= 640.0
             assert 0.0 <= y <= 480.0
         objs = json.loads(pred_file.read_text(encoding="utf-8"))["annotations"]
@@ -1006,12 +1035,13 @@ class TestGridCellToSamPrompt:
             "tcip_annotation.sam_wrapper.predict_from_points"
         ) as mock_predict:
             mock_predict.return_value = [
-                (100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0),
+                [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)],
             ]
 
             result = segment_prompt(
                 image_path=img_path,
                 grid_cells=["A1", "D3"],
+                cols=8, rows=6,
             )
 
         # Should have called predict_from_points (2 points â†’ multi-point)
@@ -1022,8 +1052,8 @@ class TestGridCellToSamPrompt:
         assert len(pts) == 2
         assert all(lbl == 1 for lbl in lbls)
 
-        # Verify result has polygon
-        assert "polygon" in result
+        # Verify result carries the mask's rings
+        assert result["ring_count"] == 1
         assert result["vertex_count"] == 4
 
     def test_single_grid_cell_uses_single_point(self, viz_dataset: Path):
@@ -1036,12 +1066,13 @@ class TestGridCellToSamPrompt:
             "tcip_annotation.sam_wrapper.predict_from_point"
         ) as mock_predict:
             mock_predict.return_value = [
-                (100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0),
+                [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)],
             ]
 
             segment_prompt(
                 image_path=img_path,
                 grid_cells=["C4"],
+                cols=8, rows=6,
             )
 
         assert mock_predict.called
@@ -1059,9 +1090,38 @@ class TestGridCellToSamPrompt:
         from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
-        result = segment_prompt(image_path=img_path, grid_cells=["Z9"])
+        result = segment_prompt(image_path=img_path, grid_cells=["Z9"], cols=8, rows=6)
         assert "error" in result
         assert "Invalid grid cell" in result["error"]
+
+    def test_grid_cells_without_cols_and_rows_is_refused(self, viz_dataset: Path):
+        """A cell name means nothing without its grid: resolving 'B3' against an assumed 8x6 when the
+        breeder rendered another grid picks the wrong pixel silently, so the call is refused."""
+        from tcip_mcp.tools.annotation_tools import segment_prompt
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        for kwargs in ({}, {"cols": 10}, {"rows": 8}):
+            result = segment_prompt(image_path=img_path, grid_cells=["B3"], **kwargs)
+            assert "error" in result, kwargs
+            assert "cols and rows" in result["error"]
+
+    def test_grid_cells_resolve_against_the_callers_own_grid(self, viz_dataset: Path):
+        """The cells are resolved with the caller's cols/rows — the grid overlay_reference_grid
+        actually rendered — not the wrapper's own 8x6 signature default."""
+        from tcip_mcp.tools.annotation_tools import segment_prompt
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        with patch("tcip_annotation.sam_wrapper.predict_from_point") as mock_predict:
+            mock_predict.return_value = [
+                [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)],
+            ]
+            segment_prompt(image_path=img_path, grid_cells=["C4"], cols=10, rows=8)
+
+        x, y = mock_predict.call_args[0][1], mock_predict.call_args[0][2]
+        # C4 on a 10x8 grid over 640x480: x = (2+0.5)*640/10 = 160, y = (3+0.5)*480/8 = 210 —
+        # the 8x6 reading of the same cell would be (200, 280).
+        assert abs(x - 160.0) < 1.0
+        assert abs(y - 210.0) < 1.0
 
     def test_no_prompts_returns_error(self, viz_dataset: Path):
         """Calling with no prompts at all should error."""
