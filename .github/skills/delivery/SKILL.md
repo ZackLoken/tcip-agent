@@ -9,15 +9,26 @@ description: "How to deliver phenotyping results — the per-plant CSV schema, p
 
 The final deliverable is a CSV with one row per plant per trait:
 
+Columns, in the order `export_aggregated_csv` writes them (its `fieldnames` is the authority — check
+it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
+
 | Column | Type | Description |
 |--------|------|-------------|
 | plant_id | string | Unique plant identifier |
 | crop | string | Crop species |
 | trait_name | string | Measured trait (from crop skill) |
 | value | float/string | Measurement value |
+| units | string | Physical unit implied by the value's own `value_key`; blank when the key implies none (a count, a px-space value) — never inherited from `crops.yml` |
+| value_key | string | Which aggregated field `value` came from (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
 | confidence | float | Model confidence [0,1] |
 | n_images | int | Number of source images |
 | pipeline_version | string | Pipeline that produced this result |
+| plant_id_source | string | How the plant identity was resolved for this plant's images (`"mixed"` when they disagree); blank when the records carried no identity provenance |
+| plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in metres, across this plant's images — the identity-confidence signal `build_plant_mapping` produces |
+| producer_model_sha256 | string | Checkpoint hash of the model that produced the predictions |
+| experiment_id | string | Experiment the producing run is recorded under |
+| produced_at | string | Timestamp stamped by the producing run |
+| measurement_validated | string | The reconciled validity state stamped into every row by the delivery gate |
 
 ## Aggregation Rules
 
