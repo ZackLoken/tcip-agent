@@ -22,33 +22,35 @@ from tests._trait_fixtures import CATKIN
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
-# --- the firewall: an unvalidated calibration op-point is un-consumable ---
+# --- the firewall: an unvalidated param that requires validation is un-consumable ---
 
 def test_unvalidated_calibration_value_raises():
-    p = derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
-                validated_vs_gt=VALIDATED_FALSE, sweep={"curve": []})
+    p = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                validated_against=VALIDATED_FALSE, sweep={"curve": []})
     assert not p.is_shippable
     with pytest.raises(UnvalidatedOperatingPointError):
         _ = p.value
 
 
 def test_validated_heldout_calibration_value_ok():
-    p = derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
-                validated_vs_gt=VALIDATED_HELD_OUT)
+    p = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                validated_against=VALIDATED_HELD_OUT)
     assert p.is_shippable
     assert p.value == 0.4
 
 
-def test_non_calibration_value_always_ok():
-    # facts (deterministic) and knobs (engineering) ship regardless of validated_vs_gt
-    assert derived("num_classes", 2, derivation_class="deterministic", derived_from="labels").value == 2
+def test_param_that_needs_no_validation_always_ships():
+    # a fact read from the data needs no validation, so it ships with no validated_against at all
+    p = derived("num_classes", 2, derived_from="labels")
+    assert p.requires_validation is False and p.validation_kind is None
+    assert p.value == 2
 
 
 def test_review_confirmed_calibration_is_shippable():
     from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED
-    p = derived("conf", 0.4, derivation_class="calibration",
+    p = derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
                 derived_from="count-unbiased center-match sweep over review verdicts",
-                validated_vs_gt=VALIDATED_REVIEW_CONFIRMED)
+                validated_against=VALIDATED_REVIEW_CONFIRMED)
     assert p.is_shippable  # a review-confirmed reference ships (distinct flag, same gate)
     assert p.value == 0.4
 
@@ -61,7 +63,7 @@ def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
     d.mkdir(parents=True, exist_ok=True)
     (d / "operating_point.json").write_text(json.dumps({
         "validated": validated,
-        "operating_point": {"conf": {"value": conf, "validated_vs_gt": ref if validated else "false"}},
+        "operating_point": {"conf": {"value": conf, "validated_against": ref if validated else "false"}},
     }), encoding="utf-8")
     return str(d)
 
@@ -111,8 +113,8 @@ def test_reconcile_review_confirmed_reference_preserved(tmp_path):
 
 
 def test_unvalidated_value_requires_acknowledgement():
-    p = derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
-                validated_vs_gt=VALIDATED_FALSE)
+    p = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                validated_against=VALIDATED_FALSE)
     with pytest.raises(UnvalidatedOperatingPointError):
         p.unvalidated_value(acknowledge_unvalidated=False)
     assert p.unvalidated_value(acknowledge_unvalidated=True) == 0.4
@@ -120,26 +122,67 @@ def test_unvalidated_value_requires_acknowledgement():
 
 def test_resolvedparam_rejects_bad_vocab():
     with pytest.raises(ValueError):
-        ResolvedParam(name="x", _raw=1, source="bogus", derivation_class="calibration")
+        ResolvedParam(name="x", _raw=1, source="bogus", requires_validation=True, validation_kind="annotations")
     with pytest.raises(ValueError):
-        ResolvedParam(name="x", _raw=1, source="derived", derivation_class="bogus")
+        # requires_validation with no kind: a param needing validation must say which reference can
+        # give it, never left to a silent default
+        ResolvedParam(name="x", _raw=1, source="derived", requires_validation=True)
+    with pytest.raises(ValueError):
+        ResolvedParam(name="x", _raw=1, source="derived", requires_validation=True, validation_kind="bogus")
+    with pytest.raises(ValueError):
+        # a kind with nothing to validate is the mirror contradiction
+        ResolvedParam(name="x", _raw=1, source="derived", validation_kind="annotations")
+    with pytest.raises(ValueError):
+        ResolvedParam(name="x", _raw=1, source="derived", validated_against="sort-of")
+
+
+def test_validated_against_must_be_the_right_kind_for_the_param():
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_PHYSICAL_MEASUREMENT, accepted_references,
+    )
+
+    # an annotations-kind param (conf) is not cleared by a physical-measurement reference...
+    conf = derived("conf", 0.4, derived_from="sweep", requires_validation=True,
+                   validation_kind="annotations", validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    assert conf.is_shippable is False
+    # ...and a physical-kind param is not cleared by held-out annotations
+    scale = derived("mm_per_px", 0.5, derived_from="reference object", requires_validation=True,
+                    validation_kind="physical", validated_against=VALIDATED_HELD_OUT)
+    assert scale.is_shippable is False
+    assert VALIDATED_HELD_OUT not in accepted_references("physical")
+    assert VALIDATED_PHYSICAL_MEASUREMENT not in accepted_references("annotations")
+    ok = derived("mm_per_px", 0.5, derived_from="reference object", requires_validation=True,
+                 validation_kind="physical", validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    assert ok.is_shippable is True and ok.value == 0.5
+
+
+def test_capture_scoped_param_is_not_comparable_without_a_capture_id():
+    p = derived("mm_per_px", 0.5, derived_from="reference object", capture_scoped=True)
+    issues = ResolvedBundle("catkin", "h1", {"mm_per_px": p}).shippable_issues()
+    assert any("capture" in s for s in issues)
+    scoped = derived("mm_per_px", 0.5, derived_from="reference object",
+                     capture_scoped=True, capture_id="cap1")
+    assert ResolvedBundle("catkin", "h1", {"mm_per_px": scoped}).shippable_issues(
+        target_capture_id="cap1") == []
+    assert any("never inherit" in s for s in ResolvedBundle("catkin", "h1", {"mm_per_px": scoped})
+               .shippable_issues(target_capture_id="cap2"))
 
 
 # --- bundle shippability + provenance ---
 
 def test_bundle_shippable_only_when_all_calibration_validated():
-    unval = derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
-                    validated_vs_gt=VALIDATED_FALSE)
-    val = derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
-                  validated_vs_gt=VALIDATED_HELD_OUT)
-    fact = derived("max_dets", 300, derivation_class="distribution", derived_from="p99")
+    unval = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                    validated_against=VALIDATED_FALSE)
+    val = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                  validated_against=VALIDATED_HELD_OUT)
+    fact = derived("max_dets", 300, derived_from="p99")
     assert not ResolvedBundle("catkin", "h1", {"conf": unval, "max_dets": fact}).is_shippable
     assert ResolvedBundle("catkin", "h1", {"conf": val, "max_dets": fact}).is_shippable
 
 
 def test_dataset_scoped_calibration_not_inherited_across_hash():
-    p = derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
-                validated_vs_gt=VALIDATED_HELD_OUT, dataset_scoped=True, dataset_hash="AAAA")
+    p = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                validated_against=VALIDATED_HELD_OUT, dataset_scoped=True, dataset_hash="AAAA")
     b = ResolvedBundle("catkin", "AAAA", {"conf": p})
     assert b.shippable_issues(target_dataset_hash="AAAA") == []
     issues = b.shippable_issues(target_dataset_hash="BBBB")
@@ -149,8 +192,8 @@ def test_dataset_scoped_calibration_not_inherited_across_hash():
 def test_provenance_roundtrip_is_serializable():
     import json
     b = ResolvedBundle("catkin", "h1", {
-        "conf": derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
-                        validated_vs_gt=VALIDATED_HELD_OUT),
+        "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                        validated_against=VALIDATED_HELD_OUT),
     })
     json.dumps(b.to_provenance())  # must not raise
 
@@ -181,7 +224,7 @@ def test_dataset_hash_content_addressed(tmp_path):
 
 def test_validate_in_chans_vs_probed_bands():
     b = ResolvedBundle("catkin", "h1", {
-        "in_chans": derived("in_chans", 3, derivation_class="deterministic", derived_from="raster"),
+        "in_chans": derived("in_chans", 3, derived_from="raster"),
     })
     assert validate_resolved_bundle(b, probed_channels=3) == []
     issues = validate_resolved_bundle(b, probed_channels=4)
@@ -191,8 +234,8 @@ def test_validate_in_chans_vs_probed_bands():
 def test_validate_eval_vs_inference_operating_point_mismatch():
     def bundle(conf):
         return ResolvedBundle("catkin", "h1", {
-            "conf": derived("conf", conf, derivation_class="calibration", derived_from="sweep",
-                            validated_vs_gt=VALIDATED_HELD_OUT),
+            "conf": derived("conf", conf, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                            validated_against=VALIDATED_HELD_OUT),
         })
     ev, inf = bundle(0.25), bundle(0.5)
     issues = validate_resolved_bundle(ev, inference_bundle=inf)
@@ -202,8 +245,8 @@ def test_validate_eval_vs_inference_operating_point_mismatch():
 
 def test_validate_export_refuses_unvalidated():
     b = ResolvedBundle("catkin", "h1", {
-        "conf": derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
-                        validated_vs_gt=VALIDATED_FALSE),
+        "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                        validated_against=VALIDATED_FALSE),
     })
     issues = validate_resolved_bundle(b, for_export=True)
     assert any("shippable" in s or "not validated" in s for s in issues)
@@ -215,9 +258,9 @@ def test_validate_bundle_surfaces_all_firewall_issues_at_export():
     # regression dropping any one (e.g. the shippable_issues(target_dataset_hash=...) fold-in)
     # can't slip past — each check is exercised in isolation elsewhere but never together.
     b = ResolvedBundle("catkin", "AAAA", {
-        "in_chans": derived("in_chans", 3, derivation_class="deterministic", derived_from="raster"),
-        "conf": derived("conf", 0.4, derivation_class="calibration", derived_from="sweep",
-                        validated_vs_gt=VALIDATED_FALSE, dataset_scoped=True, dataset_hash="AAAA"),
+        "in_chans": derived("in_chans", 3, derived_from="raster"),
+        "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
+                        validated_against=VALIDATED_FALSE, dataset_scoped=True, dataset_hash="AAAA"),
     })
     issues = validate_resolved_bundle(b, probed_channels=4, target_dataset_hash="BBBB", for_export=True)
     assert any("in_chans" in s for s in issues)       # channel mismatch
