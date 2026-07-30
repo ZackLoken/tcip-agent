@@ -1,4 +1,4 @@
-# TCIP crop trait definitions — controlled vocabulary.
+# TCIP crop trait definitions
 #
 # Ground truth, breeder-defined: trait name, definition, format, units, and which crops
 # carry each trait. Verify traits against this file before asserting one exists.
