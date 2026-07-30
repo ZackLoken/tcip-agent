@@ -87,14 +87,14 @@ def _currant_bloom_fixture(
         if validated:
             sidecar.update({
                 "validated": True,
-                "operating_point": {"conf": {"value": 0.4, "validated_vs_gt": "validated_held_out"}},
+                "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
                 "experiment_id": "exp-1",
                 "checkpoint_sha256": "abc123",
             })
             (bucket / "classifier_operating_point.json").write_text(json.dumps({
                 "validated": True, "trait": "currant_bloom", "experiment_id": "exp-1",
                 "operating_point": {"classifier": {"value": "open",
-                                                   "validated_vs_gt": "validated_held_out"}},
+                                                   "validated_against": "held_out_annotations"}},
             }), encoding="utf-8")
         (bucket / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
         assigns = []
