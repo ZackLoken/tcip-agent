@@ -155,9 +155,9 @@ def test_golden_resolve_operating_point_validated_conf():
                                 staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
-    assert conf.derivation_class == "calibration"
+    assert conf.requires_validation is True and conf.validation_kind == "annotations"
     assert conf.derived_from == "count-unbiased center-match sweep"
-    assert conf.validated_vs_gt == "validated_held_out"
+    assert conf.validated_against == "held_out_annotations"
     assert conf.dataset_scoped is True
     assert conf.dataset_hash == "h1"
     assert b.is_shippable is True
@@ -256,8 +256,9 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
 _OP_PARAM_KEYS = {"conf", "cross_tile_nms", "tiled", "tile_size", "max_dets"}
 _RESOLVED_OP_PARAM_KEYS = _OP_PARAM_KEYS | {"localization_tolerance_frac"}
 _PARAM_PROVENANCE_KEYS = {
-    "name", "value", "source", "derivation_class", "derived_from",
-    "validated_vs_gt", "dataset_scoped", "dataset_hash", "has_sweep",
+    "name", "value", "source", "derived_from",
+    "requires_validation", "validation_kind", "validated_against",
+    "dataset_scoped", "dataset_hash", "capture_scoped", "capture_id", "has_sweep",
 }
 
 
@@ -285,8 +286,9 @@ def test_golden_stamp_shape_calibrated_validated():
     conf = op["conf"]
     assert conf["value"] == pytest.approx(0.9)
     assert conf["source"] == "derived"
-    assert conf["derivation_class"] == "calibration"
-    assert conf["validated_vs_gt"] == "validated_held_out"
+    assert conf["requires_validation"] is True
+    assert conf["validation_kind"] == "annotations"
+    assert conf["validated_against"] == "held_out_annotations"
     assert conf["has_sweep"] is True
 
 
@@ -305,8 +307,9 @@ def test_golden_stamp_shape_raw_uncalibrated_is_false():
     conf = op["conf"]
     assert conf["value"] == pytest.approx(0.5)
     assert conf["source"] == "default"
-    assert conf["derivation_class"] == "calibration"
-    assert conf["validated_vs_gt"] == "false"  # the firewall stamp on an uncalibrated conf
+    assert conf["requires_validation"] is True
+    assert conf["validation_kind"] == "annotations"
+    assert conf["validated_against"] == "false"  # the firewall stamp on an uncalibrated conf
     assert conf["has_sweep"] is False
 
 
@@ -316,7 +319,7 @@ def test_golden_validated_flag_path_calibrated_no_holdout_is_false():
     # Calibrated but never held-out-measured -> validated=false, not shippable.
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=_sweep_records("c"))
-    assert b.get("conf").validated_vs_gt == "false"
+    assert b.get("conf").validated_against == "false"
     assert b.is_shippable is False
 
 
@@ -324,7 +327,7 @@ def test_golden_duplicate_content_holdout_is_false():
     """K1's delivered number, old->new: the SAME fixture pair the two goldens above used before
     this cluster (identical GT content, differing only by ``image_id`` prefix — the OLD
     ``_sweep_records("c")``/``_sweep_records("h")`` call with no ``shift``) used to stamp
-    ``validated_held_out``/shippable=True. A byte-identical-content holdout can't function as an
+    ``VALIDATED_HELD_OUT``/shippable=True. A byte-identical-content holdout can't function as an
     independent check, so K1 adds the content-overlap gate and this pair now stamps
     ``false``/shippable=False instead — pinned here exactly as before/after this cluster's change.
     """
@@ -334,7 +337,7 @@ def test_golden_duplicate_content_holdout_is_false():
                                 calibration_records=_sweep_records("c"),
                                 holdout_records=_sweep_records("h"))
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "false"
+    assert conf.validated_against == "false"
     assert b.is_shippable is False
     assert conf.sweep["content_overlap_frac"] == pytest.approx(1.0)
 
@@ -523,21 +526,21 @@ def test_golden_coco_matching_is_iou_threshold_sensitive():
 def _write_op_sidecar(d: Path, *, validated: bool, conf: float = 0.4, id_map: dict | None = None) -> None:
     """The operating_point.json stamp export_predictions writes beside a bucket's labels — the
     on-disk validity compute_phenology reconciles against (K3), including id_map (K4/K5)."""
-    ref = "validated_held_out" if validated else "false"
+    ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
     (d / "operating_point.json").write_text(json.dumps({
         "validated": validated,
-        "operating_point": {"conf": {"value": conf, "validated_vs_gt": ref}},
+        "operating_point": {"conf": {"value": conf, "validated_against": ref}},
         "id_map": id_map,
     }), encoding="utf-8")
 
 
 def _write_classifier_sidecar(d: Path, *, validated: bool, trait: str | None = "catkin") -> None:
-    ref = "validated_held_out" if validated else "false"
+    ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
     (d / "classifier_operating_point.json").write_text(json.dumps({
         "validated": validated,
-        "operating_point": {"classifier": {"value": "elongated", "validated_vs_gt": ref}},
+        "operating_point": {"classifier": {"value": "elongated", "validated_against": ref}},
         "trait": trait,
     }), encoding="utf-8")
 
@@ -597,7 +600,7 @@ def test_golden_compute_phenology_requires_both_validated_flags(tmp_path: Path):
 def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sidecar(tmp_path: Path):
     # K3: an asserted validity string is floored by the on-disk sidecar's real (false) state —
     # never trusted. The predictions ARE classified (a real id_map is on disk), but the sidecar's
-    # own conf.validated_vs_gt is "false" — a caller asserting "validated_held_out" cannot override it.
+    # own conf.validated_against is "false" — a caller asserting "held_out_annotations" cannot override it.
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
     mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=False)
@@ -608,7 +611,7 @@ def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sideca
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         operating_point_conf=0.4,
-        operating_point_validated="validated_held_out",  # asserted, but unbacked on disk
+        operating_point_validated="held_out_annotations",  # asserted, but unbacked on disk
     )
     assert "error" in res
     assert res["operating_point_validated"] == "false"
@@ -630,7 +633,7 @@ def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4,
-        operating_point_validated="validated_held_out",
+        operating_point_validated="held_out_annotations",
     )
     assert "error" not in res, res
     assert res["elongation_classified"] is True
