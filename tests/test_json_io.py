@@ -26,6 +26,10 @@ from tcip_annotation.state import Annotation, BBox, Polygon, bbox_of
 SQUARE = [(10.0, 20.0), (110.0, 20.0), (110.0, 220.0), (10.0, 220.0)]
 TRIANGLE = [(0.5, 0.25), (30.0, 0.25), (15.25, 40.75)]
 
+# Two disjoint rings of ONE instance (an occlusion-split object — a catkin behind a branch).
+LEFT_LOBE = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]
+RIGHT_LOBE = [(70.0, 12.0), (90.0, 12.0), (90.0, 48.0), (70.0, 48.0)]
+
 
 def _raw(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -91,8 +95,8 @@ def test_pred_round_trip_confidence_via_score(tmp_path: Path) -> None:
 
 def test_polygon_gt_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "labels" / "IMG_0003.json"
-    write_annotations(path, [Annotation(subject="leaf", geometry=Polygon(SQUARE)),
-                             Annotation(subject="catkin", geometry=Polygon(TRIANGLE))], 640, 480)
+    write_annotations(path, [Annotation(subject="leaf", geometry=Polygon([SQUARE])),
+                             Annotation(subject="catkin", geometry=Polygon([TRIANGLE]))], 640, 480)
 
     data = _raw(path)
     # segmentation is [[flat pixel coords]] with >= 3 points.
@@ -103,7 +107,7 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
     # Each polygon record ALSO carries its derived box (COCO xywh of bbox_of(points)) alongside the
     # segmentation — the polygon stays the source of truth, its box travels with it on disk.
     def _xywh(pts: list[tuple[float, float]]) -> list[float]:
-        b = bbox_of(Polygon(pts))
+        b = bbox_of(Polygon([pts]))
         return [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
 
     assert data["annotations"][0]["bbox"] == _xywh(SQUARE) == [10.0, 20.0, 100.0, 200.0]
@@ -114,7 +118,70 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
     got = read_annotations(path)
     assert len(got) == 2
     assert all(isinstance(a.geometry, Polygon) for a in got)
-    assert [(a.geometry.points, a.subject) for a in got] == [(SQUARE, "leaf"), (TRIANGLE, "catkin")]
+    assert [(a.geometry.rings, a.subject) for a in got] == [([SQUARE], "leaf"), ([TRIANGLE], "catkin")]
+
+
+def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(tmp_path: Path) -> None:
+    # An occlusion-split instance is ONE annotation with more than one ring. Every ring must survive
+    # the write/read round trip, in authored order — a reader that kept only the first would silently
+    # shrink the object, and its derived box with it.
+    path = tmp_path / "labels" / "IMG_multi.json"
+    write_annotations(
+        path, [Annotation(subject="catkin", geometry=Polygon([LEFT_LOBE, RIGHT_LOBE]), score=0.5)],
+        640, 480)
+
+    (rec,) = _raw(path)["annotations"]
+    assert rec["segmentation"] == [
+        [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
+        [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
+    ]
+    # The co-stored box spans BOTH rings, not just the first.
+    assert rec["bbox"] == [10.0, 10.0, 80.0, 40.0]
+
+    got = read_annotations(path)
+    assert len(got) == 1  # one annotation, not one per ring
+    assert got[0].geometry.rings == [LEFT_LOBE, RIGHT_LOBE]
+    b = bbox_of(got[0].geometry)
+    assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 10.0, 90.0, 50.0)
+
+
+def test_degenerate_ring_is_dropped_without_losing_its_siblings(tmp_path: Path) -> None:
+    # A ring that is not a shape is dropped INDIVIDUALLY; the annotation and its valid rings survive.
+    # (Before multi-ring support a bad first ring could take the whole annotation with it.)
+    path = tmp_path / "labels" / "IMG_partial.json"
+    write_annotations(
+        path,
+        [Annotation(subject="catkin",
+                    geometry=Polygon([[(1.0, 1.0), (2.0, 2.0)], LEFT_LOBE, RIGHT_LOBE]))],
+        640, 480)
+
+    (rec,) = _raw(path)["annotations"]
+    assert len(rec["segmentation"]) == 2
+    (got,) = read_annotations(path)
+    assert got.geometry.rings == [LEFT_LOBE, RIGHT_LOBE]
+
+
+def test_read_drops_only_the_bad_ring_of_a_mixed_segmentation(tmp_path: Path) -> None:
+    # Same rule on the read side, from a hand-authored file: an unusable entry (too few coords, odd
+    # coord count, an RLE dict) is skipped per-entry, and the usable rings still form the polygon.
+    path = tmp_path / "mixed.json"
+    payload = {
+        "image": "mixed", "width": 100, "height": 100,
+        "annotations": [{
+            "subject": "catkin",
+            "segmentation": [
+                [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
+                [1.0, 2.0, 3.0, 4.0],            # < 3 points
+                [1, 2, 3, 4, 5, 6, 7],           # odd coord count
+                {"counts": "RLE", "size": [2, 2]},
+                [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
+            ],
+        }],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    (got,) = read_annotations(path)
+    assert got.geometry.rings == [LEFT_LOBE, RIGHT_LOBE]
 
 
 def test_box_only_record_reads_as_single_bbox_annotation(tmp_path: Path) -> None:
@@ -134,12 +201,12 @@ def test_box_only_record_reads_as_single_bbox_annotation(tmp_path: Path) -> None
 
 def test_polygon_pred_round_trip_confidence_via_score(tmp_path: Path) -> None:
     path = tmp_path / "labels" / "IMG_0004.json"
-    write_annotations(path, [Annotation(subject="leaf", geometry=Polygon(TRIANGLE), score=0.75)], 640, 480)
+    write_annotations(path, [Annotation(subject="leaf", geometry=Polygon([TRIANGLE]), score=0.75)], 640, 480)
 
     assert _raw(path)["annotations"][0]["score"] == 0.75
 
     got = read_annotations(path)
-    assert got[0].geometry.points == TRIANGLE
+    assert got[0].geometry.rings == [TRIANGLE]
     assert got[0].subject == "leaf"
     assert got[0].score == 0.75
 
@@ -175,13 +242,13 @@ def test_provenance_round_trip_box_gt_and_pred(tmp_path: Path) -> None:
 
 def test_provenance_round_trip_polygon_gt_and_pred(tmp_path: Path) -> None:
     gt_path = tmp_path / "labels" / "gt.json"
-    write_annotations(gt_path, [Annotation(subject="leaf", geometry=Polygon(TRIANGLE), **PROV)], 100, 100)
+    write_annotations(gt_path, [Annotation(subject="leaf", geometry=Polygon([TRIANGLE]), **PROV)], 100, 100)
     (gt_poly,) = read_annotations(gt_path)
     _assert_prov(gt_poly)
 
     pred_path = tmp_path / "labels" / "pred.json"
     write_annotations(
-        pred_path, [Annotation(subject="leaf", geometry=Polygon(TRIANGLE), score=0.875, **PROV)], 100, 100)
+        pred_path, [Annotation(subject="leaf", geometry=Polygon([TRIANGLE]), score=0.875, **PROV)], 100, 100)
     (pred_poly,) = read_annotations(pred_path)
     _assert_prov(pred_poly)
     assert pred_poly.score == 0.875
@@ -191,7 +258,7 @@ def test_unset_provenance_omitted_from_json_not_null(tmp_path: Path) -> None:
     dpath = tmp_path / "labels" / "a.json"
     write_annotations(dpath, [Annotation(subject="catkin", geometry=BBox(1.0, 2.0, 3.0, 4.0))], 100, 100)
     spath = tmp_path / "labels" / "b.json"
-    write_annotations(spath, [Annotation(subject="catkin", geometry=Polygon(TRIANGLE))], 100, 100)
+    write_annotations(spath, [Annotation(subject="catkin", geometry=Polygon([TRIANGLE]))], 100, 100)
     for path in (dpath, spath):
         obj = _raw(path)["annotations"][0]
         for k in ("created_by", "created_at", "accepted_by", "accepted_at"):
@@ -351,16 +418,17 @@ def test_write_skips_degenerate_polygon(tmp_path: Path) -> None:
     # A <3-point polygon is not a shape; the writer must skip it so it can't be written as a record
     # every reader then silently drops (which would masquerade as a confirmed negative).
     path = tmp_path / "labels" / "a.json"
-    write_annotations(path, [Annotation(subject="catkin", geometry=Polygon([(1.0, 1.0), (2.0, 2.0)])),
-                             Annotation(subject="leaf", geometry=Polygon(TRIANGLE))], 100, 100)
+    write_annotations(path, [Annotation(subject="catkin", geometry=Polygon([[(1.0, 1.0), (2.0, 2.0)]])),
+                             Annotation(subject="leaf", geometry=Polygon([TRIANGLE]))], 100, 100)
     got = read_annotations(path)
-    assert [(a.geometry.points, a.subject) for a in got] == [(TRIANGLE, "leaf")]  # only the valid polygon
+    assert [(a.geometry.rings, a.subject) for a in got] == [([TRIANGLE], "leaf")]  # only the valid polygon
     # write<->read symmetry: what a reader can't read, a writer must not write.
-    assert all(len(o["segmentation"][0]) >= 6 for o in _raw(path)["annotations"])
+    assert all(len(ring) >= 6 for o in _raw(path)["annotations"] for ring in o["segmentation"])
 
-    # A list of ONLY degenerate polygons yields no records -> removed (unannotated), not a bogus file.
+    # A polygon whose every ring is degenerate yields no records -> removed (unannotated), not a
+    # bogus file.
     only_bad = tmp_path / "labels" / "b.json"
-    write_annotations(only_bad, [Annotation(subject="catkin", geometry=Polygon([(1.0, 1.0), (2.0, 2.0)]))], 100, 100)
+    write_annotations(only_bad, [Annotation(subject="catkin", geometry=Polygon([[(1.0, 1.0), (2.0, 2.0)]]))], 100, 100)
     assert not os.path.exists(only_bad)
 
 
@@ -421,7 +489,7 @@ def _mixed_entries(tmp_path: Path) -> list[tuple[str, str]]:
         640, 480,
     )
     s = tmp_path / "IMG_0002.json"
-    write_annotations(s, [Annotation(subject="catkin", geometry=Polygon(SQUARE), score=0.5, created_by="sam")], 800, 600)
+    write_annotations(s, [Annotation(subject="catkin", geometry=Polygon([SQUARE]), score=0.5, created_by="sam")], 800, 600)
     neg = tmp_path / "IMG_0003.json"
     write_annotations(neg, [], 640, 480, keep_empty=True)
     missing = tmp_path / "IMG_0004.json"
@@ -486,7 +554,7 @@ def test_to_coco_dataset_round_trips_through_format_io_parser(tmp_path: Path) ->
 
     anns2 = parse_coco_annotations(coco, file_name="IMG_0002.JPG")
     assert len(anns2) == 1 and isinstance(anns2[0].geometry, Polygon)
-    assert anns2[0].geometry.points == SQUARE
+    assert anns2[0].geometry.rings == [SQUARE]
     assert anns2[0].subject == "catkin"
 
     # No confirmed negatives were passed, so the empty IMG_0003 and the missing IMG_0004 are absent.
@@ -494,6 +562,29 @@ def test_to_coco_dataset_round_trips_through_format_io_parser(tmp_path: Path) ->
     assert "IMG_0003.JPG" not in file_names
     assert "IMG_0004.JPG" not in file_names
     assert parse_coco_annotations(coco, image_id=99) == []  # no such image
+
+
+def test_to_coco_dataset_keeps_every_ring_of_a_multi_ring_instance(tmp_path: Path) -> None:
+    # Training assembly must carry the whole occlusion-split instance: one COCO annotation whose
+    # segmentation lists both rings, with the box/area spanning their union.
+    from tcip_annotation.format_io import parse_coco_annotations
+
+    path = tmp_path / "IMG_multi.json"
+    write_annotations(
+        path, [Annotation(subject="catkin", geometry=Polygon([LEFT_LOBE, RIGHT_LOBE]))], 200, 200)
+
+    coco = to_coco_dataset([(str(path), "IMG_multi.JPG")], subject="catkin", id_map={"catkin": 0})
+    (ann,) = coco["annotations"]
+    assert ann["segmentation"] == [
+        [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
+        [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
+    ]
+    assert ann["bbox"] == [10.0, 10.0, 80.0, 40.0]
+    assert ann["area"] == 80.0 * 40.0
+
+    # ...and it survives back through the COCO parser as one two-ring polygon.
+    (parsed,) = parse_coco_annotations(coco, file_name="IMG_multi.JPG")
+    assert parsed.geometry.rings == [LEFT_LOBE, RIGHT_LOBE]
 
 
 def test_to_coco_dataset_empty_entries(tmp_path: Path) -> None:
