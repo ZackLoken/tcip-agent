@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 import csv
+import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tcip_annotation.state import BBox, Polygon
+
+logger = logging.getLogger(__name__)
 
 
 def write_predictions_json(
@@ -20,6 +27,24 @@ def write_predictions_json(
     but honest fallback, never a re-derivation). ``keep_empty=True`` so a processed image with zero
     detections still yields an ``{"annotations": []}`` file. ``created_by`` stamps the producing model
     on every prediction so the origin travels into GT when a human accepts it.
+
+    When ``result`` carries ``masks`` (one soft ``[H, W]`` array per detection — ``instance_seg``, see
+    :mod:`tcip_mcp.pipelines.inference.generic_predictor`), each mask is binarized via
+    :func:`tcip_mcp.pipelines.measurement.mask_geometry.resolve_binarize_threshold` (never a bare
+    hardcoded threshold) and converted to a real ``Polygon`` — every connected component becomes its
+    own ring (an occlusion-split instance, routine in this imagery, is genuinely more than one
+    region), so the stored geometry never silently drops part of the object. A mask that binarizes to
+    nothing falls back to the detection's ``BBox`` (a warning is logged) since there is no contour to
+    store at all.
+
+    The threshold is an unvalidated default — its own :class:`ResolvedParam` contract requires the
+    consuming output to carry ``validated=false`` so the uncertainty travels on. ``Annotation.attributes``
+    is the wrong home for that (it is the domain trait namespace — a fixed vocabulary of names, and a
+    machine-provenance float stamped there survives unfixed into GT the moment a breeder accepts the
+    prediction). The threshold is a run constant, not a per-detection fact, so it belongs in the run's
+    own ``operating_point.json`` instead — see :func:`mask_binarize_provenance`, which the two doors
+    that write predictions to disk (``export_predictions``, the web inference route) call once and
+    fold into that same stamp, mirroring how ``tiled``/``tile_size``/``conf`` already travel there.
     """
     from datetime import datetime, timezone
 
@@ -31,16 +56,50 @@ def write_predictions_json(
     h = result.get("height") or 0
     created_at = datetime.now(timezone.utc).isoformat() if created_by else None
     id_to_name = decode_class_ids(id_map) if id_map else {}
+    masks = result.get("masks")
     preds: list[Annotation] = []
-    for box, score, label in zip(
+    for i, (box, score, label) in enumerate(zip(
         result.get("boxes", []), result.get("scores", []), result.get("labels", [])
-    ):
+    )):
         x1, y1, x2, y2 = box
         cid = max(int(label) - 1, 0)  # undo the 1-indexed torchvision label -> 0-indexed run id
         name = id_to_name.get(cid, str(cid))  # decode via the recorded map, never a fresh derivation
-        preds.append(Annotation(subject=name, geometry=BBox(x1, y1, x2, y2), score=float(score),
+        geometry: BBox | Polygon = BBox(x1, y1, x2, y2)
+        if masks is not None and i < len(masks):
+            geometry = _mask_geometry_for_export(masks[i], (x1, y1, x2, y2), name)
+        preds.append(Annotation(subject=name, geometry=geometry, score=float(score),
                                 created_by=created_by, created_at=created_at))
     json_io.write_annotations(str(json_path), preds, int(w), int(h), keep_empty=True)
+
+
+def mask_binarize_provenance() -> dict:
+    """The run-constant unvalidated binarize threshold ``_mask_geometry_for_export`` actually used,
+    as a stamp for the caller's own ``operating_point.json`` — never a per-annotation attribute (see
+    :func:`write_predictions_json`'s docstring). Call once per run, when ``masks`` were present."""
+    from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
+
+    return resolve_binarize_threshold().to_provenance()
+
+
+def _mask_geometry_for_export(
+    mask, bbox_xyxy: tuple[float, float, float, float], subject: str,
+) -> BBox | Polygon:
+    """One detection's soft mask -> a real (possibly multi-ring) Polygon, or BBox if empty."""
+    from tcip_annotation.state import BBox, Polygon
+    from tcip_mcp.pipelines.measurement.mask_geometry import (
+        mask_to_polygon_points, resolve_binarize_threshold,
+    )
+
+    threshold = resolve_binarize_threshold().unvalidated_value(acknowledge_unvalidated=True)
+    rings = mask_to_polygon_points(mask, threshold=threshold)
+    if rings:
+        return Polygon(rings=rings)
+    logger.warning(
+        "%s: mask binarized to nothing at threshold=%.3f — exporting BBox (no contour to store).",
+        subject, threshold,
+    )
+    x1, y1, x2, y2 = bbox_xyxy
+    return BBox(x1, y1, x2, y2)
 
 
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "operating_point_conf",
