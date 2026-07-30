@@ -16,24 +16,36 @@ import {
   createCanvasPusher,
   measureCanvasHost,
   onCanvasStateRequest,
+  pointShapeVisible,
   type CanvasStateBody,
 } from "@/lib/canvasSync";
 import { canvasToAnnotations } from "@/lib/labelSerde";
 import {
   computePolygonBboxes,
+  findHitPoint,
   findHoveredPolygon,
-  pointInPolygon,
-  polygonBbox,
+  pointInRings,
+  ringsBbox,
 } from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/reviewEditGeometry";
 import { useStore } from "@/store";
-import type { Box, DatasetSelection, PolygonShape, PredictionReference } from "@/store/types";
+import type {
+  Box,
+  DatasetSelection,
+  Mode,
+  PointShape,
+  PolygonShape,
+  PredictionReference,
+} from "@/store/types";
 
 const SNAP_RADIUS_CANVAS = 15;
 const VERTEX_HANDLE_RADIUS = 4;
 const EDGE_INSERT_THRESHOLD = 6;
 const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Stream (freehand) mode
 const MIN_BOX_SIDE = 3;
+// Screen-px grab radius for a placed point — the whole mark is its own handle, so this matches the
+// mark's outer reach (see the tick geometry in PointOverlay) rather than a hidden smaller target.
+const POINT_HIT_CANVAS = 11;
 
 function currentImagePath(dataset: DatasetSelection): string | null {
   if (!dataset.dataset_root || !dataset.date) return null;
@@ -42,11 +54,25 @@ function currentImagePath(dataset: DatasetSelection): string | null {
   return `${dataset.dataset_root}/images/${dataset.date}/${name}`;
 }
 
-/** A polygon's read-only derived box (its axis-aligned bounds), for box-mode display only. Reuses
- *  polygonBbox — the same min/max the loader and COCO export re-derive — so it can't drift. */
+/** A polygon's read-only derived box (the axis-aligned bounds of every ring), for box-mode display
+ *  only. Reuses ringsBbox — the same min/max the loader and COCO export re-derive — so it can't
+ *  drift. */
 function derivedBoxFromPolygon(p: PolygonShape): Box {
-  const [x1, y1, x2, y2] = polygonBbox(p.points);
+  const [x1, y1, x2, y2] = ringsBbox(p.rings);
   return { x1, y1, x2, y2, subject: p.subject, attributes: {} };
+}
+
+/** One ring replaced, the rest of the annotation untouched (an edit belongs to one contour). */
+function withRing(p: PolygonShape, ringIdx: number, ring: [number, number][]): PolygonShape {
+  const rings = p.rings.slice();
+  rings[ringIdx] = ring;
+  return { ...p, rings };
+}
+
+/** The mode `m` advances to: Box -> Polygon -> Point -> Box, the toolbar's left-to-right order. */
+function nextMode(mode: Mode): Mode {
+  const order: Mode[] = ["box", "polygon", "point"];
+  return order[(order.indexOf(mode) + 1) % order.length];
 }
 
 function pointToSegmentDist(
@@ -80,10 +106,12 @@ function pointToSegmentDist(
 interface AnnotationShapesProps {
   boxes: Box[];
   polygons: PolygonShape[];
-  mode: "box" | "polygon";
+  points: PointShape[];
+  mode: Mode;
   activeSubject: string | null;
   selectedPolygonIdx: number | null;
   selectedBoxIdx: number | null;
+  selectedPointIdx: number | null;
   hoveredIdx: number | null;
   draggingIdx: number | undefined;
   renderLabels: boolean;
@@ -92,15 +120,22 @@ interface AnnotationShapesProps {
   vertR: number;
   selVertR: number;
   labelSize: number;
+  pointCoreR: number;
+  pointSelCoreR: number;
+  pointTickInner: number;
+  pointTickOuter: number;
+  scaleLineW: number;
 }
 
 const AnnotationShapes = memo(function AnnotationShapes({
   boxes,
   polygons,
+  points,
   mode,
   activeSubject,
   selectedPolygonIdx,
   selectedBoxIdx,
+  selectedPointIdx,
   hoveredIdx,
   draggingIdx,
   renderLabels,
@@ -109,6 +144,11 @@ const AnnotationShapes = memo(function AnnotationShapes({
   vertR,
   selVertR,
   labelSize,
+  pointCoreR,
+  pointSelCoreR,
+  pointTickInner,
+  pointTickOuter,
+  scaleLineW,
 }: AnnotationShapesProps) {
   if (!renderLabels) return null;
   return (
@@ -154,8 +194,8 @@ const AnnotationShapes = memo(function AnnotationShapes({
         const selected = selectedPolygonIdx === i;
         const hovered = hoveredIdx === i;
         const dragging = draggingIdx === i;
-        // In box mode only show the selected polygon; in polygon mode show all
-        if (mode === "box" && !selected) return null;
+        // Outside polygon mode only the selected polygon shows (the shape being inspected)
+        if (mode !== "polygon" && !selected) return null;
         // In polygon mode filter to the active subject unless selected
         if (mode === "polygon" && !selected && p.subject !== activeSubject) return null;
         const showVerts = selected || hovered || dragging;
@@ -167,6 +207,33 @@ const AnnotationShapes = memo(function AnnotationShapes({
             width={polyStroke}
             vertexRadius={selected ? selVertR : vertR}
             showVertices={showVerts}
+            labelSize={labelSize}
+            label={p.subject}
+          />
+        );
+      })}
+
+      {/* Points — the same visibility rule the agent's mirror uses (pointShapeVisible) */}
+      {points.map((p, i) => {
+        const selected = selectedPointIdx === i;
+        if (
+          !pointShapeVisible({
+            mode,
+            subject: p.subject,
+            activeSubject: activeSubject ?? "",
+            selected,
+          })
+        )
+          return null;
+        return (
+          <PointOverlay
+            key={`point-${i}`}
+            point={p}
+            stroke={selected ? "#00BFFF" : subjectColor(p.subject)}
+            coreR={selected ? pointSelCoreR : pointCoreR}
+            tickInner={pointTickInner}
+            tickOuter={pointTickOuter}
+            lineW={scaleLineW * 1.6}
             labelSize={labelSize}
             label={p.subject}
           />
@@ -194,6 +261,10 @@ export function AnnotateTab() {
   const deletePolygon = useStore((s) => s.deletePolygon);
   const updatePolygon = useStore((s) => s.updatePolygon);
   const dragVertex = useStore((s) => s.dragVertex);
+  const addPoint = useStore((s) => s.addPoint);
+  const dragPoint = useStore((s) => s.dragPoint);
+  const deletePoint = useStore((s) => s.deletePoint);
+  const selectPoint = useStore((s) => s.selectPoint);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const setCurrentPolygon = useStore((s) => s.setCurrentPolygon);
@@ -220,6 +291,9 @@ export function AnnotateTab() {
   // one starts a corner-resize / move drag. selectedBoxIdx is cleared on image change below.
   const [selectedBoxIdx, setSelectedBoxIdx] = useState<number | null>(null);
   const boxDragRef = useRef<{ idx: number; drag: EditDrag } | null>(null);
+  // Index of the point being dragged. A point has no vertices, so repositioning it is the whole
+  // edit — one undo snapshot is taken when the drag starts (see onDown), like a box/vertex drag.
+  const pointDragRef = useRef<number | null>(null);
 
   // I/O safety. The canvas belongs to exactly the image last loaded from disk:
   //  - loadedPathsRef: the (image, label) the current shapes came from. save() writes there —
@@ -257,6 +331,7 @@ export function AnnotateTab() {
   useEffect(() => {
     setSelectedBoxIdx(null);
     boxDragRef.current = null;
+    pointDragRef.current = null;
     streamingRef.current = false;
   }, [currentImageName]);
 
@@ -291,16 +366,19 @@ export function AnnotateTab() {
       counts: {
         boxes: canvas.boxes.length,
         polygons: canvas.polygons.length,
+        points: canvas.points.length,
         image_ratings: canvas.imageAnnotations.length,
         drawing_points: canvas.currentPolygon.length,
       },
       shapes: buildAnnotateShapes({
         boxes: canvas.boxes,
         polygons: canvas.polygons,
+        points: canvas.points,
         currentPolygon: canvas.currentPolygon,
         drawingBox: drawing,
         selectedPolygonIdx: canvas.selectedPolygonIdx,
         selectedBoxIdx,
+        selectedPointIdx: canvas.selectedPointIdx,
         mode,
         activeSubject: activeSubject ?? "",
         visible: annotateUi.visible,
@@ -315,13 +393,19 @@ export function AnnotateTab() {
   // those downgrade to heartbeats and the release (drag ref clearing, commit) sends the full.
   useEffect(() => {
     const interacting =
-      !!annotateUi.draggingVertex || streamingRef.current || !!drawing || !!boxDragRef.current;
+      !!annotateUi.draggingVertex ||
+      streamingRef.current ||
+      !!drawing ||
+      !!boxDragRef.current ||
+      pointDragRef.current !== null;
     canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), !interacting);
   }, [
     canvas.boxes,
     canvas.polygons,
+    canvas.points,
     canvas.currentPolygon,
     canvas.selectedPolygonIdx,
+    canvas.selectedPointIdx,
     imgPath,
     mode,
     activeSubject,
@@ -372,6 +456,7 @@ export function AnnotateTab() {
         annotations: canvasToAnnotations({
           boxes: c.boxes,
           polygons: c.polygons,
+          points: c.points,
           imageAnnotations: c.imageAnnotations,
         }),
         project_root: projectRoot,
@@ -419,7 +504,8 @@ export function AnnotateTab() {
     if (projectRoot && name) {
       const current = useStore.getState().imageStatus.byImage[name];
       if (current !== "complete") {
-        const hasContent = c.boxes.length + c.polygons.length + c.imageAnnotations.length > 0;
+        const hasContent =
+          c.boxes.length + c.polygons.length + c.points.length + c.imageAnnotations.length > 0;
         // content -> partial; an empty save keeps a prior confirmed negative, else unannotated
         // (a negative needs an explicit Complete, not just an empty file).
         const newStatus = hasContent
@@ -542,7 +628,10 @@ export function AnnotateTab() {
         setConflict(false);
         startImageSessionTracking(
           currentImageName,
-          labels.boxes.length + labels.polygons.length + labels.imageAnnotations.length,
+          labels.boxes.length +
+            labels.polygons.length +
+            labels.points.length +
+            labels.imageAnnotations.length,
         );
       } catch {
         if (cancelled) return;
@@ -555,6 +644,7 @@ export function AnnotateTab() {
           img_height: 0,
           boxes: [],
           polygons: [],
+          points: [],
           imageAnnotations: [],
         });
         loadedKeyRef.current = key;
@@ -583,7 +673,8 @@ export function AnnotateTab() {
     if (tracking.currentImageName !== imageName || tracking.imageEnterTimeMs === null) return;
 
     const c = state.canvas;
-    const finalAnnotationCount = c.boxes.length + c.polygons.length + c.imageAnnotations.length;
+    const finalAnnotationCount =
+      c.boxes.length + c.polygons.length + c.points.length + c.imageAnnotations.length;
     const elapsedSeconds = Math.max(0, (Date.now() - tracking.imageEnterTimeMs) / 1000);
     const key = `${imageName}|${tracking.imageEnterTimeMs}|${tracking.annotationsAddedDelta}|${finalAnnotationCount}`;
     if (tracking.lastFlushedKey === key) return;
@@ -652,7 +743,7 @@ export function AnnotateTab() {
     { keys: "ctrl+shift+z", action: () => redo(), when: () => !isLocked },
     { keys: "ctrl+y", action: () => redo(), when: () => !isLocked },
     { keys: "ctrl+s", action: () => void save(), when: () => !isLocked },
-    { keys: "m", action: () => useStore.getState().setMode(mode === "box" ? "polygon" : "box") },
+    { keys: "m", action: () => useStore.getState().setMode(nextMode(mode)) },
     {
       keys: "v",
       action: () => useStore.getState().setStream(!annotateUi.stream),
@@ -670,7 +761,7 @@ export function AnnotateTab() {
         else if (selectedBoxIdx !== null) {
           deleteBox(selectedBoxIdx);
           setSelectedBoxIdx(null);
-        }
+        } else if (canvas.selectedPointIdx !== null) deletePoint(canvas.selectedPointIdx);
       },
       when: () => !isLocked,
     },
@@ -681,6 +772,7 @@ export function AnnotateTab() {
         setDrawing(null);
         selectPolygon(null);
         setSelectedBoxIdx(null);
+        selectPoint(null);
       },
     },
     // Held-key auto-repeat (~30/s) would queue a full image render per tick — one flip per press.
@@ -720,7 +812,7 @@ export function AnnotateTab() {
   function snapImagePoint(
     ix: number,
     iy: number,
-    excludePolyVi?: [number, number],
+    excludeVertex?: [number, number, number],
   ): [number, number] {
     if (!annotateUi.snap) return [ix, iy];
     const sc = view.scale || 1;
@@ -728,13 +820,21 @@ export function AnnotateTab() {
     let best: [number, number] | null = null;
     let bestD = thr;
     canvas.polygons.forEach((poly, pi) => {
-      poly.points.forEach(([px, py], vi) => {
-        if (excludePolyVi && excludePolyVi[0] === pi && excludePolyVi[1] === vi) return;
-        const d = Math.hypot(px - ix, py - iy);
-        if (d < bestD) {
-          bestD = d;
-          best = [px, py];
-        }
+      poly.rings.forEach((ring, ri) => {
+        ring.forEach(([px, py], vi) => {
+          if (
+            excludeVertex &&
+            excludeVertex[0] === pi &&
+            excludeVertex[1] === ri &&
+            excludeVertex[2] === vi
+          )
+            return;
+          const d = Math.hypot(px - ix, py - iy);
+          if (d < bestD) {
+            bestD = d;
+            best = [px, py];
+          }
+        });
       });
     });
     return best ?? [ix, iy];
@@ -755,6 +855,19 @@ export function AnnotateTab() {
     // fires no trailing click, so without this the stale flag would swallow the next click
     // (e.g. an outside click meant to deselect), forcing a second click.
     didDragRef.current = false;
+    if (mode === "point") {
+      // A press on an existing point selects it and picks it up; the whole mark is the handle.
+      // Missing every point does nothing here — the click (see onClick) places a new one, so a
+      // single click both authors and a press-drag repositions without a mode or modifier.
+      const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
+      if (hit !== null) {
+        selectPoint(hit);
+        pushUndo(); // one snapshot per drag; dragPoint itself pushes none
+        pointDragRef.current = hit;
+        didDragRef.current = true;
+      }
+      return;
+    }
     if (mode === "box") {
       const sc = view.scale || 1;
       // Grab a handle / body of the already-selected box to resize or move it.
@@ -793,38 +906,46 @@ export function AnnotateTab() {
       if (!poly) return;
       const sc = view.scale || 1;
       const vertThr = 8 / sc;
-      // Try vertex grab
-      for (let vi = 0; vi < poly.points.length; vi++) {
-        const [px, py] = poly.points[vi];
-        if (Math.hypot(px - ix, py - iy) < vertThr) {
-          // Capture undo once at drag start; the drag itself uses dragVertex (no
-          // per-mousemove undo push, which would otherwise flood the 30-entry stack).
-          pushUndo();
-          useStore.getState().setDraggingVertex([pi, vi]);
-          didDragRef.current = true;
-          return;
+      // Try vertex grab — on any ring of the selected annotation.
+      for (let ri = 0; ri < poly.rings.length; ri++) {
+        const ring = poly.rings[ri];
+        for (let vi = 0; vi < ring.length; vi++) {
+          const [px, py] = ring[vi];
+          if (Math.hypot(px - ix, py - iy) < vertThr) {
+            // Capture undo once at drag start; the drag itself uses dragVertex (no
+            // per-mousemove undo push, which would otherwise flood the 30-entry stack).
+            pushUndo();
+            useStore.getState().setDraggingVertex([pi, ri, vi]);
+            didDragRef.current = true;
+            return;
+          }
         }
       }
-      // Try edge insert
+      // Try edge insert — the nearest edge across every ring; the new vertex joins that ring.
       const edgeThr = EDGE_INSERT_THRESHOLD / sc;
+      let bestRing = -1;
       let bestEdge = -1;
       let bestDist = edgeThr;
       let bestProj: [number, number] | null = null;
-      for (let ei = 0; ei < poly.points.length; ei++) {
-        const [ax, ay] = poly.points[ei];
-        const [bx, by] = poly.points[(ei + 1) % poly.points.length];
-        const { dist, proj } = pointToSegmentDist(ix, iy, ax, ay, bx, by);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestEdge = ei;
-          bestProj = proj;
+      for (let ri = 0; ri < poly.rings.length; ri++) {
+        const ring = poly.rings[ri];
+        for (let ei = 0; ei < ring.length; ei++) {
+          const [ax, ay] = ring[ei];
+          const [bx, by] = ring[(ei + 1) % ring.length];
+          const { dist, proj } = pointToSegmentDist(ix, iy, ax, ay, bx, by);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestRing = ri;
+            bestEdge = ei;
+            bestProj = proj;
+          }
         }
       }
-      if (bestEdge >= 0 && bestProj) {
-        const newPts = poly.points.slice();
+      if (bestRing >= 0 && bestEdge >= 0 && bestProj) {
+        const newPts = poly.rings[bestRing].slice();
         newPts.splice(bestEdge + 1, 0, bestProj);
-        updatePolygon(pi, { ...poly, points: newPts });
-        useStore.getState().setDraggingVertex([pi, bestEdge + 1]);
+        updatePolygon(pi, withRing(poly, bestRing, newPts));
+        useStore.getState().setDraggingVertex([pi, bestRing, bestEdge + 1]);
         didDragRef.current = true;
         return;
       }
@@ -847,18 +968,29 @@ export function AnnotateTab() {
     setCursor([ix, iy]);
     if (isLocked) return;
 
+    // Point drag (repositioning a placed point)
+    const pDrag = pointDragRef.current;
+    if (pDrag !== null) {
+      dragPoint(
+        pDrag,
+        Math.max(0, Math.min(canvas.imgWidth || ix, ix)),
+        Math.max(0, Math.min(canvas.imgHeight || iy, iy)),
+      );
+      return;
+    }
+
     // Vertex drag
     const dragging = annotateUi.draggingVertex;
     if (dragging) {
-      const [pi, vi] = dragging;
+      const [pi, ri, vi] = dragging;
       const poly = canvas.polygons[pi];
       if (poly) {
-        const [sx, sy] = snapImagePoint(ix, iy, [pi, vi]);
+        const [sx, sy] = snapImagePoint(ix, iy, [pi, ri, vi]);
         const clamped: [number, number] = [
           Math.max(0, Math.min(canvas.imgWidth || sx, sx)),
           Math.max(0, Math.min(canvas.imgHeight || sy, sy)),
         ];
-        dragVertex(pi, vi, clamped); // no per-move undo push (see onDown drag start)
+        dragVertex(pi, ri, vi, clamped); // no per-move undo push (see onDown drag start)
       }
       return;
     }
@@ -937,6 +1069,13 @@ export function AnnotateTab() {
 
   const onUp = (ix: number, iy: number) => {
     if (isLocked) return;
+    if (pointDragRef.current !== null) {
+      pointDragRef.current = null;
+      // didDragRef stays set: the trailing click of this release must not place a second point
+      // on top of the one just moved (onClick consumes and clears the flag).
+      canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
+      return;
+    }
     if (boxDragRef.current) {
       boxDragRef.current = null;
       didDragRef.current = false;
@@ -970,6 +1109,28 @@ export function AnnotateTab() {
   const onClick = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     if (isLocked) return;
     if (ev.evt.button !== 0) return;
+    if (mode === "point") {
+      if (didDragRef.current) {
+        didDragRef.current = false; // the trailing click of a point select/drag release
+        return;
+      }
+      // One click = one action: an existing selection is dropped first, so a click never both
+      // deselects and authors a point (the same rule polygon mode follows).
+      if (canvas.selectedPointIdx !== null) {
+        selectPoint(null);
+        return;
+      }
+      if (!requireSubject()) return;
+      // One click commits it — a point has nothing to drag out and no second vertex to wait for.
+      addPoint({
+        x: Math.max(0, Math.min(canvas.imgWidth || ix, ix)),
+        y: Math.max(0, Math.min(canvas.imgHeight || iy, iy)),
+        subject: activeSubject!,
+        attributes: {},
+      });
+      incrementAnnotationsAdded(1);
+      return;
+    }
     if (mode !== "polygon") return;
     if (annotateUi.draggingVertex) return;
     if (didDragRef.current) {
@@ -1008,9 +1169,9 @@ export function AnnotateTab() {
       return;
     }
 
-    // Not currently drawing — clicking on a polygon selects it
+    // Not currently drawing — clicking on any part of a polygon selects the whole annotation
     for (let pi = 0; pi < canvas.polygons.length; pi++) {
-      if (pointInPolygon([ix, iy], canvas.polygons[pi].points)) {
+      if (pointInRings([ix, iy], canvas.polygons[pi].rings)) {
         selectPolygon(pi);
         return;
       }
@@ -1038,6 +1199,14 @@ export function AnnotateTab() {
   const onContextMenu = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     ev.evt.preventDefault();
     if (isLocked) return;
+    // Point mode: right-click deletes the point under the cursor (a box's right-click delete,
+    // scoped to one coordinate). Nothing under the cursor just clears the selection.
+    if (mode === "point") {
+      const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
+      if (hit !== null) deletePoint(hit);
+      else selectPoint(null);
+      return;
+    }
     // Right-click cancels an in-progress / streaming polygon first
     if (mode === "polygon" && (canvas.currentPolygon.length > 0 || streamingRef.current)) {
       streamingRef.current = false;
@@ -1051,21 +1220,28 @@ export function AnnotateTab() {
       if (poly) {
         const sc = view.scale || 1;
         const vertThr = 10 / sc;
-        for (let vi = 0; vi < poly.points.length; vi++) {
-          const [px, py] = poly.points[vi];
-          if (Math.hypot(px - ix, py - iy) < vertThr) {
-            pushUndo();
-            if (poly.points.length <= 3) {
-              deletePolygon(pi);
-            } else {
-              const newPts = poly.points.slice();
-              newPts.splice(vi, 1);
-              updatePolygon(pi, { ...poly, points: newPts });
+        for (let ri = 0; ri < poly.rings.length; ri++) {
+          const ring = poly.rings[ri];
+          for (let vi = 0; vi < ring.length; vi++) {
+            const [px, py] = ring[vi];
+            if (Math.hypot(px - ix, py - iy) < vertThr) {
+              pushUndo();
+              if (ring.length > 3) {
+                const newPts = ring.slice();
+                newPts.splice(vi, 1);
+                updatePolygon(pi, withRing(poly, ri, newPts));
+              } else if (poly.rings.length > 1) {
+                // Below a triangle the ring is no longer a contour: drop that part, keep the rest
+                // of the annotation (only the last remaining part takes the whole shape with it).
+                updatePolygon(pi, { ...poly, rings: poly.rings.filter((_, i) => i !== ri) });
+              } else {
+                deletePolygon(pi);
+              }
+              return;
             }
-            return;
           }
         }
-        if (pointInPolygon([ix, iy], poly.points)) {
+        if (pointInRings([ix, iy], poly.rings)) {
           deletePolygon(pi);
           return;
         }
@@ -1086,7 +1262,7 @@ export function AnnotateTab() {
     // Non-selected polygon right-click delete (polygon mode)
     if (mode === "polygon") {
       for (let pi = 0; pi < canvas.polygons.length; pi++) {
-        if (pointInPolygon([ix, iy], canvas.polygons[pi].points)) {
+        if (pointInRings([ix, iy], canvas.polygons[pi].rings)) {
           deletePolygon(pi);
           return;
         }
@@ -1107,6 +1283,13 @@ export function AnnotateTab() {
   const vertR = vertScreen * scaleLineW;
   const selVertR = selScreen * scaleLineW;
   const labelSize = Math.max(8, Math.min(Math.round(9 * (0.6 + s * 0.4)), 18)) * scaleLineW;
+  // A point's mark is fixed in screen px (resolved once, then 1/s like every other radius here): the
+  // annotation asserts a location and no extent, so its glyph must not grow with the image and imply
+  // one. The ticks reach past the core to POINT_HIT_CANVAS — the mark IS the grab target.
+  const pointCoreR = 3.5 * scaleLineW;
+  const pointSelCoreR = 5 * scaleLineW;
+  const pointTickInner = 6.5 * scaleLineW;
+  const pointTickOuter = POINT_HIT_CANVAS * scaleLineW;
 
   if (!imgPath || !currentImageName) {
     return (
@@ -1190,10 +1373,12 @@ export function AnnotateTab() {
           <AnnotationShapes
             boxes={canvas.boxes}
             polygons={canvas.polygons}
+            points={canvas.points}
             mode={mode}
             activeSubject={activeSubject}
             selectedPolygonIdx={canvas.selectedPolygonIdx}
             selectedBoxIdx={selectedBoxIdx}
+            selectedPointIdx={canvas.selectedPointIdx}
             hoveredIdx={hoveredIdx}
             draggingIdx={draggingIdx}
             renderLabels={renderLabels}
@@ -1202,6 +1387,11 @@ export function AnnotateTab() {
             vertR={vertR}
             selVertR={selVertR}
             labelSize={labelSize}
+            pointCoreR={pointCoreR}
+            pointSelCoreR={pointSelCoreR}
+            pointTickInner={pointTickInner}
+            pointTickOuter={pointTickOuter}
+            scaleLineW={scaleLineW}
           />
 
           {/* Prediction reference (static per navigation) */}
@@ -1235,10 +1425,13 @@ function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
   const registry = useStore((s) => s.registry.subjects);
   const boxes = useStore((s) => s.canvas.boxes);
   const polygons = useStore((s) => s.canvas.polygons);
+  const points = useStore((s) => s.canvas.points);
   const selectedPolygonIdx = useStore((s) => s.canvas.selectedPolygonIdx);
+  const selectedPointIdx = useStore((s) => s.canvas.selectedPointIdx);
   const imageAnnotations = useStore((s) => s.canvas.imageAnnotations);
   const updateBox = useStore((s) => s.updateBox);
   const updatePolygon = useStore((s) => s.updatePolygon);
+  const updatePoint = useStore((s) => s.updatePoint);
   const addImageAnnotation = useStore((s) => s.addImageAnnotation);
   const updateImageAnnotation = useStore((s) => s.updateImageAnnotation);
   const deleteImageAnnotation = useStore((s) => s.deleteImageAnnotation);
@@ -1252,7 +1445,9 @@ function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
             idx: selectedPolygonIdx,
             shape: polygons[selectedPolygonIdx],
           } as const)
-        : null;
+        : selectedPointIdx != null && points[selectedPointIdx]
+          ? ({ kind: "point", idx: selectedPointIdx, shape: points[selectedPointIdx] } as const)
+          : null;
 
   const withAttr = (attrs: Record<string, string>, attr: string, value: string) => {
     const next = { ...attrs };
@@ -1266,9 +1461,12 @@ function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
     if (selected.kind === "box") {
       const b = boxes[selected.idx];
       updateBox(selected.idx, { ...b, attributes: withAttr(b.attributes, attr, value) });
-    } else {
+    } else if (selected.kind === "polygon") {
       const p = polygons[selected.idx];
       updatePolygon(selected.idx, { ...p, attributes: withAttr(p.attributes, attr, value) });
+    } else {
+      const p = points[selected.idx];
+      updatePoint(selected.idx, { ...p, attributes: withAttr(p.attributes, attr, value) });
     }
   };
 
@@ -1500,25 +1698,79 @@ const PolygonOverlay = memo(function PolygonOverlay({
   labelSize: number;
   label: string;
 }) {
-  if (polygon.points.length < 2) return null;
-  const flat = polygon.points.flat();
-  const [x0, y0] = polygon.points[0];
+  // Every ring of the annotation draws, in the instance's own stroke: the shape a reviewer confirms
+  // is all of it, not the first contour. Selection/hover styling is shared, so touching any part
+  // lights up all of them — that shared highlight is what reads as "these are one object".
+  const rings = polygon.rings.filter((ring) => ring.length >= 2);
+  if (!rings.length) return null;
+  const [x0, y0] = rings[0][0];
   return (
     <>
-      <Line points={flat} closed stroke={stroke} strokeWidth={width} />
+      {rings.map((ring, ri) => (
+        <Line key={`r-${ri}`} points={ring.flat()} closed stroke={stroke} strokeWidth={width} />
+      ))}
       {showVertices &&
-        polygon.points.map(([x, y], i) => (
-          <Circle
-            key={`v-${i}`}
-            x={x}
-            y={y}
-            radius={vertexRadius}
-            fill={stroke}
-            stroke="#ffffff"
-            strokeWidth={width * 0.5}
-          />
-        ))}
+        rings.map((ring, ri) =>
+          ring.map(([x, y], i) => (
+            <Circle
+              key={`v-${ri}-${i}`}
+              x={x}
+              y={y}
+              radius={vertexRadius}
+              fill={stroke}
+              stroke="#ffffff"
+              strokeWidth={width * 0.5}
+            />
+          )),
+        )}
+      {/* One label per annotation, not per ring — a two-part catkin is one catkin. */}
       <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={labelSize} />
+    </>
+  );
+});
+
+/**
+ * A placed point: four short ticks converging on the coordinate, plus a filled core in the
+ * subject's colour with a white keyline. The ticks are the point of the mark — they say "this exact
+ * location" the way an instrument's reticle does, and they are what separates a point from the two
+ * things it could otherwise be mistaken for on this canvas: a very small box or a collapsed polygon
+ * (both hollow outlines) and a polygon vertex handle (a bare filled dot). Selection uses the same
+ * highlighter blue as every other selected shape, and the label is the subject name, so a point
+ * joins the canvas' existing grammar instead of inventing a second one.
+ */
+const PointOverlay = memo(function PointOverlay({
+  point,
+  stroke,
+  coreR,
+  tickInner,
+  tickOuter,
+  lineW,
+  labelSize,
+  label,
+}: {
+  point: PointShape;
+  stroke: string;
+  coreR: number;
+  tickInner: number;
+  tickOuter: number;
+  lineW: number;
+  labelSize: number;
+  label: string;
+}) {
+  const { x, y } = point;
+  const ticks: [number, number, number, number][] = [
+    [x, y - tickInner, x, y - tickOuter],
+    [x, y + tickInner, x, y + tickOuter],
+    [x - tickInner, y, x - tickOuter, y],
+    [x + tickInner, y, x + tickOuter, y],
+  ];
+  return (
+    <>
+      {ticks.map(([x1, y1, x2, y2], i) => (
+        <Line key={`t-${i}`} points={[x1, y1, x2, y2]} stroke={stroke} strokeWidth={lineW} />
+      ))}
+      <Circle x={x} y={y} radius={coreR} fill={stroke} stroke="#ffffff" strokeWidth={lineW * 0.6} />
+      <HaloLabel x={x + tickOuter} y={y} text={label} fill={stroke} size={labelSize} />
     </>
   );
 });
@@ -1576,11 +1828,13 @@ function SnapIndicator({
   let best: [number, number] | null = null;
   let bestD = thr;
   for (const poly of polygons) {
-    for (const [x, y] of poly.points) {
-      const d = Math.hypot(x - cursor[0], y - cursor[1]);
-      if (d < bestD) {
-        bestD = d;
-        best = [x, y];
+    for (const ring of poly.rings) {
+      for (const [x, y] of ring) {
+        const d = Math.hypot(x - cursor[0], y - cursor[1]);
+        if (d < bestD) {
+          bestD = d;
+          best = [x, y];
+        }
       }
     }
   }
