@@ -144,7 +144,7 @@ def _op_sidecar(dir_path: Path, id_map: dict | None) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     (dir_path / "operating_point.json").write_text(json.dumps({
         "validated": True,
-        "operating_point": {"conf": {"value": 0.4, "validated_vs_gt": "validated_held_out"}},
+        "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
         "id_map": id_map,
     }), encoding="utf-8")
 
@@ -207,7 +207,7 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
     out_csv = tmp_path / "out.csv"
     (d1 / "classifier_operating_point.json").write_text(json.dumps({
         "validated": True,
-        "operating_point": {"classifier": {"value": "elongated", "validated_vs_gt": "validated_held_out"}},
+        "operating_point": {"classifier": {"value": "elongated", "validated_against": "held_out_annotations"}},
         "trait": "catkin",
     }), encoding="utf-8")
 
@@ -217,7 +217,7 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
-        operating_point_validated="validated_held_out",
+        operating_point_validated="held_out_annotations",
     )
     # The positive class id resolves from the buckets' own recorded id_map; both dimensions are
     # validated, so this delivers.
@@ -236,7 +236,7 @@ def test_compute_phenology_refuses_when_class_id_unresolvable(tmp_path: Path):
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(tmp_path / "out.csv"),
-        operating_point_validated="validated_held_out",
+        operating_point_validated="held_out_annotations",
     )
     assert "error" in res
     assert not (tmp_path / "out.csv").exists()
