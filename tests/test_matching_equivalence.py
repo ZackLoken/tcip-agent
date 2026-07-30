@@ -16,6 +16,7 @@ from collections import defaultdict
 
 import pytest
 
+from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.validation import make_valid
 
@@ -54,10 +55,12 @@ def _ref_polygon_iou(geom1, area1, geom2, area2) -> float:
 def _ref_to_shapely(ann: Annotation):
     geom = ann.geometry
     if isinstance(geom, BBox):
-        pts = [(geom.x1, geom.y1), (geom.x2, geom.y1), (geom.x2, geom.y2), (geom.x1, geom.y2)]
+        g = ShapelyPolygon(
+            [(geom.x1, geom.y1), (geom.x2, geom.y1), (geom.x2, geom.y2), (geom.x1, geom.y2)])
     else:
-        pts = geom.points
-    g = ShapelyPolygon(pts)
+        rings = [r for r in geom.rings if len(r) >= 3]
+        g = (ShapelyPolygon(rings[0]) if len(rings) == 1
+             else ShapelyMultiPolygon([ShapelyPolygon(r) for r in rings]))
     if not g.is_valid:
         g = make_valid(g)
     return g, g.area
@@ -197,21 +200,42 @@ def _rand_polygon(rng, cls, space=1000.0, size=(30.0, 150.0)):
     x1 = rng.uniform(0.0, space - w)
     y1 = rng.uniform(0.0, space - h)
     pts = [(x1, y1), (x1 + w, y1 + rng.uniform(-5, 5)), (x1 + w, y1 + h), (x1, y1 + h)]
-    return Polygon(pts), cls
+    return Polygon([pts]), cls
 
 
-def _gt_polys(rng, n, n_classes, **kw):
+def _rand_multi_ring_polygon(rng, cls, space=1000.0, size=(30.0, 150.0), n_rings=2):
+    """One occlusion-split instance: ``n_rings`` disjoint lobes in a row, separated by gaps."""
+    w = rng.uniform(*size)
+    h = rng.uniform(*size)
+    gap = rng.uniform(5.0, 30.0)
+    span = n_rings * w + (n_rings - 1) * gap
+    x1 = rng.uniform(0.0, max(0.0, space - span))
+    y1 = rng.uniform(0.0, space - h)
+    rings = []
+    for k in range(n_rings):
+        ox = x1 + k * (w + gap)
+        rings.append([(ox, y1), (ox + w, y1), (ox + w, y1 + h), (ox, y1 + h)])
+    return Polygon(rings), cls
+
+
+def _some_polygon(rng, cls, multi_frac, **kw):
+    if multi_frac and rng.random() < multi_frac:
+        return _rand_multi_ring_polygon(rng, cls, n_rings=rng.choice([2, 3]), **kw)
+    return _rand_polygon(rng, cls, **kw)
+
+
+def _gt_polys(rng, n, n_classes, *, multi_frac=0.0, **kw):
     out = []
     for _ in range(n):
-        poly, cls = _rand_polygon(rng, rng.randrange(n_classes), **kw)
+        poly, cls = _some_polygon(rng, rng.randrange(n_classes), multi_frac, **kw)
         out.append(Annotation(subject=_subj(cls), geometry=poly))
     return out
 
 
-def _pred_polys(rng, n, n_classes, **kw):
+def _pred_polys(rng, n, n_classes, *, multi_frac=0.0, **kw):
     out = []
     for _ in range(n):
-        poly, cls = _rand_polygon(rng, rng.randrange(n_classes), **kw)
+        poly, cls = _some_polygon(rng, rng.randrange(n_classes), multi_frac, **kw)
         conf = rng.uniform(0.0, 1.0)
         out.append(Annotation(subject=_subj(cls), geometry=poly, score=conf))
     return out
@@ -371,15 +395,54 @@ def test_mixed_same_class_box_and_polygon():
     """A class containing both box and polygon items uses the exact fallback loop."""
     gt = [
         Annotation(subject="c0", geometry=BBox(0, 0, 100, 100)),
-        Annotation(subject="c0", geometry=Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])),
+        Annotation(subject="c0", geometry=Polygon([[(0, 0), (100, 0), (100, 100), (0, 100)]])),
     ]
     preds = [
         Annotation(subject="c0", geometry=BBox(5, 5, 95, 95), score=0.9),
-        Annotation(subject="c0", geometry=Polygon([(2, 2), (98, 2), (98, 98), (2, 98)]), score=0.8),
+        Annotation(subject="c0", geometry=Polygon([[(2, 2), (98, 2), (98, 98), (2, 98)]]), score=0.8),
     ]
     got = compute_matches(gt, preds, iou_threshold=0.4)
     ref = _reference_compute_matches(gt, preds, iou_threshold=0.4)
     assert got == ref
+
+
+# ── Multi-ring (occlusion-split) instances ───────────────────────────────────
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_multi_ring_polygon_equivalence(seed):
+    """Multi-ring instances take the same exact fallback loop and must match the reference, whose
+    own geometry builder is an independent MultiPolygon union of every ring."""
+    rng = random.Random(900 + seed)
+    n_classes = 2
+    gt = _gt_polys(rng, 20, n_classes, multi_frac=0.7)
+    preds = _pred_polys(rng, 20, n_classes, multi_frac=0.7)
+    assert any(len(a.geometry.rings) > 1 for a in gt)  # the sweep really produced multi-ring GT
+    got = compute_matches(gt, preds, iou_threshold=0.3)
+    ref = _reference_compute_matches(gt, preds, iou_threshold=0.3)
+    assert got == ref
+
+
+def test_multi_ring_gt_iou_counts_the_area_of_every_ring():
+    """The IoU denominator is the union of ALL of an instance's rings.
+
+    Lobe A is 20x40 = 800, lobe B is 50x50 = 2500. A prediction that recovered only lobe A therefore
+    scores 800/3300 against the two-lobe GT — comparing against lobe A alone would score it 1.0 and
+    hand a half-found object a perfect match.
+    """
+    lobe_a = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]
+    lobe_b = [(70.0, 10.0), (120.0, 10.0), (120.0, 60.0), (70.0, 60.0)]
+    gt = [Annotation(subject="c0", geometry=Polygon([lobe_a, lobe_b]))]
+    preds = [Annotation(subject="c0", geometry=Polygon([lobe_a]), score=0.9)]
+
+    got = compute_matches(gt, preds, iou_threshold=0.1)
+    ref = _reference_compute_matches(gt, preds, iou_threshold=0.1)
+    assert got == ref
+    assert got["tp"][0]["iou"] == round(800.0 / 3300.0, 4)
+
+    # And the area really is the union, not the first ring: the reference oracle agrees.
+    _, area = _ref_to_shapely(gt[0])
+    assert area == 3300.0
 
 
 # ── Rough timing sanity (no strict threshold) ────────────────────────────────
