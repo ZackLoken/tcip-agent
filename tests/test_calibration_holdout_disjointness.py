@@ -1,8 +1,8 @@
-"""Stage-6 adversarial-review fixes on top of K1 ("the held-out reference is not held out").
+"""The held-out calibration reference is genuinely held out — not trained on, not reused.
 
-Five real, reproduced defects found in K1's initial implementation, each guarded here by a test
-that fails against the pre-fix code (see the fix commit for the exact before/after) and passes
-after, per CLAUDE.md's fail-before-test discipline:
+Five real, reproduced defects found in the calibration/holdout split's initial implementation, each
+guarded here by a test that fails against the pre-fix code (see the fix commit for the exact
+before/after) and passes after, per CLAUDE.md's fail-before-test discipline:
 
   1. The train-disjointness gate permanently blocked the explicit-val_images_dir and
      group_key_map training routes.
