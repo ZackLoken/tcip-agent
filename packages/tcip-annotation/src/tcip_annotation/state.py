@@ -24,24 +24,49 @@ class BBox:
 
 @dataclass
 class Polygon:
-    """Polygon annotation in pixel coordinates."""
+    """One or more simple closed contours (rings) in pixel coordinates.
 
-    points: list[tuple[float, float]]
+    Most annotations are a single ring — a person draws one contour. A model-predicted mask can be
+    more than one: an occlusion-split instance (a catkin behind a branch, a leaf crossed by a stem —
+    routine in this imagery) is genuinely more than one region, and holding every ring is what makes
+    that a represented fact instead of a silently truncated one.
+    """
+
+    rings: list[list[tuple[float, float]]]
+
+
+@dataclass
+class Point:
+    """A single labeled location in pixel coordinates — a placed prompt (human- or agent-supplied,
+    for a promptable method like SAM) or a keypoint/landmark.
+
+    Deliberately has no bounding box and no area: a Point is not a detection/segmentation target, and
+    :func:`bbox_of` refuses one rather than fabricate a degenerate zero-area box that could silently
+    pass as a real one (a real hazard: a fabricated zero-area box entering an assembled COCO dataset
+    as a training target, or matching nothing at any IoU in delivery-grade evaluation while reading
+    as a legitimate miss rather than a category error). Every consumer that assembles training
+    targets, computes IoU/matching, or reads a delivery-grade box must filter Point geometries out
+    explicitly, the same way a geometry-less annotation already is — never rely on bbox_of's refusal
+    as the only guard.
+    """
+
+    x: float
+    y: float
 
 
 @dataclass
 class Annotation:
     """One annotation on an image.
 
-    ``subject`` is the object it is about (``catkin``, ``bush``, ``efb``).  ``geometry`` is a box or a
-    polygon, or ``None`` for an image/plant-level label.  ``attributes`` maps an attribute name to its
-    value name (e.g. ``{"elongation": "elongated"}``) — names, never a numeric class id.  ``score`` set
-    means this is a prediction.  Provenance travels with the annotation: who authored it and, once a
-    prediction is accepted into ground truth, who accepted it.
+    ``subject`` is the object it is about (``catkin``, ``bush``, ``efb``).  ``geometry`` is a box, a
+    polygon, a point, or ``None`` for an image/plant-level label.  ``attributes`` maps an attribute
+    name to its value name (e.g. ``{"elongation": "elongated"}``) — names, never a numeric class id.
+    ``score`` set means this is a prediction.  Provenance travels with the annotation: who authored it
+    and, once a prediction is accepted into ground truth, who accepted it.
     """
 
     subject: str
-    geometry: BBox | Polygon | None = None
+    geometry: BBox | Polygon | Point | None = None
     attributes: dict[str, str] = field(default_factory=dict)
     score: float | None = None
     created_by: str | None = None
@@ -51,15 +76,26 @@ class Annotation:
 
 
 def bbox_of(geometry: BBox | Polygon) -> BBox:
-    """The axis-aligned bounding box of a geometry — the box itself, or a polygon's enclosing box.
+    """The axis-aligned bounding box of a geometry — the box itself, or a polygon's enclosing box
+    (over every ring, so a multi-ring instance's box covers all of its parts).
 
     Lets a detection consumer read a box from polygon ground truth: where polygons exist they are the
     source of truth and their boxes are a pure function of them, so the two can never silently diverge.
+
+    Raises for a :class:`Point` — it has no bounding box, and returning a fabricated degenerate one
+    would let it silently pass as a real detection/segmentation target downstream. Callers that may
+    see a Point must filter it out before calling this, not rely on the raise as the only guard.
     """
     if isinstance(geometry, BBox):
         return geometry
-    xs = [pt[0] for pt in geometry.points]
-    ys = [pt[1] for pt in geometry.points]
+    if isinstance(geometry, Point):
+        raise ValueError(
+            "bbox_of: a Point has no bounding box — it is not a detection/segmentation target. "
+            "Filter Point geometries out before calling bbox_of (the same way a geometry-less "
+            "annotation is already filtered), rather than relying on this raise."
+        )
+    xs = [pt[0] for ring in geometry.rings for pt in ring]
+    ys = [pt[1] for ring in geometry.rings for pt in ring]
     return BBox(min(xs), min(ys), max(xs), max(ys))
 
 
