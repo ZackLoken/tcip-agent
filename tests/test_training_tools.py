@@ -535,22 +535,70 @@ def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypa
     assert lineage["data_source"] == "imgs_v2"
 
 
-def test_ensure_experiment_attaches_to_precreated_and_resume(tmp_path, monkeypatch):
+def test_ensure_experiment_attaches_to_precreated(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+    from tcip_mcp.experiments import create_experiment
     from tcip_mcp.tools.training_tools import _ensure_experiment
 
     # Agent pre-created the experiment (state 'created', no metrics): attach.
     create_experiment("pre", {"a": 1})
     assert _ensure_experiment("pre", {"a": 1}, None, resume_from="", run_id="r1") == "pre"
 
-    # resume_from continues its own experiment even after it has history.
+    # A brand-new id is simply created.
+    assert _ensure_experiment("new", {"a": 1}, None, resume_from="", run_id="r3") == "new"
+
+
+def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, monkeypatch):
+    """K12 finding 3: a pristine pre-created experiment's config.json is refreshed with the config
+    actually launched (tiling/seed resolved after create_experiment ran), not left describing the
+    config as it stood before those were resolved."""
+    monkeypatch.chdir(tmp_path)
+    import json
+
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import _ensure_experiment
+
+    create_experiment("pre", {"a": 1})
+    effective_config = {"a": 1, "data": {"tiling": {"tile_size": 512}}, "seed": 99}
+    assert _ensure_experiment("pre", effective_config, None, resume_from="", run_id="r1") == "pre"
+
+    config = json.loads((tmp_path / ".tcip" / "experiments" / "pre" / "config.json").read_text())
+    assert config == effective_config
+
+
+def test_ensure_experiment_resume_into_populated_id_mints_fresh_parented_id(tmp_path, monkeypatch):
+    """K12 finding 4: resume_from no longer reuses an id that already has recorded history — it
+    mints a fresh parented id instead, matching the non-resume collision behavior. Silently reusing
+    it discarded the resumed run's own metrics/lineage writes (refused by the terminal-state lock)
+    and let ModelRegistry.register_model replace the original's registry entry by name with no
+    record of what was superseded."""
+    monkeypatch.chdir(tmp_path)
+    import json
+
+    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+    from tcip_mcp.tools.training_tools import _ensure_experiment
+
     create_experiment("res", {"a": 1})
     update_status("res", "running")
     log_metrics("res", 1, {"loss": 0.5})
     eid = _ensure_experiment("res", {"a": 1}, None, resume_from="ckpt/checkpoint_epoch_5.pt",
                              run_id="r2")
-    assert eid == "res"
+    assert eid == "res_r2"
 
-    # A brand-new id is simply created.
-    assert _ensure_experiment("new", {"a": 1}, None, resume_from="", run_id="r3") == "new"
+    fresh_dir = tmp_path / ".tcip" / "experiments" / "res_r2"
+    assert fresh_dir.is_dir()
+    lineage = json.loads((fresh_dir / "lineage.json").read_text())
+    assert lineage["parent_experiment"] == "res"
+
+
+def test_ensure_experiment_resume_into_pristine_id_still_attaches(tmp_path, monkeypatch):
+    """A resume_from target that is itself still pristine (never actually run) is unaffected —
+    pristine reuse doesn't depend on resume_from at all."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import _ensure_experiment
+
+    create_experiment("pre2", {"a": 1})
+    eid = _ensure_experiment("pre2", {"a": 1}, None,
+                             resume_from="ckpt/checkpoint_epoch_5.pt", run_id="r9")
+    assert eid == "pre2"
