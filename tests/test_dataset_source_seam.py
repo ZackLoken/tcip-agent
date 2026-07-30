@@ -107,7 +107,7 @@ def test_snapshot_records_dataset_builder(tmp_path: Path):
     manifest = snapshot_model_source(config, tmp_path)
     assert manifest is not None
     assert manifest["dataset_builder"] == "tests.test_dataset_source_seam:build_bespoke_ds"
-    assert any(e["file"] == Path(__file__).name and len(e["sha256"]) == 64
+    assert any(e["src"] == __file__ and len(e["sha256"]) == 64
                for e in manifest["files"])
     saved = json.loads((tmp_path / "model_src" / "manifest.json").read_text())
     assert saved["dataset_builder"] == manifest["dataset_builder"]
