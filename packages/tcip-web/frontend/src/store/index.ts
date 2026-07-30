@@ -10,6 +10,8 @@ import type {
   GuiState,
   ImageLabels,
   MatchesResponse,
+  Mode,
+  PointShape,
   PolygonShape,
   PredictionReference,
   ReviewFilters,
@@ -57,10 +59,12 @@ export interface CanvasState {
   imgHeight: number;
   boxes: Box[];
   polygons: PolygonShape[];
+  points: PointShape[];
   // Geometry-less (image/plant-level) ratings; kept so they round-trip losslessly on save.
   imageAnnotations: Annotation[];
   currentPolygon: [number, number][];
   selectedPolygonIdx: number | null;
+  selectedPointIdx: number | null;
   undoStack: CanvasSnapshot[];
   redoStack: CanvasSnapshot[];
   dirty: boolean;
@@ -72,8 +76,10 @@ export interface CanvasState {
 interface CanvasSnapshot {
   boxes: Box[];
   polygons: PolygonShape[];
+  points: PointShape[];
   imageAnnotations: Annotation[];
   selectedPolygonIdx: number | null;
+  selectedPointIdx: number | null;
 }
 
 const EMPTY_CANVAS: CanvasState = {
@@ -81,9 +87,11 @@ const EMPTY_CANVAS: CanvasState = {
   imgHeight: 0,
   boxes: [],
   polygons: [],
+  points: [],
   imageAnnotations: [],
   currentPolygon: [],
   selectedPolygonIdx: null,
+  selectedPointIdx: null,
   undoStack: [],
   redoStack: [],
   dirty: false,
@@ -127,8 +135,9 @@ interface AnnotateUiState {
   stream: boolean;
   /** Currently hovered polygon index (for vertex-handle rendering). */
   hoveredPolygonIdx: number | null;
-  /** Active vertex drag: [polygonIdx, vertexIdx]. */
-  draggingVertex: [number, number] | null;
+  /** Active vertex drag: [polygonIdx, ringIdx, vertexIdx] — a vertex belongs to one ring of one
+   *  polygon, so a multi-ring shape's second ring is addressable rather than uneditable. */
+  draggingVertex: [number, number, number] | null;
 }
 
 interface SessionTrackingState {
@@ -237,7 +246,7 @@ export interface AppState {
   setWsStatus: (s: AppState["wsStatus"]) => void;
   setActiveTab: (tab: TabName) => void;
   setView: (view: ViewState) => void;
-  setMode: (mode: "box" | "polygon") => void;
+  setMode: (mode: Mode) => void;
   setActiveSubject: (subject: string | null) => void;
   setPredReference: (p: PredictionReference | null) => void;
 
@@ -264,7 +273,7 @@ export interface AppState {
   setSnap: (v: boolean) => void;
   setStream: (v: boolean) => void;
   setHoveredPolygon: (idx: number | null) => void;
-  setDraggingVertex: (v: [number, number] | null) => void;
+  setDraggingVertex: (v: [number, number, number] | null) => void;
 
   /** Per-image session telemetry helpers. */
   startImageSessionTracking: (
@@ -290,12 +299,25 @@ export interface AppState {
   deleteBox: (idx: number) => void;
   addPolygon: (polygon: PolygonShape) => void;
   updatePolygon: (idx: number, polygon: PolygonShape) => void;
-  /** Move a single polygon vertex WITHOUT pushing an undo snapshot. Used during a
+  /** Move a single polygon vertex (of one ring) WITHOUT pushing an undo snapshot. Used during a
    *  live vertex drag (undo is captured once at drag start) so a 50px drag doesn't
    *  push dozens of snapshots and evict the whole 30-entry undo history. */
-  dragVertex: (polygonIdx: number, vertexIdx: number, point: [number, number]) => void;
+  dragVertex: (
+    polygonIdx: number,
+    ringIdx: number,
+    vertexIdx: number,
+    point: [number, number],
+  ) => void;
   deletePolygon: (idx: number) => void;
   selectPolygon: (idx: number | null) => void;
+  /** Point helpers. A point is one coordinate, so it has no vertex/ring variants: it is placed,
+   *  dragged (no-undo, like dragBox/dragVertex — one snapshot per drag, taken at drag start),
+   *  attribute-edited via updatePoint, and deleted whole. */
+  addPoint: (point: PointShape) => void;
+  updatePoint: (idx: number, point: PointShape) => void;
+  dragPoint: (idx: number, x: number, y: number) => void;
+  deletePoint: (idx: number) => void;
+  selectPoint: (idx: number | null) => void;
   setCurrentPolygon: (pts: [number, number][]) => void;
   commitCurrentPolygon: () => boolean;
   /** Geometry-less (image/plant-level) rating helpers. */
@@ -318,8 +340,10 @@ function snapshot(c: CanvasState): CanvasSnapshot {
   return {
     boxes: c.boxes.slice(),
     polygons: c.polygons.slice(),
+    points: c.points.slice(),
     imageAnnotations: c.imageAnnotations.slice(),
     selectedPolygonIdx: c.selectedPolygonIdx,
+    selectedPointIdx: c.selectedPointIdx,
   };
 }
 
@@ -582,9 +606,11 @@ export const useStore = create<AppState>()((set, get) => ({
         imgHeight: labels.img_height,
         boxes: labels.boxes.slice(),
         polygons: labels.polygons.slice(),
+        points: labels.points.slice(),
         imageAnnotations: labels.imageAnnotations.slice(),
         currentPolygon: [],
         selectedPolygonIdx: null,
+        selectedPointIdx: null,
         undoStack: [],
         redoStack: [],
         dirty: false,
@@ -622,8 +648,10 @@ export const useStore = create<AppState>()((set, get) => ({
           redoStack: [...s.canvas.redoStack, snapshot(s.canvas)],
           boxes: last.boxes,
           polygons: last.polygons,
+          points: last.points,
           imageAnnotations: last.imageAnnotations,
           selectedPolygonIdx: last.selectedPolygonIdx,
+          selectedPointIdx: last.selectedPointIdx,
           dirty: true,
         },
       };
@@ -640,8 +668,10 @@ export const useStore = create<AppState>()((set, get) => ({
           redoStack: s.canvas.redoStack.slice(0, -1),
           boxes: last.boxes,
           polygons: last.polygons,
+          points: last.points,
           imageAnnotations: last.imageAnnotations,
           selectedPolygonIdx: last.selectedPolygonIdx,
+          selectedPointIdx: last.selectedPointIdx,
           dirty: true,
         },
       };
@@ -688,14 +718,16 @@ export const useStore = create<AppState>()((set, get) => ({
     });
   },
 
-  dragVertex: (polygonIdx, vertexIdx, point) =>
+  dragVertex: (polygonIdx, ringIdx, vertexIdx, point) =>
     set((s) => {
       const poly = s.canvas.polygons[polygonIdx];
-      if (!poly) return s;
-      const pts = poly.points.slice();
+      if (!poly?.rings[ringIdx]) return s;
+      const pts = poly.rings[ringIdx].slice();
       pts[vertexIdx] = point;
+      const rings = poly.rings.slice();
+      rings[ringIdx] = pts;
       const next = s.canvas.polygons.slice();
-      next[polygonIdx] = { ...poly, points: pts };
+      next[polygonIdx] = { ...poly, rings };
       return { canvas: { ...s.canvas, polygons: next, dirty: true } };
     }),
 
@@ -721,6 +753,42 @@ export const useStore = create<AppState>()((set, get) => ({
   selectPolygon: (selectedPolygonIdx) =>
     set((s) => ({ canvas: { ...s.canvas, selectedPolygonIdx } })),
 
+  addPoint: (point) => {
+    get().pushUndo();
+    set((s) => ({ canvas: { ...s.canvas, points: [...s.canvas.points, point], dirty: true } }));
+  },
+
+  updatePoint: (idx, point) => {
+    get().pushUndo();
+    set((s) => {
+      const next = s.canvas.points.slice();
+      next[idx] = point;
+      return { canvas: { ...s.canvas, points: next, dirty: true } };
+    });
+  },
+
+  dragPoint: (idx, x, y) =>
+    set((s) => {
+      const p = s.canvas.points[idx];
+      if (!p) return s;
+      const next = s.canvas.points.slice();
+      next[idx] = { ...p, x, y };
+      return { canvas: { ...s.canvas, points: next, dirty: true } };
+    }),
+
+  deletePoint: (idx) => {
+    get().pushUndo();
+    set((s) => {
+      const points = s.canvas.points.filter((_, i) => i !== idx);
+      let sel = s.canvas.selectedPointIdx;
+      if (sel === idx) sel = null;
+      else if (sel !== null && sel > idx) sel = sel - 1;
+      return { canvas: { ...s.canvas, points, selectedPointIdx: sel, dirty: true } };
+    });
+  },
+
+  selectPoint: (selectedPointIdx) => set((s) => ({ canvas: { ...s.canvas, selectedPointIdx } })),
+
   setCurrentPolygon: (pts) => set((s) => ({ canvas: { ...s.canvas, currentPolygon: pts } })),
 
   commitCurrentPolygon: () => {
@@ -745,7 +813,8 @@ export const useStore = create<AppState>()((set, get) => ({
       canvas: {
         ...s.canvas,
         currentPolygon: [],
-        polygons: [...s.canvas.polygons, { points: clamped, subject, attributes: {} }],
+        // A hand-drawn shape is one contour — one ring (the canvas never draws a second by hand).
+        polygons: [...s.canvas.polygons, { rings: [clamped], subject, attributes: {} }],
         dirty: true,
       },
     }));
