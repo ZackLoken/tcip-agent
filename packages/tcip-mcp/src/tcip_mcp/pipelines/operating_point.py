@@ -2,10 +2,11 @@
 
 This is the single place all four consumers — train-eval, test-eval, inference, export — get the
 operating point, so the same model + images can't yield different counts by entry door (the audit's
-divergent-defaults bug). The confidence threshold is a *calibration* param: derived by a center-match
-count-unbiased sweep over a reference sized to the trait, and validated on a disjoint held-out split of
-that reference — GT annotations (``validated_held_out``) OR a breeder-confirmed sample of the model's
-own outputs (``review_confirmed``), the same gate either way — or carried as ``validated=false`` when
+divergent-defaults bug). The confidence threshold requires validation against an annotations
+reference: derived by a center-match count-unbiased sweep over a reference sized to the trait,
+and validated on a disjoint held-out split of that reference — GT annotations
+(``VALIDATED_HELD_OUT``) OR a breeder-confirmed sample of the model's own outputs
+(``VALIDATED_REVIEW_CONFIRMED``), the same gate either way — or carried as ``validated=false`` when
 no reference exists (never a frozen literal). See the scope doc and traits.py.
 """
 
@@ -27,9 +28,9 @@ from tcip_mcp.pipelines.resolution import (
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
     VALIDATED_REVIEW_CONFIRMED,
-    VALIDATED_SHIPPABLE,
     ResolvedBundle,
     ResolvedParam,
+    accepted_references,
     default,
     derived,
 )
@@ -427,10 +428,12 @@ def resolve_operating_point(
     concrete fallback number, and without the source travelling separately this function used to
     stamp that fabricated value ``"derived"`` unconditionally.
 
-    ``validated_reference`` is the stamp a *passing* held-out gate earns: ``validated_held_out`` when
-    the records came from GT annotations (default), ``review_confirmed`` when they were reconstructed
-    from a breeder-confirmed sample of the model's own outputs (feedback.review_calibration). Both
-    references pass the SAME disjoint + count-bias gate here — the stamp only records which one it was.
+    ``validated_reference`` is the stamp a *passing* held-out gate earns: ``VALIDATED_HELD_OUT`` when
+    the records came from GT annotations (default), ``VALIDATED_REVIEW_CONFIRMED`` when they were
+    reconstructed from a breeder-confirmed sample of the model's own outputs
+    (feedback.review_calibration) — the two references ``accepted_references("annotations")``
+    recognizes. Both pass the SAME disjoint + count-bias gate here; the stamp only records which one
+    it was.
 
     ``experiment_id`` (K1) is the checkpoint's own training-run id, if known — it gates the SAME
     held-out pass on train-disjointness (the cal/holdout images must not also be in that run's
@@ -457,8 +460,9 @@ def resolve_operating_point(
     inherently adjudication-covered. ``feedback.review_calibration.resolve_operating_point_from_review``
     passes the real Fix H predicate (per-image FN-adjudication coverage).
     """
-    if validated_reference not in VALIDATED_SHIPPABLE:
-        raise ValueError(f"validated_reference must be one of {VALIDATED_SHIPPABLE}, got {validated_reference!r}")
+    if validated_reference not in accepted_references("annotations"):
+        raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
+                         f"got {validated_reference!r}")
     trait = get_trait(trait_name)
     review = validated_reference == VALIDATED_REVIEW_CONFIRMED
     # Fix H gate (NOT a filter — see the docstring above for why a filter fails open): every record
@@ -482,12 +486,12 @@ def resolve_operating_point(
             [[a["bbox"] for a in rec.get("gt", [])] for rec in calibration_records])
         if loc_frac is not None:
             params["localization_tolerance_frac"] = derived(
-                "localization_tolerance_frac", loc_frac, derivation_class="distribution",
+                "localization_tolerance_frac", loc_frac,
                 derived_from="GT nearest-neighbor spacing (p10 + margin)")
         else:
             loc_frac = trait.localization_tolerance_frac
             params["localization_tolerance_frac"] = default(
-                "localization_tolerance_frac", loc_frac, derivation_class="distribution",
+                "localization_tolerance_frac", loc_frac,
                 derived_from="trait default (underivable: no same-class neighbor in this GT)")
         tol = loc_frac * gt_class_avg_size(calibration_records)
         cal_sweep = sweep_operating_point(calibration_records, tolerance=tol)
@@ -655,38 +659,39 @@ def resolve_operating_point(
                           "calibration_cap_saturated_frac": _cap_saturated_frac(calibration_records),
                           "note": "calibrated but not held-out-measured"}
             validated = VALIDATED_FALSE
-        params["conf"] = derived("conf", float(conf), derivation_class="calibration",
+        params["conf"] = derived("conf", float(conf),
                                  derived_from=conf_derived_from,
-                                 validated_vs_gt=validated, dataset_scoped=True,
+                                 requires_validation=True, validation_kind="annotations",
+                                 validated_against=validated, dataset_scoped=True,
                                  dataset_hash=dataset_hash, sweep=sweep_data)
         if max_dets is None:
             max_dets = _max_dets_from_density(calibration_records)
     else:
         # No GT for this dataset: cannot calibrate. Carry an unvalidated placeholder (un-shippable
         # via the firewall) — no valley heuristic, no chosen value dressed as trustworthy.
-        params["conf"] = derived("conf", DEFAULT_CONF, derivation_class="calibration",
+        params["conf"] = derived("conf", DEFAULT_CONF,
                                  derived_from="no GT for this dataset; unvalidated placeholder",
-                                 validated_vs_gt=VALIDATED_FALSE, dataset_scoped=True, dataset_hash=dataset_hash)
+                                 requires_validation=True, validation_kind="annotations",
+                                 validated_against=VALIDATED_FALSE, dataset_scoped=True,
+                                 dataset_hash=dataset_hash)
         params["localization_tolerance_frac"] = default(
             "localization_tolerance_frac", trait.localization_tolerance_frac,
-            derivation_class="distribution", derived_from="trait default (no GT for this dataset)")
+            derived_from="trait default (no GT for this dataset)")
 
-    # --- deterministic / distribution / documented-default params ---
+    # --- structural facts / distribution statistics / documented-default params ---
     if tile_size and tile_size_source == "explicit":
         params["tile_size"] = ResolvedParam(
-            "tile_size", int(tile_size), source="explicit",
-            derivation_class="deterministic", derived_from="caller override")
+            "tile_size", int(tile_size), source="explicit", derived_from="caller override")
     elif tile_size and tile_size_source == "derived":
         params["tile_size"] = derived(
-            "tile_size", int(tile_size), derivation_class="deterministic",
+            "tile_size", int(tile_size),
             derived_from="model imgsz / persisted training geometry")
     else:
         params["tile_size"] = default("tile_size", tile_size or DEFAULT_TILE_SIZE)
     resolved_tiled = DEFAULT_TILED if tiled is None else bool(tiled)
     if tiled is not None and tiled_source == "explicit":
         params["tiled"] = ResolvedParam(
-            "tiled", resolved_tiled, source="explicit",
-            derivation_class="deterministic", derived_from="caller override")
+            "tiled", resolved_tiled, source="explicit", derived_from="caller override")
     else:
         params["tiled"] = default("tiled", resolved_tiled)
     # cross_tile_nms: an explicit override wins and is stamped as such; otherwise derive it from the
@@ -695,20 +700,20 @@ def resolve_operating_point(
     if cross_tile_nms is not None:
         params["cross_tile_nms"] = ResolvedParam(
             "cross_tile_nms", float(cross_tile_nms), source="explicit",
-            derivation_class="distribution", derived_from="caller override")
+            derived_from="caller override")
     else:
         nms = None
         if calibration_records:
             nms = derive_cross_tile_nms([[a["bbox"] for a in rec.get("gt", [])]
                                          for rec in calibration_records])
         params["cross_tile_nms"] = (
-            derived("cross_tile_nms", nms, derivation_class="distribution",
+            derived("cross_tile_nms", nms,
                     derived_from="GT neighbor-IoU distribution (p99 + margin)")
             if nms is not None
-            else default("cross_tile_nms", DEFAULT_NMS_IOU, derivation_class="distribution")
+            else default("cross_tile_nms", DEFAULT_NMS_IOU)
         )
     params["max_dets"] = (
-        derived("max_dets", int(max_dets), derivation_class="distribution",
+        derived("max_dets", int(max_dets),
                 derived_from="~1.5x p99 GT objects/image")
         if max_dets is not None else default("max_dets", DEFAULT_MAX_DETS)
     )
@@ -769,7 +774,7 @@ def resolve_classifier_operating_point(
     Returns a dict **structurally distinct** from a ``ResolvedParam``/``ResolvedBundle`` — never a
     shape a generic writer could mistake for the count operating point's ``conf`` param and stamp
     into the wrong sidecar (K3's distinct-return-shape requirement):
-    ``{"validated_vs_gt", "passed", "failures", "sweep_data"}``. Callers write this into a
+    ``{"validated_against", "passed", "failures", "sweep_data"}``. Callers write this into a
     classifier-scoped sidecar (``classifier_operating_point.json``, never ``operating_point.json``'s
     own fields) via :func:`tcip_mcp.pipelines.resolution.reconcile_classifier_validity`.
 
@@ -778,12 +783,13 @@ def resolve_classifier_operating_point(
     classifier-validity *stamp* is still reachable for a foreign checkpoint whose cal/holdout is
     otherwise disjoint and unbiased; it is not reachable at all when no calibration/holdout is given.
     """
-    if validated_reference not in VALIDATED_SHIPPABLE:
-        raise ValueError(f"validated_reference must be one of {VALIDATED_SHIPPABLE}, got {validated_reference!r}")
+    if validated_reference not in accepted_references("annotations"):
+        raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
+                         f"got {validated_reference!r}")
     get_trait(trait_name)  # validates the trait exists; classification mode needs no trait-shaped fields today
     if not calibration_items or not holdout_items:
         return {
-            "validated_vs_gt": VALIDATED_FALSE, "passed": False,
+            "validated_against": VALIDATED_FALSE, "passed": False,
             "failures": ["no_calibration_or_holdout"],
             "sweep_data": {"note": "classifier calibration requires both calibration and holdout items"},
         }
@@ -893,6 +899,6 @@ def resolve_classifier_operating_point(
         "n_calibration": len(calibration_items), "n_holdout": len(holdout_items),
     }
     return {
-        "validated_vs_gt": validated_reference if passed else VALIDATED_FALSE,
+        "validated_against": validated_reference if passed else VALIDATED_FALSE,
         "passed": passed, "failures": failures, "sweep_data": sweep_data,
     }
