@@ -62,6 +62,32 @@ def test_doctor_flags_the_field_session_bug_family(tmp_path):
     assert "IMG_A" not in out.replace("IMG_A.JPG is negative", "")  # confirmed negative is clean
 
 
+def test_doctor_flags_incomplete_source_snapshot(tmp_path):
+    """K12 finding 1: a bespoke run's source snapshot that failed to capture a declared file is
+    now self-describing (``missing``/``snapshot_errors``) — doctor.py surfaces it rather than the
+    manifest reading as complete."""
+    root = tmp_path / "clean"
+    (root / "images" / "d").mkdir(parents=True)
+    ann = root / "annotations" / "d"
+    ann.mkdir(parents=True)
+    (root / ".tcip" / "state").mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
+    json_io.write_annotations(
+        ann / "IMG_A.json",
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9), created_by="user:zack")], 32, 32)
+
+    manifest_dir = root / ".tcip" / "experiments" / "exp1" / "model_src"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "manifest.json").write_text(json.dumps({
+        "files": [], "missing": ["agent_helper.py"], "snapshot_errors": [],
+    }))
+
+    res = _run(root)
+    assert res.returncode == 1  # warning only, no error
+    assert "source snapshot" in res.stdout and "1 missing file" in res.stdout
+
+
 def test_doctor_clean_project_exits_zero(tmp_path):
     root = tmp_path / "clean"
     (root / "images" / "d").mkdir(parents=True)
