@@ -58,7 +58,7 @@ def test_run_inference_tile_flag(tmp_path):
     assert r["total_detections"] == sum(x["count"] for x in r["results"])
     assert len(r["results"]) == 1
     # the count carries a resolved-bundle operating point, unvalidated for raw inference
-    assert r["operating_point"]["conf"]["validated_vs_gt"] == "false"
+    assert r["operating_point"]["conf"]["validated_against"] == "false"
 
     r2 = run_inference(ckpt, image_paths=[img], tile=False, conf_threshold=0.0)
     assert r2["tiled"] is False
