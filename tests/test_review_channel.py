@@ -198,8 +198,10 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     assert p0.subject == "leaf"
     assert p0.score == pytest.approx(0.91)
     assert isinstance(p0.geometry, Polygon)
-    assert len(p0.geometry.points) == 4
-    assert p0.geometry.points[0] == pytest.approx((64.0, 48.0))
+    # stage_proposals' input contract is one contour per proposal, so it stages exactly one ring.
+    assert len(p0.geometry.rings) == 1
+    assert len(p0.geometry.rings[0]) == 4
+    assert p0.geometry.rings[0][0] == pytest.approx((64.0, 48.0))
     # Each staged polygon stamps the producer (model_name) as created_by + a created_at.
     data = json.loads(out.read_text())
     assert len(data["annotations"]) == 1
