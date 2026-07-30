@@ -85,6 +85,7 @@ export function InferenceTab() {
                 done: asNum(msg.done, prev.done),
                 total: asNum(msg.total, prev.total),
                 status: (msg.status as InferenceJob["status"]) ?? prev.status,
+                warning: (msg.warning as string | null | undefined) ?? prev.warning,
               } as InferenceJob)
             : prev,
         );
@@ -123,6 +124,7 @@ export function InferenceTab() {
           images_dir: imagesDir,
           output_dir: outputDir,
           error: null,
+          warning: null,
         };
         setJobs((prev) => [stub, ...prev]);
         setActiveJob(stub);
@@ -383,6 +385,9 @@ export function InferenceTab() {
             </div>
             {activeJob.error && (
               <div className="text-[11px] text-tcip-fp mt-1">Error: {activeJob.error}</div>
+            )}
+            {activeJob.warning && (
+              <div className="text-[11px] text-tcip-warn mt-1">Warning: {activeJob.warning}</div>
             )}
           </div>
         )}
