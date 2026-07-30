@@ -4,7 +4,7 @@ The pooled per-image bias ``E[FP-FN]`` is measured by a matcher that ignores ``c
 detector that calls every object of one class another class scores TP-only with bias 0, and one that
 over-detects class A exactly as much as it under-detects class B nets to 0 as well. Either way the
 delivered phenotype — a per-class count, or a fraction built from two of them — is wrong while the
-operating point earns a ``validated_held_out``/``review_confirmed`` stamp.
+operating point earns a ``VALIDATED_HELD_OUT``/``VALIDATED_REVIEW_CONFIRMED`` stamp.
 
 Every gate test here drives a real door: ``resolve_operating_point_from_review`` (what
 ``routes/review.py`` calls) or ``resolve_operating_point`` (what ``run_inference``'s
@@ -132,7 +132,7 @@ def test_review_door_refuses_a_class_compensating_reference_the_pooled_bias_call
     assert hb["per_class"]["2"]["count_bias_mean"] == pytest.approx(float(N_SWAPPED))
     assert sweep["per_class_count_bias_failures"] == ["1", "2"]
     assert "count_bias_exceeds_tolerance_per_class" in sweep["failures"]
-    assert conf.validated_vs_gt == VALIDATED_FALSE
+    assert conf.validated_against == VALIDATED_FALSE
 
 
 def test_review_door_class_failure_has_its_own_breeder_message():
@@ -155,7 +155,7 @@ def test_review_door_still_validates_a_multi_class_reference_that_is_honest_per_
     assert conf.sweep["failures"] == []
     assert conf.sweep["per_class_count_bias_failures"] == []
     assert set(conf.sweep["holdout_bias"]["per_class"]) == {"1", "2"}
-    assert conf.validated_vs_gt == VALIDATED_REVIEW_CONFIRMED
+    assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
 
 
 # ── the GT door (run_inference -> _calibrate_operating_point) ─────────────────────────────────
@@ -168,7 +168,7 @@ def test_gt_door_refuses_a_class_compensating_reference():
     sweep = b.params["conf"].sweep
     assert sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)
     assert sweep["failures"] == ["count_bias_exceeds_tolerance_per_class"]
-    assert b.params["conf"].validated_vs_gt == VALIDATED_FALSE
+    assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
 def test_gt_door_validates_the_same_geometry_called_correctly():
@@ -177,7 +177,7 @@ def test_gt_door_validates_the_same_geometry_called_correctly():
         calibration_records=_gt_records("cal", 4, swap_classes=False),
         holdout_records=_gt_records("hold", 4, swap_classes=False, offset=5000.0))
     assert b.params["conf"].sweep["failures"] == []
-    assert b.params["conf"].validated_vs_gt == VALIDATED_HELD_OUT
+    assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
 
 
 def test_single_class_reference_is_unaffected_by_the_conditioning():
@@ -190,7 +190,7 @@ def test_single_class_reference_is_unaffected_by_the_conditioning():
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].sweep
     hb = sweep["holdout_bias"]
-    assert b.params["conf"].validated_vs_gt == VALIDATED_HELD_OUT
+    assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
     assert sweep["per_class_count_bias_failures"] == []
     # The one class's statistics are the pooled ones, reused rather than recomputed.
     assert list(hb["per_class"]) == ["1"]
@@ -216,7 +216,7 @@ def test_a_class_the_holdout_never_carries_cannot_be_validated_by_its_absence():
     assert sweep["per_class_count_bias_failures"] == []   # the holdout has nothing to fail on
     assert sweep["holdout_missing_classes"] == ["2"]
     assert "holdout_missing_class" in sweep["failures"]
-    assert b.params["conf"].validated_vs_gt == VALIDATED_FALSE
+    assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
 def _sparse_class_records(prefix, n_images, *, offset=0.0):
@@ -268,7 +268,7 @@ def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
     assert c2["count_bias_mean"] == pytest.approx(-0.4)
     assert "2" in sweep["per_class_count_bias_failures"]
     assert "count_bias_exceeds_tolerance_per_class" in sweep["failures"]
-    assert b.params["conf"].validated_vs_gt == VALIDATED_FALSE
+    assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
 def test_holdout_class_coverage_admits_a_reference_that_evidences_every_class():
@@ -280,7 +280,7 @@ def test_holdout_class_coverage_admits_a_reference_that_evidences_every_class():
                                 calibration_records=cal, holdout_records=hold)
     assert b.params["conf"].sweep["holdout_missing_classes"] == []
     assert b.params["conf"].sweep["failures"] == []
-    assert b.params["conf"].validated_vs_gt == VALIDATED_HELD_OUT
+    assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
 
 
 def test_missing_class_failure_has_its_own_breeder_message():
@@ -381,4 +381,4 @@ def test_pick_serves_the_worst_class_not_the_pooled_total():
     b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=recs, holdout_records=build("h", 5000.0))
     assert b.params["conf"].sweep["failures"] == []
-    assert b.params["conf"].validated_vs_gt == VALIDATED_HELD_OUT
+    assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
