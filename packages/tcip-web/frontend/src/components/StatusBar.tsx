@@ -17,6 +17,7 @@ export function StatusBar() {
   const dirty = useStore((s) => s.canvas.dirty);
   const boxCount = useStore((s) => s.canvas.boxes.length);
   const polyCount = useStore((s) => s.canvas.polygons.length);
+  const pointCount = useStore((s) => s.canvas.points.length);
   const matches = useStore((s) => s.review.matches);
   const activeTab = useStore((s) => s.gui.active_tab);
   const sessionTracking = useStore((s) => s.sessionTracking);
@@ -69,6 +70,11 @@ export function StatusBar() {
           {/* Detect boxes are derived from polygons when any exist, so the count tracks them live. */}
           {polyCount > 0 ? polyCount : boxCount} boxes
         </span>
+      )}
+      {/* Points are counted on their own: they are not detection targets, so they never fold into
+          the box count. */}
+      {activeTab === "annotate" && pointCount > 0 && (
+        <span className="tabular-nums">{pointCount} points</span>
       )}
       {activeTab === "annotate" && dirty && <span className="text-tcip-warn">Unsaved changes</span>}
       {activeTab === "review" && matches && (
