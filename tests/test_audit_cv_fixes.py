@@ -545,7 +545,7 @@ def test_cv0_default_path_unchanged(tmp_path, monkeypatch):
     assert r["conf_source"] == "default"
     assert r["validated"] is False
     assert r["operating_point"]["conf"]["value"] == pytest.approx(DEFAULT_CONF)
-    assert r["operating_point"]["conf"]["validated_vs_gt"] == "false"
+    assert r["operating_point"]["conf"]["validated_against"] == "false"
     assert "sweep_summary" not in r  # provenance shape unchanged on the default path
 
 
@@ -694,7 +694,7 @@ def test_k10_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_der
     """K10 finding 3 residual (ceiling-check): before this fix, resolve_operating_point inferred
     "derived" from mere truthiness of tile_size — so a checkpoint with NO persisted geometry, whose
     tile_size silently fell back to the fabricated DEFAULT_TILE_SIZE, still got stamped "derived
-    from persisted training geometry" on the calibrated (potentially validated_held_out) bundle.
+    from persisted training geometry" on the calibrated (potentially held-out-validated) bundle.
     Now the real source computed by resolve_tile_geometry travels through _calibrate_operating_point
     into resolve_operating_point, so a fabricated fallback is honestly stamped "default"."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
@@ -747,7 +747,7 @@ def test_cv0_export_predictions_validated_from_bundle(tmp_path, monkeypatch):
     import tcip_mcp.tools.inference_tools as itools
 
     img = _one_image(tmp_path)
-    fake_op = {"conf": {"value": 0.6, "validated_vs_gt": "validated_held_out"}}
+    fake_op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
 
     def _fake_run_inference(**kw):
         return {
@@ -768,18 +768,17 @@ def test_cv0_export_predictions_validated_from_bundle(tmp_path, monkeypatch):
     assert r["validated"] is True and r["conf_source"] == "calibration"
 
 
-def test_cv0_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
+def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None):
+    """Run tabulate_counts against a stubbed run_inference returning ``op``/``validated``."""
     import tcip_mcp.tools.inference_tools as itools
 
-    captured = {}
-
     def _fake_run_inference(**kw):
-        captured.update(kw)
+        if captured is not None:
+            captured.update(kw)
         return {
             "results": [{"image": "a.png", "count": 3}],
             "image_count": 1, "total_detections": 3,
-            "operating_point": {"conf": {"value": 0.6}},
-            "validated": True, "conf_source": "calibration",
+            "operating_point": op, "validated": validated, "conf_source": "calibration",
         }
 
     monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
@@ -787,9 +786,42 @@ def test_cv0_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
         itools, "export_detection_csv",
         lambda results, path, provenance=None, measurement_validated=None,
         acknowledge_unvalidated=False: str(path))
-    r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    return itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
                                   trait="catkin", calibration_labels_dir=str(tmp_path))
+
+
+def test_cv0_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
+    captured: dict = {}
+    op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
+    r = _tabulate_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured)
     assert captured["trait"] == "catkin"                    # calibration threaded through
     assert captured["calibration_labels_dir"] == str(tmp_path)
     assert r["validated"] is True and r["conf_source"] == "calibration"
-    assert r["operating_point"] == {"conf": {"value": 0.6}}
+    assert r["operating_point"] == op
+
+
+def test_tabulate_counts_never_launders_a_bare_validated_bool_into_a_reference(tmp_path, monkeypatch):
+    """The count CSV door reads the reference conf itself recorded, never the run's bare bool.
+
+    A run whose conf param records no (or a wrong-kind) reference is unvalidated for THIS dimension
+    even when the run's overall ``validated`` flag is true — promoting the bool to
+    ``held_out_annotations`` was a laundering path (the same one resolution._sidecar_reference closed).
+    """
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_PHYSICAL_MEASUREMENT
+
+    for conf_prov in ({"value": 0.6},                                        # no reference at all
+                      {"value": 0.6, "validated_against": VALIDATED_FALSE},
+                      {"value": 0.6, "validated_against": "make-believe"},
+                      # a real reference, but for the wrong validation kind (physical, not annotations)
+                      {"value": 0.6, "validated_against": VALIDATED_PHYSICAL_MEASUREMENT}):
+        r = _tabulate_counts_over(monkeypatch, tmp_path, {"conf": conf_prov}, validated=True)
+        assert "error" in r, conf_prov
+        assert r["operating_point_validated"] == VALIDATED_FALSE
+        assert r["validated"] is False
+    # ...and the rail still admits the legitimate case: a real annotations reference delivers.
+    ok = _tabulate_counts_over(
+        monkeypatch, tmp_path,
+        {"conf": {"value": 0.6, "validated_against": "reviewer_confirmed_annotations"}},
+        validated=True)
+    assert "error" not in ok
+    assert ok["operating_point_validated"] == "reviewer_confirmed_annotations"
