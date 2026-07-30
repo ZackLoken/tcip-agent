@@ -13,7 +13,7 @@ const GLOBAL: Shortcut[] = [
 ];
 
 const ANNOTATE: Shortcut[] = [
-  { key: "m", desc: "Toggle Box / Polygon mode" },
+  { key: "m", desc: "Cycle Box / Polygon / Point mode" },
   { key: "Ctrl+Z", desc: "Undo" },
   { key: "Ctrl+Shift+Z", desc: "Redo" },
   { key: "Ctrl+Y", desc: "Redo (alias)" },
@@ -22,7 +22,7 @@ const ANNOTATE: Shortcut[] = [
   { key: "s", desc: "Toggle vertex snapping (polygon mode)" },
   { key: "0–9", desc: "Select class by ID" },
   { key: "Enter", desc: "Close current polygon (or double-click)" },
-  { key: "Delete", desc: "Delete selected polygon" },
+  { key: "Delete", desc: "Delete the selected polygon, box or point" },
   { key: "←  →", desc: "Prev / Next image" },
 ];
 
@@ -43,6 +43,7 @@ const MOUSE: Shortcut[] = [
   { key: "Shift + Scroll", desc: "Pan horizontally" },
   { key: "Space + drag", desc: "Pan (hold space, drag with the left button)" },
   { key: "Middle-click + drag", desc: "Pan" },
+  { key: "Click", desc: "Place a point (point mode) — press and drag a placed point to move it" },
   { key: "Double-click", desc: "Close current polygon (polygon mode)" },
   {
     key: "Right-click",
