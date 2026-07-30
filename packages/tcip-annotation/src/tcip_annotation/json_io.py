@@ -1,9 +1,9 @@
 """Per-image JSON — the canonical on-disk label format (ground truth + predictions).
 
 **One JSON file per image**, holding every subject's annotations by name. Each annotation carries its
-``subject``, an optional geometry (``bbox`` xywh or ``segmentation`` polygon, or neither for an
-image/plant-level label), its attribute values by name, an optional ``score`` (predictions), and
-provenance (``created_by/at``, ``accepted_by/at``) — so a prediction's origin travels with it into
+``subject``, an optional geometry (``bbox`` xywh, ``segmentation`` polygon, ``point`` [x,y], or none
+for an image/plant-level label), its attribute values by name, an optional ``score`` (predictions),
+and provenance (``created_by/at``, ``accepted_by/at``) — so a prediction's origin travels with it into
 ground truth on accept, with no sidecar.
 
 Schema::
@@ -12,7 +12,8 @@ Schema::
       "annotations": [
         { "subject": "catkin",
           "bbox": [x, y, w, h],                 # COCO xywh, pixel      (optional)
-          "segmentation": [[x1,y1, ...]],       # pixel polygon         (optional)
+          "segmentation": [[x1,y1, ...], ...],  # pixel polygon, one or more rings (optional)
+          "point": [x, y],                      # pixel point — a prompt or keypoint (optional)
           "attributes": {"elongation": "elongated"},   # attr name -> value name
           "score": 0.91,                        # predictions only
           "created_by": "sam", "created_at": "...",
@@ -42,7 +43,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from tcip_annotation.state import Annotation, BBox, Polygon, bbox_of
+from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
 SCHEMA_VERSION = 2
 ANNOTATIONS_KEY = "annotations"  # the one top-level list key; format_io.detect_format shares it
@@ -104,18 +105,32 @@ def _coerce_bbox(bb) -> list[float] | None:
         return None
 
 
-def _ring_to_points(seg) -> list[tuple[float, float]] | None:
-    """First polygon ring of a ``segmentation`` → pixel points, or None if unusable.
+def _rings_from_segmentation(seg) -> list[list[tuple[float, float]]] | None:
+    """Every valid polygon ring of a ``segmentation`` → pixel points per ring, or None if none usable.
 
-    Needs an even coord count and >=3 points (6 coords); anything else (RLE dict, too few) is skipped.
+    Each entry needs an even coord count and >=3 points (6 coords); a ring that fails this is dropped
+    individually, not the whole annotation — same treatment an RLE dict or other non-ring entry gets.
+    Returns None only when no ring survives (an all-degenerate or empty ``segmentation``).
     """
     if not isinstance(seg, list) or not seg:
         return None
-    ring = seg[0]
-    if not isinstance(ring, list) or len(ring) < 6 or len(ring) % 2 != 0:
+    rings: list[list[tuple[float, float]]] = []
+    for ring in seg:
+        if not isinstance(ring, list) or len(ring) < 6 or len(ring) % 2 != 0:
+            continue
+        try:
+            rings.append([(float(ring[i]), float(ring[i + 1])) for i in range(0, len(ring), 2)])
+        except (TypeError, ValueError):
+            continue
+    return rings or None
+
+
+def _coerce_point(pt) -> tuple[float, float] | None:
+    """A 2-list of floats as an (x, y) pair, or None (wrong shape / non-numeric)."""
+    if not isinstance(pt, list) or len(pt) != 2:
         return None
     try:
-        return [(float(ring[i]), float(ring[i + 1])) for i in range(0, len(ring), 2)]
+        return (float(pt[0]), float(pt[1]))
     except (TypeError, ValueError):
         return None
 
@@ -151,15 +166,19 @@ def _annotations_of(data: dict | None) -> list[Annotation]:
         subject = o.get("subject")
         if not isinstance(subject, str) or not subject:
             continue
-        geometry: BBox | Polygon | None = None
-        pts = _ring_to_points(o.get("segmentation"))
-        if pts is not None:
-            geometry = Polygon(pts)
+        geometry: BBox | Polygon | Point | None = None
+        rings = _rings_from_segmentation(o.get("segmentation"))
+        if rings is not None:
+            geometry = Polygon(rings)
         else:
             bb = _coerce_bbox(o.get("bbox"))
             if bb is not None:
                 x, y, w, h = bb
                 geometry = BBox(x, y, x + w, y + h)
+            else:
+                pt = _coerce_point(o.get("point"))
+                if pt is not None:
+                    geometry = Point(pt[0], pt[1])
         out.append(Annotation(
             subject=subject, geometry=geometry, attributes=_attributes_of(o),
             score=_score_of(o), **_prov_kwargs(o),
@@ -185,17 +204,20 @@ def _annotation_record(a: Annotation) -> dict | None:
     rec: dict = {"subject": a.subject}
     geom = a.geometry
     if isinstance(geom, Polygon):
-        if len(geom.points) < 3:
-            return None  # a degenerate polygon is not a shape; skip so write<->read stays symmetric
-        rec["segmentation"] = [[round(float(c), 2) for xy in geom.points for c in xy]]
-        # The polygon's box travels with it (COCO-style record). Derived from the points here and
+        valid_rings = [r for r in geom.rings if len(r) >= 3]
+        if not valid_rings:
+            return None  # no ring is a real shape; skip so write<->read stays symmetric
+        rec["segmentation"] = [[round(float(c), 2) for xy in ring for c in xy] for ring in valid_rings]
+        # The polygon's box travels with it (COCO-style record). Derived from the rings here and
         # never authored or trusted as input — the polygon stays the sole source of truth, so the two
         # can't diverge; every reader re-derives via bbox_of rather than reading this stored value.
-        b = bbox_of(geom)
+        b = bbox_of(Polygon(valid_rings))
         rec["bbox"] = [round(b.x1, 2), round(b.y1, 2), round(b.x2 - b.x1, 2), round(b.y2 - b.y1, 2)]
     elif isinstance(geom, BBox):
         rec["bbox"] = [round(geom.x1, 2), round(geom.y1, 2),
                        round(geom.x2 - geom.x1, 2), round(geom.y2 - geom.y1, 2)]
+    elif isinstance(geom, Point):
+        rec["point"] = [round(geom.x, 2), round(geom.y, 2)]
     if a.attributes:
         rec["attributes"] = dict(a.attributes)
     if a.score is not None:
@@ -237,7 +259,8 @@ def target_class_id(a: Annotation, subject: str, attribute: str | None,
     """The 0-indexed class id ``a`` trains as for ``(subject, attribute)``.
 
     Returns ``None`` if ``a`` is not a detection/segmentation target for this scope at all (a
-    different subject, or a geometry-less label) — unchanged, existing behavior. For a genuine
+    different subject, a geometry-less label, or a :class:`~tcip_annotation.state.Point` — a point
+    has no box/area and is never a detection/segmentation training target). For a genuine
     target, two DIFFERENT failure shapes exist and (K4/K5) must not be conflated: the instance was
     never assessed for ``attribute`` at all (``a.attributes.get(attribute) is None`` — the annotator
     hasn't gotten to it yet, a soft/expected gap), versus the instance WAS assessed but with a value
@@ -252,7 +275,7 @@ def target_class_id(a: Annotation, subject: str, attribute: str | None,
     per-image target reader both call this, so the assembled COCO and the calibration/eval GT can
     never disagree about which annotation is a target or which class it is.
     """
-    if a.subject != subject or a.geometry is None:
+    if a.subject != subject or a.geometry is None or isinstance(a.geometry, Point):
         return None
     key = a.attributes.get(attribute) if attribute else subject
     if key is None:
@@ -340,7 +363,8 @@ def to_coco_dataset(
                 "area": round((box.x2 - box.x1) * (box.y2 - box.y1), 2),
             }
             if isinstance(a.geometry, Polygon):
-                rec["segmentation"] = [[round(float(c), 2) for xy in a.geometry.points for c in xy]]
+                rec["segmentation"] = [[round(float(c), 2) for xy in ring for c in xy]
+                                       for ring in a.geometry.rings if len(ring) >= 3]
             if a.score is not None:
                 rec["score"] = _safe_score(a.score)
             for k in _PROV_KEYS:
