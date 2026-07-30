@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_annotation import json_io
-from tcip_annotation.state import Annotation, BBox, Polygon
+from tcip_annotation.state import Annotation, BBox, Point, Polygon
 from tcip_mcp.dataset_layout import annotation_dir, image_dir
 from tcip_mcp.tools.annotation_tools import focus
 
@@ -24,13 +24,15 @@ def _scene(root: Path, date: str, images: list[str]) -> None:
 
 def _label(root: Path, subject: str, date: str, task: str, stem: str, count: int) -> None:
     # Write the one per-image JSON label (all subjects, name-based). count==0 writes a present
-    # {"annotations": []} (confirmed negative); count>0 writes `count` shapes of `subject`, polygon
-    # geometry when task=='segment' else box, so focus infers the mode from the frame's own geometry.
+    # {"annotations": []} (confirmed negative); count>0 writes `count` shapes of `subject`, with the
+    # geometry `task` names ('segment' -> polygon, 'point' -> point, else box), so focus infers the
+    # mode from the frame's own geometry.
     d = Path(annotation_dir(root, date))
+    geoms = {"segment": Polygon([[(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]]),
+             "point": Point(10.0, 10.0)}
     anns = []
     for _ in range(count):
-        geom = (Polygon([(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]) if task == "segment"
-                else BBox(10.0, 10.0, 20.0, 20.0))
+        geom = geoms.get(task, BBox(10.0, 10.0, 20.0, 20.0))
         anns.append(Annotation(subject=subject, geometry=geom))
     json_io.write_annotations(str(d / f"{stem}.json"), anns, 100, 100, keep_empty=True)
 
@@ -121,6 +123,46 @@ def test_focus_annotate_infers_box_mode_from_detect_labels(tmp_path: Path) -> No
     res = focus("annotate", str(root), str(root), "catkin", date)
     assert res["image_index"] == 1
     assert res["mode"] == "box"
+
+
+def test_focus_annotate_sends_a_point_only_frame_in_point_mode(tmp_path: Path) -> None:
+    """A frame whose only geometry for the subject is a point is edited in point mode.
+
+    ``_subject_task`` already answers "point"; delivering that frame in box mode hands the human a
+    tool that cannot touch what is on the canvas (the GUI's Mode union carries "point").
+    """
+    root = tmp_path / "proj"
+    date = "2026-03-02"
+    imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
+    _scene(root, date, imgs)
+    _label(root, "catkin", date, "point", "IMG_0001", 2)
+
+    res = focus("annotate", str(root), str(root), "catkin", date)
+    assert "error" not in res
+    assert res["image_index"] == 1
+    assert res["mode"] == "point"
+    assert res["n_annotated"] == 1
+
+
+def test_focus_annotate_accepts_an_explicit_point_mode(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-03-02"
+    _scene(root, date, ["IMG_0000.JPG"])
+    _label(root, "catkin", date, "detect", "IMG_0000", 1)
+
+    res = focus("annotate", str(root), str(root), "catkin", date, mode="point")
+    assert "error" not in res
+    assert res["mode"] == "point"  # honored over the frame's own box geometry
+
+
+def test_focus_annotate_still_rejects_a_mode_the_gui_has_no_tool_for(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-03-02"
+    _scene(root, date, ["IMG_0000.JPG"])
+    _label(root, "catkin", date, "detect", "IMG_0000", 1)
+
+    res = focus("annotate", str(root), str(root), "catkin", date, mode="lasso")
+    assert "error" in res and "lasso" in res["error"]
 
 
 def test_focus_annotate_empty_label_is_not_a_focus_target(tmp_path: Path) -> None:
