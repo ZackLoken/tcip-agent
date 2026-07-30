@@ -1,9 +1,11 @@
 """S4a — mask-geometry measurement primitive: exact values on synthetic masks.
 
 Locks that geometry on a validated mask is a real, correct measurement: a known rectangle / ellipse
-yields the right area / length / width / perimeter / centroid in pixels, a physical scale converts
-px -> mm correctly (area by the square), and degenerate / empty masks are handled without inventing
-a measurement.
+yields the right area / axis extents / perimeter / centroid in pixels, a physical scale converts
+px -> the caller's own unit correctly (area by the square), and degenerate / empty masks are handled
+without inventing a measurement. Also locks the two firewalled resolvers this module owns
+(``resolve_binarize_threshold`` / ``resolve_scale``): each is un-shippable until validated against a
+reference of its OWN kind, so an annotations-kind stamp can never clear a physical scale.
 """
 
 from __future__ import annotations
@@ -32,8 +34,8 @@ def test_rectangle_pixel_measurements_exact():
     g = mask_geometry(m)
     assert g["empty"] is False
     assert g["area_px"] == 40 * 20
-    assert g["length_px"] == 40.0        # major axis == the longer side
-    assert g["width_px"] == 20.0         # minor axis == the shorter side
+    assert g["principal_axis_extent_px"] == 40.0   # major axis == the longer side
+    assert g["secondary_axis_extent_px"] == 20.0   # minor axis == the shorter side
     assert g["perimeter_px"] == 2 * (40 + 20)
     assert g["centroid_px"] == pytest.approx((29.5, 14.5))
     assert g["angle_deg"] == pytest.approx(0.0, abs=1e-6)  # horizontal major axis
@@ -41,20 +43,67 @@ def test_rectangle_pixel_measurements_exact():
 
 def test_rectangle_physical_scale_converts_px_to_mm():
     m = _rect_mask()
-    g = mask_geometry(m, mm_per_px=0.5)
+    g = mask_geometry(m, scale=0.5, unit="mm")
     assert g["mm_per_px"] == 0.5
     assert g["area_mm2"] == pytest.approx(800 * 0.25)   # area scales by the square of the linear scale
-    assert g["length_mm"] == pytest.approx(20.0)
-    assert g["width_mm"] == pytest.approx(10.0)
+    assert g["principal_axis_extent_mm"] == pytest.approx(20.0)
+    assert g["secondary_axis_extent_mm"] == pytest.approx(10.0)
     assert g["perimeter_mm"] == pytest.approx(60.0)
     assert g["centroid_mm"] == pytest.approx((14.75, 7.25))
 
 
-def test_gsd_alias_equals_mm_per_px():
+def test_scale_unit_is_the_callers_fact_never_assumed_to_be_mm():
+    """The unit is real data the caller states, so a cm/px scale reports cm — never a mislabeled mm.
+
+    Replaces the former ``gsd`` alias, which silently treated a field-standard GSD (cm/px) as an
+    mm/px synonym: every dimensional number came out 10x wrong under an ``_mm`` label.
+    """
     m = _rect_mask()
-    assert mask_geometry(m, gsd=0.5)["area_mm2"] == mask_geometry(m, mm_per_px=0.5)["area_mm2"]
-    with pytest.raises(ValueError):
-        mask_geometry(m, mm_per_px=0.5, gsd=0.5)   # ambiguous scale is rejected
+    g = mask_geometry(m, scale=0.5, unit="cm")
+    assert g["cm_per_px"] == 0.5
+    assert g["area_cm2"] == pytest.approx(800 * 0.25)
+    assert g["principal_axis_extent_cm"] == pytest.approx(20.0)
+    assert g["secondary_axis_extent_cm"] == pytest.approx(10.0)
+    assert g["perimeter_cm"] == pytest.approx(60.0)
+    assert g["centroid_cm"] == pytest.approx((14.75, 7.25))
+    # no mm-labeled field is invented for a cm scale, and no implicit mm default is left anywhere
+    assert not any(k.endswith(("_mm", "_mm2")) or k == "mm_per_px" for k in g)
+
+
+def test_no_gsd_parameter_survives_anywhere_in_the_module():
+    """The naming trap is gone: no callable in the module still accepts a ``gsd``/``mm_per_px`` knob."""
+    import importlib
+    import inspect
+
+    mg = importlib.import_module("tcip_mcp.pipelines.measurement.mask_geometry")
+    for name, fn in vars(mg).items():
+        if not inspect.isfunction(fn) or fn.__module__ != mg.__name__:
+            continue
+        params = inspect.signature(fn).parameters
+        assert "gsd" not in params, f"{name} still takes a gsd parameter"
+        assert "mm_per_px" not in params, f"{name} still takes an mm_per_px parameter"
+
+
+def test_no_length_or_width_key_survives_under_any_alias():
+    """A PCA-chord extent is not an anatomical length/width, and no alias keeps that claim alive.
+
+    An alias would defeat the rename: code reading ``length_px`` would keep treating the principal-axis
+    chord as the organ's real length, which is exactly the reading the axis-named keys refuse to offer.
+    """
+    from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
+
+    for g in (mask_geometry(_rect_mask()), mask_geometry(_rect_mask(), scale=0.5, unit="mm")):
+        assert not [k for k in g if k.startswith(("length", "width"))], sorted(g)
+    # unit_from_value_key is vocabulary-driven (crops.yml's real declared units), not a field-name
+    # whitelist — a bespoke ``length_mm``/``width_cm`` from measurement code outside this module is
+    # recognized the same way mask_geometry's own fields are, so it is NOT the length/width alias
+    # this test guards against: this module still never emits a length/width key itself (asserted
+    # above), it just no longer refuses to recognize the unit on someone else's.
+    assert unit_from_value_key("length_mm") == ("mm", "mm")
+    assert unit_from_value_key("width_cm") == ("cm", "cm")
+    assert unit_from_value_key("principal_axis_extent_mm") == ("mm", "mm")
+    assert unit_from_value_key("secondary_axis_extent_cm") == ("cm", "cm")
+    assert unit_from_value_key("principal_axis_extent_px") is None
 
 
 # --------------------------------------------------------------------------
@@ -68,8 +117,8 @@ def test_ellipse_area_and_axes():
     m = (((xx - cx) / a) ** 2 + ((yy - cy) / b) ** 2 <= 1.0).astype(np.uint8)
     g = mask_geometry(m)
     assert g["area_px"] == pytest.approx(math.pi * a * b, rel=0.05)
-    assert g["length_px"] == pytest.approx(2 * a, abs=2.0)
-    assert g["width_px"] == pytest.approx(2 * b, abs=2.0)
+    assert g["principal_axis_extent_px"] == pytest.approx(2 * a, abs=2.0)
+    assert g["secondary_axis_extent_px"] == pytest.approx(2 * b, abs=2.0)
     assert g["centroid_px"] == pytest.approx((cx, cy), abs=1.0)
 
 
@@ -78,9 +127,10 @@ def test_ellipse_area_and_axes():
 # --------------------------------------------------------------------------
 
 def test_empty_mask_is_handled_without_inventing_a_measurement():
-    g = mask_geometry(np.zeros((32, 32), dtype=np.uint8), mm_per_px=2.0)
+    g = mask_geometry(np.zeros((32, 32), dtype=np.uint8), scale=2.0)
     assert g["empty"] is True
-    assert g["area_px"] == 0.0 and g["length_px"] == 0.0 and g["width_px"] == 0.0
+    assert g["area_px"] == 0.0
+    assert g["principal_axis_extent_px"] == 0.0 and g["secondary_axis_extent_px"] == 0.0
     assert g["centroid_px"] is None and g["centroid_mm"] is None
     assert g["area_mm2"] == 0.0        # scale still applied, still zero
 
@@ -90,7 +140,7 @@ def test_single_row_line_is_1px_wide():
     m[8, 3:13] = 1                      # a 10 px horizontal line
     g = mask_geometry(m)
     assert g["area_px"] == 10.0
-    assert g["length_px"] == 10.0 and g["width_px"] == 1.0
+    assert g["principal_axis_extent_px"] == 10.0 and g["secondary_axis_extent_px"] == 1.0
     assert g["perimeter_px"] == 2 * (10 + 1)
 
 
@@ -108,12 +158,103 @@ def test_accepts_chw_and_soft_masks():
 def test_accepts_torch_tensor():
     torch = pytest.importorskip("torch")
     g = mask_geometry(torch.from_numpy(_rect_mask()))
-    assert g["area_px"] == 40 * 20 and g["length_px"] == 40.0
+    assert g["area_px"] == 40 * 20 and g["principal_axis_extent_px"] == 40.0
 
 
 def test_instance_geometries_over_a_stack():
     stack = np.stack([_rect_mask(), np.zeros((64, 64), dtype=np.uint8)])  # one real, one empty
-    out = instance_geometries(stack, mm_per_px=0.5)
+    out = instance_geometries(stack, scale=0.5, unit="mm")
     assert len(out) == 2
     assert out[0]["area_mm2"] == pytest.approx(200.0)
     assert out[1]["empty"] is True
+
+
+def test_instance_geometries_carries_the_callers_unit():
+    out = instance_geometries(_rect_mask()[None], scale=0.5, unit="cm")
+    assert out[0]["area_cm2"] == pytest.approx(200.0)
+    assert "area_mm2" not in out[0]
+
+
+# --------------------------------------------------------------------------
+# The firewalled resolvers: binarize threshold (annotations) and scale (physical)
+# --------------------------------------------------------------------------
+
+def test_binarize_threshold_is_unvalidated_and_annotations_kind():
+    from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, UnvalidatedOperatingPointError
+
+    p = resolve_binarize_threshold()
+    assert p.requires_validation is True
+    assert p.validation_kind == "annotations"
+    assert p.validated_against == VALIDATED_FALSE
+    assert p.is_shippable is False
+    with pytest.raises(UnvalidatedOperatingPointError):
+        p.value
+    assert p.unvalidated_value(acknowledge_unvalidated=True) == 0.5
+    assert resolve_binarize_threshold(0.3).unvalidated_value(acknowledge_unvalidated=True) == 0.3
+
+
+def test_resolve_scale_is_unvalidated_by_default():
+    from tcip_mcp.pipelines.measurement.mask_geometry import resolve_scale
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, UnvalidatedOperatingPointError
+
+    p = resolve_scale(0.5)
+    assert p.name == "scale_mm_per_px"
+    assert p.source == "explicit"
+    assert p.requires_validation is True
+    assert p.validation_kind == "physical"
+    assert p.validated_against == VALIDATED_FALSE
+    assert p.is_shippable is False
+    with pytest.raises(UnvalidatedOperatingPointError):
+        p.value
+    assert p.unvalidated_value(acknowledge_unvalidated=True) == 0.5
+    assert resolve_scale(2.0, unit="cm").name == "scale_cm_per_px"
+    assert resolve_scale().source == "default"
+
+
+def test_resolve_scale_capture_scoping_is_the_callers_fact():
+    from tcip_mcp.pipelines.measurement.mask_geometry import resolve_scale
+
+    unscoped = resolve_scale(0.5)
+    assert unscoped.capture_scoped is False and unscoped.capture_id is None
+    scoped = resolve_scale(0.5, capture_id="2026-02-10_plot7")
+    assert scoped.capture_scoped is True and scoped.capture_id == "2026-02-10_plot7"
+
+
+def test_an_annotations_reference_can_never_validate_a_physical_scale():
+    """The point of the validation_kind split: a held-out-GT stamp does not make a scale shippable.
+
+    A scale is a physical fact — only a physical-measurement reference clears it. Stamping it with an
+    annotations-kind reference (the reference a conf threshold earns) leaves it un-shippable and
+    ``.value`` still raising, so a wrong scale can never launder itself into a dimensional phenotype
+    through the count operating point's paperwork.
+    """
+    import dataclasses
+
+    from tcip_mcp.pipelines.measurement.mask_geometry import resolve_scale
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_HELD_OUT,
+        VALIDATED_PHYSICAL_MEASUREMENT,
+        VALIDATED_REVIEW_CONFIRMED,
+        UnvalidatedOperatingPointError,
+        accepted_references,
+    )
+
+    base = resolve_scale(0.5)
+    for wrong_kind_ref in (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED):
+        stamped = dataclasses.replace(base, validated_against=wrong_kind_ref)
+        assert wrong_kind_ref not in accepted_references("physical")
+        assert stamped.is_shippable is False
+        with pytest.raises(UnvalidatedOperatingPointError):
+            stamped.value
+
+    # ...and the rail still admits the legitimate case: a real physical reference ships.
+    validated = dataclasses.replace(base, validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    assert validated.is_shippable is True
+    assert validated.value == 0.5
+    # symmetrically, a physical reference cannot clear the annotations-kind binarize threshold
+    from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
+
+    thr = dataclasses.replace(resolve_binarize_threshold(),
+                              validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    assert thr.is_shippable is False
