@@ -388,7 +388,7 @@ def calibrate_classifier_operating_point(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     atomic_write_json(out / "classifier_operating_point.json", {
-        "operating_point": {"classifier": {"validated_vs_gt": result["validated_vs_gt"],
+        "operating_point": {"classifier": {"validated_against": result["validated_against"],
                                            "value": spec.positive_class_name}},
         "validated": result["passed"],
         "failures": result["failures"],
@@ -398,7 +398,7 @@ def calibrate_classifier_operating_point(
     })
     return {
         "output_dir": str(out),
-        "validated_vs_gt": result["validated_vs_gt"],
+        "validated_against": result["validated_against"],
         "passed": result["passed"],
         "failures": result["failures"],
         "n_calibration_items": len(cal_items),
@@ -453,8 +453,8 @@ def compute_phenology(
         operating_point_validated: An optional caller assertion of the count operating point's
             validity. It only *lowers* the result: the real state is read from each bucket's
             ``operating_point.json`` and floored against this (a missing/unvalidated sidecar
-            floors the curve to ``false``). Must reconcile to a shippable reference
-            (``validated_held_out`` / ``review_confirmed``) to deliver unacknowledged.
+            floors the curve to ``false``). Must reconcile to a reference
+            ``accepted_references("annotations")`` recognizes to deliver unacknowledged.
         acknowledge_unvalidated: Override the gate — write the CSV even when the classifier or
             operating point is unvalidated, stamping the un-validated dimension as ``false`` so
             the un-trustworthiness travels with the delivery.
