@@ -6,12 +6,12 @@ The point (CLAUDE.md "Parameters: derive, don't pin"): the agent derives operati
 data in hand, per dataset, and the provenance travels with every result so a phenotype can always be
 traced to the operating point that produced it.
 
-The measurement-integrity firewall lives here: a **calibration** param (a precision/recall operating
-point like a confidence threshold) is *structurally un-consumable as a bare number* unless it was
-validated against held-out ground truth for the same dataset. ``.value`` raises; a caller that
-genuinely means to ship an unvalidated operating point must go through ``unvalidated_value(...)`` and
-say so explicitly. This makes an unvalidated measurement operating point physically un-shippable
-rather than merely discouraged.
+The measurement-integrity firewall lives here: a parameter that ``requires_validation`` (an operating
+point like a confidence threshold, or a physical scale) is *structurally un-consumable as a bare
+number* unless it was checked against the right kind of real-world reference for what it is.
+``.value`` raises; a caller that genuinely means to ship an unvalidated value must go through
+``unvalidated_value(...)`` and say so explicitly. This makes an unvalidated measurement value
+physically un-shippable rather than merely discouraged.
 
 Pure stdlib — no torch, safe to import anywhere.
 """
@@ -26,23 +26,38 @@ from typing import Any, Callable
 
 # --- vocabularies ---------------------------------------------------------
 SOURCES = ("explicit", "derived", "default")
-# How a parameter is (or should be) determined — see the scope doc / CLAUDE.md.
-DERIVATION_CLASSES = ("deterministic", "distribution", "calibration", "semantic", "engineering")
-# validated_vs_gt records WHICH reference confirmed a calibration operating point — the shared-reference
-# principle (CLAUDE.md): a reference sized to the trait, not dense GT for every trait. Both shippable
-# references pass the IDENTICAL disjoint-split + count-bias gate; the value keeps them distinct so
-# provenance says which one validated.
-#   None                = not applicable (facts, e.g. num_classes).
-#   "validated_held_out" = passed on a disjoint held-out split of this dataset's GT annotations.
-#   "review_confirmed"   = passed on a breeder-confirmed sample of the model's own outputs (review
-#                          verdicts reconstructed into the same records the GT path sweeps).
-#   "false"              = no such validation exists (not truth — every reference is bounded by its
-#                          label/verdict quality).
-VALIDATED_HELD_OUT = "validated_held_out"
-VALIDATED_REVIEW_CONFIRMED = "review_confirmed"
+
+# validated_against records WHICH reference confirmed a value that requires validation — the
+# shared-reference principle (CLAUDE.md): a reference sized to the trait, not dense GT for every
+# trait. "false" is a real, distinct value (not Python None) so a sidecar/provenance record can say
+# "checked, and it wasn't" rather than leaving the field merely absent.
+VALIDATED_HELD_OUT = "held_out_annotations"          # a disjoint held-out split of this dataset's GT
+VALIDATED_REVIEW_CONFIRMED = "reviewer_confirmed_annotations"  # a breeder-confirmed output sample
+VALIDATED_PHYSICAL_MEASUREMENT = "physical_measurement"  # checked against a known physical dimension
 VALIDATED_FALSE = "false"
-# The references that make a calibration operating point shippable (each cleared the same gate).
-VALIDATED_SHIPPABLE = (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED)
+
+# Which validated_against values legitimately clear validation for which KIND of thing being
+# validated — an annotation-count operating point (conf, a mask-binarize threshold) and a physical
+# scale are checked against fundamentally different references, and neither may satisfy the other's
+# requirement (that cross-satisfaction was a real, closed hole: see resolution.py's own history).
+VALIDATION_KINDS = ("annotations", "physical")
+_ACCEPTED_REFERENCES: dict[str, tuple[str, ...]] = {
+    "annotations": (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED),
+    "physical": (VALIDATED_PHYSICAL_MEASUREMENT,),
+}
+
+
+def accepted_references(validation_kind: str) -> tuple[str, ...]:
+    """The validated_against values that legitimately clear validation for this kind."""
+    return _ACCEPTED_REFERENCES[validation_kind]
+
+
+# The union of every real (non-"false") shippable reference, across every kind — used only by
+# dimension-agnostic logic (check_delivery_gate, _validity_rank) whose callers have already
+# resolved the right kind per-dimension upstream via accepted_references()/is_shippable. Never used
+# to decide whether a SPECIFIC param's reference is the right kind for it — that decision belongs to
+# accepted_references(validation_kind), always.
+VALIDATED_SHIPPABLE = (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT)
 
 # Shared inference operating-point defaults, referenced by both run_inference and the web route so the
 # same model+images can't give a different count by entry point.
@@ -57,58 +72,86 @@ DEFAULT_MAX_DETS = 1000
 
 
 class UnvalidatedOperatingPointError(RuntimeError):
-    """Raised when an unvalidated calibration param is consumed as if it were trustworthy.
+    """Raised when a param that requires validation is consumed as if it were trustworthy.
 
-    This is the firewall: it means a measurement operating point (e.g. a confidence threshold that
-    defines the object count, which *is* the phenotype) is about to flow into a result without having
-    been validated against held-out ground truth for this dataset. Do not silence it by reaching for
-    ``_raw``; either validate the operating point, or consume it via ``unvalidated_value(...)`` and
-    stamp the result ``validated=false`` so the un-trustworthiness travels downstream.
+    This is the firewall: it means a value that defines the measurement (a confidence threshold that
+    decides the object count, or a physical scale that decides every dimensional number) is about to
+    flow into a result without having been checked against the right kind of real-world reference. Do
+    not silence it by reaching for ``_raw``; either validate the value, or consume it via
+    ``unvalidated_value(...)`` and stamp the result ``validated=false`` so the un-trustworthiness
+    travels downstream.
     """
 
 
 @dataclass(frozen=True)
 class ResolvedParam:
-    """One parameter, resolved from the data in hand, with provenance and a validation status."""
+    """One parameter, resolved from the data in hand, with provenance and a validation status.
+
+    Most parameters never need validation — a fact read from the data (``in_chans``), a statistic
+    computed from this dataset's own spread (``cross_tile_nms``), or a plain configuration default
+    (``tiled``) are all trustworthy by construction (``requires_validation=False``, the default).
+    ``derived_from`` (free text) is where *how it was produced* is described — there is no separate
+    category label to learn on top of that.
+
+    A parameter that DOES need validation (a confidence threshold, a physical scale) sets
+    ``requires_validation=True`` and a real ``validation_kind`` (what KIND of reference can validate
+    it — see ``VALIDATION_KINDS``); it is shippable only once ``validated_against`` names a reference
+    ``accepted_references(validation_kind)`` recognizes for that kind.
+    """
 
     name: str
     _raw: Any
     source: str  # one of SOURCES
-    derivation_class: str  # one of DERIVATION_CLASSES
     derived_from: str = ""  # human-readable: what artifact/analysis produced it
-    validated_vs_gt: str | None = None  # None | VALIDATED_HELD_OUT | VALIDATED_FALSE
+    requires_validation: bool = False
+    validation_kind: str | None = None  # one of VALIDATION_KINDS — required iff requires_validation
+    validated_against: str | None = None  # None | VALIDATED_HELD_OUT | VALIDATED_REVIEW_CONFIRMED |
+                                           # VALIDATED_PHYSICAL_MEASUREMENT | VALIDATED_FALSE
     dataset_scoped: bool = False  # True => only valid for the dataset named by dataset_hash
     dataset_hash: str | None = None
-    sweep: dict | None = None  # sensitivity data (e.g. count-vs-conf curve) for a calibration param
+    capture_scoped: bool = False  # True => only valid for the single capture named by capture_id
+    capture_id: str | None = None
+    sweep: dict | None = None  # sensitivity data (e.g. count-vs-conf curve) for a validated param
 
     def __post_init__(self) -> None:
         if self.source not in SOURCES:
             raise ValueError(f"source must be one of {SOURCES}, got {self.source!r}")
-        if self.derivation_class not in DERIVATION_CLASSES:
-            raise ValueError(f"derivation_class must be one of {DERIVATION_CLASSES}, got {self.derivation_class!r}")
-        if self.validated_vs_gt not in (None, VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_FALSE):
-            raise ValueError(f"validated_vs_gt invalid: {self.validated_vs_gt!r}")
+        if self.requires_validation and self.validation_kind not in VALIDATION_KINDS:
+            raise ValueError(
+                f"{self.name!r}: requires_validation=True needs a real validation_kind in "
+                f"{VALIDATION_KINDS}, got {self.validation_kind!r} — a param that needs validation "
+                f"must say what kind of reference can validate it, never left to a silent default."
+            )
+        if not self.requires_validation and self.validation_kind is not None:
+            raise ValueError(
+                f"{self.name!r}: validation_kind={self.validation_kind!r} set but "
+                f"requires_validation=False — a kind with nothing to validate is a contradiction."
+            )
+        if self.validated_against is not None and self.validated_against not in (
+                VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT, VALIDATED_FALSE):
+            raise ValueError(f"validated_against invalid: {self.validated_against!r}")
 
     @property
     def is_shippable(self) -> bool:
         """Can this value flow into a delivered result as a trustworthy number?
 
-        Non-calibration params (facts, structural choices, engineering knobs) are always shippable.
-        A calibration param is shippable only when a reference sized to the trait (held-out GT or a
-        breeder-confirmed output sample) cleared the disjoint-split + count-bias gate for its dataset.
+        A param that doesn't require validation is always shippable. One that does is shippable only
+        once ``validated_against`` is a reference ``accepted_references(validation_kind)`` recognizes
+        for its own kind — a physical scale can never be satisfied by an annotation-based reference,
+        or vice versa.
         """
-        if self.derivation_class != "calibration":
+        if not self.requires_validation:
             return True
-        return self.validated_vs_gt in VALIDATED_SHIPPABLE
+        return self.validated_against in accepted_references(self.validation_kind)
 
     @property
     def value(self) -> Any:
-        """The trustworthy value — raises the firewall for an unvalidated calibration param."""
+        """The trustworthy value — raises the firewall for an unvalidated param that requires it."""
         if not self.is_shippable:
             raise UnvalidatedOperatingPointError(
-                f"{self.name!r} is a calibration operating point with validated_vs_gt="
-                f"{self.validated_vs_gt!r} and cannot be consumed as a trustworthy value. "
-                f"Calibrate it against a held-out split for this dataset, or consume it via "
+                f"{self.name!r} requires validation ({self.validation_kind}) and has "
+                f"validated_against={self.validated_against!r} — cannot be consumed as a trustworthy "
+                f"value. Validate it against a real reference for its kind, or consume it via "
                 f"unvalidated_value(acknowledge_unvalidated=True) and stamp the result validated=false."
             )
         return self._raw
@@ -131,34 +174,37 @@ class ResolvedParam:
             "name": self.name,
             "value": self._raw,
             "source": self.source,
-            "derivation_class": self.derivation_class,
             "derived_from": self.derived_from,
-            "validated_vs_gt": self.validated_vs_gt,
+            "requires_validation": self.requires_validation,
+            "validation_kind": self.validation_kind,
+            "validated_against": self.validated_against,
             "dataset_scoped": self.dataset_scoped,
             "dataset_hash": self.dataset_hash,
+            "capture_scoped": self.capture_scoped,
+            "capture_id": self.capture_id,
             # the full sweep can be large; keep a marker, callers attach it separately if wanted
             "has_sweep": self.sweep is not None,
         }
 
 
-def derived(name: str, value: Any, *, derivation_class: str, derived_from: str,
-            validated_vs_gt: str | None = None, dataset_scoped: bool = False,
-            dataset_hash: str | None = None, sweep: dict | None = None) -> ResolvedParam:
+def derived(name: str, value: Any, *, derived_from: str,
+            requires_validation: bool = False, validation_kind: str | None = None,
+            validated_against: str | None = None, dataset_scoped: bool = False,
+            dataset_hash: str | None = None, capture_scoped: bool = False,
+            capture_id: str | None = None, sweep: dict | None = None) -> ResolvedParam:
     """Convenience constructor for a data/model-derived param (``source="derived"``)."""
     return ResolvedParam(
-        name=name, _raw=value, source="derived", derivation_class=derivation_class,
-        derived_from=derived_from, validated_vs_gt=validated_vs_gt,
-        dataset_scoped=dataset_scoped, dataset_hash=dataset_hash, sweep=sweep,
+        name=name, _raw=value, source="derived", derived_from=derived_from,
+        requires_validation=requires_validation, validation_kind=validation_kind,
+        validated_against=validated_against, dataset_scoped=dataset_scoped, dataset_hash=dataset_hash,
+        capture_scoped=capture_scoped, capture_id=capture_id, sweep=sweep,
     )
 
 
-def default(name: str, value: Any, *, derivation_class: str = "engineering",
-            derived_from: str = "documented default") -> ResolvedParam:
-    """Convenience constructor for a documented default (``source="default"``)."""
-    return ResolvedParam(
-        name=name, _raw=value, source="default", derivation_class=derivation_class,
-        derived_from=derived_from,
-    )
+def default(name: str, value: Any, *, derived_from: str = "documented default") -> ResolvedParam:
+    """Convenience constructor for a documented default (``source="default"``) — never requires
+    validation; a param that does is always constructed explicitly with ``requires_validation=True``."""
+    return ResolvedParam(name=name, _raw=value, source="default", derived_from=derived_from)
 
 
 @dataclass
@@ -184,19 +230,36 @@ class ResolvedBundle:
 
     @property
     def is_shippable(self) -> bool:
-        """True only if every calibration param is validated_held_out for this dataset."""
+        """True only if every param requiring validation cleared a reference of its own kind."""
         return all(p.is_shippable for p in self.params.values())
 
-    def shippable_issues(self, *, target_dataset_hash: str | None = None) -> list[str]:
+    def shippable_issues(self, *, target_dataset_hash: str | None = None,
+                         target_capture_id: str | None = None) -> list[str]:
         """Reasons this bundle cannot ship a trustworthy phenotype (empty = shippable)."""
         issues: list[str] = []
         for p in self.params.values():
             if not p.is_shippable:
-                issues.append(f"{p.name}: calibration operating point not validated (validated_vs_gt={p.validated_vs_gt})")
+                issues.append(
+                    f"{p.name}: requires validation ({p.validation_kind}), not validated "
+                    f"(validated_against={p.validated_against})"
+                )
             if p.dataset_scoped and target_dataset_hash is not None and p.dataset_hash != target_dataset_hash:
                 issues.append(
                     f"{p.name}: dataset-scoped value derived on {p.dataset_hash} inherited across a "
                     f"different dataset {target_dataset_hash} — re-resolve per dataset, never inherit"
+                )
+            if p.capture_scoped and p.capture_id is None:
+                # No deriver for capture_id exists yet — an honest "not comparable" marker rather
+                # than silently passing a check that cannot actually run.
+                issues.append(
+                    f"{p.name}: capture-scoped but no capture_id was ever derived for it — "
+                    "cross-capture reuse cannot be checked (not comparable, not confirmed safe)"
+                )
+            elif p.capture_scoped and target_capture_id is not None and p.capture_id != target_capture_id:
+                issues.append(
+                    f"{p.name}: capture-scoped value derived for capture {p.capture_id} inherited "
+                    f"across a different capture {target_capture_id} — re-resolve per capture, "
+                    "never inherit"
                 )
         return issues
 
@@ -215,10 +278,10 @@ def raw_operating_point(
 ) -> ResolvedBundle:
     """The operating point for RAW (uncalibrated) inference — the one both doors resolve through.
 
-    ``conf`` is a documented default with no per-dataset GT behind it, so it is a calibration param
-    stamped ``validated_vs_gt=false``: reading it requires ``unvalidated_value(...)`` and the caller
-    must stamp its output ``validated=false``. This is what stops the MCP tool and the web job giving
-    a different count (the phenotype) for the same model + images by entry point.
+    ``conf`` is a documented default with no per-dataset GT behind it, so it requires validation and
+    is stamped ``validated_against=false``: reading it requires ``unvalidated_value(...)`` and the
+    caller must stamp its output ``validated=false``. This is what stops the MCP tool and the web job
+    giving a different count (the phenotype) for the same model + images by entry point.
 
     ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
     geometry, ``explicit`` (caller override), or a ``default`` fallback (CV2) — so a 224-train /
@@ -229,26 +292,23 @@ def raw_operating_point(
     before reaching here, so ``tiled`` itself is always a concrete bool.
     """
     if tiled and tile_size_source == "derived":
-        tile_param = derived("tile_size", tile_size, derivation_class="deterministic",
-                             derived_from="persisted training tile geometry")
+        tile_param = derived("tile_size", tile_size, derived_from="persisted training tile geometry")
     elif tiled and tile_size_source == "explicit":
         tile_param = ResolvedParam("tile_size", tile_size, source="explicit",
-                                   derivation_class="deterministic", derived_from="caller override")
+                                   derived_from="caller override")
     else:
         tile_param = default("tile_size", tile_size if tiled else None)
     if tiled_source == "explicit":
-        tiled_param = ResolvedParam("tiled", tiled, source="explicit",
-                                    derivation_class="deterministic", derived_from="caller override")
+        tiled_param = ResolvedParam("tiled", tiled, source="explicit", derived_from="caller override")
     else:
         tiled_param = default("tiled", tiled)
     return ResolvedBundle(trait="", dataset_hash=None, params={
-        "conf": ResolvedParam("conf", conf, source="default", derivation_class="calibration",
-                              validated_vs_gt=VALIDATED_FALSE),
-        "cross_tile_nms": default("cross_tile_nms", cross_tile_nms if tiled else None,
-                                  derivation_class="distribution"),
+        "conf": ResolvedParam("conf", conf, source="default", requires_validation=True,
+                              validation_kind="annotations", validated_against=VALIDATED_FALSE),
+        "cross_tile_nms": default("cross_tile_nms", cross_tile_nms if tiled else None),
         "tiled": tiled_param,
         "tile_size": tile_param,
-        "max_dets": default("max_dets", max_dets, derivation_class="distribution"),
+        "max_dets": default("max_dets", max_dets),
     })
 
 
@@ -464,7 +524,7 @@ def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None
     A file distinct from ``operating_point.json`` (K3) — the classifier-validity dimension is
     structurally independent from the count operating point's, so the two are never written to the
     same fields a generic writer could conflate (``_sidecar_reference`` reads exactly
-    ``validated``/``operating_point.conf.validated_vs_gt``, which must stay the count dimension's
+    ``validated``/``operating_point.conf.validated_against``, which must stay the count dimension's
     alone).
     """
     p = Path(pred_dir) / "classifier_operating_point.json"
@@ -476,22 +536,32 @@ def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None
         return None
 
 
-def _sidecar_reference(sidecar: dict | None, *, param_key: str = "conf") -> str:
-    """Which reference the sidecar's named param cleared — held_out / review_confirmed / false.
+def _sidecar_reference(
+    sidecar: dict | None, *, param_key: str = "conf", validation_kind: str = "annotations",
+) -> str:
+    """Which reference the sidecar's named param cleared, for its ``validation_kind`` — or
+    ``VALIDATED_FALSE``.
 
-    Falls back to the top-level ``validated`` bool (a shippable stamp) when the per-param reference is
-    missing, but never upgrades an unvalidated stamp. ``param_key`` lets a differently-shaped sidecar
-    (e.g. a classifier stamp's ``classifier`` param) reuse this same read.
+    Never upgrades a missing/unrecognized/wrong-kind value to a shippable reference — a param whose
+    own recorded reference is absent, or belongs to a different validation kind than this one, floors
+    to ``false`` rather than being read as validated. (Upgrading on a bare top-level ``validated``
+    bool was a real laundering path: a physical-measurement reference could read back as an
+    annotation-based one purely because the sidecar's overall flag was true.) ``param_key`` lets a
+    differently-shaped sidecar (e.g. a classifier stamp's ``classifier`` param) reuse this same read.
     """
     if not sidecar or not sidecar.get("validated"):
         return VALIDATED_FALSE
     param = (sidecar.get("operating_point") or {}).get(param_key) or {}
-    ref = param.get("validated_vs_gt")
-    return ref if ref in VALIDATED_SHIPPABLE else VALIDATED_HELD_OUT
+    ref = param.get("validated_against")
+    accepted = accepted_references(validation_kind)
+    return ref if ref in accepted else VALIDATED_FALSE
 
 
 def _validity_rank(state: str | None) -> int:
-    """Floor ordering: unvalidated (0) < any shippable reference (1). ``None`` = no assertion (skip)."""
+    """Floor ordering: unvalidated (0) < any shippable reference, any kind (1). ``None`` = no
+    assertion (skip). Comparing rank between two states already scoped to the SAME dimension/param —
+    never used to decide whether a state is the right KIND for a given param (that is
+    ``accepted_references``'s job)."""
     if state is None:
         return 99
     return 1 if state in VALIDATED_SHIPPABLE else 0
@@ -500,13 +570,14 @@ def _validity_rank(state: str | None) -> int:
 def _reconcile_validity(
     pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None,
     read_sidecar: Callable[[str | Path], dict | None], param_key: str,
+    validation_kind: str = "annotations",
 ) -> dict:
     """Floor a validity dimension against every bucket's on-disk sidecar (T5-3 fix), generalized.
 
     Shared by :func:`reconcile_operating_point_validity` and :func:`reconcile_classifier_validity` —
     the flooring logic (read on-disk, never trust a caller string, an asserted value may only lower
-    the result) is identical for both dimensions; only which sidecar file and which param key is read
-    differs, threaded in by the two thin public wrappers below.
+    the result) is identical for both dimensions; only which sidecar file, which param key, and which
+    validation kind is read differs, threaded in by the two thin public wrappers below.
 
     Returns ``{validated, on_disk_validated, missing_sidecars, unvalidated_buckets, conf, per_bucket}``.
     """
@@ -516,6 +587,7 @@ def _reconcile_validity(
     refs: set[str] = set()
     confs: list[float] = []
     all_validated = bool(pred_dirs)
+    accepted = accepted_references(validation_kind)
     for d in pred_dirs:
         sc = read_sidecar(d)
         if sc is None:
@@ -523,9 +595,9 @@ def _reconcile_validity(
             per_bucket[str(d)] = VALIDATED_FALSE
             all_validated = False
             continue
-        ref = _sidecar_reference(sc, param_key=param_key)
+        ref = _sidecar_reference(sc, param_key=param_key, validation_kind=validation_kind)
         per_bucket[str(d)] = ref
-        if ref in VALIDATED_SHIPPABLE:
+        if ref in accepted:
             refs.add(ref)
             conf_val = ((sc.get("operating_point") or {}).get(param_key) or {}).get("value")
             if isinstance(conf_val, (int, float)):
@@ -535,7 +607,7 @@ def _reconcile_validity(
             all_validated = False
 
     if all_validated and refs:
-        on_disk = VALIDATED_HELD_OUT if VALIDATED_HELD_OUT in refs else VALIDATED_REVIEW_CONFIRMED
+        on_disk = VALIDATED_HELD_OUT if VALIDATED_HELD_OUT in refs else next(iter(refs))
     else:
         on_disk = VALIDATED_FALSE
 
@@ -563,7 +635,7 @@ def reconcile_operating_point_validity(
     """
     return _reconcile_validity(
         pred_dirs, asserted=asserted,
-        read_sidecar=read_operating_point_sidecar, param_key="conf",
+        read_sidecar=read_operating_point_sidecar, param_key="conf", validation_kind="annotations",
     )
 
 
@@ -581,6 +653,7 @@ def reconcile_classifier_validity(
     return _reconcile_validity(
         pred_dirs, asserted=asserted,
         read_sidecar=read_classifier_operating_point_sidecar, param_key="classifier",
+        validation_kind="annotations",
     )
 
 
@@ -650,8 +723,8 @@ def check_delivery_gate(
 
     ``flags`` maps each measurement dimension the deliverable depends on (e.g. ``"operating_point"``,
     ``"classifier"``, or a single ``"measurement"`` for a continuous/ordinal trait with no conf
-    op-point) to its RECONCILED validity state — a shippable reference (``validated_held_out`` /
-    ``review_confirmed``) or anything else (treated as unvalidated). Read the on-disk state before
+    op-point) to its RECONCILED validity state — a shippable reference (any member of
+    ``VALIDATED_SHIPPABLE``) or anything else (treated as unvalidated). Read the on-disk state before
     calling; the gate does not trust a caller-asserted string on its own.
 
     Every dimension validated -> the gate passes. Any not -> it refuses UNLESS
@@ -711,12 +784,14 @@ def validate_resolved_bundle(
     if for_export and not bundle.is_shippable:
         issues.append("export/delivery requires a validated (held-out) operating point; this bundle is not shippable")
 
-    # eval op-point must match inference op-point on the same dataset
+    # eval op-point must match inference op-point on the same dataset — every param the two bundles
+    # have in common, not a hardcoded list (a new param added to one bundle's construction site is
+    # covered automatically rather than silently exempt from this check).
     if inference_bundle is not None:
-        for key in ("conf", "cross_tile_nms", "tiled", "tile_size", "max_dets"):
-            a = bundle.params.get(key)
-            b = inference_bundle.params.get(key)
-            if a is not None and b is not None and a._raw != b._raw:
+        for key in sorted(set(bundle.params) & set(inference_bundle.params)):
+            a = bundle.params[key]
+            b = inference_bundle.params[key]
+            if a._raw != b._raw:
                 issues.append(
                     f"{key}: eval operating point {a._raw} != inference operating point {b._raw} "
                     f"on the same dataset (the select-point must equal the ship-point)"
