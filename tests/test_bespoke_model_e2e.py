@@ -139,8 +139,10 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert env["model_kind"] == KIND_TCIP_MODULE and env["env"]["torch"]
     manifest = json.loads((exp_dir / "model_src" / "manifest.json").read_text())
     assert manifest["training_source"] == "tests.bespoke_models:train_bespoke"
-    assert any(e["file"] == Path(src_file).name and len(e["sha256"]) == 64
+    assert any(e["src"] == src_file and len(e["sha256"]) == 64
                for e in manifest["files"])                  # source snapshotted with sha256
+    assert (exp_dir / "model_src" / next(
+        e["file"] for e in manifest["files"] if e["src"] == src_file)).is_file()
 
     # ---- (b) the custom loop's metrics + the audit bracket were recorded via ctx/envelope ----
     metric_rows = [json.loads(x) for x in (out / "metrics.jsonl").read_text().splitlines()]
