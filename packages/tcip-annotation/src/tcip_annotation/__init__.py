@@ -4,6 +4,7 @@ from tcip_annotation.state import (
     Annotation,
     AnnotationState,
     BBox,
+    Point,
     Polygon,
     bbox_of,
 )
@@ -21,6 +22,8 @@ from tcip_annotation.format_io import (
     write_coco,
 )
 from tcip_annotation.matching import compute_matches, box_iou, polygon_iou, point_in_polygon
+# The one mask -> Polygon.rings extractor, shared with tcip-mcp's prediction-export path.
+from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_annotation.annotation_engine import AnnotationEngine
 from tcip_annotation.review_engine import ReviewEngine, ReviewDetection, ReviewContext
 
@@ -34,6 +37,7 @@ __all__ = [
     "Annotation",
     "AnnotationState",
     "BBox",
+    "Point",
     "Polygon",
     "bbox_of",
     # Canonical per-image JSON — the platform's native on-disk label format (primary read/write path)
@@ -52,6 +56,8 @@ __all__ = [
     "box_iou",
     "polygon_iou",
     "point_in_polygon",
+    # Mask -> polygon rings (shared by SAM-assisted labeling and prediction export)
+    "mask_to_polygon_rings",
     # SAM wrapper
     "auto_mask",
     "grid_to_pixel",
