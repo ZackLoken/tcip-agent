@@ -79,7 +79,7 @@ class GuiState(BaseModel):
     active_tab: str = "annotate"  # annotate|review|training|tuning|inference|results|meta
     dataset: DatasetSelection = Field(default_factory=DatasetSelection)
     view: ViewState = Field(default_factory=ViewState)
-    mode: str = "box"  # box|polygon
+    mode: str = "box"  # box|polygon|point
     active_subject: str = ""
     review: ReviewFilters = Field(default_factory=ReviewFilters)
     pred_reference: Optional[PredictionReference] = None
