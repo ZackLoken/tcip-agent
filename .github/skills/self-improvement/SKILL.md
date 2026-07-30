@@ -29,7 +29,10 @@ The loop is three live, audited tools — no separate journal file:
 Call `claude_reports` when you notice any of these. One line is enough in the moment; the free-text
 `detail` matters far more than the category.
 
-- **Pushback / correction** — "no, do it this way", "don't do X", "actually it's Y".
+- **Pushback / correction** — "no, do it this way", "don't do X", "actually it's Y". Call
+  `claude_reports` with `user_disagreement=True` for these — it's a separate signal from
+  `category`, so a later distill pass can pull every place the owner and you disagreed out of the
+  pile on its own, rather than mixed into general friction.
 - **Repetition** — you're told the same thing a second time.
 - **Wrong assumption** — something you assumed about the data, domain, or tools turned out false
   (e.g. "GPS is too coarse for per-plant" when the plant grid is RTK-accurate).
