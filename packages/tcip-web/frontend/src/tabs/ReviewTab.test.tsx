@@ -21,14 +21,17 @@ vi.mock("react-konva", () => ({
       data-dashed={props.dash ? "true" : "false"}
     />
   ),
-  Line: (props: { stroke?: string; dash?: number[] }) => (
+  Line: (props: { stroke?: string; dash?: number[]; points?: number[] }) => (
     <div
       data-testid="k-line"
       data-stroke={props.stroke}
       data-dashed={props.dash ? "true" : "false"}
+      data-points={props.points?.join(",")}
     />
   ),
-  Circle: () => <div data-testid="k-circle" />,
+  Circle: (props: { x?: number; y?: number; fill?: string }) => (
+    <div data-testid="k-circle" data-x={props.x} data-y={props.y} data-fill={props.fill} />
+  ),
   Text: (props: { text?: string }) => <div data-testid="k-text" data-text={props.text} />,
 }));
 vi.mock("@/components/Canvas/CanvasStage", () => ({
@@ -605,10 +608,12 @@ describe("ReviewTab symbology", () => {
             { subject: "catkin", bbox: [0, 0, 10, 10], attributes: {} },
             {
               subject: "leaf",
-              points: [
-                [40, 40],
-                [60, 40],
-                [60, 60],
+              rings: [
+                [
+                  [40, 40],
+                  [60, 40],
+                  [60, 60],
+                ],
               ],
               attributes: {},
             },
@@ -622,5 +627,144 @@ describe("ReviewTab symbology", () => {
     // The box GT draws as a k-rect and the polygon GT as a k-line — both present.
     expect(screen.getAllByTestId("k-rect").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByTestId("k-line").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("draws a point-carrying ground truth as the point mark, with no box around it", async () => {
+    // A review file can hold a point annotation ({point: [x, y]} on the wire). compute_matches
+    // ignores points today (no area, so no IoU), so no detection references one yet — this pins the
+    // render contract for when one does: the mark it was placed as, never a box around it (a
+    // fabricated extent) and never nothing (a real annotation silently absent from review).
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fn", pred_idx: null, gt_idx: 0, bbox: [200, 300, 200, 300] })], {
+        gt: [{ subject: "tip", point: [200, 300], attributes: {} }],
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    const core = screen.getByTestId("k-circle");
+    expect(core).toHaveAttribute("data-x", "200");
+    expect(core).toHaveAttribute("data-y", "300");
+    expect(screen.getAllByTestId("k-line")).toHaveLength(4); // the four reticle ticks
+    expect(screen.queryAllByTestId("k-rect")).toHaveLength(0);
+  });
+
+  it("draws every ring of an occlusion-split prediction under review", async () => {
+    // Accepting a two-part prediction accepts both parts, so both have to be on screen — a render
+    // of ring 0 alone asks for a verdict on something the reviewer never saw.
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [0, 0, 60, 60] })], {
+        preds: [
+          {
+            subject: "catkin",
+            rings: [
+              [
+                [0, 0],
+                [10, 0],
+                [10, 10],
+              ],
+              [
+                [40, 40],
+                [60, 40],
+                [60, 60],
+              ],
+            ],
+            attributes: {},
+            score: 0.9,
+          },
+        ],
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    const lines = screen.getAllByTestId("k-line");
+    expect(lines).toHaveLength(2);
+    expect(lines.map((l) => l.getAttribute("data-points"))).toEqual([
+      "0,0,10,0,10,10",
+      "40,40,60,40,60,60",
+    ]);
+    // Both parts share the under-review symbology — one shape, one verdict.
+    expect(lines.every((l) => l.getAttribute("data-dashed") === "true")).toBe(true);
+  });
+});
+
+describe("ReviewTab in-place edit scope", () => {
+  const multiRingPred: Annotation = {
+    subject: "catkin",
+    rings: [
+      [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+      ],
+      [
+        [40, 40],
+        [60, 40],
+        [60, 60],
+      ],
+    ],
+    attributes: {},
+    score: 0.9,
+  };
+
+  it("refuses to hand-edit a multi-part shape instead of silently saving one part as the whole", async () => {
+    // /review/action carries one edited contour (edited_points), so seeding part 1 and saving would
+    // write half the object to ground truth — a precise, confident, wrong measurement.
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [0, 0, 60, 60] })], {
+        preds: [multiRingPred],
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle("Adjust this shape on the canvas (E)"));
+    expect(screen.queryByText("Editing")).not.toBeInTheDocument();
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/2 separate parts/);
+  });
+
+  it("refuses to hand-edit a point instead of inventing a box around a location", async () => {
+    // The canvas editor authors an outline and /review/action carries a box or one contour. Seeding
+    // either from a point would write a fabricated extent into ground truth.
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [20, 20, 20, 20] })], {
+        preds: [{ subject: "tip", point: [20, 20], attributes: {}, score: 0.9 }],
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle("Adjust this shape on the canvas (E)"));
+    expect(screen.queryByText("Editing")).not.toBeInTheDocument();
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/marks a location, not an outline/);
+  });
+
+  it("still opens the editor for a box detection (the point refusal is scoped, not blanket)", async () => {
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [0, 0, 10, 10] })], {
+        preds: [{ subject: "catkin", bbox: [0, 0, 10, 10], attributes: {}, score: 0.9 }],
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle("Adjust this shape on the canvas (E)"));
+    expect(screen.getByText("Editing")).toBeInTheDocument();
+    expect(useStore.getState().toasts).toHaveLength(0);
+  });
+
+  it("still opens the editor for a single-contour shape (the refusal is scoped, not blanket)", async () => {
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [0, 0, 10, 10] })], {
+        preds: [{ ...multiRingPred, rings: [multiRingPred.rings![0]] }],
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle("Adjust this shape on the canvas (E)"));
+    expect(screen.getByText("Editing")).toBeInTheDocument();
+    expect(useStore.getState().toasts).toHaveLength(0);
   });
 });
