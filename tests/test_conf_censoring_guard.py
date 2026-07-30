@@ -82,7 +82,7 @@ def test_reference_floored_at_the_real_calibration_floor_still_validates():
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.9)
-    assert conf.validated_vs_gt == "validated_held_out"
+    assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
     sweep = conf.sweep
     assert sweep["conf_censored"] is False
@@ -97,7 +97,7 @@ def test_no_staged_conf_floor_asserted_fails_closed():
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold)
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "false"
+    assert conf.validated_against == "false"
     assert b.is_shippable is False
     assert conf.sweep["conf_censored"] is True
     assert "conf_censored" in conf.sweep["failures"]
@@ -110,7 +110,7 @@ def test_reference_truncated_above_the_picked_conf_is_refused():
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.95)
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "false"
+    assert conf.validated_against == "false"
     assert b.is_shippable is False
     sweep = conf.sweep
     assert sweep["conf_censored"] is True
@@ -130,7 +130,7 @@ def test_asserted_vs_observed_floor_mismatch_is_surfaced_but_never_gates():
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "validated_held_out"
+    assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
     sweep = conf.sweep
     assert sweep["conf_censored"] is False          # isolates: pick (0.9) is genuinely above the floor
