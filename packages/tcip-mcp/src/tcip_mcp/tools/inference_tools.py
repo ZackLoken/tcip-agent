@@ -7,7 +7,11 @@ from pathlib import Path
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.postprocessing.export import export_detection_csv, write_predictions_json
+from tcip_mcp.pipelines.postprocessing.export import (
+    export_detection_csv,
+    mask_binarize_provenance,
+    write_predictions_json,
+)
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
     DEFAULT_MAX_DETS,
@@ -132,10 +136,10 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                       for (x1, y1, x2, y2), lab in zip(gboxes, glabels)]
             else:
                 from tcip_annotation import json_io
-                from tcip_annotation.state import bbox_of
+                from tcip_annotation.state import Point, bbox_of
                 gt = []
                 for a in json_io.read_annotations(gt_path):
-                    if a.geometry is None:
+                    if a.geometry is None or isinstance(a.geometry, Point):
                         continue
                     bx = bbox_of(a.geometry)
                     gt.append({"category_id": 1,
@@ -350,7 +354,10 @@ def run_inference(
         tile: Enable tiled (SAHI-style) detection inference. ``None`` (default) is a documented
             default (K10 finding 3), not silently ``False``/``True`` — its provenance is stamped
             ``"default"`` vs ``"explicit"`` so a caller who deliberately chose one way is
-            distinguishable from one who left it unset.
+            distinguishable from one who left it unset. For an ``instance_seg`` checkpoint tiling
+            is not available at all (the cross-tile merge cannot yet carry masks, and masks are
+            that task's measurement): an unset ``tile`` runs UNTILED so the masks survive, and an
+            explicit ``tile=True`` is refused rather than dropping them.
         tile_size: Sliding-window tile edge (px). ``None`` (default) derives it from the
             checkpoint's training tile geometry so inference matches the trained scale; a value
             overrides. Foreign/legacy checkpoints with no geometry fall back to 640 with a warning.
@@ -417,7 +424,10 @@ def run_inference(
             },
             "note": ("These operating-point values govern the object count (the phenotype for count "
                      "traits). For a trait with a labeled subset, resolve them per dataset "
-                     "(resolve_operating_point) so the count is calibrated, not a default."),
+                     "(resolve_operating_point) so the count is calibrated, not a default. The "
+                     "checkpoint is not loaded here, so its task is unknown: for an instance_seg "
+                     "checkpoint an unset tile resolves to False (tiling cannot carry masks) and an "
+                     "explicit tile=True is refused."),
         }
 
     # Lazy import to avoid torch import at module level
@@ -435,6 +445,28 @@ def run_inference(
         nms_iou=global_nms_iou,
         max_dets=max_dets,
     )
+
+    # K20: the cross-tile merge is boxes-only, and masks ARE instance_seg's measurement, so this
+    # door never sends an instance_seg checkpoint down the tiled path. Unset ``tile`` resolves to
+    # UNTILED (masks intact) instead of blindly applying DEFAULT_TILED; an explicit tile=True is a
+    # clean refusal naming this tool's own parameter, not predict_tiled's NotImplementedError
+    # surfacing as a raw traceback through the MCP call.
+    instance_seg_warning = None
+    if getattr(predictor, "task", None) == "instance_seg" and resolved_tile_bool:
+        if tiled_source == "explicit":
+            return {"error": (
+                "instance_seg checkpoint: tiled inference cannot carry masks through the cross-tile "
+                "reconstruction/merge yet, and masks are this task's measurement — so tile=True is "
+                "refused rather than silently dropping them. Re-run with tile=False for untiled "
+                "inference (masks carried); run_inference, export_predictions and tabulate_counts "
+                "all take the same tile parameter.")}
+        resolved_tile_bool = False
+        instance_seg_warning = (
+            "instance_seg checkpoint with tile unset: running UNTILED so the masks survive (tiled "
+            "inference cannot carry masks through the cross-tile merge yet). Small dense objects "
+            "may be under-detected at full resolution; pass tile=False to state this explicitly."
+        )
+        logger.warning(instance_seg_warning)
 
     # Producing-model identity resolved BEFORE calibration (K1), not after: the calibration's
     # train-disjointness gate needs the checkpoint's own experiment_id to check the cal/holdout
@@ -535,8 +567,7 @@ def run_inference(
             if probed is not None:
                 chan_bundle = ResolvedBundle(trait=trait or "", dataset_hash=None, params={
                     "in_chans": _resolved_default(
-                        "in_chans", int(getattr(predictor, "in_chans", 3)),
-                        derivation_class="deterministic")})
+                        "in_chans", int(getattr(predictor, "in_chans", 3)))})
                 issues = issues + validate_resolved_bundle(chan_bundle, probed_channels=probed)
         # validated only when held-out passed AND nothing is un-shippable under the target actually used.
         extra = {
@@ -562,7 +593,7 @@ def run_inference(
             logger.warning("could not persist operating-point sweep", exc_info=True)
     else:
         # Raw inference has no per-dataset calibration: the model already carries score_threshold as
-        # its in-model conf; the bundle stamps it validated_vs_gt=false so the un-trustworthiness of
+        # its in-model conf; the bundle stamps it validated_against=false so the un-trustworthiness of
         # this uncalibrated operating point (the count is the phenotype) travels with the result.
         op_bundle = raw_operating_point(
             conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=resolved_tile_bool,
@@ -632,7 +663,7 @@ def run_inference(
         "results": results,
         **extra,
     }
-    warning = "; ".join(w for w in (geometry_warning, cpu_warning) if w)
+    warning = "; ".join(w for w in (instance_seg_warning, geometry_warning, cpu_warning) if w)
     if warning:
         out["warning"] = warning
     return out
@@ -680,7 +711,10 @@ def export_predictions(
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
             ``run_inference`` unresolved — see its own ``tile`` doc: a documented default distinct
-            from an explicit choice, not silently ``False``.
+            from an explicit choice, not silently ``False``. An ``instance_seg`` checkpoint cannot
+            tile (the cross-tile merge cannot yet carry masks, and this export is the door masks
+            ship through): unset runs untiled with masks, ``tile=True`` is refused with an error
+            naming ``tile=False``.
         tile_size: Sliding-window tile edge (px).
         overlap: Fractional tile overlap.
         tile_batch_size: Tiles per forward batch.
@@ -729,24 +763,31 @@ def export_predictions(
     sha = result.get("checkpoint_sha256")
     producer = f"model:{Path(checkpoint_path).stem}" + (f"@{sha[:12]}" if sha else "")
     id_map = result.get("id_map")
+    has_masks = False
     for r in result["results"]:
         out_json = out / f"{Path(r['image']).stem}.json"
         write_predictions_json(out_json, r, created_by=producer, id_map=id_map)
         written.append(str(out_json))
+        has_masks = has_masks or bool(r.get("masks"))
 
     # Stamp the operating point + producing-model identity beside the delivered labels. ``validated``
     # is derived from the run's resolved bundle (true only when a held-out calibration passed) —
     # never hardcoded, or a passing calibration would be recorded as unvalidated (and vice versa).
-    atomic_write_json(out / "operating_point.json",
-                      {"operating_point": result.get("operating_point"),
-                       "id_map": id_map,
-                       "validated": bool(result.get("validated", False)),
-                       "shippable_issues": result.get("shippable_issues", []),
-                       "checkpoint": Path(checkpoint_path).stem,
-                       "checkpoint_sha256": sha,
-                       "experiment_id": result.get("experiment_id"),
-                       "images_dir": images_dir,
-                       "produced_at": result.get("produced_at")})
+    op_stamp = {"operating_point": result.get("operating_point"),
+               "id_map": id_map,
+               "validated": bool(result.get("validated", False)),
+               "shippable_issues": result.get("shippable_issues", []),
+               "checkpoint": Path(checkpoint_path).stem,
+               "checkpoint_sha256": sha,
+               "experiment_id": result.get("experiment_id"),
+               "images_dir": images_dir,
+               "produced_at": result.get("produced_at")}
+    if has_masks:
+        # The unvalidated mask-binarize threshold write_predictions_json used for every mask in this
+        # run — a run constant, so it travels once here rather than per-annotation (see
+        # export.py's mask_binarize_provenance docstring).
+        op_stamp["mask_binarize"] = mask_binarize_provenance()
+    atomic_write_json(out / "operating_point.json", op_stamp)
 
     # Close the data→model→predictions chain: link this bucket into the producing run's lineage.
     # Additive first-write — the terminal-state lock permits it into a still-empty predictions field.
@@ -759,14 +800,20 @@ def export_predictions(
         except Exception:
             logger.warning("could not link predictions into experiment lineage", exc_info=True)
 
-    return {"image_count": len(written), "output_dir": str(out), "files": written,
-            "bucket_redirected": resolution.redirected,
-            "requested_output_dir": output_dir if resolution.redirected else None,
-            "operating_point": result.get("operating_point"),
-            "validated": bool(result.get("validated", False)),
-            "conf_source": result.get("conf_source"),
-            "checkpoint_sha256": sha,
-            "experiment_id": exp_id}
+    response = {"image_count": len(written), "output_dir": str(out), "files": written,
+                "bucket_redirected": resolution.redirected,
+                "requested_output_dir": output_dir if resolution.redirected else None,
+                "operating_point": result.get("operating_point"),
+                "validated": bool(result.get("validated", False)),
+                "conf_source": result.get("conf_source"),
+                "checkpoint_sha256": sha,
+                "experiment_id": exp_id}
+    # The run's warnings (an instance_seg run forced untiled, a fabricated tile scale, a CPU-bound
+    # workload) belong on this door's own response too — otherwise the reason a delivered bucket ran
+    # in the regime it did is visible only in the server log.
+    if result.get("warning"):
+        response["warning"] = result["warning"]
+    return response
 
 
 @mcp.tool()
@@ -813,7 +860,8 @@ def tabulate_counts(
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
             ``run_inference`` unresolved — see its own ``tile`` doc: a documented default distinct
-            from an explicit choice, not silently ``False``.
+            from an explicit choice, not silently ``False``. An ``instance_seg`` checkpoint runs
+            untiled when unset and refuses an explicit ``tile=True`` (tiling cannot carry masks).
         tile_size: Sliding-window tile edge (px).
         overlap: Fractional tile overlap.
         tile_batch_size: Tiles per forward batch.
@@ -848,18 +896,20 @@ def tabulate_counts(
 
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE,
-        VALIDATED_HELD_OUT,
-        VALIDATED_SHIPPABLE,
+        accepted_references,
         check_delivery_gate,
     )
 
     op = result.get("operating_point") or {}
     conf_prov = op.get("conf") or {}
-    # The count operating point's validity is the run's RESOLVED bundle state, not a caller string:
-    # prefer the conf param's on-the-run reference, falling back to the resolved validated bool.
-    op_ref = conf_prov.get("validated_vs_gt")
-    if op_ref not in VALIDATED_SHIPPABLE:
-        op_ref = VALIDATED_HELD_OUT if result.get("validated") else VALIDATED_FALSE
+    # The count operating point's validity is the reference the run's own conf param recorded, judged
+    # against the references accepted for conf's OWN validation kind (annotations) — never the bare
+    # `validated` bool promoted to a reference the run never earned. That upgrade laundered a
+    # missing/unrecognized/wrong-kind value into a shippable one (the same hole
+    # resolution._sidecar_reference closed).
+    op_ref = conf_prov.get("validated_against")
+    if op_ref not in accepted_references("annotations"):
+        op_ref = VALIDATED_FALSE
     gate = check_delivery_gate({"operating_point": op_ref},
                                acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
@@ -883,7 +933,7 @@ def tabulate_counts(
         measurement_validated=gate.stamp["operating_point"],
         acknowledge_unvalidated=acknowledge_unvalidated,
     )
-    return {
+    out = {
         "csv_path": csv_path,
         "image_count": result["image_count"],
         "total_detections": result["total_detections"],
@@ -896,3 +946,9 @@ def tabulate_counts(
         "checkpoint_sha256": result.get("checkpoint_sha256"),
         "experiment_id": result.get("experiment_id"),
     }
+    # Round-2 stage-6 finding: an instance_seg run forced untiled (run_inference's own warning) used
+    # to be visible only in export_predictions' response, not here — so a count CSV (the count IS the
+    # phenotype for a count trait) could ship with the regime change disclosed only in the server log.
+    if result.get("warning"):
+        out["warning"] = result["warning"]
+    return out
