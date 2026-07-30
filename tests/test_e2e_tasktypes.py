@@ -119,7 +119,7 @@ def test_instance_seg_e2e(tmp_path: Path):
         json_io.write_annotations(
             str(labels_dir / f"img{i}.json"),
             [Annotation(subject="catkin",
-                        geometry=Polygon([(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)]))],
+                        geometry=Polygon([[(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)]]))],
             IMG,
             IMG,
             keep_empty=True,
