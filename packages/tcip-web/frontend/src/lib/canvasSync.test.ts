@@ -5,9 +5,10 @@ import {
   buildReviewShapes,
   computeViewport,
   createCanvasPusher,
+  pointShapeVisible,
   type CanvasStateBody,
 } from "@/lib/canvasSync";
-import { polygonBbox } from "@/lib/polygonGeometry";
+import { ringsBbox } from "@/lib/polygonGeometry";
 import type { ReviewColors } from "@/lib/reviewColors";
 import type { MatchesResponse } from "@/store/types";
 
@@ -62,21 +63,25 @@ describe("buildAnnotateShapes", () => {
     }[],
     polygons: [
       {
-        points: [
-          [0, 0],
-          [10, 0],
-          [10, 10],
-        ] as [number, number][],
+        rings: [
+          [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+          ],
+        ] as [number, number][][],
         subject: "catkin",
         attributes: {},
         created_by: "user:zack",
       },
       {
-        points: [
-          [20, 20],
-          [30, 20],
-          [30, 30],
-        ] as [number, number][],
+        rings: [
+          [
+            [20, 20],
+            [30, 20],
+            [30, 30],
+          ],
+        ] as [number, number][][],
         subject: "other",
         attributes: {},
       },
@@ -139,16 +144,138 @@ describe("buildAnnotateShapes", () => {
     expect(shapes[0].dashed).toBeFalsy();
   });
 
-  it("box mode adds one read-only derived box per active-subject polygon, solid, === polygonBbox", () => {
+  it("box mode adds one read-only derived box per active-subject polygon, solid, === ringsBbox", () => {
     // Mirrors the canvas overlay: a polygon's detection footprint shows while boxing, and its coords
-    // are exactly polygonBbox — never a stored box. Solid like every committed shape (dashed is
+    // are exactly ringsBbox — never a stored box. Solid like every committed shape (dashed is
     // reserved for transient/under-review shapes; read-only is enforced structurally, not by style).
     const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [] });
     const derived = shapes.filter((s) => s.kind === "box");
     expect(derived).toHaveLength(1); // only the active "catkin" polygon; "other" is filtered out
-    expect(derived[0].xyxy).toEqual(polygonBbox(base.polygons[0].points));
+    expect(derived[0].xyxy).toEqual(ringsBbox(base.polygons[0].rings));
     expect(derived[0].label).toBe("catkin");
     expect(derived[0].dashed).toBeFalsy(); // solid, not the transient/under-review dashed style
+  });
+
+  it("pushes every ring of a multi-ring polygon, sharing its colour, labelled once", () => {
+    // The agent's view of the canvas must not drop a region either: an occlusion-split catkin is one
+    // annotation drawn as two paths (render_canvas_state draws one path per shape entry).
+    const multi = {
+      rings: [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+        ],
+        [
+          [40, 40],
+          [60, 40],
+          [60, 60],
+        ],
+      ] as [number, number][][],
+      subject: "catkin",
+      attributes: {},
+      created_by: "user:zack",
+    };
+    const shapes = buildAnnotateShapes({ ...base, polygons: [multi] });
+    expect(shapes).toHaveLength(2);
+    expect(shapes.map((s) => s.points)).toEqual(multi.rings);
+    expect(shapes.every((s) => s.color === "#FF0000" && s.tag === "gt")).toBe(true);
+    // Labelled once — a two-part catkin is one catkin, not two.
+    expect(shapes.filter((s) => s.label === "catkin")).toHaveLength(1);
+  });
+
+  it("box mode derives one box spanning every ring of a multi-ring polygon", () => {
+    const multi = {
+      rings: [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+        ],
+        [
+          [40, 40],
+          [60, 40],
+          [60, 60],
+        ],
+      ] as [number, number][][],
+      subject: "catkin",
+      attributes: {},
+    };
+    const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [], polygons: [multi] });
+    const derived = shapes.filter((s) => s.kind === "box");
+    expect(derived).toHaveLength(1);
+    expect(derived[0].xyxy).toEqual([0, 0, 60, 60]);
+  });
+
+  it("point mode pushes each active-subject point as its own point shape (no box, no path)", () => {
+    // The agent's view of the canvas has to include placed points, and it must not see a box the
+    // annotation never claimed: a fabricated extent here is the exact hazard Point warns about.
+    const shapes = buildAnnotateShapes({
+      ...base,
+      mode: "point",
+      polygons: [],
+      points: [
+        { x: 5.06, y: 7.04, subject: "catkin", attributes: {}, created_by: "user:zack" },
+        { x: 50, y: 60, subject: "other", attributes: {} },
+      ],
+    });
+    expect(shapes).toHaveLength(1); // "other" filtered out, exactly like the box/polygon rules
+    expect(shapes[0]).toMatchObject({
+      kind: "point",
+      points: [[5.1, 7]], // rounded like every other pushed coordinate
+      color: "#FF0000",
+      label: "catkin",
+      tag: "gt",
+      created_by: "user:zack",
+    });
+    expect(shapes[0].xyxy).toBeUndefined();
+  });
+
+  it("the selected point is pushed highlighted, and follows the selection out of point mode", () => {
+    const points = [{ x: 5, y: 7, subject: "other", attributes: {} }];
+    const selected = buildAnnotateShapes({
+      ...base,
+      mode: "point",
+      polygons: [],
+      points,
+      selectedPointIdx: 0,
+    });
+    expect(selected).toHaveLength(1); // included despite the subject filter, like a selected polygon
+    expect(selected[0].color).toBe("#00BFFF");
+
+    // Box mode: only the selection survives — the shape being inspected stays on screen.
+    const inBoxMode = buildAnnotateShapes({
+      ...base,
+      mode: "box",
+      boxes: [],
+      polygons: [],
+      points: [...points, { x: 9, y: 9, subject: "catkin", attributes: {} }],
+      selectedPointIdx: 0,
+    });
+    expect(inBoxMode.filter((s) => s.kind === "point")).toHaveLength(1);
+    expect(inBoxMode.filter((s) => s.kind === "point")[0].color).toBe("#00BFFF");
+  });
+
+  it("point mode draws no boxes and no derived boxes (nothing but its own points)", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      mode: "point",
+      boxes: [{ x1: 0, y1: 0, x2: 5, y2: 5, subject: "catkin", attributes: {} }],
+      points: [{ x: 1, y: 1, subject: "catkin", attributes: {} }],
+    });
+    expect(shapes.filter((s) => s.kind === "box")).toHaveLength(0);
+    expect(shapes.filter((s) => s.kind === "point")).toHaveLength(1);
+  });
+
+  it("the labels toggle hides points too", () => {
+    expect(
+      buildAnnotateShapes({
+        ...base,
+        mode: "point",
+        visible: false,
+        points: [{ x: 1, y: 1, subject: "catkin", attributes: {} }],
+      }),
+    ).toEqual([]);
   });
 
   it("box mode includes the selected polygon and the rubber-band box", () => {
@@ -284,10 +411,12 @@ describe("buildReviewShapes", () => {
         { subject: "catkin", bbox: [0, 0, 10, 10], attributes: {} },
         {
           subject: "leaf",
-          points: [
-            [40, 40],
-            [60, 40],
-            [60, 60],
+          rings: [
+            [
+              [40, 40],
+              [60, 40],
+              [60, 60],
+            ],
           ],
           attributes: {},
         },
@@ -300,9 +429,143 @@ describe("buildReviewShapes", () => {
     expect(shapes.filter((s) => s.kind === "polygon")).toHaveLength(1);
   });
 
+  it("an occlusion-split prediction pushes every ring, in the same outcome colour", () => {
+    // A verdict on a two-part prediction is a verdict on both parts, so the agent's mirror of the
+    // review canvas has to show both — one shape entry per ring, not just the first.
+    const split = {
+      img_width: 100,
+      img_height: 80,
+      n_tp: 0,
+      n_fp: 1,
+      n_fn: 0,
+      detections: [
+        {
+          det_type: "fp",
+          class_name: "catkin",
+          conf: 0.7,
+          iou: null,
+          gt_idx: null,
+          pred_idx: 0,
+          bbox: [0, 0, 60, 60],
+          reviewed: false,
+          reviewed_action: null,
+        },
+      ],
+      gt: [],
+      preds: [
+        {
+          subject: "catkin",
+          rings: [
+            [
+              [0, 0],
+              [10, 0],
+              [10, 10],
+            ],
+            [
+              [40, 40],
+              [60, 40],
+              [60, 60],
+            ],
+          ],
+          attributes: {},
+          score: 0.7,
+        },
+      ],
+      image_status: "started",
+    } as unknown as MatchesResponse;
+    const shapes = buildReviewShapes(split, COLORS, -1); // not focused: plain outcome colour
+    expect(shapes).toHaveLength(2);
+    expect(
+      shapes.every((s) => s.kind === "polygon" && s.color === COLORS.fp && s.tag === "fp"),
+    ).toBe(true);
+    expect(shapes.map((s) => s.points)).toEqual([
+      [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+      ],
+      [
+        [40, 40],
+        [60, 40],
+        [60, 60],
+      ],
+    ]);
+  });
+
   it("draws the focused detection last so neighbours never bury it", () => {
     const shapes = buildReviewShapes(matches, COLORS, 0);
     expect(shapes.at(-1)!.tag).toBe("pred"); // the focused TP's overlay is on top
+  });
+
+  it("a point-carrying GT pushes a point shape — not a box, and not nothing", () => {
+    // Review load responses can carry {point: [x, y]} on a GT/prediction. Dropping it would hide a
+    // real annotation from the agent's mirror; boxing it would invent an extent.
+    const withPoint = {
+      img_width: 100,
+      img_height: 80,
+      n_tp: 0,
+      n_fp: 0,
+      n_fn: 1,
+      detections: [
+        {
+          det_type: "fn",
+          class_name: "tip",
+          conf: null,
+          iou: null,
+          gt_idx: 0,
+          pred_idx: null,
+          bbox: [10, 20, 10, 20],
+          reviewed: false,
+          reviewed_action: null,
+        },
+      ],
+      gt: [{ subject: "tip", point: [10.04, 20.06], attributes: {} }],
+      preds: [],
+      image_status: "started",
+    } as unknown as MatchesResponse;
+    const shapes = buildReviewShapes(withPoint, COLORS, -1);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0]).toMatchObject({ kind: "point", points: [[10, 20.1]], color: COLORS.fn });
+    expect(shapes[0].xyxy).toBeUndefined();
+  });
+});
+
+describe("pointShapeVisible", () => {
+  // The Annotate canvas imports this predicate instead of restating it, so the GUI and the agent's
+  // mirror cannot disagree about which points are on screen.
+  it("shows active-subject points in point mode only", () => {
+    expect(
+      pointShapeVisible({
+        mode: "point",
+        subject: "catkin",
+        activeSubject: "catkin",
+        selected: false,
+      }),
+    ).toBe(true);
+    expect(
+      pointShapeVisible({
+        mode: "point",
+        subject: "other",
+        activeSubject: "catkin",
+        selected: false,
+      }),
+    ).toBe(false);
+    expect(
+      pointShapeVisible({
+        mode: "box",
+        subject: "catkin",
+        activeSubject: "catkin",
+        selected: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("always shows the selected point, whatever the mode or subject", () => {
+    for (const mode of ["box", "polygon", "point"]) {
+      expect(
+        pointShapeVisible({ mode, subject: "other", activeSubject: "catkin", selected: true }),
+      ).toBe(true);
+    }
   });
 });
 
