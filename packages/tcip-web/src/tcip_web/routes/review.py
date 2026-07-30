@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from tcip_annotation import (
     BBox,
+    Point,
     Polygon,
     ReviewContext,
     ReviewDetection,
@@ -159,13 +160,23 @@ def _ensure_original_backup(label_path: Optional[str]) -> None:
 
 
 def _ann_dict(a: Annotation) -> dict:
-    """Serialize an :class:`Annotation` for the canvas (pixel coords + attributes + provenance)."""
+    """Serialize an :class:`Annotation` for the canvas (pixel coords + attributes + provenance).
+
+    ``rings`` (not ``points``) for a polygon — a prediction awaiting review can be a genuine
+    multi-ring occlusion-split instance_seg output, and accepting it as-is must not silently keep
+    only the first ring. The canvas itself still only ever *draws*/*edits* a single ring by hand
+    (see ``edited_points`` below). ``point`` is the singular ``[x, y]`` of a placed prompt / keypoint,
+    the same key the on-disk schema uses — a Point GT annotation on the frame is shown as itself
+    rather than arriving geometry-less and being written back without its location.
+    """
     out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
     geom = a.geometry
     if isinstance(geom, Polygon):
-        out["points"] = [list(pt) for pt in geom.points]
+        out["rings"] = [[list(pt) for pt in ring] for ring in geom.rings]
     elif isinstance(geom, BBox):
         out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]
+    elif isinstance(geom, Point):
+        out["point"] = [geom.x, geom.y]
     if a.score is not None:
         out["score"] = a.score
     out["created_by"] = a.created_by
@@ -333,7 +344,8 @@ def _apply_gt_mutation(
         if payload.edited_box is not None:
             geom = BBox(*payload.edited_box)
         elif payload.edited_points is not None:
-            geom = Polygon(points=[(float(p[0]), float(p[1])) for p in payload.edited_points])
+            # The reviewer edits one contour by hand on the canvas — single-ring input.
+            geom = Polygon(rings=[[(float(p[0]), float(p[1])) for p in payload.edited_points]])
         if geom is None:
             return False, None
         new = Annotation(subject=payload.class_name, geometry=geom,
@@ -517,7 +529,8 @@ class SaveGtPayload(BaseModel):
     image_name: str
     image_path: str
     label_path: Optional[str] = None
-    # [{subject, bbox?: [x1,y1,x2,y2], points?: [[x,y]...], attributes?, created_by?, ...}]
+    # [{subject, bbox?: [x1,y1,x2,y2], rings?: [[[x,y]...], ...], point?: [x,y], attributes?,
+    #   created_by?, ...}]
     annotations: list[dict] = []
     user: Optional[str] = None    # GUI-set author; stamped as created_by unless the shape carries one
 
@@ -534,11 +547,15 @@ def save_gt(payload: SaveGtPayload) -> dict:
     now_iso = datetime.now(timezone.utc).isoformat()
 
     def _to_annotation(d: dict) -> Annotation:
-        geom: BBox | Polygon | None = None
-        if d.get("points"):
-            geom = Polygon(points=[(float(p[0]), float(p[1])) for p in d["points"]])
+        geom: BBox | Polygon | Point | None = None
+        if d.get("rings"):
+            geom = Polygon(rings=[[(float(p[0]), float(p[1])) for p in ring] for ring in d["rings"]])
         elif d.get("bbox") is not None:
             geom = BBox(*d["bbox"])
+        elif d.get("point") is not None:
+            # The canvas round-trips a Point GT annotation under this key (``_ann_dict``); dropping it
+            # here would silently strip an existing annotation's location on the next GT save.
+            geom = Point(float(d["point"][0]), float(d["point"][1]))
         round_tripped = bool(d.get("created_by"))
         return Annotation(
             subject=d["subject"],
@@ -579,7 +596,7 @@ class ValidateReferenceResponse(BaseModel):
     # True only when the review cleared the identical gate the backend uses (or the bucket was already
     # validated). A refusal is surfaced honestly here, never silently upgraded.
     validated: bool
-    reference: Optional[str]  # "review_confirmed" | "validated_held_out" | "false" | None
+    reference: Optional[str]  # a resolution.py validated_against value ("false" when unvalidated)
     reviewed_image_count: int
     conf: Optional[float]  # the derived count operating point (for transparency)
     reason: str  # plain-language, breeder-facing — always present
@@ -593,7 +610,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     Reconstructs the review verdicts into the COCO records ``resolve_operating_point`` consumes (W1's
     ``review_calibration`` adapter) and runs them through the IDENTICAL disjoint-split + count-bias gate
     and conf-censoring guard the held-out-GT path uses — no shortcut to "validated". On success the
-    bucket's ``operating_point.json`` is stamped ``review_confirmed`` (so the delivery gate can read it);
+    bucket's ``operating_point.json`` is stamped ``VALIDATED_REVIEW_CONFIRMED`` (so the delivery gate reads it);
     on refusal an honest ``validated=false`` placeholder is written and the reason is returned. An
     already-validated bucket is never downgraded.
     """
@@ -623,7 +640,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     # review reference isn't needed there, and this action must not be able to lower them.
     sidecars = {d: (read_operating_point_sidecar(d) or {}) for d in bucket_dirs}
     if all(sc.get("validated") for sc in sidecars.values()):
-        ref = next((((sc.get("operating_point") or {}).get("conf") or {}).get("validated_vs_gt")
+        ref = next((((sc.get("operating_point") or {}).get("conf") or {}).get("validated_against")
                     for sc in sidecars.values()), None)
         return ValidateReferenceResponse(
             validated=True, reference=ref, reviewed_image_count=n, conf=None,
