@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 from tcip_annotation.json_io import write_annotations
-from tcip_annotation.state import Annotation, bbox_of
+from tcip_annotation.state import Annotation, Point, bbox_of
 
 logger = logging.getLogger(__name__)
 
@@ -271,10 +271,19 @@ class ReviewEngine:
 
     @staticmethod
     def _bbox_of_annotation(anns: list[Annotation], idx: Optional[int]):
-        if idx is not None and 0 <= idx < len(anns) and anns[idx].geometry is not None:
-            b = bbox_of(anns[idx].geometry)
-            return (b.x1, b.y1, b.x2, b.y2)
-        return None
+        """The annotation's image-coord box, or ``None`` when it has none to read.
+
+        A :class:`~tcip_annotation.state.Point` reads as ``None``, like a geometry-less label: a
+        verdict's box is what the reviewer looked at and what the entry is keyed by, and a fabricated
+        zero-area box at the point would key a real verdict to a shape nobody drew.
+        """
+        if idx is None or not (0 <= idx < len(anns)):
+            return None
+        geom = anns[idx].geometry
+        if geom is None or isinstance(geom, Point):
+            return None
+        b = bbox_of(geom)
+        return (b.x1, b.y1, b.x2, b.y2)
 
     def _bbox_of_gt(self, ctx: ReviewContext, gt_idx: Optional[int]):
         return self._bbox_of_annotation(ctx.gt, gt_idx)
