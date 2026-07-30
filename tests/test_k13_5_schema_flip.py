@@ -219,11 +219,15 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
 
     (ann,) = json_io.read_annotations(str(out))
     assert isinstance(ann.geometry, Polygon)  # the polygon won; not collapsed to a box
+    # "points" is the single-ring input key, wrapped as the one ring it is — a caller with more
+    # than one ring (occlusion-split) uses "rings" instead (see test_save_annotations_accepts_rings).
+    assert ann.geometry.rings == [[(10.0, 20.0), (110.0, 20.0), (110.0, 220.0)]]
     obj = json.loads(out.read_text())["annotations"][0]
     assert "segmentation" in obj  # written as a polygon (its derived bbox rides along)
 
     # An EMPTY points list must fall through to bbox (truthy check, matching the web converters), so
-    # a box payload is not silently lost to a degenerate Polygon([]) while the tool reports success.
+    # a box payload is not silently lost to a degenerate Polygon(rings=[[]]) while the tool reports
+    # success.
     box_out = tmp_path / "emptypts.json"
     res2 = save_annotations(
         img,
@@ -233,6 +237,66 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     assert res2.get("count") == 1
     (box_ann,) = json_io.read_annotations(str(box_out))
     assert isinstance(box_ann.geometry, BBox)  # empty points -> saved as the box, not dropped
+
+
+# (g3) Round-2 stage-6 finding: segment_prompt's own output is multi-ring ({x,y} dict vertices),
+# and save_annotations had no "rings" key at all — an occlusion-split mask accepted from
+# segment_prompt silently saved as a geometry-less annotation. Both ring-vertex shapes this module
+# actually produces ({x,y} dicts from segment_prompt, [x,y] pairs from _ann_dict's read side) must
+# round-trip through the write door.
+def test_save_annotations_accepts_rings(tmp_path):
+    from tcip_mcp.tools.annotation_tools import save_annotations
+
+    images_dir = tmp_path / "images"
+    _write_image(images_dir, "img_001")
+    img = str(images_dir / "img_001.jpg")
+
+    # segment_prompt's own output shape: [[{x,y}, ...], ...], one ring per connected region.
+    out = tmp_path / "rings.json"
+    res = save_annotations(
+        img,
+        annotations=[{
+            "subject": "catkin",
+            "rings": [
+                [{"x": 10, "y": 20}, {"x": 110, "y": 20}, {"x": 110, "y": 220}],
+                [{"x": 300, "y": 300}, {"x": 340, "y": 300}, {"x": 340, "y": 340}],
+            ],
+        }],
+        path=str(out),
+    )
+    assert res.get("count") == 1
+    (ann,) = json_io.read_annotations(str(out))
+    assert isinstance(ann.geometry, Polygon)
+    assert len(ann.geometry.rings) == 2  # both occlusion-split regions survived, not just the first
+    assert ann.geometry.rings[0] == [(10.0, 20.0), (110.0, 20.0), (110.0, 220.0)]
+    assert ann.geometry.rings[1] == [(300.0, 300.0), (340.0, 300.0), (340.0, 340.0)]
+
+    # Round-trip shape ([x,y] pairs, as _ann_dict's own "rings" reader output uses) also works.
+    out2 = tmp_path / "rings_listshape.json"
+    res2 = save_annotations(
+        img,
+        annotations=[{"subject": "catkin", "rings": [[[1, 2], [3, 2], [3, 4]]]}],
+        path=str(out2),
+    )
+    assert res2.get("count") == 1
+    (ann2,) = json_io.read_annotations(str(out2))
+    assert ann2.geometry.rings == [[(1.0, 2.0), (3.0, 2.0), (3.0, 4.0)]]
+
+    # "rings" wins over "points"/"bbox" when more than one is present (never less complete).
+    out3 = tmp_path / "rings_precedence.json"
+    res3 = save_annotations(
+        img,
+        annotations=[{
+            "subject": "catkin",
+            "rings": [[{"x": 1, "y": 2}, {"x": 3, "y": 2}, {"x": 3, "y": 4}]],
+            "points": [[10, 20], [110, 20], [110, 220]],
+            "bbox": [10, 20, 110, 220],
+        }],
+        path=str(out3),
+    )
+    assert res3.get("count") == 1
+    (ann3,) = json_io.read_annotations(str(out3))
+    assert ann3.geometry.rings == [[(1.0, 2.0), (3.0, 2.0), (3.0, 4.0)]]
 
 
 # (h) the direct-json and COCO loader paths agree: a geometry-less-only image is a target on neither,
