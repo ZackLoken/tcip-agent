@@ -82,14 +82,14 @@ def _bloom_fixture(
         if validated:
             sidecar.update({
                 "validated": True,
-                "operating_point": {"conf": {"value": 0.4, "validated_vs_gt": "validated_held_out"}},
+                "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
                 "experiment_id": "exp-1",
                 "checkpoint_sha256": "abc123",
             })
             (bucket / "classifier_operating_point.json").write_text(json.dumps({
                 "validated": True, "trait": "catkin", "experiment_id": "exp-1",
                 "operating_point": {"classifier": {"value": "elongated",
-                                                   "validated_vs_gt": "validated_held_out"}},
+                                                   "validated_against": "held_out_annotations"}},
             }), encoding="utf-8")
         (bucket / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
         assigns = []
@@ -299,9 +299,9 @@ def test_no_caller_field_can_raise_the_reconciled_validity(client: TestClient, t
     bare = client.post("/api/results/per_plant_curves", json=body)
     optimistic = client.post("/api/results/per_plant_curves", json={
         **body,
-        "operating_point_validated": "validated_held_out",
-        "positive_state_classifier_validated": "validated_held_out",
-        "validated": {"operating_point": "validated_held_out", "classifier": "validated_held_out"},
+        "operating_point_validated": "held_out_annotations",
+        "positive_state_classifier_validated": "held_out_annotations",
+        "validated": {"operating_point": "held_out_annotations", "classifier": "held_out_annotations"},
         "provisional": False,
     })
     assert bare.status_code == optimistic.status_code == 400
@@ -318,7 +318,7 @@ def test_a_genuinely_unvalidated_classifier_refuses_even_when_the_count_is_valid
     for bucket in body["predictions_by_date"].values():
         (Path(bucket) / "classifier_operating_point.json").write_text(json.dumps({
             "validated": False, "trait": "catkin",
-            "operating_point": {"classifier": {"value": "elongated", "validated_vs_gt": "false"}},
+            "operating_point": {"classifier": {"value": "elongated", "validated_against": "false"}},
         }), encoding="utf-8")
     resp = client.post("/api/results/onset_dates", json=body)
     assert resp.status_code == 400
@@ -341,8 +341,8 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     header, first = resp.text.splitlines()[0].split(","), resp.text.splitlines()[1].split(",")
     assert header == phenology_csv_columns(get_trait("catkin"))
     cells = dict(zip(header, first))
-    assert cells["operating_point_validated"] == "validated_held_out"
-    assert cells["positive_state_classifier_validated"] == "validated_held_out"
+    assert cells["operating_point_validated"] == "held_out_annotations"
+    assert cells["positive_state_classifier_validated"] == "held_out_annotations"
     assert cells["operating_point_conf"] == "0.4"
     assert cells["producer_experiment_id"] == "exp-1"
     assert cells["producer_model_sha256"] == "abc123"
@@ -371,7 +371,7 @@ def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
     for bucket in body["predictions_by_date"].values():
         sidecar = {"validated": True, "trait": "catkin", "experiment_id": "exp-1",
                    "operating_point": {"classifier": {"value": "elongated",
-                                                      "validated_vs_gt": "validated_held_out"}}}
+                                                      "validated_against": "held_out_annotations"}}}
         sidecar.update(overrides)
         (Path(bucket) / "classifier_operating_point.json").write_text(
             json.dumps(sidecar), encoding="utf-8")
@@ -440,7 +440,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
     for col in provenance:
         assert cells[col] != "", col
-    assert cells["operating_point_validated"] == "validated_held_out"
+    assert cells["operating_point_validated"] == "held_out_annotations"
     assert cells["producer_experiment_id"] == "exp-1"
 
 
