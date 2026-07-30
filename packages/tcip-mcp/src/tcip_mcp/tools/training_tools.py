@@ -811,13 +811,17 @@ def _ensure_experiment(
 ) -> str:
     """Create or attach the experiment for a run, enforcing experiment immutability.
 
-    Returns the experiment id actually used. An existing id may be reused only when
-    the experiment is pristine (agent pre-created it: state 'created', no metrics)
-    or when ``resume_from`` continues that experiment's own checkpoint. Anything
-    else mints a fresh ``<id>_<run_id>`` (with the old id as parent lineage) so the
-    prior run's status, metrics, lineage, and registry entry stay intact.
+    Returns the experiment id actually used. An existing id may be reused only when the experiment
+    is pristine (agent pre-created it: state 'created', no metrics) — in which case its
+    ``config.json`` (written before tiling/seed resolution) is refreshed with the config this run
+    is actually launching (K12 finding 3). Anything else — including a ``resume_from`` that targets
+    an id which already has recorded history — mints a fresh ``<id>_<run_id>`` (with the old id as
+    parent lineage) so the prior run's status, metrics, lineage, and registry entry stay intact
+    (K12 finding 4: resuming into a non-pristine id used to silently reuse it, discarding the
+    resumed run's own metrics/lineage writes behind the terminal-state lock and letting the model
+    registry replace the original's entry by name with no record of what was superseded).
     """
-    from tcip_mcp.experiments import create_experiment, get_experiment
+    from tcip_mcp.experiments import create_experiment, get_experiment, overwrite_config_if_pristine
 
     created = create_experiment(experiment_id, config, data_source=data_source,
                                 dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
@@ -829,7 +833,8 @@ def _ensure_experiment(
         existing.get("status", {}).get("state") == "created"
         and not existing.get("n_epochs")
     )
-    if pristine or resume_from:
+    if pristine:
+        overwrite_config_if_pristine(experiment_id, config)
         return experiment_id
 
     fresh_id = f"{experiment_id}_{run_id}"
