@@ -1,56 +1,76 @@
 """Tests for per-plant aggregation postprocessing.
 
-Covers the plant_id extraction fallback (the source of a delivery-CSV
-fragmentation bug), the explicit plant_id_key / plant_id_fn override paths, and the
-aggregation strategies (count / mean / mode / sum). Bloom phenology milestones are
-not here — they are the elongated-fraction crossing, tested in test_phenology.py.
+Covers the plant_id hard requirement (K17 finding 4 — plant identity is never guessed from a
+filename; a record must carry an explicit plant_id_key value or one plant_id_fn resolves),
+identity-provenance pass-through (plant_id_source/plant_id_distance_m, mirroring
+build_plant_mapping's own real Assignment fields), the crops.yml-derived units column, and the
+aggregation strategies (count / mean / mode / sum). Bloom phenology milestones are not here — they
+are the elongated-fraction crossing, tested in test_phenology.py.
 """
 
 from __future__ import annotations
 
 import csv
-import logging
 
 import pytest
 
 from tcip_mcp.pipelines.postprocessing.aggregation import (
-    _extract_plant_id,
     aggregate_per_plant,
     export_aggregated_csv,
 )
 
 
-# ── _extract_plant_id (the guessing fallback) ───────────────────────────────
+def _identity_fn(image_name: str) -> str:
+    """A trivial plant_id_fn for tests that don't care about grouping specifics — every image maps
+    to a plant_id equal to its own stem-derived group key."""
+    return image_name.rsplit("_", 1)[0]
 
 
-@pytest.mark.parametrize(
-    ("stem", "expected"),
-    [
-        # Two-token flight suffix: heuristic recovers the intended id.
-        ("bush_42_flight_3", "bush_42"),
-        ("bush_42_flight_2", "bush_42"),
-        # Three-token YYYY_MM_DD date: only two tokens are stripped, so a year
-        # token is retained. This documents the (intended, minimal) behavior —
-        # the plant-year fragmentation the caller warns about.
-        ("PLANT_001_2024_05_15", "PLANT_001_2024"),
-        # Single token: nothing to strip, whole stem returned.
-        ("tree12", "tree12"),
-        # Filename with extension is reduced to its stem first.
-        ("bush_42_flight_3.jpg", "bush_42"),
-    ],
-)
-def test_extract_plant_id_matches_documented_behavior(stem, expected):
-    assert _extract_plant_id(stem) == expected
+# ── plant identity — no guessing, ever (K17 finding 4) ──────────────────────
 
 
-def test_extract_plant_id_two_tokens():
-    # 'PLANT_001' → rsplit('_', 2) yields ['PLANT', '001']; strips to 'PLANT'.
-    # Documents that a bare id with a numeric suffix is not preserved by the
-    # fallback — callers with such names must pass plant_id_fn / plant_id key.
-    assert _extract_plant_id("PLANT_001") == "PLANT"
+def test_no_extract_plant_id_helper_exists_anymore():
+    """The filename-guessing fallback is deleted, not just unused — this locks its absence."""
+    import tcip_mcp.pipelines.postprocessing.aggregation as agg_module
+
+    assert not hasattr(agg_module, "_extract_plant_id")
 
 
-# ── grouping paths ──────────────────────────────────────────────────────────
+def test_missing_plant_id_and_no_fn_raises():
+    results = [{"image": "bush_42_flight_3", "count": 1}]
+    with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
+        aggregate_per_plant(results, strategy="count", value_key="count")
+
+
+def test_missing_image_key_and_no_plant_id_raises():
+    """The old fallback silently bucketed a keyless record under 'unknown' — now it raises, same as
+    any other unresolved-identity record."""
+    results = [{"count": 1}]
+    with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
+        aggregate_per_plant(results, strategy="count", value_key="count")
+
+
+def test_plant_id_fn_returning_none_raises_not_groups_under_none():
+    """build_plant_mapping's own plant_id_fn can legitimately return None for an unmapped image
+    (plot_name=None, source='unmapped'). That must raise cleanly here, not silently group under a
+    None key and crash later when aggregate_per_plant sorts groups against a real string key."""
+    def sometimes_none(image_name: str) -> str | None:
+        return None if "unmapped" in image_name else "PLANT_001"
+
+    results = [
+        {"image": "mapped_img", "count": 1},
+        {"image": "unmapped_img", "count": 2},
+    ]
+    with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
+        aggregate_per_plant(results, strategy="count", value_key="count", plant_id_fn=sometimes_none)
+
+
+def test_empty_string_plant_id_value_raises():
+    """A membership test alone (`plant_id_key in r`) would pass for an empty-string value — the
+    check must be on the VALUE, not just presence of the key."""
+    results = [{"image": "x", "plant_id": "", "count": 1}]
+    with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
+        aggregate_per_plant(results, strategy="count", value_key="count")
 
 
 def test_explicit_plant_id_key_takes_precedence():
@@ -65,8 +85,6 @@ def test_explicit_plant_id_key_takes_precedence():
 
 
 def test_plant_id_fn_override_keeps_series_together():
-    # A caller-supplied fn that strips the trailing YYYY_MM_DD date keeps one
-    # plant's multi-date series in a single group (no plant-year fragmentation).
     def strip_date(image_name: str) -> str:
         return image_name.rsplit("_", 3)[0]
 
@@ -83,44 +101,50 @@ def test_plant_id_fn_override_keeps_series_together():
     assert out[0]["observations"] == 3
 
 
-def test_fallback_fragments_multiyear_series_and_warns(caplog):
-    # Without an override, the YYYY_MM_DD naming fragments one plant into two
-    # plant-year groups — the documented delivery-CSV bug. The caller must warn.
+# ── identity provenance pass-through (build_plant_mapping's honest signals) ──
+
+
+def test_plant_id_source_passes_through_when_uniform():
     results = [
-        {"image": "PLANT_001_2024_05_15", "count": 1},
-        {"image": "PLANT_001_2024_06_20", "count": 4},
-        {"image": "PLANT_001_2025_05_15", "count": 2},
+        {"image": "a", "plant_id": "P1", "count": 1, "plant_id_source": "sequence"},
+        {"image": "b", "plant_id": "P1", "count": 2, "plant_id_source": "sequence"},
     ]
-    with caplog.at_level(logging.WARNING):
-        out = aggregate_per_plant(results, strategy="count", value_key="count")
-
-    plant_ids = sorted(r["plant_id"] for r in out)
-    assert plant_ids == ["PLANT_001_2024", "PLANT_001_2025"]
-    assert any("guessed" in rec.message for rec in caplog.records)
-
-
-def test_fallback_no_warning_when_key_present(caplog):
-    results = [{"image": "x", "plant_id": "P1", "count": 1}]
-    with caplog.at_level(logging.WARNING):
-        aggregate_per_plant(results, strategy="count", value_key="count")
-    assert not any("guessed" in rec.message for rec in caplog.records)
-
-
-def test_missing_image_key_uses_unknown_bucket():
-    results = [{"count": 1}, {"count": 3}]
     out = aggregate_per_plant(results, strategy="count", value_key="count")
-    assert len(out) == 1
-    assert out[0]["plant_id"] == "unknown"
+    assert out[0]["plant_id_source"] == "sequence"
 
 
-# ── strategies ──────────────────────────────────────────────────────────────
+def test_plant_id_source_reports_mixed_when_not_uniform():
+    results = [
+        {"image": "a", "plant_id": "P1", "count": 1, "plant_id_source": "sequence"},
+        {"image": "b", "plant_id": "P1", "count": 2, "plant_id_source": "nearest_neighbour"},
+    ]
+    out = aggregate_per_plant(results, strategy="count", value_key="count")
+    assert out[0]["plant_id_source"] == "mixed"
+
+
+def test_plant_id_distance_m_max_tracked():
+    results = [
+        {"image": "a", "plant_id": "P1", "count": 1, "plant_id_distance_m": 1.5},
+        {"image": "b", "plant_id": "P1", "count": 2, "plant_id_distance_m": 4.2},
+    ]
+    out = aggregate_per_plant(results, strategy="count", value_key="count")
+    assert out[0]["plant_id_distance_m_max"] == pytest.approx(4.2)
+
+
+def test_plant_id_source_absent_when_never_supplied():
+    results = [{"image": "a", "plant_id": "P1", "count": 1}]
+    out = aggregate_per_plant(results, strategy="count", value_key="count")
+    assert "plant_id_source" not in out[0]
+
+
+# ── strategies (all now supply plant_id_fn — no bare-filename grouping left) ─
 
 
 def test_count_strategy_median():
     results = [
-        {"image": "bush_1_f_1", "count": 2},
-        {"image": "bush_1_f_2", "count": 4},
-        {"image": "bush_1_f_3", "count": 9},
+        {"image": "bush_1_f_1", "count": 2, "plant_id": "bush_1"},
+        {"image": "bush_1_f_2", "count": 4, "plant_id": "bush_1"},
+        {"image": "bush_1_f_3", "count": 9, "plant_id": "bush_1"},
     ]
     out = aggregate_per_plant(results, strategy="count", value_key="count")
     assert out[0]["value"] == 4
@@ -130,8 +154,8 @@ def test_count_strategy_median():
 
 def test_mean_strategy():
     results = [
-        {"image": "bush_1_f_1", "value": 1.0},
-        {"image": "bush_1_f_2", "value": 3.0},
+        {"image": "bush_1_f_1", "value": 1.0, "plant_id": "bush_1"},
+        {"image": "bush_1_f_2", "value": 3.0, "plant_id": "bush_1"},
     ]
     out = aggregate_per_plant(results, strategy="mean", value_key="value")
     assert out[0]["value"] == 2.0
@@ -139,9 +163,9 @@ def test_mean_strategy():
 
 def test_mode_strategy():
     results = [
-        {"image": "bush_1_f_1", "grade": 2},
-        {"image": "bush_1_f_2", "grade": 2},
-        {"image": "bush_1_f_3", "grade": 5},
+        {"image": "bush_1_f_1", "grade": 2, "plant_id": "bush_1"},
+        {"image": "bush_1_f_2", "grade": 2, "plant_id": "bush_1"},
+        {"image": "bush_1_f_3", "grade": 5, "plant_id": "bush_1"},
     ]
     out = aggregate_per_plant(results, strategy="mode", value_key="grade")
     assert out[0]["value"] == 2
@@ -150,16 +174,16 @@ def test_mode_strategy():
 
 def test_unknown_strategy_raises():
     with pytest.raises(ValueError, match="Unknown aggregation strategy"):
-        aggregate_per_plant([{"image": "a_b_c", "count": 1}], strategy="nope")
+        aggregate_per_plant([{"image": "a_b_c", "count": 1, "plant_id": "a"}], strategy="nope")
 
 
-# ── CSV export ──────────────────────────────────────────────────────────────
+# ── CSV export ────────────────────────────────────────────────────────────
 
 
 def test_export_aggregated_csv(tmp_path):
     results = [
-        {"plant_id": "PLANT_001", "value": 7, "observations": 3},
-        {"plant_id": "PLANT_002", "value": 4, "observations": 2},
+        {"plant_id": "PLANT_001", "value": 7, "observations": 3, "value_key": "count"},
+        {"plant_id": "PLANT_002", "value": 4, "observations": 2, "value_key": "count"},
     ]
     out_path = tmp_path / "out" / "aggregated.csv"
     export_aggregated_csv(
@@ -174,3 +198,219 @@ def test_export_aggregated_csv(tmp_path):
     assert rows[0]["crop"] == "hazelnut"
     assert rows[0]["trait_name"] == "catkin_count"
     assert rows[0]["n_images"] == "3"
+
+
+def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
+    """A dimensional value_key (mask_geometry-style, area_mm2) must label the units column mm2 —
+    derived from the key that produced the number, never a caller-asserted string. Squared, not the
+    bare linear unit: an area labeled "mm" (round-2 stage-6 finding) understates its own dimensionality."""
+    results = [
+        {"plant_id": "PLANT_001", "value": 12.5, "observations": 1, "value_key": "area_mm2"},
+    ]
+    out_path = tmp_path / "out.csv"
+    export_aggregated_csv(
+        results, str(out_path), trait_name="not_a_real_crops_yml_trait",
+        acknowledge_unvalidated=True,
+    )
+    with open(out_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["units"] == "mm2"
+
+
+def test_export_aggregated_csv_count_trait_has_blank_units(tmp_path):
+    results = [{"plant_id": "PLANT_001", "value": 4, "observations": 3, "value_key": "count"}]
+    out_path = tmp_path / "out.csv"
+    export_aggregated_csv(results, str(out_path), trait_name="whatever",
+                          acknowledge_unvalidated=True)
+    with open(out_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["units"] == ""
+
+
+def test_export_aggregated_csv_refuses_unit_mismatch_against_crops_yml(tmp_path):
+    """A trait crops.yml declares in one unit must not ship under a different unit implied by the
+    aggregated values' own key — the exact failure mode this column exists to prevent."""
+    from tcip_mcp.traits import crops_units
+
+    units = crops_units()
+    # Find any real crops.yml trait declared in a unit other than mm, to construct a genuine
+    # mismatch against an mm-suffixed value_key. Skip if crops.yml is unreadable in this environment
+    # rather than asserting on a fixture that can't exist.
+    mismatched_trait = next((name for name, u in units.items() if u != "mm"), None)
+    if mismatched_trait is None:
+        pytest.skip("no non-mm trait found in crops.yml to construct a mismatch against")
+
+    results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2"}]
+    out_path = tmp_path / "out.csv"
+    with pytest.raises(ValueError, match="declared units|refusing"):
+        export_aggregated_csv(results, str(out_path), trait_name=mismatched_trait,
+                              acknowledge_unvalidated=True)
+
+
+def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
+    """Stage-6 review finding, confirmed by execution: a px-suffixed value_key must NOT inherit
+    crops.yml's declared physical unit as a fallback — that shipped a 124-pixel measurement labeled
+    'mm' under a real mm-declared trait. The units column must be blank, not the declared unit,
+    whenever the value's own key implies no physical unit at all."""
+    from tcip_mcp.traits import crops_units
+
+    units = crops_units()
+    mm_trait = next((name for name, u in units.items() if u == "mm"), None)
+    if mm_trait is None:
+        pytest.skip("no mm-declared trait found in crops.yml")
+
+    results = [{"plant_id": "P1", "value": 124.0, "observations": 1,
+                "value_key": "principal_axis_extent_px"}]
+    out_path = tmp_path / "out.csv"
+    export_aggregated_csv(results, str(out_path), trait_name=mm_trait,
+                          acknowledge_unvalidated=True)
+    with open(out_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["units"] == ""
+    assert rows[0]["value"] == "124.0"
+
+
+def test_export_aggregated_csv_units_never_falls_back_with_no_value_key_at_all(tmp_path):
+    """A results list not produced by aggregate_per_plant (no value_key present) must not inherit
+    crops.yml's declared unit either — there is nothing to cross-check it against."""
+    from tcip_mcp.traits import crops_units
+
+    units = crops_units()
+    mm_trait = next((name for name, u in units.items() if u == "mm"), None)
+    if mm_trait is None:
+        pytest.skip("no mm-declared trait found in crops.yml")
+
+    results = [{"plant_id": "P1", "value": 1.0, "observations": 1}]
+    out_path = tmp_path / "out.csv"
+    export_aggregated_csv(results, str(out_path), trait_name=mm_trait, acknowledge_unvalidated=True)
+    with open(out_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["units"] == ""
+
+
+@pytest.mark.parametrize("value_key", ["plant_id", "detections_total", "elongated_fraction", "pct_open"])
+def test_unit_from_value_key_never_fabricates_from_an_unrelated_key(value_key):
+    """The unit-suffix regex used to match ANY trailing underscore-word, so 'detections_total' read
+    as unit='total' and 'plant_id' as unit='id'. Only a trailing token that is one of crops.yml's own
+    declared units (or a mechanically-squared form of one) may imply a unit — 'id'/'total'/'fraction'/
+    'open' are none of those, regardless of what precedes them."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
+
+    assert _unit_from_value_key(value_key) is None
+
+
+def test_unit_from_value_key_is_vocabulary_driven_not_a_field_name_whitelist():
+    """Round-2 follow-up: the unit vocabulary used to be 4 hardcoded mask_geometry field names, so a
+    bespoke agent-composed measurement (arc length, a landmark distance — anything outside
+    mask_geometry) shipped with a blank units column even when its value_key was a perfectly sensible
+    '{name}_{unit}'. Recognition is now driven by crops.yml's own declared units, so any key ending in
+    one of them (or its squared form) is recognized, regardless of what module produced it."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
+
+    assert _unit_from_value_key("area_mm2") == ("mm2", "mm")
+    assert _unit_from_value_key("principal_axis_extent_cm") == ("cm", "cm")
+    assert _unit_from_value_key("secondary_axis_extent_m") == ("m", "m")
+    assert _unit_from_value_key("perimeter_mm") == ("mm", "mm")
+    assert _unit_from_value_key("principal_axis_extent_px") is None
+    # bespoke, non-mask_geometry keys: now recognized on the same basis as mask_geometry's own
+    assert _unit_from_value_key("length_cm") == ("cm", "cm")
+    assert _unit_from_value_key("width_m") == ("m", "m")
+    assert _unit_from_value_key("nut_diameter_mm") == ("mm", "mm")
+    assert _unit_from_value_key("arc_length_cm") == ("cm", "cm")
+    assert _unit_from_value_key("leaf_area_mm2") == ("mm2", "mm")
+
+
+def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
+    """A value_key that names 'area' but whose trailing unit isn't squared (area_mm instead of
+    area_mm2) is a real dimensional-mismatch bug in the producing code, not a case to guess through —
+    an area is length^2, and silently labeling it with a bare linear unit is exactly the kind of wrong
+    number this function exists to prevent from shipping quietly."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
+
+    with pytest.raises(ValueError, match="area.*squared|squared.*area"):
+        _unit_from_value_key("area_mm")
+    with pytest.raises(ValueError):
+        _unit_from_value_key("leaf_area_cm")  # 'area' buried mid-key still catches it
+
+
+def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
+    """Round-2 stage-6 finding: area_mm2 used to resolve to units='mm' (the linear unit, dropping the
+    squaring) — a real area shipped mislabeled, and crops.yml's cross-check (declared only in linear
+    units) could never catch it since 'mm' == 'mm' always passed. The CSV's units column must say
+    'mm2'; the cross-check itself must still compare the linear unit crops.yml actually declares."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
+
+    results = [{"plant_id": "P1", "value": 800.0, "observations": 1, "value_key": "area_mm2"}]
+    assert _resolve_units("__no_such_trait__", results) == "mm2"  # no crops.yml entry -> no cross-check
+
+    results_linear = [{"plant_id": "P1", "value": 12.0, "observations": 1,
+                       "value_key": "principal_axis_extent_mm"}]
+    assert _resolve_units("__no_such_trait__", results_linear) == "mm"  # non-area stays unsquared
+
+    # A real mm-declared trait: the cross-check compares crops.yml's linear "mm" against area_mm2's
+    # own linear basis ("mm", not "mm2") and passes; the returned label is still squared.
+    from tcip_mcp.traits import crops_units
+
+    units = crops_units()
+    mm_trait = next((name for name, u in units.items() if u == "mm"), None)
+    if mm_trait is not None:
+        assert _resolve_units(mm_trait, results) == "mm2"
+
+
+def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
+    """The generalized vocabulary win end to end: a trait the agent measured with its own bespoke
+    code (a caliper-style diameter, never mask_geometry's field names) still gets a real units column
+    instead of shipping blank, as long as it names itself '{name}_{unit}' in a crops.yml-real unit."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
+
+    results = [{"plant_id": "P1", "value": 14.2, "observations": 1, "value_key": "nut_diameter_mm"}]
+    assert _resolve_units("__no_such_trait__", results) == "mm"
+
+
+def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
+    """The refusal in unit_from_value_key must reach export_aggregated_csv's own caller, not be
+    swallowed — a delivery CSV must never ship silently mislabeled because of a naming bug upstream."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
+
+    results = [{"plant_id": "P1", "value": 800.0, "observations": 1, "value_key": "area_mm"}]
+    with pytest.raises(ValueError):
+        _resolve_units("__no_such_trait__", results)
+
+
+def test_export_aggregated_csv_writes_value_key_column(tmp_path):
+    """The corrected fix asked for value_key as a real CSV column, not just an internal field — the
+    one thing that lets a reader independently detect a px/mm mismatch themselves."""
+    results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2"}]
+    out_path = tmp_path / "out.csv"
+    export_aggregated_csv(results, str(out_path), trait_name="whatever", acknowledge_unvalidated=True)
+    with open(out_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["value_key"] == "area_mm2"
+
+
+def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
+    """The delivery skill's Per-Plant CSV Schema table must be the schema the writer actually writes.
+
+    The table is what the agent reads before building a deliverable; a stale one (it listed seven of
+    the columns for a while) teaches a schema the breeder's file does not have. Compared against the
+    real written header, not against a second copy of the list.
+    """
+    from pathlib import Path as _Path
+
+    out_path = tmp_path / "schema.csv"
+    export_aggregated_csv([{"plant_id": "P1", "value": 1.0, "observations": 1}], str(out_path),
+                          trait_name="whatever", acknowledge_unvalidated=True)
+    with open(out_path, newline="") as f:
+        written = next(csv.reader(f))
+
+    skill = _Path(__file__).resolve().parents[1] / ".github" / "skills" / "delivery" / "SKILL.md"
+    lines = skill.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("## Per-Plant CSV Schema"))
+    documented = []
+    for ln in lines[start:]:
+        if ln.startswith("## ") and not ln.startswith("## Per-Plant CSV Schema"):
+            break
+        if ln.startswith("|") and not ln.startswith("|---") and not ln.startswith("| Column"):
+            documented.append(ln.split("|")[1].strip())
+
+    assert documented == written
