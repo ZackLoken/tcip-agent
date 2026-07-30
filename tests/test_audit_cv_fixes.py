@@ -578,6 +578,77 @@ def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     assert Path(r["sweep_path"]).is_file()
 
 
+def test_cv0_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monkeypatch):
+    """K12 finding 5: two calibrations on the SAME checkpoint+labels but different predictor-path
+    settings must not collide on the sweep artifact filename."""
+    import json
+
+    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    cal, hold = _good_dense_cal_holdout()
+    bundle = resolve_operating_point("catkin", dataset_hash="H",
+                                     calibration_records=cal, holdout_records=hold,
+                                     staged_conf_floor=0.01)
+    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    stub = _CalStub()
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
+    monkeypatch.chdir(tmp_path)
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    img = _one_image(tmp_path)
+
+    r_untiled = itools.run_inference(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
+                                     device="cpu", tile=False, trait="catkin",
+                                     calibration_labels_dir=str(tmp_path))
+    r_tiled = itools.run_inference(str(ckpt), image_paths=[img], images_dir=str(tmp_path),
+                                   device="cpu", tile=True, tile_size=256, trait="catkin",
+                                   calibration_labels_dir=str(tmp_path))
+
+    assert r_untiled["sweep_path"] != r_tiled["sweep_path"]  # distinct predictor paths, distinct files
+    assert Path(r_untiled["sweep_path"]).is_file()
+    assert Path(r_tiled["sweep_path"]).is_file()
+
+    sweep_body = json.loads(Path(r_tiled["sweep_path"]).read_text())
+    assert sweep_body["checkpoint_sha256"]  # identity threaded through, not omitted
+    assert sweep_body["predictor_path"]["tile"] is True
+    assert sweep_body["predictor_path"]["tile_size"] == 256
+
+
+def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch):
+    """K12 finding 5: the delivered operating_point.json sidecar must record the sweep artifact
+    that justified the shipped conf, not omit it entirely."""
+    import json
+
+    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    cal, hold = _good_dense_cal_holdout()
+    bundle = resolve_operating_point("catkin", dataset_hash="H",
+                                     calibration_records=cal, holdout_records=hold,
+                                     staged_conf_floor=0.01)
+    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    stub = _CalStub()
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
+    monkeypatch.chdir(tmp_path)
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    _one_image(tmp_path)  # written directly under images_dir=tmp_path; export_predictions globs it
+
+    out = itools.export_predictions(str(ckpt), images_dir=str(tmp_path), output_dir="out",
+                                    device="cpu", tile=False, trait="catkin",
+                                    calibration_labels_dir=str(tmp_path))
+    assert "error" not in out, out
+    sidecar = json.loads((Path(out["output_dir"]) / "operating_point.json").read_text())
+    assert sidecar["sweep_path"]
+    assert Path(sidecar["sweep_path"]).is_file()
+    assert sidecar["sweep_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
+
+
 def test_cv0_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     """Inferencing the SAME labeled set with a bundle scoped to a DIFFERENT hash flags inheritance and
     refuses to stamp validated=True (validated and shippable_issues stay consistent)."""
