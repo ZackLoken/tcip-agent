@@ -10,7 +10,7 @@ import random
 from pathlib import Path
 from typing import Callable
 
-from tcip_annotation import Annotation, Polygon, bbox_of, load_annotations_any
+from tcip_annotation import Annotation, Point, Polygon, bbox_of, load_annotations_any
 from tcip_annotation.json_io import read_annotations as read_labels
 from tcip_annotation.utils import get_image_dimensions
 from tcip_annotation.viz import (
@@ -49,6 +49,24 @@ def _name_map(idx: dict[str, int]) -> dict[int, str]:
     return {i: name for name, i in idx.items()}
 
 
+def _boxable(anns: list[Annotation]) -> list[Annotation]:
+    """The annotations a box renderer can draw: geometry-bearing, with a Point excluded.
+
+    A Point has no box (``bbox_of`` refuses one) and there is no point renderer in the viz layer yet,
+    so it is skipped by the *draw* call the way a geometry-less label already is. Callers report how
+    many they skipped (``_n_points``) rather than quietly shrinking the annotation count they show.
+    """
+    return [a for a in anns if a.geometry is not None and not isinstance(a.geometry, Point)]
+
+
+def _n_points(anns: list[Annotation]) -> int:
+    return sum(1 for a in anns if isinstance(a.geometry, Point))
+
+
+def _point_note(n: int) -> str:
+    return f" ({n} point annotation(s) not drawn — no point renderer yet)" if n else ""
+
+
 def _box_dict(a: Annotation, index: Callable[[str], int]) -> dict:
     b = bbox_of(a.geometry)
     d = {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2, "class_id": index(a.subject)}
@@ -58,7 +76,8 @@ def _box_dict(a: Annotation, index: Callable[[str], int]) -> dict:
 
 
 def _poly_dict(a: Annotation, index: Callable[[str], int]) -> dict:
-    return {"points": [[p[0], p[1]] for p in a.geometry.points], "class_id": index(a.subject)}
+    return {"rings": [[[p[0], p[1]] for p in ring] for ring in a.geometry.rings],
+            "class_id": index(a.subject)}
 
 
 @mcp.tool()
@@ -140,8 +159,9 @@ def _viz_annotations(
     anns = load_annotations_any(str(label_path), fmt=fmt, file_name=img.name)
     idx, index = _subject_indexer()
 
+    n_points = _n_points(anns)
     if task == "detect":
-        shapes = [a for a in anns if a.geometry is not None]
+        shapes = _boxable(anns)
         out = render_detections(image_path, [_box_dict(a, index) for a in shapes],
                                 class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} detections on {img.name}"
@@ -149,11 +169,12 @@ def _viz_annotations(
             from collections import Counter
             counts = Counter(a.subject for a in shapes)
             summary += " — " + ", ".join(f"{v} {k}" for k, v in counts.most_common())
+        summary += _point_note(n_points)
     else:
         shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
         out = render_segmentations(image_path, [_poly_dict(a, index) for a in shapes],
                                    class_names=_name_map(idx))
-        summary = f"Rendered {len(shapes)} segmentation masks on {img.name}"
+        summary = f"Rendered {len(shapes)} segmentation masks on {img.name}" + _point_note(n_points)
 
     return {
         "image_path": out,
@@ -162,6 +183,9 @@ def _viz_annotations(
         # `count` is the stable key across all visualize sources; the source-specific alias stays.
         "count": len(shapes),
         "annotation_count": len(shapes),
+        # Disclosed, not folded into `count`: these annotations are real but this renderer can't draw
+        # them, and a silently smaller count would read as "the image has fewer annotations".
+        "points_not_rendered": n_points,
     }
 
 
@@ -188,16 +212,17 @@ def _viz_predictions(
         preds = [a for a in preds if (a.score is None or a.score >= conf_threshold)]
     idx, index = _subject_indexer()
 
+    n_points = _n_points(preds)
     if task == "detect":
-        shapes = [a for a in preds if a.geometry is not None]
+        shapes = _boxable(preds)
         out = render_detections(image_path, [_box_dict(a, index) for a in shapes],
                                 class_names=_name_map(idx))
-        summary = f"Rendered {len(shapes)} predictions on {img.name}"
+        summary = f"Rendered {len(shapes)} predictions on {img.name}" + _point_note(n_points)
     else:
         shapes = [a for a in preds if isinstance(a.geometry, Polygon)]
         out = render_segmentations(image_path, [_poly_dict(a, index) for a in shapes],
                                    class_names=_name_map(idx))
-        summary = f"Rendered {len(shapes)} prediction masks on {img.name}"
+        summary = f"Rendered {len(shapes)} prediction masks on {img.name}" + _point_note(n_points)
 
     return {
         "image_path": out,
@@ -205,6 +230,7 @@ def _viz_predictions(
         # `count` is the stable key across all visualize sources; the source-specific alias stays.
         "count": len(shapes),
         "prediction_count": len(shapes),
+        "points_not_rendered": n_points,
     }
 
 
@@ -237,14 +263,13 @@ def _viz_comparison(
         fmt = detect_format(str(label_path))
     except ValueError as exc:
         return {"error": str(exc)}
-    gt = [a for a in load_annotations_any(str(label_path), fmt=fmt, file_name=img.name)
-          if a.geometry is not None]
+    gt = _boxable(load_annotations_any(str(label_path), fmt=fmt, file_name=img.name))
     gt_dicts = [_box_dict(a, index) for a in gt]
 
     pred_file = find_prediction(image_path)
     pred_dicts: list[dict] = []
     if pred_file is not None:
-        preds = [a for a in read_labels(str(pred_file)) if a.geometry is not None]
+        preds = _boxable(read_labels(str(pred_file)))
         pred_dicts = [_box_dict(a, index) for a in preds]
         # Match at the caller's conf operating point (not compute_matches' silent 0.25 default).
         match_result = compute_matches(gt, preds, iou_threshold=iou_threshold,
@@ -332,14 +357,12 @@ def render_failure_cases(
         gt_file = Path(labels_dir) / f"{stem}.json"
         gt_dicts = []
         if gt_file.is_file():
-            gt_dicts = [_box_dict(a, index) for a in read_labels(str(gt_file))
-                        if a.geometry is not None]
+            gt_dicts = [_box_dict(a, index) for a in _boxable(read_labels(str(gt_file)))]
 
         pred_file = Path(predictions_dir) / f"{stem}.json"
         pred_dicts = []
         if pred_file.is_file():
-            pred_dicts = [_box_dict(a, index) for a in read_labels(str(pred_file))
-                          if a.geometry is not None]
+            pred_dicts = [_box_dict(a, index) for a in _boxable(read_labels(str(pred_file)))]
 
         failure_cases.append({
             "image": stem,
@@ -403,7 +426,7 @@ def _viz_dataset_sample(
             idx, index = _subject_indexer()
             anns = load_annotations_any(str(label_path), fmt=fmt, file_name=img_path.name)
             if task == "detect":
-                shapes = [a for a in anns if a.geometry is not None]
+                shapes = _boxable(anns)
                 out = render_detections(str(img_path), [_box_dict(a, index) for a in shapes],
                                         class_names=_name_map(idx))
             else:
@@ -556,7 +579,9 @@ def accept_proposals(
     w, h = get_image_dimensions(image_path)
 
     # Build name-based predictions from accepted candidates (created_by=<engine>, score = the
-    # engine's proposal score). Each proposal's polygon becomes an Annotation under its subject.
+    # engine's proposal score). Each candidate becomes ONE Annotation under its subject carrying
+    # every ring the engine proposed — an occlusion-split object stays split rather than being
+    # accepted as its largest fragment.
     from datetime import datetime, timezone
     from tcip_annotation.state import Polygon as _Polygon
     staged_at = datetime.now(timezone.utc).isoformat()
@@ -570,11 +595,11 @@ def accept_proposals(
         if cand is None or not subject:
             continue
         score = float(cand.get("score", 0.0))  # neutral proposal score, in [0, 1]
-        poly_pts = cand["polygon"]
-        if len(poly_pts) >= 3:
+        rings = [[(float(x), float(y)) for x, y in ring]
+                 for ring in cand["rings"] if len(ring) >= 3]
+        if rings:
             proposals.append(Annotation(
-                subject=str(subject),
-                geometry=_Polygon([(float(x), float(y)) for x, y in poly_pts]),
+                subject=str(subject), geometry=_Polygon(rings=rings),
                 score=score, created_by=engine, created_at=staged_at))
             n_poly += 1
 
