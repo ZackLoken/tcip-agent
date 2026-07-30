@@ -235,3 +235,34 @@ def test_load_reports_filter_substring(tmp_path: Path):
     result = load_project_memory("reports", str(tmp_path), filter_substring="trait profile")
     assert result["count"] == 1
     assert result["reports"][0]["detail"] == "trait profile lookup"
+
+
+def test_claude_reports_defaults_user_disagreement_false(tmp_path: Path):
+    result = claude_reports(str(tmp_path), category="missing_tool", detail="x")
+    assert result["user_disagreement"] is False
+
+    entry = json.loads(Path(result["report_path"]).read_text())
+    assert entry["user_disagreement"] is False
+
+
+def test_claude_reports_records_user_disagreement(tmp_path: Path):
+    result = claude_reports(
+        str(tmp_path),
+        category="needs_human_judgment",
+        detail="Zack pushed back on the tiling default.",
+        user_disagreement=True,
+    )
+    assert result["user_disagreement"] is True
+
+    entry = json.loads(Path(result["report_path"]).read_text())
+    assert entry["user_disagreement"] is True
+
+
+def test_load_reports_roundtrips_user_disagreement(tmp_path: Path):
+    claude_reports(str(tmp_path), category="missing_tool", detail="a", user_disagreement=False)
+    claude_reports(str(tmp_path), category="needs_human_judgment", detail="b", user_disagreement=True)
+
+    result = load_project_memory("reports", str(tmp_path), limit=10)
+    flags = {r["detail"]: r["user_disagreement"] for r in result["reports"]}
+    assert flags["a"] is False
+    assert flags["b"] is True
