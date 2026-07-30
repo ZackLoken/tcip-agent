@@ -288,9 +288,10 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
     anns = body["annotations"]
     assert len(anns) == 2
     assert all(a["subject"] == "catkin" for a in anns)
-    # One carries a box, one a polygon (geometry kinds coexist in one file).
+    # One carries a box, one a polygon (geometry kinds coexist in one file). The load side reports a
+    # polygon as `rings` — a stored shape can be occlusion-split, so it is never flattened to one.
     assert sum("bbox" in a for a in anns) == 1
-    assert sum("points" in a for a in anns) == 1
+    assert sum("rings" in a for a in anns) == 1
 
 
 def test_annotate_save_empty_preserves_negative(
@@ -412,7 +413,50 @@ def test_annotate_save_persists_polygon_as_polygon(client, dataset_root, tmp_pat
     assert len(anns) == 1
     from tcip_annotation.state import Polygon
     assert isinstance(anns[0].geometry, Polygon)
-    assert anns[0].geometry.points[0] == (10.0, 10.0)
+    # A hand-drawn contour is the one ring the canvas authored.
+    assert anns[0].geometry.rings == [[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]]
+
+
+def test_annotate_multi_ring_polygon_round_trips_through_the_route(client, dataset_root, tmp_path):
+    """An occlusion-split shape loaded onto the canvas and re-saved unedited must keep every ring.
+
+    The save side accepts ``rings`` for exactly this, and the load side reports ``rings`` back — so a
+    multi-ring instance_seg shape survives an ordinary open/save with no edits, instead of being
+    silently reduced to its first contour.
+    """
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    rings = [[[10, 10], [30, 10], [30, 30], [10, 30]], [[60, 10], [80, 10], [80, 30], [60, 30]]]
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [{"subject": "catkin", "rings": rings}],
+    })
+    assert resp.status_code == 200
+
+    stored = read_annotations(str(label_path))
+    assert len(stored) == 1  # one instance, not one per contour
+    assert stored[0].geometry.rings == [[tuple(map(float, p)) for p in r] for r in rings]
+
+    body = client.get("/api/annotate/labels", params={
+        "image_path": str(img_path), "label_path": str(label_path)}).json()
+    (ann,) = body["annotations"]
+    assert ann["rings"] == rings
+
+
+def test_annotate_save_prefers_rings_over_points_when_both_are_sent(client, dataset_root, tmp_path):
+    """`rings` is the full shape and `points` only ever one contour, so `rings` wins — otherwise a
+    client that sends both (a loaded multi-ring shape plus a legacy single-ring mirror) would persist
+    the truncated version."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    rings = [[[10, 10], [30, 10], [30, 30]], [[60, 10], [80, 10], [80, 30]]]
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [{"subject": "catkin", "rings": rings, "points": rings[0]}],
+    })
+    assert resp.status_code == 200
+    (stored,) = read_annotations(str(label_path))
+    assert len(stored.geometry.rings) == 2
 
 
 def test_annotate_save_persists_box_as_box(client, dataset_root, tmp_path) -> None:
