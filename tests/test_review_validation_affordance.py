@@ -27,9 +27,9 @@ pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
 def _bundle(*, validated: str, sweep: dict) -> ResolvedBundle:
-    conf = derived("conf", 0.42, derivation_class="calibration",
+    conf = derived("conf", 0.42, requires_validation=True, validation_kind="annotations",
                    derived_from="count-unbiased center-match sweep over review verdicts",
-                   validated_vs_gt=validated, dataset_scoped=True, dataset_hash="abc", sweep=sweep)
+                   validated_against=validated, dataset_scoped=True, dataset_hash="abc", sweep=sweep)
     return ResolvedBundle(trait="catkin", dataset_hash="abc", params={"conf": conf})
 
 
@@ -247,10 +247,10 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is True
-    assert body["reference"] == "review_confirmed"
+    assert body["reference"] == "reviewer_confirmed_annotations"
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is True
-    assert sc["validated_reference"] == "review_confirmed"
+    assert sc["validated_reference"] == "reviewer_confirmed_annotations"
 
 
 def test_route_refuses_conf_censored_and_stamps_honest_placeholder(client, tmp_path: Path):
@@ -295,14 +295,14 @@ def test_route_does_not_downgrade_already_validated(client, tmp_path: Path):
     proj, pred_dir = _make_project(tmp_path, floored=False)
     Path(pred_dir, "operating_point.json").write_text(json.dumps({
         "validated": True,
-        "operating_point": {"conf": {"validated_vs_gt": "validated_held_out", "value": 0.31}},
+        "operating_point": {"conf": {"validated_against": "held_out_annotations", "value": 0.31}},
     }), encoding="utf-8")
     resp = client.post("/api/review/validate_reference", json={
         "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is True
-    assert body["reference"] == "validated_held_out"
+    assert body["reference"] == "held_out_annotations"
     assert body["buckets_stamped"] == []  # left untouched
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is True  # not downgraded
