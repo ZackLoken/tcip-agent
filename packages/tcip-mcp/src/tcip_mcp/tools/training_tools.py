@@ -122,7 +122,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 if probed is not None:
                     b = ResolvedBundle(trait="", dataset_hash=None, params={
                         "in_chans": _resolved_default(
-                            "in_chans", int(model_source["in_chans"]), derivation_class="deterministic")})
+                            "in_chans", int(model_source["in_chans"]))})
                     issues.extend(validate_resolved_bundle(b, probed_channels=probed))
 
     # Split-policy validation (K1): mirrors the channel firewall above — only fires when a
@@ -1126,14 +1126,21 @@ def get_worst_predictions(
         return {"error": f"Labels directory not found: {labels_dir}"}
 
     from tcip_annotation.json_io import read_annotations
+    from tcip_annotation.state import Point
+
+    def _boxes(path) -> list:
+        """The annotations this count heuristic counts — a geometry-less label and a ``Point`` are
+        not detections, so neither belongs in a box count on either side of the comparison."""
+        return [a for a in read_annotations(str(path))
+                if a.geometry is not None and not isinstance(a.geometry, Point)]
 
     scores: list[tuple[str, float]] = []
     for pred_file in pred_path.glob("*.json"):
         if pred_file.name == "operating_point.json":
             continue
         gt_file = gt_path / pred_file.name
-        preds = [a for a in read_annotations(str(pred_file)) if a.geometry is not None]
-        gt_anns = [a for a in read_annotations(str(gt_file)) if a.geometry is not None] if gt_file.is_file() else []
+        preds = _boxes(pred_file)
+        gt_anns = _boxes(gt_file) if gt_file.is_file() else []
 
         n_pred = len(preds)
         n_gt = len(gt_anns)
@@ -1154,7 +1161,7 @@ def get_worst_predictions(
     for gt_file in gt_path.glob("*.json"):
         pred_file = pred_path / gt_file.name
         if not pred_file.is_file():
-            gt_anns = [a for a in read_annotations(str(gt_file)) if a.geometry is not None]
+            gt_anns = _boxes(gt_file)
             if gt_anns:
                 scores.append((gt_file.stem, len(gt_anns) * 3.0))
 
