@@ -7,6 +7,7 @@ from pathlib import Path
 from tcip_annotation import (
     Annotation,
     BBox,
+    Point,
     Polygon,
     compute_matches,
     detect_format,
@@ -26,13 +27,30 @@ from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
 
 
+def _coerce_xy(pt) -> tuple[float, float]:
+    """A ring vertex as ``[x, y]`` (``_ann_dict``'s read-side shape) or ``{"x": x, "y": y}``
+    (``segment_prompt``'s shape, matching its point/box prompt inputs) — the two real producers
+    of ring data in this module disagree on point shape, so the write door has to take either."""
+    if isinstance(pt, dict):
+        return float(pt["x"]), float(pt["y"])
+    return float(pt[0]), float(pt[1])
+
+
 def _ann_dict(a: Annotation) -> dict:
-    """A name-based annotation as a plain JSON dict for a tool response."""
+    """A name-based annotation as a plain JSON dict for a tool response.
+
+    ``rings`` (not ``points``) for a polygon — a stored annotation can genuinely carry more than
+    one ring (an occlusion-split instance_seg prediction), so the read side always represents every
+    ring rather than silently reporting only the first. ``point`` is the same ``[x, y]`` key the
+    on-disk schema uses, so a prompt/keypoint reads back as itself instead of as a geometry-less label.
+    """
     d: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
     if isinstance(a.geometry, BBox):
         d["bbox"] = [a.geometry.x1, a.geometry.y1, a.geometry.x2, a.geometry.y2]
     elif isinstance(a.geometry, Polygon):
-        d["points"] = [[p[0], p[1]] for p in a.geometry.points]
+        d["rings"] = [[[p[0], p[1]] for p in ring] for ring in a.geometry.rings]
+    elif isinstance(a.geometry, Point):
+        d["point"] = [a.geometry.x, a.geometry.y]
     if a.score is not None:
         d["score"] = a.score
     return d
@@ -100,12 +118,16 @@ def save_annotations(
     :mod:`tcip_mcp.dataset_layout`); ``date`` is derived from the image path when not given. Pass
     ``path`` to write to an explicit location instead. Each annotation is a dict carrying a
     **subject** (required — refused when absent, since a name-based label is undecodable without it),
-    an optional geometry (``bbox`` = [x1,y1,x2,y2] or ``points`` = [[x,y],...], or neither for an
-    image-level label), and optional ``attributes`` (attribute name -> value name).
+    an optional geometry (``bbox`` = [x1,y1,x2,y2], ``points`` = [[x,y],...] for a single-ring polygon
+    contour, ``rings`` = [[[x,y],...], ...] for a multi-ring polygon (an occlusion-split mask —
+    e.g. ``segment_prompt``'s own output, whose ring vertices are ``{x,y}`` dicts and are accepted
+    the same as ``[x,y]`` pairs), ``point`` = [x,y] for a single prompt/keypoint location, or none of
+    them for an image-level label), and optional ``attributes`` (attribute name -> value name).
 
     Args:
         image_path: Absolute path to the image file.
-        annotations: List of ``{subject, bbox?/points?, attributes?}`` dicts (pixel coords).
+        annotations: List of ``{subject, bbox?/points?/rings?/point?, attributes?}`` dicts (pixel
+            coords).
         fmt: Output format — 'json' (canonical per-image, default) or 'coco'.
         date: Capture date; derived from the image path when omitted.
         path: Explicit label path (overrides the canonical location).
@@ -134,17 +156,32 @@ def save_annotations(
 
     typed: list[Annotation] = []
     for a in anns_in:
-        geometry: BBox | Polygon | None = None
+        geometry: BBox | Polygon | Point | None = None
         # Non-empty points first, matching the web converters (labelSerde `a.points && a.points.length`,
         # routes/annotate `if ap.points`): a payload carrying both never drops the polygon (bbox winning
         # would collapse a polygon to a box-only record — the polygon is the source of truth, its box is
         # derived on write). An empty points list falls through to bbox, so a box payload is not silently
         # lost to a degenerate Polygon([]).
-        if a.get("points"):
-            geometry = Polygon([(float(pt[0]), float(pt[1])) for pt in a["points"]])
+        if a.get("rings"):
+            # Multi-ring polygon (an occlusion-split mask reviewed and accepted from segment_prompt,
+            # or a re-save of an annotation read back via _ann_dict's own "rings" key) — checked
+            # before "points" since a rings-carrying payload is never less complete than a
+            # single-ring one.
+            geometry = Polygon(rings=[[_coerce_xy(pt) for pt in ring] for ring in a["rings"]])
+        elif a.get("points"):
+            # save_annotations' own single-ring input contract ("points": [[x,y],...]) — an
+            # agent/human authors one contour per call this way. A caller with more than one ring
+            # (occlusion-split) uses "rings" above instead.
+            geometry = Polygon(rings=[[_coerce_xy(pt) for pt in a["points"]]])
         elif a.get("bbox") is not None:
             x1, y1, x2, y2 = (float(v) for v in a["bbox"])
             geometry = BBox(x1, y1, x2, y2)
+        elif a.get("point") is not None:
+            # A single [x, y] — a placed prompt or a keypoint. Singular key, deliberately distinct
+            # from `points` (a polygon's contour): the two are different geometries, and letting one
+            # spelling serve both would make a one-vertex polygon and a point indistinguishable.
+            px, py = (float(v) for v in a["point"])
+            geometry = Point(px, py)
         cb = a.get("created_by", created_by)
         typed.append(Annotation(
             subject=str(a["subject"]), geometry=geometry,
@@ -197,7 +234,9 @@ def _add_geom(d: dict, a: Annotation) -> None:
         b = a.geometry
         d["box"] = [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
     elif isinstance(a.geometry, Polygon):
-        d["polygon"] = [[pt[0], pt[1]] for pt in a.geometry.points]
+        d["polygon_rings"] = [[[pt[0], pt[1]] for pt in ring] for ring in a.geometry.rings]
+    elif isinstance(a.geometry, Point):
+        d["point"] = [a.geometry.x, a.geometry.y]
 
 
 def _detection_breakdown(matches: dict, gt: list[Annotation], preds: list[Annotation]) -> list[dict]:
@@ -322,7 +361,12 @@ def _evaluate_folder(
     global_names: list[str] = []
     for (_it, _rec, (gt, preds), _w, _h, _img) in collected:
         for a in (*gt, *preds):
-            if a.geometry is not None and a.subject not in global_names:
+            # Same membership records_from_annotation applies when it builds the records this map
+            # keys: a geometry-less label and a Point produce no scorable box, so neither may mint a
+            # COCO category that no annotation ever lands in.
+            if a.geometry is None or isinstance(a.geometry, Point):
+                continue
+            if a.subject not in global_names:
                 global_names.append(a.subject)
     name_id = {n: i + 1 for i, n in enumerate(global_names)}
     records = [records_from_annotation(gt, preds, width=w, height=h,
@@ -411,21 +455,33 @@ def segment_prompt(
     points: list[dict] | None = None,
     box: dict | None = None,
     grid_cells: list[str] | None = None,
+    cols: int | None = None,
+    rows: int | None = None,
     engine: str = "sam",
     engine_params: dict | None = None,
 ) -> dict:
-    """Turn an interactive prompt (points, a box, or grid cells) into a mask polygon, via an engine.
+    """Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine.
+
+    Returns ``rings`` — the mask's contours as ``[[{x, y}, ...], ...]``, one ring per connected region.
+    An occlusion-split object (a catkin behind a branch) segments to more than one region and all of
+    them come back; keeping only the largest would report part of an object as the whole of it.
 
     Provide point prompts, a box prompt, OR grid-cell references (e.g. ['B3', 'D5'], converted to
-    foreground point prompts via the 8-col x 6-row grid overlay). The segmentation method is a
-    capability, not a hardcode: 'sam' is the built-in SAM2 reference engine; the agent can bring
-    another prompted-segmentation engine behind the same seam (a dotted 'module:factory').
+    foreground point prompts). A cell name means nothing without the grid that produced it, so
+    ``grid_cells`` requires ``cols``/``rows`` — the same dimensions the overlay whose cells are being
+    named was rendered with (``overlay_reference_grid`` echoes its ``cols``/``rows`` back for exactly
+    this). There is no default grid to fall back on: guessing one resolves 'B3' to a pixel in a grid
+    nobody looked at. The segmentation method is a capability, not a hardcode: 'sam' is the built-in
+    SAM2 reference engine; the agent can bring another prompted-segmentation engine behind the same
+    seam (a dotted 'module:factory').
 
     Args:
         image_path: Absolute path to the image file.
         points: List of point prompts, each with x, y, and label (1=fg, 0=bg).
         box: Box prompt with x1, y1, x2, y2 in pixel coordinates.
         grid_cells: List of grid cell references like ['B3', 'D5']. Each is a foreground point.
+        cols: Columns of the grid the cells were read off. Required with ``grid_cells``.
+        rows: Rows of the grid the cells were read off. Required with ``grid_cells``.
         engine: Segmentation engine — 'sam' (built-in) or a dotted 'module:factory' the agent brings.
         engine_params: Engine-specific knobs forwarded to the engine (e.g. SAM's model_type).
     """
@@ -437,12 +493,16 @@ def segment_prompt(
         return {"error": "Provide either points, box, or grid_cells prompt"}
 
     if grid_cells is not None:
+        if cols is None or rows is None:
+            return {"error": "grid_cells requires cols and rows — the dimensions of the grid the "
+                             "cells were read off (overlay_reference_grid returns them). Without "
+                             "them a cell name resolves against a grid nobody rendered."}
         from tcip_annotation.sam_wrapper import grid_to_pixel
         w, h = get_image_dimensions(image_path)
         points = []
         for cell in grid_cells:
             try:
-                cx, cy = grid_to_pixel(cell, w, h)
+                cx, cy = grid_to_pixel(cell, w, h, cols=cols, rows=rows)
                 points.append({"x": cx, "y": cy, "label": 1})
             except ValueError as e:
                 return {"error": f"Invalid grid cell {cell!r}: {e}"}
@@ -455,7 +515,7 @@ def segment_prompt(
         return {"error": str(e)}
 
     try:
-        polygon = proposer.segment(image_path, points=points, box=box, **(engine_params or {}))
+        rings = proposer.segment(image_path, points=points, box=box, **(engine_params or {}))
     except ImportError as e:
         return {"error": f"segmentation engine dependencies not available: {e}"}
     except FileNotFoundError as e:
@@ -463,12 +523,13 @@ def segment_prompt(
     except Exception as e:
         return {"error": f"segmentation failed: {e}"}
 
-    if not polygon:
-        return {"error": "engine produced empty mask", "polygon": []}
+    if not rings:
+        return {"error": "engine produced empty mask", "rings": []}
 
     return {
-        "polygon": [{"x": x, "y": y} for x, y in polygon],
-        "vertex_count": len(polygon),
+        "rings": [[{"x": x, "y": y} for x, y in ring] for ring in rings],
+        "ring_count": len(rings),
+        "vertex_count": sum(len(ring) for ring in rings),
         "engine": engine,
     }
 
@@ -535,7 +596,8 @@ def focus(
         date: Capture-date bucket (e.g. "2026-03-02").
         image_index: Index into the date's sorted image list. Default: first frame labeled for
             ``subject`` (annotate) / with a prediction of ``subject`` for the model (review).
-        mode: Annotate only — "box" or "polygon" (default: inferred from the labels on that frame).
+        mode: Annotate only — "box", "polygon" or "point" (default: inferred from the geometry the
+            labels on that frame actually carry).
         model_name: Review only (required when ``tab='review'``) — the model whose predictions.
         detection_idx: Review only — which detection to center in the Review navigator.
         filter_type: Review only — "all" | "tp" | "fp" | "fn" match filter.
@@ -559,13 +621,27 @@ _IMG_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
 
 
 def _subject_task(anns: list[Annotation], subject: str) -> str | None:
-    """"segment" if ``subject`` has a polygon here, "detect" if it has a box, else None."""
+    """"segment" if ``subject`` has a polygon here, "detect" if it has a box, "point" if its only
+    geometry here is a point, else None (no geometry-bearing annotation of ``subject``).
+
+    ``"point"`` is a real answer, not a box: callers use a non-``None`` return as "this frame is
+    annotated for the subject", so collapsing a point-only frame to ``None`` would hide it from the
+    Annotate tab's own frame count, while calling it ``"detect"`` would claim a box nobody drew.
+    """
     scoped = [a for a in anns if a.subject == subject and a.geometry is not None]
     if any(isinstance(a.geometry, Polygon) for a in scoped):
         return "segment"
-    if scoped:
+    if any(isinstance(a.geometry, BBox) for a in scoped):
         return "detect"
+    if scoped:
+        return "point"
     return None
+
+
+# The GUI drawing mode each resolved task is edited in — the frontend's own Mode union
+# ("box" | "polygon" | "point", store/types.ts). A point-only frame lands in point mode: sending it
+# in box mode would hand the human a tool that cannot edit what is on the canvas.
+_TASK_MODE = {"segment": "polygon", "detect": "box", "point": "point"}
 
 
 def _focus_annotate(
@@ -608,9 +684,9 @@ def _focus_annotate(
 
     resolved_task = _task(Path(images[image_index]).stem)
     if mode is None:
-        mode = "polygon" if resolved_task == "segment" else "box"
-    if mode not in ("box", "polygon"):
-        return {"error": f"mode must be 'box' or 'polygon', got {mode!r}"}
+        mode = _TASK_MODE.get(resolved_task or "", "box")
+    if mode not in ("box", "polygon", "point"):
+        return {"error": f"mode must be 'box', 'polygon' or 'point', got {mode!r}"}
 
     payload = {
         "project_root": project_root, "dataset_root": dataset_root,
@@ -794,7 +870,7 @@ def stage_proposals(
         for (subject, conf, cx, cy, w, h) in norm_boxes
     ] + [
         Annotation(subject=subject,
-                   geometry=Polygon([(x * img_w, y * img_h) for x, y in pts]),
+                   geometry=Polygon(rings=[[(x * img_w, y * img_h) for x, y in pts]]),
                    score=conf, created_by=model_name, created_at=created_at)
         for (subject, conf, pts) in norm_polys
     ]
