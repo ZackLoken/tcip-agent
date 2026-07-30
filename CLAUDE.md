@@ -98,6 +98,14 @@ A claim about *purpose* ("X exists as a fallback for Y") is checked by testing i
 running the code. This is the single most repeated failure here: every wrong claim shipped felt like
 settled reasoning at the time.
 
+**A domain or workflow fact generalizes only when confirmed representative, not from one example.**
+One docstring's illustrative number, one sample project's device, one dataset's capture setup —
+describes that one instance, not the platform's general case. The imagery this platform ingests spans
+many vendors and capture rigs (phone, DSLR, GoPro, drone, and more) and many identity/geolocation
+workflows (GNSS+sequence, barcode/QR, others); do not infer "how the platform's imagery generally
+works" from a single code comment or one project's setup. Ask, or check with the domain expert, before
+generalizing — same failure mode as the rule above, aimed at real-world workflows instead of code.
+
 **A test that guards a fix must be observed failing without it.** Extract the baseline and run the
 new test against it (`python scripts/prove_test_fails_before.py <testfile> -k <expr>`) — the baseline
 is the commit immediately before the change, not the phase's start. A test that passes there guards
@@ -178,6 +186,12 @@ snapshots — is a global rule now; see global `CLAUDE.md`, not restated here.)
 - **A rail must admit valid work, not only reject invalid work.** Every refusal ships with a test
   proving a legitimate call still succeeds. When a change's theme is "stop being permissive", the
   predictable failure is refusing things that were always fine.
+- **No silent fallback when required information is missing — require it explicitly, or refuse.** A
+  guessed/best-effort value that can reach a delivered result (a filename-parsed plant ID standing in
+  for real identity resolution, or anything shaped like it) is a fabrication with a warning log
+  attached, not a mitigation. When a required identity or measurement input isn't supplied, raise and
+  name the real primitive the caller should use instead — never estimate it from an adjacent signal
+  like a filename. Science does not guess.
 
 ## Pipelines & models
 
