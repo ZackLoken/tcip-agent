@@ -117,6 +117,33 @@ def create_experiment(
     }
 
 
+def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite ``config.json`` with the config actually launched, but only while the experiment is
+    still pristine (state == "created" and no epochs logged yet) — K12 finding 3.
+
+    A pre-created experiment's ``config.json`` is written once, at ``create_experiment`` time,
+    before effective tiling geometry and the training seed are resolved (see
+    ``training_tools.launch_training``). Reusing that id via ``_ensure_experiment``'s pristine-reuse
+    branch would otherwise ship a permanently stale snapshot describing a config that was never
+    trained. Refuses (and audits the refusal) once the record is no longer pristine — a "created"
+    record that already has metrics rows must stay protected too, so this checks the same full
+    predicate ``_ensure_experiment`` uses, not just the terminal-state lock alone.
+    """
+    d = _exp_dir(experiment_id)
+    if not d.exists():
+        return {"error": f"Experiment not found: {experiment_id}"}
+    metrics_path = d / "metrics.jsonl"
+    has_metrics = metrics_path.is_file() and metrics_path.stat().st_size > 0
+    state = _current_state(d)
+    if state != "created" or has_metrics:
+        _audit_refused(experiment_id, "overwrite_config_if_pristine",
+                       {"state": state, "has_metrics": has_metrics})
+        return {"error": f"Experiment {experiment_id} is no longer pristine; refusing to "
+                         f"overwrite its config.json."}
+    atomic_write_json(d / "config.json", config)
+    return {"experiment_id": experiment_id, "overwritten": True}
+
+
 def update_status(experiment_id: str, state: str) -> dict[str, Any]:
     """Update experiment state (created → running → completed | failed)."""
     d = _exp_dir(experiment_id)
