@@ -15,7 +15,7 @@
  * rule) — so the server-side render (capture_live_canvas) is faithful by construction.
  */
 
-import { polygonBbox } from "@/lib/polygonGeometry";
+import { ringsBbox } from "@/lib/polygonGeometry";
 import type { ReviewColors } from "@/lib/reviewColors";
 import {
   annotationGeometry,
@@ -23,7 +23,7 @@ import {
   detPredAnnotation,
   type ReviewGeom,
 } from "@/lib/reviewGeometry";
-import type { Box, MatchesResponse, PolygonShape } from "@/store/types";
+import type { Box, MatchesResponse, PointShape, PolygonShape } from "@/store/types";
 
 export interface CanvasViewport {
   x: number;
@@ -33,8 +33,12 @@ export interface CanvasViewport {
   scale: number;
 }
 
+/** One drawn path. A multi-ring polygon annotation contributes one shape per ring (the render
+ *  contract `render_canvas_state` reads is one path per entry), all sharing the instance's colour /
+ *  dash / tag, with the label on the first so the instance is still named once. A `point` carries a
+ *  single coordinate in `points` and is rendered as a mark, never as a path or a derived box. */
 export interface CanvasShape {
-  kind: "box" | "polygon" | "polyline";
+  kind: "box" | "polygon" | "polyline" | "point";
   xyxy?: [number, number, number, number];
   points?: [number, number][];
   color: string;
@@ -99,17 +103,35 @@ export function measureCanvasHost(): { w: number; h: number } | null {
   return r.width > 1 && r.height > 1 ? { w: r.width, h: r.height } : null;
 }
 
+/** Whether a placed point draws in the current mode: in point mode, every point of the active
+ *  subject; in any mode, the selected one (a selection survives a mode switch, so the shape being
+ *  inspected stays on screen — the same rule box mode applies to the selected polygon). The
+ *  Annotate canvas imports this rather than restating it, so the agent's mirror and the GUI cannot
+ *  disagree about which points are on screen. */
+export function pointShapeVisible(args: {
+  mode: string;
+  subject: string;
+  activeSubject: string;
+  selected: boolean;
+}): boolean {
+  if (args.selected) return true;
+  return args.mode === "point" && args.subject === args.activeSubject;
+}
+
 /** Annotate-tab shapes, mirroring the canvas render rules exactly: the labels toggle hides
  *  everything; polygon mode shows polygons of the active subject plus the selection (outline
  *  only, like the GUI); box mode shows the active-subject boxes plus the selected polygon and the
- *  in-flight rubber-band box. Each shape's label is its subject name; its colour is GUI-local. */
+ *  in-flight rubber-band box; points follow pointShapeVisible. Each shape's label is its subject
+ *  name; its colour is GUI-local. */
 export function buildAnnotateShapes(args: {
   boxes: Box[];
   polygons: PolygonShape[];
+  points?: PointShape[];
   currentPolygon: [number, number][];
   drawingBox?: { x1: number; y1: number; x2: number; y2: number } | null;
   selectedPolygonIdx: number | null;
   selectedBoxIdx?: number | null;
+  selectedPointIdx?: number | null;
   mode: string;
   activeSubject: string;
   visible: boolean;
@@ -119,14 +141,41 @@ export function buildAnnotateShapes(args: {
 
   const shapes: CanvasShape[] = [];
   const pushPolygon = (p: PolygonShape, selected: boolean) => {
-    shapes.push({
-      kind: "polygon",
-      points: rPts(p.points),
-      color: selected ? "#00BFFF" : args.colorFor(p.subject),
-      label: p.subject,
-      tag: "gt",
-      created_by: p.created_by ?? null,
-      accepted_by: p.accepted_by ?? null,
+    p.rings.forEach((ring, i) => {
+      shapes.push({
+        kind: "polygon",
+        points: rPts(ring),
+        color: selected ? "#00BFFF" : args.colorFor(p.subject),
+        label: i === 0 ? p.subject : undefined,
+        tag: "gt",
+        created_by: p.created_by ?? null,
+        accepted_by: p.accepted_by ?? null,
+      });
+    });
+  };
+  // A point is one mark at one coordinate: one shape entry carrying a single position, never a
+  // path and never a derived box (a fabricated box would read downstream as a real detection).
+  const pushPoints = () => {
+    (args.points ?? []).forEach((p, i) => {
+      const selected = i === (args.selectedPointIdx ?? null);
+      if (
+        !pointShapeVisible({
+          mode: args.mode,
+          subject: p.subject,
+          activeSubject: args.activeSubject,
+          selected,
+        })
+      )
+        return;
+      shapes.push({
+        kind: "point",
+        points: [[r1(p.x), r1(p.y)]],
+        color: selected ? "#00BFFF" : args.colorFor(p.subject),
+        label: p.subject,
+        tag: "gt",
+        created_by: p.created_by ?? null,
+        accepted_by: p.accepted_by ?? null,
+      });
     });
   };
 
@@ -146,12 +195,15 @@ export function buildAnnotateShapes(args: {
         tag: "in_progress",
       });
     }
+    pushPoints();
     return shapes;
   }
 
-  // Box mode: the active subject's editable boxes render solid.
+  // Box mode: the active subject's editable boxes render solid. Point mode draws no box or
+  // derived box — only its own points and the selection carried in from another mode.
+  const boxMode = args.mode === "box";
   args.boxes.forEach((b, i) => {
-    if (b.subject !== args.activeSubject) return;
+    if (!boxMode || b.subject !== args.activeSubject) return;
     const selected = i === (args.selectedBoxIdx ?? null);
     shapes.push({
       kind: "box",
@@ -164,13 +216,13 @@ export function buildAnnotateShapes(args: {
     });
   });
   // ...plus each active-subject polygon's read-only derived box, mirroring the canvas so the capture
-  // stays faithful. Derived from polygonBbox here — the same min/max the loader and COCO export
-  // re-derive — never a stored box, so it can't be double-counted as its own annotation. Solid like
-  // every committed shape (dashed is reserved for transient/under-review shapes); how to signal
-  // derived-vs-editable is deferred GUI-polish (see the plan).
+  // stays faithful. Derived from ringsBbox here — the same min/max the loader and COCO export
+  // re-derive, over every ring — never a stored box, so it can't be double-counted as its own
+  // annotation. Solid like every committed shape (dashed is reserved for transient/under-review
+  // shapes); how to signal derived-vs-editable is deferred GUI-polish (see the plan).
   args.polygons.forEach((p) => {
-    if (p.subject !== args.activeSubject) return;
-    const [x1, y1, x2, y2] = polygonBbox(p.points);
+    if (!boxMode || p.subject !== args.activeSubject) return;
+    const [x1, y1, x2, y2] = ringsBbox(p.rings);
     shapes.push({
       kind: "box",
       xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
@@ -181,7 +233,7 @@ export function buildAnnotateShapes(args: {
       accepted_by: p.accepted_by ?? null,
     });
   });
-  // Box mode still shows the selected polygon (the shape being inspected).
+  // The other modes still show the selected polygon (the shape being inspected).
   const sel = args.selectedPolygonIdx;
   if (sel !== null && args.polygons[sel]) pushPolygon(args.polygons[sel], true);
   if (args.drawingBox) {
@@ -199,6 +251,7 @@ export function buildAnnotateShapes(args: {
       tag: "in_progress",
     });
   }
+  pushPoints();
   return shapes;
 }
 
@@ -243,15 +296,27 @@ export function buildReviewShapes(
           label,
           tag: opts.tag,
         });
-      } else {
+      } else if (geom.kind === "point") {
+        // A point annotation travels as a point: the agent sees the location that is on screen,
+        // and no box is invented for it (a box here would be a fabricated detection target).
         out.push({
-          kind: "polygon",
-          points: rPts(geom.points),
+          kind: "point",
+          points: [[r1(geom.point[0]), r1(geom.point[1])]],
           color,
-          dashed: opts.dashed,
-          fill: opts.fill,
           label,
           tag: opts.tag,
+        });
+      } else {
+        geom.rings.forEach((ring, i) => {
+          out.push({
+            kind: "polygon",
+            points: rPts(ring),
+            color,
+            dashed: opts.dashed,
+            fill: opts.fill,
+            label: i === 0 ? label : undefined,
+            tag: opts.tag,
+          });
         });
       }
     };
