@@ -130,8 +130,11 @@ high-conf proposals survive breeder review.
 | `resolve_proposer(engine)` / `available_engines()` | resolve a built-in name **or** a dotted `module:factory`; list the built-ins. |
 | `SamProposer` (`"sam"`) | the built-in SAM2 reference engine; its stability / predicted-IoU signals ride under `engine_meta`. SAM ships as the runnable example; no engine is privileged. |
 
-Candidates use a neutral schema (`candidate_id` / `bbox` / `area` / `polygon` / `score` / `engine`
-/ `engine_meta`) so the shared review/staging path stays method-agnostic.
+Candidates use a neutral schema (`candidate_id` / `bbox` / `area` / `rings` / `score` / `engine`
+/ `engine_meta`) so the shared review/staging path stays method-agnostic. `rings` is `Polygon.rings`
+(one contour per connected region), extracted by `tcip_annotation.mask_contours.mask_to_polygon_rings`
+— the same extractor prediction export uses, so proposal-derived GT and model predictions describe an
+occlusion-split object identically.
 
 ## Active learning — the scorer registry (`pipelines.active_learning.scorer`)
 
