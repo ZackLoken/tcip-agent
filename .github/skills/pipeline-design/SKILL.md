@@ -138,10 +138,15 @@ literature for a technique that fits — see the `cv-research` skill for the res
 loop (and the rule that a new method must beat the baseline on the *measured phenotype* before you
 trust it).
 
-**Dimensional traits — mask geometry is a supported measurement.** For area / length / width of a
-segmented organ, `pipelines.measurement.mask_geometry` (also `ctx.mask_geometry`) computes those on
-a *validated* mask in pixels, and in mm when given a scale — geometry on a validated mask is a valid
-measurement, subject to the same validate-before-you-trust rule as any other.
+**Dimensional traits — mask geometry is a supported measurement.** `pipelines.measurement.mask_geometry`
+(also `ctx.mask_geometry`) computes area, perimeter, centroid and the extents along the mask's own PCA
+principal/secondary axes on a *validated* mask, in pixels and in the caller's stated unit when given a
+scale — geometry on a validated mask is a valid measurement, subject to the same
+validate-before-you-trust rule as any other. An axis extent is a straight chord of the mask's
+footprint, not an anatomical span: it answers the trait's dimension only when the structure is
+straight and its visual long axis is the statistically dominant one. When the definition calls for a
+span a chord cannot represent (an arc length, a skeleton path, a landmark-to-landmark distance),
+compose that computation on the same validated mask instead of relabeling an extent as it.
 
 ## Multi-phase pipelines
 
@@ -158,11 +163,32 @@ tiling persistence) against a `model_source` builder; run each stage's model wit
 stage_a = launch_training(config={"model_source": {...}, "data": {...}})
 stage_b = launch_training(config={"model_source": {...}, "data": {...}})
 run_inference(model_path=stage_b_best, images_dir=images_dir, output_dir="stage_b_preds")
+
+# aggregate_per_plant never guesses plant identity from a filename — supply a real plant_id_fn.
+# build_plant_mapping (a GNSS + capture-sequence resolver) is the real mechanism; load its
+# persisted mapping and look each image up by stem.
+from pathlib import Path
+from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
+
+mapping = load_mapping(Path(plant_mapping_json))  # from a prior build_plant_mapping call
+by_stem = {a.stem: a for assignments in mapping.values() for a in assignments}
+
+def plant_id_fn(image_path: str) -> str | None:
+    a = by_stem.get(Path(image_path).stem)
+    return a.plot_name if a else None
+
+image_results = [
+    {**r, "image": r["image"],
+     "plant_id_source": (a := by_stem.get(Path(r["image"]).stem)) and a.source,
+     "plant_id_distance_m": a and a.distance_m}
+    for r in read_stage_b_preds_as_image_results("stage_b_preds")  # your own per-image count reader
+]
+
 # The final CSV is a phenotype delivery door: it refuses a bare write. Pass pred_dirs so the count
 # operating point's validity is read from each bucket's operating_point.json (or measurement_validated
 # for a continuous/ordinal trait), or acknowledge_unvalidated=True for a flagged provisional CSV.
-export_aggregated_csv(aggregate_per_plant("stage_b_preds", plant_mapping), "phenotype_csv",
-                      pred_dirs=["stage_b_preds"])
+summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
+export_aggregated_csv(summaries, "phenotype_csv", trait_name="<trait>", pred_dirs=["stage_b_preds"])
 ```
 
 How many stages there are, and what each one does, is your decomposition to derive — the chaining
