@@ -264,14 +264,24 @@ def test_save_gt_writes_merged_file(engine: ReviewEngine, ctx: ReviewContext, tm
     # One merged per-image file holds every subject — a box and a polygon together.
     ctx.gt = [
         Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200)),
-        Annotation(subject="leaf", geometry=Polygon([(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)])),
+        Annotation(subject="leaf", geometry=Polygon([[(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]])),
+        # An accepted occlusion-split prediction keeps both of its contours through the GT write.
+        Annotation(subject="nut", geometry=Polygon([
+            [(30.0, 30.0), (40.0, 30.0), (40.0, 40.0)],
+            [(60.0, 30.0), (70.0, 30.0), (70.0, 40.0)],
+        ])),
     ]
     path = tmp_path / "out" / "IMG.json"
     ok = engine.save_gt(ctx, path=str(path))
     assert ok
     read_back = read_annotations(str(path))
-    assert len(read_back) == 2
+    assert len(read_back) == 3
     box_ann = next(a for a in read_back if isinstance(a.geometry, BBox))
     assert box_ann.subject == "catkin"
-    poly_ann = next(a for a in read_back if isinstance(a.geometry, Polygon))
-    assert poly_ann.subject == "leaf"
+    poly_ann = next(a for a in read_back if a.subject == "leaf")
+    assert poly_ann.geometry.rings == [[(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]]
+    multi_ann = next(a for a in read_back if a.subject == "nut")
+    assert multi_ann.geometry.rings == [
+        [(30.0, 30.0), (40.0, 30.0), (40.0, 40.0)],
+        [(60.0, 30.0), (70.0, 30.0), (70.0, 40.0)],
+    ]
