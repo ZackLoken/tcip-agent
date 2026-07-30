@@ -17,6 +17,11 @@ Public API:
     auto_mask(image_path, model_type, ...)
     grid_to_pixel(cell, img_w, img_h, cols, rows)
 
+The prompted predictors return polygon **rings** (a mask with two disjoint regions is two rings),
+via the shared :func:`tcip_annotation.mask_contours.mask_to_polygon_rings` — the same extractor the
+model-prediction export path uses, so SAM-assisted GT and a model's prediction describe an
+occlusion-split object identically.
+
 `model_type` values: "hiera_t", "hiera_s", "hiera_b+", "hiera_l".
 """
 
@@ -27,6 +32,8 @@ import logging
 import threading
 from pathlib import Path
 from typing import Any
+
+from tcip_annotation.mask_contours import mask_to_polygon_rings
 
 logger = logging.getLogger(__name__)
 
@@ -125,30 +132,6 @@ def _set_image(predictor: Any, image_path: str) -> None:
     logger.info("SAM2 image embedding computed for %s", image_path)
 
 
-def mask_to_polygon(mask: Any) -> list[tuple[float, float]]:
-    """Convert a binary mask to a single polygon (largest contour).
-
-    Args:
-        mask: 2D boolean or uint8 array.
-
-    Returns:
-        List of (x, y) tuples in pixel coordinates.
-    """
-    import cv2
-    import numpy as np
-    mask_uint8 = (np.asarray(mask).astype(np.uint8)) * 255
-    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)
-    if not contours:
-        return []
-
-    largest = max(contours, key=cv2.contourArea)
-    epsilon = 0.5 * cv2.arcLength(largest, True) / max(len(largest), 1)
-    epsilon = max(epsilon, 1.0)
-    approx = cv2.approxPolyDP(largest, epsilon, True)
-
-    return [(float(pt[0][0]), float(pt[0][1])) for pt in approx]
-
-
 @_serialized
 def predict_from_point(
     image_path: str,
@@ -156,7 +139,7 @@ def predict_from_point(
     y: float,
     label: int = 1,
     model_type: str = "hiera_b+",
-) -> list[tuple[float, float]]:
+) -> list[list[tuple[float, float]]]:
     """Run SAM2 prediction from a single point prompt.
 
     Args:
@@ -167,7 +150,7 @@ def predict_from_point(
         model_type: hiera_t, hiera_s, hiera_b+, or hiera_l.
 
     Returns:
-        List of (x, y) polygon vertices in pixel coordinates.
+        Polygon rings — one list of (x, y) pixel vertices per connected region of the mask.
     """
     import numpy as np
     predictor = _get_predictor(model_type)
@@ -179,7 +162,7 @@ def predict_from_point(
         multimask_output=True,
     )
     best_idx = int(np.argmax(scores))
-    return mask_to_polygon(masks[best_idx])
+    return mask_to_polygon_rings(masks[best_idx])
 
 
 @_serialized
@@ -188,8 +171,8 @@ def predict_from_points(
     points: list[tuple[float, float]],
     labels: list[int],
     model_type: str = "hiera_b+",
-) -> list[tuple[float, float]]:
-    """Run SAM2 prediction from multiple point prompts."""
+) -> list[list[tuple[float, float]]]:
+    """Run SAM2 prediction from multiple point prompts (returns polygon rings)."""
     import numpy as np
     predictor = _get_predictor(model_type)
     _set_image(predictor, image_path)
@@ -200,7 +183,7 @@ def predict_from_points(
         multimask_output=True,
     )
     best_idx = int(np.argmax(scores))
-    return mask_to_polygon(masks[best_idx])
+    return mask_to_polygon_rings(masks[best_idx])
 
 
 @_serialized
@@ -211,8 +194,8 @@ def predict_from_box(
     x2: float,
     y2: float,
     model_type: str = "hiera_b+",
-) -> list[tuple[float, float]]:
-    """Run SAM2 prediction from a box prompt."""
+) -> list[list[tuple[float, float]]]:
+    """Run SAM2 prediction from a box prompt (returns polygon rings)."""
     import numpy as np
     predictor = _get_predictor(model_type)
     _set_image(predictor, image_path)
@@ -222,7 +205,7 @@ def predict_from_box(
         multimask_output=True,
     )
     best_idx = int(np.argmax(scores))
-    return mask_to_polygon(masks[best_idx])
+    return mask_to_polygon_rings(masks[best_idx])
 
 
 @_serialized
@@ -242,7 +225,8 @@ def auto_mask(
       - area: int (pixel count)
       - stability_score: float
       - predicted_iou: float
-      - polygon: list of (x, y) tuples in pixel coordinates
+      - rings: polygon rings, one list of (x, y) pixel tuples per connected region of the mask
+        (an occlusion-split object carries more than one; none is dropped)
 
     Args:
         image_path: Absolute path to the image.
@@ -280,8 +264,8 @@ def auto_mask(
 
     candidates: list[dict] = []
     for i, m in enumerate(masks):
-        polygon = mask_to_polygon(m["segmentation"])
-        if len(polygon) < 3:
+        rings = mask_to_polygon_rings(m["segmentation"])
+        if not rings:
             continue
         x, y, w, h = m["bbox"]
         candidates.append({
@@ -290,7 +274,7 @@ def auto_mask(
             "area": int(m["area"]),
             "stability_score": float(m["stability_score"]),
             "predicted_iou": float(m["predicted_iou"]),
-            "polygon": polygon,
+            "rings": rings,
         })
 
     logger.info("Auto-mask generated %d candidates for %s", len(candidates), image_path)
