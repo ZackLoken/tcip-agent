@@ -171,8 +171,9 @@ def render_segmentations(
 
     Args:
         image_path: Path to the source image.
-        polygons: List of dicts with 'points' (list of (x,y) pixel tuples)
-                  and 'class_id'.
+        polygons: List of dicts with 'rings' (list of rings, each a list of (x,y) pixel tuples —
+                  an occlusion-split instance is more than one ring, drawn as one instance) and
+                  'class_id'.
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
         alpha: Fill transparency (0=transparent, 1=opaque).
@@ -190,13 +191,16 @@ def render_segmentations(
     for poly in polygons:
         cid = poly.get("class_id", 0)
         color = _color_for_class(cid)
-        pts = [(x * sx, y * sy) for x, y in poly["points"]]
-        if len(pts) >= 3:
-            draw.polygon(pts, fill=color + (int(255 * alpha),), outline=color)
-
-            # Label at centroid
-            cx = sum(p[0] for p in pts) / len(pts)
-            cy = sum(p[1] for p in pts) / len(pts)
+        all_pts: list[tuple[float, float]] = []
+        for ring in poly.get("rings", []):
+            pts = [(x * sx, y * sy) for x, y in ring]
+            if len(pts) >= 3:
+                draw.polygon(pts, fill=color + (int(255 * alpha),), outline=color)
+                all_pts.extend(pts)
+        if all_pts:
+            # Label once per instance, at the centroid of every drawn ring combined.
+            cx = sum(p[0] for p in all_pts) / len(all_pts)
+            cy = sum(p[1] for p in all_pts) / len(all_pts)
             label = class_names.get(cid, str(cid))
             draw.text((cx, cy), label, fill=(255, 255, 255), font=font)
 
@@ -393,10 +397,11 @@ def render_candidates(
 
     Each candidate is drawn as a semi-transparent colored polygon with a
     large numbered label. Colors cycle through the palette. Engine-agnostic.
+    Every ring of a candidate is drawn — an occlusion-split proposal must look split, not whole.
 
     Args:
         image_path: Path to the source image.
-        candidates: Neutral candidate dicts, each with candidate_id, bbox, polygon, area, score
+        candidates: Neutral candidate dicts, each with candidate_id, bbox, rings, area, score
             (SAM populates these via its proposer adapter).
         output_path: Where to save. Defaults to .tcip/artifacts/viz/.
         alpha: Fill transparency (0=transparent, 1=opaque).
@@ -421,15 +426,17 @@ def render_candidates(
     for cand in candidates:
         cid = cand["candidate_id"]
         color = COLOR_PALETTE[cid % len(COLOR_PALETTE)]
-        pts = [(x * sx, y * sy) for x, y in cand["polygon"]]
-        if len(pts) < 3:
+        rings = [[(x * sx, y * sy) for x, y in ring] for ring in cand["rings"]]
+        rings = [r for r in rings if len(r) >= 3]
+        if not rings:
             continue
 
-        # Fill polygon
+        # Fill every ring; one number for the candidate as a whole
         fill = color + (int(255 * alpha),)
-        overlay_draw.polygon(pts, fill=fill, outline=color)
+        for ring in rings:
+            overlay_draw.polygon(ring, fill=fill, outline=color)
 
-        # Draw candidate number at centroid
+        pts = [p for ring in rings for p in ring]
         cx = sum(p[0] for p in pts) / len(pts)
         cy = sum(p[1] for p in pts) / len(pts)
 
@@ -575,8 +582,11 @@ def render_canvas_state(
     """Render the live GUI canvas: display-resolved shapes over the (EXIF-upright) image.
 
     ``shapes`` come from the canvas-state push, each already carrying the exact symbology the
-    GUI rendered: ``{kind: box|polygon|polyline, xyxy|points (pixel), color '#hex', fill?,
-    dashed?, label?}`` — so this draws what the annotator sees rather than re-deriving colors.
+    GUI rendered: ``{kind: box|polygon|polyline|point, xyxy|points (pixel), color '#hex', fill?,
+    dashed?, label?}`` — so this draws what the annotator sees rather than re-deriving colors. A
+    ``point`` carries one coordinate in ``points`` and draws as the GUI's mark (a core with radial
+    ticks); it is never widened into a box, which would show the agent an extent the annotation
+    does not claim.
     With ``crop_to_viewport`` and a ``viewport`` (``{x, y, w, h}`` image coords), the output is
     exactly the visible region (full native resolution, downscaled only past ``max_edge``).
     """
@@ -629,6 +639,9 @@ def render_canvas_state(
                 x2, y2 = tx(s["xyxy"][2:4])
                 pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
                 closed = True
+            elif kind == "point" and s.get("points"):
+                pts = [tx(s["points"][0])]
+                closed = False
             elif kind in ("polygon", "polyline") and s.get("points"):
                 pts = [tx(p) for p in s["points"]]
                 if len(pts) < 2:
@@ -647,6 +660,19 @@ def render_canvas_state(
         if s.get("fill") and closed and len(pts) >= 3:
             draw.polygon(pts, fill=color + (38,))
     for s, pts, color, closed in parsed:  # pass 2: outlines + vertices
+        if s.get("kind") == "point":
+            # The GUI's reticle: a core plus four radial ticks converging on the coordinate — the
+            # mark that distinguishes a location from a very small box on the same canvas.
+            px, py = pts[0]
+            core = dot_r * 1.6
+            inner, outer = core * 1.9, core * 3.2
+            draw.ellipse([px - core, py - core, px + core, py + core], fill=color + (255,))
+            for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+                draw.line(
+                    [(px + dx * inner, py + dy * inner), (px + dx * outer, py + dy * outer)],
+                    fill=color + (255,), width=lw,
+                )
+            continue
         _draw_path(draw, pts, color + (255,), lw, bool(s.get("dashed")), closed=closed)
         if s.get("kind") == "polyline":  # in-progress drawing: show the laid vertices
             for px, py in pts:
