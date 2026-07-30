@@ -12,8 +12,8 @@ principle, CLAUDE.md). Per record:
     as the GT path does.
 
 The review-confirmed reference passes the IDENTICAL disjoint-split + count-bias gate the held-out-GT
-path passes; ``resolve_operating_point`` stamps it ``review_confirmed`` (distinct from
-``validated_held_out`` so provenance records which reference validated). The conf-censoring guard in
+path passes; ``resolve_operating_point`` stamps it ``VALIDATED_REVIEW_CONFIRMED`` (distinct from
+``VALIDATED_HELD_OUT`` so provenance records which reference validated). The conf-censoring guard in
 ``resolve_operating_point`` still applies: verdicts whose predictions were staged above the display
 floor are truncated and cannot stamp a validated claim — the reviewed predictions must have been
 generated at a floored conf for the sweep to reach the low-conf tail (the G1 precondition).
@@ -341,10 +341,10 @@ def resolve_operating_point_from_review(
     Splits the reviewed images into a LOCKED, group-aware calibration/holdout split (K1 —
     ``resolve_locked_cal_holdout_split``, keyed by the review reference's own content hash so a
     later call over the same verdicts returns the same split rather than a fresh cut) and hands
-    both to ``resolve_operating_point`` with ``validated_reference='review_confirmed'`` — so the
+    both to ``resolve_operating_point`` with ``validated_reference=VALIDATED_REVIEW_CONFIRMED`` — so the
     SAME disjoint + count-bias + content-overlap + train-disjointness gate decides whether the
     conf is shippable, and the conf-censoring guard still fails a display-floored reference
-    closed. Returns a bundle whose conf is stamped ``review_confirmed`` only if that gate passes,
+    closed. Returns a bundle whose conf is stamped ``VALIDATED_REVIEW_CONFIRMED`` only if that gate passes,
     else ``false``. ``seed``/``holdout_ratio`` only govern the FIRST (locking) draw for this
     reference's identity hash — a later call over the same verdicts returns the locked split
     regardless, and any divergence is surfaced on the bundle's conf sweep, not just logged
@@ -414,7 +414,7 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
     """
     conf = bundle.params.get("conf")
     validated = bool(conf is not None and conf.is_shippable)
-    reference = conf.validated_vs_gt if conf is not None else None
+    reference = conf.validated_against if conf is not None else None
     # Report the derived number without shipping it — the honest raw-read accessor, not .value.
     conf_value = (float(conf.unvalidated_value(acknowledge_unvalidated=True))
                   if conf is not None else None)
