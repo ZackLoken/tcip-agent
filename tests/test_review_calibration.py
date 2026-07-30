@@ -140,8 +140,8 @@ def test_review_confirmed_stamps_when_the_same_gate_passes():
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
     # A disjoint, uncensored, count-bias-passing review reference earns review_confirmed (distinct
-    # from validated_held_out so provenance records WHICH reference validated) and is shippable.
-    assert conf.validated_vs_gt == VALIDATED_REVIEW_CONFIRMED
+    # from VALIDATED_HELD_OUT so provenance records WHICH reference validated) and is shippable.
+    assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
     assert conf.derived_from == "count-unbiased center-match sweep over review verdicts"
     assert conf.dataset_scoped is True
     assert b.is_shippable is True
@@ -154,7 +154,7 @@ def test_review_confirmed_fails_closed_without_a_staged_conf_floor():
     b = resolve_operating_point_from_review(_good_review_state(), "catkin",
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
-    assert conf.validated_vs_gt == VALIDATED_FALSE
+    assert conf.validated_against == VALIDATED_FALSE
     assert b.is_shippable is False
     assert "conf_censored" in conf.sweep["failures"]
 
@@ -165,7 +165,7 @@ def test_conf_censored_review_reference_refused_when_picked_conf_at_or_below_the
     b = resolve_operating_point_from_review(_good_review_state(), "catkin", staged_conf_floor=0.95,
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
-    assert conf.validated_vs_gt == VALIDATED_FALSE
+    assert conf.validated_against == VALIDATED_FALSE
     assert b.is_shippable is False
     assert "conf_censored" in conf.sweep["failures"]
 
@@ -244,7 +244,7 @@ def test_previously_unlabeled_session_with_marked_misses_can_still_validate():
     b = resolve_operating_point_from_review(state, "catkin", staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
-    assert conf.validated_vs_gt == VALIDATED_REVIEW_CONFIRMED
+    assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
     assert "insufficient_adjudication_coverage" not in conf.sweep["failures"]
 
 
@@ -256,7 +256,7 @@ def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly():
     b = resolve_operating_point_from_review(state, "catkin", staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
-    assert conf.validated_vs_gt == VALIDATED_FALSE
+    assert conf.validated_against == VALIDATED_FALSE
     assert conf.sweep["failures"] == ["insufficient_adjudication_coverage"]
 
 
@@ -266,7 +266,7 @@ def test_gt_backed_session_passes_unaffected_by_the_coverage_gate():
     b = resolve_operating_point_from_review(_good_review_state(), "catkin", staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
-    assert conf.validated_vs_gt == VALIDATED_REVIEW_CONFIRMED
+    assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
     assert "insufficient_adjudication_coverage" not in conf.sweep["failures"]
 
 
