@@ -127,3 +127,52 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
     import json
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
     assert obj["subject"] == "catkin"  # resolved via id_map, not the raw index "0"
+
+
+def test_web_worker_forces_untiled_for_instance_seg(tmp_path, monkeypatch):
+    """Round-2 stage-6 finding: an instance_seg checkpoint launched with the GUI's tile
+    checkbox checked used to crash with a raw traceback (tiled inference can't carry masks
+    through the cross-tile merge). The GUI's checkbox has no "unset" state, so — unlike the
+    MCP door's run_inference, which can refuse an explicit tile=True — this door always
+    forces untiled for instance_seg instead, with a warning, rather than ever refusing."""
+    pytest.importorskip("fastapi")
+    from PIL import Image
+
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
+    out_dir = tmp_path / "out"
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    captured = {}
+
+    class FakeInstanceSegPredictor:
+        task = "instance_seg"
+
+        def __init__(self, checkpoint_path=None, **kwargs):
+            pass
+
+        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
+            captured["tile"] = tile
+            return [{"image": p, "width": 100, "height": 100,
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
+                    for p in paths]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeInstanceSegPredictor)
+
+    job = InferenceJob(
+        job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        output_dir=str(out_dir), tile=True, tile_source="explicit", conf=0.25, iou=0.7,
+        slice_hw=(640, 640), overlap=0.2, postprocess="nms",
+    )
+    _worker(job)
+
+    assert job.status == "completed"        # no crash, unlike before the fix
+    assert captured["tile"] is False         # masks survive: forced untiled regardless of the checkbox
+    assert job.tile is False
+    assert job.tile_source == "default"      # platform, not the breeder, decided this run's tiling
+    assert job.warning and "instance_seg" in job.warning
