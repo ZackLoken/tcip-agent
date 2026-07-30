@@ -171,7 +171,7 @@ export const api = {
 
   annotate: {
     // Read the one unified per-image label file, splitting the annotation list into the canvas'
-    // box / polygon / geometry-less buckets (shared with save via labelSerde).
+    // box / polygon / point / geometry-less buckets (shared with save via labelSerde).
     load: async (image_path: string, label_path?: string | null): Promise<LoadedLabels> => {
       const raw = await call<{
         image_path: string;
@@ -180,13 +180,16 @@ export const api = {
         annotations: Annotation[];
         base_mtime: string | null;
       }>(`/api/annotate/labels?${q({ image_path, label_path })}`);
-      const { boxes, polygons, imageAnnotations } = annotationsToCanvas(raw.annotations ?? []);
+      const { boxes, polygons, points, imageAnnotations } = annotationsToCanvas(
+        raw.annotations ?? [],
+      );
       return {
         image_path: raw.image_path,
         img_width: raw.img_width,
         img_height: raw.img_height,
         boxes,
         polygons,
+        points,
         imageAnnotations,
         base_mtime: raw.base_mtime,
       };
