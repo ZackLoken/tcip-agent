@@ -580,14 +580,35 @@ def run_inference(
             "n_excluded_incomplete_attribute": n_excluded_incomplete_attribute,
         }
         # The full sweep can be large — persist it and return the path (provenance emits has_sweep).
+        # K12 finding 5: keyed on cal_hash alone, a second checkpoint (or the same checkpoint under
+        # different tile/postprocess settings) calibrated on the same labels silently overwrote the
+        # prior curve. Content-address the filename by every dimension the sweep actually depends
+        # on — checkpoint identity + the full predictor path, not just the labels — so it can't be
+        # under-keyed again the next time a dimension is added; identical inputs harmlessly reuse
+        # the same file, different inputs never collide.
         try:
+            import hashlib
+            import json as _json
+
             from tcip_mcp.project_paths import project_root
             from tcip_mcp.utils.atomic_io import atomic_write_json
             art = project_root() / ".tcip" / "artifacts"
             art.mkdir(parents=True, exist_ok=True)
-            sweep_path = art / f"operating_point_sweep_{cal_hash}.json"
-            atomic_write_json(sweep_path, {"trait": trait, "dataset_hash": cal_hash,
-                                           "sweep": conf_param.sweep})
+            sweep_key = {
+                "trait": trait,
+                "dataset_hash": cal_hash,
+                "checkpoint_sha256": identity["sha256"],
+                "predictor_path": {
+                    "tile": resolved_tile_bool, "tile_size": resolved_tile,
+                    "overlap": resolved_overlap, "postprocess": postprocess,
+                    "global_nms_iou": global_nms_iou, "max_dets": max_dets,
+                },
+            }
+            body_hash = hashlib.sha256(
+                _json.dumps(sweep_key, sort_keys=True, default=str).encode()
+            ).hexdigest()[:16]
+            sweep_path = art / f"operating_point_sweep_{body_hash}.json"
+            atomic_write_json(sweep_path, {**sweep_key, "sweep": conf_param.sweep})
             extra["sweep_path"] = str(sweep_path)
         except Exception:
             logger.warning("could not persist operating-point sweep", exc_info=True)
@@ -781,7 +802,12 @@ def export_predictions(
                "checkpoint_sha256": sha,
                "experiment_id": result.get("experiment_id"),
                "images_dir": images_dir,
-               "produced_at": result.get("produced_at")}
+               "produced_at": result.get("produced_at"),
+               # K12 finding 5: the sweep artifact (the evidence a conf was DERIVED, not chosen) had
+               # no pointer in the delivered sidecar — a reviewer could see "validated" but not the
+               # curve that justified it without re-deriving it themselves.
+               "sweep_path": result.get("sweep_path"),
+               "sweep_summary": result.get("sweep_summary")}
     if has_masks:
         # The unvalidated mask-binarize threshold write_predictions_json used for every mask in this
         # run — a run constant, so it travels once here rather than per-annotation (see
