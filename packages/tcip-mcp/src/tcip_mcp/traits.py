@@ -133,9 +133,9 @@ _SPEC_FIELDS = {f.name for f in fields(TraitSpec)}
 _TUPLE_FIELDS = {"milestone_fractions", "delivers", "provenance"}
 
 
-def _crops_vocab() -> set[str]:
-    """The crops.yml controlled-vocab trait names, or an empty set if it can't be read (fail-closed:
-    a config spec that can't be cross-checked is not registered)."""
+def _crops_traits() -> list[dict]:
+    """The raw crops.yml trait records, or [] if it can't be read — the one YAML load every
+    crops.yml-derived reader (vocab, units) shares, never re-parsed per reader."""
     from tcip_mcp.project_paths import repo_root_from_here
 
     crops_yml = repo_root_from_here() / ".github" / "skills" / "crops" / "crops.yml"
@@ -143,9 +143,22 @@ def _crops_vocab() -> set[str]:
         import yaml
 
         data = yaml.safe_load(crops_yml.read_text(encoding="utf-8"))
-        return {t["name"] for t in data.get("traits", []) if isinstance(t, dict) and "name" in t}
+        return [t for t in data.get("traits", []) if isinstance(t, dict) and "name" in t]
     except (OSError, ValueError, KeyError, ImportError):
-        return set()
+        return []
+
+
+def _crops_vocab() -> set[str]:
+    """The crops.yml controlled-vocab trait names, or an empty set if it can't be read (fail-closed:
+    a config spec that can't be cross-checked is not registered)."""
+    return {t["name"] for t in _crops_traits()}
+
+
+def crops_units() -> dict[str, str]:
+    """trait name -> crops.yml's declared physical unit (``mm``/``g``/``kg``/``m``/``cm``/…), for
+    every trait that declares one. crops.yml is THE trait-unit authority (CLAUDE.md); a count/
+    ordinal trait with no physical unit is simply absent from this mapping, never guessed."""
+    return {t["name"]: t["units"] for t in _crops_traits() if isinstance(t.get("units"), str)}
 
 
 def _spec_from_config(data: dict, vocab: set[str]) -> TraitSpec | None:
