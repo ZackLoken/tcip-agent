@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Literal
 
 from tcip_annotation.json_io import ANNOTATIONS_KEY, read_annotations, write_annotations
-from tcip_annotation.state import Annotation, BBox, Polygon, bbox_of
+from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
 AnnotFormat = Literal["coco", "json"]
 
@@ -153,10 +153,14 @@ def parse_coco_annotations(
             continue
         geometry: BBox | Polygon | None = None
         segs = ann.get("segmentation")
-        if isinstance(segs, list) and segs and isinstance(segs[0], list) and len(segs[0]) >= 6:
-            coords = segs[0]
-            geometry = Polygon([(float(coords[i]), float(coords[i + 1]))
-                                for i in range(0, len(coords) - 1, 2)])
+        rings: list[list[tuple[float, float]]] = []
+        if isinstance(segs, list):
+            for coords in segs:
+                if isinstance(coords, list) and len(coords) >= 6:
+                    rings.append([(float(coords[i]), float(coords[i + 1]))
+                                 for i in range(0, len(coords) - 1, 2)])
+        if rings:
+            geometry = Polygon(rings)
         else:
             bb = ann.get("bbox")
             if isinstance(bb, list) and len(bb) == 4:
@@ -181,6 +185,11 @@ def write_coco(
     ``subject -> category_id`` map; when omitted it is enumerated from the distinct subjects present
     (COCO carries its category names in the file, so the enumeration travels with the data — this is
     interop export, not the training id assignment, which is ``class_registry.assign_class_ids``).
+
+    Every emitted record is a box (plus a polygon's ``segmentation``), so a geometry-less annotation
+    and a :class:`~tcip_annotation.state.Point` are both skipped — COCO's own box/segmentation record
+    has no honest representation for a point, and fabricating a zero-area one would export it as a
+    detection target.
     """
     if id_map is None:
         subjects: list[str] = []
@@ -195,7 +204,7 @@ def write_coco(
     for img_id, (file_name, (anns, img_w, img_h)) in enumerate(images_annotations.items(), start=1):
         coco["images"].append({"id": img_id, "file_name": file_name, "width": img_w, "height": img_h})
         for a in anns:
-            if a.geometry is None or a.subject not in id_map:
+            if a.geometry is None or isinstance(a.geometry, Point) or a.subject not in id_map:
                 continue
             box = bbox_of(a.geometry)
             bw, bh = box.x2 - box.x1, box.y2 - box.y1
@@ -205,7 +214,8 @@ def write_coco(
                 "area": round(bw * bh, 2),
             }
             if isinstance(a.geometry, Polygon):
-                rec["segmentation"] = [[round(float(c), 2) for xy in a.geometry.points for c in xy]]
+                rec["segmentation"] = [[round(float(c), 2) for xy in ring for c in xy]
+                                       for ring in a.geometry.rings if len(ring) >= 3]
             if a.attributes:
                 rec["attributes"] = dict(a.attributes)
             if a.score is not None:
