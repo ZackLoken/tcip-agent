@@ -100,7 +100,7 @@ def test_finding1_external_marker_not_permanently_blocked_when_disjoint(tmp_path
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="exp_ext")
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "validated_held_out"  # NOT permanently blocked
+    assert conf.validated_against == "held_out_annotations"  # NOT permanently blocked
     td = conf.sweep["train_disjointness"]
     assert td["unresolvable"] is False
     assert td["group_check"] == "not_performed"
@@ -123,7 +123,7 @@ def test_finding1_external_marker_still_catches_a_real_leak(tmp_path, monkeypatc
                                 holdout_records=_op_records("h", shift=3.0),
                                 experiment_id="exp_ext2")
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "false"
+    assert conf.validated_against == "false"
     td = conf.sweep["train_disjointness"]
     assert td["unresolvable"] is False
     assert td["group_check"] == "not_performed"
@@ -225,7 +225,7 @@ def test_finding2_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
         bucket_identities=[_IDENTITY])
     td = bundle.get("conf").sweep["train_disjointness"]
     assert td["leaked_groups"] == ["srcA"]  # would be [] before the fix
-    assert bundle.get("conf").validated_vs_gt == "false"
+    assert bundle.get("conf").validated_against == "false"
 
 
 # ===========================================================================
@@ -235,9 +235,9 @@ def test_finding2_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
 def _review_bundle(sweep: dict):
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, ResolvedBundle, derived
 
-    conf = derived("conf", 0.42, derivation_class="calibration",
+    conf = derived("conf", 0.42, requires_validation=True, validation_kind="annotations",
                    derived_from="count-unbiased center-match sweep over review verdicts",
-                   validated_vs_gt=VALIDATED_FALSE, dataset_scoped=True, dataset_hash="abc",
+                   validated_against=VALIDATED_FALSE, dataset_scoped=True, dataset_hash="abc",
                    sweep=sweep)
     return ResolvedBundle(trait="catkin", dataset_hash="abc", params={"conf": conf})
 
@@ -279,8 +279,8 @@ def test_finding3_sweep_summary_surfaces_disjointness_fields():
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, derived
     from tcip_mcp.tools.inference_tools import _sweep_summary
 
-    conf = derived("conf", 0.4, derivation_class="calibration", derived_from="x",
-                   validated_vs_gt=VALIDATED_FALSE,
+    conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
+                   validated_against=VALIDATED_FALSE,
                    sweep={"disjoint": True, "content_overlap_frac": 0.0, "content_duplicated": False,
                           "train_disjointness": {"unresolvable": False, "leaked_groups": ["g1"]},
                           "passed_holdout": False, "conf_censored": False, "count_bias_tolerance": 1.0})
@@ -297,8 +297,8 @@ def test_finding5_sweep_summary_surfaces_split_policy_divergence():
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, derived
     from tcip_mcp.tools.inference_tools import _sweep_summary
 
-    conf = derived("conf", 0.4, derivation_class="calibration", derived_from="x",
-                   validated_vs_gt=VALIDATED_FALSE,
+    conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
+                   validated_against=VALIDATED_FALSE,
                    sweep={"passed_holdout": False, "conf_censored": False, "count_bias_tolerance": 1.0,
                           "split_policy_divergence": {"requested": {"seed": 7}, "locked": {"seed": 0}},
                           "split_unlocked_stems": ["new_stem_0_0"]})
