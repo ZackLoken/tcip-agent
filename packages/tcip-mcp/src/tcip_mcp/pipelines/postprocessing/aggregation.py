@@ -26,36 +26,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _extract_plant_id(image_name: str) -> str:
-    """Best-effort guess of plant_id from an image filename.
-
-    Heuristic: strip the last **two** underscore-separated tokens, treated as a
-    trailing capture/flight suffix, and return the remainder. E.g.:
-
-        'bush_42_flight_3'      → 'bush_42'         (strips 'flight_3')
-        'PLANT_001_2024_05_15'  → 'PLANT_001_2024'  (strips '05_15' only)
-
-    Note the second case: a full ``YYYY_MM_DD`` date is *three* tokens, so one
-    date token (the year) is retained and one physical plant's temporal series
-    fragments per plant-year. There is no filename-only rule that recovers the
-    intended plant_id for every naming scheme (``001`` is part of the id but
-    ``2024_05_15`` is a date — both look numeric), so this stays a deliberate,
-    minimal heuristic rather than a fragile guesser.
-
-    This is a *fallback* used only when neither an explicit ``plant_id`` key nor
-    a ``plant_id_fn`` is supplied to ``aggregate_per_plant``; that caller emits a
-    warning when it fires so silent mis-grouping does not reach the delivery CSV.
-    Pass ``plant_id_fn`` or a ``plant_id`` key to control grouping precisely.
-
-    Falls back to the full stem if there is nothing to strip (single token).
-    """
-    stem = Path(image_name).stem
-    parts = stem.rsplit("_", 2)
-    if len(parts) >= 2:
-        return parts[0]
-    return stem
-
-
 def aggregate_per_plant(
     image_results: list[dict],
     strategy: str = "count",
@@ -65,41 +35,46 @@ def aggregate_per_plant(
 ) -> list[dict]:
     """Aggregate per-image results to per-plant summaries.
 
+    Plant identity is never guessed from a filename. Every record's ``plant_id`` must come from an
+    explicit ``plant_id_key`` value or ``plant_id_fn(image)`` — a record for which neither resolves
+    raises, naming ``build_plant_mapping`` (the real GNSS+capture-sequence resolver,
+    ``tcip_mcp.pipelines.postprocessing.plant_mapping``) as what to use instead. Filenames rarely
+    carry a plant id at all; real identity resolution in this domain is RTK/GNSS + capture sequence
+    or a zbar/QR code physically tied to the plant, never a filename heuristic.
+
+    When a record carries ``plant_id_source``/``plant_id_distance_m`` (as ``build_plant_mapping``'s
+    own ``Assignment`` records do — the real, honest uncertainty signal that mapping already
+    produces), it is summarized per plant so identity confidence reaches the delivery CSV instead of
+    stopping at the mapping step's own boundary.
+
     Args:
-        image_results: List of dicts, each with at least an 'image' key
-                      and a value field (e.g., 'count', 'class', 'value').
+        image_results: List of dicts, each with at least an 'image' key, a plant_id_key or a value
+                      plant_id_fn can resolve, and a value field (e.g., 'count', 'class', 'value').
         strategy: Aggregation strategy — 'count', 'mode', 'mean', 'sum'.
         plant_id_key: Key in each result dict for plant identification.
-                     If not present, extracts from image filename.
         value_key: Key in each result dict for the value to aggregate.
-        plant_id_fn: Optional callable to extract plant_id from image filename.
+        plant_id_fn: Callable to derive plant_id from the image path when plant_id_key is absent.
 
     Returns:
         List of per-plant summary dicts.
     """
-    # Group by plant_id
     groups: dict[str, list[dict]] = defaultdict(list)
-    used_fallback = False
     for r in image_results:
-        if plant_id_key in r:
+        if plant_id_key in r and r[plant_id_key] not in (None, ""):
             pid = r[plant_id_key]
         elif plant_id_fn is not None:
             pid = plant_id_fn(r.get("image", ""))
         else:
-            pid = _extract_plant_id(r.get("image", "unknown"))
-            used_fallback = True
+            pid = None
+        if pid in (None, ""):
+            raise ValueError(
+                f"aggregate_per_plant: record {r.get('image', '<no image key>')!r} has no "
+                f"{plant_id_key!r} value and no plant_id_fn resolved one. Plant identity is never "
+                "guessed from a filename — pass plant_id_fn=... built from "
+                "tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping's real "
+                f"GNSS+sequence resolution, or ensure every record carries a {plant_id_key!r} key."
+            )
         groups[pid].append(r)
-
-    if used_fallback:
-        logger.warning(
-            "aggregate_per_plant grouped image(s) by a plant_id *guessed* from "
-            "filenames (no %r key and no plant_id_fn). A trailing YYYY_MM_DD date "
-            "is three tokens but only two are stripped, so multi-date series can "
-            "fragment per plant-year in the delivery CSV. Supply plant_id_fn or a "
-            "%r key to control grouping.",
-            plant_id_key,
-            plant_id_key,
-        )
 
     aggregator = _STRATEGIES.get(strategy)
     if aggregator is None:
@@ -110,6 +85,14 @@ def aggregate_per_plant(
         summary = aggregator(items, value_key)
         summary["plant_id"] = plant_id
         summary["observations"] = len(items)
+        summary["value_key"] = value_key
+        sources = {r["plant_id_source"] for r in items if r.get("plant_id_source") is not None}
+        if sources:
+            summary["plant_id_source"] = sources.pop() if len(sources) == 1 else "mixed"
+        distances = [r["plant_id_distance_m"] for r in items
+                    if isinstance(r.get("plant_id_distance_m"), (int, float))]
+        if distances:
+            summary["plant_id_distance_m_max"] = max(distances)
         results.append(summary)
 
     return results
@@ -185,6 +168,53 @@ _STRATEGIES = {
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "produced_at",
                        "measurement_validated"]
 
+def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
+    """``(display_unit, linear_basis)`` a value_key implies (``area_mm2`` -> ``("mm2", "mm")``,
+    ``principal_axis_extent_cm`` -> ``("cm", "cm")``), or None for a key with no physical-unit suffix
+    (``count``, a plain ``value``, a px-suffixed key, or a trailing token outside crops.yml's own
+    declared unit vocabulary). Delegates to :func:`mask_geometry.unit_from_value_key` — the single
+    owner of the naming convention, vocabulary-driven rather than a field-name whitelist, so a
+    bespoke agent-composed measurement (an arc length, a landmark distance) is recognized the same
+    way mask_geometry's own fields are — rather than re-deriving the pattern with a local regex (two
+    independent parsers of the same convention is exactly the drift class that let a wrong pattern
+    fabricate unit labels from unrelated keys like ``plant_id`` or ``detections_total``)."""
+    from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
+
+    return unit_from_value_key(value_key)
+
+
+def _resolve_units(trait_name: str, results: list[dict]) -> str:
+    """The physical unit implied by the aggregated values' own value_key — crops.yml's declared unit
+    is a CROSS-CHECK only, never a fallback source. A value_key with no recognized physical-unit
+    suffix (px, count, or a trailing token outside crops.yml's declared unit vocabulary) yields a
+    blank units column, exactly like a count trait already does — it never inherits crops.yml's
+    declared unit unopposed, which was the actual defect: a pixel-space value shipping labeled with
+    the trait's declared mm/cm/m because nothing derived a unit to check it against.
+
+    An area's returned unit is squared (``"mm2"``, not ``"mm"``) — the cross-check itself still
+    compares against crops.yml's declared LINEAR unit (crops.yml has no squared-unit vocabulary)."""
+    from tcip_mcp.traits import crops_units
+
+    implied_pairs = {p for p in (_unit_from_value_key(r.get("value_key", "")) for r in results) if p}
+    if len(implied_pairs) > 1:
+        implied_units = {display for display, _linear_basis in implied_pairs}
+        raise ValueError(
+            f"export_aggregated_csv: results for trait {trait_name!r} imply more than one physical "
+            f"unit ({sorted(implied_units)}) across rows — cannot label a single units column."
+        )
+    pair = next(iter(implied_pairs), None)
+    if pair is None:
+        return ""
+    display, linear_basis = pair
+    declared = crops_units().get(trait_name)
+    if declared is not None and linear_basis != declared:
+        raise ValueError(
+            f"export_aggregated_csv: trait {trait_name!r} is declared units={declared!r} in "
+            f"crops.yml, but the aggregated values' own key implies {linear_basis!r} — refusing to "
+            "ship a mismatched unit label rather than guessing which one is right."
+        )
+    return display
+
 
 def export_aggregated_csv(
     results: list[dict],
@@ -200,10 +230,11 @@ def export_aggregated_csv(
 ) -> str:
     """Export per-plant aggregated results to a delivery CSV.
 
-    Follows the per-plant CSV schema from the delivery skill:
-    plant_id, crop, trait_name, value, confidence, n_images, pipeline_version — plus an optional
-    producing-model provenance stamp (checkpoint sha, experiment id, timestamp) so the final
-    per-plant value is traceable to the exact model that produced it.
+    Follows the per-plant CSV schema from the delivery skill — the ``fieldnames`` list below is the
+    authority for it: plant_id, crop, trait_name, value, units, value_key, confidence, n_images,
+    pipeline_version, plant_id_source, plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS``
+    (producer_model_sha256, experiment_id, produced_at, measurement_validated) so the final per-plant
+    value is traceable to the exact model that produced it and carries its own validity stamp.
 
     The final per-plant CSV is a delivery door: it refuses a *bare* write (an unvalidated phenotype
     with no acknowledgement) via the shared ``check_delivery_gate`` and stamps the reconciled validity
@@ -256,11 +287,14 @@ def export_aggregated_csv(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
+    units = _resolve_units(trait_name, results)
+
     stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
     stamp["measurement_validated"] = gate.stamp["measurement"]
     fieldnames = [
-        "plant_id", "crop", "trait_name", "value",
+        "plant_id", "crop", "trait_name", "value", "units", "value_key",
         "confidence", "n_images", "pipeline_version",
+        "plant_id_source", "plant_id_distance_m_max",
     ] + _PROVENANCE_COLUMNS
 
     with open(output_path, "w", newline="") as f:
@@ -273,9 +307,13 @@ def export_aggregated_csv(
                 "crop": crop,
                 "trait_name": trait_name,
                 "value": r.get("value", ""),
+                "units": units,
+                "value_key": r.get("value_key", ""),
                 "confidence": r.get("confidence", ""),
                 "n_images": r.get("observations", 0),
                 "pipeline_version": pipeline_version,
+                "plant_id_source": r.get("plant_id_source", ""),
+                "plant_id_distance_m_max": r.get("plant_id_distance_m_max", ""),
                 **stamp,
             })
 
