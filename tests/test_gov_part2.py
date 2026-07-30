@@ -42,6 +42,43 @@ def test_distill_worksheet_gathers_reports_captures_and_themes(tmp_path):
     assert "Nothing here is applied" in ws  # gathering only — governance stays human
 
 
+def test_distill_worksheet_surfaces_disagreements(tmp_path):
+    distill = _load_distill()
+    reports = tmp_path / ".tcip" / "reports"
+    reports.mkdir(parents=True)
+    (reports / "r1.jsonl").write_text(
+        json.dumps({"category": "needs_human_judgment", "detail": "kept the old default",
+                    "user_disagreement": False}) + "\n", encoding="utf-8")
+    (reports / "r2.jsonl").write_text(
+        json.dumps({"category": "needs_human_judgment", "detail": "pushed back on the tiling default",
+                    "user_disagreement": True}) + "\n", encoding="utf-8")
+
+    ws = distill.build_worksheet(tmp_path)
+    assert "Disagreements (1)" in ws
+    assert "pushed back on the tiling default" in ws
+    disagreements_section = ws.split("## Disagreements", 1)[1].split("##", 1)[0]
+    assert "kept the old default" not in disagreements_section
+
+
+def test_themes_generic_frequency_and_recurrence_floor():
+    distill = _load_distill()
+    text = ("the wobblesync module keeps desyncing. wobblesync desyncing again. "
+            "a one-off mention of zzyzx.")
+    themes = dict(distill._themes(text))
+    # "wobblesync"/"desyncing" are not, and never will be, in any hardcoded theme vocabulary —
+    # they surface purely because they recurred in this project's own text.
+    assert themes.get("wobblesync") == 2
+    assert themes.get("desyncing") == 2
+    assert "zzyzx" not in themes  # single mention, below the recurrence floor
+
+
+def test_themes_picks_up_bigram_phrases():
+    distill = _load_distill()
+    text = "operating point drifted. operating point drifted again next session."
+    themes = dict(distill._themes(text))
+    assert themes.get("operating point") == 2
+
+
 def test_capture_hook_appends_and_never_raises(tmp_path, monkeypatch):
     from tcip_web import agent_learning_capture
 
