@@ -3,7 +3,7 @@ Fix B (dispersion + localization-quality floor), Fix C (reference-sufficiency + 
 criterion), Fix E (pick-then-label + registry-driven objective), Fix F (exact-conf holdout
 evaluation, not a nearest-neighbor snap), Fix K (cap-saturation provenance, non-gating), and the
 named-failure architecture. Plus the mandatory end-to-end integration fixture (a realistic dense
-catkin reference reaching ``validated_held_out`` with every fix applied together).
+catkin reference reaching ``VALIDATED_HELD_OUT`` with every fix applied together).
 """
 
 from __future__ import annotations
@@ -111,7 +111,7 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_the_old_snap_would_have_mis
     assert hb["conf"] == pytest.approx(0.9)           # evaluated at the conf that will actually ship
     assert hb["count_bias_mean"] == pytest.approx(-80.0)  # the TRUE bias at that conf: total miss
     assert hb["count_bias_mean"] != pytest.approx(old["count_bias_mean"])  # the two approaches differ
-    assert conf.validated_vs_gt == "false"            # exact eval correctly refuses...
+    assert conf.validated_against == "false"            # exact eval correctly refuses...
     assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]  # ...the old snap would not have
 
 
@@ -145,7 +145,7 @@ def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_fai
     assert hb["conf"] == pytest.approx(0.9)            # evaluated at the conf that will actually ship
     assert hb["count_bias_mean"] == pytest.approx(0.0)  # the TRUE bias at that conf: clean
     assert hb["count_bias_mean"] != pytest.approx(old["count_bias_mean"])  # the two approaches differ
-    assert conf.validated_vs_gt == "validated_held_out"  # exact eval correctly admits...
+    assert conf.validated_against == "held_out_annotations"  # exact eval correctly admits...
     assert conf.sweep["failures"] == []                  # ...what the old snap would have refused
 
 
@@ -178,7 +178,7 @@ def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
     hb = conf.sweep["holdout_bias"]
     assert hb["tp"] == 0
     assert hb["count_bias_mean"] == pytest.approx(0.0)  # the degenerate case: bias vanishes...
-    assert conf.validated_vs_gt == "false"               # ...but this must not pass silently
+    assert conf.validated_against == "false"               # ...but this must not pass silently
     assert "localization_quality_floor_failed" in conf.sweep["failures"]
 
 
@@ -276,11 +276,11 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     b_diluted = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
                                         holdout_records=hold_real + padding, staged_conf_floor=0.3)
     assert b_diluted.get("conf").sweep["holdout_bias"]["n_images"] == 10
-    assert b_diluted.get("conf").validated_vs_gt == "validated_held_out"
+    assert b_diluted.get("conf").validated_against == "held_out_annotations"
 
     # With the seam wired to a predicate that flags the padding as uncovered, the WHOLE reference is
     # refused — statistics are still computed over the full, unfiltered 10-image set (never a
-    # filter-then-recompute on a shrunk sample), but validated_vs_gt is false because the coverage
+    # filter-then-recompute on a shrunk sample), but validated_against is false because the coverage
     # requirement itself failed.
     covered = lambda r: not r.get("padded")  # noqa: E731
     b_covered = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
@@ -289,7 +289,7 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     sweep = b_covered.get("conf").sweep
     assert sweep["holdout_bias"]["n_images"] == 10  # unfiltered — a gate, not a filter
     assert sweep["adjudication_covered"] is False
-    assert b_covered.get("conf").validated_vs_gt == "false"
+    assert b_covered.get("conf").validated_against == "false"
     assert "insufficient_adjudication_coverage" in sweep["failures"]
 
 
@@ -405,7 +405,7 @@ def test_passed_holdout_is_exactly_the_absence_of_named_failures():
 # at n=40 images / 100 objects/image this reaches count_bias_std ~= 2.03 and count_error_p90 = 4.0
 # (recall/precision ~0.97) — in the ballpark of the stage-6 reviewers' cited ~1.6-1.7 std at n=40 for
 # a ~97%+ recall detector against catkin's count_bias_tolerance=1.0 — and correctly reaches
-# validated_held_out. The IDENTICAL per-image pattern at n=10 (fewer images, nothing else different)
+# VALIDATED_HELD_OUT. The IDENTICAL per-image pattern at n=10 (fewer images, nothing else different)
 # is correctly REFUSED: the SE term grows enough that the equivalence criterion no longer clears the
 # tolerance. Reference size is a real constraint the gate imposes on a genuinely noisy detector, not
 # a formality — this is the accepted, known consequence of closing the vacuous-gate defect, not
@@ -442,7 +442,7 @@ def test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at
     assert hb["count_bias_std"] == pytest.approx(2.0254787341673333, abs=1e-6)  # genuine dispersion
     assert hb["recall"] == pytest.approx(0.97, abs=1e-6)   # a realistic ~97% recall detector
     assert hb["precision"] == pytest.approx(0.97, abs=1e-6)
-    assert conf.validated_vs_gt == "validated_held_out"
+    assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
     assert conf.sweep["failures"] == []
 
@@ -466,15 +466,15 @@ def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equival
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)  # same clean mean...
-    assert conf.validated_vs_gt == "false"  # ...but too few images to clear the equivalence criterion
+    assert conf.validated_against == "false"  # ...but too few images to clear the equivalence criterion
     assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]
 
 
 # ── Mandatory end-to-end integration fixture ────────────────────────────────
 
-def test_integration_dense_realistic_reference_reaches_validated_held_out():
+def test_integration_dense_realistic_reference_reaches_held_out_validation():
     """A realistic dense catkin reference (perfect recall, a varying handful of low-conf spurious
-    detections per image) must reach validated_held_out with every fix in this cluster (B, C, D, E,
+    detections per image) must reach VALIDATED_HELD_OUT with every fix in this cluster (B, C, D, E,
     F, K) applied together: the spurious detections are filtered out at the count-unbiased operating
     point, leaving zero bias and full recall/precision on the holdout.
 
@@ -500,6 +500,6 @@ def test_integration_dense_realistic_reference_reaches_validated_held_out():
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "validated_held_out"
+    assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
     assert conf.sweep["failures"] == []
