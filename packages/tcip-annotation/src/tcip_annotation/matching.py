@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 
+from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.geometry import Point as ShapelyPoint
 from shapely.validation import make_valid
@@ -19,7 +20,7 @@ try:
 except ImportError:  # pragma: no cover - older shapely
     ShapelyError = Exception
 
-from tcip_annotation.state import Annotation, BBox, Polygon
+from tcip_annotation.state import Annotation, BBox, Point, Polygon
 
 logger = logging.getLogger(__name__)
 
@@ -93,16 +94,25 @@ def _is_box(a: Annotation) -> bool:
     return isinstance(a.geometry, BBox)
 
 
-def _to_shapely(a: Annotation) -> tuple[ShapelyPolygon, float]:
-    """Convert an annotation's geometry to a Shapely polygon + area."""
+def _rings_to_shapely(rings: list[list[tuple[float, float]]]):
+    """One or more simple closed rings -> a Shapely Polygon (one ring) or MultiPolygon (several) —
+    every ring contributes, never just the first/largest."""
+    valid = [r for r in rings if len(r) >= 3]
+    if len(valid) == 1:
+        return ShapelyPolygon(valid[0])
+    return ShapelyMultiPolygon([ShapelyPolygon(r) for r in valid])
+
+
+def _to_shapely(a: Annotation):
+    """Convert an annotation's geometry to a Shapely polygon (or multipolygon) + area."""
     if isinstance(a.geometry, BBox):
         b = a.geometry
         pts = [(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)]
+        g = ShapelyPolygon(pts)
     elif isinstance(a.geometry, Polygon):
-        pts = list(a.geometry.points)
+        g = _rings_to_shapely(a.geometry.rings)
     else:  # pragma: no cover - callers filter geometry-less annotations out first
-        pts = []
-    g = ShapelyPolygon(pts)
+        g = ShapelyPolygon([])
     if not g.is_valid:
         g = make_valid(g)
     return g, g.area
@@ -118,7 +128,9 @@ def compute_matches(
 
     ``gt`` / ``preds`` are :class:`Annotation` lists (a prediction carries a ``score``). Matching is
     per class name (``subject``) using greedy IoU. Geometry-less annotations (image-level labels)
-    carry no spatial extent and are ignored here.
+    carry no spatial extent and are ignored here — as is a :class:`~tcip_annotation.state.Point`,
+    which has no area and so no IoU with anything: it can be neither matched, nor a FP, nor a FN
+    without fabricating a spatial claim it does not make.
 
     Returns a dict with keys ``'tp'`` / ``'fp'`` / ``'fn'``:
       - ``tp``: ``{gt_idx, pred_idx, iou, class_name, conf}``
@@ -127,13 +139,16 @@ def compute_matches(
 
     ``gt_idx`` / ``pred_idx`` index into ``gt`` / ``preds`` directly.
     """
+    def _matchable(a: Annotation) -> bool:
+        return a.geometry is not None and not isinstance(a.geometry, Point)
+
     gt_items: list[tuple[int, str, Annotation]] = [
-        (i, a.subject, a) for i, a in enumerate(gt) if a.geometry is not None
+        (i, a.subject, a) for i, a in enumerate(gt) if _matchable(a)
     ]
     pred_items: list[tuple[int, str, float, Annotation]] = [
         (i, a.subject, float(a.score if a.score is not None else 1.0), a)
         for i, a in enumerate(preds)
-        if a.geometry is not None and (a.score is None or a.score >= conf_threshold)
+        if _matchable(a) and (a.score is None or a.score >= conf_threshold)
     ]
 
     gt_by_class: dict[str, list[int]] = defaultdict(list)
@@ -232,8 +247,8 @@ def compute_matches(
 
 
 def point_in_polygon(x: float, y: float, polygon: Polygon) -> bool:
-    """Test whether a point lies inside a polygon using Shapely."""
-    geom = ShapelyPolygon(polygon.points)
+    """Test whether a point lies inside any ring of a polygon using Shapely."""
+    geom = _rings_to_shapely(polygon.rings)
     if not geom.is_valid:
         geom = make_valid(geom)
     return geom.contains(ShapelyPoint(x, y))
