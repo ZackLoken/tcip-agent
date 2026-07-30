@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
 
     conf = bundle.get("conf")
     print(f"trait={args.trait} dataset_hash={dh}")
-    print(f"conf={conf._raw:.4f} validated_vs_gt={conf.validated_vs_gt} shippable={bundle.is_shippable}")
+    print(f"conf={conf._raw:.4f} validated_against={conf.validated_against} shippable={bundle.is_shippable}")
     print(f"persisted -> {out_path}")
     return 0
 
