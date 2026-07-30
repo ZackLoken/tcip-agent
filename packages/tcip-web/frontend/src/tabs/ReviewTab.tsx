@@ -46,7 +46,6 @@ import {
 import { useStore } from "@/store";
 import type {
   DatasetSelection,
-  Detection,
   MatchesResponse,
   ReviewImageStatus,
   ReviewStatusFilter,
@@ -63,14 +62,15 @@ const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashe
 const MIN_BOX_SIDE = 3;
 const HANDLE_HIT_PX = 10; // screen-px hit radius for edit handles
 
-/** The shape Edit picks up: the matched GT for a TP/FN (what a save replaces), the prediction for
- *  an FP (what a save adds) — by the referenced annotation's OWN geometry. Deep-copied so dragging
- *  never mutates matches. */
-function seedEditShape(d: Detection, m: MatchesResponse): EditShape | null {
-  const geom = detOutcomeGeometry(d, m);
-  if (!geom) return null;
+/** The shape Edit picks up, from the geometry the detection draws as (the matched GT for a TP/FN —
+ *  what a save replaces — or the prediction for an FP, which a save adds). Deep-copied so dragging
+ *  never mutates matches. Single-ring by construction: hand-editing adjusts one contour, and
+ *  ``/review/action``'s ``edited_points`` carries exactly one (startEdit turns a multi-part shape
+ *  away rather than seeding one part and saving it as the whole object). A point never gets here:
+ *  the editor authors an outline, and there is no outline a location could stand in for. */
+function seedEditShape(geom: Exclude<ReviewGeom, { kind: "point" }>): EditShape {
   if (geom.kind === "box") return { kind: "box", box: geom.box };
-  return { kind: "polygon", points: geom.points.map((p): [number, number] => [p[0], p[1]]) };
+  return { kind: "polygon", points: geom.rings[0].map((p): [number, number] => [p[0], p[1]]) };
 }
 
 function currentImagePath(dataset: DatasetSelection): { path: string | null; name: string | null } {
@@ -730,12 +730,38 @@ export function ReviewTab() {
   function startEdit() {
     if (reviewLocked) return;
     if (!current || !matches) return;
-    const seed = seedEditShape(current, matches);
-    if (!seed) {
+    const geom = detOutcomeGeometry(current, matches);
+    if (!geom) {
       useStore.getState().pushToast("This detection has no shape to adjust.");
       return;
     }
-    setEdit(clampShapeToImage(seed, matches.img_width, matches.img_height));
+    if (geom.kind === "point") {
+      // The canvas editor adjusts an outline, and /review/action carries a box or one contour. A
+      // point has neither, and inventing a small box around it would write a fabricated extent into
+      // ground truth. The verdict keys (accept/reject) still apply to it.
+      useStore
+        .getState()
+        .pushToast(
+          "This is a point — it marks a location, not an outline, so there is nothing to resize. " +
+            "Accept or reject it here, or move it in Annotate.",
+          "info",
+        );
+      return;
+    }
+    if (geom.kind === "polygon" && geom.rings.length > 1) {
+      // Editing by hand commits one contour (edited_points), so seeding part 1 of an
+      // occlusion-split shape would save that part as the entire object — a quietly wrong
+      // measurement. Refuse instead, and say what the reviewer can do.
+      useStore
+        .getState()
+        .pushToast(
+          `This shape covers ${geom.rings.length} separate parts of one object. Adjusting by hand ` +
+            `works on a single outline — accept or reject it here, or redraw it in Annotate.`,
+          "info",
+        );
+      return;
+    }
+    setEdit(clampShapeToImage(seedEditShape(geom), matches.img_width, matches.img_height));
   }
 
   function cancelEdit() {
@@ -1563,7 +1589,10 @@ const ReviewOverlays = memo(function ReviewOverlays({
   const ACTIVE_COLOR = colors.active;
 
   // Every detection renders by ITS OWN annotation's geometry — a box stays a box, a polygon stays
-  // a polygon, and neither kind is hidden (hiding one is an unreviewed false-negative).
+  // a polygon, a point stays a point, and no kind is hidden (hiding one is an unreviewed
+  // false-negative). Every ring of a polygon draws too, in the same stroke: a verdict on an
+  // occlusion-split shape is a verdict on all of it, so a truncated render would be a verdict on
+  // something the reviewer never saw.
   const drawGeom = (
     key: string,
     geom: ReviewGeom | null,
@@ -1573,6 +1602,9 @@ const ReviewOverlays = memo(function ReviewOverlays({
     fill: string | undefined,
   ): ReactNode => {
     if (!geom) return null;
+    if (geom.kind === "point") {
+      return <ReviewPoint key={key} point={geom.point} stroke={stroke} lw={lw} weight={weight} />;
+    }
     if (geom.kind === "box") {
       return (
         <ReviewRect
@@ -1587,15 +1619,19 @@ const ReviewOverlays = memo(function ReviewOverlays({
       );
     }
     return (
-      <ReviewLine
-        key={key}
-        points={geom.points}
-        stroke={stroke}
-        lw={lw}
-        weight={weight}
-        dashed={dashed}
-        fill={fill}
-      />
+      <Fragment key={key}>
+        {geom.rings.map((ring, ri) => (
+          <ReviewLine
+            key={ri}
+            points={ring}
+            stroke={stroke}
+            lw={lw}
+            weight={weight}
+            dashed={dashed}
+            fill={fill}
+          />
+        ))}
+      </Fragment>
     );
   };
 
@@ -1710,6 +1746,46 @@ function ReviewRect({
       dash={dashed ? [8 * lw, 4 * lw] : undefined}
       fill={fill}
     />
+  );
+}
+
+/** A point annotation under review: the Annotate canvas' reticle in the detection's outcome colour.
+ *  Same mark in both tabs, so a location a reviewer accepts is drawn the way it was placed — and no
+ *  box is drawn around it, which would show the reviewer an extent the annotation does not claim. */
+function ReviewPoint({
+  point,
+  stroke,
+  lw,
+  weight,
+}: {
+  point: [number, number];
+  stroke: string;
+  lw: number;
+  weight: number;
+}) {
+  const [x, y] = point;
+  const inner = 6.5 * lw;
+  const outer = 11 * lw;
+  const ticks: [number, number, number, number][] = [
+    [x, y - inner, x, y - outer],
+    [x, y + inner, x, y + outer],
+    [x - inner, y, x - outer, y],
+    [x + inner, y, x + outer, y],
+  ];
+  return (
+    <>
+      {ticks.map(([x1, y1, x2, y2], i) => (
+        <Line key={i} points={[x1, y1, x2, y2]} stroke={stroke} strokeWidth={weight * lw} />
+      ))}
+      <Circle
+        x={x}
+        y={y}
+        radius={4 * lw}
+        fill={stroke}
+        stroke="#FFFFFF"
+        strokeWidth={weight * 0.5 * lw}
+      />
+    </>
   );
 }
 
