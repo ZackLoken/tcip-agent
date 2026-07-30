@@ -341,8 +341,12 @@ def count_by_class(json_path: Path, id_map: dict | None, positive_value: str) ->
     exist.
     """
     from tcip_annotation import json_io
+    from tcip_annotation.state import Point
 
-    annotations = [a for a in json_io.read_annotations(str(json_path)) if a.geometry is not None]
+    # A Point carries no detection: counting one would inflate the denominator of the positive
+    # fraction this phenology curve is built from, with an object the detector never found.
+    annotations = [a for a in json_io.read_annotations(str(json_path))
+                   if a.geometry is not None and not isinstance(a.geometry, Point)]
     total = len(annotations)
     if not id_map or positive_value not in id_map:
         return total, 0, total
