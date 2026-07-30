@@ -175,9 +175,21 @@ class ModelRegistry:
         # concurrent writer's entries aren't clobbered, replace-by-name, then atomic save.
         with file_transaction(self._index_path):
             self._index = self._load_index()
+            superseded = next((e for e in self._index if e["name"] == name), None)
             self._index = [e for e in self._index if e["name"] != name]
             self._index.append(entry)
             self._save_index()
+        # K12 finding 4: a replace-by-name that actually changes content (a resumed or re-registered
+        # run under the same name) had no record anywhere — the prior sha256/config/metrics were
+        # destroyed silently. Purely additive: nothing here changes what get_model/best_model/
+        # list_registered_models return, only whether the supersession is durably auditable.
+        if superseded is not None and superseded.get("sha256") != sha256:
+            from tcip_mcp.audit import record_event
+
+            record_event("model_registry_replace", {
+                "name": name, "superseded_sha256": superseded.get("sha256"),
+                "superseded_tags": superseded.get("tags"), "new_sha256": sha256,
+            })
         return entry
 
     def verify_model(self, name: str) -> dict:
