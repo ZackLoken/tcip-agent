@@ -111,12 +111,11 @@ def test_parse_coco_segment():
     assert len(anns) == 1
     assert anns[0].subject == "leaf"
     assert isinstance(anns[0].geometry, Polygon)
-    assert len(anns[0].geometry.points) == 4
-    assert anns[0].geometry.points[0] == (10.0, 20.0)
+    assert anns[0].geometry.rings == [[(10.0, 20.0), (50.0, 20.0), (50.0, 80.0), (10.0, 80.0)]]
 
 
 def test_write_coco_polygon_roundtrip(tmp_path):
-    poly = Polygon([(10, 20), (50, 20), (50, 80), (10, 80)])
+    poly = Polygon([[(10, 20), (50, 20), (50, 80), (10, 80)]])
     anns = [Annotation(subject="leaf", geometry=poly)]
     path = str(tmp_path / "seg.json")
     write_coco(path, {"IMG_0001.jpg": (anns, 640, 480)})
@@ -127,8 +126,48 @@ def test_write_coco_polygon_roundtrip(tmp_path):
     parsed = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
     assert len(parsed) == 1
     assert isinstance(parsed[0].geometry, Polygon)
-    assert len(parsed[0].geometry.points) == 4
+    assert len(parsed[0].geometry.rings[0]) == 4
     assert parsed[0].subject == "leaf"
+
+
+# ── COCO multi-ring (occlusion-split instance) ───────────────────────────────
+
+# Two disjoint lobes of ONE instance — a leaf crossed by a stem, a catkin behind a branch.
+LOBE_A = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]
+LOBE_B = [(70.0, 12.0), (90.0, 12.0), (90.0, 48.0), (70.0, 48.0)]
+
+
+def test_parse_coco_multi_ring_segmentation_keeps_every_ring():
+    # COCO's segmentation is a LIST of rings and always was; the reader must decode all of them into
+    # one polygon rather than taking the first and dropping the rest.
+    coco = _sample_coco_segment()
+    coco["annotations"][0]["segmentation"] = [
+        [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
+        [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
+    ]
+    (ann,) = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
+    assert ann.geometry.rings == [LOBE_A, LOBE_B]
+
+
+def test_write_coco_multi_ring_polygon_roundtrip(tmp_path):
+    anns = [Annotation(subject="leaf", geometry=Polygon([LOBE_A, LOBE_B]))]
+    path = str(tmp_path / "seg_multi.json")
+    write_coco(path, {"IMG_0001.jpg": (anns, 640, 480)})
+
+    with open(path) as f:
+        coco = json.load(f)
+
+    # One COCO annotation, two rings, in order — and its box/area span their union.
+    (rec,) = coco["annotations"]
+    assert rec["segmentation"] == [
+        [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
+        [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
+    ]
+    assert rec["bbox"] == [10.0, 10.0, 80.0, 40.0]
+    assert rec["area"] == 80.0 * 40.0
+
+    (parsed,) = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
+    assert parsed.geometry.rings == [LOBE_A, LOBE_B]
 
 
 # ── Unified load/save dispatch ──────────────────────────────────────────────
