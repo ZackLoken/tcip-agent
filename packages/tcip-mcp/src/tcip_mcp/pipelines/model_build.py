@@ -172,7 +172,12 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     Called by the training envelope when ``model_source`` / ``training_source`` / ``data.dataset_source``
     is set. Records the agent-written source files (each source's ``source_files`` + the builder/loop
     module files) so the run is reproducible from importable builders — never ``exec``. Best-effort: a
-    missing file is skipped, and any failure returns without raising (provenance must not sink a run).
+    missing file is skipped and any failure returns without raising (provenance must not sink a run) —
+    but the manifest is self-describing about what it failed to capture (``missing``/``snapshot_errors``)
+    rather than silently indistinguishable from a complete one (K12 finding 1). Destination files are
+    content-addressed (``<sha256[:8]>/<basename>``), so two distinct source files sharing a basename never
+    clobber each other, and the same file reached via two different path spellings dedups to one entry
+    rather than two rows claiming the same basename with different hashes (K12 finding 2).
     Returns the manifest, or ``None`` when there is nothing bespoke to snapshot.
     """
     import hashlib
@@ -195,6 +200,7 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     if isinstance(dataset_source, dict):
         dataset_builder = dataset_source.get("builder")
         files.extend(dataset_source.get("source_files") or [])
+    snapshot_errors: list[str] = []
     # Snapshot the agent's training-loop + dataset modules too (best-effort — resolve mod:fn -> file).
     for dotted in (builder, training_source, dataset_builder):
         if isinstance(dotted, str) and dotted:
@@ -205,28 +211,42 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
                 mod_file = getattr(importlib.import_module(mod_name), "__file__", None)
                 if mod_file:
                     files.append(mod_file)
-            except Exception:
-                pass
+                else:
+                    snapshot_errors.append(
+                        f"{dotted!r} imported but its module has no __file__ (namespace/frozen "
+                        "module?) — cannot snapshot its source")
+            except Exception as exc:
+                snapshot_errors.append(f"could not import {dotted!r}: {exc}")
 
     dst = Path(exp_dir) / "model_src"
     dst.mkdir(parents=True, exist_ok=True)
     entries: list[dict] = []
-    seen: set[str] = set()
+    seen_content: set[str] = set()
+    missing: list[str] = []
     for f in files:
         p = Path(f)
-        if not p.is_file() or str(p) in seen:
+        if not p.is_file():
+            missing.append(f)
             continue
-        seen.add(str(p))
         data = p.read_bytes()
-        (dst / p.name).write_bytes(data)
-        entries.append({"file": p.name, "src": str(p),
-                        "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)})
+        sha = hashlib.sha256(data).hexdigest()
+        if sha in seen_content:
+            continue
+        seen_content.add(sha)
+        key = f"{sha[:8]}/{p.name}"
+        dst_file = dst / key
+        dst_file.parent.mkdir(parents=True, exist_ok=True)
+        dst_file.write_bytes(data)
+        entries.append({"file": key, "src": str(p), "sha256": sha, "bytes": len(data)})
 
     manifest = {
         "builder": builder,
         "training_source": training_source,
         "dataset_builder": dataset_builder,
+        "declared_files": files,
         "files": entries,
+        "missing": missing,
+        "snapshot_errors": snapshot_errors,
         "env": capture_env(),
         "seed": config.get("seed", config.get("training", {}).get("seed")),
     }
