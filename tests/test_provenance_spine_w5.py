@@ -201,7 +201,7 @@ def test_export_detection_csv_carries_provenance(tmp_path):
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
         provenance={"producer_model_sha256": "abc", "experiment_id": "expE",
                     "operating_point_conf": 0.42, "produced_at": "2026-07-19T00:00:00Z"},
-        measurement_validated="validated_held_out")
+        measurement_validated="held_out_annotations")
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == "abc"
     assert rows[0]["experiment_id"] == "expE"
@@ -219,7 +219,7 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
         [{"plant_id": "p1", "value": 5, "observations": 2}], str(out), trait_name="count",
         provenance={"producer_model_sha256": "def", "experiment_id": "expA",
                     "produced_at": "2026-07-19T00:00:00Z"},
-        measurement_validated="validated_held_out", acknowledge_unvalidated=True)
+        measurement_validated="held_out_annotations", acknowledge_unvalidated=True)
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == "def"
     assert rows[0]["experiment_id"] == "expA"
