@@ -1,6 +1,6 @@
 /**
  * Annotate-tab context toolbar. Two rows matching the approved mockup:
- *   Row 1  — draw mode (Box/Polygon), the subject picker pill, an Editor toggle, then the
+ *   Row 1  — draw mode (Box/Polygon/Point), the subject picker pill, an Editor toggle, then the
  *            nav filter, image navigation, and the Complete checkbox.
  *   Editor — a second toolbar (collapsed by default, remembered) holding the tools you
  *            flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
@@ -75,6 +75,7 @@ export function AnnotateToolbar({
   const setRegistry = useStore((s) => s.setRegistry);
   const canvasBoxes = useStore((s) => s.canvas.boxes);
   const canvasPolygons = useStore((s) => s.canvas.polygons);
+  const canvasPoints = useStore((s) => s.canvas.points);
   const canvasImageAnnotations = useStore((s) => s.canvas.imageAnnotations);
   const annotateUi = useStore((s) => s.annotateUi);
   const setVisible = useStore((s) => s.setVisible);
@@ -108,15 +109,16 @@ export function AnnotateToolbar({
   const [counterDraft, setCounterDraft] = useState<string | null>(null);
   const counterRef = useRef<HTMLInputElement | null>(null);
 
-  // Counts per subject across everything on the current canvas (boxes + polygons + ratings).
+  // Counts per subject across everything on the current canvas (boxes + polygons + points + ratings).
   const subjectCounts = useMemo(() => {
     const counts = new Map<string, number>();
     const bump = (subj: string) => counts.set(subj, (counts.get(subj) ?? 0) + 1);
     for (const b of canvasBoxes) bump(b.subject);
     for (const p of canvasPolygons) bump(p.subject);
+    for (const p of canvasPoints) bump(p.subject);
     for (const a of canvasImageAnnotations) bump(a.subject);
     return counts;
-  }, [canvasBoxes, canvasPolygons, canvasImageAnnotations]);
+  }, [canvasBoxes, canvasPolygons, canvasPoints, canvasImageAnnotations]);
 
   const currentImage = dataset.image_list[dataset.current_image_index] ?? "—";
   const currentStatus: ImageStatus | undefined = currentImage
@@ -162,7 +164,11 @@ export function AnnotateToolbar({
   async function toggleComplete(next: boolean) {
     if (!currentImage || !dataset.project_root) return;
     const hasContent =
-      canvasBoxes.length + canvasPolygons.length + canvasImageAnnotations.length > 0;
+      canvasBoxes.length +
+        canvasPolygons.length +
+        canvasPoints.length +
+        canvasImageAnnotations.length >
+      0;
     const newStatus: ImageStatus = next
       ? hasContent
         ? "complete"
@@ -236,6 +242,27 @@ export function AnnotateToolbar({
               />
             </svg>
             Polygon
+          </button>
+          <button
+            aria-pressed={mode === "point"}
+            onClick={() => setMode("point")}
+            title="Point: click to place one location (a prompt or landmark) — drag it to move, right-click to remove"
+            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
+              mode === "point" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
+            }`}
+          >
+            {/* The canvas mark in miniature: ticks converging on a core, so the tool and the shape
+                it authors read as the same thing. */}
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+              <path
+                d="M8 1.6v2.7M8 11.7v2.7M1.6 8h2.7M11.7 8h2.7"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+              <circle cx="8" cy="8" r="2" fill="currentColor" />
+            </svg>
+            Point
           </button>
         </div>
 
