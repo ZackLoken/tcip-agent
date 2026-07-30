@@ -9,6 +9,7 @@
 
 import { api } from "@/api/client";
 import { useStore } from "@/store";
+import type { Mode } from "@/store/types";
 
 export interface AnnotateFocusData {
   project_root?: string;
@@ -16,7 +17,7 @@ export interface AnnotateFocusData {
   subject?: string | null;
   date?: string | null;
   image_index?: number;
-  mode?: "box" | "polygon";
+  mode?: Mode;
   active_subject?: string | null;
 }
 
