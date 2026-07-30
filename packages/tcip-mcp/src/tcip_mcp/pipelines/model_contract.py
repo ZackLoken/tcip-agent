@@ -160,9 +160,15 @@ def check_model_contract(
             out = model(images)
         if task in _DETECTION_TASKS:
             report["eval_output_type"] = "list[dict]"
+            required = {"boxes", "scores", "labels"}
+            if task == "instance_seg":
+                # instance_seg trains on real masks (_synth_batch above already supplies
+                # target["masks"]) — a model whose eval output drops them passes as a detector
+                # while the platform's only sanctioned dimensional measurement can never reach it.
+                required = required | {"masks"}
             if not (isinstance(out, list) and out and isinstance(out[0], dict)
-                    and {"boxes", "scores", "labels"} <= set(out[0])):
-                issues.append("detection eval output is not list[dict] with boxes/scores/labels")
+                    and required <= set(out[0])):
+                issues.append(f"detection eval output is not list[dict] with {sorted(required)}")
         else:
             report["eval_output_type"] = "dict"
             if not isinstance(out, dict):
