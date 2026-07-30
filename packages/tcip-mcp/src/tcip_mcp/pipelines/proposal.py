@@ -10,9 +10,13 @@ ships as a runnable reference.
 An engine implements :class:`Proposer` — ``propose`` for whole-image candidates (auto-labeling) and
 ``segment`` for a prompted single mask; an engine may supply either, and the dispatch checks for the
 method it needs. Candidates use a neutral schema (``candidate_id`` / ``bbox`` / ``area`` /
-``polygon`` / ``score`` / ``engine`` / ``engine_meta``); engine-specific signals (SAM's stability
+``rings`` / ``score`` / ``engine`` / ``engine_meta``); engine-specific signals (SAM's stability
 and predicted-IoU scores) live under ``engine_meta`` so the shared review/staging path stays
 method-agnostic.
+
+``rings`` is a candidate's geometry as ``Polygon.rings`` — one closed contour per connected region of
+the proposed mask. An engine that only ever finds whole objects yields one ring per candidate; one
+that proposes an occlusion-split object yields several, and the staging path keeps all of them.
 """
 
 from __future__ import annotations
@@ -35,8 +39,8 @@ class Proposer(Protocol):
         points: list[dict] | None = None,
         box: dict | None = None,
         **params: Any,
-    ) -> list[tuple[float, float]]:
-        """One mask polygon (pixel coords) from an interactive point/box prompt."""
+    ) -> list[list[tuple[float, float]]]:
+        """One mask's polygon rings (pixel coords) from an interactive point/box prompt."""
         ...
 
 
@@ -46,7 +50,7 @@ def neutral_candidate(raw: dict, *, engine: str, score_key: str, meta_keys: tupl
         "candidate_id": raw["candidate_id"],
         "bbox": raw["bbox"],
         "area": raw["area"],
-        "polygon": raw["polygon"],
+        "rings": raw["rings"],
         "score": float(raw.get(score_key, 0.0)),
         "engine": engine,
         "engine_meta": {k: raw[k] for k in meta_keys if k in raw},
@@ -81,7 +85,7 @@ class SamProposer:
         points: list[dict] | None = None,
         box: dict | None = None,
         **params: Any,
-    ) -> list[tuple[float, float]]:
+    ) -> list[list[tuple[float, float]]]:
         from tcip_annotation.sam_wrapper import (
             predict_from_box,
             predict_from_point,
