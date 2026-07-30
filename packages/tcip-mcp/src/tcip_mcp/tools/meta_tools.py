@@ -55,6 +55,7 @@ def claude_reports(
     category: str,
     detail: str,
     context: dict | None = None,
+    user_disagreement: bool = False,
 ) -> dict:
     """Log structured friction when you get stuck, confused, or surprised.
 
@@ -76,6 +77,10 @@ def claude_reports(
         context: Optional structured context (file paths, tool names, trait,
             crop, session_id, error messages). Preserves raw signal for later
             review.
+        user_disagreement: True when this report is capturing the user pushing
+            back on or disagreeing with your approach, independent of category —
+            lets a later distill pass pull every disagreement out of the pile on
+            its own, rather than mixed into general friction.
     """
     if category not in REPORT_CATEGORIES:
         return {
@@ -96,6 +101,7 @@ def claude_reports(
         "category": category,
         "detail": detail,
         "context": context or {},
+        "user_disagreement": user_disagreement,
     }
 
     with open(report_path, "w", encoding="utf-8") as f:
@@ -105,6 +111,7 @@ def claude_reports(
         "report_path": str(report_path),
         "category": category,
         "timestamp": entry["timestamp"],
+        "user_disagreement": user_disagreement,
     }
 
 
@@ -191,6 +198,7 @@ def _load_reports(
             "category": entry.get("category", ""),
             "detail": entry.get("detail", ""),
             "context": entry.get("context", {}),
+            "user_disagreement": entry.get("user_disagreement", False),
         })
         if len(results) >= limit:
             break
