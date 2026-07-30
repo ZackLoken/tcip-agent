@@ -523,15 +523,21 @@ def test_golden_coco_matching_is_iou_threshold_sensitive():
 # 6. compute_phenology gate behavior
 # ══════════════════════════════════════════════════════════════════════════
 
-def _write_op_sidecar(d: Path, *, validated: bool, conf: float = 0.4, id_map: dict | None = None) -> None:
+def _write_op_sidecar(d: Path, *, validated: bool, conf: float = 0.4, id_map: dict | None = None,
+                      checkpoint_sha256: str | None = "deadbeef" * 8,
+                      experiment_id: str | None = "exp-golden") -> None:
     """The operating_point.json stamp export_predictions writes beside a bucket's labels — the
-    on-disk validity compute_phenology reconciles against (K3), including id_map (K4/K5)."""
+    on-disk validity compute_phenology reconciles against (K3), including id_map (K4/K5) and
+    producer identity (K12 finding 7: the real writer always stamps checkpoint_sha256/experiment_id
+    at the top level — a fixture that omitted them blessed a shape the platform never produces)."""
     ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
     (d / "operating_point.json").write_text(json.dumps({
         "validated": validated,
         "operating_point": {"conf": {"value": conf, "validated_against": ref}},
         "id_map": id_map,
+        "checkpoint_sha256": checkpoint_sha256,
+        "experiment_id": experiment_id,
     }), encoding="utf-8")
 
 
@@ -638,3 +644,12 @@ def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
     assert "error" not in res, res
     assert res["elongation_classified"] is True
     assert out_csv.exists()
+
+    # K12 finding 7: a fully-validated delivery must carry real producer identity, not blank
+    # producer columns — no test previously asserted compute_phenology actually populates them.
+    import csv as _csv
+    with out_csv.open(newline="", encoding="utf-8") as f:
+        rows = list(_csv.DictReader(f))
+    assert rows
+    assert all(row["producer_model_sha256"] == "deadbeef" * 8 for row in rows)
+    assert all(row["producer_experiment_id"] == "exp-golden" for row in rows)
