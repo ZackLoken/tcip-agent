@@ -25,6 +25,7 @@ export interface InferenceJob {
   images_dir: string;
   output_dir: string;
   error: string | null;
+  warning: string | null;
 }
 
 export interface LaunchInferenceBody {
