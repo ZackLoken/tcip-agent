@@ -161,6 +161,28 @@ def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
     assert px[1] > px[0]  # outline survives the later overlapping fill (green-dominant)
 
 
+def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
+    """A pushed point must reach the agent's view as a mark — not be dropped, not become a box.
+
+    The GUI can now author point annotations, so a shape kind the renderer skips would show the
+    agent a canvas with fewer annotations than the annotator sees. Widening it into a box is the
+    other failure: that invents an extent the annotation does not claim (see state.Point/bbox_of).
+    """
+    from tcip_annotation.viz import render_canvas_state
+    img = _make_image(tmp_path)
+    shapes = [{"kind": "point", "points": [[100, 50]], "color": "#FF0000", "label": "tip"}]
+    out = render_canvas_state(img, shapes, crop_to_viewport=False,
+                              output_path=str(tmp_path / "point.png"))
+    px = Image.open(out).convert("RGB")
+
+    def r_at(xy):  # red-over-green dominance at one pixel
+        return px.getpixel(xy)[0] - px.getpixel(xy)[1]
+
+    assert r_at((100, 50)) > 40          # the core sits on the coordinate
+    assert r_at((100, 42)) > 40          # a radial tick above it (the mark's reticle)
+    assert r_at((140, 50)) < 10          # nothing 40px away: no box, no fill, no outline
+
+
 def test_render_tolerates_malformed_shapes(tmp_path):
     from tcip_annotation.viz import render_canvas_state
     img = _make_image(tmp_path)
