@@ -5,21 +5,32 @@ import type { ImageLabels } from "@/store/types";
 
 const s = () => useStore.getState();
 
-function loadOnePolygon(): void {
-  const points: [number, number][] = [
-    [0, 0],
-    [10, 0],
-    [10, 10],
-  ];
+function loadPolygon(rings: [number, number][][]): void {
   const labels: ImageLabels = {
     image_path: "x",
     img_width: 100,
     img_height: 100,
     boxes: [],
-    polygons: [{ points, subject: "catkin", attributes: {} }],
+    polygons: [{ rings, subject: "catkin", attributes: {} }],
+    points: [],
     imageAnnotations: [],
   };
   s().loadLabelsIntoCanvas(labels);
+}
+
+const RING_A: [number, number][] = [
+  [0, 0],
+  [10, 0],
+  [10, 10],
+];
+const RING_B: [number, number][] = [
+  [40, 40],
+  [60, 40],
+  [60, 60],
+];
+
+function loadOnePolygon(): void {
+  loadPolygon([RING_A]);
 }
 
 describe("canvas store", () => {
@@ -38,11 +49,21 @@ describe("canvas store", () => {
   it("dragVertex moves a vertex WITHOUT pushing an undo snapshot", () => {
     loadOnePolygon();
     const before = s().canvas.undoStack.length;
-    s().dragVertex(0, 1, [42, 7]);
-    expect(s().canvas.polygons[0].points[1]).toEqual([42, 7]);
+    s().dragVertex(0, 0, 1, [42, 7]);
+    expect(s().canvas.polygons[0].rings[0][1]).toEqual([42, 7]);
     // The whole point of dragVertex: a live drag must not flood the undo stack.
     expect(s().canvas.undoStack.length).toBe(before);
     expect(s().canvas.dirty).toBe(true);
+  });
+
+  it("dragVertex edits the addressed ring and leaves the shape's other rings alone", () => {
+    // A vertex belongs to one contour of one annotation; a multi-ring shape must stay whole through
+    // an edit to one of its parts.
+    loadPolygon([RING_A, RING_B]);
+    s().dragVertex(0, 1, 2, [99, 98]);
+    expect(s().canvas.polygons[0].rings[1][2]).toEqual([99, 98]);
+    expect(s().canvas.polygons[0].rings[0]).toEqual(RING_A);
+    expect(s().canvas.polygons[0].rings).toHaveLength(2);
   });
 
   it("addBox pushes an undo snapshot that undo restores", () => {
@@ -96,6 +117,81 @@ describe("canvas store", () => {
     ]);
     expect(s().commitCurrentPolygon()).toBe(true);
     expect(s().canvas.polygons[0].subject).toBe("catkin");
+    // A hand-drawn shape is exactly one contour — the drawing tool never authors a second ring.
+    expect(s().canvas.polygons[0].rings).toHaveLength(1);
+  });
+});
+
+describe("canvas store points", () => {
+  beforeEach(() => {
+    s().clearCanvas();
+  });
+
+  const pt = (x: number, y: number, subject = "tip") => ({ x, y, subject, attributes: {} });
+
+  it("addPoint pushes an undo snapshot that undo restores", () => {
+    s().addPoint(pt(10, 20));
+    expect(s().canvas.points).toEqual([pt(10, 20)]);
+    expect(s().canvas.dirty).toBe(true);
+    expect(s().canvas.undoStack).toHaveLength(1);
+    s().undo();
+    expect(s().canvas.points).toHaveLength(0);
+    expect(s().canvas.redoStack).toHaveLength(1);
+    s().redo();
+    expect(s().canvas.points).toEqual([pt(10, 20)]);
+  });
+
+  it("dragPoint repositions WITHOUT pushing an undo snapshot", () => {
+    s().addPoint(pt(10, 20));
+    const before = s().canvas.undoStack.length;
+    s().dragPoint(0, 33, 44);
+    expect(s().canvas.points[0]).toMatchObject({ x: 33, y: 44, subject: "tip" });
+    // Like dragBox/dragVertex: a live drag must not flood the 30-entry undo stack.
+    expect(s().canvas.undoStack.length).toBe(before);
+    expect(s().canvas.dirty).toBe(true);
+  });
+
+  it("dragPoint on a missing index is a no-op (a stale drag can outlive its point)", () => {
+    s().addPoint(pt(10, 20));
+    s().dragPoint(5, 1, 1);
+    expect(s().canvas.points).toEqual([pt(10, 20)]);
+  });
+
+  it("deletePoint removes it and keeps the selection pointing at the same annotation", () => {
+    s().addPoint(pt(1, 1, "a"));
+    s().addPoint(pt(2, 2, "b"));
+    s().addPoint(pt(3, 3, "c"));
+    s().selectPoint(2);
+    s().deletePoint(0); // an earlier point goes: the selection shifts down with it
+    expect(s().canvas.points.map((p) => p.subject)).toEqual(["b", "c"]);
+    expect(s().canvas.selectedPointIdx).toBe(1);
+    s().deletePoint(1); // the selected point itself goes
+    expect(s().canvas.selectedPointIdx).toBeNull();
+  });
+
+  it("updatePoint edits attributes in place (undoable), leaving the position alone", () => {
+    s().addPoint(pt(10, 20));
+    s().updatePoint(0, { ...s().canvas.points[0], attributes: { stage: "open" } });
+    expect(s().canvas.points[0]).toMatchObject({ x: 10, y: 20, attributes: { stage: "open" } });
+    s().undo();
+    expect(s().canvas.points[0].attributes).toEqual({});
+  });
+
+  it("loadLabelsIntoCanvas adopts loaded points and clears any point selection", () => {
+    s().addPoint(pt(1, 1));
+    s().selectPoint(0);
+    s().loadLabelsIntoCanvas({
+      image_path: "x",
+      img_width: 100,
+      img_height: 100,
+      boxes: [],
+      polygons: [],
+      points: [pt(5, 6, "tip")],
+      imageAnnotations: [],
+    });
+    expect(s().canvas.points).toEqual([pt(5, 6, "tip")]);
+    expect(s().canvas.selectedPointIdx).toBeNull();
+    expect(s().canvas.dirty).toBe(false);
   });
 });
 
