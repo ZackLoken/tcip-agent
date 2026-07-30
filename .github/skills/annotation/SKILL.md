@@ -68,7 +68,9 @@ agent names an `engine` and the platform runs it. `engine='sam'` is the built-in
 agent can register another engine (`register_proposal_engine`) or pass a dotted `module:factory` it
 wrote — a Grounding DINO / open-vocab detector, or a bespoke proposer — exactly the way `model_source`
 lets it bring a model. Engine-specific knobs travel in `engine_params`; the candidate schema is
-neutral (`candidate_id` / `bbox` / `area` / `polygon` / `score`), engine signals under `engine_meta`.
+neutral (`candidate_id` / `bbox` / `area` / `rings` / `score`), engine signals under `engine_meta`
+(`rings` is `Polygon.rings` — one contour per connected region of the proposed mask, so an
+occlusion-split object stays split from proposal through accept).
 That bespoke proposer may be classical-analysis-based (an OpenCV / scikit-image pipeline the agent
 writes) — one option among engines, not a prescribed step; its proposals are soft and prove out only
 by surviving review.
@@ -81,8 +83,9 @@ Do not promise an engine that isn't built; SAM is the one that ships as a runnab
 
 ### Manual/prompted segmentation
 1. User clicks a point or draws a rough box on the annotation canvas (or the agent names a grid cell)
-2. `segment_prompt(image_path, points=/box=/grid_cells=, engine='sam')` returns a precise polygon
-3. Polygon is saved in the project's configured annotation format
+2. `segment_prompt(image_path, points=/box=/grid_cells=, engine='sam')` returns precise polygon
+   `rings` — one per connected region of the mask, so a partly-occluded object comes back whole
+3. The rings are saved as one polygon annotation in the project's configured annotation format
 4. Supports point prompts (positive/negative), box prompts, and grid-cell references
 
 ### Vision-guided auto-labeling (the engine is the "hands", the agent's vision the "eyes")
@@ -102,12 +105,16 @@ classification and QA.
 **Corrective loop (for missed objects):**
 1. `overlay_reference_grid(image_path)` → labeled grid (A1–H6) for spatial reference
 2. Agent `view_image` → identifies missed regions by grid cell
-3. `segment_prompt(image_path, grid_cells=["B3", "D5"])` → the engine segments at those locations
+3. `segment_prompt(image_path, grid_cells=["B3", "D5"], cols=8, rows=6)` → the engine segments at
+   those locations
 4. Save new annotations via `save_annotations`
 
 **Grid cell system:**
-- 8 columns (A–H) × 6 rows (1–6) by default
+- `overlay_reference_grid(image_path, cols=, rows=)` renders the grid (8 × 6 unless you say otherwise)
+  and echoes the `cols`/`rows` it used
 - Agent references cells like "B3" or "F5" instead of pixel coordinates
+- A cell name is meaningless without its grid, so `segment_prompt(grid_cells=...)` requires the same
+  `cols`/`rows` that rendered the overlay you read the cells off — it refuses rather than assume a grid
 - `grid_to_pixel()` in `sam_wrapper.py` converts to center pixel coords
 
 | Tool | Role | Phase |
