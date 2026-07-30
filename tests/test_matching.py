@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 
 from tcip_annotation import (
     Annotation,
@@ -56,19 +57,56 @@ def test_polygon_iou_no_overlap():
 
 
 def test_point_in_polygon_inside():
-    poly = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    poly = Polygon([[(0, 0), (100, 0), (100, 100), (0, 100)]])
     assert point_in_polygon(50, 50, poly) is True
 
 
 def test_point_in_polygon_outside():
-    poly = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    poly = Polygon([[(0, 0), (100, 0), (100, 100), (0, 100)]])
     assert point_in_polygon(200, 200, poly) is False
 
 
 def test_point_in_polygon_on_edge():
     """Points on the boundary are not inside (Shapely convention)."""
-    poly = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    poly = Polygon([[(0, 0), (100, 0), (100, 100), (0, 100)]])
     assert point_in_polygon(0, 50, poly) is False
+
+
+# ── multi-ring (occlusion-split) instances ───────────────────────────────
+
+# Two disjoint lobes of ONE instance — a catkin split by a branch crossing in front of it.
+LOBE_A = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]        # area 800
+LOBE_B = [(70.0, 10.0), (120.0, 10.0), (120.0, 60.0), (70.0, 60.0)]     # area 2500
+LOBES_AREA = 800.0 + 2500.0
+
+
+def test_point_in_polygon_hits_a_ring_that_is_not_the_first():
+    """Every ring is part of the instance, so a hit test consults all of them."""
+    poly = Polygon([LOBE_A, LOBE_B])
+    assert point_in_polygon(20, 30, poly) is True   # inside the first lobe
+    assert point_in_polygon(95, 35, poly) is True   # inside the second lobe
+    assert point_in_polygon(50, 30, poly) is False  # the occluded gap between them
+
+
+def test_compute_matches_multi_ring_iou_spans_every_ring():
+    """IoU is computed over the union of an instance's rings (a Shapely MultiPolygon)."""
+    gt = [Annotation(subject="catkin", geometry=Polygon([LOBE_A, LOBE_B]))]
+
+    exact = [Annotation(subject="catkin", geometry=Polygon([LOBE_A, LOBE_B]), score=0.9)]
+    result = compute_matches(gt, exact)
+    assert len(result["tp"]) == 1
+    assert result["tp"][0]["iou"] == 1.0
+
+    # A prediction that found only the first lobe leaves most of the instance unexplained: its IoU is
+    # 800/3300, so at a 0.5 threshold it is an FP against an unmatched FN — not the perfect match a
+    # first-ring-only comparison would report.
+    partial = [Annotation(subject="catkin", geometry=Polygon([LOBE_A]), score=0.9)]
+    strict = compute_matches(gt, partial, iou_threshold=0.5)
+    assert strict["tp"] == []
+    assert len(strict["fp"]) == 1 and len(strict["fn"]) == 1
+
+    lenient = compute_matches(gt, partial, iou_threshold=0.2)
+    assert lenient["tp"][0]["iou"] == pytest.approx(800.0 / LOBES_AREA, abs=1e-4)
 
 
 # ── compute_matches ──────────────────────────────────────────────────────
@@ -120,9 +158,9 @@ def test_compute_matches_class_mismatch():
 
 def test_compute_matches_polygon():
     """Polygon GT + Polygon pred."""
-    gt = [Annotation(subject="catkin", geometry=Polygon([(0, 0), (100, 0), (100, 100), (0, 100)]))]
+    gt = [Annotation(subject="catkin", geometry=Polygon([[(0, 0), (100, 0), (100, 100), (0, 100)]]))]
     preds = [Annotation(subject="catkin",
-                        geometry=Polygon([(5, 5), (95, 5), (95, 95), (5, 95)]), score=0.85)]
+                        geometry=Polygon([[(5, 5), (95, 5), (95, 95), (5, 95)]]), score=0.85)]
     result = compute_matches(gt, preds)
     assert len(result["tp"]) == 1
     assert result["tp"][0]["iou"] > 0.8
