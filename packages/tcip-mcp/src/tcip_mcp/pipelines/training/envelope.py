@@ -340,7 +340,9 @@ def _snapshot_run_provenance(ctx: TrainContext) -> None:
             # from an importable builder, not exec. No-op for the composed default path.
             snapshot_model_source(ctx.config, exp_dir)
     except Exception:  # noqa: BLE001
-        logger.debug("run provenance snapshot skipped", exc_info=True)
+        # A dropped provenance snapshot is a real gap in the model+env link — surface it, don't
+        # bury it at debug (K12: matches audit.py's own "a dropped audit line" stance).
+        logger.warning("run provenance snapshot skipped", exc_info=True)
 
 
 def dispatch_train_body(ctx: TrainContext) -> None:
