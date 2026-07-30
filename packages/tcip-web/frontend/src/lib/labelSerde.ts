@@ -1,11 +1,11 @@
 /**
  * The single mapping between the unified name-based label file (one Annotation list per image)
- * and the Annotate canvas' drawing model (boxes + polygons + geometry-less ratings). Load and
- * save share this so the round-trip is symmetric — a box stays a box, a polygon stays a polygon,
- * and a geometry-less rating is never silently dropped on the next save.
+ * and the Annotate canvas' drawing model (boxes + polygons + points + geometry-less ratings). Load
+ * and save share this so the round-trip is symmetric — a box stays a box, a polygon stays a polygon,
+ * a point stays a point, and a geometry-less rating is never silently dropped on the next save.
  */
 
-import type { Annotation, AnnotationPayload, Box, PolygonShape } from "@/store/types";
+import type { Annotation, AnnotationPayload, Box, PointShape, PolygonShape } from "@/store/types";
 
 function provenance(a: {
   created_by?: string | null;
@@ -24,20 +24,24 @@ function provenance(a: {
 export interface CanvasLabels {
   boxes: Box[];
   polygons: PolygonShape[];
+  points: PointShape[];
   imageAnnotations: Annotation[];
 }
 
-/** Split a unified annotation list into the canvas' three buckets, keyed on each annotation's own
- *  geometry: points -> polygon, else bbox -> box, else geometry-less rating. */
+/** Split a unified annotation list into the canvas' four buckets, keyed on each annotation's own
+ *  geometry: rings -> polygon, else bbox -> box, else point -> point, else geometry-less rating.
+ *  Every ring of a polygon is kept — dropping the rest of an occlusion-split shape would show the
+ *  reviewer a part of the object and save it back as the whole. */
 export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
   const boxes: Box[] = [];
   const polygons: PolygonShape[] = [];
+  const points: PointShape[] = [];
   const imageAnnotations: Annotation[] = [];
   for (const a of annotations) {
     const attributes = { ...(a.attributes ?? {}) };
-    if (a.points && a.points.length) {
+    if (a.rings && a.rings.length) {
       polygons.push({
-        points: a.points.map(([x, y]): [number, number] => [x, y]),
+        rings: a.rings.map((ring) => ring.map(([x, y]): [number, number] => [x, y])),
         subject: a.subject,
         attributes,
         ...provenance(a),
@@ -45,14 +49,17 @@ export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
     } else if (a.bbox) {
       const [x1, y1, x2, y2] = a.bbox;
       boxes.push({ x1, y1, x2, y2, subject: a.subject, attributes, ...provenance(a) });
+    } else if (a.point) {
+      const [x, y] = a.point;
+      points.push({ x, y, subject: a.subject, attributes, ...provenance(a) });
     } else {
       imageAnnotations.push({ ...a, attributes });
     }
   }
-  return { boxes, polygons, imageAnnotations };
+  return { boxes, polygons, points, imageAnnotations };
 }
 
-/** Reassemble the canvas' three buckets into one unified annotation list for save. */
+/** Reassemble the canvas' four buckets into one unified annotation list for save. */
 export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
   const out: AnnotationPayload[] = [];
   for (const b of labels.boxes) {
@@ -64,9 +71,25 @@ export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
     });
   }
   for (const p of labels.polygons) {
+    // One contour goes back as `points` — the field a hand-drawn/hand-edited shape belongs in, and
+    // the only one the Review edit route (`edited_points`) has. More than one goes back as `rings`,
+    // which is the only field that can carry them. Never both: the backend prefers `rings`.
+    const geometry =
+      p.rings.length === 1
+        ? { points: p.rings[0].map(([x, y]) => [x, y]) }
+        : { rings: p.rings.map((ring) => ring.map(([x, y]) => [x, y])) };
     out.push({
       subject: p.subject,
-      points: p.points.map(([x, y]) => [x, y]),
+      ...geometry,
+      attributes: p.attributes ?? {},
+      ...provenance(p),
+    });
+  }
+  for (const p of labels.points) {
+    // One coordinate pair, always — a point has no contour, so neither `points` nor `rings` applies.
+    out.push({
+      subject: p.subject,
+      point: [p.x, p.y],
       attributes: p.attributes ?? {},
       ...provenance(p),
     });
