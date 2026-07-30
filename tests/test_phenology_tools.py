@@ -104,11 +104,11 @@ def _write_preds(dir_path: Path, stem: str, subjects: list[str]) -> None:
 def _write_op_sidecar(dir_path: Path, *, validated: bool, conf: float = 0.4,
                       id_map: dict | None = None, experiment_id: str | None = None) -> None:
     """The operating_point.json a calibrated export_predictions writes."""
-    ref = "validated_held_out" if validated else "false"
+    ref = "held_out_annotations" if validated else "false"
     dir_path.mkdir(parents=True, exist_ok=True)
     (dir_path / "operating_point.json").write_text(json.dumps({
         "validated": validated,
-        "operating_point": {"conf": {"value": conf, "validated_vs_gt": ref}},
+        "operating_point": {"conf": {"value": conf, "validated_against": ref}},
         "id_map": id_map,
         "experiment_id": experiment_id,
     }), encoding="utf-8")
@@ -117,11 +117,11 @@ def _write_op_sidecar(dir_path: Path, *, validated: bool, conf: float = 0.4,
 def _write_classifier_sidecar(dir_path: Path, *, validated: bool, trait: str | None = None,
                               experiment_id: str | None = None) -> None:
     """The classifier_operating_point.json calibrate_classifier_operating_point writes (K3)."""
-    ref = "validated_held_out" if validated else "false"
+    ref = "held_out_annotations" if validated else "false"
     dir_path.mkdir(parents=True, exist_ok=True)
     (dir_path / "classifier_operating_point.json").write_text(json.dumps({
         "validated": validated,
-        "operating_point": {"classifier": {"value": "elongated", "validated_vs_gt": ref}},
+        "operating_point": {"classifier": {"value": "elongated", "validated_against": ref}},
         "trait": trait,
         "experiment_id": experiment_id,
     }), encoding="utf-8")
@@ -151,7 +151,7 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4,
-        operating_point_validated="validated_held_out",
+        operating_point_validated="held_out_annotations",
     )
 
     assert "error" not in res, res
@@ -188,7 +188,7 @@ def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path:
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(other_trait_dir)],
         operating_point_conf=0.4,
-        operating_point_validated="validated_held_out",
+        operating_point_validated="held_out_annotations",
     )
 
     assert "error" in res
@@ -224,7 +224,7 @@ def test_compute_phenology_rejects_classifier_stamp_with_no_trait_recorded(tmp_p
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4,
-        operating_point_validated="validated_held_out",
+        operating_point_validated="held_out_annotations",
     )
 
     assert "error" in res
@@ -323,12 +323,12 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
         mapping_path=str(mapping_path),
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
-        operating_point_validated="validated_held_out",
+        operating_point_validated="held_out_annotations",
         acknowledge_unvalidated=True,
     )
     assert "error" not in res, res
     assert res["positive_state_classifier_validated"] == "false"  # never upgraded
-    assert res["operating_point_validated"] == "validated_held_out"
+    assert res["operating_point_validated"] == "held_out_annotations"
     assert out_csv.exists()
 
 
@@ -450,6 +450,12 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
     assert res["failures"] == []
     sidecar = json.loads((tmp_path / "out" / "classifier_operating_point.json").read_text())
     assert sidecar["validated"] is True
+    # The writer's field name must be the one the shared reader reads — checked by running the real
+    # reader over the real output, not by re-asserting a key name in two places.
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT, reconcile_classifier_validity
+
+    assert sidecar["operating_point"]["classifier"]["validated_against"] == VALIDATED_HELD_OUT
+    assert reconcile_classifier_validity([str(tmp_path / "out")])["validated"] == VALIDATED_HELD_OUT
 
 
 def test_calibrate_classifier_operating_point_refuses_genuinely_duplicated_holdout(tmp_path: Path) -> None:
