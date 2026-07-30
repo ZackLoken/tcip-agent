@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_annotation import BBox, Polygon
+from tcip_annotation import BBox, Point, Polygon
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation
 from tcip_annotation.utils import get_image_dimensions
@@ -26,12 +26,21 @@ router = APIRouter(prefix="/api/annotate", tags=["annotate"])
 
 
 class AnnotationPayload(BaseModel):
-    """One annotation: its ``subject`` (the object it is about), a geometry (a box or a polygon,
-    or neither for an image-level label), and its attribute values by name."""
+    """One annotation: its ``subject`` (the object it is about), a geometry (a box, a polygon, a
+    point, or none of them for an image-level label), and its attribute values by name."""
 
     subject: str
     bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel
-    points: Optional[list[list[float]]] = None  # polygon vertices, pixel
+    points: Optional[list[list[float]]] = None  # single-ring polygon vertices, pixel — a shape the
+                                                 # canvas itself drew/edited by hand
+    rings: Optional[list[list[list[float]]]] = None  # multi-ring polygon (a loaded, unedited
+                                                       # occlusion-split instance_seg shape round-
+                                                       # tripping through save) — takes precedence
+                                                       # over `points` when both are present
+    point: Optional[list[float]] = None         # [x, y], pixel — one placed prompt / keypoint.
+                                                 # Singular, deliberately distinct from `points`:
+                                                 # a point and a one-vertex contour are not the
+                                                 # same geometry.
     attributes: dict[str, str] = {}
     # Provenance round-trips through the client: a loaded shape carries its original created_by
     # back on save (keep-original-creator policy), so a re-save never wholesale re-stamps existing
@@ -98,13 +107,22 @@ def _mtime_token(path: Optional[str]) -> Optional[str]:
 
 
 def _ann_dict(a: Annotation) -> dict:
-    """Serialize an :class:`Annotation` for the canvas (pixel coords + provenance)."""
+    """Serialize an :class:`Annotation` for the canvas (pixel coords + provenance).
+
+    ``rings`` (not ``points``) for a polygon — a loaded GT annotation can be a multi-ring
+    occlusion-split instance_seg prediction accepted through Review, so the canvas always receives
+    every ring rather than silently only the first. The canvas itself still only ever *draws* a
+    single ring by hand (see ``AnnotationPayload.points`` below, the save side). ``point`` is the
+    singular ``[x, y]`` of a placed prompt / keypoint, the same key the on-disk schema uses.
+    """
     out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
     geom = a.geometry
     if isinstance(geom, Polygon):
-        out["points"] = [list(pt) for pt in geom.points]
+        out["rings"] = [[list(pt) for pt in ring] for ring in geom.rings]
     elif isinstance(geom, BBox):
         out["bbox"] = [geom.x1, geom.y1, geom.x2, geom.y2]
+    elif isinstance(geom, Point):
+        out["point"] = [geom.x, geom.y]
     if a.score is not None:
         out["score"] = a.score
     out["created_by"] = a.created_by
@@ -188,10 +206,16 @@ def save_labels(payload: SavePayload) -> dict:
 
     def _to_annotation(ap: AnnotationPayload) -> Annotation:
         geometry = None
-        if ap.points:
-            geometry = Polygon(points=[(float(p[0]), float(p[1])) for p in ap.points])
+        if ap.rings:
+            geometry = Polygon(rings=[[(float(p[0]), float(p[1])) for p in ring] for ring in ap.rings])
+        elif ap.points:
+            # The canvas draws one contour by hand — single-ring input. Polygon itself supports
+            # multiple rings (occlusion-split model output), but a freshly-drawn shape is always one.
+            geometry = Polygon(rings=[[(float(p[0]), float(p[1])) for p in ap.points]])
         elif ap.bbox is not None:
             geometry = BBox(*ap.bbox)
+        elif ap.point is not None:
+            geometry = Point(float(ap.point[0]), float(ap.point[1]))
         # accepted_* only ride along on round-tripped shapes (created_by present) — a new shape
         # claiming acceptance would mint review sign-off that never happened.
         round_tripped = bool(ap.created_by)
