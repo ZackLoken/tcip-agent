@@ -618,8 +618,15 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
     default when ``name_id`` is ``None``, fine for a single image) pools different subjects into one
     category across images and corrupts per-class AP. ``force_segm`` makes every box carry a
     rectangular ``segmentation`` so a whole dataset can be scored with ``iou_type='segm'``.
+
+    A geometry-less annotation and a :class:`~tcip_annotation.state.Point` contribute no record and no
+    ``name_id`` entry: neither has a box to score, and emitting one would put a fabricated extent into
+    a delivery-grade AP — as GT nothing can match, or as a detection matching nothing.
     """
-    from tcip_annotation.state import Polygon, bbox_of
+    from tcip_annotation.state import Point, Polygon, bbox_of
+
+    def _scorable(a) -> bool:
+        return a.geometry is not None and not isinstance(a.geometry, Point)
 
     def _has_poly(anns):
         return any(isinstance(a.geometry, Polygon) for a in anns)
@@ -630,7 +637,7 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
     if name_id is None:  # single-image scoring: a local map cannot disagree with itself
         names: list[str] = []
         for a in (*gt, *preds):
-            if a.geometry is not None and a.subject not in names:
+            if _scorable(a) and a.subject not in names:
                 names.append(a.subject)
         name_id = {n: i + 1 for i, n in enumerate(names)}  # 1-indexed (background 0), like detector labels
 
@@ -638,7 +645,7 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
         return [[float(x1), float(y1), float(x2), float(y1), float(x2), float(y2), float(x1), float(y2)]]
 
     def _record(a, *, is_pred):
-        if a.geometry is None:
+        if not _scorable(a):
             return None
         box = bbox_of(a.geometry)
         rec: dict = {"category_id": name_id[a.subject],
@@ -649,7 +656,7 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
             rec["area"] = float((box.x2 - box.x1) * (box.y2 - box.y1))
             rec["iscrowd"] = 0
         if isinstance(a.geometry, Polygon):
-            rec["segmentation"] = [_poly_flat(a.geometry.points)]
+            rec["segmentation"] = [_poly_flat(ring) for ring in a.geometry.rings if len(ring) >= 3]
         elif use_segm:
             rec["segmentation"] = _box_seg(box.x1, box.y1, box.x2, box.y2)
         return rec
@@ -1003,6 +1010,11 @@ def run_full_frame_evaluation(
     ``overlap`` alone falling back to a default does NOT raise — a checkpoint trained with no
     tiling overlap convention at all has no persisted overlap analog, which is a legitimate fact,
     not a missing derivation; only ``tile_size``'s absence changes the object count's scale.
+
+    This is a BOX metric (``iou_type="bbox"``): it requests boxes-only tiled inference
+    (``predict_tiled(require_masks=False)``), so an instance_seg checkpoint is gated here on its
+    boxes/counts, never on its masks. A mask-quality gate is separate work; do not report this
+    number as one.
     """
     from tcip_mcp.dataset_layout import annotation_date
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
@@ -1075,8 +1087,12 @@ def run_full_frame_evaluation(
             for (x1, y1, x2, y2), lab in zip(gboxes, glabels):
                 gt.append({"category_id": int(lab),
                            "bbox": _xyxy_to_xywh(x1, y1, x2, y2), "iscrowd": 0})
+        # require_masks=False: this gate matches boxes to full-frame GT and never reads masks, so a
+        # tile-trained instance_seg checkpoint evaluates here exactly as a detector does, instead of
+        # being blocked by predict_tiled's mask contract for masks nothing on this path consumes.
         r = predictor.predict_tiled(str(p), tile_size=tile_size, overlap=overlap,
-                                    global_nms_iou=global_nms_iou, postprocess=postprocess)
+                                    global_nms_iou=global_nms_iou, postprocess=postprocess,
+                                    require_masks=False)
         w, h = int(r["width"]), int(r["height"])
         dt = [{"category_id": int(lab), "bbox": _xyxy_to_xywh(*b), "score": float(s)}
               for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
@@ -1093,7 +1109,12 @@ def run_full_frame_evaluation(
             "precision", "recall", "f1", "tp", "fp", "fn", "n_images", "n_gt", "n_pred")
     result = {
         **{k: m[k] for k in keys},
-        "model_path": str(ckpt_path), "task": "detection", "iou_type": "bbox",
+        # task: the predictor's own real task (round-2 stage-6 finding — this used to hardcode
+        # "detection" even for an instance_seg checkpoint, mislabeling its delivery artifact).
+        # iou_type stays the literal "bbox": this gate always computes a box-only metric by design
+        # (require_masks=False above), true regardless of task — see the docstring.
+        "model_path": str(ckpt_path), "task": getattr(predictor, "task", "detection"),
+        "iou_type": "bbox",
         **_producer_identity(ckpt_path),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
         "max_dets_cap_saturated_frac": _cap_saturated_frac(per_image),
