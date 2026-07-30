@@ -7,6 +7,7 @@ arguments, result status, and duration. Append-only JSONL format.
 from __future__ import annotations
 
 import functools
+import inspect
 import logging
 import time
 from datetime import datetime, timezone
@@ -65,16 +66,30 @@ def record_event(
 
 
 def audited(fn: Callable) -> Callable:
-    """Decorator that logs MCP tool calls to .tcip/audit.jsonl."""
+    """Decorator that logs MCP tool calls to .tcip/audit.jsonl.
+
+    Binds positional args to their parameter names (K12 finding 6) so a caller that invokes the
+    tool positionally — e.g. the web routes, which call ``launch_training(payload.config,
+    payload.output_dir)`` rather than by keyword — is recorded with the same fidelity as a keyword
+    call, instead of writing an empty ``arguments`` dict. Binding failures never abort the call this
+    decorator only observes; they fall back to the kwargs-only record.
+    """
+    sig = inspect.signature(fn)
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         tool_name = fn.__name__
         t0 = time.monotonic()
+        try:
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+            logged_args: dict[str, Any] = dict(bound.arguments)
+        except TypeError:
+            logged_args = dict(kwargs)
         entry: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "tool": tool_name,
-            "arguments": _redact(kwargs) if kwargs else {},
+            "arguments": _redact(logged_args) if logged_args else {},
         }
 
         try:
