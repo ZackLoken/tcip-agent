@@ -71,6 +71,7 @@ class InferenceJob:
     done: int = 0
     status: str = "pending"  # pending | running | completed | failed | cancelled
     error: Optional[str] = None
+    warning: Optional[str] = None
     results: list[dict] = field(default_factory=list)  # [{image, n_detections}]
     thread: Optional[threading.Thread] = field(default=None, repr=False)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -84,6 +85,7 @@ def _summary(job: InferenceJob) -> dict:
     return {
         "job_id": job.job_id, "status": job.status, "done": job.done, "total": job.total,
         "images_dir": job.images_dir, "output_dir": job.output_dir, "error": job.error,
+        "warning": job.warning,
     }
 
 
@@ -145,6 +147,7 @@ def rehydrate() -> None:
                 done=s.get("done", 0),
                 status=status,
                 error=s.get("error"),
+                warning=s.get("warning"),
             )
 
 
@@ -181,6 +184,27 @@ def _worker(job: InferenceJob) -> None:
             nms_iou=job.iou,           # raw_operating_point below wraps the same raw value, never
             max_dets=job.max_dets,     # transforms it (see its own docstring).
         )
+
+        # instance_seg tiled inference can't carry masks through the cross-tile merge (same rail
+        # run_inference enforces — see inference_tools.py). The MCP door can tell an explicit
+        # tile=True request apart from an unset default and refuse only the explicit case; the
+        # GUI's tile checkbox is a controlled input with no "unset" state (K10 finding 3 above), so
+        # job.tile_source is "explicit" on every real launch and refusing on that basis here would
+        # refuse every GUI instance_seg run, not just the ones that mean it. So this door always
+        # forces untiled for instance_seg instead of ever refusing (masks survive; a rail must admit
+        # valid work, not only reject invalid work) and records the forced value's source as
+        # "default" rather than "explicit" — the platform, not the breeder, decided this run's
+        # tiling, and the provenance should say so.
+        if getattr(predictor, "task", None) == "instance_seg" and job.tile:
+            job.tile = False
+            job.tile_source = "default"
+            job.warning = (
+                "instance_seg checkpoint: tiled inference cannot carry masks through the "
+                "cross-tile merge yet, so this run forced untiled (masks survive) regardless of "
+                "the 'Tiled inference' checkbox. Small dense objects may be under-detected at "
+                "full resolution."
+            )
+            logger.warning(job.warning)
 
         # Derive tile_size/overlap from the checkpoint's own persisted training geometry (K6/TRAP 4
         # step 2) — the same resolver run_inference uses, so the GUI door can't silently diverge
@@ -240,6 +264,13 @@ def _worker(job: InferenceJob) -> None:
         # matching the MCP door's own run_inference (inference_tools.py).
         provenance["overlap"] = resolved_overlap
         provenance["overlap_source"] = overlap_source
+        if getattr(predictor, "task", None) == "instance_seg":
+            # The unvalidated mask-binarize threshold write_predictions_json will use for every mask
+            # in this run — a run constant, so it travels once here (see export.py's
+            # mask_binarize_provenance docstring), never per-annotation.
+            from tcip_mcp.pipelines.postprocessing.export import mask_binarize_provenance
+
+            provenance["mask_binarize"] = mask_binarize_provenance()
         atomic_write_json(output_dir / "operating_point.json", provenance)
 
         for img in images:
@@ -458,6 +489,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                     "done": job.done,
                     "total": job.total,
                     "status": job.status,
+                    "warning": job.warning,
                 })
             # Terminate on ANY terminal state — a cancelled/interrupted job never
             # reaches completed/failed, so keying only on those spun this loop forever.
@@ -467,6 +499,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                     "job_id": job.job_id,
                     "status": job.status,
                     "error": job.error,
+                    "warning": job.warning,
                 })
                 break
             await asyncio.sleep(0.5)
