@@ -171,8 +171,8 @@ def test_resolve_operating_point_validated_with_holdout():
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01)
     conf = b.get("conf")
-    assert conf.derivation_class == "calibration"
-    assert conf.validated_vs_gt == "validated_held_out"
+    assert conf.requires_validation is True and conf.validation_kind == "annotations"
+    assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable
     assert conf.value == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert b.get("max_dets").value >= 100  # derived from GT density
@@ -191,7 +191,7 @@ def test_resolve_operating_point_overlapping_holdout_not_validated():
     # same image ids in calibration and holdout -> not a real held-out split -> not validated
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=_records("c"), holdout_records=_records("c"))
-    assert b.get("conf").validated_vs_gt == "false"
+    assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
 
 
@@ -204,7 +204,7 @@ def test_resolve_operating_point_missing_image_ids_fails_closed():
              "dt": [_ann(100, 100, score=0.9)]}]  # no image_id key
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=recs, holdout_records=recs)
-    assert b.get("conf").validated_vs_gt == "false"
+    assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
 
 
@@ -220,7 +220,7 @@ def test_resolve_operating_point_biased_holdout_is_unshippable():
                                 calibration_records=cal, holdout_records=biased_hold,
                                 staged_conf_floor=0.01)
     # measured on the disjoint split but FAILED (bias > tolerance) -> not validated, firewall holds
-    assert b.get("conf").validated_vs_gt == "false"
+    assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
     assert "count_bias_exceeds_tolerance" in b.get("conf").sweep["failures"]
 
@@ -228,7 +228,7 @@ def test_resolve_operating_point_biased_holdout_is_unshippable():
 def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records())
-    assert b.get("conf").validated_vs_gt == "false"
+    assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
 
 
@@ -241,7 +241,7 @@ def test_resolve_operating_point_content_clone_holdout_is_false():
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=_records("c"), holdout_records=_records("h"))
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "false"
+    assert conf.validated_against == "false"
     assert not b.is_shippable
     assert conf.sweep["content_overlap_frac"] == pytest.approx(1.0)
 
@@ -263,7 +263,7 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, experiment_id="exp1")
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "false"
+    assert conf.validated_against == "false"
     assert conf.sweep["train_disjointness"]["leaked_groups"] == ["a"]
 
 
@@ -278,7 +278,7 @@ def test_resolve_operating_point_train_disjointness_unresolvable_when_split_miss
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="does-not-exist")
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "false"
+    assert conf.validated_against == "false"
     assert conf.sweep["train_disjointness"] == {"checked": False, "unresolvable": True,
                                                  "leaked_groups": [], "leaked_stems": [],
                                                  "group_check": None}
@@ -300,7 +300,7 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="exp2")
     conf = b.get("conf")
-    assert conf.validated_vs_gt == "validated_held_out"
+    assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable
     assert conf.sweep["train_disjointness"] == {"checked": True, "unresolvable": False,
                                                  "leaked_groups": [], "leaked_stems": [],
@@ -330,7 +330,7 @@ def test_resolve_operating_point_derives_cross_tile_nms_from_gt():
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_overlap_records())
     p = b.get("cross_tile_nms")
     assert p.source == "derived"
-    assert p.derivation_class == "distribution"
+    assert p.requires_validation is False  # a statistic from this dataset's own spread needs no validation
     assert "neighbor-IoU" in p.derived_from
     assert 0.2 <= p.value <= 0.8
     assert p.value == pytest.approx(0.4286 + 0.05, abs=1e-2)  # p99 of the GT neighbor-IoU tail + margin
