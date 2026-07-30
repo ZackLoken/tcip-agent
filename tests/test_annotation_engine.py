@@ -101,14 +101,13 @@ def test_close_polygon_clamps_to_image_bounds(state: AnnotationState) -> None:
     state.current_polygon = [(-10.0, -10.0), (200.0, 50.0), (50.0, 200.0)]
     eng = AnnotationEngine(state)
     assert eng.close_current_polygon() is True
-    pts = state.annotations[0].geometry.points
-    assert pts == [(0.0, 0.0), (100.0, 50.0), (50.0, 100.0)]
+    assert state.annotations[0].geometry.rings == [[(0.0, 0.0), (100.0, 50.0), (50.0, 100.0)]]
 
 
 def test_delete_polygon_updates_selection(state: AnnotationState) -> None:
     eng = AnnotationEngine(state)
-    eng.add_polygon(Polygon([(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]), subject="catkin")
-    eng.add_polygon(Polygon([(10.0, 10.0), (11.0, 10.0), (10.0, 11.0)]), subject="catkin")
+    eng.add_polygon(Polygon([[(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]]), subject="catkin")
+    eng.add_polygon(Polygon([[(10.0, 10.0), (11.0, 10.0), (10.0, 11.0)]]), subject="catkin")
     state.selected_polygon_idx = 1
     eng.delete_annotation(0)
     assert state.selected_polygon_idx == 0
@@ -116,7 +115,7 @@ def test_delete_polygon_updates_selection(state: AnnotationState) -> None:
 
 def test_delete_polygon_clears_selection_when_same(state: AnnotationState) -> None:
     eng = AnnotationEngine(state)
-    eng.add_polygon(Polygon([(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]), subject="catkin")
+    eng.add_polygon(Polygon([[(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]]), subject="catkin")
     state.selected_polygon_idx = 0
     eng.delete_annotation(0)
     assert state.selected_polygon_idx is None
@@ -129,7 +128,7 @@ def test_save_writes_json_files(state: AnnotationState, tmp_path: Path) -> None:
     state.img_height = 500
     state.annotations = [
         Annotation(subject="catkin", geometry=BBox(x1=100.0, y1=50.0, x2=200.0, y2=150.0)),
-        Annotation(subject="leaf", geometry=Polygon(points=[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)])),
+        Annotation(subject="leaf", geometry=Polygon(rings=[[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]])),
     ]
 
     eng = AnnotationEngine(state)
@@ -156,10 +155,22 @@ def test_save_rejects_invalid_image_dimensions(state: AnnotationState, tmp_path:
 
 def test_ensure_poly_bboxes_caches_bounds(state: AnnotationState) -> None:
     eng = AnnotationEngine(state)
-    eng.add_polygon(Polygon([(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]), subject="catkin")
+    eng.add_polygon(Polygon([[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]]), subject="catkin")
     eng.ensure_poly_bboxes()
     assert state._poly_bboxes == [(0.0, 0.0, 100.0, 100.0)]
     assert state._poly_bboxes_dirty is False
     # modification should invalidate the cache
-    eng.add_polygon(Polygon([(200.0, 200.0), (300.0, 200.0), (300.0, 300.0)]), subject="catkin")
+    eng.add_polygon(Polygon([[(200.0, 200.0), (300.0, 200.0), (300.0, 300.0)]]), subject="catkin")
     assert state._poly_bboxes_dirty is True
+
+
+def test_ensure_poly_bboxes_spans_every_ring(state: AnnotationState) -> None:
+    # The spatial-index box of an occlusion-split instance covers all of its lobes; a box over only
+    # the first ring would make the rest of the object unhittable.
+    eng = AnnotationEngine(state)
+    eng.add_polygon(
+        Polygon([[(0.0, 0.0), (20.0, 0.0), (20.0, 40.0), (0.0, 40.0)],
+                 [(70.0, 10.0), (90.0, 10.0), (90.0, 60.0), (70.0, 60.0)]]),
+        subject="catkin")
+    eng.ensure_poly_bboxes()
+    assert state._poly_bboxes == [(0.0, 0.0, 90.0, 60.0)]
