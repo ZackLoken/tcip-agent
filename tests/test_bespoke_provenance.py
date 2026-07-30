@@ -48,12 +48,92 @@ def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
 
     assert manifest is not None
     assert (exp_dir / "model_src" / "manifest.json").is_file()
-    assert (exp_dir / "model_src" / Path(__file__).name).is_file()  # this file was copied
     expected_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-    assert any(e["sha256"] == expected_sha for e in manifest["files"])
+    entry = next(e for e in manifest["files"] if e["sha256"] == expected_sha)
+    assert (exp_dir / "model_src" / entry["file"]).is_file()  # content-addressed destination
     assert manifest["builder"].endswith(":build_bespoke_detector")
     assert manifest["env"]["torch"]
     assert manifest["seed"] == 123
+    assert manifest["missing"] == []
+    assert manifest["snapshot_errors"] == []
+
+
+# --------------------------------------------------------------------------
+# K12 finding 1 — silent partial capture is now self-describing
+# --------------------------------------------------------------------------
+
+def test_snapshot_model_source_records_missing_files(tmp_path):
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    src = _model_source()
+    missing_path = str(tmp_path / "does_not_exist.py")
+    src["source_files"] = [__file__, missing_path]
+    manifest = snapshot_model_source({"model_source": src}, exp_dir)
+
+    assert manifest["missing"] == [missing_path]
+    assert any(e["src"] == __file__ for e in manifest["files"])  # the real file still captured
+
+
+def test_snapshot_model_source_records_import_error(tmp_path):
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    manifest = snapshot_model_source(
+        {"model_source": {"builder": "definitely_not_a_real_module_xyz:build"}}, exp_dir)
+
+    assert manifest["snapshot_errors"]
+    assert "definitely_not_a_real_module_xyz" in manifest["snapshot_errors"][0]
+
+
+# --------------------------------------------------------------------------
+# K12 finding 2 — content-addressed destination: no basename clobber, no double-count
+# --------------------------------------------------------------------------
+
+def test_snapshot_model_source_dedups_same_file_reached_two_ways(tmp_path):
+    """The auto-appended builder module __file__ (absolute) and a differently-spelled
+    source_files entry for the SAME physical file (e.g. via a relative/dotted path) must dedup
+    by content, not merely by exact path-string equality — a naive ``str(p) in seen`` dedup
+    misses this because the two spellings never compare equal as strings."""
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    real = Path(__file__).resolve()
+    # A second, distinct string that resolves to the exact same file on disk: relative to cwd.
+    import os
+    alt_spelling = os.path.relpath(real, Path.cwd())
+    assert alt_spelling != str(real)  # genuinely a different string, not a no-op fixture
+
+    src = _model_source()
+    src["source_files"] = [str(real), alt_spelling]
+    manifest = snapshot_model_source({"model_source": src}, exp_dir)
+
+    expected_sha = hashlib.sha256(real.read_bytes()).hexdigest()
+    matches = [e for e in manifest["files"] if e["sha256"] == expected_sha]
+    assert len(matches) == 1  # one physical file, one entry, regardless of how many ways it was named
+
+
+def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):
+    """Two distinct source files sharing a basename must both survive on disk with distinct
+    content, not silently overwrite each other."""
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    a_dir, b_dir = tmp_path / "a", tmp_path / "b"
+    a_dir.mkdir()
+    b_dir.mkdir()
+    (a_dir / "model.py").write_text("# builder A")
+    (b_dir / "model.py").write_text("# builder B, different content")
+
+    src = {"builder": "tests.bespoke_models:build_bespoke_detector",
+          "source_files": [str(a_dir / "model.py"), str(b_dir / "model.py")]}
+    manifest = snapshot_model_source({"model_source": src}, exp_dir)
+
+    a_path, b_path = str(a_dir / "model.py"), str(b_dir / "model.py")
+    file_entries = [e for e in manifest["files"] if e["src"] in (a_path, b_path)]
+    assert len(file_entries) == 2
+    shas = {e["sha256"] for e in file_entries}
+    assert len(shas) == 2  # distinct content, distinct hashes, distinct destination keys
+    for e in file_entries:
+        dst = exp_dir / "model_src" / e["file"]
+        assert dst.is_file()
+        assert hashlib.sha256(dst.read_bytes()).hexdigest() == e["sha256"]  # not clobbered
 
 
 # --------------------------------------------------------------------------
