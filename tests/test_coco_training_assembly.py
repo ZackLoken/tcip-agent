@@ -32,7 +32,13 @@ def _box(x1, y1, x2, y2, *, subject=CATKIN, score=None, **attrs):
 
 
 def _poly(points, *, subject=CATKIN, **attrs):
-    return Annotation(subject=subject, geometry=Polygon(points), attributes=dict(attrs))
+    """A one-ring polygon annotation — the ordinary case, one contour."""
+    return Annotation(subject=subject, geometry=Polygon([points]), attributes=dict(attrs))
+
+
+def _multi_poly(rings, *, subject=CATKIN, **attrs):
+    """One occlusion-split instance: several disjoint rings, still a single annotation."""
+    return Annotation(subject=subject, geometry=Polygon(list(rings)), attributes=dict(attrs))
 
 
 def _reg_id_map(subject=CATKIN, attribute=None, values=()):
@@ -207,6 +213,83 @@ def test_build_dataset_instance_seg_autoresolves_json(tmp_path):
     assert target["masks"].shape[0] == 1
     assert target["labels"].tolist() == [1]
     assert int(target["masks"].sum()) > 0  # polygon rasterized to a non-empty mask
+
+
+# Two disjoint lobes of ONE instance, with a clear gap between them.
+LOBE_A = [(10, 10), (30, 10), (30, 30), (10, 30)]
+LOBE_B = [(60, 10), (80, 10), (80, 30), (60, 30)]
+
+
+def _assert_one_mask_over_both_lobes(target) -> None:
+    """A 2-ring instance is ONE mask covering both lobes — not two instances, not one lobe."""
+    assert target["masks"].shape[0] == 1, "a multi-ring instance must not split into several"
+    assert target["labels"].tolist() == [1]
+    # The box spans the union of the rings.
+    assert target["boxes"].tolist() == [[10.0, 10.0, 80.0, 30.0]]
+    mask = target["masks"][0].numpy()
+    assert mask[10:31, 10:31].sum() > 0, "the first lobe is missing from the mask"
+    assert mask[10:31, 60:81].sum() > 0, "the second lobe is missing from the mask"
+    # The occluded gap between the lobes stays background — the union of rings, not their hull.
+    assert mask[:, 35:55].sum() == 0
+
+
+@pytest.mark.parametrize("via", ["coco", "json"])
+def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path, via):
+    """An occlusion-split instance (a catkin behind a branch) is one object with two regions. Both
+    label paths must rasterize every ring into that instance's single mask."""
+    from tcip_mcp.pipelines.data.datasets import InstanceSegDataset, assemble_coco
+
+    images, labels = tmp_path / "images", tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    _make_images(images, ["img0"])
+    json_io.write_annotations(labels / "img0.json", [_multi_poly([LOBE_A, LOBE_B])], 100, 100)
+
+    kwargs = {"subject": CATKIN}
+    if via == "coco":
+        _reg, id_map = _reg_id_map()
+        kwargs["coco_data"] = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
+        kwargs["id_map"] = id_map
+
+    ds = InstanceSegDataset(str(images), str(labels), **kwargs)
+    _, target = ds[0]
+    _assert_one_mask_over_both_lobes(target)
+
+
+def test_instance_seg_two_single_ring_instances_stay_two_masks(tmp_path):
+    """The rail admits the ordinary case too: the same two lobes authored as SEPARATE annotations are
+    two instances with two masks — multi-ring support must not merge distinct objects."""
+    from tcip_mcp.pipelines.data.datasets import InstanceSegDataset
+
+    images, labels = tmp_path / "images", tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    _make_images(images, ["img0"])
+    json_io.write_annotations(
+        labels / "img0.json", [_poly(LOBE_A), _poly(LOBE_B)], 100, 100)
+
+    ds = InstanceSegDataset(str(images), str(labels), subject=CATKIN)
+    _, target = ds[0]
+    assert target["masks"].shape[0] == 2
+    assert target["boxes"].tolist() == [[10.0, 10.0, 30.0, 30.0], [60.0, 10.0, 80.0, 30.0]]
+
+
+def test_assemble_coco_keeps_both_rings_of_an_instance(tmp_path):
+    """Training assembly carries the whole instance into COCO: one annotation, two segmentation
+    rings, and a box over their union."""
+    from tcip_mcp.pipelines.data.datasets import assemble_coco
+
+    images, labels = tmp_path / "images", tmp_path / "annotations"
+    labels.mkdir(parents=True)
+    _make_images(images, ["img0"])
+    json_io.write_annotations(labels / "img0.json", [_multi_poly([LOBE_A, LOBE_B])], 100, 100)
+
+    _reg, id_map = _reg_id_map()
+    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
+    (ann,) = coco["annotations"]
+    assert ann["segmentation"] == [
+        [10.0, 10.0, 30.0, 10.0, 30.0, 30.0, 10.0, 30.0],
+        [60.0, 10.0, 80.0, 10.0, 80.0, 30.0, 60.0, 30.0],
+    ]
+    assert ann["bbox"] == [10.0, 10.0, 70.0, 20.0]
 
 
 def test_count_label_lines_reads_json_objects(tmp_path):
