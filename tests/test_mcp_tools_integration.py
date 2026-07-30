@@ -52,6 +52,33 @@ class TestReadAnnotations:
         result = read_annotations("/nonexistent/image.jpg")
         assert "error" in result
 
+    def test_polygon_is_reported_as_rings_including_every_contour(self, tmp_path):
+        """The tool response represents a polygon as ``rings``, all of them.
+
+        A stored annotation can be occlusion-split (one instance, several contours), so reporting a
+        single flat point list would silently hide part of the object from the agent reading it.
+        """
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, Polygon
+        from tcip_mcp.tools.annotation_tools import read_annotations
+
+        images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
+        images_dir.mkdir()
+        labels_dir.mkdir()
+        Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
+        json_io.write_annotations(
+            str(labels_dir / "a.json"),
+            [Annotation(subject="catkin", geometry=Polygon([
+                [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)],
+                [(60.0, 10.0), (80.0, 10.0), (80.0, 30.0)],
+            ]))], 100, 100)
+
+        result = read_annotations(str(images_dir / "a.jpg"))
+        (ann,) = result["labels"]["annotations"]
+        assert "points" not in ann
+        assert ann["rings"] == [[[10.0, 10.0], [30.0, 10.0], [30.0, 30.0]],
+                                [[60.0, 10.0], [80.0, 10.0], [80.0, 30.0]]]
+
 
 # ── Evaluate predictions integration test ───────────────────────────────────
 
