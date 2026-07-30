@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { annotationsToCanvas, canvasToAnnotations } from "@/lib/labelSerde";
-import type { Annotation } from "@/store/types";
+import type { Annotation, AnnotationPayload } from "@/store/types";
+
+/** What the load routes hand back for a payload just saved — the save/load asymmetry made explicit:
+ *  `_to_annotation` builds one Polygon from `rings` or `points`, and `_ann_dict` always emits
+ *  `rings`. A save payload is therefore never a load payload; going through this is what makes a
+ *  round-trip test a round-trip. `point` is symmetric (same field both ways), so it rides through
+ *  the rest spread untouched. */
+function asLoaded(saved: AnnotationPayload[]): Annotation[] {
+  return saved.map(({ points, rings, ...rest }) => ({
+    ...rest,
+    rings: rings ?? (points ? [points] : null),
+  })) as unknown as Annotation[];
+}
 
 describe("labelSerde round-trip", () => {
   it("splits a unified list by each annotation's own geometry, then reassembles it symmetrically", () => {
@@ -10,29 +22,35 @@ describe("labelSerde round-trip", () => {
       { subject: "catkin", bbox: [10, 20, 30, 40], attributes: { elongation: "elongated" } },
       {
         subject: "catkin",
-        points: [
-          [0, 0],
-          [10, 0],
-          [10, 10],
+        rings: [
+          [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+          ],
         ],
         attributes: {},
       },
+      { subject: "tip", point: [7, 9], attributes: {} },
       { subject: "efb", attributes: { severity: "moderate" }, created_by: "user:zack" },
     ];
 
     const canvas = annotationsToCanvas(annotations);
     expect(canvas.boxes).toHaveLength(1);
     expect(canvas.polygons).toHaveLength(1);
+    expect(canvas.points).toHaveLength(1);
     expect(canvas.imageAnnotations).toHaveLength(1); // the geometry-less rating survives the split
     expect(canvas.boxes[0].subject).toBe("catkin");
     expect(canvas.imageAnnotations[0].subject).toBe("efb");
 
-    // Save reassembles all three buckets — a box stays a box, a polygon a polygon, the rating kept.
+    // Save reassembles every bucket — a box stays a box, a polygon a polygon, a point a point.
     const back = canvasToAnnotations(canvas);
-    expect(back).toHaveLength(3);
+    expect(back).toHaveLength(4);
     const box = back.find((a) => a.bbox);
     const poly = back.find((a) => a.points);
-    const rating = back.find((a) => !a.bbox && !a.points);
+    const pt = back.find((a) => a.point);
+    const rating = back.find((a) => !a.bbox && !a.points && !a.rings && !a.point);
+    expect(pt).toMatchObject({ subject: "tip", point: [7, 9] });
     expect(box).toMatchObject({
       subject: "catkin",
       bbox: [10, 20, 30, 40],
@@ -55,7 +73,7 @@ describe("labelSerde round-trip", () => {
     const original: Annotation[] = [{ subject: "efb", attributes: { severity: "severe" } }];
     const saved = canvasToAnnotations(annotationsToCanvas(original));
     // The saved payload, read back, still yields exactly the geometry-less rating.
-    const reloaded = annotationsToCanvas(saved as unknown as Annotation[]);
+    const reloaded = annotationsToCanvas(asLoaded(saved));
     expect(reloaded.boxes).toHaveLength(0);
     expect(reloaded.polygons).toHaveLength(0);
     expect(reloaded.imageAnnotations).toHaveLength(1);
@@ -65,17 +83,19 @@ describe("labelSerde round-trip", () => {
     });
   });
 
-  it("buckets a both-geometry annotation (points AND bbox) to ONE polygon, ZERO boxes", () => {
+  it("buckets a both-geometry annotation (rings and bbox) to one polygon, zero boxes", () => {
     // Measurement-critical: a polygon record carries its derived bbox on disk. The split is
-    // points-first (if/else-if), so it must produce exactly one polygon and no box — a two-ifs
+    // rings-first (if/else-if), so it must produce exactly one polygon and no box — a two-ifs
     // regression would emit BOTH and double-count the catkin.
     const annotations: Annotation[] = [
       {
         subject: "catkin",
-        points: [
-          [0, 0],
-          [10, 0],
-          [10, 10],
+        rings: [
+          [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+          ],
         ],
         bbox: [0, 0, 10, 10],
         attributes: {},
@@ -90,10 +110,12 @@ describe("labelSerde round-trip", () => {
     const original: Annotation[] = [
       {
         subject: "catkin",
-        points: [
-          [0, 0],
-          [10, 0],
-          [10, 10],
+        rings: [
+          [
+            [0, 0],
+            [10, 0],
+            [10, 10],
+          ],
         ],
         bbox: [0, 0, 10, 10],
         attributes: {},
@@ -105,8 +127,150 @@ describe("labelSerde round-trip", () => {
     expect(saved[0].points).toBeDefined();
     expect(saved[0].bbox).toBeUndefined();
 
-    const reloaded = annotationsToCanvas(saved as unknown as Annotation[]);
+    const reloaded = annotationsToCanvas(asLoaded(saved));
     expect(reloaded.polygons).toHaveLength(1);
     expect(reloaded.boxes).toHaveLength(0);
+  });
+});
+
+describe("labelSerde multi-ring polygons", () => {
+  // An occlusion-split instance_seg shape (a catkin behind a branch): two disjoint regions, one
+  // annotation. Both routes' load side always sends every ring.
+  const twoRings: [number, number][][] = [
+    [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+    ],
+    [
+      [40, 40],
+      [60, 40],
+      [60, 60],
+    ],
+  ];
+
+  it("loads every ring into one canvas polygon (no ring dropped, no shape split in two)", () => {
+    const canvas = annotationsToCanvas([{ subject: "catkin", rings: twoRings, attributes: {} }]);
+    expect(canvas.polygons).toHaveLength(1);
+    expect(canvas.polygons[0].rings).toEqual(twoRings);
+  });
+
+  it("deep-copies the rings so canvas edits never mutate the loaded response", () => {
+    const loaded: Annotation[] = [{ subject: "catkin", rings: twoRings, attributes: {} }];
+    const canvas = annotationsToCanvas(loaded);
+    canvas.polygons[0].rings[1][0] = [999, 999];
+    expect(twoRings[1][0]).toEqual([40, 40]);
+  });
+
+  it("saves a multi-ring shape as `rings` (all of them) and never as `points`", () => {
+    const saved = canvasToAnnotations({
+      boxes: [],
+      polygons: [{ rings: twoRings, subject: "catkin", attributes: {} }],
+      points: [],
+      imageAnnotations: [],
+    });
+    expect(saved).toHaveLength(1);
+    expect(saved[0].rings).toEqual(twoRings);
+    expect(saved[0].points).toBeUndefined(); // `points` would carry one contour = a lost region
+  });
+
+  it("saves a one-ring shape as `points` — the field a hand-drawn/edited contour belongs in", () => {
+    const saved = canvasToAnnotations({
+      boxes: [],
+      polygons: [{ rings: [twoRings[0]], subject: "catkin", attributes: {} }],
+      points: [],
+      imageAnnotations: [],
+    });
+    expect(saved[0].points).toEqual(twoRings[0]);
+    expect(saved[0].rings).toBeUndefined(); // never both: the backend prefers `rings`
+  });
+
+  it("round-trips a multi-ring shape unchanged through save -> load (points bucket empty)", () => {
+    const original: Annotation[] = [
+      { subject: "catkin", rings: twoRings, attributes: {}, created_by: "user:zack" },
+    ];
+    const saved = canvasToAnnotations(annotationsToCanvas(original));
+    const reloaded = annotationsToCanvas(asLoaded(saved));
+    expect(reloaded.polygons).toHaveLength(1);
+    expect(reloaded.polygons[0].rings).toEqual(twoRings);
+    expect(reloaded.polygons[0].created_by).toBe("user:zack");
+    expect(reloaded.points).toHaveLength(0);
+  });
+});
+
+describe("labelSerde points", () => {
+  it("loads a point annotation into the points bucket — never a box or a polygon", () => {
+    // A point has no extent: bucketing it as a box would hand a fabricated zero-area target to
+    // every downstream consumer that reads canvas.boxes.
+    const canvas = annotationsToCanvas([
+      { subject: "tip", point: [12.5, 40], attributes: { stage: "open" }, created_by: "user:zack" },
+    ]);
+    expect(canvas.points).toEqual([
+      {
+        x: 12.5,
+        y: 40,
+        subject: "tip",
+        attributes: { stage: "open" },
+        created_by: "user:zack",
+        created_at: null,
+        accepted_by: null,
+        accepted_at: null,
+      },
+    ]);
+    expect(canvas.boxes).toHaveLength(0);
+    expect(canvas.polygons).toHaveLength(0);
+    expect(canvas.imageAnnotations).toHaveLength(0); // and not mistaken for a geometry-less rating
+  });
+
+  it("saves a point as `point` only — no bbox, no points/rings contour", () => {
+    const saved = canvasToAnnotations({
+      boxes: [],
+      polygons: [],
+      points: [{ x: 3, y: 4, subject: "tip", attributes: {} }],
+      imageAnnotations: [],
+    });
+    expect(saved).toHaveLength(1);
+    expect(saved[0].point).toEqual([3, 4]);
+    expect(saved[0].bbox).toBeUndefined();
+    expect(saved[0].points).toBeUndefined();
+    expect(saved[0].rings).toBeUndefined();
+  });
+
+  it("round-trips a point (position, subject, attributes, provenance) through save -> load", () => {
+    const original: Annotation[] = [
+      {
+        subject: "tip",
+        point: [101.5, 202.25],
+        attributes: { stage: "open" },
+        created_by: "user:zack",
+      },
+    ];
+    const reloaded = annotationsToCanvas(
+      asLoaded(canvasToAnnotations(annotationsToCanvas(original))),
+    );
+    expect(reloaded.points).toHaveLength(1);
+    expect(reloaded.points[0]).toMatchObject({
+      x: 101.5,
+      y: 202.25,
+      subject: "tip",
+      attributes: { stage: "open" },
+      created_by: "user:zack",
+    });
+    // A round-trip must not multiply the annotation into a second geometry kind.
+    expect(reloaded.boxes).toHaveLength(0);
+    expect(reloaded.polygons).toHaveLength(0);
+    expect(reloaded.imageAnnotations).toHaveLength(0);
+  });
+
+  it("keeps a point and a geometry-less rating distinct (a point is not an image-level label)", () => {
+    const canvas = annotationsToCanvas([
+      { subject: "tip", point: [1, 2], attributes: {} },
+      { subject: "efb", attributes: { severity: "severe" } },
+    ]);
+    expect(canvas.points).toHaveLength(1);
+    expect(canvas.imageAnnotations).toHaveLength(1);
+    const saved = canvasToAnnotations(canvas);
+    expect(saved.filter((a) => a.point)).toHaveLength(1);
+    expect(saved.filter((a) => !a.point && !a.bbox && !a.points && !a.rings)).toHaveLength(1);
   });
 });
