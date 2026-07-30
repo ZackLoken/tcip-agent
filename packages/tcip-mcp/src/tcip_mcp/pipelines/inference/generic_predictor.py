@@ -139,15 +139,34 @@ class GenericPredictor:
     def predict_tiled(
         self, image_path: str, tile_size: int = DEFAULT_TILE_SIZE, overlap: float = 0.2,
         tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU, postprocess: str = "nms",
+        *, require_masks: bool = True,
     ) -> dict:
         """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict ->
         core-region reconstruction -> cross-tile merge -> full-image detections.
 
         ``postprocess`` selects the cross-tile merge: ``"nms"`` suppresses overlaps, ``"nmm"``
         unions boxes split across a seam. Falls back to :meth:`predict` for non-detection heads.
+
+        ``require_masks`` (default True) is the instance_seg mask contract: this path is boxes-only,
+        so a caller that will consume masks is refused rather than handed a result whose masks
+        silently vanished. ``require_masks=False`` is the deliberate "boxes only, don't even try"
+        opt-out for a caller that never reads masks (``run_full_frame_evaluation`` scores boxes
+        against full-frame GT) — the tiled result then carries no ``masks`` key for any task, so
+        there is no partial-mask channel either way.
         """
         if self.task not in _DETECTION_TASKS:
             return self.predict(image_path)
+        if self.task == "instance_seg" and require_masks:
+            # reconstruct_core/global_nms/global_merge (data/tiling.py) are boxes-only signatures.
+            # Threading masks through tiling without a merge that also merges masks would create a
+            # new silent channel (masks present untiled, silently absent tiled) — refuse loudly
+            # instead. Untiled instance_seg (predict/predict_batch(tile=False)) is unaffected.
+            raise NotImplementedError(
+                "predict_tiled does not yet thread masks through cross-tile reconstruction/merge "
+                "for instance_seg. For masks, call predict() / predict_batch(tile=False), or from "
+                "the MCP doors run_inference(..., tile=False) / export_predictions(..., tile=False). "
+                "For boxes-only tiled inference, pass require_masks=False deliberately."
+            )
 
         import numpy as np
         from tcip_mcp.pipelines.data.tiling import (
@@ -234,7 +253,7 @@ class GenericPredictor:
 
     def _format_detection(self, outputs: dict, image_path: str, w: int, h: int) -> dict:
         keep = outputs["scores"] >= self.score_threshold
-        return {
+        result = {
             "image": image_path,
             "width": w,
             "height": h,
@@ -243,6 +262,16 @@ class GenericPredictor:
             "labels": outputs["labels"][keep].cpu().tolist(),
             "count": int(keep.sum()),
         }
+        if self.task == "instance_seg" and "masks" in outputs:
+            # Kept SOFT (unbinarized) — mask_geometry()/export.py binarize via
+            # resolve_binarize_threshold(), never a second hardcoded threshold here; export.py
+            # stamps the (currently unvalidated) threshold it used into each prediction's own
+            # attributes rather than pinning 0.5 silently. Same order as boxes/scores/labels.
+            masks = outputs["masks"][keep]
+            if masks.dim() == 4 and masks.shape[1] == 1:  # torchvision MaskRCNN: [N, 1, H, W]
+                masks = masks[:, 0]
+            result["masks"] = masks.cpu().tolist()
+        return result
 
     def _format_other(self, outputs: dict, image_path: str, w: int, h: int) -> dict:
         result: dict = {"image": image_path, "width": w, "height": h}
