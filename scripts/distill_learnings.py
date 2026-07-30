@@ -22,22 +22,36 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Words that mark friction worth turning into a durable rule/skill (recurrence = signal).
-_THEME_WORDS = re.compile(
-    r"\b(exif|orientation|tile|tiling|sahi|nms|max_dets|operating point|calibrat|"
-    r"validat|firewall|checkpoint|kind|yolo|ultralytics|sandbox|fence|governance|"
-    r"format:check|prettier|gate|ci|type|mypy|pyright|two-root|active project|"
-    r"phenology|catkin|elongat|plant.mapping|classifier|derive|pin)\b",
-    re.IGNORECASE,
-)
+# Generic English function words — filtered out so recurrence-counting surfaces whatever
+# actually recurs in a project's own reports/retrospectives, not a fixed, maintained,
+# domain-specific vocabulary that goes stale the moment this project's vocabulary shifts.
+_STOPWORDS = frozenset("""
+a an the and or but if then than so to of in on at by for with as is was were are be been being
+it its this that these those there here which what when where who whom how why i you we they he
+she him her them his their my your our do does did doing have has had having would could should
+can will just also not no yes very more most some any all each every other such into out up down
+off over under again once about against between through during before after above below from
+because while still only own same too now one two
+""".split())
+
+_WORD = re.compile(r"[a-z][a-z0-9']{2,}")
 
 
-def _themes(*texts: str, top: int = 12) -> list[tuple[str, int]]:
-    counter: Counter[str] = Counter()
-    for t in texts:
-        for m in _THEME_WORDS.findall(t):
-            counter[m.lower()] += 1
-    return counter.most_common(top)
+def _themes(*texts: str, top: int = 12, min_count: int = 2) -> list[tuple[str, int]]:
+    """Recurring words/phrases across free text — generic, no fixed vocabulary to maintain.
+
+    Unigrams and bigrams built from a stopword-filtered token stream (bigrams keep both
+    words so a real recurring phrase like "operating point" survives, not just single words).
+    Recurrence is the signal, so anything mentioned only once is dropped here — it's still
+    printed in full further down in the friction-reports/retrospectives sections either way.
+    """
+    raw = [w for t in texts for w in _WORD.findall(t.lower())]
+    counts: Counter[str] = Counter(w for w in raw if w not in _STOPWORDS)
+    counts.update(
+        f"{a} {b}" for a, b in zip(raw, raw[1:])
+        if a not in _STOPWORDS and b not in _STOPWORDS
+    )
+    return [(term, n) for term, n in counts.most_common(top) if n >= min_count]
 
 
 def _read_jsonl_dir(d: Path) -> list[dict]:
@@ -71,6 +85,14 @@ def build_worksheet(project_root: Path) -> str:
         lines.append("\n## Recurring themes (candidates for a skill line or a CLAUDE.md rule)")
         for word, n in themes:
             lines.append(f"- **{word}** ×{n}")
+
+    disagreements = [r for r in reports if r.get("user_disagreement")]
+    if disagreements:
+        lines.append(f"\n## Disagreements ({len(disagreements)}) — the owner pushed back or disagreed")
+        for r in disagreements[-15:]:
+            cat = r.get("category", "?")
+            detail = str(r.get("detail", "")).replace("\n", " ")[:200]
+            lines.append(f"- [{cat}] {detail}")
 
     if reports:
         lines.append(f"\n## Friction reports ({len(reports)}) — machine-local, won't reach the repo alone")
