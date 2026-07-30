@@ -111,7 +111,7 @@ class TestPolygonRoundtrip:
         )
 
         # Draw a triangle polygon (simulating canvas vertex clicks)
-        poly = Polygon(points=[(100.0, 50.0), (250.0, 200.0), (50.0, 200.0)])
+        poly = Polygon(rings=[[(100.0, 50.0), (250.0, 200.0), (50.0, 200.0)]])
         state.annotations.append(Annotation(subject="catkin", geometry=poly))
         assert len(state.annotations) == 1
 
@@ -124,10 +124,10 @@ class TestPolygonRoundtrip:
         assert len(read_back) == 1
         assert read_back[0].subject == "catkin"
         assert isinstance(read_back[0].geometry, Polygon)
-        assert len(read_back[0].geometry.points) == 3
+        assert len(read_back[0].geometry.rings[0]) == 3
 
         # Verify coordinates
-        for (ox, oy), (lx, ly) in zip(poly.points, read_back[0].geometry.points):
+        for (ox, oy), (lx, ly) in zip(poly.rings[0], read_back[0].geometry.rings[0]):
             assert abs(ox - lx) < 2
             assert abs(oy - ly) < 2
 
@@ -136,9 +136,9 @@ class TestPolygonRoundtrip:
         state = AnnotationState(img_width=640, img_height=480)
 
         state.annotations.append(Annotation(
-            subject="catkin", geometry=Polygon(points=[(10, 10), (100, 10), (100, 100), (10, 100)])))
+            subject="catkin", geometry=Polygon(rings=[[(10, 10), (100, 10), (100, 100), (10, 100)]])))
         state.annotations.append(Annotation(
-            subject="bud", geometry=Polygon(points=[(200, 200), (300, 200), (300, 300), (200, 300)])))
+            subject="bud", geometry=Polygon(rings=[[(200, 200), (300, 200), (300, 300), (200, 300)]])))
 
         label_path = str(img_dir / "labels" / "test_001.json")
         write_annotations(label_path, state.annotations, 640, 480)
@@ -146,6 +146,24 @@ class TestPolygonRoundtrip:
         read_back = read_annotations(label_path)
         assert len(read_back) == 2
         assert {a.subject for a in read_back} == {"catkin", "bud"}
+
+    def test_occlusion_split_prediction_survives_the_round_trip(self, img_dir: Path) -> None:
+        """A model-predicted mask the review canvas overlays can be occlusion-split: one instance,
+        two contours. Both rings must come back so the reviewer sees the whole object."""
+        rings = [
+            [(100.0, 50.0), (150.0, 50.0), (150.0, 200.0), (100.0, 200.0)],
+            [(300.0, 60.0), (350.0, 60.0), (350.0, 190.0), (300.0, 190.0)],
+        ]
+        pred_path = str(img_dir / "predictions" / "test_001.json")
+        write_annotations(
+            pred_path,
+            [Annotation(subject="catkin", geometry=Polygon(rings=rings), score=0.88)],
+            640, 480)
+
+        read_back = read_annotations(pred_path)
+        assert len(read_back) == 1  # one instance, not one annotation per contour
+        assert read_back[0].geometry.rings == rings
+        assert read_back[0].score == 0.88
 
 
 # ── Single-file save (boxes + polygons in one per-image file) ──
@@ -160,7 +178,7 @@ class TestSingleFileSave:
 
         state.annotations.append(Annotation(subject="catkin", geometry=BBox(x1=50, y1=50, x2=200, y2=150)))
         state.annotations.append(Annotation(
-            subject="nut", geometry=Polygon(points=[(300, 100), (400, 100), (400, 200), (300, 200)])))
+            subject="nut", geometry=Polygon(rings=[[(300, 100), (400, 100), (400, 200), (300, 200)]])))
 
         label_path = str(img_dir / "labels" / "test_001.json")
         write_annotations(label_path, state.annotations, 640, 480)
