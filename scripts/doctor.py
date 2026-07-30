@@ -134,6 +134,24 @@ def check_provenance(root: Path, findings: list) -> None:
         findings.append(("info", f"{unstamped} GT annotations carry no created_by (pre-provenance "
                         "data; fine, but new writes should always stamp)"))
 
+    # Bespoke-run source snapshots (K12 finding 1): a manifest that failed to capture a declared
+    # file is now self-describing rather than silently indistinguishable from a complete one.
+    experiments_dir = root / ".tcip" / "experiments"
+    if experiments_dir.is_dir():
+        for exp_dir in experiments_dir.iterdir():
+            manifest_path = exp_dir / "model_src" / "manifest.json"
+            if not manifest_path.is_file():
+                continue
+            manifest = _load(manifest_path)
+            if not isinstance(manifest, dict):
+                continue
+            missing = manifest.get("missing") or []
+            errors = manifest.get("snapshot_errors") or []
+            if missing or errors:
+                findings.append(("warn", f"{manifest_path.relative_to(root)}: source snapshot "
+                                f"incomplete — {len(missing)} missing file(s), "
+                                f"{len(errors)} import error(s)"))
+
 
 def check_state(root: Path, findings: list) -> None:
     state = root / ".tcip" / "state"
