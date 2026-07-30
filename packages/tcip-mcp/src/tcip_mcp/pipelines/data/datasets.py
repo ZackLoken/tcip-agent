@@ -165,7 +165,7 @@ def _json_det_targets(path, subject, attribute, id_map):
     without a deeper stems-selection change, and currently only surfaces the count.
     """
     from tcip_annotation import json_io
-    from tcip_annotation.state import bbox_of
+    from tcip_annotation.state import Point, bbox_of
 
     boxes, labels = [], []
     n_unlabeled = 0
@@ -176,7 +176,7 @@ def _json_det_targets(path, subject, attribute, id_map):
         if cid == json_io.UNLABELED:
             n_unlabeled += 1
             continue
-        if cid is None or a.geometry is None:
+        if cid is None or a.geometry is None or isinstance(a.geometry, Point):
             continue
         box = bbox_of(a.geometry)
         boxes.append([box.x1, box.y1, box.x2, box.y2])
@@ -372,22 +372,28 @@ def _require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> No
 def _label_record_state(stem: str, labels_dir, subject: str | None) -> tuple[bool, bool]:
     """``(a record exists, it has ≥1 detection/seg target of ``subject``)`` for one stem.
 
-    ``has_objects`` is subject-scoped *and geometry-bearing*: the unified file holds every subject, so
-    "annotated" for a catkin run means it carries a catkin annotation *with geometry* — the same
-    membership ``to_coco_dataset`` applies (a box/polygon is a target; a geometry-less image-level
-    label is not). Counting a geometry-less-only image as annotated would keep it on the direct-json
-    path and train it as a zero-object negative, diverging from the COCO path and fabricating a
-    negative no human confirmed.
+    ``has_objects`` is subject-scoped *and box/polygon-bearing*: the unified file holds every subject,
+    so "annotated" for a catkin run means it carries a catkin annotation whose geometry is a real
+    detection/seg target — the same membership ``to_coco_dataset``/``target_class_id`` apply (a
+    box/polygon is a target; a geometry-less image-level label and a ``Point`` are not). Counting an
+    image whose only annotations are non-targets as annotated would keep it on the direct-json path
+    and train it as a zero-object negative, diverging from the COCO path and fabricating a negative no
+    human confirmed.
     """
     from tcip_annotation import json_io
+    from tcip_annotation.state import Point
 
     path = Path(labels_dir) / f"{stem}.json"
     if not path.is_file():
         return False, False
     anns = json_io.read_annotations(str(path))
+
+    def _is_target(a) -> bool:
+        return a.geometry is not None and not isinstance(a.geometry, Point)
+
     if subject is None:
-        return True, any(a.geometry is not None for a in anns)
-    return True, any(a.subject == subject and a.geometry is not None for a in anns)
+        return True, any(_is_target(a) for a in anns)
+    return True, any(a.subject == subject and _is_target(a) for a in anns)
 
 
 def confirmed_negative_names(
@@ -950,22 +956,31 @@ class InstanceSegDataset(BaseImageDataset):
         # Real on-disk filenames for the COCO ``file_name`` match (see DetectionDataset / image_name_map).
         self._image_names = image_name_map(self.images_dir)
 
-    def _read_polys(self, stem: str, w: int, h: int) -> list[tuple[list[tuple[float, float]], int]]:
-        """(pixel polygon points, 1-indexed label) per instance — from the assembled COCO or the
+    def _read_polys(self, stem: str, w: int, h: int) -> list[tuple[list[list[tuple[float, float]]], int]]:
+        """(pixel polygon rings, 1-indexed label) per instance — from the assembled COCO or the
         name-based per-image ``<stem>.json`` (filtered to ``subject`` + polygon geometry). Both are
-        already pixel-space; the +1 background offset is the loader's, nothing on disk carries it."""
-        out: list[tuple[list[tuple[float, float]], int]] = []
+        already pixel-space; the +1 background offset is the loader's, nothing on disk carries it.
+        An instance's rings is a list — an occlusion-split instance (a catkin behind a branch, a
+        leaf crossed by a stem) is genuinely more than one ring; ``__getitem__`` rasterizes every
+        ring of an instance into that instance's one mask."""
+        out: list[tuple[list[list[tuple[float, float]]], int]] = []
         if self.label_format == "coco":
             from tcip_annotation import format_io
             file_name = self._image_names.get(stem, "")
             anns, _, _ = format_io._coco_image_annotations(self._coco, file_name=file_name)
             for a in anns:
                 seg = a.get("segmentation")
-                if not (isinstance(seg, list) and seg and isinstance(seg[0], list) and len(seg[0]) >= 6):
+                if not (isinstance(seg, list) and seg):
                     continue
-                coords = seg[0]
-                pts = [(float(coords[i]), float(coords[i + 1])) for i in range(0, len(coords) - 1, 2)]
-                out.append((pts, int(a.get("category_id", 0)) + 1))
+                rings = []
+                for coords in seg:
+                    if not (isinstance(coords, list) and len(coords) >= 6):
+                        continue
+                    rings.append([(float(coords[i]), float(coords[i + 1]))
+                                 for i in range(0, len(coords) - 1, 2)])
+                if not rings:
+                    continue
+                out.append((rings, int(a.get("category_id", 0)) + 1))
             return out
         from tcip_annotation import json_io
         from tcip_annotation.state import Polygon
@@ -977,7 +992,7 @@ class InstanceSegDataset(BaseImageDataset):
                 raise ValueError(
                     f"annotation of subject {self.subject!r} has class key {key!r} not in the run's "
                     f"id map — the registry cannot decode its own labels")
-            out.append((list(a.geometry.points), self.id_map[key] + 1))
+            out.append(([list(ring) for ring in a.geometry.rings], self.id_map[key] + 1))
         return out
 
     @property
@@ -994,20 +1009,26 @@ class InstanceSegDataset(BaseImageDataset):
         w, h = self._image_size(img)
 
         boxes, labels, masks = [], [], []
-        for pts, lab in self._read_polys(stem, w, h):
-            xs = [p[0] for p in pts]
-            ys = [p[1] for p in pts]
-            if not xs:
+        for rings, lab in self._read_polys(stem, w, h):
+            all_pts = [p for ring in rings for p in ring]
+            if not all_pts:
                 continue
+            xs = [p[0] for p in all_pts]
+            ys = [p[1] for p in all_pts]
             boxes.append([min(xs), min(ys), max(xs), max(ys)])
             labels.append(lab)
 
-            # Rasterize polygon to binary mask
+            # Rasterize every ring into the SAME instance mask — a multi-ring instance is one
+            # occlusion-split object, not several separate ones; ImageDraw fills union naturally
+            # since a pixel already painted 1 stays 1.
             mask = np.zeros((h, w), dtype=np.uint8)
             try:
                 from PIL import ImageDraw
                 poly_img = Image.new("L", (w, h), 0)
-                ImageDraw.Draw(poly_img).polygon(list(zip(xs, ys)), fill=1)
+                draw = ImageDraw.Draw(poly_img)
+                for ring in rings:
+                    if len(ring) >= 3:
+                        draw.polygon([(p[0], p[1]) for p in ring], fill=1)
                 mask = np.array(poly_img)
             except Exception:
                 pass
