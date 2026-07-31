@@ -153,6 +153,8 @@ the catkin-elongation cautionary tale there). Persimmon-specific traps:
   sex from fruit presence without flower-level or multi-year evidence.
 - `fruit_diameter` / `fruit_height` — valid in mm only with a real in-frame scale reference
   and an unoccluded silhouette; raw bbox pixels are not millimetres.
+- `plant_height` — a pixel quantity until an in-frame scale / photogrammetric calibration
+  makes it metric. Pixels are not millimeters.
 - `dbh` — a pixel trunk width is not DBH without calibration and correct localization of the
   4.5 ft breast-height plane.
 - `overall_disease` — an aggregate whole-tree severity spanning etiologies that look nothing
