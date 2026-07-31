@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from tcip_web.paths import origin_allowed, safe_join
+from tcip_web.paths import assert_path_allowed, assert_project_root_allowed, origin_allowed, safe_join
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,16 @@ class LaunchPayload(BaseModel):
 def launch_training_route(payload: LaunchPayload) -> dict:
     from tcip_mcp.tools.training_tools import launch_training
 
+    # Confine the client-supplied output dir when the server is locked down (no-op otherwise) —
+    # mirrors tuning.py's launch_hpo. This does not confine config.model_source.builder, which this
+    # same route importlib-imports and calls (model_build.py) — that is a separate code-execution
+    # trust boundary path confinement can't close; don't read this guard as closing it.
+    if payload.output_dir:
+        try:
+            assert_path_allowed(payload.output_dir)
+        except ValueError as exc:
+            raise HTTPException(403, str(exc)) from exc
+
     try:
         return launch_training(payload.config, payload.output_dir)
     except Exception as exc:
@@ -156,6 +166,10 @@ def cancel_run_route(run_id: str) -> dict:
 @router.get("/runs/{run_id}/metrics")
 def get_run_metrics(project_root: str, run_id: str) -> dict:
     """Read the full metrics.jsonl for a run."""
+    try:
+        assert_project_root_allowed(project_root)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
     try:
         metrics_path = _metrics_path(project_root, run_id)
     except ValueError:
@@ -253,6 +267,11 @@ async def training_stream_ws(websocket: WebSocket, run_id: str, project_root: st
     """Tail metrics.jsonl for ``run_id`` and push new rows to the browser."""
     if not origin_allowed(websocket.headers.get("origin")):
         await websocket.close(code=1008, reason="origin not allowed")
+        return
+    try:
+        assert_project_root_allowed(project_root)
+    except ValueError as exc:
+        await websocket.close(code=1008, reason=str(exc))
         return
     await websocket.accept()
     try:
