@@ -48,25 +48,24 @@ from tcip_mcp.traits import COUNT_OBJECTIVES, COUNT_UNBIASED, DETECTION_F1, PRES
 # model+images can't give a different count by entry door. cross_tile_nms shares the NMS-IoU knob (a
 # distribution derivation refines it); the conf placeholder is only ever read via unvalidated_value().
 
-# Count-objective -> (picker, derivation label). One registry, not two hardcoded lists to keep in
-# sync (Fix E): the KEYS are ``traits.COUNT_OBJECTIVES`` (torch-free, so ``traits._spec_from_config``
-# validates a config-authored count_objective against that set directly, never importing this
-# torch-heavy module just to check a name) — this dict only adds the picker/label each objective
-# resolves to. The label stamped on ``conf`` is derived from whichever picker actually ran
-# (pick-then-label), never from the reference type alone. PRESENCE deliberately shares DETECTION_F1's
-# F1-max picker/label: presence is a per-object find/no-find call, exactly what F1 (harmonic
-# precision/recall) measures on matching quality — unlike COUNT_UNBIASED's sum-agreement objective
-# (the phenotype is a count), which needs its own picker. An unregistered objective (only reachable
-# via a code-authored TraitSpec, since config-authored specs are validated against COUNT_OBJECTIVES)
-# falls back to the F1-max entry, same as before.
+# Count-objective -> (picker, derivation label) — the CURRENTLY-IMPLEMENTED capability catalog, not
+# a closed vocabulary (K18 B4: traits._spec_from_config no longer validates count_objective against
+# this; a trait can name any objective, but resolve_operating_point below can only run one that has
+# a registered picker here). The label stamped on ``conf`` is derived from whichever picker actually
+# ran (pick-then-label), never from the reference type alone. PRESENCE deliberately shares
+# DETECTION_F1's F1-max picker/label: presence is a per-object find/no-find call, exactly what F1
+# (harmonic precision/recall) measures on matching quality — unlike COUNT_UNBIASED's sum-agreement
+# objective (the phenotype is a count), which needs its own picker. Add a new entry here (and a new
+# picker function) when a trait's breeder-stated need doesn't match either existing one — the
+# capability grows by registering a picker, not by widening a vocabulary check.
 COUNT_OBJECTIVE_PICKERS: dict[str, tuple[Callable[[dict], float | None], str]] = {
     COUNT_UNBIASED: (pick_count_unbiased, "count-unbiased center-match sweep"),
     DETECTION_F1: (pick_f1_max, "F1-max center-match sweep"),
     PRESENCE: (pick_f1_max, "F1-max center-match sweep"),
 }
 assert set(COUNT_OBJECTIVE_PICKERS) == COUNT_OBJECTIVES, (
-    "COUNT_OBJECTIVE_PICKERS must cover exactly traits.COUNT_OBJECTIVES — the single source of "
-    "truth traits._spec_from_config validates config-authored objectives against")
+    "COUNT_OBJECTIVE_PICKERS and traits.COUNT_OBJECTIVES must name the same currently-implemented "
+    "objectives — two lists of the same capability set, kept in sync deliberately")
 
 # Fix C's one-sided confidence multiplier for the mean+SE equivalence criterion (~95%) — a stated
 # CV-derivation convention, not a breeder-semantics decision, so it lives here as a named constant
@@ -471,8 +470,24 @@ def resolve_operating_point(
         all(adjudication_covered(r) for r in (calibration_records or []))
         and all(adjudication_covered(r) for r in (holdout_records or []))
     )
-    picker, base_label = COUNT_OBJECTIVE_PICKERS.get(
-        trait.count_objective, (pick_f1_max, "F1-max center-match sweep"))
+    # K18 B4: no silent default. count_objective is a recorded breeder decision (never authored
+    # blind, never silently inherited from another trait) — calibrating a trait where it was never
+    # decided must refuse, not quietly optimize for whatever pick_f1_max happens to produce.
+    if not trait.count_objective:
+        raise ValueError(
+            f"trait {trait_name!r} has no recorded count_objective — what this delivered number "
+            "needs to be reliable for has never been decided. Ask the breeder in plain terms "
+            "(does every object need to be found correctly, or is it fine if errors cancel out as "
+            "long as the total is right?) and record the answer via update_trait_spec_fields "
+            "before calibrating this trait."
+        )
+    if trait.count_objective not in COUNT_OBJECTIVE_PICKERS:
+        raise ValueError(
+            f"trait {trait_name!r}'s count_objective {trait.count_objective!r} has no registered "
+            f"picker in COUNT_OBJECTIVE_PICKERS ({sorted(COUNT_OBJECTIVE_PICKERS)}) — register one "
+            "(a new picker function + a new entry in this dict) before calibrating this trait."
+        )
+    picker, base_label = COUNT_OBJECTIVE_PICKERS[trait.count_objective]
     conf_derived_from = base_label + (" over review verdicts" if review else "")
     params: dict[str, ResolvedParam] = {}
 
