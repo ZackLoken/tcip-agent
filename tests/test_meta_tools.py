@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from tcip_mcp.project_status import read_project_status
 from tcip_mcp.tools.meta_tools import (
     claude_reports,
     load_project_memory,
     project_retrospective,
+    record_distillation_pass,
 )
 
 
@@ -266,3 +268,44 @@ def test_load_reports_roundtrips_user_disagreement(tmp_path: Path):
     flags = {r["detail"]: r["user_disagreement"] for r in result["reports"]}
     assert flags["a"] is False
     assert flags["b"] is True
+
+
+def test_claude_reports_updates_project_status(tmp_path: Path):
+    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    status = read_project_status(tmp_path)
+    assert status["reports_since_last_retrospective"] == 1
+    assert status["reports_since_last_distillation"] == 1
+
+
+def test_project_retrospective_updates_project_status(tmp_path: Path):
+    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    project_retrospective(str(tmp_path), project_id="p", task="t", worked="w", did_not_work="d")
+
+    status = read_project_status(tmp_path)
+    assert status["reports_since_last_retrospective"] == 0
+    assert status["last_retrospective"]["project_id"] == "p"
+    assert "worked" not in json.dumps(status)  # no retrospective text cached, pointer only
+
+
+def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
+    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    claude_reports(str(tmp_path), category="missing_tool", detail="b")
+
+    result = record_distillation_pass(str(tmp_path))
+    assert result["status"] == "recorded"
+
+    status = read_project_status(tmp_path)
+    assert status["reports_since_last_distillation"] == 0
+    assert status["last_distillation_at"]
+
+
+def test_record_distillation_pass_never_touches_reports_or_retrospectives(tmp_path: Path):
+    # Bookkeeping only — must never write/modify/delete the underlying records it's counting.
+    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    before = list((tmp_path / ".tcip" / "reports").glob("*.jsonl"))
+
+    record_distillation_pass(str(tmp_path))
+
+    after = list((tmp_path / ".tcip" / "reports").glob("*.jsonl"))
+    assert before == after
+    assert json.loads(before[0].read_text())["detail"] == "a"
