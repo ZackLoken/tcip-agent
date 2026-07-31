@@ -7,9 +7,17 @@ cheap and nothing is dropped.
 
     conda activate tcip-agent
     python scripts/distill_learnings.py [--project <root>]
+    python scripts/distill_learnings.py --workspace
 
 Output is a Markdown worksheet: recurring themes across the project's reports and retrospectives,
-then the records themselves. It *gathers* — nothing is written, applied, or promoted anywhere.
+then the records themselves. It *gathers* — nothing is written, applied, or promoted anywhere; this
+stays true in ``--workspace`` mode too. ``--workspace`` gathers across every project under the TCIP
+workspace instead of one project root, and surfaces themes recurring across multiple DISTINCT
+projects — a stronger "candidate for a platform change" signal than one project's own recurrence,
+which a single project's own accumulated friction/retrospectives could produce on its own. After
+reviewing a worksheet (either mode), call the ``record_distillation_pass`` MCP tool per project
+covered so its distillation-backlog counters reset — that's the one write in this loop, and it's
+audited, kept out of this script on purpose.
 """
 
 from __future__ import annotations
@@ -52,6 +60,92 @@ def _themes(*texts: str, top: int = 12, min_count: int = 2) -> list[tuple[str, i
         if a not in _STOPWORDS and b not in _STOPWORDS
     )
     return [(term, n) for term, n in counts.most_common(top) if n >= min_count]
+
+
+def _project_token_set(*texts: str) -> set[str]:
+    """Distinct unigrams/bigrams present in one project's text — membership, not frequency. The
+    building block for cross-project recurrence (_cross_project_themes), which asks "how many
+    DISTINCT projects", not "how many times in one project" (that's _themes' own job)."""
+    raw = [w for t in texts for w in _WORD.findall(t.lower())]
+    tokens = {w for w in raw if w not in _STOPWORDS}
+    tokens.update(
+        f"{a} {b}" for a, b in zip(raw, raw[1:])
+        if a not in _STOPWORDS and b not in _STOPWORDS
+    )
+    return tokens
+
+
+def _cross_project_themes(
+    per_project_tokens: dict[str, set[str]], top: int = 12, min_projects: int = 2
+) -> list[tuple[str, int]]:
+    """Themes appearing in >= min_projects DISTINCT projects' token sets.
+
+    Built from each project's own SET (one project can only ever contribute 1 to a token's count,
+    no matter how many times it repeats that token internally), so a single verbose project can
+    never clear the bar alone the way a pooled frequency count over concatenated text would let it.
+    """
+    counts: Counter[str] = Counter()
+    for tokens in per_project_tokens.values():
+        counts.update(tokens)
+    return [(term, n) for term, n in counts.most_common() if n >= min_projects][:top]
+
+
+def build_workspace_worksheet(workspace_root: Path) -> str:
+    """Cross-project distill worksheet — gathers across every project under the workspace.
+
+    Still pure gather, same as :func:`build_worksheet`: nothing is written, applied, or promoted.
+    """
+    lines: list[str] = [f"# Cross-project learning-review worksheet — {workspace_root}", ""]
+
+    projects = sorted(
+        p for p in workspace_root.iterdir() if p.is_dir() and (p / ".tcip").is_dir()
+    )
+    if not projects:
+        lines.append("\nNo projects with a `.tcip/` directory found under this workspace.")
+        return "\n".join(lines) + "\n"
+
+    per_project_tokens: dict[str, set[str]] = {}
+    per_project_report_count: dict[str, int] = {}
+    per_project_retro_count: dict[str, int] = {}
+    for proj in projects:
+        reports = _read_jsonl_dir(proj / ".tcip" / "reports")
+        retros_dir = proj / ".tcip" / "retrospectives"
+        retros = sorted(retros_dir.glob("*.md")) if retros_dir.is_dir() else []
+        report_text = " ".join(str(r.get("detail", "")) for r in reports)
+        retro_text = " ".join(p2.read_text(encoding="utf-8") for p2 in retros)
+        per_project_tokens[proj.name] = _project_token_set(report_text, retro_text)
+        per_project_report_count[proj.name] = len(reports)
+        per_project_retro_count[proj.name] = len(retros)
+
+    cross_themes = _cross_project_themes(per_project_tokens)
+    if cross_themes:
+        lines.append(
+            "\n## Cross-project recurring themes (candidates for a skill line or a CLAUDE.md rule)"
+        )
+        lines.append(
+            "A theme here appeared in reports/retrospectives from multiple DISTINCT projects — a "
+            "stronger platform-change signal than one project's own recurrence."
+        )
+        for word, n_projects in cross_themes:
+            lines.append(f"- **{word}** — {n_projects} projects")
+    else:
+        lines.append(
+            "\n## Cross-project recurring themes\nNone found (or only one project has data)."
+        )
+
+    lines.append(f"\n## Projects covered ({len(projects)})")
+    for proj in projects:
+        lines.append(
+            f"- {proj.name} — {per_project_report_count[proj.name]} report(s), "
+            f"{per_project_retro_count[proj.name]} retrospective(s)"
+        )
+
+    lines.append(
+        "\n---\nSame as the single-project worksheet: this gathers, the judgment is yours. Nothing "
+        "here is applied. After reviewing, call the `record_distillation_pass` MCP tool for each "
+        "project covered so its distillation-backlog counters reset."
+    )
+    return "\n".join(lines) + "\n"
 
 
 def _read_jsonl_dir(d: Path) -> list[dict]:
@@ -133,8 +227,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Gather learning-review material into one worksheet.")
     ap.add_argument("--project", default=str(REPO_ROOT),
                     help="project root holding .tcip/reports + .tcip/retrospectives (default: repo root)")
+    ap.add_argument("--workspace", action="store_true",
+                    help="cross-project mode: gather across every project under the TCIP workspace "
+                         "(TCIP_WORKSPACE, default ~/tcip-projects/) instead of one --project root")
     args = ap.parse_args()
-    print(build_worksheet(Path(args.project)))
+    if args.workspace:
+        from tcip_mcp.workspace import workspace_root
+
+        print(build_workspace_worksheet(workspace_root()))
+    else:
+        print(build_worksheet(Path(args.project)))
 
 
 if __name__ == "__main__":
