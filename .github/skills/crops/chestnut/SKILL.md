@@ -44,6 +44,9 @@ and scoring basis with the breeder before treating any of these as measured.
 `catkin_sex_ratio`, `cryphonectria_parasitica`, `chestnut_anthracnose`, `plant_height`,
 `plant_width_inrow`, `plant_width_betweenrow`, `plant_surface_area`, `plant_volume`.
 
+- **Plant-size traits** (`plant_height`, `plant_width_inrow`, `plant_width_betweenrow`) are pixel
+  quantities until an in-frame scale / photogrammetric calibration makes them metric. Pixels are
+  not millimeters.
 - `plant_surface_area` and `plant_volume` are defined from a **3D canopy model** (SfM/LiDAR).
   TCIP is **2D-only today** (3D not built), so these are not achievable yet — a 2D bbox
   height/area is not a valid proxy for crown volume or planimetric area.
@@ -164,6 +167,10 @@ the catkin-elongation cautionary tale there). Chestnut-specific traps:
 
 ## Needs expert confirmation
 
+- `plant_surface_area`: is the delivered quantity the *planimetric crown area* (achievable from a
+  validated 2D mask + in-frame scale calibration, per CLAUDE.md's measurement-integrity invariant)
+  or specifically the *3D-canopy-model derivation* crops.yml's current definition names? The two
+  are not the same thing, and only the breeder can redefine their own trait's meaning.
 - Exact species/cultivar composition actually planted and bred (Chinese chestnut dominant;
   whether American × Chinese hybrids and Euro-Japanese cultivars like 'Colossal' are included).
 - Training system at the sites (single-stem central-leader tree vs coppice/multi-stem) —
