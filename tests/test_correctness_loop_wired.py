@@ -105,6 +105,21 @@ def test_resolve_contract_dims_falls_back_without_inventing():
     assert dims == {"in_chans": 3, "num_classes": 1, "img_size": 224}
 
 
+def test_resolve_contract_dims_attribute_without_registry_raises_not_silently_falls_back(tmp_path):
+    """K18 B2: before this fix, a bare `except Exception: pass` around _resolve_registry_id_map
+    fell open to the head's declared num_classes for ANY read failure, not just the legitimate
+    "no subject in scope" case — masking a real problem (an attribute-classification config with
+    no classes.json to order its values) as a healthy smoke-test dims resolution. No subject at
+    all still legitimately falls back (test above); a subject THAT IS given, with an attribute and
+    no registry, must now raise."""
+    cfg = {
+        "model_source": {"builder_kwargs": {"num_classes": 5}},
+        "data": {"subject": "catkin", "attribute": "elongation", "labels_dir": str(tmp_path / "labels")},
+    }
+    with pytest.raises(ValueError, match="classes.json"):
+        resolve_contract_dims(cfg, "detection")
+
+
 # --------------------------------------------------------------------------
 # preflight_config(smoke=True) — builds + smokes, blocks a broken builder
 # --------------------------------------------------------------------------
