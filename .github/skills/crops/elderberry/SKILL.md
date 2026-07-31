@@ -71,6 +71,11 @@ in each trait's crops.yml definition. Trait names are verbatim.
 - **Leaf morphology (calibrated close-up or flatbed scan; needs a scale):** `leaf_length`,
   `leaf_width`, `leaf_length_width_ratio`.
 - **Stem descriptor (close-up):** `stem_internode_length`.
+- **Berry size (calibrated macro/close-up; resolution-gated — see the `crop-science` skill's
+  resolution-gate guidance, effective GSD roughly 2-3x smaller than the ~3-6 mm berry):**
+  `fruit_diameter`, `fruit_diameter_range`. Valid only from a *validated mask* with in-frame
+  physical-scale calibration — an uncalibrated pixel length is not millimeters, and at this size
+  the imaging setup needs to actually resolve the berry, not just calibrate whatever it captures.
 - **Disease & abiotic damage (visible symptoms; each an ordinal from a validated model calibrated to the breeder's rubric):**
   `plant_borer`, `plant_eriophyid_mites`, `plant_jbeetle`, `plant_powderymildew_presence`,
   `bloom_frost_tolerance`.
@@ -84,9 +89,8 @@ in each trait's crops.yml definition. Trait names are verbatim.
 - **Mass / yield (kg or g on a scale):** `plant_yield`, `cyme_weight`, `fruit_averageweight`,
   `fruit_batch_weight`, `leaf_25weight_fresh`, `leaf_25weight_dry`, `leaf_aveweight_fresh`,
   `leaf_aveweight_dry`.
-- **Destructive size / count:** `fruit_diameter`, `fruit_diameter_range` (berries are only
-  ~3-6 mm; sub-cm size is unreliable from field imagery), `fruit_seed_count` (seeds are internal),
-  `leaf_thickness` (caliper / cross-section).
+- **Destructive size / count:** `fruit_seed_count` (seeds are internal), `leaf_thickness`
+  (caliper / cross-section).
 - **Physical handling test:** `cyme_shatter_resistance` (berry retention under shaking),
   `fruit_machine_harvest` (mechanical-harvest handling trial).
 - **Sensory:** `flavor_rating`, `fruit_flavor_description` (tasting).
@@ -184,6 +188,9 @@ the catkin-elongation cautionary tale there). Elderberry-specific traps:
 
 - `cyme_shatter_resistance` is a physical **shake/retention test**, not something a bounding box,
   geometry, or still-image count can measure — do not manufacture a proxy from a static image.
+- **Plant-size traits** (`plant_height`, `plant_height_width_ratio`, `plant_width_inrow`,
+  `plant_width_betweenrow`) are pixel quantities until an in-frame scale / photogrammetric
+  calibration makes them metric. Pixels are not millimeters.
 - The fruit-ripening dates (`fruit_ripe_50per_date` and its siblings), "ripened to eating stage,"
   are a **breeder-defined threshold** (color **plus** soluble solids), not "the berry looks dark";
   a pixel-color threshold is a proxy that must be validated against expert scoring before any
@@ -195,8 +202,11 @@ the catkin-elongation cautionary tale there). Elderberry-specific traps:
 - Counts under heavy occlusion (`inflorescence_count`, `fruit_per_cyme`) are visible-count proxies
   for the true count and must be calibrated/validated; seeds (`fruit_seed_count`) are internal and
   not imageable at all.
-- Berry size (`fruit_diameter`, `fruit_diameter_range`) at ~3-6 mm needs physical calibration;
-  a pixel length without a scale is invalid science.
+- Berry size (`fruit_diameter`, `fruit_diameter_range`) at ~3-6 mm needs a *validated mask* with
+  in-frame physical-scale calibration, not scale alone — a pixel length without a scale is invalid
+  science, and a box/count without a validated segmentation is not a size measurement. The imaging
+  setup must also actually resolve the berry at this size (see the `crop-science` skill's
+  resolution-gate guidance) before calibration is even the binding constraint.
 - Chemistry (`fruit_anthocyanin_content`, `fruit_juice_brix`, `fruit_juice_pH`, `fruit_juice_TA`,
   `fruit_cyanide_content`) is not readable from RGB — color may correlate but is not the assay.
 
