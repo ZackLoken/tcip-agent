@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api } from "@/api/client";
+import { resultsApi } from "@/api/inference";
 import { applyReviewFocus } from "@/lib/reviewFocus";
 import { useStore } from "@/store";
 import type { Annotation, Detection, MatchesResponse } from "@/store/types";
@@ -128,6 +129,9 @@ beforeEach(() => {
   // Default: no recorded generation confidence -> no Conf >= censoring warning. Tests exercising
   // K15's warning override this per-case.
   vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: null });
+  // K23: the priority-queue model picker fetches this on every render with a project open. Default
+  // empty; the priority-queue describe block below overrides per-case.
+  vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({ models: [] });
 });
 
 afterEach(() => {
@@ -766,5 +770,97 @@ describe("ReviewTab in-place edit scope", () => {
     fireEvent.click(screen.getByTitle("Adjust this shape on the canvas (E)"));
     expect(screen.getByText("Editing")).toBeInTheDocument();
     expect(useStore.getState().toasts).toHaveLength(0);
+  });
+});
+
+describe("ReviewTab priority queue (K23)", () => {
+  function openFilters() {
+    fireEvent.click(screen.getByTitle("Show or hide the review filters"));
+  }
+
+  it("launches with the picked model's checkpoint and this date's images_dir, then shows the ranked count", async () => {
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
+      models: [{ name: "run-42", checkpoint_path: "C:/ckpts/run-42.pt" }],
+    });
+    const launchSpy = vi
+      .spyOn(api.review, "launchPriorityQueue")
+      .mockResolvedValue({ status: "launched", job_id: "pq-1" });
+    vi.spyOn(api.review, "priorityQueueJob").mockResolvedValue({
+      job_id: "pq-1",
+      status: "completed",
+      error: null,
+      queue: [
+        { image: "img2.jpg", score: 0.9 },
+        { image: "img1.jpg", score: 0.4 },
+      ],
+      total_candidates: 2,
+      reviewed_skipped: 0,
+    });
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    openFilters();
+    await waitFor(() => expect(screen.getByText("run-42")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Priority-order model"), {
+      target: { value: "C:/ckpts/run-42.pt" },
+    });
+    fireEvent.click(
+      screen.getByTitle("Rank this date's images by how useful reviewing them would be"),
+    );
+
+    await waitFor(() =>
+      expect(launchSpy).toHaveBeenCalledWith({
+        project_root: "C:/proj",
+        checkpoint_path: "C:/ckpts/run-42.pt",
+        images_dir: "C:/data/images/2026-01-01",
+      }),
+    );
+    expect(await screen.findByText(/Browse in priority order \(2 ranked\)/)).toBeInTheDocument();
+    // Auto-enabled once a queue completes — that's clearly what computing one was for.
+    expect((screen.getByLabelText(/Browse in priority order/) as HTMLInputElement).checked).toBe(
+      true,
+    );
+  });
+
+  it("surfaces the tool's own refusal honestly, not a generic failure", async () => {
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
+      models: [{ name: "run-42", checkpoint_path: "C:/ckpts/run-42.pt" }],
+    });
+    vi.spyOn(api.review, "launchPriorityQueue").mockResolvedValue({
+      status: "launched",
+      job_id: "pq-2",
+    });
+    vi.spyOn(api.review, "priorityQueueJob").mockResolvedValue({
+      job_id: "pq-2",
+      status: "failed",
+      error: "no scorer registered as 'nonsense'",
+      queue: [],
+      total_candidates: 0,
+      reviewed_skipped: 0,
+    });
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    openFilters();
+    await waitFor(() => expect(screen.getByText("run-42")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Priority-order model"), {
+      target: { value: "C:/ckpts/run-42.pt" },
+    });
+    fireEvent.click(
+      screen.getByTitle("Rank this date's images by how useful reviewing them would be"),
+    );
+
+    expect(await screen.findByText("no scorer registered as 'nonsense'")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Browse in priority order/)).not.toBeInTheDocument();
+  });
+
+  it("the Rank button stays disabled until a model is picked", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    openFilters();
+    expect(
+      screen.getByTitle("Rank this date's images by how useful reviewing them would be"),
+    ).toBeDisabled();
   });
 });
