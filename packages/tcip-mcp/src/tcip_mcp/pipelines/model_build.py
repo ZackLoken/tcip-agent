@@ -100,15 +100,17 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
     num_classes = _int(bk.get("num_classes"), 1)
 
     data = config.get("data") or {}
-    if task in ("detection", "instance_seg"):
-        try:
-            from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
+    # Precondition check, not a broad except: a config with no subject in scope (a bespoke
+    # dataset_source, or a registry-less build) legitimately fails open to the head's declared
+    # count below — that is the one real "no registry in scope" case. A subject THAT IS given but
+    # whose read fails for a real reason (corrupted classes.json, an attribute needing a registry
+    # that isn't there) must not be silently swallowed into the same fallback.
+    if task in ("detection", "instance_seg") and data.get("subject"):
+        from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
 
-            _reg, id_map = _resolve_registry_id_map(
-                data.get("labels_dir", ""), data.get("subject"), data.get("attribute"))
-            num_classes = len(id_map)
-        except Exception:  # noqa: BLE001 — fail open to the head's declared count
-            pass
+        _reg, id_map = _resolve_registry_id_map(
+            data.get("labels_dir", ""), data.get("subject"), data.get("attribute"))
+        num_classes = len(id_map)
 
     img_size = 224  # safe non-tiny default (7x7 at stride 32); overridden by the real tile edge below
     tiling = (config.get("data") or {}).get("tiling")
