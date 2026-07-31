@@ -39,7 +39,6 @@ Supporting library: `packages/tcip-annotation` — headless annotation engine (l
 CLAUDE.md                      # agent operating contract (persona, invariants, conventions)
 .github/
   skills/                      # domain knowledge modules (crops, annotation, training, ...)
-  prompts/                     # slash-command templates
 packages/
   tcip-mcp/                    # MCP server (python -m tcip_mcp)
     src/tcip_mcp/
