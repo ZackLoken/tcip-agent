@@ -97,6 +97,21 @@ def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
     return (w, h) if w > 0 and h > 0 else None
 
 
+def resolved_classes_path(dataset_dir) -> Path | None:
+    """The real ``classes.json`` path for the dataset containing ``dataset_dir``, or ``None`` if it
+    doesn't exist. The one fact ``_resolve_registry_id_map``'s attribute-without-registry refusal
+    and any caller wanting to precheck it (K18 B2 stage-6 review: ``inference_tools.run_inference``
+    precondition-checks this before attempting resolution, so a legitimately absent registry
+    degrades to an honest ``id_map=None`` instead of a caught-and-swallowed exception) both need —
+    computed once, never two independent implementations of the same "does a registry exist" fact.
+    """
+    from tcip_mcp.dataset_layout import classes_path, dataset_root_of
+
+    root = dataset_root_of(dataset_dir)
+    cp = classes_path(root) if root is not None else None
+    return Path(cp) if cp is not None and Path(cp).is_file() else None
+
+
 def _resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | None):
     """``(registry, id_map)`` for a training scope from the dataset's ``classes.json``.
 
@@ -108,15 +123,13 @@ def _resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | N
     registry to order its values, and refuses when there is none.
     """
     from tcip_mcp import class_registry
-    from tcip_mcp.dataset_layout import classes_path, dataset_root_of
 
     if not subject:
         raise ValueError(
             "a detection/instance_seg run needs an explicit subject to read name-based labels; "
             "none was threaded through build_dataset.")
-    root = dataset_root_of(labels_dir)
-    cp = classes_path(root) if root is not None else None
-    if cp is not None and Path(cp).is_file():
+    cp = resolved_classes_path(labels_dir)
+    if cp is not None:
         registry = class_registry.read_registry(cp)
     elif attribute is not None:
         raise ValueError(
