@@ -118,3 +118,34 @@ def test_ws_training_stream_rejects_cross_site_origin(client: TestClient) -> Non
             headers={"origin": "http://evil.example.com"},
         ):
             pass
+
+
+def test_ws_training_stream_confines_project_root_to_allowed_roots(
+    client: TestClient, tmp_path, monkeypatch
+) -> None:
+    # K19: training_stream_ws took project_root as a query param and passed it straight to
+    # _metrics_path with no confinement, unlike get_run_metrics' identical parameter.
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(
+            f"/api/training/runs/does-not-exist/stream?project_root={outside}",
+        ):
+            pass
+
+
+def test_ws_training_stream_unconfined_when_no_image_roots(
+    client: TestClient, tmp_path, monkeypatch
+) -> None:
+    # The rail must admit valid work: with TCIP_IMAGE_ROOTS unset, the socket still opens and
+    # reaches its normal "unknown run" error message rather than being refused by the new guard.
+    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
+    with client.websocket_connect(
+        f"/api/training/runs/does-not-exist/stream?project_root={tmp_path}",
+    ) as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "status"
+        assert msg["status"]["error"]
