@@ -49,6 +49,55 @@ def test_training_metrics_rejects_run_id_traversal(tmp_path):
     assert ei.value.status_code == 400
 
 
+def test_training_metrics_confines_project_root_to_allowed_roots(tmp_path, monkeypatch):
+    # K19: get_run_metrics took project_root off the payload but never confined it, unlike the
+    # identical parameter on meta.py's report routes.
+    pytest.importorskip("fastapi")
+    from fastapi import HTTPException
+
+    from tcip_web.routes.training import get_run_metrics
+
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    with pytest.raises(HTTPException) as ei:
+        get_run_metrics(project_root=str(outside), run_id="run-1")
+    assert ei.value.status_code == 403
+
+
+def test_training_launch_confines_output_dir_to_allowed_roots(tmp_path, monkeypatch):
+    # K19: launch_training_route passed output_dir straight to launch_training with no guard,
+    # unlike the sibling tuning.py launch route.
+    pytest.importorskip("fastapi")
+    from fastapi import HTTPException
+
+    from tcip_web.routes.training import LaunchPayload, launch_training_route
+
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    with pytest.raises(HTTPException) as ei:
+        launch_training_route(LaunchPayload(config={}, output_dir=str(outside)))
+    assert ei.value.status_code == 403
+
+
+def test_training_launch_output_dir_guard_is_a_no_op_when_unrestricted(tmp_path, monkeypatch):
+    # The rail must admit valid work, not only reject invalid work: with TCIP_IMAGE_ROOTS unset
+    # (the default), an unconfined output_dir must reach launch_training as before, not 403 —
+    # launch_training itself then reports an invalid (model_source-less) config as a normal
+    # {"error": ...} result, not an exception, which is exactly the point: the new guard let the
+    # request past it to reach that existing behavior unchanged.
+    from tcip_web.routes.training import LaunchPayload, launch_training_route
+
+    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
+    result = launch_training_route(LaunchPayload(config={}, output_dir=str(tmp_path)))
+    assert result["error"] == "Invalid config"
+
+
 def test_images_route_blocks_outside_allowed_root(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
