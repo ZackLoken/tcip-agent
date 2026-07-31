@@ -251,6 +251,38 @@ def test_cv1_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     assert Path(r["results_path"]).is_file()
 
 
+def test_k18_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
+    """K18 B2: before this fix, run_full_frame_evaluation's bare `except Exception` around
+    _resolve_registry_id_map swallowed an attribute-classification registry refusal and silently
+    scored against zero ground truth instead of refusing. An attribute needs a real classes.json
+    to order its values (_resolve_registry_id_map's own deliberate ValueError) — no classes.json
+    exists here, so this must now propagate as a real refusal, not a quietly-empty GT read."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
+    json_io.write_annotations(str(labels_dir / "a.json"),
+                              [Annotation(subject="catkin", geometry=BBox(54, 54, 74, 74))], 128, 128)
+
+    class _Stub:
+        def predict_tiled(self, path, **kw):
+            return {"image": path, "width": 128, "height": 128,
+                    "boxes": [], "scores": [], "labels": [], "count": 0}
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    with pytest.raises(ValueError, match="classes.json"):
+        run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"),
+                                  subject="catkin", attribute="elongation", tile_size=64, overlap=0.2)
+
+
 # ======================================================================
 # CV2 — inference tile geometry derived from the checkpoint
 # ======================================================================
@@ -393,6 +425,67 @@ def test_k10_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     assert captured["tile_size"] == 224 and captured["overlap"] == pytest.approx(0.1)
     assert r["tile_size"] == 224 and r["tile_size_source"] == "derived"
     assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
+
+
+def test_k18_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, monkeypatch):
+    """K18 B2 (stage-6 review fix): an attribute-scoped run against a dataset with no classes.json
+    must NOT crash — write_predictions_json already documents id_map=None as an accepted, honest
+    degraded fallback ("the raw 0-indexed id is used as the name... never a re-derivation"). The
+    original bare except swallowed this case too broadly; the fix (a precondition check) must still
+    admit it, not turn it into a hard failure that discards completed prediction work."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    images_dir = tmp_path / "images"  # no classes.json anywhere under this root
+    images_dir.mkdir()
+    from PIL import Image
+    Image.new("RGB", (100, 100)).save(images_dir / "a.png")
+
+    class _Stub:
+        config = {"data": {"subject": "catkin", "attribute": "state"}}
+
+        def predict_batch(self, paths, **kw):
+            return [{"image": p, "width": 100, "height": 100,
+                     "boxes": [[10, 10, 20, 20]], "scores": [0.9], "labels": [1], "count": 1}
+                    for p in paths]
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu")
+    assert "error" not in r
+    assert r["image_count"] == 1  # the completed detection work was not discarded
+
+
+def test_k18_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch):
+    """The precondition check (resolved_classes_path) only short-circuits the LEGITIMATE
+    no-registry case — a classes.json that exists but is corrupted is a real, unexpected failure
+    and must still raise loudly, not be silently absorbed by the same precondition that admits
+    the honest degraded case."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    root = tmp_path / "ds"
+    images_dir = root / "images"
+    images_dir.mkdir(parents=True)
+    (root / "classes.json").write_text("{not valid json", encoding="utf-8")
+    from PIL import Image
+    Image.new("RGB", (100, 100)).save(images_dir / "a.png")
+
+    class _Stub:
+        config = {"data": {"subject": "catkin", "attribute": "state"}}
+
+        def predict_batch(self, paths, **kw):
+            return [{"image": p, "width": 100, "height": 100,
+                     "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+
+    with pytest.raises(Exception):  # json.JSONDecodeError (a ValueError subclass) — not swallowed
+        run_inference(str(ckpt), images_dir=str(images_dir), device="cpu")
 
 
 def test_cv2_explicit_tile_size_wins(tmp_path, monkeypatch):
