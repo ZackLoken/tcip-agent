@@ -24,20 +24,25 @@ function syncNavIndex(index: number): void {
 }
 
 /** Indices of images that match the active status filter (all indices when "all"), further
- *  narrowed by `isNavigable` when supplied (the Review tab skips images with zero detections). */
+ *  narrowed by `isNavigable` when supplied (the Review tab skips images with zero detections).
+ *  `order` (K23), when supplied, replaces `imageList`'s own positional order as the traversal
+ *  order — e.g. an active-learning priority ranking — while the same filter/isNavigable
+ *  predicates still apply on top of it. Omitted, traversal is positional exactly as before. */
 export function computeFilteredIndices(
   imageList: string[],
   byImage: Record<string, string>,
   activeFilter: string,
   isNavigable?: (name: string) => boolean,
+  order?: number[],
 ): number[] {
-  return imageList
-    .map((name, i) => {
-      if (isNavigable && !isNavigable(name)) return -1;
-      if (activeFilter !== "all" && byImage[name] !== activeFilter) return -1;
-      return i;
-    })
-    .filter((i) => i >= 0);
+  const candidates = order ?? imageList.map((_, i) => i);
+  return candidates.filter((i) => {
+    const name = imageList[i];
+    if (name === undefined) return false;
+    if (isNavigable && !isNavigable(name)) return false;
+    if (activeFilter !== "all" && byImage[name] !== activeFilter) return false;
+    return true;
+  });
 }
 
 /** The image index `delta` steps away within `indices`, or null if it wouldn't move.
@@ -71,11 +76,14 @@ export function jumpTarget(indices: number[], oneBased: number): number | null {
 
 /** Per-tab overrides. The Annotate tab (default) filters by annotation status from the store;
  *  the Review tab passes its own image-level review-status map + filter and an `isNavigable`
- *  predicate that skips images with nothing to review. */
+ *  predicate that skips images with nothing to review. `order` (K23) is an explicit traversal
+ *  order (indices into `image_list`) — e.g. an active-learning priority ranking — in place of
+ *  positional order. */
 export interface ImageNavOptions {
   byImage?: Record<string, string>;
   activeFilter?: string;
   isNavigable?: (name: string) => boolean;
+  order?: number[];
 }
 
 export function useImageNav(options?: ImageNavOptions) {
@@ -88,10 +96,11 @@ export function useImageNav(options?: ImageNavOptions) {
   const byImage = options?.byImage ?? storeByImage;
   const activeFilter: string = options?.activeFilter ?? storeFilter;
   const isNavigable = options?.isNavigable;
+  const order = options?.order;
 
   const filteredIndices = useMemo(
-    () => computeFilteredIndices(imageList, byImage, activeFilter, isNavigable),
-    [imageList, byImage, activeFilter, isNavigable],
+    () => computeFilteredIndices(imageList, byImage, activeFilter, isNavigable, order),
+    [imageList, byImage, activeFilter, isNavigable, order],
   );
 
   const goTo = useCallback(
