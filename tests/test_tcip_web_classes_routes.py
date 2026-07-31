@@ -265,6 +265,181 @@ def test_load_derived_registry_cache_invalidates_on_label_write(
     assert set(second["subjects"]) == {"bush", "catkin"}
 
 
+def test_save_classes_confines_dataset_root_to_allowed_roots(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    resp = client.post(
+        "/api/classes/save",
+        json={"project_root": str(outside), "dataset_root": str(outside),
+              "subjects": {"catkin": {"description": "a catkin"}}},
+    )
+    assert resp.status_code == 403
+
+
+def test_image_status_confines_dataset_root_to_allowed_roots(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    resp = client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(outside), "dataset_root": str(outside),
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "catkin"},
+    )
+    assert resp.status_code == 403
+
+
+def test_image_status_bulk_confines_dataset_root_to_allowed_roots(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    resp = client.post(
+        "/api/classes/image_status/bulk",
+        json={"project_root": str(outside), "dataset_root": str(outside),
+              "subject": "catkin", "statuses": {"A.JPG": "complete"}},
+    )
+    assert resp.status_code == 403
+
+
+def test_get_image_status_confines_dataset_root_to_allowed_roots(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    resp = client.get(
+        "/api/classes/image_status",
+        params={"project_root": str(outside), "dataset_root": str(outside), "subject": "catkin"},
+    )
+    assert resp.status_code == 403
+
+
+def test_derive_image_status_confines_annotations_dir_to_allowed_roots(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    outside = tmp_path / "outside" / "annotations"
+    outside.mkdir(parents=True)
+    resp = client.post(
+        "/api/classes/image_status/derive",
+        json={"project_root": str(tmp_path), "annotations_dir": str(outside),
+              "subject": "catkin", "image_list": ["IMG_A.JPG"]},
+    )
+    assert resp.status_code == 403
+
+
+def test_unrestricted_deployment_is_unaffected_by_the_confinement_guard(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TCIP_IMAGE_ROOTS unset (the default) must stay a no-op — the rail must admit valid work,
+    not only reject invalid work."""
+    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
+    resp = client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "catkin"},
+    )
+    assert resp.status_code == 200
+
+
+def _read_audit_entries(dataset_root: Path) -> list[dict]:
+    path = dataset_root / ".tcip" / "audit.jsonl"
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_set_image_status_writes_a_dataset_scoped_audit_entry(
+    client: TestClient, tmp_path: Path
+) -> None:
+    # image_status.json is dataset-native (K13.5 slice 4), so its audit trail is colocated with the
+    # dataset rather than guessed into a project's own audit.jsonl — distinct roots here so the
+    # assertion actually pins which root the entry followed, not just that one was written.
+    project_root = tmp_path / "project"
+    dataset_root = tmp_path / "shared_dataset"
+    project_root.mkdir()
+    dataset_root.mkdir()
+    client.post(
+        "/api/classes/image_status",
+        json={"project_root": str(project_root), "dataset_root": str(dataset_root),
+              "image_name": "IMG_0001.JPG", "status": "complete", "subject": "catkin"},
+    )
+    entries = _read_audit_entries(dataset_root)
+    assert len(entries) == 1
+    assert entries[0]["tool"] == "gui_set_image_status"
+    assert entries[0]["source"] == "gui"
+    assert entries[0]["arguments"]["image_name"] == "IMG_0001.JPG"
+    assert entries[0]["arguments"]["status"] == "complete"
+    assert _read_audit_entries(project_root) == []  # not the project's own audit.jsonl
+
+
+def test_set_image_status_bulk_audit_entry_records_only_what_was_applied(
+    client: TestClient, tmp_path: Path
+) -> None:
+    project_root = tmp_path / "project"
+    dataset_root = tmp_path / "shared_dataset"
+    project_root.mkdir()
+    dataset_root.mkdir()
+    client.post(
+        "/api/classes/image_status/bulk",
+        json={
+            "project_root": str(project_root), "dataset_root": str(dataset_root), "subject": "catkin",
+            "statuses": {"A.JPG": "complete", "B.JPG": "invalid_ignored"},
+        },
+    )
+    entries = _read_audit_entries(dataset_root)
+    assert len(entries) == 1
+    assert entries[0]["tool"] == "gui_set_image_status_bulk"
+    # B.JPG's status was invalid and never written — the audit entry must not claim it was.
+    assert entries[0]["arguments"]["statuses"] == {"A.JPG": "complete"}
+    assert _read_audit_entries(project_root) == []
+
+
+def test_save_classes_writes_a_dataset_scoped_audit_entry(client: TestClient, tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    dataset_root = tmp_path / "shared_dataset"
+    project_root.mkdir()
+    dataset_root.mkdir()
+    client.post(
+        "/api/classes/save",
+        json={"project_root": str(project_root), "dataset_root": str(dataset_root),
+              "subjects": {"catkin": {"description": "a catkin"}}},
+    )
+    entries = _read_audit_entries(dataset_root)
+    assert len(entries) == 1
+    assert entries[0]["tool"] == "gui_save_classes"
+    assert entries[0]["arguments"]["n_subjects"] == 1
+    assert _read_audit_entries(project_root) == []
+
+
+def test_image_status_bulk_writes_no_audit_entry_when_every_status_is_invalid(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """No real write happened, so no audit entry should claim one did."""
+    client.post(
+        "/api/classes/image_status/bulk",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subject": "catkin",
+              "statuses": {"A.JPG": "invalid_ignored"}},
+    )
+    assert _read_audit_entries(tmp_path) == []
+
+
 def test_image_status_bulk(client: TestClient, tmp_path: Path) -> None:
     resp = client.post(
         "/api/classes/image_status/bulk",
