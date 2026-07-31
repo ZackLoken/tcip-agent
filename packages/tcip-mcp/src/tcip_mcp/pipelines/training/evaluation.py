@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import logging
 import math
 from pathlib import Path
 
@@ -27,6 +28,8 @@ import numpy as np
 import torch
 
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+
+logger = logging.getLogger(__name__)
 
 # Composite-objective weights. Note: in compute_composite_objective the F1 and
 # mAP50 terms are multiplied by 10 to lift them onto the same scale as val_loss,
@@ -259,7 +262,8 @@ def coco_detection_metrics(
 # scale for a given trait/dataset is gt_class_avg_size's job to measure, not a pinned constant
 # here). The operating point (conf) is then
 # derived to minimize the signed per-image count bias E[FP-FN] — not F1 — because the phenotype is a
-# count (Sigma pred ~= Sigma gt). See traits.py (count_objective=count_unbiased, localization=center_match).
+# count (Sigma pred ~= Sigma gt) for a trait whose recorded count_objective/localization say so
+# (traits.py; K18 B3/B4 — neither is authored, both are derived/decided once and recorded).
 
 def _centers_xywh(anns: list[dict]) -> list[tuple[float, float]]:
     return [(a["bbox"][0] + a["bbox"][2] / 2.0, a["bbox"][1] + a["bbox"][3] / 2.0) for a in anns]
@@ -307,34 +311,117 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
                             class_id: int | None = None, iou_threshold: float = 0.5) -> dict:
     """The ONE localization criterion that GOVERNS a trait's phenotype count + model selection (R3/D9).
 
-    Reads the trait's semantic ``localization`` (center_match vs iou_match, traits.py) and derives its
-    per-dataset tolerance from the GT in hand — never a pinned value. Returns
+    Reads the trait's recorded ``localization`` kind (center_match vs iou_match, traits.py) and
+    derives its per-dataset tolerance from the GT in hand — never a pinned value. Returns
     ``{kind, tolerance | iou_threshold, derived_from, trait}``. With no trait (or an iou_match trait),
     it is IoU matching at ``iou_threshold`` — the labeled comparability convention (AP@0.5), which
     governs nothing on its own; a count trait's derived center-match tolerance is what the phenotype
     and checkpoint selection rest on.
+
+    K18 B3: ``localization`` is no longer authored — it is derived once, the first time real GT is
+    available for a trait with no recorded kind (via ``derivations.derive_localization_kind``),
+    persisted through ``traits.write_trait_spec_fields`` with ``data_derived_at_runtime``
+    provenance, and read from the recorded value on every later call. A recorded kind is also
+    cheaply re-checked against what the CURRENT data would derive, every real call — divergence
+    surfaces a warning (``kind_diverged`` in the returned dict) rather than silently switching,
+    per the standing "constrain by observation, not permission" rule; only an explicit re-derive
+    changes the recorded value. This is also the single point every consumer of a trait's
+    localization criterion goes through — ``generic_trainer.py`` reads the recorded field directly
+    (it runs before any GT loads, so it cannot call this), but every site with real GT in hand
+    (phenology_tools.py's classifier-calibration matching, this module's own count/selection
+    metrics) calls this function rather than re-deriving or re-reading the field independently.
     """
     if not trait_name:
         return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
                 "derived_from": "comparability convention (AP@0.5)", "trait": None}
-    from tcip_mcp.pipelines.derivations import derive_localization_tolerance_frac
+    from tcip_mcp.pipelines.derivations import (
+        derive_iou_match_threshold, derive_localization_kind, derive_localization_tolerance_frac,
+    )
     from tcip_mcp.traits import CENTER_MATCH, get_trait
 
     spec = get_trait(trait_name)
-    if spec.localization == CENTER_MATCH:
-        boxes_per_image = [[a["bbox"] for a in rec.get("gt", [])
-                            if class_id is None or a["category_id"] == class_id]
-                           for rec in per_image]
+    boxes_per_image = [[a["bbox"] for a in rec.get("gt", [])
+                        if class_id is None or a["category_id"] == class_id]
+                       for rec in per_image]
+
+    kind = spec.localization
+    kind_source = "recorded"
+    kind_diverged = False
+    live_derived_kind = derive_localization_kind(boxes_per_image)
+    if kind:
+        if live_derived_kind is not None and live_derived_kind != kind:
+            kind_diverged = True
+            logger.warning(
+                "trait %r: recorded localization kind %r diverges from what this call's own GT "
+                "would derive (%r) — not switched (observation, not permission); re-derive "
+                "explicitly via update_trait_spec_fields if this data is now representative.",
+                trait_name, kind, live_derived_kind)
+    elif live_derived_kind is not None:
+        kind = live_derived_kind
+        kind_source = "data_derived_at_runtime"
+        # Stamp via resolution.derived() — NOT aliased on import — so test_provenance_honesty.py's
+        # AST scanner (which matches the literal call name "derived") actually sees this label; the
+        # TraitSpec.provenance entry below is a separate, free-text record of WHO decided (for a
+        # human/agent reader), not a substitute for this mechanical check.
+        from tcip_mcp.pipelines.resolution import derived
+        derived("localization_kind", kind,
+               derived_from="achievable IoU under annotation jitter (GT characteristic size)")
+        try:
+            from tcip_mcp import traits as traits_module
+            traits_module.write_trait_spec_fields(
+                trait_name, {"localization": kind},
+                [f"localization: data_derived_at_runtime — derived from "
+                 f"{sum(len(b) for b in boxes_per_image)} GT boxes (achievable IoU under jitter)"],
+            )
+        except ValueError:
+            logger.warning("could not persist derived localization kind for %r", trait_name, exc_info=True)
+    else:
+        raise ValueError(
+            f"trait {trait_name!r} has no recorded localization kind and no GT in this call to "
+            "derive one from — cannot resolve a match criterion. Calibrate or evaluate against a "
+            "labeled reference at least once before this trait's localization kind can be known.")
+
+    # Stamp via resolution.derived()/default() — NOT aliased on import, and with the derived_from
+    # LITERAL inlined directly into the call (round-2 stage-6 review: passing it as a variable,
+    # even unaliased, is ALSO invisible to the AST scanner — it only reads a literal string or an
+    # f-string's leading constant written directly at the call site, never a name reference).
+    # derived() for a real per-dataset computation, default() for the honest "underivable, fell
+    # back" case (never claimed as a derivation — and not scanned by test_provenance_honesty.py at
+    # all, correctly, since it makes no derivation claim to check). The label text lives ONCE, in
+    # the call itself; `.derived_from` reads it back rather than a second, separately-typed copy.
+    from tcip_mcp.pipelines.resolution import default, derived
+
+    if kind == CENTER_MATCH:
         frac = derive_localization_tolerance_frac(boxes_per_image)
-        frac_source = "GT nearest-neighbor spacing (p10 + margin)"
-        if frac is None:
+        if frac is not None:
+            frac_source = derived("localization_tolerance_frac", frac,
+                                  derived_from="GT nearest-neighbor spacing (p10 + margin)").derived_from
+        else:
             frac = spec.localization_tolerance_frac
-            frac_source = f"trait default (underivable: no same-class neighbor in this GT), {spec.localization_tolerance}"
-        return {"kind": "center_match",
-                "tolerance": float(frac * gt_class_avg_size(per_image, class_id=class_id)),
-                "derived_from": frac_source, "trait": trait_name}
-    return {"kind": "iou_match", "iou_threshold": float(iou_threshold),
-            "derived_from": f"trait localization={spec.localization}", "trait": trait_name}
+            frac_source = default(
+                "localization_tolerance_frac", frac,
+                derived_from=f"trait default (underivable: no same-class neighbor in this GT), "
+                             f"{spec.localization_tolerance}",
+            ).derived_from
+        result = {"kind": "center_match",
+                  "tolerance": float(frac * gt_class_avg_size(per_image, class_id=class_id)),
+                  "derived_from": frac_source, "trait": trait_name,
+                  "kind_source": kind_source, "kind_diverged": kind_diverged}
+        return result
+    derived_threshold = derive_iou_match_threshold(boxes_per_image)
+    if derived_threshold is not None:
+        threshold_source = derived(
+            "iou_threshold", derived_threshold,
+            derived_from="achievable IoU under annotation jitter, minus margin (GT characteristic size)",
+        ).derived_from
+    else:
+        derived_threshold = iou_threshold
+        threshold_source = f"caller/default (underivable: no valid GT boxes), trait localization={kind}"
+        default("iou_threshold", derived_threshold, derived_from=threshold_source)
+    result = {"kind": "iou_match", "iou_threshold": float(derived_threshold),
+              "derived_from": threshold_source, "trait": trait_name,
+              "kind_source": kind_source, "kind_diverged": kind_diverged}
+    return result
 
 
 def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: float,
@@ -1047,12 +1134,14 @@ def run_full_frame_evaluation(
     _lbl_date = annotation_date(lbl_dir)
     # The GT category ids come from the run's single assign_class_ids map, read through the same
     # loader-side reader (_json_det_targets), so delivery-grade GT never diverges from what trained.
+    # No try/except here: _resolve_registry_id_map's only exception is its own deliberate
+    # ValueError refusal (attribute classification with no registry to order values) — that must
+    # reach the caller, not be silently swallowed into "no ground truth" for a delivery-grade
+    # evaluation. Its one legitimate "no registry, that's fine" case (single-class, no attribute)
+    # already returns normally without raising.
     _gt_id_map = None
     if subject:
-        try:
-            _reg, _gt_id_map = _resolve_registry_id_map(lbl_dir, subject, attribute)
-        except Exception:  # noqa: BLE001 — no registry in scope; GT reading falls back below
-            _gt_id_map = None
+        _reg, _gt_id_map = _resolve_registry_id_map(lbl_dir, subject, attribute)
     # Same negative rail the training set uses: an image with no label record has no ground truth,
     # so scoring it turns every correct detection into a false positive and drags down the very
     # precision this delivery-grade number gates a phenotype on.
