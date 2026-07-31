@@ -12,9 +12,12 @@ name with no registry lookup.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
-from dataclasses import replace
+import threading
+import uuid
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -39,6 +42,7 @@ from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
 
 router = APIRouter(prefix="/api/review", tags=["review"])
+logger = logging.getLogger(__name__)
 
 
 # ── Engine cache ──────────────────────────────────────────────────────────
@@ -864,3 +868,144 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
     conf = ((sidecar.get("operating_point") or {}).get("conf") or {}).get("value")
     return GenerationConfResponse(
         generation_conf=float(conf) if isinstance(conf, (int, float)) else None)
+
+
+# ── Active-learning priority queue for review (K23) ─────────────────────────
+#
+# prioritize_review_queue's own ranking (packages/tcip-mcp .../tools/feedback_tools.py) never
+# reached the breeder-facing Review tab — the only path was the agent manually calling
+# focus(tab='review', ...) once per ranked image, which doesn't scale. This surfaces the SAME
+# tool (never a second implementation of its scoring/filtering) as a browsable queue: launch on a
+# background thread (checkpoint loading + a forward pass per candidate image can be slow), poll
+# for the result. Scoped to strategy="informativeness" only — the tool's other strategy,
+# confidence_triage, can auto-accept predictions as GT above a breeder-confirmed threshold (D11);
+# that is a different, more consequential capability deliberately left agent-only for now.
+
+
+@dataclass
+class PriorityQueueJob:
+    job_id: str
+    checkpoint_path: str
+    images_dir: str
+    review_state_dir: str
+    method: str = "combined"
+    budget: int = 50
+    status: str = "pending"  # pending | running | completed | failed
+    error: Optional[str] = None
+    queue: list[dict] = field(default_factory=list)  # [{image, score}], highest first
+    total_candidates: int = 0
+    reviewed_skipped: int = 0
+    thread: Optional[threading.Thread] = field(default=None, repr=False)
+
+
+_pq_jobs: dict[str, PriorityQueueJob] = {}
+_pq_lock = threading.Lock()
+
+
+def _pq_summary(job: PriorityQueueJob) -> dict:
+    return {
+        "job_id": job.job_id, "status": job.status, "error": job.error,
+        "queue": job.queue, "total_candidates": job.total_candidates,
+        "reviewed_skipped": job.reviewed_skipped,
+    }
+
+
+def _pq_persist() -> None:
+    from tcip_web import jobstore
+    with _pq_lock:
+        summaries = [_pq_summary(j) for j in _pq_jobs.values()]
+    jobstore.persist("review_priority_jobs", summaries)
+
+
+def _pq_register(job: PriorityQueueJob) -> None:
+    from tcip_web import jobstore
+    with _pq_lock:
+        _pq_jobs[job.job_id] = job
+        jobstore.evict_terminal(_pq_jobs)  # bound the registry (drop oldest terminal jobs)
+    _pq_persist()
+
+
+def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
+    with _pq_lock:
+        return _pq_jobs.get(job_id)
+
+
+def _pq_worker(job: PriorityQueueJob) -> None:
+    try:
+        job.status = "running"
+        _pq_persist()
+        # The SAME MCP tool the agent calls — its scoring/filtering (build_predictor ->
+        # require_composed_detector -> build_scorer -> score -> budget slice -> response shape) is
+        # not re-derived here. It returns soft {"error": ...} dicts rather than raising, for every
+        # failure mode (missing checkpoint, unknown scorer, non-composed detector, torch
+        # unavailable) — mapped onto this job's own status/error below rather than reimplemented.
+        from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+
+        result = prioritize_review_queue(
+            checkpoint_path=job.checkpoint_path,
+            images_dir=job.images_dir,
+            review_state_dir=job.review_state_dir,
+            strategy="informativeness",
+            method=job.method,
+            budget=job.budget,
+        )
+        if "error" in result:
+            job.status = "failed"
+            job.error = result["error"]
+        else:
+            job.status = "completed"
+            job.queue = result["queue"]
+            job.total_candidates = result["total_candidates"]
+            job.reviewed_skipped = result["reviewed_skipped"]
+    except Exception as exc:
+        logger.exception("priority-queue job %s failed", job.job_id)
+        job.status = "failed"
+        job.error = str(exc)
+    finally:
+        _pq_persist()
+
+
+class LaunchPriorityQueuePayload(BaseModel):
+    project_root: str
+    checkpoint_path: str
+    images_dir: str
+    method: str = "combined"
+    budget: int = 50
+
+
+@router.post("/queue/launch")
+def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
+    # checkpoint_path reaches torch.load via build_predictor (the same arbitrary-pickle sink the
+    # Inference tab's own launch route confines) — same guard, same treatment.
+    for p in (payload.project_root, payload.checkpoint_path, payload.images_dir):
+        _guard_path(p)
+    if not Path(payload.checkpoint_path).is_file():
+        raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
+    if not Path(payload.images_dir).is_dir():
+        raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
+
+    # Same review-state location _get_engine resolves from project_root — the caller supplies the
+    # project, not the platform's own internal state layout.
+    review_state_dir = str(Path(payload.project_root) / ".tcip" / "state")
+
+    job = PriorityQueueJob(
+        job_id=f"pq-{uuid.uuid4().hex[:8]}",
+        checkpoint_path=payload.checkpoint_path,
+        images_dir=payload.images_dir,
+        review_state_dir=review_state_dir,
+        method=payload.method,
+        budget=payload.budget,
+    )
+    _pq_register(job)
+    t = threading.Thread(target=_pq_worker, args=(job,), daemon=True)
+    job.thread = t
+    t.start()
+    return {"status": "launched", "job_id": job.job_id}
+
+
+@router.get("/queue/{job_id}")
+def get_priority_queue_job(job_id: str) -> dict:
+    job = _pq_get(job_id)
+    if job is None:
+        raise HTTPException(404, f"job not found: {job_id}")
+    return _pq_summary(job)
