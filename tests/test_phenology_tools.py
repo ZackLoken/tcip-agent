@@ -647,6 +647,16 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
     gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
     gt_dir.mkdir()
     pred_dir.mkdir()
+    # Precondition guard, corrected (K18 B3 stage-6 review round 2): this test's math depends on
+    # the RECORDED kind (CATKIN's localization=CENTER_MATCH, seeded by seed_catkin_trait_spec)
+    # governing, not a live derivation — verified this is NOT redundant with derivation: this
+    # split's average characteristic size (sqrt(200*200)=200 and sqrt(20*20)=20, mean 110px)
+    # exceeds derive_localization_kind's ~45px crossover and would derive to iou_match if
+    # unrecorded. resolve_match_criterion uses a recorded kind as-is (only warns on divergence,
+    # never overrides it — see test_evaluation_metrics.py's dedicated coverage of that behavior),
+    # so this assertion is what actually fails fast, with a clear message, if the CATKIN fixture's
+    # localization value ever changes and silently stops exercising the center-match code path
+    # this test exists to cover.
     spec = get_trait("catkin")
     assert spec.localization == CENTER_MATCH and spec.localization_tolerance_frac == 0.5
 
@@ -672,8 +682,8 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
 
     # Split-wide avg char_size = (200 + 20) / 2 = 110 -> tolerance = 0.5 * 110 = 55px, comfortably
     # above both the small image's 15px offset and the big image's 40px offset.
-    items = _classification_items(str(gt_dir), str(pred_dir), subject="catkin",
-                                  positive_value="elongated", attribute="elongation", spec=spec)
+    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="catkin", subject="catkin",
+                                  positive_value="elongated", attribute="elongation")
 
     by_image = {it["image_id"]: it for it in items}
     assert "small" in by_image, (
@@ -697,7 +707,6 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
     gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
     gt_dir.mkdir()
     pred_dir.mkdir()
-    spec = get_trait("catkin")
 
     # catkin center (125, 125), offset ~7px from the prediction -- comfortably inside tolerance.
     # bush center (120, 120), an EXACT match to the prediction -- if it entered the pool, greedy
@@ -713,8 +722,8 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
         Annotation(subject="elongated", geometry=BBox(114.0, 114.0, 126.0, 126.0), score=0.9),
     ], 400, 400)
 
-    items = _classification_items(str(gt_dir), str(pred_dir), subject="catkin",
-                                  positive_value="elongated", attribute="elongation", spec=spec)
+    items = _classification_items(str(gt_dir), str(pred_dir), trait_name="catkin", subject="catkin",
+                                  positive_value="elongated", attribute="elongation")
 
     assert len(items) == 1
     assert items[0]["bbox"] == [105.0, 105.0, 145.0, 145.0]  # the catkin box, not bush's
