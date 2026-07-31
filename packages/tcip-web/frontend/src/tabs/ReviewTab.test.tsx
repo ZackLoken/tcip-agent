@@ -774,8 +774,13 @@ describe("ReviewTab in-place edit scope", () => {
 });
 
 describe("ReviewTab priority queue (K23)", () => {
+  // Idempotent, not a blind toggle: filtersOpen's initial state is read from localStorage
+  // ("tcip.review.filtersOpen"), which persists across tests within this file (one jsdom
+  // environment per file, not per test) — a prior test in this block leaving it open would make
+  // a bare toggle click CLOSE it here instead.
   function openFilters() {
-    fireEvent.click(screen.getByTitle("Show or hide the review filters"));
+    const btn = screen.getByTitle("Show or hide the review filters");
+    if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
   }
 
   it("launches with the picked model's checkpoint and this date's images_dir, then shows the ranked count", async () => {
