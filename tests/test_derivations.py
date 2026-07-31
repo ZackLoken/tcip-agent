@@ -8,6 +8,8 @@ from PIL import Image
 
 from tcip_mcp.pipelines.derivations import (
     derive_cross_tile_nms,
+    derive_iou_match_threshold,
+    derive_localization_kind,
     derive_localization_tolerance_frac,
     derive_sliver_frac,
     gt_aspect_ratios,
@@ -111,6 +113,61 @@ def test_derive_sliver_frac_too_few_samples_returns_none():
     # not a spread, just noise. Below min_samples must refuse rather than derive from it.
     assert derive_sliver_frac([25.6]) is None
     assert derive_sliver_frac([10.0, 20.0, 30.0, 40.0]) is None  # 4 < default min_samples=5
+
+
+def test_derive_localization_kind_small_objects_are_center_match():
+    # 20x20 boxes (char size 20) — well under the ~45px default crossover; IoU would be unreliable
+    # under realistic jitter, so center-match must govern.
+    boxes = [[(0, 0, 20, 20), (100, 0, 20, 20)]]
+    assert derive_localization_kind(boxes) == "center_match"
+
+
+def test_derive_localization_kind_large_objects_are_iou_match():
+    # 200x200 boxes (char size 200) — well over the crossover; IoU is a meaningful criterion here.
+    boxes = [[(0, 0, 200, 200), (500, 0, 200, 200)]]
+    assert derive_localization_kind(boxes) == "iou_match"
+
+
+def test_derive_localization_kind_no_boxes_returns_none():
+    assert derive_localization_kind([]) is None
+    assert derive_localization_kind([[], []]) is None
+    assert derive_localization_kind([[(0, 0, 0, 0)]]) is None  # zero-area box, not a valid size
+
+
+def test_derive_localization_kind_crossover_is_monotonic_in_size():
+    # Larger characteristic size must never flip FROM iou_match BACK to center_match — the
+    # achievable-IoU formula is monotonically increasing in size, so this must hold for any jitter.
+    small = derive_localization_kind([[(0, 0, 10, 10)]])
+    mid = derive_localization_kind([[(0, 0, 45, 45)]])
+    large = derive_localization_kind([[(0, 0, 500, 500)]])
+    assert small == "center_match"
+    assert large == "iou_match"
+    assert mid in ("center_match", "iou_match")  # near the crossover, either is defensible
+
+
+def test_derive_iou_match_threshold_exact_value():
+    # char size 60 -> achievable_iou = (60-15)/(60+15) = 0.6 -> threshold = 0.6 - margin(0.1) = 0.5.
+    boxes = [[(0, 0, 60, 60)]]
+    assert derive_iou_match_threshold(boxes) == pytest.approx(0.5)
+
+
+def test_derive_iou_match_threshold_scales_with_object_size():
+    # Larger characteristic size -> higher achievable IoU under the same jitter -> higher threshold.
+    small = derive_iou_match_threshold([[(0, 0, 60, 60)]])
+    large = derive_iou_match_threshold([[(0, 0, 300, 300)]])
+    assert small is not None and large is not None
+    assert large > small
+
+
+def test_derive_iou_match_threshold_clamped_to_upper_bound():
+    # A very large object's achievable IoU under jitter approaches 1.0 -> clamped at 0.7.
+    assert derive_iou_match_threshold([[(0, 0, 1000, 1000)]]) == pytest.approx(0.7)
+
+
+def test_derive_iou_match_threshold_no_boxes_returns_none():
+    assert derive_iou_match_threshold([]) is None
+    assert derive_iou_match_threshold([[], []]) is None
+    assert derive_iou_match_threshold([[(0, 0, 0, 0)]]) is None
 
 
 def test_write_class_map(tmp_path):
