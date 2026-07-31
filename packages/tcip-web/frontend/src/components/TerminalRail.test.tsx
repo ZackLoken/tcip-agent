@@ -25,7 +25,7 @@ const { termInstances, MockTerminal } = vi.hoisted(() => {
     input = vi.fn();
     parser = { registerCsiHandler: vi.fn(() => ({ dispose: vi.fn() })) };
     attachCustomKeyEventHandler = vi.fn();
-    onData = vi.fn(() => ({ dispose: vi.fn() }));
+    onData = vi.fn((_cb: (data: string) => void) => ({ dispose: vi.fn() }));
     onResize = vi.fn(() => ({ dispose: vi.fn() }));
     constructor() {
       MockTerminal.instances.push(this);
@@ -179,5 +179,38 @@ describe("TerminalRail", () => {
     fireEvent.click(screen.getByLabelText("Restart the agent"));
     await waitFor(() => expect(terminalApi.restart).toHaveBeenCalledWith("t1", 30, 100));
     expect(termInstances[0].reset).toHaveBeenCalled();
+  });
+
+  describe("starter hint (K23)", () => {
+    it("shows a starter hint when no project is open", async () => {
+      render(<TerminalRail />);
+      await screen.findByTestId("terminal-host");
+      expect(await screen.findByTestId("terminal-starter-hint")).toBeInTheDocument();
+    });
+
+    it("hides the starter hint once the breeder sends input", async () => {
+      render(<TerminalRail />);
+      await screen.findByTestId("terminal-host");
+      await screen.findByTestId("terminal-starter-hint");
+      termInstances[0].onData.mock.calls[0][0]("h");
+      await waitFor(() =>
+        expect(screen.queryByTestId("terminal-starter-hint")).not.toBeInTheDocument(),
+      );
+    });
+
+    it("does not show the starter hint when a project is already open", async () => {
+      const dataset = useStore.getState().gui.dataset;
+      useStore.getState().patchGui({
+        dataset: { ...dataset, dataset_root: "/workspace/demo_trait_site", date: "2026-05-01" },
+      });
+      try {
+        render(<TerminalRail />);
+        await screen.findByTestId("terminal-host");
+        expect(screen.queryByTestId("terminal-starter-hint")).not.toBeInTheDocument();
+      } finally {
+        // Restore, so a later test in this file can't inherit "a project is open".
+        useStore.getState().patchGui({ dataset });
+      }
+    });
   });
 });
