@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections import OrderedDict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -64,15 +66,56 @@ def _cached_label_json(path: Path) -> object:
     return data
 
 
+def _guard_dataset_root(root: str) -> str:
+    """Confine a resolved dataset root to the allowed image roots (no-op unless ``TCIP_IMAGE_ROOTS``
+    is set) — the same lockdown the rest of the backend applies to absolute reads. The single choke
+    point every ``classes.py`` route resolves through, so a new caller can't forget it the way a
+    route-local guard could."""
+    from tcip_web.paths import assert_path_allowed
+
+    try:
+        return str(assert_path_allowed(root))
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
 def _resolve_dataset_root(dataset_root: str | None, annotations_dir: str | None) -> str | None:
     """The dataset root, taken from ``dataset_root`` or derived from a per-image label dir path."""
     if dataset_root:
-        return dataset_root
+        return _guard_dataset_root(dataset_root)
     from tcip_mcp.dataset_layout import dataset_root_of
 
     if annotations_dir and (root := dataset_root_of(annotations_dir)) is not None:
-        return str(root)
+        return _guard_dataset_root(str(root))
     return None
+
+
+def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
+    """Append a dataset-native GUI mutation to ``<dataset_root>/.tcip/audit.jsonl`` (best-effort).
+
+    ``image_status.json`` and ``classes.json`` are dataset-native, not project-private (a dataset can
+    be opened by more than one project — see ``dataset_layout.image_status_path``), so there is no
+    single project's audit log a write here unambiguously belongs to. Colocating the trail with the
+    state it describes, rather than guessing a project, is deliberate — mirrors
+    ``annotate._audit_gui_write`` / ``review._audit`` in shape, diverges from them only in root.
+    """
+    if not dataset_root:
+        return
+    try:
+        from tcip_mcp.utils.atomic_io import append_jsonl
+
+        append_jsonl(
+            os.path.join(dataset_root, ".tcip", "audit.jsonl"),
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "tool": tool,
+                "source": "gui",
+                "arguments": arguments,
+                "status": "ok",
+            },
+        )
+    except Exception:
+        pass
 
 
 def _subjects_in_dir(d: Path) -> set[str]:
@@ -153,6 +196,9 @@ def save_classes(payload: SaveClassesPayload) -> dict:
         write_registry(path, registry)
     except OSError as exc:
         raise HTTPException(500, f"could not write {path}: {exc}") from exc
+    _audit_dataset_write(
+        root, "gui_save_classes", {"classes_path": str(path), "n_subjects": len(registry.subjects)}
+    )
     return {"status": "ok", "n_subjects": len(registry.subjects), "classes_path": str(path)}
 
 
@@ -268,6 +314,12 @@ def set_image_status(payload: ImageStatusPayload) -> dict:
         store.setdefault(bucket, {})[payload.image_name] = payload.status
         atomic_write_json(path, {k: dict(sorted(store[k].items())) for k in sorted(store)})
     _stamp_digest(root, bucket, payload.subject, [payload.image_name])
+    _audit_dataset_write(
+        root,
+        "gui_set_image_status",
+        {"image_name": payload.image_name, "status": payload.status,
+         "subject": payload.subject, "date": payload.date},
+    )
     return {"status": "ok"}
 
 
@@ -297,6 +349,16 @@ def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
                 applied.append(name)
         atomic_write_json(path, {k: dict(sorted(store[k].items())) for k in sorted(store)})
     _stamp_digest(root, bucket, payload.subject, applied)
+    # Record what was actually written, not the raw payload — an entry with a name whose status
+    # was skipped (not in VALID_STATUSES) would overstate the change. No entry at all when nothing
+    # was applied: a no-op write logged as a mutation is noise, not signal.
+    if applied:
+        _audit_dataset_write(
+            root,
+            "gui_set_image_status_bulk",
+            {"statuses": {name: payload.statuses[name] for name in applied},
+             "subject": payload.subject, "date": payload.date},
+        )
     return {"status": "ok", "n": len(payload.statuses)}
 
 
@@ -317,6 +379,11 @@ def derive_image_status(payload: DerivePayload) -> dict:
     completed+empty -> negative; objects (not completed) -> partial; empty-or-missing -> unannotated.
     When a ``subject`` is given, only annotations of that subject count (per-subject scoping).
     """
+    # Reads label files directly rather than through _resolve_dataset_root, so it needs its own
+    # confinement call (no-op unless TCIP_IMAGE_ROOTS is set) — an absolute-path read is exactly
+    # what that lockdown governs.
+    if payload.annotations_dir:
+        _guard_dataset_root(payload.annotations_dir)
     adir = Path(payload.annotations_dir) if payload.annotations_dir else None
     complete_set = set(payload.complete_override)
 
