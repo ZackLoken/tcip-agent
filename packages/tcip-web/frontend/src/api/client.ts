@@ -349,6 +349,31 @@ export const api = {
         `/api/review/image_statuses?${qs.toString()}`,
       );
     },
+
+    // K23: launch the active-learning priority queue (informativeness ranking only — never the
+    // confidence_triage/auto-accept-as-GT strategy, which stays agent-only) as a background job;
+    // poll launchPriorityQueue's job_id via priorityQueueJob until status is a terminal value.
+    launchPriorityQueue: (body: {
+      project_root: string;
+      checkpoint_path: string;
+      images_dir: string;
+      method?: string;
+      budget?: number;
+    }) =>
+      call<{ status: string; job_id: string }>("/api/review/queue/launch", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+
+    priorityQueueJob: (jobId: string) =>
+      call<{
+        job_id: string;
+        status: "pending" | "running" | "completed" | "failed";
+        error: string | null;
+        queue: { image: string; score: number }[];
+        total_candidates: number;
+        reviewed_skipped: number;
+      }>(`/api/review/queue/${jobId}`),
   },
 };
 
