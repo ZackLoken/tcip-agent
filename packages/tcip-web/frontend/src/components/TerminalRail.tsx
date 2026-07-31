@@ -70,6 +70,14 @@ export function TerminalRail() {
   const sessionRef = useRef<string | null>(null);
   const termRef = useRef<Terminal | null>(null);
 
+  // K23: a first-time breeder's first view of this rail is otherwise a blank cursor in a full
+  // developer CLI. Show a starter hint until either a project is open (App.tsx's own signal —
+  // once the breeder/agent has a project going, they don't need an example prompt) or they've
+  // sent their first input (they're already engaging; the hint would just be in the way).
+  const projectOpen = useStore((s) => !!s.gui.dataset.dataset_root && !!s.gui.dataset.date);
+  const [hasInput, setHasInput] = useState(false);
+  const showStarterHint = !!status?.available && !projectOpen && !hasInput;
+
   const [width, setWidth] = useState<number>(() => {
     try {
       const v = parseInt(localStorage.getItem(WIDTH_KEY) ?? "", 10);
@@ -315,7 +323,10 @@ export function TerminalRail() {
     };
     void connect();
 
-    const dataSub = term.onData((data) => send({ type: "input", data }));
+    const dataSub = term.onData((data) => {
+      setHasInput(true);
+      send({ type: "input", data });
+    });
     const resizeSub = term.onResize(({ rows, cols }) => send({ type: "resize", rows, cols }));
     const observer = new ResizeObserver(() => {
       try {
@@ -349,6 +360,7 @@ export function TerminalRail() {
     try {
       await terminalApi.restart(id, term?.rows ?? 30, term?.cols ?? 100);
       term?.reset();
+      setHasInput(false); // a fresh conversation with still no project open re-shows the hint
     } catch (e) {
       setError(String(e));
     }
@@ -437,14 +449,26 @@ export function TerminalRail() {
           </button>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 relative">
-          <div ref={hostRef} data-testid="terminal-host" className="absolute inset-0 p-2" />
-          {error && (
-            <div className="absolute bottom-2 left-2 right-2 text-[11px] text-tcip-fp bg-tcip-panel/90 border border-tcip-border rounded p-2">
-              {error}
+        <>
+          {showStarterHint && (
+            <div
+              data-testid="terminal-starter-hint"
+              className="shrink-0 px-3 py-2 border-b border-tcip-border bg-tcip-panel text-[11px] text-tcip-muted"
+            >
+              Tell the agent what you&rsquo;re working on — for example: &ldquo;I have photos of my{" "}
+              <span className="italic">[crop]</span> and want to measure{" "}
+              <span className="italic">[trait]</span>.&rdquo;
             </div>
           )}
-        </div>
+          <div className="flex-1 min-h-0 relative">
+            <div ref={hostRef} data-testid="terminal-host" className="absolute inset-0 p-2" />
+            {error && (
+              <div className="absolute bottom-2 left-2 right-2 text-[11px] text-tcip-fp bg-tcip-panel/90 border border-tcip-border rounded p-2">
+                {error}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </aside>
   );
