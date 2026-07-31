@@ -107,6 +107,10 @@ def claude_reports(
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
+    from tcip_mcp.project_status import record_report
+
+    record_report(project_path)
+
     return {
         "report_path": str(report_path),
         "category": category,
@@ -295,12 +299,37 @@ def project_retrospective(
 
     retro_path.write_text(content, encoding="utf-8")
 
+    from tcip_mcp.project_status import record_retrospective
+
+    record_retrospective(project_path, project_id, retro_path)
+
     return {
         "retrospective_path": str(retro_path),
         "project_id": project_id,
         "timestamp": now.isoformat(),
         "appended_to_existing": appended,
     }
+
+
+@mcp.tool()
+@audited
+def record_distillation_pass(project_path: str) -> dict:
+    """Record that you reviewed this project's friction/retrospectives (e.g. via
+    ``scripts/distill_learnings.py``) — resets its distillation-backlog counters.
+
+    Call this after actually reading a distillation worksheet, not before. It only records that a
+    review happened; it never applies, promotes, or writes anything from the worksheet itself —
+    turning a recurring theme into a skill line, a CLAUDE.md rule, or a tool change stays your own,
+    separate, explicit edit. ``distill_learnings.py`` itself stays read-only; this is the one
+    audited write in the loop, kept out of the script on purpose.
+
+    Args:
+        project_path: Root directory of the project (or workspace project) reviewed.
+    """
+    from tcip_mcp.project_status import record_distillation
+
+    record_distillation(project_path)
+    return {"project_path": project_path, "status": "recorded"}
 
 
 def _load_retrospectives(
