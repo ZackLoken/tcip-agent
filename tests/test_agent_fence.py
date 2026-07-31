@@ -269,6 +269,98 @@ def test_guard_fails_open_on_garbage_stdin():
     assert r.returncode == 0  # unparseable → fall through to normal permission flow
 
 
+# ── the Bash fence's delete/truncate parity with PowerShell (K19) ────────
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "rm C:/Users/zack/tcip-projects/proj/labels/a.txt",
+        "rmdir /c/Users/zack/tcip-projects/proj/annotations/2026-01-01",
+        "unlink /c/Users/zack/tcip-projects/proj/labels/a.txt",
+        "shred /c/Users/zack/tcip-projects/proj/labels/a.txt",
+        "truncate -s 0 /c/Users/zack/tcip-projects/proj/annotations/a.json",
+        # xargs — with and without a flag on the trailing verb
+        "ls /c/proj/annotations/*.json | xargs rm",
+        "ls /c/proj/annotations/*.json | xargs rm -f",
+        # find — the sharpest hole: Bash(find:*) is allow-listed, so only the guard stops this
+        "find /c/proj/annotations -name '*.json' -delete",
+        "find /c/proj/annotations -name '*.json' -exec rm {} \\;",
+        # statement-position variants (after ; | & ( { } and at line start)
+        "cd /c/proj && rm labels/a.txt",
+        "echo hi; rm labels/a.txt",
+    ],
+)
+def test_guard_denies_deletion_and_truncation(cmd):
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        # a delete/truncate verb as a bareword in an argument (not statement position) must not trip
+        # the guard — the false-positive the _STMT anchoring exists to prevent.
+        "grep -r shred packages/tcip-mcp",
+        "grep -rn truncate packages",
+        "cat elderberry-rm-notes.txt",
+        "ls /c/proj/rm-backup",
+        "python scripts/doctor.py /c/proj",  # contains no delete verb at all
+        "find /c/proj/annotations -name '*.json'",  # find without -delete/-exec rm is a plain read
+        "find /c/proj -type f -name 'truncate_report.json'",
+    ],
+)
+def test_guard_allows_reads_that_merely_mention_delete_words(cmd):
+    r = _run_guard(cmd)
+    assert r.returncode == 0, r.stdout
+    assert r.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "cat /c/proj/annotations/2026-01-01/a.json > /c/proj/annotations/2026-01-01/a.json.bak",
+        "echo '{}' > /c/proj/labels/a.json",
+        "echo '{}' > /c/proj/predictions/live/2026-01-01/a.json",
+        "> /c/proj/annotations/a.json",
+    ],
+)
+def test_guard_denies_writing_into_breeder_data_paths(cmd):
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+def test_guard_allows_a_redirect_into_an_unrelated_path():
+    # A redirect target that doesn't name annotations/labels/predictions/image_status.json is not
+    # breeder data — the rail must admit valid work, not only reject invalid work.
+    r = _run_guard("echo done > /tmp/scratch.txt")
+    assert r.returncode == 0, r.stdout
+
+
+def test_bash_and_powershell_guards_deny_the_same_breeder_data_operations():
+    # Parity test (K19): both shells must deny the same breeder-data delete/truncate/write
+    # operations — the drift the platform-path-only comparison above
+    # (test_bash_and_powershell_guards_protect_the_same_roots) cannot catch, since platform paths
+    # and breeder data are orthogonal invariants. Covers all three harm classes (delete, truncate,
+    # overwrite-via-redirect-or-cmdlet), not delete alone.
+    pairs = [
+        ("rm C:/Users/zack/tcip-projects/proj/labels/a.txt",
+         'rm C:\\Users\\zack\\tcip-projects\\proj\\labels\\a.txt'),
+        ("find /c/proj/annotations -name '*.json' -delete", None),  # Bash-only construct
+        ("truncate -s 0 /c/proj/annotations/a.json",
+         "Clear-Content C:\\proj\\annotations\\a.json"),
+        ("echo '{}' > /c/proj/labels/a.json",
+         'Set-Content C:\\proj\\labels\\a.json \'{}\''),
+        ("> /c/proj/labels/a.json", "'{}' > C:\\proj\\labels\\a.json"),
+    ]
+    for bash_cmd, ps_cmd in pairs:
+        assert _run_guard(bash_cmd).returncode == 2, bash_cmd
+        if ps_cmd is not None:
+            assert _run_ps_guard(ps_cmd).returncode == 2, ps_cmd
+
+
 # ── the PowerShell guard hook (the closed bypass) ────────────────────────
 
 
@@ -321,6 +413,70 @@ def _run_ps_guard(command: str) -> subprocess.CompletedProcess:
     ],
 )
 def test_ps_guard_denies_mutations_and_dangerous(cmd):
+    r = _run_ps_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+# ── the PowerShell fence's breeder-data truncate/write parity with Bash (K19) ──
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "Clear-Content C:\\Users\\zack\\tcip-projects\\proj\\labels\\a.json",
+        "clc C:\\Users\\zack\\tcip-projects\\proj\\labels\\a.json",
+        'Set-Content -Path C:\\proj\\annotations\\2026-01-01\\a.json -Value \'{}\'',
+        "Out-File -FilePath C:\\proj\\predictions\\live\\2026-01-01\\a.json",
+        'sc C:\\proj\\labels\\a.json "x"',
+        "'{}' > C:\\proj\\labels\\a.json",
+        "Get-Content x.json > C:\\proj\\annotations\\a.json.bak",
+    ],
+)
+def test_ps_guard_denies_writing_into_breeder_data_paths(cmd):
+    r = _run_ps_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        # a write cmdlet/alias or "labels"/"annotations"/"predictions" as a bareword argument (not
+        # a write target) must not trip the guard.
+        "Get-Content elderberry-labels-notes.txt",
+        "Select-String -Pattern predictions -Path packages\\tcip-mcp\\server.py",
+        "Get-ChildItem C:\\proj\\annotations",  # a read, not a write
+        "echo 'Set-Content is a cmdlet name'",
+        "Get-Content C:\\proj\\annotations\\a.json > $env:TEMP\\scratch.json",  # write target is not breeder data
+        # Copy-Item (and its aliases) can't be told source from destination by a stateless guard —
+        # deliberately exempted from the breeder-data check in both directions, mirroring the Bash
+        # guard's own exemption of cp, so a legitimate backup/duplicate of a label isn't blocked.
+        "Copy-Item C:\\proj\\labels\\a.json -Destination C:\\out\\backup.json",
+        "Copy-Item C:\\out\\x.json -Destination C:\\proj\\labels\\a.json",
+        "cpi C:\\proj\\annotations\\a.json C:\\out\\x.json",
+    ],
+)
+def test_ps_guard_allows_reads_that_merely_mention_breeder_data_words(cmd):
+    r = _run_ps_guard(cmd)
+    assert r.returncode == 0, r.stdout
+    assert r.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        # Move/Rename DO relocate the tracked file even when it's named as the "source" — unlike
+        # Copy-Item, these stay denied.
+        "Move-Item C:\\proj\\labels\\a.json -Destination C:\\out\\a.json",
+        "mv C:\\proj\\labels\\a.json C:\\out\\a.json",
+        "Rename-Item C:\\proj\\labels\\a.json b.json",
+        "rni C:\\proj\\annotations\\a.json b.json",
+    ],
+)
+def test_ps_guard_still_denies_move_and_rename_of_breeder_data(cmd):
+    # Regression pin for the Copy-Item exemption above: narrowing the write-op set for the
+    # breeder-data check must not have accidentally exempted Move/Rename too.
     r = _run_ps_guard(cmd)
     assert r.returncode == 2, r.stdout
     assert "deny" in r.stdout
