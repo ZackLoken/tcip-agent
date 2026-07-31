@@ -99,6 +99,48 @@ def test_inspect_project(tmp_path: Path):
     assert status["has_config"] is True
 
 
+def test_inspect_project_folds_in_recent_activity(tmp_path: Path):
+    from tcip_mcp.tools.meta_tools import claude_reports
+
+    init_project(str(tmp_path))
+    status = inspect_project(str(tmp_path))
+    assert status["recent_activity"] == {}  # no history yet — genuinely empty, not corrupt
+
+    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    status = inspect_project(str(tmp_path))
+    assert status["recent_activity"]["reports_since_last_retrospective"] == 1
+
+
+def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path):
+    init_project(str(tmp_path))
+    status_path = tmp_path / ".tcip" / "state" / "project_status.json"
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text("{not valid json", encoding="utf-8")
+
+    status = inspect_project(str(tmp_path))
+    assert "status_unavailable" in status["recent_activity"]
+    # Live counts must stay unaffected by a corrupt status file — different store, different rail.
+    assert status["initialized"] is True
+
+
+def test_set_active_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path))
+    import tcip_mcp.web_client as web_client
+    from tcip_mcp.tools.meta_tools import claude_reports
+    from tcip_mcp.tools.project_tools import set_active_project
+    from tcip_mcp.workspace import project_path
+
+    # Stub the GUI notification so the result is deterministic regardless of whether a tcip-web
+    # backend happens to be listening on this machine (matches test_set_active_project.py).
+    monkeypatch.setattr(web_client, "post_panel_event", lambda *a, **k: {"delivered": False})
+
+    init_project(str(project_path("proj_a")))
+    claude_reports(str(project_path("proj_a")), category="missing_tool", detail="a")
+
+    result = set_active_project("proj_a")
+    assert result["recent_activity"]["reports_since_last_retrospective"] == 1
+
+
 def test_export_import_roundtrip(tmp_path: Path):
     """archive_project -> import_project -> inspect_project recovers the project."""
     from PIL import Image
