@@ -446,6 +446,29 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     assert n_excluded == 2  # partial_a + partial_b, wherever the split put them
 
 
+def test_k18_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
+    """K18 B2: before this fix, _calibrate_operating_point's bare `except Exception` around
+    _resolve_registry_id_map silently degraded an attribute-classification calibration to a
+    single-class GT read when the registry read failed for a real reason — sitting directly on
+    the calibration/operating-point rail, worse than the delivery-grade-eval instance of the same
+    bug. No classes.json exists here for an attribute-scoped config, so this must now refuse."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    stems = ["a_0_0", "a_0_1"]
+    images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
+
+    stub = _CalStub()
+    stub.config = {"data": {"subject": "catkin", "attribute": "state"}}  # no classes.json written
+
+    with pytest.raises(ValueError, match="classes.json"):
+        itools._calibrate_operating_point(
+            stub, "catkin", str(labels_dir), str(images_dir),
+            tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
+            global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+            group_by="stem", seed=0, holdout_ratio=0.5,
+        )
+
+
 # ===========================================================================
 # Minor — resolve_model_identity's checkpoint deserialization.
 # ===========================================================================
