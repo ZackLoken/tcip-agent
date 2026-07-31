@@ -13,6 +13,7 @@ import type Konva from "konva";
 
 import { api, IMAGE_MAX_WIDTH } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
+import { resultsApi, type RegisteredModel } from "@/api/inference";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
@@ -156,12 +157,8 @@ export function ReviewTab() {
   );
   // Shared filtered navigation, scoped to review status + non-empty images (same traversal
   // machinery as the arrow keys + TopBar Prev/Next, different filter source).
-  const nav = useImageNav({
-    byImage: reviewNavByImage,
-    activeFilter: reviewStatus.activeFilter,
-    isNavigable,
-  });
-  usePrefetchAdjacentImages();
+  // nav (useImageNav) is declared further below, once priorityOrder (K23) is computed — it needs
+  // that value to feed useImageNav's `order` option.
 
   const [showGT, setShowGT] = useState(true);
   const [showPred, setShowPred] = useState(true);
@@ -242,6 +239,103 @@ export function ReviewTab() {
   const confFilterCensoring =
     !!dataset.predictions_dir &&
     (generationConf === null || filters.conf_threshold > generationConf);
+
+  // ── Active-learning priority queue (K23) ──────────────────────────────────
+  // prioritize_review_queue's ranking otherwise never reaches the breeder — the only path was the
+  // agent manually steering focus() one image at a time. Session-local (like generationConf/
+  // validationResult above): nothing else in the app needs to know the computed order.
+  const [pqModels, setPqModels] = useState<RegisteredModel[]>([]);
+  const [pqModelPath, setPqModelPath] = useState("");
+  const [pqJobId, setPqJobId] = useState<string | null>(null);
+  const [pqStatus, setPqStatus] = useState<"idle" | "running" | "completed" | "failed">("idle");
+  const [pqQueue, setPqQueue] = useState<{ image: string; score: number }[] | null>(null);
+  const [pqError, setPqError] = useState<string | null>(null);
+  // Auto-enabled once a queue completes (that's clearly what computing one was for); the breeder
+  // can turn it back off to browse in the ordinary (positional) order without discarding the queue.
+  const [pqUseOrder, setPqUseOrder] = useState(false);
+
+  useEffect(() => {
+    setPqModels([]);
+    setPqModelPath("");
+    if (!dataset.project_root) return;
+    void resultsApi
+      .registeredModels(dataset.project_root)
+      .then((r) => setPqModels(r.models ?? []))
+      .catch(() => setPqModels([]));
+  }, [dataset.project_root]);
+
+  // A new dataset/date selection invalidates whatever queue was computed for the previous one.
+  useEffect(() => {
+    setPqJobId(null);
+    setPqStatus("idle");
+    setPqQueue(null);
+    setPqError(null);
+    setPqUseOrder(false);
+  }, [visKey]);
+
+  useEffect(() => {
+    if (!pqJobId || pqStatus !== "running") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const body = await api.review.priorityQueueJob(pqJobId);
+        if (cancelled) return;
+        if (body.status === "completed") {
+          setPqStatus("completed");
+          setPqQueue(body.queue);
+          setPqUseOrder(true);
+        } else if (body.status === "failed") {
+          setPqStatus("failed");
+          setPqError(body.error ?? "The priority queue could not be computed.");
+        }
+      } catch {
+        // A transient poll failure just tries again on the next tick.
+      }
+    };
+    void poll();
+    const t = setInterval(() => void poll(), 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [pqJobId, pqStatus]);
+
+  async function computePriorityQueue() {
+    if (!dataset.project_root || !dataset.dataset_root || !dataset.date || !pqModelPath) return;
+    setPqStatus("running");
+    setPqError(null);
+    setPqQueue(null);
+    try {
+      const res = await api.review.launchPriorityQueue({
+        project_root: dataset.project_root,
+        checkpoint_path: pqModelPath,
+        images_dir: `${dataset.dataset_root}/images/${dataset.date}`,
+      });
+      setPqJobId(res.job_id);
+    } catch (e) {
+      setPqStatus("failed");
+      setPqError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // Map the computed queue (image names, ranked) onto image_list indices for useImageNav — an
+  // image the queue named that no longer appears in image_list (deleted/renamed since scoring) is
+  // dropped rather than crashing the traversal.
+  const priorityOrder = useMemo(() => {
+    if (!pqUseOrder || !pqQueue) return undefined;
+    const indexByName = new Map(dataset.image_list.map((name, i) => [name, i]));
+    return pqQueue
+      .map((q) => indexByName.get(q.image.split(/[/\\]/).pop() ?? q.image))
+      .filter((i): i is number => i !== undefined);
+  }, [pqUseOrder, pqQueue, dataset.image_list]);
+
+  const nav = useImageNav({
+    byImage: reviewNavByImage,
+    activeFilter: reviewStatus.activeFilter,
+    isNavigable,
+    order: priorityOrder,
+  });
+  usePrefetchAdjacentImages();
   // User-tunable symbology colours (persisted + shared with the status bar); legend swatches
   // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
   const [reviewColors, setReviewColors] = useReviewColors();
@@ -1188,6 +1282,51 @@ export function ReviewTab() {
               />
               Predictions
             </label>
+
+            <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
+            {/* K23: prioritize_review_queue's ranking, otherwise reachable only one image at a
+                time via the agent's own focus() calls — surfaced here as a real browsable order. */}
+            <span
+              className="text-[10px] font-semibold uppercase tracking-wide text-tcip-muted"
+              title="Rank unreviewed images by how much the model would learn from your input on them, so you look at the most useful ones first"
+            >
+              Priority order
+            </span>
+            <select
+              className="tcip-select"
+              aria-label="Priority-order model"
+              value={pqModelPath}
+              disabled={pqStatus === "running"}
+              onChange={(e) => setPqModelPath(e.target.value)}
+            >
+              <option value="">Choose a model…</option>
+              {pqModels.map((m) => (
+                <option key={m.checkpoint_path} value={m.checkpoint_path}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <button
+              className="tcip-btn"
+              disabled={!pqModelPath || pqStatus === "running"}
+              onClick={() => void computePriorityQueue()}
+              title="Rank this date's images by how useful reviewing them would be"
+            >
+              {pqStatus === "running" ? "Ranking…" : "Rank images"}
+            </button>
+            {pqStatus === "completed" && pqQueue && (
+              <label className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={pqUseOrder}
+                  onChange={(e) => setPqUseOrder(e.target.checked)}
+                />
+                Browse in priority order ({pqQueue.length} ranked)
+              </label>
+            )}
+            {pqStatus === "failed" && pqError && (
+              <span className="text-tcip-fp max-w-[280px]">{pqError}</span>
+            )}
           </div>
         )}
       </div>
