@@ -74,12 +74,13 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     # same loader-side reader the training targets use, so the swept count can't diverge from training.
     _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
     _subject, _attribute = _data_cfg.get("subject"), _data_cfg.get("attribute")
+    # No try/except: _resolve_registry_id_map's only exception is its own deliberate ValueError
+    # refusal, which must reach the caller on the calibration rail rather than silently degrade
+    # to a single-class GT read. Its one legitimate "no registry, that's fine" case (single-class,
+    # no attribute) already returns normally without raising.
     _cal_id_map = None
     if _subject:
-        try:
-            _reg, _cal_id_map = _resolve_registry_id_map(labels_dir, _subject, _attribute)
-        except Exception:  # noqa: BLE001 — fall back to a single-class GT read below
-            _cal_id_map = None
+        _reg, _cal_id_map = _resolve_registry_id_map(labels_dir, _subject, _attribute)
     # Labels-intersect-images-on-disk (K1 finding 4): the shared scan force_redraw_cal_holdout_split
     # now also uses, so the two paths can't disagree about which stems exist. A stem whose image was
     # deleted/renamed never even enters the split universe here.
@@ -656,15 +657,29 @@ def run_inference(
     # registry whose value order was edited between train and inference cannot mis-decode a multi-value
     # attribute — lands with K4/K5, which is where attribute order first matters.
     id_map = None
-    try:
-        data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
-        subject = data_cfg.get("subject")
-        if subject and images_dir:
-            from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
+    data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
+    subject = data_cfg.get("subject")
+    attribute = data_cfg.get("attribute")
+    if subject and images_dir:
+        from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, resolved_classes_path
 
-            _reg, id_map = _resolve_registry_id_map(images_dir, subject, data_cfg.get("attribute"))
-    except Exception:  # noqa: BLE001 — no run scope for the map; predictions decode by raw id then
-        id_map = None
+        # Precondition check, not a broad except (K18 B2 stage-6 review, round 2): attribute-scoped
+        # decode with no classes.json for this dataset is a legitimate, honest degraded case
+        # write_predictions_json already documents and accepts ("the raw 0-indexed id is used as
+        # the name... never a re-derivation") — id_map stays None rather than crashing on already-
+        # completed, valid prediction work. Reuses resolved_classes_path — the SAME "does a
+        # registry exist" check _resolve_registry_id_map's own refusal is built on, not a second
+        # independent re-derivation of that fact (round-1 review found the first version of this
+        # fix duplicated it locally). A registry that IS present but fails to read/resolve for a
+        # real reason (corrupted file, an id-space mismatch) still propagates loudly — this
+        # precondition only short-circuits the one case that's supposed to degrade honestly, the
+        # same case _resolve_registry_id_map's own attribute-without-registry ValueError names.
+        # Not the same shape as model_build.py's resolve_contract_dims precondition (that one
+        # gates on subject alone and lets the attribute-without-registry refusal reach the
+        # caller); this site's downstream consumer has its own documented accepted-degradation
+        # contract that resolve_contract_dims's caller does not.
+        if attribute is None or resolved_classes_path(images_dir) is not None:
+            _reg, id_map = _resolve_registry_id_map(images_dir, subject, attribute)
     out = {
         "checkpoint": checkpoint_path,
         "checkpoint_sha256": identity["sha256"],
