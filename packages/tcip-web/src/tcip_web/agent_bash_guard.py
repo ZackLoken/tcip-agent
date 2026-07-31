@@ -41,6 +41,27 @@ _TEE = re.compile(r"\btee\b\s+(?:-a\s+|--append\s+)?(?P<target>[^\s;|&<>()]+)")
 # In-place / copy writers, matched coarsely (paired with a protected token in main()). These
 # never appear in the read-only diagnostics the fence must let through.
 _WRITE_OP = re.compile(r"\bsed\b\s+-i|\bcp\b|\bmv\b|\bdd\b")
+# Start of a statement / pipeline segment — mirrors the PowerShell guard's ``_STMT`` so a delete
+# verb is anchored to where a command actually starts, not to any substring (a path or grep
+# pattern containing "unlink"/"shred"/"truncate" must not trip this).
+_STMT = r"(?:^|[\n;|&(){}]\s*)"
+# Deletes / truncates — blocked unconditionally, mirroring the PowerShell fence's unconditional
+# _DELETE_OP/_DELETE_ALIAS: the agent mutates data through audited MCP tools, not raw shell
+# deletion (of platform code OR of a breeder's labels).
+_DELETE_OP = re.compile(_STMT + r"(?:rm|rmdir|unlink|shred|truncate)\b")
+# ``... | xargs rm`` (with optional flags on either xargs or the trailing verb).
+_XARGS_DELETE = re.compile(r"\bxargs\b\s+(?:-\S+\s+)*(?:rm|rmdir|unlink|shred)\b")
+# ``find ... -delete`` / ``find ... -exec rm`` — the sharpest hole of the three: ``Bash(find:*)``
+# is allow-listed in agent_terminal.settings.json, so unlike the others this form runs with no
+# human prompt at all if this guard doesn't deny it.
+_FIND_DELETE = re.compile(r"\bfind\b[\s\S]*?\s-delete\b|\bfind\b[\s\S]*?-exec\s+rm\b")
+# A redirect/tee target that names a breeder's annotation/label/prediction state — denied
+# regardless of whether the file exists yet. An existence check would be filesystem state at
+# hook time; the guard is stateless and cwd-blind, so it would silently stop firing after a
+# ``cd`` (same honesty-about-scope the PowerShell guard already commits to).
+_BREEDER_DATA_TARGET = re.compile(
+    r"(?:^|[/\\])(?:annotations|labels|predictions)[/\\]|image_status\.json\b"
+)
 # Inline / nested / arbitrary code execution — a spawned interpreter (``python -c``…) OR a
 # nested shell (``bash -c``, ``sh -c``, ``powershell -EncodedCommand``, ``cmd /c``) whose
 # payload the guard can't see through.
@@ -69,6 +90,13 @@ _PROTECTED_WRITE_MSG = (
     "`python scripts/doctor.py <root>`), that's a fence false-positive: file it with the "
     "claude_reports tool (category unexpected_behavior; include the exact command) so the fence "
     "can be fixed — do not route around it by editing platform files."
+)
+_DELETE_DENY_MSG = (
+    "File deletion via the shell is blocked — the agent mutates data through the audited TCIP tools."
+)
+_BREEDER_DATA_WRITE_MSG = (
+    "Writing or truncating a breeder's annotation, label, or prediction data via the shell is "
+    "blocked — the agent mutates data through the audited TCIP tools."
 )
 
 
@@ -100,6 +128,10 @@ def main() -> None:
 
     if _INLINE_INTERP.search(cmd):
         _deny("Inline interpreter execution is blocked in the agent terminal — use the TCIP tools.")
+    if _DELETE_OP.search(cmd) or _XARGS_DELETE.search(cmd) or _FIND_DELETE.search(cmd):
+        _deny(_DELETE_DENY_MSG)
+    if any(_BREEDER_DATA_TARGET.search(t) for t in _write_targets(cmd)):
+        _deny(_BREEDER_DATA_WRITE_MSG)
     if any(_PROTECTED.search(t) for t in _write_targets(cmd)):
         _deny(_PROTECTED_WRITE_MSG)
     if _WRITE_OP.search(cmd) and _PROTECTED.search(cmd):
