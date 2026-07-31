@@ -1,36 +1,54 @@
 """Trait knowledge — the human-defined *semantics* of each measurable trait (Tier C).
 
-These are the things the domain expert defines once per trait and the agent *reads* — never derives,
-never re-asks per dataset (CLAUDE.md: the human defines a trait's intent/semantics; the agent derives
-the operating points that realize it). Keeping them in one place, versioned with the code, stops a
-measurement definition from living only in a session's memory.
+Most fields here are things the domain expert defines once per trait and the agent *reads* — never
+derives, never re-asks per dataset (CLAUDE.md: the human defines a trait's intent/semantics; the
+agent derives the operating points that realize it). Keeping them in one place, versioned with the
+code, stops a measurement definition from living only in a session's memory.
 
-A ``TraitSpec`` says: what the phenotype *is* (count objective), what "finding one" *means*
-(localization), how the elongated/dormant call is defined (texture, not geometry), the milestone
-convention, and the tile-seam sliver policy. Operating-point *values* (conf, IoU, tolerances) and
-the CV task / pipeline decomposition (detection vs classification, one model vs detect-then-classify)
-are deliberately absent — those the agent derives and validates per dataset at runtime, the same way
-the values are.
+Two fields are a different shape, by design (K18 B3/B4) — neither is authored blind, and neither
+has a default: ``localization`` (what "finding one" means) is derived once from real GT the first
+time it's needed and recorded (a genuine geometric fact about the object's scale, computable from
+data — see ``pipelines.derivations.derive_localization_kind``); ``count_objective`` (what the
+phenotype *is*, hence what the operating point optimizes) is decided once from a real, plain-language
+answer the breeder gives about what the delivered number needs to be reliable for, and recorded the
+same way. Both get written through ``write_trait_spec_fields``, with a ``provenance`` entry naming
+who decided and how, and both are read from the recorded value on every later call — never silently
+defaulted, never copied from another trait's values (the exact failure this replaced: an earlier
+design let both fields default to catkin's own historical values, silently inherited by any trait
+whose config omitted them).
+
+Everything else in ``TraitSpec`` says: which class in ``classes.json`` is the positive/target state,
+the milestone convention, and the tile-seam sliver policy — genuinely authored-once breeder facts.
+Operating-point *values* (conf, IoU, tolerances) and the CV task / pipeline decomposition (detection
+vs classification, one model vs detect-then-classify) are deliberately absent from this whole class —
+those the agent derives and validates per dataset at runtime, the same way the values are.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass, fields
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Count objectives — what the resolved operating point optimizes.
+# Count objectives — what the resolved operating point optimizes. NOT a closed enum (K18 B4):
+# these three names are today's real, implemented picker capabilities
+# (``operating_point.COUNT_OBJECTIVE_PICKERS``), not the only objectives a trait may ever declare.
+# The agent can write and register a new named picker for a trait whose breeder-stated need these
+# three don't cover — a capability the platform can grow, not a category TraitSpec closes over.
 COUNT_UNBIASED = "count_unbiased"  # minimize signed per-image count bias E[FP-FN]; the phenotype is a count
 DETECTION_F1 = "detection_f1"      # optimize matching quality; the phenotype is presence/localization
 PRESENCE = "presence"             # only whether the object is present
 
-# The single source of truth for which objective names exist — lives here (torch-free) rather than
-# in ``operating_point.py`` (which imports the torch-heavy ``pipelines.training.evaluation`` at
-# module level) so validating a config-authored ``count_objective`` never drags torch into
+# The currently-implemented objective names — lives here (torch-free) rather than in
+# ``operating_point.py`` (which imports the torch-heavy ``pipelines.training.evaluation`` at module
+# level) purely so referencing these three names never drags torch into
 # ``get_trait``/``registered_traits``. ``operating_point.py``'s picker/label registry
-# (``COUNT_OBJECTIVE_PICKERS``) shares these same keys rather than maintaining a second list.
+# (``COUNT_OBJECTIVE_PICKERS``) shares these same keys rather than maintaining a second list. NOT a
+# validation whitelist — ``_spec_from_config`` no longer rejects a ``count_objective`` outside this
+# set; a trait may name any objective an agent has implemented and registered a picker for.
 COUNT_OBJECTIVES = {COUNT_UNBIASED, DETECTION_F1, PRESENCE}
 
 # Localization — what counts as "finding" an object.
@@ -40,13 +58,26 @@ IOU_MATCH = "iou_match"        # IoU >= a derived/def threshold
 
 @dataclass(frozen=True)
 class TraitSpec:
-    """The semantics of one trait — read, never derived."""
+    """The semantics of one trait. Most fields are read, never derived; ``count_objective`` and
+    ``localization`` are the two exceptions — see the module docstring."""
 
     name: str
-    # What the delivered phenotype is, and hence what the operating point optimizes.
-    count_objective: str = COUNT_UNBIASED
-    # What "a hit" means when validating counts. For small objects, center-match (IoU is noise).
-    localization: str = CENTER_MATCH
+    # What the delivered phenotype needs to be reliable FOR — hence what the operating point
+    # optimizes. NOT authored blind: a consequence judgment only a human stakeholder can make (does
+    # this number need every object found correctly, or is it fine if errors cancel out as long as
+    # the total is right?), asked in plain domain terms, never CV vocabulary. Empty = not yet
+    # decided — never silently defaulted or copied from another trait's value (K18 B4: this field
+    # used to default to "count_unbiased" and get silently inherited by any trait whose config
+    # omitted it). Record the real answer via ``write_trait_spec_fields``, with a ``provenance``
+    # entry naming who decided and why; ``resolve_operating_point`` refuses rather than guessing
+    # when this is unset.
+    count_objective: str = ""
+    # What "a hit" means when validating counts (center_match vs iou_match) — NOT authored: derived
+    # once from real GT the first time it's needed and recorded via
+    # ``write_trait_spec_fields``/``pipelines.derivations.derive_localization_kind``, then read from
+    # here on every later call (K18 B3). Empty = not yet derived — never silently assumed to be
+    # either kind; ``resolve_match_criterion`` is what fills this in.
+    localization: str = ""
     # How the localization tolerance is derived (the recipe string names it; ``localization_tolerance_frac``
     # is the fallback multiplier when a caller has no GT to derive one from — the real per-dataset
     # value comes from ``derivations.derive_localization_tolerance_frac`` at runtime).
@@ -55,8 +86,6 @@ class TraitSpec:
     # The class the elongated/positive call resolves to in classes.json, by NAME (the id is a mapping
     # FACT derived from the labels, not a pinned magic number). Empty = the trait has no positive class.
     positive_class_name: str = ""
-    # The elongated/positive call is learned from texture (frills/gills), never geometry — proxies forbidden.
-    positive_is_texture: bool = False
     # Milestone crossing fractions and the quantity they cross.
     milestone_fractions: tuple[float, ...] = ()
     milestone_on: str = ""  # e.g. "positive_fraction"
@@ -183,17 +212,11 @@ def _spec_from_config(data: dict, vocab: set[str]) -> TraitSpec | None:
         logger.warning("trait spec %r skipped: delivers must be non-empty and all in crops.yml "
                        "(off-vocab: %s)", name, off_vocab)
         return None
-    if "count_objective" in data:
-        # COUNT_OBJECTIVES (this module) is the single source of truth for which objectives exist —
-        # operating_point.py's picker/label registry shares these same keys, so validating here never
-        # needs to import that torch-heavy module. A value outside this set would otherwise silently
-        # fall into operating_point.py's permissive else-branch at resolution time instead of failing
-        # here.
-        objective = data["count_objective"]
-        if objective not in COUNT_OBJECTIVES:
-            logger.warning("trait spec %r skipped: count_objective %r is not one of %s",
-                           name, objective, sorted(COUNT_OBJECTIVES))
-            return None
+    # count_objective is NOT validated against a closed vocabulary (K18 B4) — a trait may name any
+    # objective an agent has implemented and registered a picker for in
+    # operating_point.COUNT_OBJECTIVE_PICKERS. resolve_operating_point refuses at resolution time
+    # if the name has no registered picker, which is the honest place for that check to live (it
+    # needs the picker registry; this module stays torch-free and doesn't import it).
     kwargs = {k: (tuple(v) if k in _TUPLE_FIELDS else v) for k, v in data.items()}
     try:
         return TraitSpec(**kwargs)
@@ -228,6 +251,66 @@ def load_trait_specs(specs_dir: Path | None = None) -> list[TraitSpec]:
         if spec is not None:
             specs.append(spec)
     return specs
+
+
+def write_trait_spec_fields(
+    trait_name: str, fields_: dict, provenance_entries: list[str] | tuple[str, ...],
+    specs_dir: Path | None = None,
+) -> TraitSpec:
+    """Update one or more fields on an ALREADY-REGISTERED trait spec, appending provenance
+    entries recording who asserted the change and how firmly (K18 B2.5).
+
+    Refuses (raises ``ValueError``) if the trait has no existing spec file — creating a new trait
+    is a separate, still-manual authoring step, out of scope here. Re-validates the merged spec
+    through ``_spec_from_config`` — the same crops.yml cross-check and field validation every
+    config-authored spec already goes through, reused rather than a second implementation — and
+    refuses to write anything that would silently fail to load or fall out of
+    ``registered_traits()`` afterward. Writes atomically.
+
+    This is the only write path for a trait spec anywhere in the platform. Before this, a spec
+    was authored by hand-writing YAML directly, with no ``@audited`` record — this function is
+    what the ``update_trait_spec_fields`` MCP tool calls, and what B3's derived localization kind
+    and B4's recorded count-objective decision both use to persist themselves; neither gets its
+    own write implementation.
+    """
+    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.utils.atomic_io import atomic_write_text
+
+    import yaml
+
+    directory = specs_dir or resolve_state(_TRAIT_SPECS_RELPATH)
+    path = next(
+        (p for p in (directory / f"{trait_name}.yml", directory / f"{trait_name}.yaml") if p.is_file()),
+        None,
+    )
+    if path is None:
+        raise ValueError(
+            f"no existing trait spec file for {trait_name!r} under {directory} — "
+            "write_trait_spec_fields only updates an already-registered trait; author the "
+            "initial spec file first."
+        )
+
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} is not a valid trait spec (not a mapping)")
+
+    merged = dict(data)
+    merged.update(fields_)
+    merged["provenance"] = tuple(data.get("provenance") or ()) + tuple(provenance_entries)
+
+    spec = _spec_from_config(merged, _crops_vocab())
+    if spec is None:
+        raise ValueError(
+            f"update to trait spec {trait_name!r} would produce an invalid spec (unknown field, "
+            "off-vocab delivers, or an invalid value) — refusing to write; see the logged warning "
+            "above for which check failed."
+        )
+
+    write_data = {
+        k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
+    }
+    atomic_write_text(path, yaml.safe_dump(write_data), encoding="utf-8")
+    return spec
 
 
 def _all_traits() -> dict[str, TraitSpec]:
