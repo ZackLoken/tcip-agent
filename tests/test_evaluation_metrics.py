@@ -29,6 +29,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     pick_count_unbiased,
     pick_f1_max,
     regression_metrics,
+    resolve_match_criterion,
     run_test_evaluation,
     sweep_operating_point,
 )
@@ -184,6 +185,99 @@ def test_golden_operating_point_pickers():
     assert pick_f1_max(sweep) == pytest.approx(0.0)           # recall-max point
     at06 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.6))
     assert at06["count_bias_mean"] == pytest.approx(0.0)
+
+
+# --------------------------------------------------------------------------
+# K18 B3 — resolve_match_criterion derives/records the localization kind once, reuses it,
+# and warns (never silently switches) on divergence.
+# --------------------------------------------------------------------------
+
+def _write_bare_trait(tmp_path: Path, name: str, **extra) -> None:
+    """A minimal trait spec with NO localization recorded (unlike seed_catkin_trait_spec's
+    CATKIN, which already carries localization="center_match")."""
+    import yaml
+
+    specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    (specs_dir / f"{name}.yml").write_text(
+        yaml.safe_dump({"name": name, "delivers": ["leaf_length"], **extra}), encoding="utf-8"
+    )
+
+
+def _per_image(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
+    return [{"gt": [{"bbox": list(b), "category_id": 0} for b in boxes]}]
+
+
+def test_resolve_match_criterion_derives_and_persists_when_unrecorded(tmp_path: Path):
+    from tcip_mcp.traits import get_trait
+
+    _write_bare_trait(tmp_path, "leaf")
+    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]  # char size 20 -> center_match
+    result = resolve_match_criterion("leaf", _per_image(small_boxes))
+    assert result["kind"] == "center_match"
+    assert result["kind_source"] == "data_derived_at_runtime"
+    assert result["kind_diverged"] is False
+    # persisted — a fresh read sees the derived value, not the original empty one.
+    assert get_trait("leaf").localization == "center_match"
+
+
+def test_resolve_match_criterion_reuses_recorded_kind_without_rederiving(tmp_path: Path):
+    _write_bare_trait(tmp_path, "leaf", localization="iou_match")
+    # Small boxes would derive center_match fresh, but a recorded kind must be used as-is.
+    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
+    result = resolve_match_criterion("leaf", _per_image(small_boxes))
+    assert result["kind"] == "iou_match"
+    assert result["kind_source"] == "recorded"
+
+
+def test_resolve_match_criterion_flags_divergence_without_switching(tmp_path: Path):
+    _write_bare_trait(tmp_path, "leaf", localization="iou_match")
+    # Small boxes: derive_localization_kind would say center_match — diverges from the recorded
+    # iou_match. Must warn (kind_diverged=True), never silently switch what governs this call.
+    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
+    result = resolve_match_criterion("leaf", _per_image(small_boxes))
+    assert result["kind_diverged"] is True
+    assert result["kind"] == "iou_match"  # unchanged despite the divergence
+
+
+def test_resolve_match_criterion_no_divergence_when_kinds_agree(tmp_path: Path):
+    _write_bare_trait(tmp_path, "leaf", localization="center_match")
+    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
+    result = resolve_match_criterion("leaf", _per_image(small_boxes))
+    assert result["kind_diverged"] is False
+
+
+def test_resolve_match_criterion_refuses_when_unrecorded_and_underivable(tmp_path: Path):
+    _write_bare_trait(tmp_path, "leaf")
+    with pytest.raises(ValueError, match="no recorded localization kind"):
+        resolve_match_criterion("leaf", [])  # no GT at all -> nothing to derive from
+
+
+def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
+    result = resolve_match_criterion(None, [])
+    assert result["kind"] == "iou_match"
+    assert result["trait"] is None
+
+
+def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5(tmp_path: Path):
+    """K18 B3 companion fix: iou_match's threshold must be genuinely derived from the GT in hand
+    (derive_iou_match_threshold), not the old pinned-0.5 literal — the dormant bug B3 was flagged
+    as making live for the first time by auto-selecting iou_match."""
+    _write_bare_trait(tmp_path, "leaf", localization="iou_match")
+    # char size 300 -> derived threshold well above 0.5 (see test_derive_iou_match_threshold_*).
+    large_boxes = [(0, 0, 300, 300), (500, 0, 300, 300)]
+    result = resolve_match_criterion("leaf", _per_image(large_boxes))
+    assert result["kind"] == "iou_match"
+    assert result["iou_threshold"] > 0.5
+    assert "achievable IoU" in result["derived_from"]
+
+
+def test_resolve_match_criterion_iou_match_falls_back_honestly_when_underivable(tmp_path: Path):
+    _write_bare_trait(tmp_path, "leaf", localization="iou_match")
+    result = resolve_match_criterion("leaf", [], iou_threshold=0.42)
+    assert result["kind"] == "iou_match"
+    assert result["iou_threshold"] == pytest.approx(0.42)  # caller/default, not a fabricated derivation
+    assert "underivable" in result["derived_from"]
 
 
 # --------------------------------------------------------------------------
