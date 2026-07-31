@@ -170,6 +170,7 @@ def set_active_project(name: str) -> dict:
         "project_path": str(proj),
         "marker": str(marker),
         "gui_notified": bool(delivery.get("delivered")),
+        "recent_activity": _recent_activity(str(proj)),
     }
 
 
@@ -266,7 +267,22 @@ def inspect_project(project_path: str = "") -> dict:
         )
         status["dates"] = dataset_layout.list_dates(root)
 
+    status["recent_activity"] = _recent_activity(project_path)
     return status
+
+
+def _recent_activity(project_path: str) -> dict:
+    """The project's persisted status summary (recent report/retrospective/distillation
+    activity), namespaced separately from the live-computed fields above it so a caller can tell
+    freshly-computed-this-call fields from read-from-the-status-store ones, which may be stale or
+    corrupt.
+    """
+    from tcip_mcp.project_status import read_project_status
+
+    activity = read_project_status(project_path)
+    if activity.get("_corrupt"):
+        return {"status_unavailable": "project_status.json exists but could not be read"}
+    return activity
 
 
 @mcp.tool()
