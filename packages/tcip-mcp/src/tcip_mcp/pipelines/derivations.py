@@ -152,6 +152,117 @@ def derive_localization_tolerance_frac(
     return float(min(max(raw, lo), hi))
 
 
+def _char_sizes_from_boxes(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]]) -> list[float]:
+    """``sqrt(w*h)`` per GT box across every image, filtered to positive sizes — the shared size
+    measure ``derive_localization_kind`` and ``derive_iou_match_threshold`` both derive from, so
+    the two agree on what "this trait's characteristic object size" means by construction."""
+    sizes = [
+        (max(w, 0.0) * max(h, 0.0)) ** 0.5
+        for boxes in gt_boxes_per_image for _, _, w, h in boxes
+    ]
+    return [s for s in sizes if s > 0]
+
+
+def _achievable_iou(avg_size: float, jitter_px: float) -> float:
+    """Best-case IoU between two same-size boxes of characteristic size ``avg_size``, offset by
+    ``jitter_px`` along one axis — the shared geometric basis ``derive_localization_kind`` and
+    ``derive_iou_match_threshold`` both compute from (never two independent formulas for the same
+    fact)."""
+    return max(0.0, avg_size - jitter_px) / (avg_size + jitter_px)
+
+
+def derive_localization_kind(
+    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
+    jitter_px: float = 15.0, iou_floor: float = 0.5,
+) -> str | None:
+    """Whether IoU-matching or center-matching should govern this trait's "found the object" call
+    (K18 B3) — from the GT's own characteristic box size, or ``None`` if underivable.
+
+    IoU is unreliable on small objects: a realistic detector-vs-GT localization disagreement (not
+    just human annotator imprecision — a genuinely correct detection's box rarely lands pixel-
+    identical to the GT box either) changes IoU by a large relative amount when the box itself is
+    small. Model two same-size boxes of characteristic size ``s`` (``sqrt(w*h)``, matching
+    ``derive_localization_tolerance_frac``'s own size measure) offset by ``jitter_px`` along one
+    axis: their achievable IoU is ``(s - jitter_px) / (s + jitter_px)``. When that achievable IoU
+    falls below ``iou_floor`` (0.5, the standard "hit" convention this platform already uses
+    elsewhere), even a correctly-localized detection could not clear an IoU-match criterion under
+    realistic jitter, so center-match must govern instead — this is a genuine geometric fact about
+    the object's scale, not a per-trait preference. No valid boxes anywhere -> ``None``
+    (underivable; the caller stamps an honest default, never a derivation label on that number) —
+    same contract as every other function in this module.
+
+    **``jitter_px``'s default (15.0px) is a provisional platform-chosen constant, not a value
+    validated against this platform's real detector/annotation precision** — same shape and same
+    caveat as ``operating_point._PROVISIONAL_KAPPA_FLOOR``. It sets where the center-match/IoU-match
+    crossover falls (currently ``s = 3 * jitter_px`` = ~45px characteristic size); a future pass
+    with real per-trait localization-agreement data (repeated-annotation studies, or measured
+    prediction-vs-GT offset on a validated model) could derive it properly instead of assuming it.
+    This is exactly why a derived kind is recorded with ``data_derived_at_runtime`` provenance and
+    re-checked for divergence on later calls (see ``resolve_match_criterion``) rather than trusted
+    as a one-shot final answer — the safety net is the revisit check, not a perfectly-tuned formula
+    up front.
+
+    ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
+    filtered to the trait's own class.
+    """
+    sizes = _char_sizes_from_boxes(gt_boxes_per_image)
+    if not sizes:
+        return None
+    import numpy as np
+
+    from tcip_mcp.traits import CENTER_MATCH, IOU_MATCH
+
+    avg_size = float(np.mean(sizes))
+    return CENTER_MATCH if _achievable_iou(avg_size, jitter_px) < iou_floor else IOU_MATCH
+
+
+def derive_iou_match_threshold(
+    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
+    jitter_px: float = 15.0, margin: float = 0.1, clamp: tuple[float, float] = (0.3, 0.7),
+) -> float | None:
+    """The IoU threshold for an ``iou_match`` trait — from the GT's own characteristic box size,
+    or ``None`` if underivable (K18 B3 companion fix).
+
+    Uses the SAME achievable-IoU-under-jitter basis ``derive_localization_kind`` uses to decide
+    whether ``iou_match`` should govern at all — the design that introduced automatic kind
+    derivation explicitly required a real threshold derivation to land in the same change, since
+    making ``iou_match`` automatically reachable without one would leave a previously-dormant
+    pinned-``0.5`` literal live for the first time with no real basis behind it.
+
+    When ``resolve_match_criterion`` derives the kind FRESH from this same call's GT
+    (``kind_source == "data_derived_at_runtime"``), the characteristic size already cleared
+    ``iou_floor``'s achievable-IoU bar by construction (see ``derive_localization_kind``), so the
+    achievable IoU here is at or above that floor for that call. That is NOT guaranteed for a
+    RECORDED ``iou_match`` trait revisited with a different call's GT — the kind isn't re-validated
+    against the current box sizes, only compared for a divergence warning — so a recorded trait
+    with unusually small current-call GT can still see an achievable IoU below the floor; the
+    ``clamp`` below is what keeps the result sane in that case, not an assumption that it can't
+    occur. ``margin`` subtracts a safety buffer below the achievable IoU so a TYPICALLY-jittered
+    correct detection clears the threshold, not only the mathematical best case — the same
+    "percentile plus margin" shape every other derivation in this module uses (e.g.
+    ``derive_cross_tile_nms``), rather than gating on the exact boundary value. Clamped to a sane
+    range around the conventional IoU@0.5 comparability convention.
+
+    **``jitter_px``'s default (15.0px) and ``margin``'s default (0.1) are provisional
+    platform-chosen constants**, same caveat as ``derive_localization_kind``'s own ``jitter_px`` —
+    not validated against this platform's real detector precision yet; the same
+    ``data_derived_at_runtime`` recording and revisit-on-divergence discipline applies once this
+    is wired into ``resolve_match_criterion``.
+
+    ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
+    filtered to the trait's own class.
+    """
+    sizes = _char_sizes_from_boxes(gt_boxes_per_image)
+    if not sizes:
+        return None
+    import numpy as np
+
+    avg_size = float(np.mean(sizes))
+    achievable = _achievable_iou(avg_size, jitter_px)
+    lo, hi = clamp
+    return float(min(max(achievable - margin, lo), hi))
+
+
 def derive_sliver_frac(
     char_sizes: Sequence[float], *, percentile: float = 10.0,
     clamp: tuple[float, float] = (0.25, 0.9), min_samples: int = 5,
@@ -272,6 +383,10 @@ DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     "GT neighbor-IoU distribution (p99 + margin)": "tcip_mcp.pipelines.derivations.derive_cross_tile_nms",
     "GT nearest-neighbor spacing (p10 + margin)": "tcip_mcp.pipelines.derivations.derive_localization_tolerance_frac",
     "GT characteristic-size spread (p10 / mean)": "tcip_mcp.pipelines.derivations.derive_sliver_frac",
+    "achievable IoU under annotation jitter (GT characteristic size)":
+        "tcip_mcp.pipelines.derivations.derive_localization_kind",
+    "achievable IoU under annotation jitter, minus margin (GT characteristic size)":
+        "tcip_mcp.pipelines.derivations.derive_iou_match_threshold",
     "~1.5x p99 GT objects/image": "tcip_mcp.pipelines.operating_point._max_dets_from_density",
     "model imgsz / persisted training geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
     "persisted training tile geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
