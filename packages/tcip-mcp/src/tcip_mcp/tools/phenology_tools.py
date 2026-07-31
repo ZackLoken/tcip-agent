@@ -101,6 +101,31 @@ def build_plant_mapping(
     }
 
 
+@mcp.tool()
+@audited
+def update_trait_spec_fields(trait_name: str, fields: dict, provenance_entries: list[str]) -> dict:
+    """Update one or more fields on an already-registered trait's spec, recording who asserted
+    the change and how firmly (K18 B2.5).
+
+    Before this tool, a trait spec was authored by hand-writing YAML directly — no audited
+    record, no re-validation. This refuses if the trait has no existing spec file (creating a new
+    trait is a separate, still-manual authoring step) or if the merged result would fail the same
+    crops.yml cross-check every config-authored spec already goes through. Returns the updated
+    spec.
+
+    This is what a real localization-kind derivation (from actual GT box geometry) or a real
+    breeder-answered count objective gets recorded through — never a silent default and never
+    copied from another trait's values, both durable, audited facts instead of living only in a
+    session's memory.
+    """
+    import dataclasses
+
+    from tcip_mcp import traits
+
+    spec = traits.write_trait_spec_fields(trait_name, fields, provenance_entries)
+    return {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()}
+
+
 def _resolve_positive_class_id(trait_name: str, predictions_by_date: dict[str, str]) -> tuple[int | None, str]:
     """Thin wrapper over ``phenology.resolve_positive_class_id`` (the one resolution both delivery
     doors' positive-class-id surfaces call — K4/K5/K6), for this tool's trait-name-based callers."""
@@ -166,27 +191,18 @@ def _greedy_match(gt: list, preds: list, gt_boxes: list, pred_boxes: list, *,
     return matches
 
 
-def _char_size(a) -> float:
-    """Characteristic size of a box annotation = sqrt(w*h) — scale-robust for a tolerance basis.
-    Mirrors ``evaluation.py``'s own ``_char_size_xywh`` for the same concept, adapted to
-    ``BBox``'s x1/y1/x2/y2 shape instead of a COCO xywh dict record.
-    """
-    b = a.geometry
-    w, h = max(b.x2 - b.x1, 0.0), max(b.y2 - b.y1, 0.0)
-    return (w * h) ** 0.5
-
-
 def _center(a) -> tuple[float, float]:
     b = a.geometry
     return ((b.x1 + b.x2) / 2.0, (b.y1 + b.y2) / 2.0)
 
 
-def _match_gt_to_predictions(gt: list, preds: list, *, spec,
-                             center_match_tolerance: float | None = None) -> list[tuple]:
-    """Match GT to predictions using the TRAIT's own declared localization criterion — never a
-    pinned IoU threshold (stage-6 review, K3: a pinned IoU=0.3 silently paired catkins by a
-    criterion different from the trait's own ``localization=CENTER_MATCH`` choice, dropping real
-    classification calibration pairs from the reference with no disclosure).
+def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
+                             center_match_tolerance: float | None = None,
+                             iou_threshold: float = 0.5) -> list[tuple]:
+    """Match GT to predictions using the criterion resolved by the caller — never a pinned IoU
+    threshold (stage-6 review, K3: a pinned IoU=0.3 silently paired catkins by a criterion
+    different from the trait's own choice, dropping real classification calibration pairs from
+    the reference with no disclosure).
 
     Unlike ``tcip_annotation.matching.compute_matches`` (which only matches within the same
     ``subject`` name), a classification calibration must match a GT box (subject = the trait's
@@ -194,52 +210,41 @@ def _match_gt_to_predictions(gt: list, preds: list, *, spec,
     verdict (e.g. ``"elongated"``) — different names by design (K3/K4/K5). Box geometries only
     (polygon GT is out of scope for a box-detector's classification calibration).
 
-    For a ``CENTER_MATCH`` trait (the default — see ``traits.py``), mirrors ``evaluation.py``'s own
-    center-match algorithm (adapted, via ``_greedy_match``, to return matched ``(gt, pred)`` PAIRS —
-    ``_center_match_image`` returns aggregate TP/FP/FN counts only, so pairing needs its own pass).
-    ``center_match_tolerance`` should be derived ONCE across the whole reference split by the
-    caller (``_classification_items``), the same scope ``evaluation.py``'s own
-    ``gt_class_avg_size`` derives over — never per-image (stage-6 review Finding A/N5: a per-image
-    average lets one atypical annotation both drop real pairs, on a smaller-than-typical image, and
-    fabricate a false match, on a larger-than-typical one). When ``None`` (a standalone/single-image
-    caller, e.g. a test), falls back to deriving it from just this call's own GT — the same
-    documented mismatch hazard, accepted only outside the real reference-building path. For an
-    ``iou_match`` trait, keeps the box-IoU pairing, reusing ``tcip_annotation.matching.box_iou``
-    (the same primitive ``compute_matches`` itself calls) rather than a second IoU implementation.
+    ``kind``/``center_match_tolerance``/``iou_threshold`` come from
+    ``evaluation.resolve_match_criterion`` — the same resolver every other localization consumer
+    goes through (K18 B3) — computed ONCE across the whole reference split by the caller
+    (``_classification_items``), never re-derived per image (stage-6 review Finding A/N5: a
+    per-image average lets one atypical annotation both drop real pairs, on a smaller-than-typical
+    image, and fabricate a false match, on a larger-than-typical one). For ``center_match``,
+    mirrors ``evaluation.py``'s own center-match algorithm (adapted, via ``_greedy_match``, to
+    return matched ``(gt, pred)`` PAIRS — ``_center_match_image`` returns aggregate TP/FP/FN counts
+    only, so pairing needs its own pass). For ``iou_match``, reuses
+    ``tcip_annotation.matching.box_iou`` (the same primitive ``compute_matches`` itself calls)
+    rather than a second IoU implementation.
     """
     from tcip_annotation.matching import box_iou
     from tcip_annotation.state import BBox
-    from tcip_mcp.traits import CENTER_MATCH
 
     gt_boxes = [(i, a) for i, a in enumerate(gt) if isinstance(a.geometry, BBox)]
     pred_boxes = [(i, a) for i, a in enumerate(preds) if isinstance(a.geometry, BBox)]
 
-    if spec.localization == CENTER_MATCH:
+    if kind == "center_match":
         def _dist(g, p):
             gx, gy = _center(g)
             px, py = _center(p)
             return ((gx - px) ** 2 + (gy - py) ** 2) ** 0.5
 
-        tolerance = center_match_tolerance
-        if tolerance is None:
-            sizes = [_char_size(a) for _, a in gt_boxes]
-            avg_size = sum(sizes) / len(sizes) if sizes else 0.0
-            tolerance = spec.localization_tolerance_frac * avg_size
+        tolerance = center_match_tolerance if center_match_tolerance is not None else 0.0
         return _greedy_match(gt, preds, gt_boxes, pred_boxes,
                              score=_dist, tolerance=tolerance, best_first=False)
 
-    # iou_match trait. Known residual (stage-6 review N8, not fixed here): 0.5 is a pinned literal,
-    # unreachable today since no registered trait uses IOU_MATCH localization (traits.py) — not the
-    # same class of hazard round 1 found (that pinned IoU silently governed catkin's real
-    # CENTER_MATCH-declared calibration); still worth a real derivation (TraitSpec has no
-    # IoU-threshold field yet) before any trait actually uses this branch.
     return _greedy_match(gt, preds, gt_boxes, pred_boxes,
                          score=lambda g, p: box_iou(g.geometry, p.geometry),
-                         tolerance=0.5, best_first=True)
+                         tolerance=iou_threshold, best_first=True)
 
 
-def _classification_items(gt_dir: str, pred_dir: str, *, subject: str, positive_value: str,
-                          attribute: str, spec) -> list[dict]:
+def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subject: str,
+                          positive_value: str, attribute: str) -> list[dict]:
     """Build classification calibration/holdout items for one split from paired GT + prediction dirs.
 
     For every ``<stem>.json`` present in both dirs, matches GT annotations against predictions by
@@ -264,16 +269,15 @@ def _classification_items(gt_dir: str, pred_dir: str, *, subject: str, positive_
     call, not the detector's, the same separation the platform's own detect-then-classify
     decomposition makes elsewhere.
 
-    For a ``CENTER_MATCH`` trait, the matching tolerance is derived ONCE across every paired
-    (gt, pred) file in this split — never per-image (stage-6 review Finding A/N5) — the same scope
-    ``evaluation.py``'s own ``gt_class_avg_size`` derives over, so one atypically small or large
-    annotated object can't distort matching for the rest of the split. The tolerance is derived from
-    the SAME subject-scoped GT the matching itself uses, so an unrelated subject's typical size can't
-    skew it either.
+    The match criterion (kind + tolerance/iou_threshold) is resolved ONCE across the whole split
+    via ``evaluation.resolve_match_criterion`` (K18 B3) — the same resolver every other
+    localization consumer goes through, never a second independent computation — built from the
+    SAME subject-scoped GT the matching itself uses, so an unrelated subject's typical size can't
+    skew it either, and never re-derived per image (stage-6 review Finding A/N5).
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import BBox
-    from tcip_mcp.traits import CENTER_MATCH
+    from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
 
     gt_p, pred_p = Path(gt_dir), Path(pred_dir)
     paired = [f for f in sorted(gt_p.glob("*.json")) if (pred_p / f.name).is_file()]
@@ -281,16 +285,19 @@ def _classification_items(gt_dir: str, pred_dir: str, *, subject: str, positive_
     def _scoped_gt(path: str) -> list:
         return [a for a in json_io.read_annotations(path) if a.subject == subject]
 
-    center_match_tolerance = None
-    if spec.localization == CENTER_MATCH:
-        sizes = [
-            _char_size(a)
-            for gt_file in paired
-            for a in _scoped_gt(str(gt_file))
-            if isinstance(a.geometry, BBox)
-        ]
-        avg_size = sum(sizes) / len(sizes) if sizes else 0.0
-        center_match_tolerance = spec.localization_tolerance_frac * avg_size
+    def _xywh(a) -> list[float]:
+        b = a.geometry
+        return [b.x1, b.y1, max(b.x2 - b.x1, 0.0), max(b.y2 - b.y1, 0.0)]
+
+    per_image = [
+        {"gt": [{"bbox": _xywh(a), "category_id": 0}
+                for a in _scoped_gt(str(gt_file)) if isinstance(a.geometry, BBox)]}
+        for gt_file in paired
+    ]
+    criterion = resolve_match_criterion(trait_name, per_image)
+    kind = criterion["kind"]
+    center_match_tolerance = criterion.get("tolerance")
+    iou_threshold = criterion.get("iou_threshold", 0.5)
 
     items: list[dict] = []
     for gt_file in paired:
@@ -298,7 +305,8 @@ def _classification_items(gt_dir: str, pred_dir: str, *, subject: str, positive_
         gt_annots = _scoped_gt(str(gt_file))
         pred_annots = json_io.read_annotations(str(pred_file))
         for gt_a, pred_a in _match_gt_to_predictions(
-            gt_annots, pred_annots, spec=spec, center_match_tolerance=center_match_tolerance,
+            gt_annots, pred_annots, kind=kind, center_match_tolerance=center_match_tolerance,
+            iou_threshold=iou_threshold,
         ):
             gt_value = gt_a.attributes.get(attribute) if gt_a.attributes else None
             if gt_value is None:
@@ -374,12 +382,12 @@ def calibrate_classifier_operating_point(
     if not spec.positive_class_name:
         return {"error": f"trait {trait_name!r} defines no positive_class_name to calibrate"}
 
-    cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir, subject=subject,
-                                      positive_value=spec.positive_class_name,
-                                      attribute=attribute, spec=spec)
-    hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir, subject=subject,
-                                       positive_value=spec.positive_class_name,
-                                       attribute=attribute, spec=spec)
+    cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir, trait_name=trait_name,
+                                      subject=subject, positive_value=spec.positive_class_name,
+                                      attribute=attribute)
+    hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir, trait_name=trait_name,
+                                       subject=subject, positive_value=spec.positive_class_name,
+                                       attribute=attribute)
     result = resolve_classifier_operating_point(
         trait_name, calibration_items=cal_items, holdout_items=hold_items,
         experiment_id=experiment_id,
