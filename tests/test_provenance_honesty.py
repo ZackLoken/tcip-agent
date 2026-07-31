@@ -55,3 +55,21 @@ def test_registered_implementations_exist_and_are_callable():
         module, _, attr = str(target).rpartition(".")
         fn = getattr(importlib.import_module(module), attr, None)
         assert callable(fn), f"{label!r} points at {target} which is not an importable callable"
+
+
+def test_scanner_actually_finds_resolve_match_criterions_stamps():
+    """K18 B3 round-2 stage-6 review: a `derived(...)` call is invisible to `_stamped_labels()`
+    when either (a) the import is aliased (the scanner matches the literal call name) or (b) the
+    `derived_from=` argument is a variable reference rather than a literal/f-string written at the
+    call site (the scanner reads the AST node, not a runtime value) — both happened here in two
+    successive attempts at this exact fix, and the test suite passing was not proof either
+    attempt worked, since a scanner that finds nothing trivially satisfies "every stamped label is
+    registered." Pin that `evaluation.py`'s three real stamps are genuinely found, not just that
+    the two honesty tests above pass (which they would even if this file's stamps stayed
+    invisible — this is the actual gap the round-2 review caught)."""
+    labels = {label for fname, label in _stamped_labels() if fname == "evaluation.py"}
+    assert labels == {
+        "achievable IoU under annotation jitter (GT characteristic size)",
+        "achievable IoU under annotation jitter, minus margin (GT characteristic size)",
+        "GT nearest-neighbor spacing (p10 + margin)",
+    }
