@@ -63,6 +63,10 @@ harvest processing that no image can substitute for.
 `cluster_detachment_force`, `ttl_inshell_count`, `ttl_inshell_weight`, `flavor_rating`.
 
 **Caveats that move the line (confirm before treating as imageable):**
+- **Plant-size traits** (`plant_height`, `plant_max_height`, `plant_max_width`, `plant_min_width`,
+  `plant_width_inrow`, `plant_width_betweenrow`, `root_crown_inrow_width`,
+  `root_crown_betweenrow_width`) are pixel quantities until an in-frame scale / photogrammetric
+  calibration makes them metric. Pixels are not millimeters.
 - `plant_surface_area`, `plant_volume`, and `plant_biomass` are defined from a 3D canopy model
   (biomass via an allometric equation). The platform is currently 2D-only with no 3D point-cloud
   pipeline — they may not be computable today.
@@ -156,6 +160,10 @@ traps:
 
 ## Needs expert confirmation
 
+- `plant_surface_area`: is the delivered quantity the *planimetric crown area* (achievable from a
+  validated 2D mask + in-frame scale calibration, per CLAUDE.md's measurement-integrity invariant)
+  or specifically the *3D-canopy-model derivation* crops.yml's current definition names? The two
+  are not the same thing, and only the breeder can redefine their own trait's meaning.
 - The program's specific hybrid selections and named releases (general species knowledge is used
   here, not an accession list).
 - All Upper-Midwest phenophase timings — approximate and region/year/genotype-dependent; derive from
