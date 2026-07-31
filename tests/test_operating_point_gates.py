@@ -19,7 +19,7 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     resolve_operating_point,
 )
 from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED  # noqa: E402
-from tcip_mcp.traits import DETECTION_F1, PRESENCE, TraitSpec  # noqa: E402
+from tcip_mcp.traits import COUNT_UNBIASED, DETECTION_F1, PRESENCE, TraitSpec  # noqa: E402
 from tests._trait_fixtures import CATKIN  # noqa: E402
 
 # Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
@@ -196,8 +196,8 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
                          shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9)
 
-    strict = TraitSpec(name="catkin", count_error_tolerance=0.5, count_bias_tolerance=5.0,
-                       delivers=CATKIN.delivers)
+    strict = TraitSpec(name="catkin", count_objective=COUNT_UNBIASED, count_error_tolerance=0.5,
+                       count_bias_tolerance=5.0, delivers=CATKIN.delivers)
     monkeypatch.setattr(OP, "get_trait", lambda name: strict)
     b_strict = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                        holdout_records=hold, staged_conf_floor=0.01)
