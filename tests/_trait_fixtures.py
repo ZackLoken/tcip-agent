@@ -21,7 +21,6 @@ CATKIN = TraitSpec(
     localization_tolerance="half_class_avg_size",
     localization_tolerance_frac=0.5,
     positive_class_name="elongated",
-    positive_is_texture=True,
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",
     majority_milestone="95per",
