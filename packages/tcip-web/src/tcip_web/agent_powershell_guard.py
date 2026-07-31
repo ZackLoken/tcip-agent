@@ -94,6 +94,38 @@ _GIT_DANGER = re.compile(
 # no longer counts as a write into a protected token the line merely names.
 _REDIRECT = re.compile(r"\d*>>?(?!&)\s*(?P<target>[^\s;|&<>()]+)")
 
+# A write target that names a breeder's annotation/label/prediction state — denied regardless of
+# whether the file exists yet, mirroring the Bash guard's ``_BREEDER_DATA_TARGET``. This guard was
+# unconditional on delete (see ``_DELETE_OP``/``_DELETE_ALIAS`` above) but had no equivalent for
+# truncate/overwrite (``Clear-Content``, ``Set-Content``, a redirect) into the same paths — a
+# zero-byte label is not a negative without an explicit Complete, so silently emptying one is the
+# same harm as deleting it. Stateless/cwd-blind like the rest of this guard, so this is a path-shape
+# check, not an existence check.
+_BREEDER_DATA_TARGET = re.compile(
+    r"(?:^|[/\\])(?:annotations|labels|predictions)[/\\]|image_status\.json\b",
+    re.IGNORECASE,
+)
+# Write ops for the breeder-data check specifically — deliberately excludes Copy-Item/cpi/cp/copy
+# and [IO.File]::Copy: this guard is stateless and can't tell a two-argument cmdlet's source from
+# its destination, so "_WRITE_OP and _BREEDER_DATA_TARGET anywhere in the command" would deny a
+# legitimate copy/backup of a breeder file to elsewhere, not just a copy into one. Move/Rename still
+# relocate the tracked file even when named as the source, so they stay included. Mirrors the Bash
+# guard's own choice to exempt cp from its breeder-data check entirely.
+_BREEDER_DATA_WRITE_OP = re.compile(
+    r"\bTee-Object\b"
+    r"|\b(?:Set|Add|Clear)-Content\b"
+    r"|\bOut-File\b"
+    r"|\b(?:New|Move|Rename)-Item\b"
+    r"|\b(?:Set|New)-ItemProperty\b"
+    r"|\[(?:System\.)?IO\.(?:File|Directory)\]::(?:Write|Create|Append|Move|Replace|Open)\w*"
+    r"|\bStreamWriter\b",
+    re.IGNORECASE,
+)
+_BREEDER_DATA_WRITE_ALIAS = re.compile(
+    _STMT + r"(?:sc|ac|clc|ni|mi|mv|move|rni|ren|sp|spi)\b",
+    re.IGNORECASE,
+)
+
 
 def _redirect_targets(cmd: str) -> list[str]:
     return [m.group("target") for m in _REDIRECT.finditer(cmd)]
@@ -105,6 +137,10 @@ _PROTECTED_WRITE_MSG = (
     "`python scripts/doctor.py <root>`), that's a fence false-positive: file it with the "
     "claude_reports tool (category unexpected_behavior; include the exact command) so the fence "
     "can be fixed — do not route around it by editing platform files."
+)
+_BREEDER_DATA_WRITE_MSG = (
+    "Writing or truncating a breeder's annotation, label, or prediction data via the shell is "
+    "blocked — the agent mutates data through the audited TCIP tools."
 )
 
 
@@ -140,6 +176,11 @@ def main() -> None:
         _deny("Dangerous git (push/commit/reset/checkout/clean) is blocked in the agent terminal.")
     if _DELETE_OP.search(cmd) or _DELETE_ALIAS.search(cmd):
         _deny("File deletion via the shell is blocked — the agent mutates data through the audited TCIP tools.")
+    if any(_BREEDER_DATA_TARGET.search(t) for t in _redirect_targets(cmd)):
+        _deny(_BREEDER_DATA_WRITE_MSG)
+    if (_BREEDER_DATA_WRITE_OP.search(cmd) or _BREEDER_DATA_WRITE_ALIAS.search(cmd)) \
+            and _BREEDER_DATA_TARGET.search(cmd):
+        _deny(_BREEDER_DATA_WRITE_MSG)
     if any(_PROTECTED.search(t) for t in _redirect_targets(cmd)):
         _deny(_PROTECTED_WRITE_MSG)
     if (_WRITE_OP.search(cmd) or _WRITE_ALIAS.search(cmd)) and _PROTECTED.search(cmd):
