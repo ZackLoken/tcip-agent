@@ -42,7 +42,6 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         "localization_tolerance": "half_class_avg_size",
         "localization_tolerance_frac": 0.5,
         "positive_class_name": "open",
-        "positive_is_texture": False,
         "milestone_fractions": [0.05, 0.50, 0.95],
         "milestone_on": "positive_fraction",
         # No majority alias: crops.yml names no single "most blooms open" date for currant, unlike
@@ -58,10 +57,15 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         "notes": "Test-only, provisional (round 11, 2026-07-29): proves the delivery mechanism "
                  "generalizes to a second trait. Not a domain-expert-confirmed measurement.",
         "provenance": [
-            "positive_class_name, positive_is_texture: claude_proposed_unvalidated — authored "
+            "positive_class_name: claude_proposed_unvalidated — authored "
             "solely to exercise the K5->K6 acceptance test; no domain expert involved.",
-            "count_objective, localization: claude_proposed_unvalidated — copied from catkin's "
-            "shape as a plausible default, not independently evaluated for this trait.",
+            "count_objective: claude_proposed_unvalidated — a test-only stub value to exercise "
+            "the delivery door, not a real breeder decision (K18 B4: this field is normally only "
+            "set from an actual plain-language answer about what the number needs to be reliable "
+            "for, never authored blind or copied from another trait).",
+            "localization: claude_proposed_unvalidated — a test-only stub value; this fixture "
+            "never runs real GT through derive_localization_kind (K18 B3), so this is NOT what a "
+            "real trait's recorded value would look like (that comes from data, not authoring).",
             "milestone_fractions: vocabulary_derived — 0.05/0.50/0.95 from crops.yml's real "
             "bloom_05per_date/bloom_50per_date/bloom_95per_date entries for currant.",
         ],
