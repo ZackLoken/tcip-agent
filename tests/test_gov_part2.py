@@ -79,6 +79,78 @@ def test_themes_picks_up_bigram_phrases():
     assert themes.get("operating point") == 2
 
 
+def test_cross_project_themes_require_multiple_distinct_projects():
+    distill = _load_distill()
+    # "wobblesync" repeats many times within ONE project's own text — a pooled frequency count
+    # would clear a >=2 bar on that alone. The per-project SET approach must not let it.
+    per_project = {
+        "proj_a": distill._project_token_set(
+            "wobblesync desyncing. wobblesync desyncing again and again."
+        ),
+        "proj_b": distill._project_token_set("an unrelated report about tiling."),
+    }
+    themes = dict(distill._cross_project_themes(per_project))
+    assert "wobblesync" not in themes  # only 1 distinct project, no matter the internal repeats
+
+
+def test_cross_project_themes_surface_when_shared_across_projects():
+    distill = _load_distill()
+    per_project = {
+        "proj_a": distill._project_token_set("GPS accuracy was too coarse for per-plant work."),
+        "proj_b": distill._project_token_set("per-plant GPS accuracy issues came up again."),
+        "proj_c": distill._project_token_set("unrelated tiling report."),
+    }
+    themes = dict(distill._cross_project_themes(per_project))
+    assert themes.get("gps") == 2
+    assert themes.get("accuracy") == 2
+
+
+def test_build_workspace_worksheet_gathers_across_projects(tmp_path):
+    distill = _load_distill()
+    for name, detail in [("proj_a", "shared friction theme theme"),
+                          ("proj_b", "shared friction theme theme")]:
+        reports = tmp_path / name / ".tcip" / "reports"
+        reports.mkdir(parents=True)
+        (reports / "r.jsonl").write_text(
+            json.dumps({"category": "unexpected_behavior", "detail": detail}) + "\n",
+            encoding="utf-8")
+
+    ws = distill.build_workspace_worksheet(tmp_path)
+    assert "Cross-project recurring themes" in ws
+    assert "proj_a" in ws and "proj_b" in ws
+    assert "Nothing here is applied" in ws  # same governance framing as the single-project worksheet
+    assert "the judgment is yours" in ws
+    assert "record_distillation_pass" in ws
+
+
+def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
+    distill = _load_distill()
+    (tmp_path / "not_a_project").mkdir()  # no .tcip/ — must not be treated as a project
+    ws = distill.build_workspace_worksheet(tmp_path)
+    assert "No projects with a `.tcip/` directory" in ws
+
+
+def test_workspace_mode_never_writes_anything(tmp_path):
+    # The read-only invariant this whole governance surface depends on — a --workspace run must
+    # leave every project's .tcip/ untouched, same as the single-project mode already does.
+    distill = _load_distill()
+    reports_dir = tmp_path / "proj_a" / ".tcip" / "reports"
+    reports_dir.mkdir(parents=True)
+    (reports_dir / "r.jsonl").write_text(
+        json.dumps({"category": "missing_tool", "detail": "x"}) + "\n", encoding="utf-8")
+
+    before = {
+        p: p.read_bytes()
+        for p in (tmp_path / "proj_a" / ".tcip").rglob("*") if p.is_file()
+    }
+    distill.build_workspace_worksheet(tmp_path)
+    after = {
+        p: p.read_bytes()
+        for p in (tmp_path / "proj_a" / ".tcip").rglob("*") if p.is_file()
+    }
+    assert before == after
+
+
 def test_capture_hook_appends_and_never_raises(tmp_path, monkeypatch):
     from tcip_web import agent_learning_capture
 
