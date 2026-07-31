@@ -344,6 +344,13 @@ def resolve_selection_metric(task: str, trait: str | None, requested: str | None
     localization criterion demotes to comparability-only (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``)
     — selecting checkpoints by a metric the trait doesn't trust is a defensibility regression, not a
     legitimate choice.
+
+    Reads the trait's RECORDED localization kind (K18 B3 — ``TraitSpec.localization`` is derived
+    once from real GT and persisted, never authored). This runs at preflight time, before any GT is
+    loaded, so it cannot itself derive a kind — an unrecorded kind (``spec.localization == ""``, a
+    trait never yet calibrated/evaluated against real data) means nothing is known yet, so no
+    metric is rejected here; ``resolve_match_criterion`` is what fills the recording in the first
+    time real GT is available, and every later preflight call sees it.
     """
     default = "objective" if task in ("detection", "instance_seg") else "loss"
     if not requested:
