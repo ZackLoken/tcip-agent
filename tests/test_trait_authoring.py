@@ -120,16 +120,16 @@ def test_missing_specs_dir_yields_no_config(tmp_path: Path):
 # ── K18 B2.5: the audited write path for an already-registered trait spec ──────────────────
 
 def test_write_trait_spec_fields_updates_and_persists(tmp_path: Path):
-    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance": 1.0})
+    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance_frac": 1.0})
     updated = traits.write_trait_spec_fields(
-        "leaf", {"count_bias_tolerance": 2.5}, ["count_bias_tolerance: domain_expert_confirmed"],
+        "leaf", {"count_bias_tolerance_frac": 2.5}, ["count_bias_tolerance_frac: domain_expert_confirmed"],
         specs_dir=tmp_path,
     )
-    assert updated.count_bias_tolerance == 2.5
-    assert "count_bias_tolerance: domain_expert_confirmed" in updated.provenance
+    assert updated.count_bias_tolerance_frac == 2.5
+    assert "count_bias_tolerance_frac: domain_expert_confirmed" in updated.provenance
     # persisted, not just returned — a fresh load sees the same value
     reloaded = load_trait_specs(specs_dir=tmp_path)
-    assert reloaded[0].count_bias_tolerance == 2.5
+    assert reloaded[0].count_bias_tolerance_frac == 2.5
 
 
 def test_write_trait_spec_fields_appends_provenance_not_replaces(tmp_path: Path):
@@ -137,17 +137,17 @@ def test_write_trait_spec_fields_appends_provenance_not_replaces(tmp_path: Path)
         "delivers": ["leaf_length"], "provenance": ["name: vocabulary_derived"],
     })
     updated = traits.write_trait_spec_fields(
-        "leaf", {"count_bias_tolerance": 3.0}, ["count_bias_tolerance: zack_methodology_correction"],
+        "leaf", {"count_bias_tolerance_frac": 3.0}, ["count_bias_tolerance_frac: zack_methodology_correction"],
         specs_dir=tmp_path,
     )
     assert updated.provenance == (
-        "name: vocabulary_derived", "count_bias_tolerance: zack_methodology_correction",
+        "name: vocabulary_derived", "count_bias_tolerance_frac: zack_methodology_correction",
     )
 
 
 def test_write_trait_spec_fields_refuses_when_trait_not_already_registered(tmp_path: Path):
     with pytest.raises(ValueError, match="no existing trait spec file"):
-        traits.write_trait_spec_fields("nonexistent", {"count_bias_tolerance": 1.0}, [], specs_dir=tmp_path)
+        traits.write_trait_spec_fields("nonexistent", {"count_bias_tolerance_frac": 1.0}, [], specs_dir=tmp_path)
 
 
 def test_write_trait_spec_fields_refuses_an_invalid_merged_spec(tmp_path: Path):
@@ -162,12 +162,12 @@ def test_update_trait_spec_fields_tool_end_to_end(tmp_path: Path, monkeypatch: p
     from tcip_mcp.tools.phenology_tools import update_trait_spec_fields
 
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
-    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance": 1.0})
+    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance_frac": 1.0})
     result = update_trait_spec_fields(
-        "leaf", {"count_bias_tolerance": 4.0}, ["count_bias_tolerance: domain_expert_confirmed"],
+        "leaf", {"count_bias_tolerance_frac": 4.0}, ["count_bias_tolerance_frac: domain_expert_confirmed"],
     )
-    assert result["count_bias_tolerance"] == 4.0
-    assert get_trait("leaf").count_bias_tolerance == 4.0
+    assert result["count_bias_tolerance_frac"] == 4.0
+    assert get_trait("leaf").count_bias_tolerance_frac == 4.0
 
 
 def test_registry_reads_every_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -187,8 +187,8 @@ def test_config_authored_catkin_is_the_real_definition(tmp_path: Path, monkeypat
     # authored catkin.yml is simply what get_trait("catkin") returns — proven here by a value a real
     # builtin would never have carried.
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
-    _write_spec(tmp_path, "catkin", {"delivers": ["catkin_05per_date"], "count_bias_tolerance": 99.0})
-    assert get_trait("catkin").count_bias_tolerance == 99.0
+    _write_spec(tmp_path, "catkin", {"delivers": ["catkin_05per_date"], "count_bias_tolerance_frac": 99.0})
+    assert get_trait("catkin").count_bias_tolerance_frac == 99.0
 
 
 def test_unknown_trait_still_hard_fails():
@@ -208,7 +208,7 @@ def test_catkin_config_semantics_match_reference_fixture():
     assert t.sliver_frac == 0.5
     assert t.majority_milestone == "95per"
     assert t.majority_provisional is True
-    assert t.count_bias_tolerance == 1.0  # ABSOLUTE, breeder-set (D12)
+    assert t.count_bias_tolerance_frac == 0.01  # RELATIVE fraction, breeder-set (D12; K4 residual)
     assert set(t.delivers) == {
         "catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"}
 
