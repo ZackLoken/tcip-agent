@@ -23,7 +23,7 @@ from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU, DEFAULT_TILE_SIZE
 logger = logging.getLogger(__name__)
 
 # Detection task names that format outputs as boxes/scores/labels. A bespoke model_source declares
-# the task type ``detection`` / ``instance_seg`` — both route through the detection formatter.
+# the task type ``detection`` / ``instance_seg``, both route through the detection formatter.
 _DETECTION_TASKS = frozenset({"detection", "instance_seg"})
 
 
@@ -33,10 +33,10 @@ from tcip_mcp.pipelines.image_utils import crop_pad_tile as _crop_pad_tile  # no
 def _display_path(source: str | Path | BandGroupRef) -> str:
     """A JSON-safe, human-meaningful identity string for a predict result's ``image`` field.
 
-    A :class:`BandGroupRef` has no single sibling file that names the logical image — its own
+    A :class:`BandGroupRef` has no single sibling file that names the logical image, its own
     ``.bandgroup`` manifest path is the closest thing (stable, on disk, unique per capture); a plain
     path/string is returned as-is. Every ``load_image``/``load_multiband`` call in this module keeps
-    receiving the ORIGINAL source object (never this string), so a band-grouped capture still
+    receiving the original source object (never this string), so a band-grouped capture still
     decodes through the channel-aware loader instead of a stringified dataclass repr that no reader
     can open.
     """
@@ -76,7 +76,7 @@ class GenericPredictor:
         self.config = ckpt.get("config", {})
 
         # Training tile geometry, so inference can derive the tile scale from the checkpoint instead
-        # of a mismatched default (CV2). None when this checkpoint carried no tiling geometry.
+        # of a mismatched default. None when this checkpoint carried no tiling geometry.
         _tiling = (self.config.get("data") or {}).get("tiling") or {}
         self.train_tile_size = _tiling.get("tile_size")
         self.train_overlap = _tiling.get("overlap")
@@ -102,7 +102,7 @@ class GenericPredictor:
     def predict(self, image_path: str | Path | BandGroupRef) -> dict:
         """Run inference on a single image.
 
-        ``image_path`` may be a plain path/string or a :class:`BandGroupRef` — the SAME image
+        ``image_path`` may be a plain path/string or a :class:`BandGroupRef`, the same image
         sources ``image_utils.list_logical_images``/``resolve_image_source`` hand every other
         reader in this platform, so a band-grouped capture decodes through the channel-aware
         loader here too instead of needing its own stringified stand-in.
@@ -130,7 +130,7 @@ class GenericPredictor:
         """Run inference on multiple images (optionally tiled for small objects).
 
         For detection, images are run through the detector in batches of ``batch_size``
-        (one GPU forward per batch — torchvision detectors take a list of variable-size
+        (one GPU forward per batch, torchvision detectors take a list of variable-size
         images), instead of one forward per image. Non-detection heads stay per-image
         since their inputs are native-resolution (can't be stacked without resizing).
 
@@ -183,7 +183,7 @@ class GenericPredictor:
         so a caller that will consume masks is refused rather than handed a result whose masks
         silently vanished. ``require_masks=False`` is the deliberate "boxes only, don't even try"
         opt-out for a caller that never reads masks (``run_full_frame_evaluation`` scores boxes
-        against full-frame GT) — the tiled result then carries no ``masks`` key for any task, so
+        against full-frame GT), the tiled result then carries no ``masks`` key for any task, so
         there is no partial-mask channel either way.
         """
         if self.task not in _DETECTION_TASKS:
@@ -191,7 +191,7 @@ class GenericPredictor:
         if self.task == "instance_seg" and require_masks:
             # reconstruct_core/global_nms/global_merge (data/tiling.py) are boxes-only signatures.
             # Threading masks through tiling without a merge that also merges masks would create a
-            # new silent channel (masks present untiled, silently absent tiled) — refuse loudly
+            # new silent channel (masks present untiled, silently absent tiled), refuse loudly
             # instead. Untiled instance_seg (predict/predict_batch(tile=False)) is unaffected.
             raise NotImplementedError(
                 "predict_tiled does not yet thread masks through cross-tile reconstruction/merge "
@@ -295,7 +295,7 @@ class GenericPredictor:
             "count": int(keep.sum()),
         }
         if self.task == "instance_seg" and "masks" in outputs:
-            # Kept SOFT (unbinarized) — mask_geometry()/export.py binarize via
+            # Kept soft (unbinarized), mask_geometry()/export.py binarize via
             # resolve_binarize_threshold(), never a second hardcoded threshold here; export.py
             # stamps the (currently unvalidated) threshold it used into each prediction's own
             # attributes rather than pinning 0.5 silently. Same order as boxes/scores/labels.
