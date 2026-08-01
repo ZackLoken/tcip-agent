@@ -306,12 +306,12 @@ def build_bespoke_semantic_seg(*, num_classes: int, in_chans: int = 3):
 
 
 def build_bespoke_instance_seg(*, num_classes: int = 1, in_chans: int = 3,
-                               min_size: int = 800, max_size: int = 1333):
+                               min_size: int = 800, max_size: int = 1333, **det_kwargs):
     return BespokeDetection(num_classes, in_chans=in_chans, detector="mask_rcnn",
-                            min_size=min_size, max_size=max_size)
+                            min_size=min_size, max_size=max_size, **det_kwargs)
 
 
 def build_bespoke_detection(*, num_classes: int = 1, in_chans: int = 3, detector: str = "faster_rcnn",
-                            min_size: int = 800, max_size: int = 1333):
+                            min_size: int = 800, max_size: int = 1333, **det_kwargs):
     return BespokeDetection(num_classes, in_chans=in_chans, detector=detector,
-                            min_size=min_size, max_size=max_size)
+                            min_size=min_size, max_size=max_size, **det_kwargs)
