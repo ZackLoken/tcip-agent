@@ -57,16 +57,17 @@ def main(argv: list[str] | None = None) -> int:
     from tcip_mcp.pipelines.data.splits import count_label_lines, resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
-        attach_split_policy_provenance, records_over_loader, resolve_operating_point,
-        set_detector_operating_point,
+        attach_split_policy_provenance, derive_max_dets_from_counts, records_over_loader,
+        resolve_operating_point, set_detector_operating_point,
     )
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, dataset_hash
     from tcip_mcp.pipelines.training.generic_trainer import task_collate
     from tcip_mcp.project_paths import project_root
 
-    # Fix J: match the MCP path's cap exactly (DEFAULT_MAX_DETS) rather than leaving the framework
-    # default (torchvision 100/300) in place, which can truncate a dense calibration image's raw
-    # detections during this untiled pass before the score_thresh=0.01 floor even sees them.
+    # Fix J: match the MCP path's own initial predictor construction exactly (DEFAULT_MAX_DETS)
+    # rather than leaving the framework default (torchvision 100/300) in place — this value is
+    # superseded below, once this split's density is known, by the set_detector_operating_point
+    # call that actually governs the collection pass (K7 residual, "detector-cap censoring").
     predictor = build_predictor(checkpoint_path=args.checkpoint, device=args.device,
                                 max_dets=DEFAULT_MAX_DETS)
     tile_size = getattr(predictor, "train_tile_size", None)
@@ -84,6 +85,12 @@ def main(argv: list[str] | None = None) -> int:
 
     dh = dataset_hash(args.labels_dir)
     annotation_counts = {s: count_label_lines(args.labels_dir, s) for s in stems}
+    # Detector-cap censoring (K7 residual): the flat DEFAULT_MAX_DETS below can still truncate a
+    # dense calibration image's raw detections the same way a too-high conf floor censors them —
+    # derive the collection-pass cap from this labeled split's OWN density (same ~1.5x p99 formula
+    # resolve_operating_point uses for the shipped max_dets) so the sweep isn't measured against an
+    # arbitrary constant that may sit below what a dense scene actually needs.
+    density_cap = derive_max_dets_from_counts(list(annotation_counts.values()))
     # LOCKED split (K1): the first call for this labels_dir's GT identity draws + locks the
     # cal/holdout split; a later run of this script over unchanged labels returns the SAME split
     # rather than a fresh cut that could happen to draw a weaker holdout.
@@ -104,11 +111,14 @@ def main(argv: list[str] | None = None) -> int:
               "already covers).", file=sys.stderr)
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
-    # Floor the in-model conf so hesitant detections survive to be swept, keeping the cap set above
-    # (Fix J — two entry doors, one cap). The applied score_thresh (not a re-typed 0.01 literal) is
-    # threaded into resolve_operating_point as staged_conf_floor (Fix D).
+    # Floor the in-model conf so hesitant detections survive to be swept, and raise the cap to this
+    # split's own density (derived above) — this call executes after build_predictor's construction-
+    # time DEFAULT_MAX_DETS (Fix J — matching the MCP path's own initial predictor exactly) and wins,
+    # so density_cap is the value that actually governs the collection pass. The applied score_thresh
+    # (not a re-typed 0.01 literal) is threaded into resolve_operating_point as staged_conf_floor
+    # (Fix D).
     applied = set_detector_operating_point(predictor.model, score_thresh=0.01,
-                                           detections_per_img=DEFAULT_MAX_DETS)
+                                           detections_per_img=density_cap)
 
     def _records(sub):
         ds = build_dataset("detection", images_dir=args.images_dir,
@@ -123,6 +133,12 @@ def main(argv: list[str] | None = None) -> int:
         # geometry when present — say so, or resolve_operating_point now (correctly) stamps
         # any unclaimed value "default" rather than assuming truthiness means derived.
         tile_size_source=("derived" if tile_size is not None else "default"),
+        # K10: this script's own pass (_records, above) is always untiled — a plain DataLoader
+        # over the whole image, never predict_tiled/predict_batch(tile=...) — so tiled=False is
+        # stated explicitly rather than left to resolve_operating_point's tiled=True default.
+        # Omitting this would have resolve_tile_size_param wrongly gate (or falsely validate) a
+        # tile_size dimension that was never actually operative for this untiled pass.
+        tiled=False,
         experiment_id=args.experiment_id, staged_conf_floor=applied.get("score_thresh"),
     )
     attach_split_policy_provenance(bundle, locked)
