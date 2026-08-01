@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -12,6 +15,9 @@ from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_NMS_IOU
 
 logger = logging.getLogger(__name__)
+
+# K24: round-robins unpinned concurrent launches across available GPUs (no-op with 0-1 devices).
+_gpu_round_robin = itertools.count()
 
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
@@ -102,8 +108,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 issues.append(f"Directory not found: data.{key} = '{path}'")
 
     # Channel firewall (T6-3): probe one sample raster and check its band count against the declared
-    # in_chans, so a channel-wrong train is caught here rather than deep in the daemon thread. Only
-    # fires when a raster is actually readable — never a false-fail on an empty/absent dir.
+    # in_chans, so a channel-wrong train is caught here rather than deep in the training subprocess.
+    # Only fires when a raster is actually readable — never a false-fail on an empty/absent dir.
     if isinstance(model_source, dict) and model_source.get("in_chans") is not None and data_cfg:
         images_dir = data_cfg.get("images_dir")
         if images_dir and Path(images_dir).is_dir():
@@ -212,10 +218,10 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     result: dict = {"valid": False, "issues": issues, "warnings": warnings}
 
     # Smoke: build the model and run the correctness contract at the RESOLVED dims, so a broken
-    # bespoke builder is caught here (before the daemon thread spawns) rather than surfacing only as
-    # run.status='failed'. Only attempt once the structural checks pass — otherwise the config can't
-    # build and the contract would just re-report the same failure. Overfit stays a voluntary,
-    # non-gating diagnostic (a valid model can fail 20 steps on noise).
+    # bespoke builder is caught here (before the training subprocess spawns) rather than surfacing
+    # only as run.status='failed'. Only attempt once the structural checks pass — otherwise the
+    # config can't build and the contract would just re-report the same failure. Overfit stays a
+    # voluntary, non-gating diagnostic (a valid model can fail 20 steps on noise).
     if smoke and not issues:
         try:
             from tcip_mcp.pipelines.model_build import build_model, resolve_contract_dims
@@ -260,20 +266,30 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
 @mcp.tool()
 @audited
-def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dict:
-    """Launch a training run asynchronously from a bespoke ``model_source`` builder.
+def launch_training(
+    config: dict, output_dir: str, resume_from: str = "",
+    max_wall_clock_seconds: float | None = None,
+) -> dict:
+    """Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder.
 
-    The run will proceed in a background thread. Use check_training_status
-    to monitor progress.
+    The run's actual training body (dataset build, model forward/backward, checkpointing) executes
+    in a separate OS process, not this one (K24) — a bug/OOM/hang in one run can't take down this
+    process or any other concurrent run's process. Use check_training_status to monitor progress;
+    it reads the run's own status/metrics from disk, not shared memory.
 
     Args:
         config: Full training configuration dict with model_source, data, training sections.
         output_dir: Directory for checkpoints and logs.
         resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
             (restores model + optimizer + scheduler + scaler and continues).
+        max_wall_clock_seconds: Optional hard timeout. If the training process hasn't exited on its
+            own by then, it is terminated and the run marked failed with that reason — no
+            cooperative grace period is attempted (a hung process isn't responding to cooperative
+            signals). Omit for no timeout (the default — no behavior change from before this param
+            existed).
     """
     # smoke=True: build the model and run the correctness contract before spawning the training
-    # thread, so a broken builder returns here instead of wasting a full audited run.
+    # subprocess, so a broken builder returns here instead of wasting a full audited run.
     validation = preflight_config(config, smoke=True)
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
@@ -285,88 +301,19 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     from tcip_mcp.pipelines.schemas import normalize_train_config
     config = normalize_train_config(config)
 
-    from tcip_mcp.pipelines.training.generic_trainer import TrainConfig, create_run
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
 
-    model_source = config.get("model_source", {})
-    train_cfg = config.get("training", {})
     data_cfg = config.get("data", {})
-
-    train_config = TrainConfig(
-        model_source=model_source,
-        dataset=data_cfg,
-        augmentation=config.get("augmentation", {}),
-        sampler=config.get("sampler", "random"),
-        batch_size=train_cfg.get("batch_size", 2),
-        num_workers=train_cfg.get("num_workers", 0),
-    )
 
     run = create_run(config, output_dir)
     # Nest each run's artifacts under its run_id. The GUI (and typical callers) pass a
     # shared base such as ``<project>/.tcip/experiments``; without nesting, sequential
     # runs write ``metrics.jsonl`` / ``model_best.pt`` to the *same* flat directory and
     # clobber each other — violating experiment immutability. Nesting also makes the
-    # trainer write exactly where the web metrics stream reads (``<base>/<run_id>/``).
+    # trainer write exactly where the web metrics stream reads (``<base>/<run_id>/``), and gives
+    # the subprocess a single directory to write into and the cancel sentinel to live in.
     run.output_dir = str(Path(output_dir) / run.run_id)
-
-    # Task drives collate + measurement routing: the bespoke model_source declares it,
-    # falling back to the data section.
-    task = model_source.get("task") or data_cfg.get("task", "detection")
-
-    # Build data loaders (build_dataset is used inside _auto_train_val).
-    from tcip_mcp.pipelines.data.samplers import build_sampler
-    from tcip_mcp.pipelines.training.generic_trainer import task_collate
-    from torch.utils.data import DataLoader
-
-    # Build augmentation transforms if config specifies them
-    aug_config = config.get("augmentation", {})
-    transforms = None
-    if aug_config:
-        from tcip_mcp.pipelines.data.augmentations import build_augmentation
-        transforms = build_augmentation(aug_config)
-
-    train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
-
-    # CV2: persist the EFFECTIVE tiling geometry (the 224/0.2 defaults used when the tiling dict
-    # omitted them, not just caller-pinned values) into config["data"]["tiling"], so every checkpoint
-    # + the experiment config carry the true tile scale and inference can derive it. data_cfg is the
-    # same object as config["data"], so this lands in the snapshot recorded below.
-    tiling_cfg = data_cfg.get("tiling")
-    if tiling_cfg and tiling_cfg.get("enabled", True):
-        eff_tile = getattr(train_ds, "tile_size", None)
-        eff_overlap = getattr(train_ds, "overlap", None)
-        if eff_tile is not None:
-            tiling_cfg["tile_size"] = int(eff_tile)
-        if eff_overlap is not None:
-            tiling_cfg["overlap"] = float(eff_overlap)
-
-    sampler = build_sampler(train_config.sampler, train_ds)
-    # K11: seed the loader's shuffle/worker RNG from the run's own (create_run-resolved) seed —
-    # the same value set_seed uses, so a resumed run's data order is reproducible too.
-    from tcip_mcp.pipelines.training.generic_trainer import seeded_loader_kwargs
-    loader_kwargs = seeded_loader_kwargs(config.get("seed"))
-    train_loader = DataLoader(
-        train_ds, batch_size=train_config.batch_size,
-        shuffle=(sampler is None), sampler=sampler,
-        collate_fn=task_collate(task),
-        num_workers=train_config.num_workers,
-        **loader_kwargs,
-    )
-    val_loader = None
-    if val_ds is not None:
-        val_loader = DataLoader(
-            val_ds, batch_size=train_config.batch_size,
-            shuffle=False,
-            collate_fn=task_collate(task),
-            num_workers=train_config.num_workers,
-            **loader_kwargs,
-        )
-    if val_loader is None and task in ("detection", "instance_seg"):
-        logger.warning(
-            "No validation loader for %s run %s: best-model selection and early "
-            "stopping will fall back to training loss (no val mAP/composite). "
-            "Provide a val split (data.val_images_dir) or enable auto_val.",
-            task, run.run_id,
-        )
+    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
 
     # Auto-create experiment if not already tracked. Experiments are immutable:
     # reusing an id that already has a run would interleave metrics histories and
@@ -375,35 +322,49 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
     try:
         from tcip_mcp.experiments import update_status
 
-        # The dataset identity this run trains on — computed ONCE and passed to both immutable
-        # records (lineage + split.json) so they cannot disagree about which data produced the number.
+        # The dataset identity this run trains on — computed ONCE and passed to the immutable
+        # lineage record. The child recomputes the identical fingerprint independently for
+        # split.json — cheap, and "recompute-on-read" is this fact's own stated authority, so
+        # there's no need to thread it across the process boundary.
         ds_id, ds_fp = _dataset_identity(data_cfg)
         experiment_id = _ensure_experiment(
             experiment_id, config, data_cfg.get("images_dir"), resume_from, run.run_id,
-            dataset_id=ds_id, dataset_fingerprint=ds_fp,
+            output_dir=run.output_dir, dataset_id=ds_id, dataset_fingerprint=ds_fp,
         )
-        # Thread the resolved id into the live config so the default trainer's checkpoints carry it
-        # (the envelope's ctx.save_checkpoint stamps it explicitly). run.config is this same dict.
+        # Thread the resolved id into the live config so the child's checkpoints carry it (the
+        # envelope's ctx.save_checkpoint stamps it explicitly).
         config["experiment_id"] = experiment_id
         update_status(experiment_id, "running")
-        _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg,
-                                dataset_id=ds_id, dataset_fingerprint=ds_fp)
     except Exception as exc:  # Experiment tracking is best-effort, but failures must be visible.
         logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
 
-    # The training body runs inside the audited integrity envelope: it snapshots source/env,
-    # brackets the body with audit open/close events (closing the old un-audited daemon-thread
-    # hole), stamps checkpoints, and wires status/registration/lineage — around whatever training
-    # code runs. Absent `training_source`, the envelope calls ctx.default_train() (today's trainer,
-    # byte-identical); with it, the agent's custom train(ctx). See pipelines/training/envelope.py.
-    from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
+    # The child reads its own bootstrap config from here, independent of whether experiment
+    # tracking above succeeded — a filesystem hiccup in .tcip/experiments degrades tracking (as it
+    # always has) without also preventing the run from training at all. experiment_id is never
+    # read from here (see subprocess_worker.py) — only passed as the explicit CLI arg below,
+    # because this file is written before config["experiment_id"] is guaranteed resolved in the
+    # K12 fresh-id-relaunch branch.
+    from tcip_mcp.utils.atomic_io import atomic_write_json
+    launch_config_path = Path(run.output_dir) / "launch_config.json"
+    atomic_write_json(launch_config_path, config)
 
-    ctx = TrainContext(
-        run=run, train_loader=train_loader, val_loader=val_loader,
-        task=task, resume_from=resume_from, experiment_id=experiment_id,
+    child_env = _child_env_for_launch(config)
+
+    proc = subprocess.Popen(
+        [
+            sys.executable, "-m", "tcip_mcp.pipelines.training.subprocess_worker",
+            "--run-id", run.run_id,
+            "--experiment-id", experiment_id,
+            "--config-path", str(launch_config_path),
+            "--output-dir", run.output_dir,
+            "--resume-from", resume_from,
+        ],
+        env=child_env,
     )
-    thread = threading.Thread(target=run_training_envelope, args=(ctx,), daemon=True)
-    thread.start()
+    run.pid = proc.pid
+
+    if max_wall_clock_seconds is not None:
+        _watch_wall_clock(proc, run, experiment_id, max_wall_clock_seconds)
 
     # Launch TensorBoard for live monitoring
     tb_info = {}
@@ -420,7 +381,74 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
         "status": "launched",
         "output_dir": run.output_dir,
         "tensorboard": tb_info,
+        "pid": proc.pid,
     }
+
+
+def _child_env_for_launch(config: dict) -> dict[str, str]:
+    """Subprocess env for a launch (K24): round-robin GPU pinning when the config names no
+    explicit device, left untouched when it does. ``CUDA_VISIBLE_DEVICES`` remaps device
+    *indices* inside the child — pinning it would ask an explicit ``device: "cuda:1"`` config for
+    an ordinal invalid in the child's own remapped view, so pinning applies only to the unpinned
+    case it's meant to spread out.
+
+    Also propagates this process's own import search path via ``PYTHONPATH`` — the child is a
+    fresh interpreter with only sys.path's own defaults, not whatever got this process's bespoke
+    ``model_source``/``training_source``/``dataset_source`` module importable in the first place
+    (an editable install's extra path entries, a test runner's rootdir insertion, an agent's own
+    working-directory convention). Without this, a bespoke module importable to the caller can
+    become unimportable to the child purely because of the process boundary — a correctness gap,
+    not just a convenience.
+    """
+    import os
+    import sys
+
+    env = dict(os.environ)
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    path_entries = [p for p in sys.path if p]
+    if existing_pythonpath:
+        path_entries = path_entries + [existing_pythonpath]
+    env["PYTHONPATH"] = os.pathsep.join(path_entries)
+
+    if config.get("device") or config.get("training", {}).get("device"):
+        return env
+
+    try:
+        import torch
+        count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    except Exception:
+        count = 0
+    if count > 1:
+        from tcip_mcp.pipelines.training.generic_trainer import _RUNS_LOCK
+        with _RUNS_LOCK:
+            idx = next(_gpu_round_robin) % count
+        env["CUDA_VISIBLE_DEVICES"] = str(idx)
+    return env
+
+
+def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
+                      timeout_seconds: float) -> None:
+    """Daemon watcher (K24): hard-terminates ``proc`` if it outlives ``timeout_seconds`` and
+    records the reason through the same status channel every other terminal state uses — never an
+    in-memory-only mark, since ``check_training_status`` always defers to disk for a pid-bearing
+    run and would otherwise never surface it. No cooperative grace period: a hung process isn't
+    responding to cooperative signals, so this is a hard kill, not the cancel path."""
+    def _watch() -> None:
+        try:
+            proc.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            reason = f"exceeded max_wall_clock_seconds ({timeout_seconds})"
+            run.status = "failed"
+            run.error = reason
+            try:
+                from tcip_mcp.experiments import update_status
+                update_status(experiment_id, "failed", error=reason)
+            except Exception:
+                logger.warning("wall-clock timeout status update failed for %s",
+                               experiment_id, exc_info=True)
+
+    threading.Thread(target=_watch, daemon=True).start()
 
 
 @mcp.tool()
@@ -428,13 +456,41 @@ def launch_training(config: dict, output_dir: str, resume_from: str = "") -> dic
 def check_training_status(run_id: str) -> dict:
     """Check the status of a training run.
 
+    Reads the run's own status/metrics from disk (K24) whenever its training body runs in a
+    subprocess — the in-memory record for a subprocess-delegated run is a launch-time placeholder
+    only, since the subprocess mutates its own separate copy in its own process memory — or when
+    this process never held the run in memory at all (a different process launched it).
+
     Args:
         run_id: Training run identifier.
     """
     from tcip_mcp.pipelines.training.generic_trainer import get_run
     run = get_run(run_id)
-    if run is None:
-        return {"error": f"Run not found: {run_id}"}
+
+    result: dict[str, Any] | None = None
+    if run is None or run.pid is not None:
+        from tcip_mcp.experiments import reconstruct_run_status
+        disk = reconstruct_run_status(run_id)
+        if disk is not None:
+            result = {
+                "run_id": disk["run_id"],
+                "status": disk["status"],
+                "epoch": disk["current_epoch"],
+                "best_metric": disk["best_metric"],
+                "output_dir": disk["output_dir"],
+                "error": disk.get("error"),
+            }
+
+    if result is None:
+        if run is None:
+            return {"error": f"Run not found: {run_id}"}
+        result = {
+            "run_id": run.run_id,
+            "status": run.status,
+            "epoch": run.current_epoch,
+            "best_metric": run.best_metric,
+            "output_dir": run.output_dir,
+        }
 
     # Check for running TensorBoard
     tb_url = None
@@ -445,23 +501,34 @@ def check_training_status(run_id: str) -> dict:
             tb_url = f"http://localhost:{proc._tb_port}"
     except Exception:
         pass
-
-    return {
-        "run_id": run.run_id,
-        "status": run.status,
-        "epoch": run.current_epoch,
-        "best_metric": run.best_metric,
-        "output_dir": run.output_dir,
-        "tensorboard_url": tb_url,
-    }
+    result["tensorboard_url"] = tb_url
+    return result
 
 
 @mcp.tool()
 @audited
 def list_training_runs() -> dict:
-    """List all training runs in this session."""
+    """List all training runs in this session.
+
+    Overlays disk-reconstructed status onto any subprocess-delegated run (K24, ``pid`` set) whose
+    in-memory record is a stale launch-time placeholder; a run whose training body never left this
+    process (every existing synchronous test, and any future non-subprocess caller) is reported
+    from the live in-memory record exactly as before, untouched.
+    """
     from tcip_mcp.pipelines.training.generic_trainer import list_runs
-    return {"runs": list_runs()}
+    from tcip_mcp.experiments import reconstruct_run_status
+
+    runs = list_runs()
+    for r in runs:
+        if r.get("pid") is not None:
+            disk = reconstruct_run_status(r["run_id"])
+            if disk is not None:
+                r["status"] = disk["status"]
+                if disk["current_epoch"] is not None:
+                    r["current_epoch"] = disk["current_epoch"]
+                if disk.get("error"):
+                    r["error"] = disk["error"]
+    return {"runs": runs}
 
 
 @mcp.tool()
@@ -480,7 +547,68 @@ def cancel_training(run_id: str) -> dict:
     from tcip_mcp.pipelines.training.generic_trainer import cancel_run, get_run
     if not cancel_run(run_id):
         return {"error": f"Run not found: {run_id}"}
-    return {"run_id": run_id, "status": get_run(run_id).status, "cancel_requested": True}
+    run = get_run(run_id)
+    if run is not None:
+        status = run.status
+    else:
+        # Cancelled via the disk fallback (K24) — this process never held the run locally, so
+        # there's no in-memory status to read; reflect the same disk record cancel_run itself
+        # resolved to write the sentinel, if it's still discoverable.
+        from tcip_mcp.experiments import reconstruct_run_status
+        disk = reconstruct_run_status(run_id)
+        status = disk["status"] if disk is not None else "running"
+    return {"run_id": run_id, "status": status, "cancel_requested": True}
+
+
+@mcp.tool()
+@audited
+def inspect_compute_resources() -> dict:
+    """Report the host's current compute headroom (K24) — a fact to reason with before launching
+    another concurrent training/HPO run, not an enforced cap. This platform doesn't cap memory/CPU
+    per run (no portable, non-pinned way to do that across POSIX/Windows without guessing a number
+    that's wrong on the next host); it gives you the real numbers and trusts you to judge whether
+    another candidate run fits, the same way you'd judge any other CV-scientist tradeoff.
+
+    Returns:
+        ``cpu``: ``{logical_count, percent_used}`` — ``percent_used`` is ``None`` without
+            ``psutil`` installed.
+        ``memory``: ``{total_bytes, available_bytes}`` — both ``None`` without ``psutil``.
+        ``gpus``: ``[{index, free_bytes, total_bytes}, ...]`` — always populated when CUDA is
+            available (``torch.cuda.mem_get_info``, no extra dependency); ``[]`` otherwise.
+        ``active_training_runs``: count of runs currently reporting ``"running"`` — reads through
+            ``list_training_runs``'s own disk overlay, since a subprocess-delegated run's parent-
+            side in-memory record never mutates past its launch-time placeholder.
+    """
+    import os
+
+    cpu: dict[str, Any] = {"logical_count": os.cpu_count(), "percent_used": None}
+    memory: dict[str, Any] = {"total_bytes": None, "available_bytes": None}
+    try:
+        import psutil
+        cpu["percent_used"] = psutil.cpu_percent(interval=0.1)
+        vm = psutil.virtual_memory()
+        memory["total_bytes"] = vm.total
+        memory["available_bytes"] = vm.available
+    except Exception:
+        logger.info("psutil unavailable or failed; cpu/memory visibility degraded to None",
+                   exc_info=True)
+
+    gpus: list[dict[str, Any]] = []
+    try:
+        import torch
+        if torch.cuda.is_available():
+            for idx in range(torch.cuda.device_count()):
+                free_b, total_b = torch.cuda.mem_get_info(idx)
+                gpus.append({"index": idx, "free_bytes": free_b, "total_bytes": total_b})
+    except Exception:
+        logger.info("GPU visibility unavailable", exc_info=True)
+
+    # list_training_runs (not the raw generic_trainer.list_runs) — its disk overlay is what makes
+    # a subprocess-delegated run's real status visible; the parent's own in-memory copy never
+    # leaves its launch-time placeholder once the child starts mutating its own separate copy.
+    active = sum(1 for r in list_training_runs()["runs"] if r.get("status") == "running")
+
+    return {"cpu": cpu, "memory": memory, "gpus": gpus, "active_training_runs": active}
 
 
 # K11: keys _apply_hpo_params gives purpose-built handling (routed into nested optimizer/
@@ -637,6 +765,7 @@ def run_hpo(
     warm_start: bool = False,
     baseline_params: dict | None = None,
     max_concurrent: int = 1,
+    resources_per_trial: dict | None = None,
 ) -> dict:
     """Run hyperparameter optimization on Ray Tune, training each trial for real.
 
@@ -660,6 +789,9 @@ def run_hpo(
         n_trials: Number of trials.
         output_dir: Base output directory for trial results (defaults under ``.tcip/hpo``).
         max_concurrent: Trials to run at once (default 1 — safe for single-GPU training).
+        resources_per_trial: Ray resource request per trial (K24) — omit to derive one from the
+            host's real GPU count and ``max_concurrent`` (see ``hpo._default_trial_resources``);
+            an explicit value always wins over the derivation.
     """
     from tcip_mcp.pipelines.training.hpo import tune_search, get_default_space
 
@@ -697,6 +829,7 @@ def run_hpo(
         max_concurrent=max_concurrent,
         storage_path=str(hpo_dir),
         study_name=study_name,
+        resources_per_trial=resources_per_trial,
     )
 
     # Auto-launch TensorBoard on Ray's per-trial event files.
@@ -807,7 +940,7 @@ def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
 
 def _ensure_experiment(
     experiment_id: str, config: dict, data_source, resume_from: str, run_id: str,
-    *, dataset_id: str | None = None, dataset_fingerprint: str | None = None,
+    *, output_dir: str, dataset_id: str | None = None, dataset_fingerprint: str | None = None,
 ) -> str:
     """Create or attach the experiment for a run, enforcing experiment immutability.
 
@@ -820,12 +953,23 @@ def _ensure_experiment(
     (K12 finding 4: resuming into a non-pristine id used to silently reuse it, discarding the
     resumed run's own metrics/lineage writes behind the terminal-state lock and letting the model
     registry replace the original's entry by name with no record of what was superseded).
+
+    Every branch below stamps ``run_id``/``output_dir`` into the resolved experiment's
+    ``status.json`` before returning (K24) — unconditionally, once, regardless of which branch
+    resolved the id, so a different process can later discover this run's real artifact directory
+    from ``experiment_id`` alone (``resolve_experiment_dir_for_run``/``reconstruct_run_status``/the
+    disk-based ``cancel_run`` fallback all depend on this). Deliberately not a ``create_experiment``
+    param: that would only cover the fresh-creation branch and silently miss the pristine-reuse
+    branch, which never otherwise touches ``status.json`` at all.
     """
-    from tcip_mcp.experiments import create_experiment, get_experiment, overwrite_config_if_pristine
+    from tcip_mcp.experiments import (
+        create_experiment, get_experiment, overwrite_config_if_pristine, stamp_run_identity,
+    )
 
     created = create_experiment(experiment_id, config, data_source=data_source,
                                 dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
     if "error" not in created:
+        stamp_run_identity(experiment_id, run_id, output_dir)
         return experiment_id
 
     existing = get_experiment(experiment_id, metrics_limit=1)
@@ -835,6 +979,7 @@ def _ensure_experiment(
     )
     if pristine:
         overwrite_config_if_pristine(experiment_id, config)
+        stamp_run_identity(experiment_id, run_id, output_dir)
         return experiment_id
 
     fresh_id = f"{experiment_id}_{run_id}"
@@ -844,6 +989,7 @@ def _ensure_experiment(
     )
     create_experiment(fresh_id, config, parent_experiment=experiment_id, data_source=data_source,
                       dataset_id=dataset_id, dataset_fingerprint=dataset_fingerprint)
+    stamp_run_identity(fresh_id, run_id, output_dir)
     return fresh_id
 
 
