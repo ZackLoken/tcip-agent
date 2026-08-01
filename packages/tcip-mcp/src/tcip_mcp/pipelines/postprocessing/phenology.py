@@ -1,30 +1,32 @@
-"""Canonical bloom phenology — the ONE implementation of a trait's positive-fraction milestones.
+"""Canonical phenology measurement, the one implementation of a trait's positive-fraction milestones.
 Every surface (the tcip-web Results route, the MCP ``compute_phenology`` tool) routes through here,
 so a phenology date always means the same thing, for whichever registered trait it's computed for.
 
 Trait definition (authoritative; see the ``phenology`` skill + the CLAUDE.md measurement-
-integrity invariant): bloom = the fraction of a plant's detected objects that are in the trait's
-positive/measured state — an expert-defined visible morphological stage emitted by a *validated*
+integrity invariant): the positive-state fraction = the fraction of a plant's detected objects
+that are in the trait's positive/measured state, an expert-defined visible morphological stage
+emitted by a *validated*
 classifier (the trait's ``positive_class_name``), never a geometric proxy such as bbox height.
-Milestones (catkin, Phase 1 — a different trait's spec yields its own prefix/columns, no code
-change):
+Milestone columns come entirely from the trait's own ``TraitSpec`` (``phenology_prefix`` plus
+each ``milestone_fractions`` entry), so a different registered trait yields its own prefix and
+columns with no code change:
 
-    catkin_05/50/95per_date  = the dates the positive fraction first crosses 5/50/95%
-    catkin_elongation_date   = the date most catkins have elongated (``crops.yml``) — the 95%
-                               majority crossing, i.e. synonymous with catkin_95per_date
+    ``<prefix>_<NN>per_date``            = the date the positive fraction first crosses NN%,
+                                            for each fraction the spec declares
+    ``<prefix>_<majority_label>_date``   = the majority-crossing alias
+                                            (``TraitSpec.majority_milestone``), present only
+                                            when the spec names one
 
-``catkin_elongation_date`` follows ``crops.yml`` ("Date when most catkins have elongated"),
-operationalized as the majority crossing the trait spec names (``TraitSpec.majority_milestone``
-= "95per"). This is the current best-guess reading of that text, flagged provisional
-(``TraitSpec.majority_provisional``) pending breeder confirmation — correct the mapping in the
-spec if they rule otherwise. ``elongation_onset_date`` (the first date any elongation appears)
-is a separate helper, not the delivered trait.
+A spec's majority-crossing alias is a breeder-confirmed reading of the trait's own definition
+text, flagged provisional (``TraitSpec.majority_provisional``) until confirmed; correct the
+mapping in the spec if the breeder rules otherwise. ``positive_onset_date`` (the first date
+any positive-state observation appears) is a separate helper, not the delivered trait.
 
 This module is pure (stdlib only, plus ``resolution.py`` which is itself torch-free): it consumes
 prediction buckets and never touches pixels or model machinery. A prediction file's ``.subject``
 carries the classifier's own decoded call (see ``count_by_class``'s docstring for the full
-schema-vs-GT distinction, settled over five rounds of adversarial review — K4/K5). If the bucket
-never assessed the trait's positive-class axis at all, the fraction is not a valid measurement —
+schema-vs-GT distinction). If the bucket
+never assessed the trait's positive-class axis at all, the fraction is not a valid measurement,
 ``per_plant_phenology`` surfaces that via per-plant/per-date disclosure fields so callers never
 deliver a curve built on unclassified or missing detections.
 """
@@ -54,8 +56,8 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
     date and its bound; the schema functions map it to names. The majority alias enters only when the
     spec names a crossing for it, so declared and produced can no longer disagree for any spec shape:
     each side used to apply that condition independently, and a trait with no ``majority_milestone``
-    declared a majority date/bound/provisional column no producer ever filled (invisible for catkin,
-    which names one).
+    declared a majority date/bound/provisional column no producer ever filled (invisible for any
+    trait whose spec does name one).
     """
     cols = [(key, key) for key in _milestone_targets(spec)]
     if spec.majority_milestone:
@@ -64,12 +66,12 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
 
 
 def milestone_date_columns(spec) -> list[str]:
-    """The milestone/date column NAMES a trait's phenology delivery carries — a proper subset of
+    """The milestone/date column names a trait's phenology delivery carries, a proper subset of
     ``phenology_csv_columns`` (no ``plant_id``/provenance columns).
 
     Consumed by ``phenology_csv_columns``, which pairs each with its ``_bound``. It no longer feeds
     an export gate: the web door used to trigger on these names appearing in a caller-supplied
-    table, which round 7 replaced with a door that computes what it exports.
+    table; it now computes what it exports instead.
     """
     return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
 
@@ -77,14 +79,13 @@ def milestone_date_columns(spec) -> list[str]:
 def phenology_csv_columns(spec) -> list[str]:
     """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitSpec``.
 
-    The milestone/alias column NAMES come from the spec (``phenology_prefix`` + each milestone key,
+    The milestone/alias column names come from the spec (``phenology_prefix`` + each milestone key,
     plus the majority alias/provisional columns built from ``majority_label``) so the schema carries
-    no trait vocabulary of its own — catkin resolves to ``catkin_05per_date`` … ``catkin_elongation_date``,
-    while a different trait's spec yields its own prefix with no change here. The surrounding
-    provenance columns (operating point, classifier validation, producer identity, coverage
-    disclosure) are genuinely trait-neutral.
+    no trait vocabulary of its own: every registered trait resolves through its own spec to its own
+    prefix and columns with no change here. The surrounding provenance columns (operating point,
+    classifier validation, producer identity, coverage disclosure) are genuinely trait-neutral.
     """
-    # Only when the spec names a majority crossing — the alias's provisional marker qualifies that
+    # Only when the spec names a majority crossing, the alias's provisional marker qualifies that
     # alias, so without one there is nothing for it to mark (``phenology_tools`` gates its stamp on
     # the same condition; the two must agree or ``write_phenology_csv`` raises on an unknown key).
     provisional = ([f"{spec.phenology_prefix}_{spec.majority_label}_provisional"]
@@ -93,21 +94,22 @@ def phenology_csv_columns(spec) -> list[str]:
         "plant_id",
         "accession",
         "n_dates",
-        # Stage-6 review N6/round-4: a plant can be fully classified AND fully observed (0
-        # unclassified, 0 missing) while still having zero real detections on every date (before
-        # emergence, or a genuinely empty scene) — n_dates alone doesn't distinguish that from real
-        # bloom data. per_plant_phenology already computes this per row; it was silently dropped by
+        # A plant can be fully classified and fully observed (0 unclassified, 0 missing) while
+        # still having zero real detections on every date (before emergence, or a genuinely empty
+        # scene), n_dates alone doesn't distinguish that from real detection data. per_plant_phenology
+        # already computes this per row; without it here it would be silently dropped by
         # DictWriter's extrasaction="ignore" for not being in this column set.
         "n_observed_dates",
         "n_dates_unclassified",
         "n_dates_missing_images",
         *milestone_date_columns(spec),
-        # Each milestone's evidentiary bound, beside the date it qualifies (round-4 review).
-        # ``plant_milestones`` has always emitted these; they were absent from this schema, so
-        # ``write_phenology_csv``'s DictWriter dropped them and a LEFT_CENSORED crossing — one where
-        # the first observation already met the target, so the true date is only an upper bound —
-        # was delivered indistinguishable from a measured one. That is a precision claim the data
-        # does not support, which is the failure mode this platform exists to prevent.
+        # Each milestone's evidentiary bound, beside the date it qualifies.
+        # ``plant_milestones`` has always emitted these; without this column,
+        # ``write_phenology_csv``'s DictWriter would drop them and a left-censored crossing, one
+        # where the first observation already met the target, so the true date is only an upper
+        # bound, would be delivered indistinguishable from a measured one. That is a precision
+        # claim the data does not support, which is the failure mode this platform exists to
+        # prevent.
         *[f"{c}_bound" for c in milestone_date_columns(spec)],
         *provisional,
         *PROVENANCE_COLUMNS,
@@ -115,14 +117,14 @@ def phenology_csv_columns(spec) -> list[str]:
 
 
 # How the counts behind a delivered number were produced, and whether the measurement is
-# trustworthy — a delivered phenotype must carry this so it can be traced. Trait-neutral, and the
+# trustworthy, a delivered phenotype must carry this so it can be traced. Trait-neutral, and the
 # single owner of the tail, so every delivered shape (milestones, curves) carries the same chain
 # rather than each door listing its own.
 PROVENANCE_COLUMNS = [
     "operating_point_conf",
     "operating_point_validated",
     "positive_state_classifier_validated",
-    # Producing-model identity — the exact checkpoint (content hash) + run behind the counts.
+    # Producing-model identity, the exact checkpoint (content hash) + run behind the counts.
     "producer_model_sha256",
     "producer_experiment_id",
 ]
@@ -137,8 +139,8 @@ CURVE_MEASUREMENT_COLUMNS = [
 def curve_csv_columns() -> list[str]:
     """The delivered per-(plant, date) curve CSV schema.
 
-    A curve is the same bloom measurement as the milestone summary, un-summarised — which is why it
-    takes the identical delivery gate — so it carries the identical provenance tail. Trait-neutral:
+    A curve is the same phenology measurement as the milestone summary, un-summarised, which is why it
+    takes the identical delivery gate, so it carries the identical provenance tail. Trait-neutral:
     unlike the milestone schema it names no crossings, only the counts the fraction is built from.
     """
     return [*CURVE_MEASUREMENT_COLUMNS, *PROVENANCE_COLUMNS]
@@ -152,10 +154,10 @@ def date_key(date_str: str) -> tuple[int, int, int]:
 
     A value that is not a calendar-legal ISO date (the ``undated/`` bucket, a non-numeric
     folder, or an out-of-range one like ``2026-13-01``) sorts first as ``(0, 0, 0)`` and is
-    excluded from milestone math — an image with no valid capture date can't sit on a time
+    excluded from milestone math, an image with no valid capture date can't sit on a time
     series. Validating the *whole* date here (not just "three integers") keeps ``date_key``,
     ``crossing_date`` (which builds ``datetime.date`` objects to interpolate) and
-    ``elongation_onset_date`` agreeing on exactly which points are real, and prevents a
+    ``positive_onset_date`` agreeing on exactly which points are real, and prevents a
     malformed folder from raising mid-interpolation.
     """
     parts = date_str.split("-")
@@ -190,17 +192,15 @@ class Crossing:
 
     ``bound``:
       - ``"exact"``: the target fraction was actually observed on this date.
-      - ``"left_censored"``: the FIRST observed point already meets the target — the true crossing
-        may have happened any time before it; this date is an upper bound, not a measured crossing
-        (K4: the prior bare-tuple return made this indistinguishable from an interpolated date).
+      - ``"left_censored"``: the first observed point already meets the target, the true crossing
+        may have happened any time before it; this date is an upper bound, not a measured crossing.
       - ``"interpolated"``: linearly interpolated between the two bracketing observed dates.
-      - ``"right_censored"``: the LAST observed point still hasn't met the target — the true crossing,
+      - ``"right_censored"``: the last observed point still hasn't met the target, the true crossing,
         if it happens at all, is after this date; this date is a lower bound, the mirror of
-        ``left_censored`` at the other end of the observed window (round 12, 2026-07-29: the prior
-        bare ``None`` made "not yet reached, but we watched through this date" indistinguishable from
-        "no information at all").
+        ``left_censored`` at the other end of the observed window, distinguishing "not yet reached,
+        but we watched through this date" from "no information at all".
     ``gap_days``: for ``interpolated``, the number of days between the two bracketing observations
-    (a wide gap is weaker evidence for the same interpolated date) — ``0`` for ``exact``/unknown for
+    (a wide gap is weaker evidence for the same interpolated date), ``0`` for ``exact``/unknown for
     ``left_censored``/``right_censored`` (no bracket on the censored side exists).
     """
 
@@ -210,7 +210,7 @@ class Crossing:
 
 
 def crossing_date(series: list[tuple[str, float]], target: float) -> Optional[Crossing]:
-    """Earliest date the fraction curve reaches ``>= target``, with its evidentiary bound (K4).
+    """Earliest date the fraction curve reaches ``>= target``, with its evidentiary bound.
 
     Linear interpolation between neighbouring observed dates when the crossing falls between two
     points; a left-censored crossing (the first observed point already meets the target) or a
@@ -236,7 +236,7 @@ def crossing_date(series: list[tuple[str, float]], target: float) -> Optional[Cr
     return Crossing(iso(points[-1][0]), "right_censored")
 
 
-def elongation_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
+def positive_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
     """First date any elongation appears (fraction > 0), chronologically. ``None`` if never."""
     for d, r in _real_points(series):
         if r > 0:
@@ -248,18 +248,17 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
     """The phenology dates for one plant's positive-fraction series, keyed by the trait's own columns.
 
     Both the column names (``phenology_prefix`` + each milestone key, plus the majority alias) and the
-    crossing fractions and "most elongated" majority mapping come from the trait's semantics
-    (``TraitSpec``), so the milestone definition lives in one place instead of scattered literals.
-    ``spec`` is required (K4/K5: no silent catkin fallback — a caller that forgets to thread the
-    trait spec must fail loudly, not emit catkin's columns for a different trait).
+    crossing fractions and majority mapping come from the trait's semantics (``TraitSpec``), so the
+    milestone definition lives in one place instead of scattered literals. ``spec`` is required: no
+    silent default trait, a caller that forgets to thread the trait spec must fail loudly, not emit
+    one trait's columns for another.
     """
     prefix = spec.phenology_prefix
     crossings = {key: crossing_date(series, frac) for key, frac in _milestone_targets(spec).items()}
     out: dict = {}
-    # The majority alias (e.g. catkin's crops.yml "most catkins elongated") is just another entry in
-    # ``_milestone_columns`` pointing at the crossing the spec names for it, so it carries the same
-    # date + evidentiary bound as every other milestone and cannot be emitted under a different
-    # condition than the schema declares it under.
+    # The majority alias is just another entry in ``_milestone_columns`` pointing at the crossing
+    # the spec names for it, so it carries the same date + evidentiary bound as every other
+    # milestone and cannot be emitted under a different condition than the schema declares it under.
     for sfx, key in _milestone_columns(spec):
         crossing = crossings.get(key)
         out[f"{prefix}_{sfx}_date"] = crossing.date if crossing else None
@@ -274,7 +273,7 @@ def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tupl
     """Resolve a trait's positive class id from a prediction bucket's own recorded ``id_map``.
 
     The single resolution both delivery doors' ``elongated_class_id``/``positive_class_id`` surfaces
-    call (K4/K5/K6) — not a separate registry re-derivation, which could disagree with the map
+    call, not a separate registry re-derivation, which could disagree with the map
     predictions were actually decoded through. Returns ``(class_id, message)``; ``class_id`` is
     ``None`` when no bucket's ``id_map`` contains the trait's positive value, so the caller refuses
     rather than guessing (never a bare default like the historical ``elongated_class_id: int = 1``).
@@ -289,17 +288,17 @@ def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tupl
                 return int(id_map[name]), f"resolved {name!r} -> class {id_map[name]} from {pred_dir}"
             except (TypeError, ValueError):
                 continue
-    return None, (f"no prediction bucket's recorded id_map contains {name!r} — the classifier that "
+    return None, (f"no prediction bucket's recorded id_map contains {name!r}, the classifier that "
                   "produced these predictions never assessed this trait's positive class")
 
 
 def bucket_id_map(pred_dir: Path) -> dict | None:
     """The bucket's recorded ``id_map`` (name -> int), or ``None`` if absent/malformed.
 
-    Read from ``operating_point.json`` — the SAME sidecar every prediction-bucket writer
+    Read from ``operating_point.json``, the same sidecar every prediction-bucket writer
     (``export_predictions``, the GUI worker) stamps ``id_map`` into, never re-derived. A non-dict
-    ``id_map`` (a malformed/foreign sidecar) is treated the same as absent — fail closed, never
-    duck-typed (round-5 finding A-NEW-3).
+    ``id_map`` (a malformed/foreign sidecar) is treated the same as absent, fail closed, never
+    duck-typed.
     """
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
@@ -313,30 +312,29 @@ def bucket_id_map(pred_dir: Path) -> dict | None:
 def count_by_class(json_path: Path, id_map: dict | None, positive_value: str) -> tuple[int, int, int]:
     """``(n_total, n_positive, n_unclassified)`` for one image's predictions.
 
-    The fifth and final formulation of this rule (K4/K5, five rounds of adversarial review — see
-    ``docs/decisions/cluster-map.md``'s Group A history for the four prior ones that broke). Two
-    checks, in order:
+    Two checks, in order:
 
-    1. **Bucket-level precondition.** ``id_map`` must be a dict containing ``positive_value`` as a
-       key — the run that produced this bucket must have actually classified along the trait's own
-       axis. A bare single-class detector's ``id_map`` (``{"catkin": 0}``, no attribute axis) fails
-       this, correctly, since the detector never assessed elongation at all. If it fails, EVERY
-       detection in this image is unclassified — a whole-bucket decision, not a per-detection one.
-    2. **Per-detection check.** Within a bucket that passes (1), a detection is positive if
-       ``.subject == positive_value``, classified-negative if ``.subject`` is some OTHER key of
-       ``id_map``, and unclassified if ``.subject`` is not a key of ``id_map`` at all — a stale file
+    1. Bucket-level precondition: ``id_map`` must be a dict containing ``positive_value`` as a
+       key, the run that produced this bucket must have actually classified along the trait's own
+       axis. A bare single-class detector's ``id_map`` (e.g. ``{"<object>": 0}``, no attribute axis)
+       fails this, correctly, since the detector never assessed the trait's positive state at all.
+       If it fails, every detection in this image is unclassified, a whole-bucket decision, not a
+       per-detection one.
+    2. Per-detection check: within a bucket that passes (1), a detection is positive if
+       ``.subject == positive_value``, classified-negative if ``.subject`` is some other key of
+       ``id_map``, and unclassified if ``.subject`` is not a key of ``id_map`` at all, a stale file
        left behind by an earlier run, or a raw-index fallback (``export.py``'s
        ``id_to_name.get(cid, str(cid))``) from a checkpoint whose class vocabulary shrank after
-       training. Never silently coerced into a classified negative (that was the round-5 defect).
+       training. Never silently coerced into a classified negative.
 
-    Predictions decode differently from GT annotations — verified against the real writer,
+    Predictions decode differently from GT annotations, verified against the real writer,
     ``write_predictions_json``, which puts the classifier's decoded call straight into
     ``Annotation.subject`` and leaves ``.attributes`` empty, always, for every prediction-bucket
     writer this reads from (``json_io.target_class_id``, built for GT's ``subject``+``attributes``
-    shape, is not reused here — applying it to a prediction file returns ``None``/raises for either
+    shape, is not reused here, applying it to a prediction file returns ``None``/raises for either
     bucket shape, unusable either way).
 
-    A missing prediction file is the caller's concern (a missing OBSERVATION, not an observed zero —
+    A missing prediction file is the caller's concern (a missing observation, not an observed zero,
     see ``per_plant_series``), not this function's: it is only ever called for a file confirmed to
     exist.
     """
@@ -372,10 +370,10 @@ def per_plant_series(
     ``{plant_id: {accession, series: [(date, total, positive, unclassified, missing), ...]}}``.
 
     Coverage is measured against the stems the plant mapping actually names for each (plant, date),
-    not merely against whatever prediction files happen to exist (round-5 finding A-NEW-2): a named
-    stem with no corresponding prediction file is a MISSING observation, disclosed separately, never
-    read as an observed zero. This applies at the DATE level too (stage-6 review): a date the
-    mapping names for which the caller simply omits a ``predictions_by_date`` entry is not skipped —
+    not merely against whatever prediction files happen to exist: a named stem with no
+    corresponding prediction file is a missing observation, disclosed separately, never read as an
+    observed zero. This applies at the date level too: a date the
+    mapping names for which the caller simply omits a ``predictions_by_date`` entry is not skipped,
     every stem the mapping names for it counts as missing, the same as a named stem with no file,
     rather than the date vanishing from the series with no disclosure at all.
     """
@@ -383,15 +381,15 @@ def per_plant_series(
         return getattr(a, name, None) if not isinstance(a, dict) else a.get(name)
 
     per_plant: dict[str, dict] = {}
-    # Iterate the mapping's own dates, not predictions_by_date's — the mapping is the coverage
+    # Iterate the mapping's own dates, not predictions_by_date's, the mapping is the coverage
     # reference, so a date it names is never silently absent just because the caller dropped it.
     for date_str in mapping:
         pred_dir = predictions_by_date.get(date_str)
         pred_path = Path(pred_dir) if pred_dir else None
         id_map = bucket_id_map(pred_path) if pred_path is not None else None
         # [total, positive, unclassified, missing, n_images] per plant, accumulated across that
-        # plant's images on this date. ``n_images`` counts every image the mapping NAMES for this
-        # (plant, date) — including ones with no prediction file, which ``missing`` counts too —
+        # plant's images on this date. ``n_images`` counts every image the mapping names for this
+        # (plant, date), including ones with no prediction file, which ``missing`` counts too,
         # since it is the coverage the series entry summarises, not the files that happened to exist.
         by_plant: dict[str, list[int]] = {}
         accession: dict[str, Optional[str]] = {}
@@ -424,14 +422,14 @@ def per_plant_phenology(
 ) -> dict:
     """Full canonical pipeline: classified predictions + plant mapping → per-plant milestones.
 
-    Returns ``{rows: [...], elongation_classified: bool}``. Each row carries the positive-fraction
+    Returns ``{rows: [...], positive_class_assessed: bool}``. Each row carries the positive-fraction
     series, the milestone dates, and coverage-disclosure fields (``n_dates_unclassified``,
-    ``n_dates_missing_images``). A plant's milestones are computed only over dates that are BOTH
-    fully classified (``unclassified == 0``) AND fully observed (``missing == 0``) for that date —
-    an AND across dates (round-5 finding A6), not an "any date" union: a plant with even one
+    ``n_dates_missing_images``). A plant's milestones are computed only over dates that are both
+    fully classified (``unclassified == 0``) and fully observed (``missing == 0``) for that date,
+    conjunctive across dates, not an "any date" union: a plant with even one
     partially-unclassified or partially-missing date does not earn milestone dates for that plant,
-    it earns disclosure of which dates were excluded and why. The top-level ``elongation_classified``
-    is ``True`` iff at least one date, anywhere in the delivery, was fully classified — distinguishing
+    it earns disclosure of which dates were excluded and why. The top-level ``positive_class_assessed``
+    is ``True`` iff at least one date, anywhere in the delivery, was fully classified, distinguishing
     "the classifier bridge was never wired at all" (nothing here, refuse the whole call) from "wired,
     with some per-plant/per-date gaps" (deliver, with per-row disclosure).
     """
@@ -447,7 +445,7 @@ def per_plant_phenology(
         if usable_dates:
             any_classified_date = True
         # total==0 detected no objects, so it's not an observation of the positive fraction
-        # (pre-emergence or a detection gap) — excluded from the milestone series; total>0 with
+        # (pre-emergence or a detection gap), excluded from the milestone series; total>0 with
         # positive==0 is a real 0% and kept.
         frac_series = [(d, positive / total) for (d, total, positive) in usable_dates if total]
         plant_fully_classified = len(usable_dates) == len(info["series"]) and len(info["series"]) > 0
@@ -466,21 +464,21 @@ def per_plant_phenology(
             ],
         }
         # A plant with any unclassified/missing date earns no milestone dates, but must still carry
-        # the same keys as one that does — so both branches go through the producer (an empty series
+        # the same keys as one that does, so both branches go through the producer (an empty series
         # crosses nothing) rather than one of them rebuilding the key set from the column names. The
         # rebuild used to omit every ``*_date_bound``, so an excluded plant's row shape differed from
         # an included one's within a single delivery.
         row.update(plant_milestones(frac_series if plant_fully_classified else [], spec))
         rows.append(row)
-    return {"rows": rows, "elongation_classified": any_classified_date}
+    return {"rows": rows, "positive_class_assessed": any_classified_date}
 
 
 def write_phenology_csv(rows: list[dict], out_path: Path, spec, stamp: dict | None = None) -> str:
     """Write per-plant milestone rows to the canonical delivery CSV, for the given trait's spec.
 
-    Emits exactly ``phenology_csv_columns(spec)`` — a stamp key absent from that spec-derived set
-    RAISES rather than being silently dropped (K4/K5: the prior ``extrasaction="ignore"`` behavior
-    would have silently discarded a stray/mistyped provenance key with no signal). ``stamp`` (the
+    Emits exactly ``phenology_csv_columns(spec)``, a stamp key absent from that spec-derived set
+    raises rather than being silently dropped: ``extrasaction="ignore"`` alone would silently
+    discard a stray/mistyped provenance key with no signal. ``stamp`` (the
     operating point + validation status) is written into every row so the phenotype is traceable.
     """
     out_path = Path(out_path)
