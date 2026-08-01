@@ -33,7 +33,7 @@ The agent can visually inspect images using `view_image` after rendering annotat
 return the file path.
 
 `capture_live_canvas` is the live view: the GUI continuously pushes its canvas state
-(hybrid — tiny heartbeats on pan/zoom, full display-resolved geometry on shape changes,
+(hybrid: tiny heartbeats on pan/zoom, full display-resolved geometry on shape changes,
 including unsaved edits and the in-progress drawing). The tool pings the GUI for fresh
 state (`refresh=True`), renders the visible region (`crop_to_viewport`) or the full frame,
 and returns the classes schema, review legend, per-tag / per-creator shape counts, and the
@@ -69,7 +69,7 @@ Goal: Diagnose training issues from worst-case analysis.
 1. `check_training_status` → verify training completed, review loss curves
 2. `render_failure_cases` → surface + render failure cases → `view_image`
 3. Cross-reference visual findings with `score_predictions`' per-image TP/FP/FN breakdown
-   (no per-class breakdown for detection today — see the `evaluation` skill)
+   (no per-class breakdown for detection today, see the `evaluation` skill)
 4. Recommend: more data, augmentation changes, architecture changes, longer training
 
 ### GT vs Prediction Comparison
@@ -84,12 +84,12 @@ Goal: Detailed per-image quality assessment.
 
 When inspecting rendered annotations/predictions, evaluate:
 
-- [ ] **Coverage** — Are all visible objects annotated?
-- [ ] **Tightness** — Do boxes closely fit the objects?
-- [ ] **Class correctness** — Are classes assigned correctly?
-- [ ] **Consistency** — Is the same object type labeled the same way across images?
-- [ ] **Edge cases** — Occluded, overlapping, or ambiguous objects handled?
-- [ ] **Scale variation** — Are small and large objects both captured?
+- [ ] **Coverage**: Are all visible objects annotated?
+- [ ] **Tightness**: Do boxes closely fit the objects?
+- [ ] **Class correctness**: Are classes assigned correctly?
+- [ ] **Consistency**: Is the same object type labeled the same way across images?
+- [ ] **Edge cases**: Occluded, overlapping, or ambiguous objects handled?
+- [ ] **Scale variation**: Are small and large objects both captured?
 
 ## Rendering Details
 
@@ -104,7 +104,7 @@ When inspecting rendered annotations/predictions, evaluate:
 ## Vision-Guided Auto-Labeling
 
 Full workflow, tool/role table, the method-neutral engine seam, and the corrective (grid-cell) loop
-live in `.github/skills/annotation` (it owns the format/write semantics — `accept_proposals` stages
+live in `.github/skills/annotation` (it owns the format/write semantics; `accept_proposals` stages
 to predictions, never GT directly). The visual-QA-specific angle here: after each `accept_proposals`
-or `segment_prompt` call, `view_image` the staged result before moving on — catching a wrong class
+or `segment_prompt` call, `view_image` the staged result before moving on; catching a wrong class
 or a sloppy mask before it reaches human review is cheaper than catching it after.
