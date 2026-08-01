@@ -1,6 +1,6 @@
 /**
  * Annotate-tab context toolbar. Two rows matching the approved mockup:
- *   Row 1  — draw mode (Box/Polygon/Point), the subject picker pill, an Editor toggle, then the
+ *   Row 1  — draw mode (Point/Box/Polygon), the subject picker pill, an Editor toggle, then the
  *            nav filter, image navigation, and the Complete checkbox.
  *   Editor — a second toolbar (collapsed by default, remembered) holding the tools you
  *            flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
@@ -13,12 +13,14 @@ import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useStore } from "@/store";
 
+// Progression order (start state first, terminal states last) — matches Review's parallel
+// status filter, which already reads Unreviewed before Reviewed.
 const STATUS_FILTERS: { value: "all" | ImageStatus; label: string }[] = [
   { value: "all", label: "All" },
+  { value: "unannotated", label: "Unannotated" },
   { value: "partial", label: "Partial" },
   { value: "complete", label: "Complete" },
   { value: "negative", label: "Negative" },
-  { value: "unannotated", label: "Unannotated" },
 ];
 
 /** A pressed-state tool button with a status dot, matching the mockup's Editor tools. */
@@ -205,6 +207,27 @@ export function AnnotateToolbar({
           aria-label="Draw mode"
         >
           <button
+            aria-pressed={mode === "point"}
+            onClick={() => setMode("point")}
+            title="Point: click to place one location (a prompt or landmark) — drag it to move, right-click to remove"
+            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
+              mode === "point" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
+            }`}
+          >
+            {/* The canvas mark in miniature: ticks converging on a core, so the tool and the shape
+                it authors read as the same thing. */}
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
+              <path
+                d="M8 1.6v2.7M8 11.7v2.7M1.6 8h2.7M11.7 8h2.7"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+              <circle cx="8" cy="8" r="2" fill="currentColor" />
+            </svg>
+            Point
+          </button>
+          <button
             aria-pressed={mode === "box"}
             onClick={() => setMode("box")}
             className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
@@ -242,27 +265,6 @@ export function AnnotateToolbar({
               />
             </svg>
             Polygon
-          </button>
-          <button
-            aria-pressed={mode === "point"}
-            onClick={() => setMode("point")}
-            title="Point: click to place one location (a prompt or landmark) — drag it to move, right-click to remove"
-            className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
-              mode === "point" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
-            }`}
-          >
-            {/* The canvas mark in miniature: ticks converging on a core, so the tool and the shape
-                it authors read as the same thing. */}
-            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
-              <path
-                d="M8 1.6v2.7M8 11.7v2.7M1.6 8h2.7M11.7 8h2.7"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <circle cx="8" cy="8" r="2" fill="currentColor" />
-            </svg>
-            Point
           </button>
         </div>
 
