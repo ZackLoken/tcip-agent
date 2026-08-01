@@ -1,4 +1,4 @@
-"""Loss functions for bespoke models — plain importable classes + a name→class map.
+"""Loss functions for bespoke models: plain importable classes + a name->class map.
 
 Bespoke model code imports a loss class directly or calls ``build_loss(name)``; the
 ``a+b`` syntax composes a ``CombinedLoss`` from multiple terms.
@@ -53,7 +53,7 @@ class FocalLoss(BaseLoss):
 
     def forward(self, predictions, targets):
         if self.weight is not None:
-            # Per-class weight subsumes the scalar alpha (RetinaNet-style) — no double balance.
+            # Per-class weight subsumes the scalar alpha (RetinaNet-style): no double balance.
             ce = F.cross_entropy(predictions, targets, weight=self.weight, reduction="none")
             p_t = torch.exp(-ce)
             loss = (1 - p_t) ** self.gamma * ce
@@ -233,7 +233,7 @@ def compute_class_weights(
 ) -> torch.Tensor:
     """Per-class loss weights from a class-count distribution.
 
-    Schemes: ``balanced`` (sklearn-style ``total/(n_present*count)`` — the same
+    Schemes: ``balanced`` (sklearn-style ``total/(n_present*count)``, the same
     inverse-frequency formula ``ClassBalancedSampler`` uses), ``inverse``
     (``1/count``), or ``effective`` (Cui et al. 2019, ``(1-beta)/(1-beta**count)``).
     Zero-count classes get weight 1.0. When ``normalize``, weights are rescaled so
@@ -303,7 +303,7 @@ def build_loss(
     When ``class_distribution`` is supplied and the loss is weightable
     (``cross_entropy``/``weighted_ce``/``focal``), an inverse-frequency ``weight``
     tensor is injected unless ``weight`` was passed explicitly. Supplying it for a loss that
-    cannot consume it raises rather than dropping it — imbalance handling that silently vanishes
+    cannot consume it raises rather than dropping it: imbalance handling that silently vanishes
     is worse than a build that refuses.
 
     In a combined loss each keyword goes to the terms whose constructor accepts it, so a per-term
@@ -315,7 +315,7 @@ def build_loss(
         if class_distribution is not None and not any(p in _WEIGHTABLE_LOSSES for p in parts):
             raise ValueError(
                 f"class_distribution was supplied for '{name}', but none of {parts} is weightable "
-                f"(weightable: {sorted(_WEIGHTABLE_LOSSES)}) — the weighting would have no effect. "
+                f"(weightable: {sorted(_WEIGHTABLE_LOSSES)}); the weighting would have no effect. "
                 "Compose a weightable term, or drop class_distribution."
             )
         # Route each hyperparameter to the terms that accept it. Broadcasting every kwarg to every
@@ -340,7 +340,7 @@ def build_loss(
     if class_distribution is not None and name not in _WEIGHTABLE_LOSSES:
         raise ValueError(
             f"class_distribution was supplied for '{name}', which is not weightable "
-            f"(weightable: {sorted(_WEIGHTABLE_LOSSES)}) — the weighting would have no effect. "
+            f"(weightable: {sorted(_WEIGHTABLE_LOSSES)}); the weighting would have no effect. "
             "Use a weightable loss, or drop class_distribution."
         )
     if class_distribution is not None and "weight" not in kwargs:
