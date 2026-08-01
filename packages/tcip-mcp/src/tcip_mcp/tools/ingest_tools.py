@@ -16,13 +16,12 @@ from pathlib import Path
 
 from tcip_mcp import dataset_layout, workspace
 from tcip_mcp.audit import audited
+from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 from tcip_mcp.server import mcp
 from tcip_mcp.utils.atomic_io import atomic_write_bytes
 
 logger = logging.getLogger(__name__)
 
-# Mirrors the extensions the GUI/plant-mapping already accept.
-IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp")
 UNDATED_BUCKET = "undated"
 
 
@@ -101,6 +100,7 @@ def ingest_images(
     copy: bool = True,
     date_from: str = "exif",
     recursive: bool = True,
+    detect_band_groups: bool = False,
 ) -> dict:
     """Copy raw images into a structured project, bucketed by EXIF capture date.
 
@@ -120,9 +120,14 @@ def ingest_images(
             ``undated/``), ``"none"`` (all → ``undated/``), or a literal bucket name
             (all → ``images/<literal>/``, e.g. a known ISO capture date).
         recursive: Recurse into source subfolders.
+        detect_band_groups: After copying, run the band-group correlation strategies
+            (``pipelines.data.band_groups``) over each touched bucket, writing a ``.bandgroup``
+            manifest for every sibling-single-band-file group found (e.g. a multispectral rig
+            that writes one file per band instead of one multi-band file per capture). Default
+            ``False`` — a project with no such capture pays nothing for this pass.
 
     Returns a manifest: ``{project_path, name, image_root, total, found, copied,
-    moved, buckets, undated, skipped_collisions, errors, move}``.
+    moved, buckets, undated, skipped_collisions, errors, move, band_groups}``.
     """
     try:
         _validate_bucket_literal(date_from)
@@ -149,6 +154,7 @@ def ingest_images(
     moved = 0
     skipped_collisions: list[dict] = []
     errors: list[dict] = []
+    touched_buckets: set[str] = set()
     # Collisions are keyed by stem within a bucket (case-insensitively): labels and
     # predictions pair to an image by stem alone (see dataset_layout), so two sources with
     # the same stem but different extensions would otherwise silently share one label file.
@@ -195,10 +201,23 @@ def ingest_images(
                 copied += 1
 
         placed.add(stem_key)
+        touched_buckets.add(bucket)
         if bucket == UNDATED_BUCKET:
             undated += 1
         else:
             buckets[bucket] = buckets.get(bucket, 0) + 1
+
+    band_groups_result: dict = {"formed": [], "refused": [], "manifests": []}
+    if detect_band_groups:
+        from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+
+        for bucket in sorted(touched_buckets):
+            bucket_dir = dataset_layout.image_dir(dest_root, bucket)
+            result = detect_and_write_band_groups(bucket_dir)
+            for g in result["formed"]:
+                band_groups_result["formed"].append({**g, "bucket": bucket})
+            band_groups_result["refused"].extend(result["refused"])
+            band_groups_result["manifests"].extend(result["manifests"])
 
     return {
         "project_path": str(dest_root),
@@ -214,4 +233,5 @@ def ingest_images(
         "errors": errors,
         "move": not copy,
         "tcip_dir": scaffold["tcip_dir"],
+        "band_groups": band_groups_result,
     }
