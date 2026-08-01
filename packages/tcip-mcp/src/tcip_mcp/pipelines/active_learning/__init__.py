@@ -1,1 +1,1 @@
-"""Active learning pipeline — scorer and selector modules."""
+"""Active learning pipeline: scorer and selector modules."""
