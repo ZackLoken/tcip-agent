@@ -1,13 +1,13 @@
-"""Phenology MCP tools — the agent-facing surface for the per-plant bloom pipeline.
+"""Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline.
 
 Two composable steps over the canonical ``pipelines.postprocessing`` modules, so the agent
 composes tools instead of scripting into the web backend (and a milestone date means exactly
 what it means in the web Results tab):
 
     build_plant_mapping   geolocated images + plant CSVs → persisted plant_mapping.json
-    compute_phenology     that mapping + classified predictions → catkin_phenology.csv
+    compute_phenology     that mapping + classified predictions → <phenology_prefix>_phenology.csv
 
-See the ``phenology`` skill for the whole pattern (isolate → detect → classify elongation →
+See the ``phenology`` skill for the whole pattern (isolate → detect → classify state →
 per-plant fraction → crossings).
 """
 
@@ -36,7 +36,7 @@ def build_plant_mapping(
     Image GPS (handheld EXIF) carries ~5 m error while the plant grid is ~2.8 m between
     adjacent plots, so nearest-neighbour GPS alone is ambiguous. This orders each date's
     images by EXIF capture time (the walker's sequence), splits into row runs on large GPS
-    jumps, and assigns along the row — falling back to nearest-neighbour when the sequence
+    jumps, and assigns along the row, falling back to nearest-neighbour when the sequence
     signal is weak. Each assignment records its ``source`` and GPS ``distance_m`` (no
     fabricated "confidence"). The persisted ``plant_mapping.json`` is what ``compute_phenology``
     consumes. See the ``phenology`` skill.
@@ -54,7 +54,7 @@ def build_plant_mapping(
             explicit value is honored but still capped at that pitch-derived ceiling.
 
     Returns a compact per-date summary (images, mapped count, avg GPS distance) plus totals
-    and the persisted path — not the full per-image mapping (that lives in the JSON).
+    and the persisted path, not the full per-image mapping (that lives in the JSON).
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
@@ -105,16 +105,16 @@ def build_plant_mapping(
 @audited
 def update_trait_spec_fields(trait_name: str, fields: dict, provenance_entries: list[str]) -> dict:
     """Update one or more fields on an already-registered trait's spec, recording who asserted
-    the change and how firmly (K18 B2.5).
+    the change and how firmly.
 
-    Before this tool, a trait spec was authored by hand-writing YAML directly — no audited
+    Before this tool, a trait spec was authored by hand-writing YAML directly, no audited
     record, no re-validation. This refuses if the trait has no existing spec file (creating a new
     trait is a separate, still-manual authoring step) or if the merged result would fail the same
     crops.yml cross-check every config-authored spec already goes through. Returns the updated
     spec.
 
     This is what a real localization-kind derivation (from actual GT box geometry) or a real
-    breeder-answered count objective gets recorded through — never a silent default and never
+    breeder-answered count objective gets recorded through, never a silent default and never
     copied from another trait's values, both durable, audited facts instead of living only in a
     session's memory.
     """
@@ -128,7 +128,7 @@ def update_trait_spec_fields(trait_name: str, fields: dict, provenance_entries: 
 
 def _resolve_positive_class_id(trait_name: str, predictions_by_date: dict[str, str]) -> tuple[int | None, str]:
     """Thin wrapper over ``phenology.resolve_positive_class_id`` (the one resolution both delivery
-    doors' positive-class-id surfaces call — K4/K5/K6), for this tool's trait-name-based callers."""
+    doors' positive-class-id surfaces call), for this tool's trait-name-based callers."""
     from tcip_mcp.traits import get_trait
 
     return phenology.resolve_positive_class_id(get_trait(trait_name), predictions_by_date)
@@ -138,7 +138,7 @@ def _resolve_producer_identity(predictions_by_date: dict[str, str]) -> dict:
     """Collect producing-model identity from each date's ``operating_point.json`` sidecar.
 
     A single producer across dates carries through; differing producers collapse to ``"multiple"``
-    so a curve spliced from two models is not silently attributed to one. Best-effort — a missing
+    so a curve spliced from two models is not silently attributed to one. Best-effort, a missing
     sidecar contributes nothing rather than failing the delivery.
     """
     shas: set[str] = set()
@@ -199,26 +199,26 @@ def _center(a) -> tuple[float, float]:
 def _match_gt_to_predictions(gt: list, preds: list, *, kind: str,
                              center_match_tolerance: float | None = None,
                              iou_threshold: float = 0.5) -> list[tuple]:
-    """Match GT to predictions using the criterion resolved by the caller — never a pinned IoU
-    threshold (stage-6 review, K3: a pinned IoU=0.3 silently paired catkins by a criterion
-    different from the trait's own choice, dropping real classification calibration pairs from
-    the reference with no disclosure).
+    """Match GT to predictions using the criterion resolved by the caller, never a pinned IoU
+    threshold (a pinned IoU=0.3 silently paired objects by a criterion different from the trait's
+    own choice, dropping real classification calibration pairs from the reference with no
+    disclosure).
 
     Unlike ``tcip_annotation.matching.compute_matches`` (which only matches within the same
     ``subject`` name), a classification calibration must match a GT box (subject = the trait's
-    object type, e.g. ``"catkin"``) against a prediction box whose ``subject`` IS the classifier's
-    verdict (e.g. ``"elongated"``) — different names by design (K3/K4/K5). Box geometries only
-    (polygon GT is out of scope for a box-detector's classification calibration).
+    object type) against a prediction box whose ``subject`` is the classifier's
+    verdict, different names by design. Box geometries only (polygon GT is
+    out of scope for a box-detector's classification calibration).
 
     ``kind``/``center_match_tolerance``/``iou_threshold`` come from
-    ``evaluation.resolve_match_criterion`` — the same resolver every other localization consumer
-    goes through (K18 B3) — computed ONCE across the whole reference split by the caller
-    (``_classification_items``), never re-derived per image (stage-6 review Finding A/N5: a
-    per-image average lets one atypical annotation both drop real pairs, on a smaller-than-typical
-    image, and fabricate a false match, on a larger-than-typical one). For ``center_match``,
-    mirrors ``evaluation.py``'s own center-match algorithm (adapted, via ``_greedy_match``, to
-    return matched ``(gt, pred)`` PAIRS — ``_center_match_image`` returns aggregate TP/FP/FN counts
-    only, so pairing needs its own pass). For ``iou_match``, reuses
+    ``evaluation.resolve_match_criterion``, the same resolver every other localization consumer
+    goes through, computed once across the whole reference split by the caller
+    (``_classification_items``), never re-derived per image (a per-image average lets one atypical
+    annotation both drop real pairs, on a smaller-than-typical image, and fabricate a false match,
+    on a larger-than-typical one). For ``center_match``, mirrors ``evaluation.py``'s own
+    center-match algorithm (adapted, via ``_greedy_match``, to return matched ``(gt, pred)`` pairs
+, ``_center_match_image`` returns aggregate TP/FP/FN counts only, so pairing needs its own
+    pass). For ``iou_match``, reuses
     ``tcip_annotation.matching.box_iou`` (the same primitive ``compute_matches`` itself calls)
     rather than a second IoU implementation.
     """
@@ -251,29 +251,28 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     the trait's own localization criterion (``_match_gt_to_predictions``) and yields one item per
     matched pair: ``{"image_id": stem, "is_true_positive": <GT subject/attribute == positive_value>,
     "is_pred_positive": <prediction subject == positive_value>, "bbox": <the GT box, x1,y1,x2,y2>}``.
-    ``subject`` scopes the GT side to the run's own object class (stage-6 review NEW-5, round 4): a
-    labels dir isn't guaranteed to hold only one kind of annotation — a dataset that also isolates
-    an enabling subject (e.g. ``bush``, per the root CLAUDE.md's "a subject is not a trait" rule)
-    would otherwise let an unrelated object's box enter the match pool and pair against a catkin
-    classifier's prediction purely on proximity. Predictions are never subject-filtered here: a
-    prediction's ``subject`` already carries the classifier's decoded VERDICT (e.g. ``"elongated"``),
-    not an object-type name, so there is nothing to scope it against. ``attribute`` is the per-run
-    fact naming which GT attribute carries the trait's positive-class axis (e.g. ``"elongation"`` for
-    catkin) — threaded by the caller, never hardcoded here (K3/K4/K5: a hardcoded attribute name pins
-    this producer to one trait exactly the defect K5 fixed elsewhere). ``bbox`` is the matched
-    instance's own GT geometry — carried through so ``resolve_classifier_operating_point``'s
-    content-overlap check has real per-instance content to hash (a placeholder box would collapse
-    every item of the same class to one identical hash, defeating that check entirely; see its own
-    docstring). An unmatched GT or prediction (the detector itself missed or hallucinated an object)
-    is not a classification-call disagreement and is excluded — this calibrates the CLASSIFIER's
-    call, not the detector's, the same separation the platform's own detect-then-classify
-    decomposition makes elsewhere.
+    ``subject`` scopes the GT side to the run's own object class: a labels dir isn't guaranteed to
+    hold only one kind of annotation, a dataset that also isolates an enabling subject (e.g.
+    ``bush``, per the root CLAUDE.md's "a subject is not a trait" rule) would otherwise let an
+    unrelated object's box enter the match pool and pair against the classifier's prediction
+    purely on proximity. Predictions are never subject-filtered here: a prediction's ``subject``
+    already carries the classifier's decoded verdict, not an object-type
+    name, so there is nothing to scope it against. ``attribute`` is the per-run fact naming which
+    GT attribute carries the trait's positive-class axis,
+    threaded by the caller, never hardcoded here (a hardcoded attribute name would pin this
+    producer to one trait). ``bbox`` is the matched instance's own GT geometry, carried through
+    so ``resolve_classifier_operating_point``'s content-overlap check has real per-instance
+    content to hash (a placeholder box would collapse every item of the same class to one
+    identical hash, defeating that check entirely; see its own docstring). An unmatched GT or
+    prediction (the detector itself missed or hallucinated an object) is not a classification-call
+    disagreement and is excluded, this calibrates the classifier's call, not the detector's, the
+    same separation the platform's own detect-then-classify decomposition makes elsewhere.
 
-    The match criterion (kind + tolerance/iou_threshold) is resolved ONCE across the whole split
-    via ``evaluation.resolve_match_criterion`` (K18 B3) — the same resolver every other
-    localization consumer goes through, never a second independent computation — built from the
-    SAME subject-scoped GT the matching itself uses, so an unrelated subject's typical size can't
-    skew it either, and never re-derived per image (stage-6 review Finding A/N5).
+    The match criterion (kind + tolerance/iou_threshold) is resolved once across the whole split
+    via ``evaluation.resolve_match_criterion``, the same resolver every other localization
+    consumer goes through, never a second independent computation, built from the same
+    subject-scoped GT the matching itself uses, so an unrelated subject's typical size can't skew
+    it either, and never re-derived per image.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import BBox
@@ -310,7 +309,7 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
         ):
             gt_value = gt_a.attributes.get(attribute) if gt_a.attributes else None
             if gt_value is None:
-                # Never assessed for `attribute` yet -- a soft, expected gap (stage-6 review N1),
+                # Never assessed for `attribute` yet -- a soft, expected gap,
                 # not a confirmed negative. Coercing an unassessed instance into "not positive"
                 # fabricates a disagreement against a perfect classifier -- the exact
                 # unlabeled-vs-undecodable distinction json_io.UNLABELED exists for elsewhere in
@@ -339,35 +338,32 @@ def calibrate_classifier_operating_point(
     output_dir: str,
     experiment_id: str | None = None,
 ) -> dict:
-    """Calibrate and validate the trait's positive-class classifier against held-out GT (K3).
+    """Calibrate and validate the trait's positive-class classifier against held-out GT.
 
     Builds classification calibration/holdout items by matching each split's GT against its
     predictions via the trait's own localization criterion (``_classification_items``), runs the
-    same-rigor classification-mode gate (``operating_point.resolve_classifier_operating_point`` —
+    same-rigor classification-mode gate (``operating_point.resolve_classifier_operating_point``,
     disjointness, train-disjointness, content-duplication, count-bias, and a derived
     compensating-error floor, mirroring the detector calibration path), and stamps the result into
-    ``<output_dir>/classifier_operating_point.json`` — a file distinct from the count operating
-    point's own sidecar, never conflatable with it. This is the producer TRAP 2 requires: without
-    it, a classifier-validated stamp can never be earned on disk, and the gate floors every caller
-    to unvalidated forever.
+    ``<output_dir>/classifier_operating_point.json``, a file distinct from the count operating
+    point's own sidecar, never conflatable with it. Without this producer, a classifier-validated
+    stamp can never be earned on disk, and the gate floors every caller to unvalidated forever.
 
     Args:
         trait_name: The registered trait whose positive class is being calibrated.
-        subject: The GT annotation subject naming this trait's object type (e.g. ``"catkin"``) —
-            a per-run fact the caller supplies, per Zack's decision that the (subject, attribute)
-            axis threads from the run's own config, never from ``TraitSpec`` (K3/K4/K5: pinning it
-            here would reintroduce the same trait-vocabulary leak K5 fixed at the public surface).
-            Scopes the GT side of matching so an unrelated subject sharing the same labels dir
-            (e.g. an enabling subject like ``bush`` — root CLAUDE.md's "a subject is not a trait")
-            can't enter the match pool (stage-6 review NEW-5).
-        attribute: The GT annotation attribute carrying this trait's positive-class axis (e.g.
-            ``"elongation"`` for catkin) — a per-run fact the caller supplies, same rationale as
-            ``subject`` above.
+        subject: The GT annotation subject naming this trait's object type, a per-run fact the
+            caller supplies, per Zack's decision that the (subject, attribute)
+            axis threads from the run's own config, never from ``TraitSpec`` (pinning it here would
+            reintroduce a trait-vocabulary leak at the public surface). Scopes the GT side of
+            matching so an unrelated subject sharing the same labels dir (e.g. an enabling subject
+            like ``bush``, root CLAUDE.md's "a subject is not a trait") can't enter the match pool.
+        attribute: The GT annotation attribute carrying this trait's positive-class axis, a
+            per-run fact the caller supplies, same rationale as ``subject`` above.
         calibration_gt_dir / calibration_pred_dir: Paired per-image JSON dirs for the calibration
             split (same stems).
         holdout_gt_dir / holdout_pred_dir: Paired per-image JSON dirs for the disjoint held-out split.
         output_dir: Where to write ``classifier_operating_point.json``.
-        experiment_id: The classifier checkpoint's training-run id, if known — gates train-
+        experiment_id: The classifier checkpoint's training-run id, if known, gates train-
             disjointness the same way the detector calibration path does. ``None`` (a foreign/
             unregistered checkpoint) skips that check rather than failing closed.
     """
@@ -429,48 +425,50 @@ def compute_phenology(
     """Per-plant phenology milestones from classified predictions + a plant mapping.
 
     A phenology milestone is a crossing of the **fraction of a plant's detected objects that are in
-    the trait's positive/measured state** — an expert-defined morphological stage emitted by a
+    the trait's positive/measured state**, an expert-defined morphological stage emitted by a
     *validated* classifier (the trait's positive class), never a geometric proxy such as bounding-box
-    height. For the Phase-1 catkin trait the positive state is ``elongated`` and this reports:
+    height. For a registered trait whose positive state is, say, ``<majority_label>`` this reports:
 
-        catkin_elongation_date   date most catkins have elongated (crops.yml) = the 95% crossing
-                                 (provisional reading, pending breeder confirmation)
-        catkin_05/50/95per_date  dates the elongated fraction crosses 5/50/95%
+        <phenology_prefix>_<majority_label>_date   date most objects reached that state
+                                 (crops.yml) = the 95% crossing (provisional reading, pending
+                                 breeder confirmation)
+        <phenology_prefix>_05/50/95per_date  dates the positive-state fraction crosses 5/50/95%
 
-    Column names and crossing fractions come from ``trait``'s ``TraitSpec`` — a different registered
-    trait yields its own prefixed columns without a code change (K4/K5's generalization).
+    Column names and crossing fractions come from ``trait``'s ``TraitSpec``, a different registered
+    trait yields its own prefixed columns without a code change.
 
     Args:
-        trait: A registered trait name (``registered_traits()``) — required, no default. The
+        trait: A registered trait name (``registered_traits()``), required, no default. The
             positive class id is resolved from the prediction buckets' own recorded ``id_map`` by
             this trait's ``positive_class_name`` (a mapping fact read from the labels the run
             actually decoded through, never a pinned default or a separate registry re-derivation
             that could disagree with it).
         mapping_path: Path to a persisted plant-mapping JSON (``{date: [assignment, ...]}``
-            with ``stem`` / ``plot_name`` / ``accession_name`` per assignment) — produced by
+            with ``stem`` / ``plot_name`` / ``accession_name`` per assignment), produced by
             the web plant-mapping step or ``build_plant_mapping``.
-        predictions_by_date: ``{date: predictions_dir}`` — each dir holds per-image COCO/JSON
+        predictions_by_date: ``{date: predictions_dir}``, each dir holds per-image COCO/JSON
             prediction files (``<stem>.json``) from the state classifier.
-        output_csv_path: Where to write the delivered per-plant CSV (e.g. ``catkin_phenology.csv``).
+        output_csv_path: Where to write the delivered per-plant CSV (e.g.
+            ``<phenology_prefix>_phenology.csv``).
         classifier_pred_dirs: Bucket(s) carrying the trait's classifier-validity stamp
             (``classifier_operating_point.json``, written by ``calibrate_classifier_operating_point``)
-            — reconciled from disk, never trusted from a caller-asserted string (TRAP 2). ``None``
+, reconciled from disk, never trusted from a caller-asserted string. ``None``
             or a bucket with no such stamp floors the classifier dimension to unvalidated.
         operating_point_conf: The count operating point (conf) the predictions were produced
-            at — stamped into the CSV; the on-disk sidecar value is preferred when present.
+            at, stamped into the CSV; the on-disk sidecar value is preferred when present.
         operating_point_validated: An optional caller assertion of the count operating point's
             validity. It only *lowers* the result: the real state is read from each bucket's
             ``operating_point.json`` and floored against this (a missing/unvalidated sidecar
             floors the curve to ``false``). Must reconcile to a reference
             ``accepted_references("annotations")`` recognizes to deliver unacknowledged.
-        acknowledge_unvalidated: Override the gate — write the CSV even when the classifier or
+        acknowledge_unvalidated: Override the gate, write the CSV even when the classifier or
             operating point is unvalidated, stamping the un-validated dimension as ``false`` so
             the un-trustworthiness travels with the delivery.
 
-    Returns a summary. **Measurement-integrity guard:** if no bucket, anywhere in the delivery, ever
+    Returns a summary. Measurement-integrity guard: if no bucket, anywhere in the delivery, ever
     classified along the trait's positive-class axis, the positive fraction is not a valid measurement
-    anywhere — the tool refuses to write the CSV and returns ``error`` with
-    ``elongation_classified: false``. Rows for a plant with a partially-unclassified or partially-
+    anywhere, the tool refuses to write the CSV and returns ``error`` with
+    ``positive_class_assessed: false``. Rows for a plant with a partially-unclassified or partially-
     missing date still ship (with the gap disclosed via ``n_dates_unclassified``/
     ``n_dates_missing_images``) but carry no fabricated milestone dates for that plant (see
     CLAUDE.md's measurement-integrity invariant).
@@ -504,21 +502,21 @@ def compute_phenology(
     )
     rows = result["rows"]
 
-    if not result["elongation_classified"]:
+    if not result["positive_class_assessed"]:
         return {
             "error": (
-                f"predictions carry no {pos} class anywhere in this delivery — the classifier that "
+                f"predictions carry no {pos} class anywhere in this delivery, the classifier that "
                 f"produced them never assessed this trait's positive class. "
-                f"The {pos} fraction is not a valid measurement — run and validate "
+                f"The {pos} fraction is not a valid measurement, run and validate "
                 f"the {pos}-state classifier before computing phenology."
             ),
-            "elongation_classified": False,
+            "positive_class_assessed": False,
             "n_plants": len(rows),
         }
 
     # Measurement-integrity gate (the numerator's validity): the phenotype rests on the
-    # elongated/dormant call being right, so a delivery requires a classifier validated against
-    # held-out GT — presence of the class is not enough. Refuse unless explicitly acknowledged,
+    # classifier's positive/negative state call being right, so a delivery requires a classifier validated against
+    # held-out GT, presence of the class is not enough. Refuse unless explicitly acknowledged,
     # and in that case stamp the CSV validated=false so the un-trustworthiness travels downstream.
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity,
@@ -528,33 +526,33 @@ def compute_phenology(
     )
 
     # The count operating point's validity is read from each prediction bucket's operating_point.json
-    # (stamped by export_predictions), floored against any caller assertion — never trusted from the
-    # caller's string alone (T5-3). A missing/unvalidated sidecar floors the whole curve to false.
+    # (stamped by export_predictions), floored against any caller assertion, never trusted from the
+    # caller's string alone. A missing/unvalidated sidecar floors the whole curve to false.
     recon = reconcile_operating_point_validity(
         list(predictions_by_date.values()), asserted=operating_point_validated)
     op_state = recon["validated"]
     if operating_point_conf is None and recon["conf"] is not None:
         operating_point_conf = recon["conf"]  # prefer the on-disk conf over a caller string
 
-    # The classifier's validity is read the same way, from classifier_operating_point.json — never a
-    # caller-asserted string (K3/TRAP 2). No producer stamp anywhere -> floors to unvalidated, same as
+    # The classifier's validity is read the same way, from classifier_operating_point.json, never a
+    # caller-asserted string. No producer stamp anywhere -> floors to unvalidated, same as
     # the count dimension with no on-disk backing.
     classifier_recon = reconcile_classifier_validity(classifier_pred_dirs or [])
     classifier_state = classifier_recon["validated"]
 
-    # Bind the classifier stamp to THIS delivery (stage-6 review N3): unlike the count dimension
-    # (which reconciles from the SAME predictions_by_date buckets it delivers), classifier_pred_dirs
-    # is a separate, caller-supplied list — reconcile_classifier_validity alone can't see whether a
+    # Bind the classifier stamp to this delivery: unlike the count dimension (which reconciles from
+    # the same predictions_by_date buckets it delivers), classifier_pred_dirs is a separate,
+    # caller-supplied list, reconcile_classifier_validity alone can't see whether a
     # genuinely-validated stamp was calibrated for an unrelated model or trait. A sidecar's own
     # recorded `trait`/`experiment_id` (written by calibrate_classifier_operating_point) must agree
     # with what's actually being delivered here; a foreign/unregistered checkpoint calibration
-    # (experiment_id=None, the K3 owner decision) is not rejected for lacking one to compare against.
+    # (experiment_id=None) is deliberately not rejected for lacking one to compare against.
     classifier_state, classifier_binding_note = bind_classifier_validity(
         classifier_state, classifier_pred_dirs, list(predictions_by_date.values()), trait=trait,
     )
 
-    # A delivered phenotype needs BOTH the classifier and the count operating point validated against a
-    # reference sized to the trait — the one shared refuse-or-stamp gate, or an explicit acknowledge.
+    # A delivered phenotype needs both the classifier and the count operating point validated against a
+    # reference sized to the trait, the one shared refuse-or-stamp gate, or an explicit acknowledge.
     gate = check_delivery_gate(
         {"classifier": classifier_state, "operating_point": op_state},
         acknowledge_unvalidated=acknowledge_unvalidated,
@@ -567,14 +565,14 @@ def compute_phenology(
                           f"{recon['unvalidated_buckets']}).")
         if classifier_recon["missing_sidecars"]:
             floor_note += (f" No classifier_operating_point.json found in "
-                           f"{classifier_recon['missing_sidecars']} — calibrate the classifier via "
+                           f"{classifier_recon['missing_sidecars']}, calibrate the classifier via "
                            "calibrate_classifier_operating_point before delivering.")
         if classifier_binding_note:
             floor_note += f" {classifier_binding_note}"
         return {
             "error": (
-                "a delivered bloom phenotype requires BOTH a validated elongation classifier "
-                f"(reconciled from classifier_operating_point.json = {classifier_state!r}) AND a "
+                "a delivered phenotype requires both a validated positive-state classifier "
+                f"(reconciled from classifier_operating_point.json = {classifier_state!r}) and a "
                 f"validated count operating point (reconciled from operating_point.json = "
                 f"{op_state!r})." + floor_note
                 + " Validate both (calibrate_classifier_operating_point for the classifier; a "
@@ -602,16 +600,16 @@ def compute_phenology(
         "producer_model_sha256": producer.get("sha256"),
         "producer_experiment_id": producer.get("experiment_id"),
     }
-    # Only when the spec names a majority crossing — the marker qualifies that alias, and
+    # Only when the spec names a majority crossing, the marker qualifies that alias, and
     # phenology_csv_columns declares the column under the same condition, so stamping it for a trait
     # without one would raise on an unknown stamp key rather than ship a permanently-blank column.
     if spec.majority_milestone:
         stamp[f"{spec.phenology_prefix}_{spec.majority_label}_provisional"] = (
             "true" if spec.majority_provisional else "false")
     csv_path = phenology.write_phenology_csv(rows, Path(output_csv_path), spec, stamp=stamp)
-    # Per-milestone summary (TRAP 3 fix, K5): report reached-counts for each milestone the SPEC
-    # actually declares, not a single hardcoded "50per" key — a trait authored with different
-    # milestone fractions has no fabricated zero for a crossing it was never asked to report.
+    # Per-milestone summary: report reached-counts for each milestone the spec actually declares,
+    # not a single hardcoded "50per" key, a trait authored with different milestone fractions has
+    # no fabricated zero for a crossing it was never asked to report.
     n_reached: dict[str, int] = {}
     for key in phenology._milestone_targets(spec):
         col = f"{spec.phenology_prefix}_{key}_date"
@@ -620,7 +618,7 @@ def compute_phenology(
         "csv_path": csv_path,
         "n_plants": len(rows),
         "n_plants_reached_milestone": n_reached,
-        "elongation_classified": True,
+        "positive_class_assessed": True,
         "positive_state_classifier_validated": stamp["positive_state_classifier_validated"],
         "operating_point_validated": stamp["operating_point_validated"],
         "columns": phenology.phenology_csv_columns(spec),
