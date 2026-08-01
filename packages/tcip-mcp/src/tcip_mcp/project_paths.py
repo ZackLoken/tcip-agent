@@ -1,7 +1,7 @@
 """Stable resolution of the platform state root, independent of a process's cwd.
 
-Durable *platform* state — the ``@audited`` log, the experiment store, and the model
-registry — anchors here so a whole project is self-contained under one ``<root>/.tcip/``.
+Durable *platform* state, the ``@audited`` log, the experiment store, and the model
+registry, anchors here so a whole project is self-contained under one ``<root>/.tcip/``.
 
 Resolution order (``project_root`` / ``resolve_state``, evaluated at use time):
   1. ``$TCIP_PROJECT_ROOT`` if set. Servers pin it to the repo root at startup
@@ -9,7 +9,7 @@ Resolution order (``project_root`` / ``resolve_state``, evaluated at use time):
      record (the audit once found a stray ``frontend/.tcip/`` from exactly this). Adopting a
      project (``set_active_project``) then *repins* it to ``<workspace>/<project>``, so the
      audit log, experiments, and registry all land under that project.
-  2. otherwise the current working directory — the historical default, so nothing changes
+  2. otherwise the current working directory, the historical default, so nothing changes
      for tests or an un-pinned run.
 
 The repin is an explicit action, not a passive marker read, so an in-flight training run
@@ -37,7 +37,7 @@ def project_root() -> Path:
 
 
 def resolve_state(path: Path) -> Path:
-    """Resolve a platform-state path against the pinned root, at USE time.
+    """Resolve a platform-state path against the pinned root, at use time.
 
     - An already-absolute ``path`` is returned unchanged (e.g. a test that rebinds
       ``AUDIT_PATH``/``EXPERIMENTS_DIR`` to a tmp dir).
@@ -53,7 +53,7 @@ def resolve_state(path: Path) -> Path:
 
 
 def repo_root_from_here() -> Path:
-    """The repo root inferred from this file's location — the nearest ancestor holding
+    """The repo root inferred from this file's location: the nearest ancestor holding
     ``.mcp.json``, checked across every ancestor before falling back to the nearest one holding
     ``CLAUDE.md``. Stable regardless of cwd; used to *pin* the env var.
 
@@ -76,7 +76,7 @@ def pin_project_root() -> Path:
     """Pin ``$TCIP_PROJECT_ROOT`` to the repo root (if not already set) and log it once.
 
     Call at the top of a long-running entry point (MCP server, web backend) *before* the
-    audit/experiment modules resolve their paths, so all of them — and any child process —
+    audit/experiment modules resolve their paths, so all of them, and any child process,
     agree on one ``.tcip/`` even if the launch cwd differs. This is the pre-adoption root;
     ``set_active_project`` repins it to the adopted project. ``setdefault`` so it never
     stomps a root a caller (or an earlier adoption) already chose.
