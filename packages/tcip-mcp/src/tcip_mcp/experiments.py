@@ -38,8 +38,19 @@ def _exp_dir(experiment_id: str) -> Path:
 
 # Once a run reaches a terminal state its record is immutable (experiments are immutable). The lock
 # is additive-only (D6): populated fields freeze, but a still-empty field may take its first write —
-# so the post-completion predictions link + model registration still land.
+# so the post-completion predictions link + model registration still land. Deliberately excludes
+# "cancelled" — a cancelled run's record stays reopenable (e.g. resumed via resume_from), so it
+# must not be lock-frozen the way a genuinely finished run is.
 _TERMINAL_STATES = {"completed", "failed"}
+
+# A DIFFERENT concept sharing similar vocabulary (K24) — states reconstruct_run_status trusts as
+# already-decided and never re-derives from heartbeat freshness. Unlike _TERMINAL_STATES above,
+# this DOES include "cancelled": a gracefully cancelled run recorded its own final state honestly
+# (model_final.pt was written, cancel_training's own documented contract), and re-deriving it from
+# heartbeat staleness would misreport it as "running" then permanently as "interrupted" — implying
+# a crash that never happened. Named separately rather than reusing _TERMINAL_STATES so the two
+# purposes (mutation-lock vs. heartbeat-reconstruction) can never silently drift onto each other.
+_RECORDED_AS_DONE = {"completed", "failed", "cancelled"}
 
 
 def _current_state(exp_dir: Path) -> str | None:
@@ -144,8 +155,13 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
     return {"experiment_id": experiment_id, "overwritten": True}
 
 
-def update_status(experiment_id: str, state: str) -> dict[str, Any]:
-    """Update experiment state (created → running → completed | failed)."""
+def update_status(experiment_id: str, state: str, *, error: str | None = None) -> dict[str, Any]:
+    """Update experiment state (created → running → completed | failed).
+
+    ``error`` (K24) records a specific failure reason (e.g. a wall-clock-timeout kill) into
+    ``status.json["error"]`` — omitted/``None`` never clears a previously-recorded error, only an
+    explicit new value overwrites it.
+    """
     d = _exp_dir(experiment_id)
     if not d.exists():
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -160,6 +176,8 @@ def update_status(experiment_id: str, state: str) -> dict[str, Any]:
             return {"error": f"Experiment {experiment_id} is {current} (terminal); refusing to "
                              f"re-open to {state!r}.", "state": current}
         status["state"] = state
+        if error is not None:
+            status["error"] = error
 
         now = datetime.now(timezone.utc).isoformat()
         status["heartbeat"] = now  # liveness stamp: a fresh heartbeat means a live process
@@ -170,6 +188,140 @@ def update_status(experiment_id: str, state: str) -> dict[str, Any]:
 
         atomic_write_json(status_path, status)
     return {"experiment_id": experiment_id, "state": state}
+
+
+def stamp_run_identity(experiment_id: str, run_id: str, output_dir: str) -> None:
+    """Record which ``run_id``/``output_dir`` produced this experiment (K24), into ``status.json``.
+
+    Best-effort, like ``_touch_heartbeat`` — a dropped stamp must not break the launch it's
+    recording. Called unconditionally by ``_ensure_experiment`` regardless of which of its three
+    branches resolved ``experiment_id`` (fresh creation, pristine pre-created-experiment reuse, or a
+    K12 fresh-id conflict) — those are the only paths that mint a real, running experiment, and this
+    is what makes the real artifact directory (``output_dir``, a separately-computed, caller-influenced
+    path that only coincides with the experiment directory by convention) discoverable from
+    ``experiment_id``/``run_id`` alone by a different process.
+    """
+    d = _exp_dir(experiment_id)
+    status_path = d / "status.json"
+    if not status_path.is_file():
+        return
+    try:
+        with file_transaction(status_path):
+            status = json.loads(status_path.read_text())
+            status["run_id"] = run_id
+            status["output_dir"] = output_dir
+            atomic_write_json(status_path, status)
+    except Exception:
+        logger.warning("stamp_run_identity failed for %s/%s", experiment_id, run_id, exc_info=True)
+
+
+def resolve_experiment_dir_for_run(run_id: str) -> Path | None:
+    """Find the experiment directory for ``run_id`` without assuming ``experiment_id == run_id``.
+
+    Tries the exact match first (the common case, ``experiment_id == run_id``). Then the K12
+    fresh-id relaunch format (``f"{experiment_id}_{run_id}"``, always suffixed ``_<run_id>``) via a
+    glob. Neither naming convention covers a *custom-named* experiment (an agent/breeder
+    pre-created it via the standalone ``create_experiment`` tool, e.g. ``"exp-001-hazelnut-catkin-
+    det"``, before any ``run_id`` existed, then launched training against it later — a real, tested
+    workflow, not theoretical: ``_ensure_experiment``'s pristine-reuse branch) — its directory name
+    bears no naming relationship to ``run_id`` at all. For that case, falls back to scanning every
+    experiment directory's own stamped ``status.json["run_id"]`` (the authoritative fact
+    ``stamp_run_identity`` records, not a naming guess) — a full scan, but reached only once both
+    naming shortcuts miss, and it's also what disambiguates the (negligible-probability, per
+    ``run_id``'s own timestamp+uuid entropy) case of more than one glob match, rather than refusing
+    a resolvable run just because the fast path was ambiguous. Returns ``None`` only when no
+    directory's stamped identity matches at all — the caller (``cancel_run``'s disk fallback,
+    ``reconstruct_run_status``) must then refuse honestly rather than act against an unverified path.
+    """
+    root = experiments_dir()
+    exact = root / run_id
+    if exact.is_dir():
+        return exact
+    if not root.is_dir():
+        return None
+    matches = [p for p in root.glob(f"*_{run_id}") if p.is_dir()]
+    if len(matches) == 1:
+        return matches[0]
+
+    for d in sorted(root.iterdir()):
+        if not d.is_dir():
+            continue
+        status_path = d / "status.json"
+        if not status_path.is_file():
+            continue
+        try:
+            status = json.loads(status_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if status.get("run_id") == run_id:
+            return d
+    return None
+
+
+def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict[str, Any] | None:
+    """Reconstruct a run's status from disk (K24) for a caller whose in-memory registry doesn't
+    have it — either it was never in this process (a different process launched it) or it was
+    subprocess-delegated and the in-memory record is stale by design.
+
+    Returns ``None`` when the run can't be resolved on disk at all (an honestly unknown run, not a
+    guess). ``current_epoch`` comes from the last ``metrics.jsonl`` row when present; ``best_metric``
+    is left ``None`` — a running best isn't recoverable from the metrics log alone without
+    re-deriving the selection policy, and a fabricated approximation would be worse than an honest
+    gap (matches the pre-existing convention this function replaces, which also reported ``None``).
+    ``stale_seconds`` lets a caller (``routes/training.py``) keep its own configurable heartbeat
+    window rather than being pinned to this module's default.
+    """
+    d = resolve_experiment_dir_for_run(run_id)
+    if d is None:
+        return None
+    status_path = d / "status.json"
+    if not status_path.is_file():
+        return None
+    try:
+        status = json.loads(status_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    state = status.get("state", "unknown")
+    heartbeat = status.get("heartbeat")
+    if state not in _RECORDED_AS_DONE:
+        state = "running" if _heartbeat_fresh(heartbeat, stale_seconds) else "interrupted"
+
+    current_epoch = None
+    metrics_path = d / "metrics.jsonl"
+    if metrics_path.is_file():
+        try:
+            lines = [ln for ln in metrics_path.read_text().splitlines() if ln.strip()]
+            if lines:
+                current_epoch = json.loads(lines[-1]).get("epoch")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return {
+        "run_id": status.get("run_id", d.name),
+        "experiment_id": d.name,
+        "status": state,
+        "current_epoch": current_epoch,
+        "best_metric": None,
+        "output_dir": status.get("output_dir"),
+        "error": status.get("error"),
+    }
+
+
+def _heartbeat_fresh(hb_iso: str | None, stale_seconds: float = 600.0) -> bool:
+    """True if ``hb_iso`` (ISO-8601) is within the staleness window — a process is still actively
+    updating this run. Missing/unparseable → not fresh (treat as dead). Mirrors
+    ``routes/training.py``'s own threshold; kept independent since this module has no FastAPI/env
+    dependency and the two consumers (web route, MCP tool) can reasonably differ in the future."""
+    if not hb_iso:
+        return False
+    try:
+        hb = datetime.fromisoformat(hb_iso)
+    except (ValueError, TypeError):
+        return False
+    if hb.tzinfo is None:
+        hb = hb.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - hb).total_seconds() <= stale_seconds
 
 
 def _touch_heartbeat(exp_dir: Path) -> None:
