@@ -123,7 +123,7 @@ def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_fai
     0.9). Evaluated EXACTLY at 0.9, the false positives are filtered out and the true matches survive
     -> zero bias, clean pass. The old snap's nearest grid point to 0.9 is 0.89 (closer than 0.99) --
     at which the false positives ALSO survive, reading as a +2.0/image overcount that exceeds
-    catkin's count_bias_tolerance=1.0.
+    catkin's count-bias tolerance regardless of the exact value.
     """
     from tcip_mcp.pipelines.training.evaluation import gt_class_avg_size
 
@@ -197,7 +197,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
                          shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9)
 
     strict = TraitSpec(name="catkin", count_objective=COUNT_UNBIASED, count_error_tolerance=0.5,
-                       count_bias_tolerance=5.0, delivers=CATKIN.delivers)
+                       count_bias_tolerance_frac=1.0, delivers=CATKIN.delivers)
     monkeypatch.setattr(OP, "get_trait", lambda name: strict)
     b_strict = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                        holdout_records=hold, staged_conf_floor=0.01)
@@ -252,7 +252,7 @@ def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degene
     assert "count_bias_exceeds_tolerance" in sweep["failures"]
 
 
-def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_refuses_it():
+def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_refuses_it(monkeypatch):
     """Fix C item 5 / Fix H seam: padding a reference with zero-verdict, unadjudicated records must
     not make its own statistics EASIER to pass by silently diluting the variance denominator — the
     exact hole this seam exists to close, wired here with a synthetic predicate standing in for Fix
@@ -266,7 +266,21 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     quantity being measured, per ``resolve_operating_point``'s own docstring): the padding is never
     dropped before the statistics are computed (``n_images`` stays 10, the full unfiltered set), but
     the reference is refused outright because the coverage requirement itself failed.
+
+    K4 residual (2026-07-31): this fixture's own GT is sparse (typical count 1.5/image), so at the
+    new default 1% relative tolerance the derived tolerance (~0.1, floor-dominated) is tighter than
+    the diluted SE even before the coverage predicate is involved — a real, unrelated tightening this
+    test doesn't exist to demonstrate. Loosen the trait's fraction for this test only (mirrors
+    ``test_dispersion_gate_skipped_when_unauthored_gates_when_authored``'s own pattern) so the
+    dilution mechanism under test is isolated from that unrelated magnitude effect.
     """
+    import dataclasses
+
+    import tcip_mcp.pipelines.operating_point as OP
+
+    monkeypatch.setattr(OP, "get_trait", lambda name: dataclasses.replace(
+        CATKIN, count_bias_tolerance_frac=1.0))
+
     hold_real = _records("h", shift=3.0)  # n=2, real per-image variance ([+1, -1])
     padding = [{"width": 400, "height": 400, "image_id": f"h_pad_{i}", "gt": [], "dt": [],
                "padded": True} for i in range(8)]
@@ -404,8 +418,11 @@ def test_passed_holdout_is_exactly_the_absence_of_named_failures():
 # Verified empirically against the ACTUAL code (with the fixes in this cluster applied, not assumed):
 # at n=40 images / 100 objects/image this reaches count_bias_std ~= 2.03 and count_error_p90 = 4.0
 # (recall/precision ~0.97) — in the ballpark of the stage-6 reviewers' cited ~1.6-1.7 std at n=40 for
-# a ~97%+ recall detector against catkin's count_bias_tolerance=1.0 — and correctly reaches
-# VALIDATED_HELD_OUT. The IDENTICAL per-image pattern at n=10 (fewer images, nothing else different)
+# a ~97%+ recall detector against catkin's count-bias tolerance of 1.0 (K4 residual, 2026-07-31: now
+# the DERIVED value at this reference's density — count_bias_tolerance_frac's 0.01 default times this
+# fixture's 100-objects/image typical count is exactly 1.0, matching D12's old absolute default at
+# this density by the new default's own design) — and correctly reaches VALIDATED_HELD_OUT. The
+# IDENTICAL per-image pattern at n=10 (fewer images, nothing else different)
 # is correctly REFUSED: the SE term grows enough that the equivalence criterion no longer clears the
 # tolerance. Reference size is a real constraint the gate imposes on a genuinely noisy detector, not
 # a formality — this is the accepted, known consequence of closing the vacuous-gate defect, not
@@ -434,8 +451,10 @@ def test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at
     hold = dense_records(n_images=n, objects_per_image=obj, id_prefix="h", shift=5.0,
                          miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
 
+    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, staged_conf_floor=0.01)
+                                holdout_records=hold, tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
     hb = conf.sweep["holdout_bias"]
     assert hb["count_bias_mean"] == pytest.approx(0.0)
@@ -470,6 +489,42 @@ def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equival
     assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]
 
 
+def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_admit_refuse():
+    """K4 residual (2026-07-31), stage-6 review Finding F5: the tests above vary IMAGE COUNT at a
+    fixed density (100 objects/image); this fixes n=40 (already proven sufficient above) and varies
+    DENSITY instead — the axis the new relative tolerance actually introduces. The IDENTICAL
+    per-image noise pattern (mean bias exactly 0.0, std ~2.0255, unaffected by density) is refused at
+    30 objects/image (tolerance 0.30, comfortably under the ~0.527 the equivalence test needs) and
+    admitted at 100 (tolerance 1.00) — the true crossover (round-2 review's own independent
+    derivation) is ~52.68 objects/image, so both chosen densities sit with real margin (43% below,
+    90% above), not on a fragile boundary.
+    Not a defect — the explicit, disclosed consequence of "relative, not absolute": a trait whose
+    real density sits below where this default's tolerance would exceed its own noise floor needs a
+    domain-authored (larger) fraction or more holdout images, not a platform-picked one.
+    """
+    n = 40
+    miss, fp = _rotating_noise_pattern(n)
+
+    def _run(obj):
+        cal = dense_records(n_images=n, objects_per_image=obj, id_prefix="c",
+                            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
+        hold = dense_records(n_images=n, objects_per_image=obj, id_prefix="h", shift=5.0,
+                             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
+        return resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                       holdout_records=hold, staged_conf_floor=0.01)
+
+    sparse = _run(30)
+    dense = _run(100)
+    # Same noise, same n, same mean/std -- density is the only thing that differs.
+    assert sparse.get("conf").sweep["holdout_bias"]["count_bias_std"] == pytest.approx(
+        dense.get("conf").sweep["holdout_bias"]["count_bias_std"])
+    assert sparse.get("conf").sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)
+    assert sparse.get("conf").validated_against == "false"
+    assert "count_bias_exceeds_tolerance" in sparse.get("conf").sweep["failures"]
+    assert dense.get("conf").validated_against == "held_out_annotations"
+    assert dense.get("conf").sweep["failures"] == []
+
+
 # ── Mandatory end-to-end integration fixture ────────────────────────────────
 
 def test_integration_dense_realistic_reference_reaches_held_out_validation():
@@ -497,8 +552,10 @@ def test_integration_dense_realistic_reference_reaches_held_out_validation():
     hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
                          shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
 
+    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, staged_conf_floor=0.01)
+                                holdout_records=hold, tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
