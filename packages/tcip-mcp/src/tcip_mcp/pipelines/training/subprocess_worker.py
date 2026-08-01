@@ -49,6 +49,79 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict) -> Non
         logger.warning("tiling geometry patch-back failed for %s", experiment_id, exc_info=True)
 
 
+def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute: str | None,
+                                    id_map: dict) -> None:
+    """Best-effort: patch this run's resolved name->id map (K25/K13.5-2c) into the durable
+    experiment record's own ``config.json`` — a small merge, not a rewrite, the same shape
+    :func:`_patch_experiment_config_tiling` already uses for CV2's tile geometry. Called from
+    ``run()`` right after the dataset is built (mirroring where the tiling patch fires), though
+    unlike tile geometry this fact is a pure function of ``data_cfg`` and would be resolvable
+    before the build too — the call site is chosen for symmetry with the tiling patch, not because
+    the dataset build is a precondition for it. Never sinks the run if the experiment directory
+    doesn't exist."""
+    try:
+        from tcip_mcp.experiments import experiments_dir
+        from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction
+
+        exp_config_path = experiments_dir() / experiment_id / "config.json"
+        if not exp_config_path.is_file():
+            return
+        with file_transaction(exp_config_path):
+            cfg = json.loads(exp_config_path.read_text())
+            data_cfg = cfg.setdefault("data", {})
+            data_cfg["subject"] = subject
+            data_cfg["attribute"] = attribute
+            data_cfg["id_map"] = dict(id_map)
+            atomic_write_json(exp_config_path, cfg)
+    except Exception:
+        logger.warning("class-id-map patch-back failed for %s", experiment_id, exc_info=True)
+
+
+def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dict] | None:
+    """This run's resolved name->id map (K25/K13.5-2c), or ``None`` when there is nothing to
+    record. Returns ``(subject, attribute, id_map)``.
+
+    Resolved INDEPENDENTLY of the built dataset object's own attributes (stage-6 review round 1:
+    ``DetectionDataset`` only self-populates ``.id_map`` on its own direct-json build path; the
+    COCO-assembled ``auto_val`` default and ``TiledDetectionDataset`` both build through a
+    different internal path and expose neither ``.id_map`` nor ``.subject`` at all, so a
+    ``getattr``-off-the-dataset read was silently a no-op on the default and every tiled run — the
+    shipped Phase-1 catkin case). ``assign_class_ids`` is a pure function of
+    ``(registry, subject, attribute)`` — "same registry + scope -> identical map, every call"
+    (``class_registry.py``) — so re-resolving it here from ``data_cfg``'s own
+    subject/attribute/labels_dir, the SAME inputs ``_auto_train_val`` already resolved it from
+    internally (``training_tools.py``'s own COCO-assembly branch calls this exact function),
+    reproduces the identical map without depending on which internal dataset shape got built.
+
+    ``None`` when ``task`` isn't detection/instance_seg, no ``subject`` is configured, the run
+    trains from a pre-built COCO source (``coco_json``/``label_format="coco"``) or a bespoke
+    ``dataset_source`` (stage-6 review round 2, N1: neither route's targets are guaranteed to come
+    from THIS ``(labels_dir, subject, attribute)`` triple at all — a COCO file's own category ids
+    can be authored in any order, and a bespoke builder owns its class space entirely — so
+    re-deriving here could stamp a map that is the wrong id space for what the run actually
+    trained on, exactly the class of error class-aware admission exists to prevent; ``build_dataset``
+    itself only calls ``_resolve_registry_id_map`` on the SAME predicate, datasets.py's own
+    ``has_coco``/``dataset_source`` branch), or the one legitimate degraded case
+    ``_resolve_registry_id_map`` itself names (an attribute scope with no ``classes.json`` for this
+    labels dir) — honest: no map recorded, decode falls through to its own live-registry
+    re-derivation, same as before this fix.
+    """
+    if task not in ("detection", "instance_seg") or not data_cfg.get("subject"):
+        return None
+    if data_cfg.get("dataset_source") or data_cfg.get("coco_json") \
+            or (data_cfg.get("label_format") or "").lower() == "coco":
+        return None
+    from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
+
+    subject = data_cfg["subject"]
+    attribute = data_cfg.get("attribute")
+    try:
+        _reg, id_map = _resolve_registry_id_map(data_cfg.get("labels_dir", ""), subject, attribute)
+    except ValueError:
+        return None
+    return (subject, attribute, id_map) if id_map else None
+
+
 def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resume_from: str) -> None:
     """The training body — identical in substance to what ``launch_training`` ran synchronously
     in-process before K24, just executing in this dedicated process instead."""
@@ -74,6 +147,20 @@ def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resu
         transforms = build_augmentation(aug_config)
 
     train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
+
+    # K25/K13.5-2c: stamp this run's resolved name->id map onto config["data"] IN PLACE — data_cfg
+    # is the same dict object, so this lands on the checkpoint (generic_trainer persists run.config
+    # into every checkpoint; GenericPredictor reads it back as predictor.config) as well as the
+    # durable experiment record (_patch_experiment_config_id_map). Decode/record at inference time
+    # (inference_tools.py::run_inference) then prefers THIS recorded map over re-deriving from the
+    # inference dataset's live registry, so a classes.json whose declared attribute-value order
+    # changes between train and inference can't silently mis-decode. See _resolve_run_id_map's own
+    # docstring for why this is resolved independently of train_ds's own attributes.
+    _resolved = _resolve_run_id_map(task, data_cfg)
+    if _resolved is not None:
+        _run_subject, _run_attribute, _run_id_map = _resolved
+        data_cfg["id_map"] = dict(_run_id_map)
+        _patch_experiment_config_id_map(experiment_id, _run_subject, _run_attribute, _run_id_map)
 
     # CV2: resolve the EFFECTIVE tiling geometry (the 224/0.2 defaults used when the tiling dict
     # omitted them, not just caller-pinned values) — only knowable once the dataset is actually
