@@ -34,16 +34,23 @@ SOURCES = ("explicit", "derived", "default")
 VALIDATED_HELD_OUT = "held_out_annotations"          # a disjoint held-out split of this dataset's GT
 VALIDATED_REVIEW_CONFIRMED = "reviewer_confirmed_annotations"  # a breeder-confirmed output sample
 VALIDATED_PHYSICAL_MEASUREMENT = "physical_measurement"  # checked against a known physical dimension
+# K10: a tile scale's own real basis for trust — the checkpoint's own persisted training geometry, or
+# a caller's deliberate stated override (the same two bases run_full_frame_evaluation already accepts
+# on the delivery-gating path; only a fabricated no-basis fallback is untrustworthy).
+VALIDATED_PERSISTED_GEOMETRY = "persisted_training_geometry"
+VALIDATED_EXPLICIT_GEOMETRY = "explicit_caller_stated_geometry"
 VALIDATED_FALSE = "false"
 
 # Which validated_against values legitimately clear validation for which KIND of thing being
-# validated — an annotation-count operating point (conf, a mask-binarize threshold) and a physical
-# scale are checked against fundamentally different references, and neither may satisfy the other's
-# requirement (that cross-satisfaction was a real, closed hole: see resolution.py's own history).
-VALIDATION_KINDS = ("annotations", "physical")
+# validated — an annotation-count operating point (conf, a mask-binarize threshold), a physical
+# scale, and a tile geometry are checked against fundamentally different references, and none may
+# satisfy another's requirement (that cross-satisfaction was a real, closed hole: see resolution.py's
+# own history).
+VALIDATION_KINDS = ("annotations", "physical", "geometry")
 _ACCEPTED_REFERENCES: dict[str, tuple[str, ...]] = {
     "annotations": (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED),
     "physical": (VALIDATED_PHYSICAL_MEASUREMENT,),
+    "geometry": (VALIDATED_PERSISTED_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY),
 }
 
 
@@ -57,7 +64,10 @@ def accepted_references(validation_kind: str) -> tuple[str, ...]:
 # resolved the right kind per-dimension upstream via accepted_references()/is_shippable. Never used
 # to decide whether a SPECIFIC param's reference is the right kind for it — that decision belongs to
 # accepted_references(validation_kind), always.
-VALIDATED_SHIPPABLE = (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT)
+VALIDATED_SHIPPABLE = (
+    VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT,
+    VALIDATED_PERSISTED_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY,
+)
 
 # Shared inference operating-point defaults, referenced by both run_inference and the web route so the
 # same model+images can't give a different count by entry point.
@@ -105,8 +115,7 @@ class ResolvedParam:
     derived_from: str = ""  # human-readable: what artifact/analysis produced it
     requires_validation: bool = False
     validation_kind: str | None = None  # one of VALIDATION_KINDS — required iff requires_validation
-    validated_against: str | None = None  # None | VALIDATED_HELD_OUT | VALIDATED_REVIEW_CONFIRMED |
-                                           # VALIDATED_PHYSICAL_MEASUREMENT | VALIDATED_FALSE
+    validated_against: str | None = None  # None | a member of VALIDATED_SHIPPABLE | VALIDATED_FALSE
     dataset_scoped: bool = False  # True => only valid for the dataset named by dataset_hash
     dataset_hash: str | None = None
     capture_scoped: bool = False  # True => only valid for the single capture named by capture_id
@@ -128,7 +137,7 @@ class ResolvedParam:
                 f"requires_validation=False — a kind with nothing to validate is a contradiction."
             )
         if self.validated_against is not None and self.validated_against not in (
-                VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT, VALIDATED_FALSE):
+                *VALIDATED_SHIPPABLE, VALIDATED_FALSE):
             raise ValueError(f"validated_against invalid: {self.validated_against!r}")
 
     @property
@@ -272,6 +281,47 @@ class ResolvedBundle:
         }
 
 
+def resolve_tile_size_param(
+    tile_size: int | None, *, tiled: bool, tile_size_source: str,
+) -> ResolvedParam:
+    """The ``tile_size`` dimension, gated the same shape ``conf`` already is (K10) — the shared
+    construction site both :func:`raw_operating_point` (here) and
+    :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point` (the calibrated path) call,
+    so the two doors can't drift into disagreeing about when a tile scale is trustworthy.
+
+    Only meaningful when ``tiled``: an untiled run's count never depends on tile_size, so it stays a
+    plain non-gating fact there (mirrors ``in_chans``) — gating it anyway would refuse legitimate
+    untiled work over a dimension that was never operative. When tiled, the value is shippable only
+    when its source names a real basis for trusting the scale: the checkpoint's own persisted
+    training geometry (``"derived"``), or a caller's deliberate explicit override (``"explicit"`` —
+    accepted on the same terms ``run_full_frame_evaluation`` already accepts an explicit value on:
+    not cross-checked against the checkpoint's real training scale, but a stated decision, not a
+    guess). A bare ``"default"`` fallback (no persisted geometry, nothing explicit — the fabricated
+    640) has no basis and floors to unvalidated, closing the asymmetry with the delivery-gating path
+    (``run_full_frame_evaluation``), which already refuses outright for this exact case.
+    """
+    if not tiled:
+        return default("tile_size", None)
+    if tile_size and tile_size_source == "derived":
+        return derived(
+            "tile_size", int(tile_size), derived_from="persisted training tile geometry",
+            requires_validation=True, validation_kind="geometry",
+            validated_against=VALIDATED_PERSISTED_GEOMETRY,
+        )
+    if tile_size and tile_size_source == "explicit":
+        return ResolvedParam(
+            "tile_size", int(tile_size), source="explicit", derived_from="caller override",
+            requires_validation=True, validation_kind="geometry",
+            validated_against=VALIDATED_EXPLICIT_GEOMETRY,
+        )
+    return ResolvedParam(
+        "tile_size", int(tile_size or DEFAULT_TILE_SIZE), source="default",
+        derived_from="no persisted training geometry; fabricated fallback",
+        requires_validation=True, validation_kind="geometry",
+        validated_against=VALIDATED_FALSE,
+    )
+
+
 def raw_operating_point(
     *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
     max_dets: int, tile_size_source: str = "default", tiled_source: str = "default",
@@ -285,19 +335,16 @@ def raw_operating_point(
 
     ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
     geometry, ``explicit`` (caller override), or a ``default`` fallback (CV2) — so a 224-train /
-    640-infer scale mismatch is visible in the provenance rather than silent. ``tiled_source`` is the
-    same vocabulary for the boolean itself (K10 finding 3) — a caller that explicitly chose to tile
-    (or not) stamps ``"explicit"``; a caller who passed nothing gets ``"default"``. Both callers of
-    this function resolve their own bool once (``None`` sentinel -> ``DEFAULT_TILED`` internally)
-    before reaching here, so ``tiled`` itself is always a concrete bool.
+    640-infer scale mismatch is visible in the provenance rather than silent, AND (K10) whether tiled
+    inference's tile_size has a real basis at all: see :func:`resolve_tile_size_param` — a tiled run
+    with no persisted/explicit basis is now a real, gating-firewalled unvalidated dimension, not
+    silently shippable engineering trivia. ``tiled_source`` is the same provenance vocabulary for the
+    boolean itself (K10 finding 3) — a caller that explicitly chose to tile (or not) stamps
+    ``"explicit"``; a caller who passed nothing gets ``"default"``. Both callers of this function
+    resolve their own bool once (``None`` sentinel -> ``DEFAULT_TILED`` internally) before reaching
+    here, so ``tiled`` itself is always a concrete bool.
     """
-    if tiled and tile_size_source == "derived":
-        tile_param = derived("tile_size", tile_size, derived_from="persisted training tile geometry")
-    elif tiled and tile_size_source == "explicit":
-        tile_param = ResolvedParam("tile_size", tile_size, source="explicit",
-                                   derived_from="caller override")
-    else:
-        tile_param = default("tile_size", tile_size if tiled else None)
+    tile_param = resolve_tile_size_param(tile_size, tiled=tiled, tile_size_source=tile_size_source)
     if tiled_source == "explicit":
         tiled_param = ResolvedParam("tiled", tiled, source="explicit", derived_from="caller override")
     else:
