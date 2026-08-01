@@ -253,6 +253,16 @@ longer fragments `.tcip/`.
 - Crop traits are controlled vocabulary in `.github/skills/crops/` — verify there before asserting.
 - Match surrounding code style. (Comment/emphasis style is a global rule — see global `CLAUDE.md`;
   not restated here.)
+- **A comment or docstring exists to help the agent navigating this code in some future session —
+  never to log what changed, never to cite where a fix came from.** Never write `K<n>`, "Fix <letter>",
+  "finding <n>", "stage-6 review", round numbers, or any other refactor-process vocabulary into a
+  comment or docstring — nor a date a decision was made. Both are bookkeeping for the refactor, not a
+  fact about the platform, and read as noise the moment the numbering/date is forgotten (which is
+  immediately, for anyone who didn't live through this refactor). State the actual technical
+  constraint — the invariant, the non-obvious why —
+  with no process pointer attached, or say nothing. That process narration belongs in the commit
+  message and `decisions/`, never in the diff. No all-caps or em dashes in comments (global rule,
+  restated here because it kept recurring).
 
 ## Pointers
 
