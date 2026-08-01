@@ -1,4 +1,4 @@
-"""Data management tools — load datasets, validate quality, split data."""
+"""Data management tools: load datasets, validate quality, split data."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from tcip_mcp.audit import audited
 def _scan_dataset(root: str) -> dict:
     """Scan a directory tree for images and labels.
 
-    Labels are the name-based per-image JSON — one file per image, all subjects — under
+    Labels are the name-based per-image JSON (one file per image, all subjects) under
     ``annotations/<date>/`` (no detect/segment split), or a single assembled dataset-level COCO.
     """
     root_path = Path(root)
@@ -127,7 +127,7 @@ def validate_data_quality(folder_path: str) -> dict:
             if stem not in image_stems:
                 issues.append({"level": "error", "file": label_path, "message": "No matching image"})
 
-    # Format-specific validation — the subjects present, not numeric ids (labels are name-based now).
+    # Format-specific validation: the subjects present, not numeric ids (labels are name-based now).
     subjects: set[str] = set()
 
     if fmt == "json":  # the name-based per-image label file
@@ -189,13 +189,13 @@ def make_splits(
 
     Non-destructive by default: emits ``{train,val,test}.json`` stem manifests plus a stats
     dict. Sibling tiles of one source image are kept in the same split (no tree-/canopy-level
-    leakage), and — when ``stratify_foreground`` is set — splits are balanced by annotation
+    leakage), and, when ``stratify_foreground`` is set, splits are balanced by annotation
     count so dense and sparse sources are proportionally represented.
 
     With ``materialize=True`` it additionally lays out a
     ``{train,val,test}/{images,labels}/`` tree under ``output_path`` (defaulting to
     ``folder_path/splits``), copying (or symlinking, ``copy_files=False``) each stem's image and
-    label — and adds ``output_dir`` / ``structure`` to the return.
+    label, and adds ``output_dir`` / ``structure`` to the return.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -203,10 +203,10 @@ def make_splits(
         val_ratio: Fraction for validation set.
         test_ratio: Fraction for test set.
         seed: Random seed for reproducibility.
-        group_by: Group selector — ``"tile_prefix"`` (strip a trailing
+        group_by: Group selector: ``"tile_prefix"`` (strip a trailing
             ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per image). Ignored when
             ``group_key_map`` is given.
-        group_key_map: An agent-derived ``{stem: group_key}`` map overriding ``group_by`` —
+        group_key_map: An agent-derived ``{stem: group_key}`` map overriding ``group_by``;
             must cover every stem in the dataset. Recorded as ``group_by="explicit_map"`` in
             the result and manifest (the resolved policy, not the raw ``group_by`` string).
         stratify_foreground: Balance splits by foreground annotation count.
@@ -260,8 +260,8 @@ def make_splits(
         seed=seed,
     )
 
-    # Content hash of the labels this split partitions — two runs with the same seed still yield
-    # different splits over different GT, so the hash + seed together identify the partition (R5).
+    # Content hash of the labels this split partitions: two runs with the same seed still yield
+    # different splits over different GT, so the hash + seed together identify the partition.
     dataset_hash = None
     if label_map:
         from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
@@ -353,7 +353,7 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
         return
 
     # Resolve one source dataset's registry (best-effort) to carry a fresh per-image schema stamp
-    # alongside the negatives — without this, a split tree has no classes.json to compare against
+    # alongside the negatives: without this, a split tree has no classes.json to compare against
     # and quarantine can never fire on it (a permanent no-op, not "admit until proven stale").
     digest = None
     src_classes: Path | None = None
