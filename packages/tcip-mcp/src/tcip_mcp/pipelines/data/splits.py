@@ -1,19 +1,19 @@
 """Group-aware, annotation-stratified train/val/test splitting.
 
-Pure standard library — intentionally imports no torch and no ``datasets`` so it
+Pure standard library, intentionally imports no torch and no ``datasets`` so it
 can be used from ``tcip_mcp.tools.data_tools`` (which is in the server's
 always-load group and must stay torch-free).
 
 Ported from the chestnut-burr ``burr_detection/dataset.py`` ``_group_balanced_split``
 with three deliberate deviations needed for the MCP tool / auto-val use:
 
-1. Operates on **stems + an ``annotation_counts`` dict** (not image paths + a
+1. Operates on stems + an ``annotation_counts`` dict (not image paths + a
    labels dir), so callers that already scanned the folder don't re-glob.
-2. **No-foreground fallback** — when ``annotation_counts`` is ``None`` or all
+2. No-foreground fallback: when ``annotation_counts`` is ``None`` or all
    zero, every group is treated as foreground weighted by its tile count, so
    label-less tasks (semantic_seg / classification) can reuse the same code.
    The reference raises; we only raise when ``require_foreground=True``.
-3. **Fraction-gated min-foreground** — the minimum-foreground guarantee is
+3. Fraction-gated min-foreground: the minimum-foreground guarantee is
    applied only to splits whose fraction is > 0, so ``splits=(0.8, 0.2, 0.0)``
    yields a clean two-way split (auto-val needs this).
 
@@ -117,7 +117,7 @@ def group_balanced_split(
 
     Returns
     -------
-    ``{"train": [...], "val": [...], "test": [...]}`` — a partition of ``stems``.
+    ``{"train": [...], "val": [...], "test": [...]}``, a partition of ``stems``.
     """
     if group_key_fn is None:
         group_key_fn = GROUP_KEY_FNS["tile_prefix"]
@@ -227,8 +227,8 @@ def resolve_group_key_fn(
 ) -> Callable[[str], str]:
     """Resolve a grouping policy to a callable, raising loudly rather than silently degrading.
 
-    Replaces every ``GROUP_KEY_FNS.get(group_by, default_group_key)`` call site (K1): an
-    unrecognized ``group_by`` string, or a ``group_key_map`` missing coverage for some of
+    Replaces every ``GROUP_KEY_FNS.get(group_by, default_group_key)`` call site: an unrecognized
+    ``group_by`` string, or a ``group_key_map`` missing coverage for some of
     ``stems``, is a policy error the caller must see immediately, not a silent fallback to the
     tile-prefix default that could mis-group a dataset without anyone noticing.
     """
@@ -269,24 +269,24 @@ def cal_holdout_split(
 
 def cal_holdout_lock_path(identity_hash: str) -> Path:
     """Where a dataset identity's locked cal/holdout split lives (mirrors the operating-point
-    sweep artifact's ``.tcip/artifacts/`` convention — see ``inference_tools.py``)."""
+    sweep artifact's ``.tcip/artifacts/`` convention, see ``inference_tools.py``)."""
     return project_root() / ".tcip" / "artifacts" / f"cal_holdout_split_{identity_hash}.json"
 
 
 def label_image_stems(
     labels_dir: str | Path, images_dir: str | Path | None = None,
 ) -> tuple[list[str], dict[str, "Path | BandGroupRef"]]:
-    """Stems with a readable per-image label file, one scan shared by every caller (K1 finding 4).
+    """Stems with a readable per-image label file, one scan shared by every caller.
 
     ``_calibrate_operating_point`` and ``force_redraw_cal_holdout_split`` each used to run their
     own independent labels/images scan; a caller adding an images_dir got the stronger
     labels-intersect-images stem universe, one that only globbed labels got the weaker (and
-    possibly stale, if an image was deleted/renamed) labels-only universe — the two could disagree
+    possibly stale, if an image was deleted/renamed) labels-only universe, the two could disagree
     on what "the dataset's stems" are. This is the one implementation both call.
 
-    With ``images_dir`` omitted, returns every stem with a label file (``stem_to_image`` empty) —
+    With ``images_dir`` omitted, returns every stem with a label file (``stem_to_image`` empty),
     the label-only universe, for a caller (e.g. a redraw with no images to check) that has no
-    images directory to intersect against. With ``images_dir`` given, only stems that ALSO have a
+    images directory to intersect against. With ``images_dir`` given, only stems that also have a
     matching logical image (a plain file, or a ``.bandgroup``-grouped capture) survive, so a stem
     in the labels dir with no image left (deleted/renamed) never enters the split universe.
     """
@@ -326,38 +326,38 @@ def resolve_locked_cal_holdout_split(
     force_redraw: bool = False,
     timestamp: str | None = None,
 ) -> dict:
-    """Resolve (and lock) the calibration/holdout split for one dataset identity (K1).
+    """Resolve (and lock) the calibration/holdout split for one dataset identity.
 
-    "The held-out reference is not held out" was a deterministic lexicographic cut, redrawn
-    fresh on every call with no train-disjointness check and no record of what was drawn — so a
-    "held-out validation" gate could pass on data that wasn't actually held out. This locks the
-    split on its FIRST draw for a given ``identity_hash``: every later call for the same
-    identity returns the identical split, never a silent re-cut, unless the caller explicitly
-    passes ``force_redraw=True`` (the audited admin path — see the
-    ``force_redraw_cal_holdout_split`` MCP tool; never wired to a default kwarg on a
+    A held-out reference that is not actually held out can happen when the split is a
+    deterministic lexicographic cut, redrawn fresh on every call with no train-disjointness check
+    and no record of what was drawn, so a "held-out validation" gate could pass on data that
+    wasn't actually held out. This locks the split on its first draw for a given
+    ``identity_hash``: every later call for the same identity returns the identical split, never a
+    silent re-cut, unless the caller explicitly passes ``force_redraw=True`` (the audited admin
+    path, see the ``force_redraw_cal_holdout_split`` MCP tool; never wired to a default kwarg on a
     high-traffic tool).
 
-    The grouping policy is resolved via :func:`resolve_group_key_fn` FIRST, so a malformed
+    The grouping policy is resolved via :func:`resolve_group_key_fn` first, so a malformed
     ``group_by``/``group_key_map`` raises loudly here rather than silently degrading.
 
     If a lock already exists and the caller's declared policy (``group_by``/``group_key_map``/
     ``seed``/``holdout_ratio``) differs from what is recorded in it, the divergence is logged as
-    a warning AND returned under ``"policy_divergence"`` (``{"requested": ..., "locked": ...}``) —
+    a warning and returned under ``"policy_divergence"`` (``{"requested": ..., "locked": ...}``),
     the locked split is still returned unchanged, never silently redrawn, but a caller now has a
-    way to *see* the mismatch instead of reading server logs (K1 finding 5). Stems the caller has
-    that the lock doesn't cover are similarly surfaced under ``"unlocked_stems"`` rather than
-    silently dropped — the lock stays authoritative for what it already covers.
+    way to *see* the mismatch instead of reading server logs. Stems the caller has that the lock
+    doesn't cover are similarly surfaced under ``"unlocked_stems"`` rather than silently dropped,
+    the lock stays authoritative for what it already covers.
 
     A locked stem with no corresponding entry in the caller's current ``stems`` (its image/label
     was deleted or renamed since the split was locked) raises ``ValueError`` rather than silently
-    returning stale membership for a caller to crash on later (K1 finding 4) — this mirrors
+    returning stale membership for a caller to crash on later; this mirrors
     ``resolve_group_key_fn``'s already-loud policy-error convention, which this function already
     lets propagate unmodified. A lock file that exists but fails to parse (corrupt, not merely
-    absent) raises for the same reason when ``force_redraw=False`` — "unreadable" must never
+    absent) raises for the same reason when ``force_redraw=False``, "unreadable" must never
     silently become "no lock exists yet, draw a fresh one", which would violate this function's
     own never-a-silent-re-cut guarantee. ``force_redraw=True`` (the audited admin path) is
-    ITSELF the deliberate fix for a corrupt lock, so it proceeds past a corrupt file rather than
-    also being blocked by it — redraw history just can't be recovered from what couldn't be read.
+    itself the deliberate fix for a corrupt lock, so it proceeds past a corrupt file rather than
+    also being blocked by it, redraw history just can't be recovered from what couldn't be read.
 
     ``timestamp`` is threaded in from the caller (this pipeline layer does not call
     ``datetime.now()`` itself, matching the rest of the codebase's tool-boundary convention) and
@@ -377,13 +377,13 @@ def resolve_locked_cal_holdout_split(
             if not force_redraw:
                 raise ValueError(
                     f"cal/holdout lock file at {lock_path} exists but could not be read/parsed "
-                    f"({exc}) — refusing to silently treat a corrupt lock as 'no lock exists' and "
+                    f"({exc}). Refusing to silently treat a corrupt lock as 'no lock exists' and "
                     "redraw. Investigate the file, or use force_redraw_cal_holdout_split once "
                     "you've deliberately decided to replace it."
                 ) from exc
             logger.warning(
                 "cal/holdout lock file at %s is corrupt (%s); force_redraw=True proceeds to draw "
-                "a fresh lock (this call IS the deliberate, audited fix) — its prior redraw "
+                "a fresh lock (this call is the deliberate, audited fix). Its prior redraw "
                 "history could not be recovered from the unreadable file.", lock_path, exc,
             )
     declared_policy = {
@@ -413,7 +413,7 @@ def resolve_locked_cal_holdout_split(
         if recorded_policy != declared_policy:
             logger.warning(
                 "cal/holdout split for identity_hash=%s is locked with a different policy than "
-                "declared (locked=%s, declared=%s); returning the LOCKED split unchanged. Use "
+                "declared (locked=%s, declared=%s); returning the locked split unchanged. Use "
                 "force_redraw_cal_holdout_split to redraw deliberately.",
                 identity_hash, recorded_policy, declared_policy,
             )
