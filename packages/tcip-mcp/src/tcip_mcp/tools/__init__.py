@@ -1,1 +1,1 @@
-"""Tool sub-package — each module registers tools with the MCP server."""
+"""Tool sub-package: each module registers tools with the MCP server."""
