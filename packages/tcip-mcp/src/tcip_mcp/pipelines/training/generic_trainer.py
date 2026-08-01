@@ -129,6 +129,26 @@ class TrainRun:
     # K11: set on resume — True if the checkpoint carried RNG state and it was restored, False
     # if the checkpoint predates RNG capture (fresh-seed stream stands). None on a non-resumed run.
     rng_state_restored: bool | None = None
+    # K24: set by the parent right after spawning the subprocess this run's training body actually
+    # executes in. None means the loop is running in-process (every existing test; cancel_event alone
+    # is authoritative). Not None means should_cancel() must also check the cross-process sentinel
+    # file, since the parent's own cancel_event lives in different process memory than the child.
+    pid: int | None = None
+
+    def should_cancel(self) -> bool:
+        """True if cancellation was requested — in-process (``cancel_event``) or via the sentinel
+        file a (possibly different) process may have written at ``<output_dir>/.cancel_requested``
+        (K24). Checked unconditionally, not gated on ``pid`` being set: the object checking this is
+        typically the CHILD's own attached ``TrainRun`` (which has no reason to know its own OS
+        pid), while ``pid`` is meaningful on the PARENT's copy for a different purpose (deciding
+        whether ``cancel_run`` should set the in-memory ``Event`` or write the sentinel). The single
+        check every poll site and every ``train(ctx)`` loop must use, so a sentinel-triggered stop is
+        never invisible to a check written against the in-memory ``Event`` alone."""
+        if self.cancel_event.is_set():
+            return True
+        if self.output_dir:
+            return (Path(self.output_dir) / ".cancel_requested").exists()
+        return False
 
     def to_dict(self) -> dict:
         return {
@@ -140,6 +160,7 @@ class TrainRun:
             "metrics_history": self.metrics_history,
             "origin": self.origin,
             "elapsed_seconds": (self.end_time or time.time()) - self.start_time if self.start_time else 0,
+            "pid": self.pid,
         }
 
 
@@ -166,6 +187,23 @@ def create_run(config: dict, output_dir: str, origin: str = "training") -> Train
     return run
 
 
+def attach_run(run_id: str, config: dict, output_dir: str, origin: str = "training") -> TrainRun:
+    """Construct a ``TrainRun`` for an id the caller already owns (K24) — unlike ``create_run``,
+    which unconditionally mints a fresh random id, this never mints one. Used by the subprocess
+    worker to adopt the exact ``run_id`` the parent already returned to its own caller and baked
+    into ``output_dir``/``env.json``/audit events; ``create_run`` cannot do that.
+
+    Does not draw a seed: the parent already called ``create_run`` (which does) before spawning,
+    so ``config`` (read back from the persisted ``config.json``) already carries the resolved seed.
+    Inserts into *this process's own* ``_RUNS`` — safe even though the id may already be a key in a
+    different process's registry, since that's different process memory entirely.
+    """
+    run = TrainRun(run_id=run_id, config=config, output_dir=output_dir, origin=origin)
+    with _RUNS_LOCK:
+        _RUNS[run_id] = run
+    return run
+
+
 def get_run(run_id: str) -> TrainRun | None:
     with _RUNS_LOCK:
         return _RUNS.get(run_id)
@@ -185,12 +223,44 @@ def list_runs(include_hpo_trials: bool = False) -> list[dict]:
 
 
 def cancel_run(run_id: str) -> bool:
-    """Request a graceful cancellation of a training run. Returns False if unknown."""
+    """Request a graceful cancellation of a training run. Returns False if unknown.
+
+    K24: a run whose training body executes in a subprocess (``run.pid is not None``) can't be
+    stopped by setting an in-memory ``Event`` — that memory lives in a different process. Writes a
+    sentinel file at ``<output_dir>/.cancel_requested`` instead, which ``TrainRun.should_cancel()``
+    polls in the child. When this process has no local record of the run at all (it was launched by
+    a *different* process — e.g. the web backend cancelling a run the agent's MCP server's
+    subprocess is running), falls back to resolving the run's real output directory on disk rather
+    than guessing one; an unresolvable run is refused (``False``), never a silent write to a path
+    nobody polls.
+    """
     with _RUNS_LOCK:
         run = _RUNS.get(run_id)
-    if run is None:
+    if run is not None:
+        if run.pid is None:
+            run.cancel_event.set()
+        else:
+            Path(run.output_dir).mkdir(parents=True, exist_ok=True)
+            (Path(run.output_dir) / ".cancel_requested").touch()
+        return True
+
+    from tcip_mcp.experiments import resolve_experiment_dir_for_run
+
+    exp_dir = resolve_experiment_dir_for_run(run_id)
+    if exp_dir is None:
         return False
-    run.cancel_event.set()
+    status_path = exp_dir / "status.json"
+    if not status_path.is_file():
+        return False
+    try:
+        status = json.loads(status_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+    output_dir = status.get("output_dir")
+    if not output_dir:
+        return False
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    (Path(output_dir) / ".cancel_requested").touch()
     return True
 
 
@@ -669,7 +739,7 @@ def train(
                 ckpt = None
 
             for epoch in range(start_epoch, stage_epochs):
-                if stopped_early or run.cancel_event.is_set():
+                if stopped_early or run.should_cancel():
                     break
                 run.current_epoch += 1
                 model.train()
@@ -686,7 +756,7 @@ def train(
                         group["lr"] = start + alpha * (target_lrs[gi] - start)
 
                 for batch_idx, batch in enumerate(train_loader):
-                    if run.cancel_event.is_set():
+                    if run.should_cancel():
                         break
                     if task in ("detection", "instance_seg"):
                         images, targets = batch
@@ -828,7 +898,7 @@ def train(
             if stage_snapshot is not None:
                 pending_snapshot = stage_snapshot
 
-            if run.cancel_event.is_set():
+            if run.should_cancel():
                 break  # stop before starting the next stage
 
         # Final checkpoint (saved even on cancellation so partial progress is recoverable).
@@ -838,7 +908,7 @@ def train(
             "metrics": run.metrics_history,
         }, config), out_dir / "model_final.pt")
 
-        if run.cancel_event.is_set():
+        if run.should_cancel():
             run.status = "cancelled"
             logger.info("Training run %s cancelled at epoch %d", run.run_id, run.current_epoch)
         else:
