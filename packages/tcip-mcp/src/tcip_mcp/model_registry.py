@@ -139,7 +139,7 @@ class ModelRegistry:
         """Register a trained model with SHA-256 integrity checksum.
 
         Args:
-            name: Model name (e.g. 'hazelnut_catkin_detector_v1').
+            name: Model name (e.g. '<crop>_<trait>_detector_v1').
             checkpoint_path: Path to the .pt checkpoint file.
             config: Training config dict.
             metrics: Evaluation metrics dict.
