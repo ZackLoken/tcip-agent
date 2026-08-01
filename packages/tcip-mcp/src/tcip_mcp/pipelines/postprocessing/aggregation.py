@@ -1,4 +1,4 @@
-"""Per-plant aggregation — temporal/spatial aggregation of per-image results.
+"""Per-plant aggregation, temporal/spatial aggregation of per-image results.
 
 Aggregation strategies (per-plant summary of a per-image value):
   - count:    Median detection count across images per plant
@@ -6,8 +6,10 @@ Aggregation strategies (per-plant summary of a per-image value):
   - mean:     Arithmetic mean (continuous traits)
   - sum:      Sum of values (area traits)
 
-Bloom phenology (05/50/95-per-date) is intentionally not here — it is the elongated-
-fraction crossing, implemented once in ``postprocessing/phenology.py``.
+A trait's own phenology milestones (percentile-crossing dates of its positive-state fraction,
+e.g. a 5/50/95% schedule) are intentionally not here: that is interpolated crossing time, a
+different shape of computation than a per-image summary statistic, implemented once in
+``postprocessing/phenology.py`` for whichever trait is registered.
 
 Usage:
     results = aggregate_per_plant(image_results, strategy="count")
@@ -36,21 +38,21 @@ def aggregate_per_plant(
     """Aggregate per-image results to per-plant summaries.
 
     Plant identity is never guessed from a filename. Every record's ``plant_id`` must come from an
-    explicit ``plant_id_key`` value or ``plant_id_fn(image)`` — a record for which neither resolves
+    explicit ``plant_id_key`` value or ``plant_id_fn(image)``, a record for which neither resolves
     raises, naming ``build_plant_mapping`` (the real GNSS+capture-sequence resolver,
     ``tcip_mcp.pipelines.postprocessing.plant_mapping``) as what to use instead. Filenames rarely
     carry a plant id at all; real identity resolution in this domain is RTK/GNSS + capture sequence
     or a zbar/QR code physically tied to the plant, never a filename heuristic.
 
     When a record carries ``plant_id_source``/``plant_id_distance_m`` (as ``build_plant_mapping``'s
-    own ``Assignment`` records do — the real, honest uncertainty signal that mapping already
+    own ``Assignment`` records do, the real, honest uncertainty signal that mapping already
     produces), it is summarized per plant so identity confidence reaches the delivery CSV instead of
     stopping at the mapping step's own boundary.
 
     Args:
         image_results: List of dicts, each with at least an 'image' key, a plant_id_key or a value
                       plant_id_fn can resolve, and a value field (e.g., 'count', 'class', 'value').
-        strategy: Aggregation strategy — 'count', 'mode', 'mean', 'sum'.
+        strategy: Aggregation strategy, 'count', 'mode', 'mean', 'sum'.
         plant_id_key: Key in each result dict for plant identification.
         value_key: Key in each result dict for the value to aggregate.
         plant_id_fn: Callable to derive plant_id from the image path when plant_id_key is absent.
@@ -70,7 +72,7 @@ def aggregate_per_plant(
             raise ValueError(
                 f"aggregate_per_plant: record {r.get('image', '<no image key>')!r} has no "
                 f"{plant_id_key!r} value and no plant_id_fn resolved one. Plant identity is never "
-                "guessed from a filename — pass plant_id_fn=... built from "
+                "guessed from a filename. Pass plant_id_fn=... built from "
                 "tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping's real "
                 f"GNSS+sequence resolution, or ensure every record carries a {plant_id_key!r} key."
             )
@@ -114,8 +116,8 @@ def _agg_count(items: list[dict], value_key: str) -> dict:
 
 
 def _agg_mean(items: list[dict], value_key: str) -> dict:
-    """Arithmetic mean of continuous values. All-absent yields None, never a fabricated 0.0 — a
-    missing measurement must never read as a measured zero (K4)."""
+    """Arithmetic mean of continuous values. All-absent yields None, never a fabricated 0.0, a
+    missing measurement must never read as a measured zero."""
     values = [r.get(value_key, 0.0) for r in items if value_key in r]
     n_observations_with_value = len(values)
     if not values:
@@ -142,19 +144,15 @@ def _agg_mode(items: list[dict], value_key: str) -> dict:
 
 
 def _agg_sum(items: list[dict], value_key: str) -> dict:
-    """Sum of values (for area traits). All-absent yields None, never a fabricated 0 (K4)."""
+    """Sum of values (for area traits). All-absent yields None, never a fabricated 0."""
     values = [r.get(value_key, 0.0) for r in items if value_key in r]
     if not values:
         return {"value": None, "n_observations_with_value": 0}
     return {"value": sum(values), "n_observations_with_value": len(values)}
 
 
-# note: catkin bloom phenology (05/50/95-per-date milestones) is not an aggregation
-# strategy here. It is the elongated-fraction crossing, and its single canonical
-# implementation lives in ``postprocessing/phenology.py`` (used by the web Results route
-# and the ``compute_phenology`` MCP tool). A prior "sigmoid" strategy computed those
-# milestones from raw count normalized to the season peak — a different, wrong definition
-# of the same trait — and has been removed (see CLAUDE.md measurement integrity).
+# A trait's phenology milestones need interpolated crossing time, not a per-image aggregate;
+# see ``postprocessing/phenology.py``, not a strategy entry here.
 
 
 _STRATEGIES = {
@@ -172,10 +170,10 @@ def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
     """``(display_unit, linear_basis)`` a value_key implies (``area_mm2`` -> ``("mm2", "mm")``,
     ``principal_axis_extent_cm`` -> ``("cm", "cm")``), or None for a key with no physical-unit suffix
     (``count``, a plain ``value``, a px-suffixed key, or a trailing token outside crops.yml's own
-    declared unit vocabulary). Delegates to :func:`mask_geometry.unit_from_value_key` — the single
+    declared unit vocabulary). Delegates to :func:`mask_geometry.unit_from_value_key`, the single
     owner of the naming convention, vocabulary-driven rather than a field-name whitelist, so a
     bespoke agent-composed measurement (an arc length, a landmark distance) is recognized the same
-    way mask_geometry's own fields are — rather than re-deriving the pattern with a local regex (two
+    way mask_geometry's own fields are, rather than re-deriving the pattern with a local regex (two
     independent parsers of the same convention is exactly the drift class that let a wrong pattern
     fabricate unit labels from unrelated keys like ``plant_id`` or ``detections_total``)."""
     from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
@@ -184,15 +182,15 @@ def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
 
 
 def _resolve_units(trait_name: str, results: list[dict]) -> str:
-    """The physical unit implied by the aggregated values' own value_key — crops.yml's declared unit
-    is a CROSS-CHECK only, never a fallback source. A value_key with no recognized physical-unit
+    """The physical unit implied by the aggregated values' own value_key, crops.yml's declared unit
+    is a cross-check only, never a fallback source. A value_key with no recognized physical-unit
     suffix (px, count, or a trailing token outside crops.yml's declared unit vocabulary) yields a
-    blank units column, exactly like a count trait already does — it never inherits crops.yml's
+    blank units column, exactly like a count trait already does, it never inherits crops.yml's
     declared unit unopposed, which was the actual defect: a pixel-space value shipping labeled with
     the trait's declared mm/cm/m because nothing derived a unit to check it against.
 
-    An area's returned unit is squared (``"mm2"``, not ``"mm"``) — the cross-check itself still
-    compares against crops.yml's declared LINEAR unit (crops.yml has no squared-unit vocabulary)."""
+    An area's returned unit is squared (``"mm2"``, not ``"mm"``), the cross-check itself still
+    compares against crops.yml's declared linear unit (crops.yml has no squared-unit vocabulary)."""
     from tcip_mcp.traits import crops_units
 
     implied_pairs = {p for p in (_unit_from_value_key(r.get("value_key", "")) for r in results) if p}
@@ -200,7 +198,7 @@ def _resolve_units(trait_name: str, results: list[dict]) -> str:
         implied_units = {display for display, _linear_basis in implied_pairs}
         raise ValueError(
             f"export_aggregated_csv: results for trait {trait_name!r} imply more than one physical "
-            f"unit ({sorted(implied_units)}) across rows — cannot label a single units column."
+            f"unit ({sorted(implied_units)}) across rows, cannot label a single units column."
         )
     pair = next(iter(implied_pairs), None)
     if pair is None:
@@ -210,7 +208,7 @@ def _resolve_units(trait_name: str, results: list[dict]) -> str:
     if declared is not None and linear_basis != declared:
         raise ValueError(
             f"export_aggregated_csv: trait {trait_name!r} is declared units={declared!r} in "
-            f"crops.yml, but the aggregated values' own key implies {linear_basis!r} — refusing to "
+            f"crops.yml, but the aggregated values' own key implies {linear_basis!r}, refusing to "
             "ship a mismatched unit label rather than guessing which one is right."
         )
     return display
@@ -230,7 +228,7 @@ def export_aggregated_csv(
 ) -> str:
     """Export per-plant aggregated results to a delivery CSV.
 
-    Follows the per-plant CSV schema from the delivery skill — the ``fieldnames`` list below is the
+    Follows the per-plant CSV schema from the delivery skill, the ``fieldnames`` list below is the
     authority for it: plant_id, crop, trait_name, value, units, value_key, confidence, n_images,
     pipeline_version, plant_id_source, plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS``
     (producer_model_sha256, experiment_id, produced_at, measurement_validated) so the final per-plant
@@ -241,9 +239,8 @@ def export_aggregated_csv(
     into every row. For a count trait, pass ``pred_dirs`` (the prediction buckets the counts came from)
     so the count operating point's validity is read from each ``operating_point.json`` sidecar and
     floored against ``measurement_validated``. For a continuous/ordinal trait with no conf op-point
-    (``pred_dirs`` empty/omitted), ``measurement_validated`` is currently NOT honored (stage-6 review
-    Finding G corrected this docstring, which previously claimed it was) — no on-disk source exists
-    yet for that dimension's validity (K3 finding #3), so the state floors to unvalidated
+    (``pred_dirs`` empty/omitted), ``measurement_validated`` is currently not honored: no on-disk
+    source exists yet for that dimension's validity, so the state floors to unvalidated
     unconditionally; the only route to delivery is the explicit acknowledge below.
     ``acknowledge_unvalidated`` ships a clearly-flagged provisional CSV stamped ``validated=false``.
 
@@ -256,7 +253,7 @@ def export_aggregated_csv(
         provenance: Optional producing-model stamp added as trailing columns.
         measurement_validated: Honored only when ``pred_dirs`` is also given (floors the count
             operating point's on-disk validity, never raises it). Ignored, not a delivery path, when
-            ``pred_dirs`` is empty — see the note above.
+            ``pred_dirs`` is empty, see the note above.
         pred_dirs: Prediction buckets to reconcile the count operating point's validity from (count
             traits); floored against ``measurement_validated``.
         acknowledge_unvalidated: Write an unvalidated phenotype as a flagged provisional CSV.
@@ -271,14 +268,14 @@ def export_aggregated_csv(
     )
 
     if pred_dirs:
-        # A count trait: the measurement validity IS the count operating point's, read from the
+        # A count trait: the measurement validity is the count operating point's, read from the
         # buckets' sidecars and floored against any caller assertion (never trusted from the string).
         state = reconcile_operating_point_validity(pred_dirs, asserted=measurement_validated)["validated"]
     else:
-        # No on-disk source exists for a continuous/ordinal trait's measurement validity today (K3
-        # finding #3) — a bare caller-asserted `measurement_validated` string is never trusted on its
-        # own. The only route to delivery without a producer is the explicit acknowledge below; this
-        # never auto-sets it on the writer's own initiative.
+        # No on-disk source exists for a continuous/ordinal trait's measurement validity today, a
+        # bare caller-asserted `measurement_validated` string is never trusted on its own. The only
+        # route to delivery without a producer is the explicit acknowledge below; this never
+        # auto-sets it on the writer's own initiative.
         state = VALIDATED_FALSE
     gate = check_delivery_gate({"measurement": state},
                                acknowledge_unvalidated=acknowledge_unvalidated)
