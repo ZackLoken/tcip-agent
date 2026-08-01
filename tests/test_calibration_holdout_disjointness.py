@@ -283,11 +283,17 @@ def test_finding3_sweep_summary_surfaces_disjointness_fields():
                    validated_against=VALIDATED_FALSE,
                    sweep={"disjoint": True, "content_overlap_frac": 0.0, "content_duplicated": False,
                           "train_disjointness": {"unresolvable": False, "leaked_groups": ["g1"]},
-                          "passed_holdout": False, "conf_censored": False, "count_bias_tolerance": 1.0})
+                          "passed_holdout": False, "conf_censored": False, "count_bias_tolerance_frac": 1.0,
+                          "pooled_count_bias_tolerance": 4.0})
     out = _sweep_summary(conf)
     assert out["disjoint"] is True
     assert out["content_overlap_frac"] == 0.0
     assert out["train_disjointness"]["leaked_groups"] == ["g1"]  # visible, not silently dropped
+    # K4 residual, stage-6 review Finding F3: the renamed/new fields must actually reach the OUTPUT,
+    # not just be present somewhere in the input sweep dict — the earlier version of this test did
+    # the latter, which a key-name drift in `_sweep_summary`'s own `.get(...)` calls could not fail.
+    assert out["count_bias_tolerance_frac"] == 1.0
+    assert out["pooled_count_bias_tolerance"] == 4.0
 
 
 def test_finding5_sweep_summary_surfaces_split_policy_divergence():
@@ -299,7 +305,7 @@ def test_finding5_sweep_summary_surfaces_split_policy_divergence():
 
     conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
                    validated_against=VALIDATED_FALSE,
-                   sweep={"passed_holdout": False, "conf_censored": False, "count_bias_tolerance": 1.0,
+                   sweep={"passed_holdout": False, "conf_censored": False, "count_bias_tolerance_frac": 1.0,
                           "split_policy_divergence": {"requested": {"seed": 7}, "locked": {"seed": 0}},
                           "split_unlocked_stems": ["new_stem_0_0"]})
     out = _sweep_summary(conf)
