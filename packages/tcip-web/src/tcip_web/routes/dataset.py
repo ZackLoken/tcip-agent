@@ -30,12 +30,21 @@ from tcip_mcp.dataset_layout import (
     prediction_dir,
     subjects_with_labels,
 )
+from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
 from tcip_web.paths import safe_join
 from tcip_web.state import DatasetSelection, store
 
 router = APIRouter(prefix="/api/dataset", tags=["dataset"])
 
-IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp")
+
+def _logical_image_names(date_dir: Path) -> list[str]:
+    """Every logical image's display name under ``date_dir`` — a plain file's own name, or (for a
+    ``.bandgroup``-grouped capture) its manifest's filename. Folds sibling band files into one
+    grouped entry per capture so the GUI's gallery shows 16 composites, not 64 grayscale frames."""
+    return sorted(
+        src.manifest_path.name if isinstance(src, BandGroupRef) else src.name
+        for src in list_logical_images(date_dir).values()
+    )
 
 # Whether this server process has selected a dataset yet. Resuming the persisted image index
 # is helpful within a running session, but a fresh process opening a project should start at
@@ -143,11 +152,7 @@ def list_images(dataset_root: str, date: str) -> dict:
         raise HTTPException(400, str(exc)) from exc
     if not date_dir.is_dir():
         raise HTTPException(404, f"images/{date} not found under {dataset_root}")
-    items = sorted(
-        p.name
-        for p in date_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
-    )
+    items = _logical_image_names(date_dir)
     return {"dataset_root": dataset_root, "date": date, "images": items, "count": len(items)}
 
 
@@ -174,11 +179,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
     if req.date:
         date_dir = root / "images" / req.date
         if date_dir.is_dir():
-            image_list = sorted(
-                p.name
-                for p in date_dir.iterdir()
-                if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
-            )
+            image_list = _logical_image_names(date_dir)
 
     # Canonical layout (see tcip_mcp.dataset_layout) — the single source of truth shared with the
     # agent tools, so agent writes land where the GUI reads. One file per image now holds every
