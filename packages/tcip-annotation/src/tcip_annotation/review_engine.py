@@ -1,4 +1,4 @@
-"""ReviewEngine — Review logic, detection walk-through, accept/reject.
+"""ReviewEngine: review logic, detection walk-through, accept/reject.
 
 GUI-free:
 
@@ -11,9 +11,9 @@ GUI-free:
     AppState. This makes the engine safe to reuse across images and
     concurrent sessions.
 
-The only state the engine holds between calls is the persisted review log — one JSON
+The only state the engine holds between calls is the persisted review log, one JSON
 shard per image under ``<state_dir>/review/`` (a verdict rewrites only its own image's
-shard, not the whole cross-image log) — and a small spatial-hash cache for fast lookups.
+shard, not the whole cross-image log), and a small spatial-hash cache for fast lookups.
 """
 
 from __future__ import annotations
@@ -164,7 +164,7 @@ class ReviewEngine:
                     pass
 
     def _save_image(self, img_name: str) -> None:
-        """Persist only ``img_name``'s shard — O(detections on that image), not O(all-reviewed)."""
+        """Persist only ``img_name``'s shard: O(detections on that image), not O(all-reviewed)."""
         img_data = self._review_state.get("image", {}).get(img_name)
         if img_data is None:
             return
@@ -193,20 +193,19 @@ class ReviewEngine:
                             adjudication_covered: Optional[bool] = None) -> None:
         """Mark ``img_name`` fully reviewed (e.g. a confirmed negative / bulk-accept).
 
-        ``producer_identity`` (Fix G): the resolved producing-bucket fact (``checkpoint_sha256``/
-        ``experiment_id``), a plain dict the CALLER resolves (this package never looks one up
-        itself — see the module docstring). A confirmed negative carries zero verdict entries, so
+        ``producer_identity``: the resolved producing-bucket fact (``checkpoint_sha256``/
+        ``experiment_id``), a plain dict the caller resolves (this package never looks one up
+        itself, see the module docstring). A confirmed negative carries zero verdict entries, so
         it has nowhere else to record which model it was reviewed against; this stamps that fact at
         the image level instead. ``None`` (the default) leaves any existing stamp untouched.
 
-        ``adjudication_covered`` (Fix H, stage-6 review): whether this zero-verdict completion is a
-        genuine negative the CALLER has already confirmed (the prediction bucket held zero
-        detections for this image, so Complete is itself the confirming act) — never inferred by
-        this package. A bulk-accept of an image the bucket DID predict on, completed with no
-        individual verdicts, must pass ``False`` (or omit it): stamping every zero-verdict Complete
-        as covered would let an unreviewed bulk-accept dilute a real reference's statistics, which is
-        exactly the fail-open this distinction exists to close. ``None`` (the default) leaves any
-        existing stamp untouched.
+        ``adjudication_covered``: whether this zero-verdict completion is a genuine negative the
+        caller has already confirmed (the prediction bucket held zero detections for this image, so
+        Complete is itself the confirming act), never inferred by this package. A bulk-accept of an
+        image the bucket did predict on, completed with no individual verdicts, must pass ``False``
+        (or omit it): stamping every zero-verdict Complete as covered would let an unreviewed
+        bulk-accept dilute a real reference's statistics. ``None`` (the default) leaves any existing
+        stamp untouched.
         """
         per_image = self._review_state.setdefault("image", {})
         img_data = per_image.setdefault(
@@ -260,7 +259,7 @@ class ReviewEngine:
 
     def get_all_image_statuses(self) -> dict[str, str]:
         """Review status for every image the engine has state for (untouched images are
-        absent — the caller defaults them to ``"not_started"``). Backs the image-level
+        absent, the caller defaults them to ``"not_started"``). Backs the image-level
         Reviewed/Unreviewed navigation filter, batch-fetched once per dataset."""
         per_image = self._review_state.get("image", {})
         return {
@@ -496,37 +495,37 @@ class ReviewEngine:
         geometry (what the next reload's lookup sees) while any prior entry for this
         detection is still found via the pre-edit geometry of ``det``/``ctx``.
 
-        ``producer_identity`` (Fix G): the resolved producing-bucket fact (``checkpoint_sha256``/
+        ``producer_identity``: the resolved producing-bucket fact (``checkpoint_sha256``/
         ``experiment_id``, plus ``bucket_dir`` for human legibility) this verdict was recorded
-        against — a plain dict the CALLER resolves (``tcip-web``, which can read a bucket's
+        against: a plain dict the caller resolves (``tcip-web``, which can read a bucket's
         ``operating_point.json`` sidecar); this package stores it verbatim and never resolves one
         itself, keeping it free of any dependency on ``tcip-mcp``/``tcip-web``. Persisted on the
-        verdict entry so a later validation pass can scope verdicts to the SAME producing model,
+        verdict entry so a later validation pass can scope verdicts to the same producing model,
         not a directory-name comparison.
 
-        ``conf_threshold`` (Fix D item 4): the review session's confidence-display threshold in
-        effect when this verdict was recorded — persisted so the review-confirmed reference can
-        reconstruct the effective floor the reviewed predictions were shown at.
+        ``conf_threshold``: the review session's confidence-display threshold in effect when this
+        verdict was recorded, persisted so the review-confirmed reference can reconstruct the
+        effective floor the reviewed predictions were shown at.
 
-        ``class_id`` (K25): the 0-indexed class identity ``det.class_name`` resolves to under the
-        producing bucket's own recorded name->id map — the SAME shape as ``producer_identity``, a
-        plain fact the CALLER resolves (``tcip-web``, via the bucket's ``operating_point.json``
+        ``class_id``: the 0-indexed class identity ``det.class_name`` resolves to under the
+        producing bucket's own recorded name->id map (the same shape as ``producer_identity``), a
+        plain fact the caller resolves (``tcip-web``, via the bucket's ``operating_point.json``
         ``id_map``) and this package stores verbatim, never re-derives. ``None`` when the caller
-        could not resolve one (no recorded map, or ``class_name`` isn't one of its keys) — an honest
+        could not resolve one (no recorded map, or ``class_name`` isn't one of its keys), an honest
         "unresolvable" fact, not a guessed default; a consumer building a class-aware reference from
         this verdict (``review_calibration.review_to_records``) must refuse rather than assume 0.
 
-        On the FIRST verdict recorded for this image, stamps ``gt_preexisting = bool(ctx.gt)`` onto
-        the image-level record (Fix H) — the pristine, pre-mutation GT the caller already holds at
-        that point, a recorded fact (never inferred later) for whether this image had ground truth
-        BEFORE the review session touched it.
+        On the first verdict recorded for this image, stamps ``gt_preexisting = bool(ctx.gt)`` onto
+        the image-level record: the pristine, pre-mutation GT the caller already holds at that
+        point, a recorded fact (never inferred later) for whether this image had ground truth before
+        the review session touched it.
 
-        Every entry also stamps ``missed_object_attested`` (Fix H) — ``True`` only when BOTH
-        ``det.gt_idx`` and ``det.pred_idx`` are ``None`` at the moment of THIS call: the exact
-        call-site shape only the "mark missed object" tool produces (a verdict with no existing GT
-        or prediction to key off of — see ``ReviewTab.tsx``'s ``recordMissedObject``). Recorded here,
-        from the caller's own intent, rather than reconstructed later from the entry's persisted
-        ``gt_bbox_norm``/``pred_bbox_norm`` shape — a rejected or accepted FN (an EXISTING,
+        Every entry also stamps ``missed_object_attested``: ``True`` only when both ``det.gt_idx``
+        and ``det.pred_idx`` are ``None`` at the moment of this call: the exact call-site shape only
+        the "mark missed object" tool produces (a verdict with no existing GT or prediction to key
+        off of, see ``ReviewTab.tsx``'s ``recordMissedObject``). Recorded here, from the caller's
+        own intent, rather than reconstructed later from the entry's persisted
+        ``gt_bbox_norm``/``pred_bbox_norm`` shape: a rejected or accepted FN (an existing,
         already-indexed GT box being corrected or confirmed) ends up with the identical
         ``pred_bbox_norm=None, gt_bbox_norm=<box>`` shape once written, so geometry alone cannot tell
         "a genuinely new missed object was attested" apart from "a pre-existing FN was adjudicated".
