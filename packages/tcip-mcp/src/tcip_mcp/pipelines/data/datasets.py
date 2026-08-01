@@ -365,9 +365,9 @@ def _label_record_state(stem: str, labels_dir, subject: str | None) -> tuple[boo
     """``(a record exists, it has ≥1 detection/seg target of ``subject``)`` for one stem.
 
     ``has_objects`` is subject-scoped *and box/polygon-bearing*: the unified file holds every subject,
-    so "annotated" for a catkin run means it carries a catkin annotation whose geometry is a real
-    detection/seg target, the same membership ``to_coco_dataset``/``target_class_id`` apply (a
-    box/polygon is a target; a geometry-less image-level label and a ``Point`` are not). Counting an
+    so "annotated" for a given subject's run means it carries an annotation of that subject whose
+    geometry is a real detection/seg target, the same membership ``to_coco_dataset``/``target_class_id``
+    apply (a box/polygon is a target; a geometry-less image-level label and a ``Point`` are not). Counting an
     image whose only annotations are non-targets as annotated would keep it on the direct-json path
     and train it as a zero-object negative, diverging from the COCO path and fabricating a negative no
     human confirmed.
@@ -952,9 +952,9 @@ class InstanceSegDataset(BaseImageDataset):
         """(pixel polygon rings, 1-indexed label) per instance, from the assembled COCO or the
         name-based per-image ``<stem>.json`` (filtered to ``subject`` + polygon geometry). Both are
         already pixel-space; the +1 background offset is the loader's, nothing on disk carries it.
-        An instance's rings is a list, an occlusion-split instance (a catkin behind a branch, a
-        leaf crossed by a stem) is genuinely more than one ring; ``__getitem__`` rasterizes every
-        ring of an instance into that instance's one mask."""
+        An instance's rings is a list, an occlusion-split instance (a leaf crossed by a stem) is
+        genuinely more than one ring; ``__getitem__`` rasterizes every ring of an instance into
+        that instance's one mask."""
         out: list[tuple[list[list[tuple[float, float]]], int]] = []
         if self.label_format == "coco":
             from tcip_annotation import format_io
