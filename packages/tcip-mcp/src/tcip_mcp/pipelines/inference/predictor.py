@@ -1,14 +1,14 @@
 """Model-kind contract + the predictor factory.
 
-Inference dispatches on a model KIND so the platform can run more than one framework of
+Inference dispatches on a model kind so the platform can run more than one framework of
 detector without special-casing at every call site. A tcip checkpoint (a bespoke model built
 by an agent-written importable builder) is the only kind today; the dispatch stays
-kind-aware — sniffed from the checkpoint, not hardcoded to one implementation — because
+kind-aware, sniffed from the checkpoint, not hardcoded to one implementation, because
 ``.kind`` is a real field other code already reads generically (``require_composed_detector``,
 the model registry), not scaffolding for a single implementation.
 
 Kind travels three ways: stamped on tcip checkpoints at save time (a top-level ``kind`` key),
-recorded on the registry entry, and — for a foreign ``.pt`` this platform never wrote —
+recorded on the registry entry, and, for a foreign ``.pt`` this platform never wrote,
 sniffed from the checkpoint's top-level keys. An undeterminable kind raises rather than
 guessing and running a wrong forward, which would silently corrupt the count (and the count
 is the phenotype).
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # A bespoke, from-scratch model built by an agent-written importable builder (model_source).
-# Reproduced by re-importing that builder — never by exec.
+# Reproduced by re-importing that builder, never by exec.
 KIND_TCIP_MODULE = "tcip_module"
 DEFAULT_KIND = KIND_TCIP_MODULE
 
@@ -40,12 +40,12 @@ class Predictor(Protocol):
     Detection result dict:
     ``{image, width, height, boxes[[x1,y1,x2,y2] px], scores[], labels[], count}`` (tiled adds
     ``tiles``). For ``task == "instance_seg"``, ``predict``/``predict_batch`` (untiled) additionally
-    carry ``masks`` — one soft (unbinarized) ``[H, W]`` probability array per surviving detection,
+    carry ``masks``, one soft (unbinarized) ``[H, W]`` probability array per surviving detection,
     same order as ``boxes``/``scores``/``labels``. ``predict_tiled`` does not yet thread masks
     through cross-tile reconstruction/merge and raises ``NotImplementedError`` for ``instance_seg``
     rather than silently dropping them; a caller that never reads masks opts out deliberately with
     ``predict_tiled(..., require_masks=False)`` and gets ordinary boxes-only tiled inference.
-    Labels are **1-indexed foreground** (background = 0) — the
+    Labels are **1-indexed foreground** (background = 0), the
     torchvision convention the rest of the pipeline (JSON prediction export, Review, CSV) already
     assumes; a future kind that is natively 0-indexed would shift to it at its own boundary,
     so downstream code never has to know which kind produced a result.
@@ -54,8 +54,8 @@ class Predictor(Protocol):
     task: str
     in_chans: int
 
-    # Each image argument may be a plain path/string or a BandGroupRef (a band-grouped capture —
-    # see pipelines.data.band_groups) — the SAME image sources image_utils.list_logical_images/
+    # Each image argument may be a plain path/string or a BandGroupRef (a band-grouped capture,
+    # see pipelines.data.band_groups), the same image sources image_utils.list_logical_images/
     # resolve_image_source hand every other reader in this platform.
     def predict(self, image_path: str | Path | BandGroupRef) -> dict: ...
     def predict_batch(self, image_paths: list[str | Path | BandGroupRef], **kwargs: Any) -> list[dict]: ...
@@ -83,7 +83,7 @@ def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:
 
 
 def detect_kind(checkpoint_path: str) -> str:
-    """Return the model KIND for a checkpoint on disk (loads it once to sniff)."""
+    """Return the model kind for a checkpoint on disk (loads it once to sniff)."""
     import torch
 
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
@@ -95,7 +95,7 @@ def resolve_tile_geometry(
 ) -> tuple[int, str, float, str]:
     """Resolve tile_size/overlap by precedence: explicit caller value > the checkpoint's own
     persisted training geometry (``predictor.train_tile_size``/``train_overlap``) > a documented
-    default (K10 CV2/CV3 — one implementation both ``run_inference`` and the delivery-grade
+    default (one implementation both ``run_inference`` and the delivery-grade
     ``run_full_frame_evaluation`` call, so they can't silently disagree on which regime a model
     actually ran in).
 
@@ -103,7 +103,7 @@ def resolve_tile_geometry(
     ``(tile_size, tile_size_source, overlap, overlap_source)`` where each ``*_source`` is one of
     ``"explicit"``/``"derived"``/``"default"``. A caller with a stake in the source (e.g. a
     delivery gate that must not silently fabricate a number) inspects the returned source itself
-    and decides whether to refuse, warn, or proceed — that policy does not belong here, since an
+    and decides whether to refuse, warn, or proceed, that policy does not belong here, since an
     exploratory caller (``run_inference``) and a certifying caller (``run_full_frame_evaluation``)
     legitimately make different calls on the same fact.
     """
@@ -136,7 +136,7 @@ def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: 
     if kind is None:
         # Sniff by loading once; hand the loaded checkpoint to the predictor so the weights aren't
         # read from disk twice. If the file can't be read (missing / corrupt / a test stub), fall
-        # back to the default tcip kind — GenericPredictor then surfaces the real load error rather
+        # back to the default tcip kind, GenericPredictor then surfaces the real load error rather
         # than us masking it here.
         import torch
 
@@ -151,7 +151,7 @@ def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: 
 
     if kind == KIND_TCIP_MODULE:
         # A tcip checkpoint GenericPredictor rebuilds by re-importing the bespoke model_source
-        # builder through build_model — never exec.
+        # builder through build_model, never exec.
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
         extra = {"checkpoint": ckpt} if ckpt is not None else {}
         return GenericPredictor(checkpoint_path=checkpoint_path, **extra, **kwargs)
