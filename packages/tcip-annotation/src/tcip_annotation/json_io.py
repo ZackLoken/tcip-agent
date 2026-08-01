@@ -10,11 +10,11 @@ Schema::
 
     { "image": "<stem>", "width": W, "height": H,
       "annotations": [
-        { "subject": "catkin",
+        { "subject": "<subject>",
           "bbox": [x, y, w, h],                 # COCO xywh, pixel      (optional)
           "segmentation": [[x1,y1, ...], ...],  # pixel polygon, one or more rings (optional)
           "point": [x, y],                      # pixel point, a prompt or keypoint (optional)
-          "attributes": {"elongation": "elongated"},   # attr name -> value name
+          "attributes": {"<attribute>": "<value>"},   # attr name -> value name
           "score": 0.91,                        # predictions only
           "created_by": "sam", "created_at": "...",
           "accepted_by": "user:zack", "accepted_at": "..." } ] }
