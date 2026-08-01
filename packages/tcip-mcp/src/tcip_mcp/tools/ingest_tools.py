@@ -1,9 +1,9 @@
-"""Image ingestion — turn a raw folder of photos into a structured TCIP project.
+"""Image ingestion: turn a raw folder of photos into a structured TCIP project.
 
 ``ingest_images`` is the missing structuring primitive. It copies (or moves) raw
 images into the canonical layout (``images/<YYYY-MM-DD>/<stem><ext>``) under a
-workspace project, bucketing by EXIF capture date. It does **not** annotate, split,
-choose a task, or write ``classes.json`` — those are later steps in the project-setup
+workspace project, bucketing by EXIF capture date. It does not annotate, split,
+choose a task, or write ``classes.json``; those are later steps in the project-setup
 arc (see ``.github/skills/project-setup``). Keeping it thin is deliberate: one
 auditable primitive the agent composes, instead of improvising file ops per project.
 """
@@ -61,7 +61,7 @@ def _exif_iso_date(path: Path) -> str | None:
 
 
 def _iter_source_images(source: str, recursive: bool):
-    """Yield image files under ``source`` — a directory or a glob pattern."""
+    """Yield image files under ``source``: a directory or a glob pattern."""
     src = Path(source)
     if src.is_dir():
         it = src.rglob("*") if recursive else src.iterdir()
@@ -76,7 +76,7 @@ def _iter_source_images(source: str, recursive: bool):
 
 
 def _validate_bucket_literal(date_from: str) -> None:
-    """A literal ``date_from`` becomes a path segment — reject separators/traversal."""
+    """A literal ``date_from`` becomes a path segment: reject separators/traversal."""
     if date_from in ("exif", "none"):
         return
     if not workspace.is_valid_name(date_from):
@@ -106,7 +106,7 @@ def ingest_images(
 
     Turns a raw folder (or glob) of photos into the canonical layout
     (``images/<YYYY-MM-DD>/<stem><ext>``) under a workspace project. Copies by
-    default — originals are left byte-identical; pass ``copy=False`` to move.
+    default; originals are left byte-identical; pass ``copy=False`` to move.
     Refuses to overwrite an existing image (records the collision and skips it).
     Does not annotate, split, choose a task, or write ``classes.json``.
 
@@ -124,7 +124,7 @@ def ingest_images(
             (``pipelines.data.band_groups``) over each touched bucket, writing a ``.bandgroup``
             manifest for every sibling-single-band-file group found (e.g. a multispectral rig
             that writes one file per band instead of one multi-band file per capture). Default
-            ``False`` — a project with no such capture pays nothing for this pass.
+            ``False``; a project with no such capture pays nothing for this pass.
 
     Returns a manifest: ``{project_path, name, image_root, total, found, copied,
     moved, buckets, undated, skipped_collisions, errors, move, band_groups}``.
@@ -178,7 +178,7 @@ def ingest_images(
             continue
 
         # One bad file (locked by antivirus, vanished, unreadable) must not abort the whole
-        # batch — record it and keep going. Reading bytes never mutates the original;
+        # batch; record it and keep going. Reading bytes never mutates the original;
         # atomic_write_bytes writes a temp file + fsync + os.replace, so a crash mid-copy
         # can't leave a torn image.
         try:
