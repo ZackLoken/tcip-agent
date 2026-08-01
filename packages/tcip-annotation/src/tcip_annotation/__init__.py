@@ -1,4 +1,4 @@
-"""Headless annotation library — canonical name-based per-image JSON labels + a single-file COCO."""
+"""Headless annotation library: canonical name-based per-image JSON labels + a single-file COCO."""
 
 from tcip_annotation.state import (
     Annotation,
@@ -27,7 +27,7 @@ from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_annotation.annotation_engine import AnnotationEngine
 from tcip_annotation.review_engine import ReviewEngine, ReviewDetection, ReviewContext
 
-# SAM wrapper — lazy-import safe (requires segment-anything optional dep)
+# SAM wrapper: lazy-import safe (requires segment-anything optional dep)
 try:
     from tcip_annotation.sam_wrapper import auto_mask, grid_to_pixel
 except ImportError:
@@ -40,7 +40,7 @@ __all__ = [
     "Point",
     "Polygon",
     "bbox_of",
-    # Canonical per-image JSON — the platform's native on-disk label format (primary read/write path)
+    # Canonical per-image JSON: the platform's native on-disk label format (primary read/write path)
     "read_annotations",
     "write_annotations",
     "to_coco_dataset",
