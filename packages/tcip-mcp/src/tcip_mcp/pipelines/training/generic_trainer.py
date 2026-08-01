@@ -47,7 +47,7 @@ except ImportError:
 
 
 def set_seed(seed: int, deterministic: bool = False) -> None:
-    """Seed random / numpy / torch (+ cuda) for reproducible runs (W7).
+    """Seed random / numpy / torch (+ cuda) for reproducible runs.
 
     ``deterministic`` additionally forces cuDNN deterministic algorithms
     (``cudnn.deterministic=True``, ``cudnn.benchmark=False``).
@@ -64,7 +64,7 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
 
 def seeded_loader_kwargs(seed: int | None) -> dict:
     """DataLoader kwargs (``generator``, ``worker_init_fn``) making shuffling and worker-process
-    randomness reproducible from ``seed`` — the same value ``set_seed`` uses (K11). ``{}`` when
+    randomness reproducible from ``seed``, the same value ``set_seed`` uses. ``{}`` when
     ``seed`` is ``None``: an unseeded run stays unseeded end to end, honestly, rather than
     silently becoming reproducible only in its loader while everything else stays random.
     """
@@ -90,7 +90,7 @@ def seeded_loader_kwargs(seed: int | None) -> dict:
 class TrainConfig:
     """Constructor-time config carrier for ``launch_training``'s data-loader setup.
 
-    Only ``sampler``/``batch_size``/``num_workers`` are ever read off an instance (K9) — the
+    Only ``sampler``/``batch_size``/``num_workers`` are ever read off an instance, the
     trainer itself reads every other setting straight from ``run.config`` (see ``train()``'s own
     ``config.get(...)`` calls), so this dataclass does not double as a config record. Do not add a
     field here expecting ``train()`` to honor it; wire it into ``run.config`` instead.
@@ -122,25 +122,25 @@ class TrainRun:
     output_dir: str = ""
     # "training" (standalone/GUI/agent run) vs "hpo_trial" (a run created by an HPO
     # sweep's objective). The Training view lists only "training" so sweeps of dozens of
-    # trials don't flood it — HPO trials belong to the Tuning view.
+    # trials don't flood it, HPO trials belong to the Tuning view.
     origin: str = "training"
     # Set by cancel_run() to request a graceful stop; the train loop polls it.
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
-    # K11: set on resume — True if the checkpoint carried RNG state and it was restored, False
+    # Set on resume, True if the checkpoint carried RNG state and it was restored, False
     # if the checkpoint predates RNG capture (fresh-seed stream stands). None on a non-resumed run.
     rng_state_restored: bool | None = None
-    # K24: set by the parent right after spawning the subprocess this run's training body actually
+    # Set by the parent right after spawning the subprocess this run's training body actually
     # executes in. None means the loop is running in-process (every existing test; cancel_event alone
     # is authoritative). Not None means should_cancel() must also check the cross-process sentinel
     # file, since the parent's own cancel_event lives in different process memory than the child.
     pid: int | None = None
 
     def should_cancel(self) -> bool:
-        """True if cancellation was requested — in-process (``cancel_event``) or via the sentinel
-        file a (possibly different) process may have written at ``<output_dir>/.cancel_requested``
-        (K24). Checked unconditionally, not gated on ``pid`` being set: the object checking this is
-        typically the CHILD's own attached ``TrainRun`` (which has no reason to know its own OS
-        pid), while ``pid`` is meaningful on the PARENT's copy for a different purpose (deciding
+        """True if cancellation was requested, in-process (``cancel_event``) or via the sentinel
+        file a (possibly different) process may have written at ``<output_dir>/.cancel_requested``.
+        Checked unconditionally, not gated on ``pid`` being set: the object checking this is
+        typically the child's own attached ``TrainRun`` (which has no reason to know its own OS
+        pid), while ``pid`` is meaningful on the parent's copy for a different purpose (deciding
         whether ``cancel_run`` should set the in-memory ``Event`` or write the sentinel). The single
         check every poll site and every ``train(ctx)`` loop must use, so a sentinel-triggered stop is
         never invisible to a check written against the in-memory ``Event`` alone."""
@@ -169,13 +169,13 @@ _RUNS_LOCK = threading.Lock()
 
 
 def create_run(config: dict, output_dir: str, origin: str = "training") -> TrainRun:
-    # uuid suffix (not len(_RUNS)): same-second launches — from this process, or from
-    # the web backend's separate registry sharing the same experiments dir — must never
+    # uuid suffix (not len(_RUNS)): same-second launches, from this process, or from
+    # the web backend's separate registry sharing the same experiments dir, must never
     # collide, or two runs would silently share one run_id and output directory.
     run_id = f"run_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     # Reproducibility: never start an unseeded run. If the caller set no seed (same
     # top-level/training.seed read as train()), draw one from OS entropy and write it
-    # into the config in place — launch_training snapshots this dict into the
+    # into the config in place, launch_training snapshots this dict into the
     # experiment record *after* create_run, and every checkpoint embeds it, so the
     # effective seed is always on record and the run can be rerun exactly.
     if config.get("seed", config.get("training", {}).get("seed")) is None:
@@ -188,14 +188,14 @@ def create_run(config: dict, output_dir: str, origin: str = "training") -> Train
 
 
 def attach_run(run_id: str, config: dict, output_dir: str, origin: str = "training") -> TrainRun:
-    """Construct a ``TrainRun`` for an id the caller already owns (K24) — unlike ``create_run``,
+    """Construct a ``TrainRun`` for an id the caller already owns, unlike ``create_run``,
     which unconditionally mints a fresh random id, this never mints one. Used by the subprocess
     worker to adopt the exact ``run_id`` the parent already returned to its own caller and baked
     into ``output_dir``/``env.json``/audit events; ``create_run`` cannot do that.
 
     Does not draw a seed: the parent already called ``create_run`` (which does) before spawning,
     so ``config`` (read back from the persisted ``config.json``) already carries the resolved seed.
-    Inserts into *this process's own* ``_RUNS`` — safe even though the id may already be a key in a
+    Inserts into *this process's own* ``_RUNS``, safe even though the id may already be a key in a
     different process's registry, since that's different process memory entirely.
     """
     run = TrainRun(run_id=run_id, config=config, output_dir=output_dir, origin=origin)
@@ -225,11 +225,11 @@ def list_runs(include_hpo_trials: bool = False) -> list[dict]:
 def cancel_run(run_id: str) -> bool:
     """Request a graceful cancellation of a training run. Returns False if unknown.
 
-    K24: a run whose training body executes in a subprocess (``run.pid is not None``) can't be
-    stopped by setting an in-memory ``Event`` — that memory lives in a different process. Writes a
+    A run whose training body executes in a subprocess (``run.pid is not None``) can't be
+    stopped by setting an in-memory ``Event``, that memory lives in a different process. Writes a
     sentinel file at ``<output_dir>/.cancel_requested`` instead, which ``TrainRun.should_cancel()``
     polls in the child. When this process has no local record of the run at all (it was launched by
-    a *different* process — e.g. the web backend cancelling a run the agent's MCP server's
+    a *different* process, e.g. the web backend cancelling a run the agent's MCP server's
     subprocess is running), falls back to resolving the run's real output directory on disk rather
     than guessing one; an unresolvable run is refused (``False``), never a silent write to a path
     nobody polls.
@@ -291,9 +291,9 @@ def _save_checkpoint(
     stage_idx: int, stage_epoch: int, run: "TrainRun",
     es_best: float, es_counter: int, global_step: int, seed, metrics: dict,
 ) -> None:
-    """Write a resumable periodic checkpoint (W7).
+    """Write a resumable periodic checkpoint.
 
-    Superset of the previous payload — ``GenericPredictor`` reads only the model reference
+    Superset of the previous payload, ``GenericPredictor`` reads only the model reference
     (``model_source``) + ``model_state_dict`` and stays compatible.
     """
     _atomic_torch_save(stamp_model_ref({
@@ -311,7 +311,7 @@ def _save_checkpoint(
         "global_step": global_step,
         "seed": seed,
         "metrics": metrics,
-        # K11: full RNG state at save time, so a resume can pick the streams up exactly where
+        # Full RNG state at save time, so a resume can pick the streams up exactly where
         # they were rather than silently re-seeding from stream position zero.
         "python_rng_state": random.getstate(),
         "numpy_rng_state": np.random.get_state(),
@@ -334,7 +334,7 @@ def _stack_collate(batch):
     """Classification/ordinal/regression/semantic_seg: stack into tensors."""
     images, targets = zip(*batch)
     images = torch.stack(images)
-    # Merge target dicts — stack numeric values
+    # Merge target dicts, stack numeric values
     merged: dict[str, Any] = {}
     for key in targets[0]:
         vals = [t[key] for t in targets]
@@ -383,13 +383,13 @@ def _validate(
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     trait: str | None = None,
 ) -> dict:
-    """Task-aware validation — delegates to ``evaluation.evaluate`` and ``val_``-prefixes.
+    """Task-aware validation, delegates to ``evaluation.evaluate`` and ``val_``-prefixes.
 
     detection/instance_seg → precision/recall/F1/mAP50/mAP + composite objective;
     classification → accuracy/F1; ordinal → MAE/rank_acc; regression → MAE/RMSE;
     semantic_seg → mIoU/dice/pixel_acc/per-class IoU (``evaluation.semantic_seg_metrics``). Always
     returns ``val_loss``. Only detection/instance_seg's composite objective (or an explicit
-    ``evaluation.selection_metric``, K9) drives ``model_best.pt``/early stopping — every other
+    ``evaluation.selection_metric``) drives ``model_best.pt``/early stopping, every other
     task, including semantic_seg, selects by ``val_loss`` (see ``resolve_selection_metric``).
 
     ``trait``: when set, a count trait's derived localization criterion governs the reported
@@ -406,18 +406,18 @@ def _validate(
 
 def resolve_selection_metric(task: str, trait: str | None, requested: str | None) -> str:
     """Resolve the bare metric key (into ``val_metrics``, without the ``val_`` prefix) that drives
-    both ``model_best.pt`` and early stopping — deliberately the SAME key for both (K9).
+    both ``model_best.pt`` and early stopping, deliberately the same key for both.
 
     Default (unchanged from the prior hardcoded behavior): ``"objective"`` for detection/
     instance_seg, else ``"loss"``. An explicit ``requested`` is honored, except it is rejected when
     ``trait`` is a center-match trait and ``requested`` names a metric that trait's own
     localization criterion demotes to comparability-only (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``)
-    — selecting checkpoints by a metric the trait doesn't trust is a defensibility regression, not a
+, selecting checkpoints by a metric the trait doesn't trust is a defensibility regression, not a
     legitimate choice.
 
-    Reads the trait's RECORDED localization kind (K18 B3 — ``TraitSpec.localization`` is derived
+    Reads the trait's recorded localization kind (``TraitSpec.localization`` is derived
     once from real GT and persisted, never authored). This runs at preflight time, before any GT is
-    loaded, so it cannot itself derive a kind — an unrecorded kind (``spec.localization == ""``, a
+    loaded, so it cannot itself derive a kind, an unrecorded kind (``spec.localization == ""``, a
     trait never yet calibrated/evaluated against real data) means nothing is known yet, so no
     metric is rejected here; ``resolve_match_criterion`` is what fills the recording in the first
     time real GT is available, and every later preflight call sees it.
@@ -433,7 +433,7 @@ def resolve_selection_metric(task: str, trait: str | None, requested: str | None
         if spec.localization == CENTER_MATCH and requested in CENTER_MATCH_COMPARABILITY_KEYS:
             raise ValueError(
                 f"evaluation.selection_metric={requested!r} is a comparability-only metric for "
-                f"trait {trait!r} (localization=center_match) — it does not govern this trait's "
+                f"trait {trait!r} (localization=center_match), it does not govern this trait's "
                 "phenotype count. Select by 'objective', 'f1', 'precision', 'recall', or 'loss', "
                 "which resolve through the trait's own center-match criterion."
             )
@@ -455,7 +455,7 @@ def apply_stage_freeze(
     """Apply a stage's progressive-unfreeze policy and return the resulting trainable-param count.
 
     ``freeze_to``: ``0`` (or a model with no ``freeze_backbone``) trains everything; ``<0`` freezes
-    all backbone stages; ``>0`` freezes up to that stage — best-effort, a bespoke model need not
+    all backbone stages; ``>0`` freezes up to that stage, best-effort, a bespoke model need not
     expose ``freeze_backbone``. When ``enforce_monotonic`` and ``prev_trainable`` is given, an
     unfreeze that shrinks the trainable set raises (progressive unfreeze must only ever grow it).
     Extracted so a hand-rolled ``train(ctx)`` gets the identical policy + guard the default trainer uses.
@@ -478,7 +478,7 @@ def apply_stage_freeze(
 
 
 def _expected_in_chans(config: dict) -> int:
-    """Input channels the model expects — from ``model_source.in_chans``."""
+    """Input channels the model expects, from ``model_source.in_chans``."""
     src = config.get("model_source")
     if isinstance(src, dict):
         return int(src.get("in_chans", 3))
@@ -524,40 +524,40 @@ def train(
 
     The model is built from run.config["model_source"] via build_model().
     ``epoch_callback(epoch:int, epoch_metrics:dict)`` (optional) is invoked after
-    each epoch's metrics are recorded — used by HPO to report intermediate values
+    each epoch's metrics are recorded, used by HPO to report intermediate values
     for pruning. It may raise to abort the run (e.g. ``optuna.TrialPruned``).
 
     This is the canonical, ground-truth list of every ``run.config`` key this function reads
-    (K9 — every other surface, e.g. ``preflight_config``'s docstring and the training skill's
+    (every other surface, e.g. ``preflight_config``'s docstring and the training skill's
     example, points here rather than re-deriving its own copy). ``run.config`` is an open dict,
-    not a fixed schema (``TrainConfigSchema``/``StageSpec`` both keep ``extra="allow"``) — a bespoke
+    not a fixed schema (``TrainConfigSchema``/``StageSpec`` both keep ``extra="allow"``), a bespoke
     ``model_source``/``dataset_source``/``training_source`` may read its own additional keys this
     function never touches.
 
     - ``device`` (str, default cuda-if-available else cpu)
-    - ``batch_size`` (int) — only as a fallback when ``train_loader`` itself has no ``.batch_size``
+    - ``batch_size`` (int), only as a fallback when ``train_loader`` itself has no ``.batch_size``
       (the DataLoader's own batch size, set at construction, is the primary source).
-    - ``seed`` (int | None), ``deterministic`` (bool, default False) — RNG seeding before model
+    - ``seed`` (int | None), ``deterministic`` (bool, default False), RNG seeding before model
       build; also under ``training.seed``/``training.deterministic``. ``create_run`` already draws
       and records a seed when none is configured, so ``seed`` is never actually ``None`` here in
       practice.
-    - ``mixed_precision`` (bool, default True) — AMP, only when ``device`` is cuda.
-    - ``stages`` (list of ``{freeze_to, epochs}``; a per-stage ``lr`` is accepted but ignored —
-      see ``optimizer`` below) — default a single 10-epoch full-unfreeze stage.
+    - ``mixed_precision`` (bool, default True), AMP, only when ``device`` is cuda.
+    - ``stages`` (list of ``{freeze_to, epochs}``; a per-stage ``lr`` is accepted but ignored,
+      see ``optimizer`` below), default a single 10-epoch full-unfreeze stage.
     - ``optimizer`` (``{name, backbone_lr, head_lr, weight_decay}``, default adamw/1e-4/1e-3/1e-4)
-      — the ONE source of learning rate, applied uniformly across every stage.
+, the one source of learning rate, applied uniformly across every stage.
     - ``scheduler`` (``{type, ...}``; ``type`` in cosine/plateau/onecycle/step, default cosine).
     - ``lr_scaling`` (``{enabled, reference_effective_batch, scale_power, max_lr}``, default
-      disabled) — effective-batch LR scaling at stage boundaries.
+      disabled), effective-batch LR scaling at stage boundaries.
     - ``stage_warmup_epochs`` (int, default 0), ``enforce_monotonic_unfreeze`` (bool, default True).
     - ``gradient_accumulation_steps`` (int, default 1; a stage may override its own), and a
       per-stage ``gradient_accumulation_steps`` override.
-    - ``checkpoint_every_n_epochs`` (int, default 5) — periodic resumable checkpoints.
+    - ``checkpoint_every_n_epochs`` (int, default 5), periodic resumable checkpoints.
     - ``early_stopping`` (``{enabled, patience, min_delta}``, default enabled-if-val_loader,
       patience 7, min_delta 1e-4).
     - ``evaluation`` (``{trait, selection_metric, conf_threshold, iou_threshold, iou_type,
-      max_dets, score_weights}``, all optional) — ``trait`` and ``selection_metric`` drive
-      ``resolve_selection_metric`` (K9); the rest pass through to ``_validate``/``evaluate``.
+      max_dets, score_weights}``, all optional), ``trait`` and ``selection_metric`` drive
+      ``resolve_selection_metric``; the rest pass through to ``_validate``/``evaluate``.
     """
     config = run.config
     run.status = "running"
@@ -589,7 +589,7 @@ def train(
 
         device = torch.device(config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
 
-        # W7: seed before model build so pretrained=False init + shuffle are reproducible.
+        # Seed before model build so pretrained=False init + shuffle are reproducible.
         seed = config.get("seed", config.get("training", {}).get("seed"))
         if seed is not None:
             set_seed(int(seed), deterministic=config.get(
@@ -606,7 +606,7 @@ def train(
         opt_cfg = config.get("optimizer", {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 1e-4})
         sched_cfg = config.get("scheduler", {"type": "cosine"})
 
-        # W2: progressive-unfreezing fidelity setup.
+        # Progressive-unfreezing fidelity setup.
         base_backbone_lr = opt_cfg.get("backbone_lr", 1e-4)
         base_head_lr = opt_cfg.get("head_lr", 1e-3)
         lr_scaling_cfg = config.get("lr_scaling", {})
@@ -615,14 +615,14 @@ def train(
         physical_batch = getattr(train_loader, "batch_size", None) or config.get("batch_size") or 1
         pending_snapshot = None   # best optimizer state from the previous stage
         prev_trainable = None     # trainable param count of the previous stage
-        eval_cfg = config.get("evaluation", {})  # W1 metric / selection params
+        eval_cfg = config.get("evaluation", {})  # metric / selection params
         trait = eval_cfg.get("trait")
         selection_metric = resolve_selection_metric(task, trait, eval_cfg.get("selection_metric"))
 
         global_step = 0
         stopped_early = False
 
-        # W7: resume from a periodic checkpoint (model + optimizer + scheduler + scaler).
+        # Resume from a periodic checkpoint (model + optimizer + scheduler + scaler).
         resume_stage = -1
         resume_stage_epoch = 0
         ckpt = None
@@ -644,8 +644,8 @@ def train(
             es_best = ckpt.get("es_best", es_best)
             es_counter = ckpt.get("es_counter", es_counter)
             global_step = ckpt.get("global_step", 0)
-            # K11: restore RNG state AFTER the fresh `set_seed()` call above (never skip that
-            # call — it also configures cudnn.deterministic/benchmark) so the resumed streams
+            # Restore RNG state after the fresh `set_seed()` call above (never skip that
+            # call, it also configures cudnn.deterministic/benchmark) so the resumed streams
             # overwrite the freshly-seeded ones rather than starting over from stream position
             # zero. Older checkpoints predating this field degrade gracefully to the fresh seed.
             if "torch_rng_state" in ckpt:
@@ -665,11 +665,11 @@ def train(
                 break
             run.current_stage = stage_idx
 
-            # W7: skip stages already completed before the resume checkpoint.
+            # Skip stages already completed before the resume checkpoint.
             if stage_idx < resume_stage:
                 continue
 
-            # Progressive unfreezing (+ monotonic guard) — the shared craft primitive a custom
+            # Progressive unfreezing (+ monotonic guard), the shared craft primitive a custom
             # train(ctx) reuses via ctx.apply_stage_freeze.
             trainable = apply_stage_freeze(
                 model, stage.get("freeze_to", 0), prev_trainable=prev_trainable,
@@ -677,7 +677,7 @@ def train(
             )
             prev_trainable = trainable
 
-            # W2: per-stage accumulation + optional effective-batch LR scaling.
+            # Per-stage accumulation + optional effective-batch LR scaling.
             stage_accum = stage.get("gradient_accumulation_steps", accum_steps)
             eff_batch = physical_batch * stage_accum
             stage_backbone_lr, stage_head_lr = base_backbone_lr, base_head_lr
@@ -702,7 +702,7 @@ def train(
                 weight_decay=opt_cfg.get("weight_decay", 1e-4),
             )
 
-            # W2: hand off momentum from the previous stage's best epoch.
+            # Hand off momentum from the previous stage's best epoch.
             if pending_snapshot is not None:
                 restored = restore_optimizer_state(optimizer, model, pending_snapshot)
                 logger.info("Stage %d: restored optimizer state for %d params", stage_idx, restored)
@@ -711,7 +711,7 @@ def train(
             prev_end_lrs = pending_snapshot.get("end_lrs") if pending_snapshot else None
 
             stage_epochs = stage.get("epochs", 10)
-            # W2: inter-stage LR warmup (boundaries only; default off).
+            # Inter-stage LR warmup (boundaries only; default off).
             warmup_n = (
                 min(stage_warmup_epochs, stage_epochs)
                 if (stage_idx > 0 and pending_snapshot is not None)
@@ -723,8 +723,8 @@ def train(
             stage_best = float("inf")
             stage_snapshot = None
 
-            # W7: for the resumed stage, restore optimizer/scheduler/scaler and start
-            # mid-stage; later stages keep fresh state (and W2's handoff).
+            # For the resumed stage, restore optimizer/scheduler/scaler and start
+            # mid-stage; later stages keep fresh state (and the momentum handoff above).
             start_epoch = 0
             if stage_idx == resume_stage and ckpt is not None:
                 start_epoch = resume_stage_epoch
@@ -747,7 +747,7 @@ def train(
                 n_batches = 0
                 optimizer.zero_grad()
 
-                # W2: per-group linear LR warmup at the stage boundary.
+                # Per-group linear LR warmup at the stage boundary.
                 in_warmup = warmup_n > 0 and epoch < warmup_n
                 if in_warmup:
                     alpha = (epoch + 1) / warmup_n
@@ -800,7 +800,7 @@ def train(
                 if val_loader is not None:
                     val_metrics = _validate(
                         model, val_loader, device, task,
-                        # A fixed default unless eval_cfg explicitly overrides it — NOT the
+                        # A fixed default unless eval_cfg explicitly overrides it, not the
                         # resolved ship-point conf (that is derived later by resolve_operating_point).
                         conf_threshold=eval_cfg.get("conf_threshold", DEFAULT_CONF),
                         iou_threshold=eval_cfg.get("iou_threshold", 0.5),
@@ -811,7 +811,7 @@ def train(
                     )
                 sel = _selection_value(task, val_metrics, avg_loss, selection_metric)
 
-                # W2: suppress the scheduler during warmup epochs.
+                # Suppress the scheduler during warmup epochs.
                 if not in_warmup:
                     if is_plateau:
                         scheduler.step(val_metrics.get("val_loss", avg_loss))
@@ -851,7 +851,7 @@ def train(
                 logger.info("Epoch %d stage %d loss=%.4f val_loss=%.4f lr=%.2e",
                     run.current_epoch, stage_idx, avg_loss, val_metrics.get("val_loss", 0), current_lr)
 
-                # Best model checkpoint — selected by the W1 selection objective.
+                # Best model checkpoint, selected by the selection objective.
                 if sel < run.best_metric:
                     run.best_metric = sel
                     try:
@@ -869,7 +869,7 @@ def train(
                             "model_best.pt held open by a reader; keeping previous best "
                             "(epoch %d not persisted).", run.current_epoch)
 
-                # W2: remember this stage's best optimizer state for the handoff.
+                # Remember this stage's best optimizer state for the handoff.
                 if sel < stage_best:
                     stage_best = sel
                     stage_snapshot = snapshot_optimizer_state(optimizer, model)
@@ -883,7 +883,7 @@ def train(
                         seed=seed, metrics=epoch_metrics,
                     )
 
-                # Early stopping — on the same selection objective.
+                # Early stopping, on the same selection objective.
                 if es_enabled and val_loader is not None:
                     if sel < es_best - es_min_delta:
                         es_best = sel
@@ -894,7 +894,7 @@ def train(
                             logger.info("Early stopping at epoch %d", run.current_epoch)
                             stopped_early = True
 
-            # W2: carry this stage's best optimizer state into the next stage.
+            # Carry this stage's best optimizer state into the next stage.
             if stage_snapshot is not None:
                 pending_snapshot = stage_snapshot
 
