@@ -1,4 +1,4 @@
-"""Vision tools — render annotations and predictions for visual analysis.
+"""Vision tools: render annotations and predictions for visual analysis.
 
 Each tool saves a rendered image to .tcip/artifacts/viz/ and returns the
 path so the agent can use view_image to visually inspect it.
@@ -32,13 +32,13 @@ def _materialize_if_needed(source) -> str:
     """The real path to hand a (photographic-only) renderer for an already-resolved image source.
 
     A plain photographic file (jpg/png/heic/bmp) is returned unchanged. So is an ordinary
-    photographic-shaped GeoTIFF (1/3/4 bands — a real, pre-existing supported format PIL decodes
+    photographic-shaped GeoTIFF (1/3/4 bands, a real, pre-existing supported format PIL decodes
     in true color, unchanged from before band-group support existed). Only a genuinely
-    non-standard source — a ``.bandgroup``-grouped capture, or a raster whose band count PIL's own
-    1/3/4-channel modes don't cover (npy/npz, or a >4-band GeoTIFF) — decodes through the
+    non-standard source (a ``.bandgroup``-grouped capture, or a raster whose band count PIL's own
+    1/3/4-channel modes don't cover: npy/npz, or a >4-band GeoTIFF) decodes through the
     channel-aware ``image_utils`` and is materialized to a throwaway 8-bit RGB preview (first three
     bands, independently min-max stretched; a single band is repeated across channels) under
-    ``.tcip/artifacts/viz/_band_previews/``. Never a measurement artifact — visualization only.
+    ``.tcip/artifacts/viz/_band_previews/``. Never a measurement artifact, visualization only.
     """
     from tcip_mcp.pipelines import image_utils
     from tcip_mcp.pipelines.derivations import probe_channels
@@ -49,7 +49,7 @@ def _materialize_if_needed(source) -> str:
             return str(source)
         if ext in (".tif", ".tiff") and probe_channels(source) in (1, 3, 4):
             # A photographic-shaped GeoTIFF: PIL decodes it directly, same as any other
-            # supported format — no synthetic stretch for what is really an ordinary image.
+            # supported format: no synthetic stretch for what is really an ordinary image.
             return str(source)
 
     n = probe_channels(source)
@@ -81,7 +81,7 @@ def _band_preview_png(arr, stem: str) -> str:
 
 
 def _resolve_render_path(images_dir, stem: str) -> str | None:
-    """The real path to hand a renderer for ``stem`` in ``images_dir`` — ``None`` if ``stem``
+    """The real path to hand a renderer for ``stem`` in ``images_dir``; ``None`` if ``stem``
     isn't a resolvable logical image (missing, or a stale band-group manifest)."""
     from tcip_mcp.pipelines import image_utils
 
@@ -95,7 +95,7 @@ def _resolve_render_path(images_dir, stem: str) -> str | None:
 def _renderable_path(image_path: str) -> str:
     """As ``_resolve_render_path``, for a caller that already has a path rather than a
     ``(dir, stem)`` pair. Falls back to ``image_path`` unchanged when it isn't resolvable through
-    the enumeration primitive (e.g. a path outside any recognized ``images/`` layout) — the
+    the enumeration primitive (e.g. a path outside any recognized ``images/`` layout); the
     caller's own not-a-file / not-found handling surfaces the real error instead of this silently
     swallowing it.
     """
@@ -139,7 +139,7 @@ def _n_points(anns: list[Annotation]) -> int:
 
 
 def _point_note(n: int) -> str:
-    return f" ({n} point annotation(s) not drawn — no point renderer yet)" if n else ""
+    return f" ({n} point annotation(s) not drawn, no point renderer yet)" if n else ""
 
 
 def _box_dict(a: Annotation, index: Callable[[str], int]) -> dict:
@@ -173,7 +173,7 @@ def visualize(
     .tcip/artifacts/viz/ and returns ``image_path`` for view_image.
 
     Args:
-        source: What to render —
+        source: What to render:
             'annotations' = ground-truth labels on a single image (path = image file);
             'predictions' = model predictions on a single image (path = image file);
             'comparison'  = GT (green) vs predictions (red) with TP/FP/FN match stats
@@ -182,8 +182,8 @@ def visualize(
             containing images/ and labels/).
         path: Image file (annotations/predictions/comparison) or dataset folder (dataset).
         task: 'detect' or 'segment'.
-        class_names: Comma-separated class names (e.g. "catkin,nut,bud").
-        conf_threshold: Minimum confidence — filters displayed predictions (source='predictions')
+        class_names: Comma-separated class names (e.g. "leaf,fruit,bud").
+        conf_threshold: Minimum confidence; filters displayed predictions (source='predictions')
             and the predictions matched against GT (source='comparison'). Defaults to the shared
             ``DEFAULT_CONF`` so the comparison operating point matches inference/evaluate (it used to
             silently match at compute_matches' own 0.25 default).
@@ -244,7 +244,7 @@ def _viz_annotations(
         if shapes:
             from collections import Counter
             counts = Counter(a.subject for a in shapes)
-            summary += " — " + ", ".join(f"{v} {k}" for k, v in counts.most_common())
+            summary += ": " + ", ".join(f"{v} {k}" for k, v in counts.most_common())
         summary += _point_note(n_points)
     else:
         shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
@@ -381,7 +381,7 @@ def render_failure_cases(
 ) -> dict:
     """Find and render the worst predictions for failure analysis.
 
-    Ranks by a count-mismatch + low-confidence heuristic (`get_worst_predictions`) — no IoU
+    Ranks by a count-mismatch + low-confidence heuristic (`get_worst_predictions`); no IoU
     matching, so an image with the right box count but every box mislocated scores as good. Not a
     substitute for `score_predictions`(`detail=True`)'s IoU-matched TP/FP/FN when mislocalization
     itself is the question.
@@ -480,7 +480,7 @@ def _viz_dataset_sample(
         return {"error": f"Images directory not found: {images_dir}"}
 
     # Every logical image at or under images_dir, folding sibling band files into one grouped
-    # entry per capture — recurses into images/<date>/ subfolders (the canonical layout) and any
+    # entry per capture: recurses into images/<date>/ subfolders (the canonical layout) and any
     # deeper nesting, mirroring the old flat rglob extension scan.
     dirs = {images_dir} | {p for p in images_dir.rglob("*") if p.is_dir()}
     all_images: list[tuple[Path, str]] = [
@@ -518,7 +518,7 @@ def _viz_dataset_sample(
                                            class_names=_name_map(idx))
             titles.append(f"{stem} ({len(shapes)})")
         else:
-            # No annotations — just use raw image
+            # No annotations: just use raw image
             out = render_path
             titles.append(f"{stem} (no labels)")
 
@@ -551,12 +551,12 @@ def propose_annotations(
 
     The engine is a capability, not a fixed method: 'sam' is the built-in SAM2 reference; the agent
     can register another engine (``register_proposal_engine``) or pass a dotted 'module:factory' it
-    wrote — then trial and compare engines by how well each one's high-conf proposals survive breeder
+    wrote, then trial and compare engines by how well each one's high-conf proposals survive breeder
     review, and pick the most useful for the task.
 
     Args:
         image_path: Absolute path to the image file.
-        engine: Proposal engine — 'sam' (built-in) or a dotted 'module:factory' the agent brings.
+        engine: Proposal engine: 'sam' (built-in) or a dotted 'module:factory' the agent brings.
         engine_params: Engine-specific knobs forwarded to the engine (e.g. SAM's model_type,
             points_per_side, pred_iou_thresh, stability_score_thresh, min_mask_region_area). Omit for
             the engine's own defaults.
@@ -631,7 +631,7 @@ def accept_proposals(
     After reviewing propose_annotations output, the agent calls this tool with a mapping from
     candidate IDs to class IDs. Rejected candidates are simply omitted from the assignments list.
     The masks are written to the predictions tree (``predictions/<engine>/<date>/<task>``) as
-    per-image COCO/JSON with ``created_by=<engine>`` and ``score`` = the engine's proposal score —
+    per-image COCO/JSON with ``created_by=<engine>`` and ``score`` = the engine's proposal score;
     they are model output, so a human accepts them on the Review canvas before they become ground
     truth. Staging goes through the prediction-bucket verdict guard, so a re-run never overwrites
     reviewed predictions or orphans their verdicts. This never writes GT.
@@ -664,8 +664,8 @@ def accept_proposals(
     w, h = image_dimensions(resolve_image_source(img.parent, img.stem))
 
     # Build name-based predictions from accepted candidates (created_by=<engine>, score = the
-    # engine's proposal score). Each candidate becomes ONE Annotation under its subject carrying
-    # every ring the engine proposed — an occlusion-split object stays split rather than being
+    # engine's proposal score). Each candidate becomes one Annotation under its subject carrying
+    # every ring the engine proposed: an occlusion-split object stays split rather than being
     # accepted as its largest fragment.
     from datetime import datetime, timezone
     from tcip_annotation.state import Polygon as _Polygon
@@ -688,7 +688,7 @@ def accept_proposals(
                 score=score, created_by=engine, created_at=staged_at))
             n_poly += 1
 
-    # Stage into the predictions tree through the shared verdict-guarded helper — model output for a
+    # Stage into the predictions tree through the shared verdict-guarded helper: model output for a
     # human to accept on the Review canvas, never written straight to ground truth.
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
@@ -709,9 +709,9 @@ def accept_proposals(
                             class_names=_name_map(idx))
 
     note = (f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
-            f"predictions (created_by={engine!r}) for review — not ground truth.")
+            f"predictions (created_by={engine!r}) for review, not ground truth.")
     if staged["redirected"]:
-        note = (f"bucket {engine!r} has {staged['verdict_count']} review verdict(s) — staged to a fresh "
+        note = (f"bucket {engine!r} has {staged['verdict_count']} review verdict(s), staged to a fresh "
                 f"bucket {bucket!r} instead so the reviewed predictions stay intact. " + note)
 
     return {
@@ -731,10 +731,10 @@ def capture_live_canvas(
     crop_to_viewport: bool = True,
     max_edge: int = 1600,
 ) -> dict:
-    """Render exactly what the human's GUI canvas shows right now — image, shapes, viewport.
+    """Render exactly what the human's GUI canvas shows right now: image, shapes, viewport.
 
     The GUI continuously pushes its canvas state (image, viewport, classes, and the
-    display-resolved shapes with the exact colors/tags it renders — including unsaved edits and
+    display-resolved shapes with the exact colors/tags it renders, including unsaved edits and
     an in-progress drawing) to ``.tcip/state/canvas_live.json``. This tool renders that state
     over the full-resolution image and returns the artifact path for ``view_image``, plus the
     classes schema, review legend, per-tag/per-creator counts, and the state's age.
@@ -779,7 +779,7 @@ def capture_live_canvas(
 
     state = _read(meta_file)
     if state is None:
-        return {"error": "No live canvas state found — is the GUI open with a project loaded? "
+        return {"error": "No live canvas state found; is the GUI open with a project loaded? "
                          "The frontend pushes it to <project>/.tcip/state/canvas_live.json "
                          f"(looked at {meta_file}; if the GUI has a different project open, "
                          "set_active_project to it first)."}
@@ -788,7 +788,7 @@ def capture_live_canvas(
     if not Path(src_image).is_file():
         return {"error": f"Canvas state references a missing image: {src_image}"}
 
-    # Geometry is valid only when its identity matches the meta document — a heartbeat for a
+    # Geometry is valid only when its identity matches the meta document: a heartbeat for a
     # different image/tab means the stored shapes are stale and must not render.
     sdoc = _read(shapes_file) or {}
     shapes_valid = (
@@ -815,8 +815,8 @@ def capture_live_canvas(
     summary = (
         f"Rendered the live {state.get('tab')} canvas for {state.get('image')} ({len(shapes)} shapes)."
         if live else
-        f"Rendered the LAST KNOWN {state.get('tab')} canvas for {state.get('image')} "
-        f"({len(shapes)} shapes, {age}s old — the GUI did not answer the refresh ping; it may be "
+        f"Rendered the last known {state.get('tab')} canvas for {state.get('image')} "
+        f"({len(shapes)} shapes, {age}s old; the GUI did not answer the refresh ping; it may be "
         "closed, on another tab, or on a different project)."
     ) + " Call view_image on image_path to see it."
     return {
