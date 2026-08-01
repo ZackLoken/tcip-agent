@@ -19,13 +19,15 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
-from tcip_annotation.utils import get_image_dimensions
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 _POSITIVE_ACTIONS = {"accepted", "edited"}
-IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")
 
 
 def partition_review_verdicts(review_state: dict, *, only_completed: bool = False) -> dict[str, dict]:
@@ -56,16 +58,21 @@ def partition_review_verdicts(review_state: dict, *, only_completed: bool = Fals
     return result
 
 
-def _find_source_image(source_images_dir: str, img_name: str) -> Path | None:
-    direct = Path(source_images_dir) / img_name
-    if direct.is_file():
-        return direct
+def _find_source_image(source_images_dir: str, img_name: str) -> "Path | BandGroupRef | None":
+    """The logical image ``img_name`` names — a plain ``Path``, or (when a ``.bandgroup``
+    manifest groups sibling band files under this stem) a ``BandGroupRef``. ``None`` if unresolvable
+    (missing, or a stale group whose manifest references a deleted sibling).
+
+    Lazy-imports ``image_utils`` (which pulls in torch) so this module stays torch-free at import
+    time, matching every other caller in this file.
+    """
+    from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, resolve_image_source
+
     stem = Path(img_name).stem
-    for ext in IMAGE_EXTS:
-        cand = Path(source_images_dir) / f"{stem}{ext}"
-        if cand.is_file():
-            return cand
-    return None
+    try:
+        return resolve_image_source(source_images_dir, stem)
+    except (FileNotFoundError, BandGroupIncomplete):
+        return None
 
 
 def _write_positive_label(path: Path, positives: list[tuple], img_w: int, img_h: int) -> None:
@@ -119,11 +126,29 @@ def materialize_dataset(
             counts["missing_images"] += 1
             continue
 
-        dst_img = images_out / src.name
-        if not dst_img.exists():
-            place(str(src), str(dst_img))
-        label_path = labels_out / f"{src.stem}.json"
-        img_w, img_h = get_image_dimensions(str(src))
+        from tcip_mcp.pipelines.image_utils import BandGroupRef, image_dimensions
+
+        if isinstance(src, BandGroupRef):
+            # A grouped capture materializes as every sibling band file PLUS the .bandgroup
+            # manifest itself — the manifest is what stands in for "the image" in the output
+            # (its own filename is what every by-name reader treats as this capture's name).
+            for band_path in src.bands.values():
+                dst_band = images_out / band_path.name
+                if not dst_band.exists():
+                    place(str(band_path), str(dst_band))
+            dst_manifest = images_out / src.manifest_path.name
+            if not dst_manifest.exists():
+                place(str(src.manifest_path), str(dst_manifest))
+            record_name = src.manifest_path.name
+            stem = src.stem
+        else:
+            dst_img = images_out / src.name
+            if not dst_img.exists():
+                place(str(src), str(dst_img))
+            record_name = src.name
+            stem = src.stem
+        label_path = labels_out / f"{stem}.json"
+        img_w, img_h = image_dimensions(src)
 
         if status == "positive":
             _write_positive_label(label_path, info["positives"], img_w, img_h)
@@ -135,7 +160,7 @@ def materialize_dataset(
             counts["hard_negative"] += 1
 
         manifest_images.append({
-            "image": src.name, "status": status, "n_boxes": len(info["positives"]),
+            "image": record_name, "status": status, "n_boxes": len(info["positives"]),
             "rejected_count": info["rejected_count"], "label": str(label_path),
         })
 
