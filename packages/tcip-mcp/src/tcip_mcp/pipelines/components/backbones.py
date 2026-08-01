@@ -1,23 +1,23 @@
-"""``BackboneWrapper`` — the interface a backbone must expose to the necks and detectors here.
+"""``BackboneWrapper``: the interface a backbone must expose to the necks and detectors here.
 
-Wrap a module that **already emits a list, tuple, or dict of feature maps** — timm's
+Wrap a module that already emits a list, tuple, or dict of feature maps: timm's
 ``features_only=True``, torchvision's ``create_feature_extractor`` / ``IntermediateLayerGetter``,
 or a staged module you wrote. The wrapper renames those to ``{"s0": ..., "sN": ...}``, carries a
 declared ``out_channels``, and adds per-stage ``freeze_to`` for progressive unfreezing.
 
-**Emit finest first.** Stages are renamed in the order the module returns them (a dict's insertion
+Emit finest first: stages are renamed in the order the module returns them (a dict's insertion
 order), and the necks rebuild pyramid order from those names, so ``s0`` must be the
 highest-resolution stage. The renaming is what makes that ordering survive: ``FPN``/``PAN`` sort the
 keys they are handed, so a module's own names (``feat1``/``feat4``, ``low``/``mid``/``high``) would
-otherwise be consumed in alphabetical order — silently, and without a shape error whenever the
+otherwise be consumed in alphabetical order, silently, and without a shape error whenever the
 stage widths are uniform. Pass ``feature_keys=[...]`` to name the stages yourself instead.
 
 It does not turn a classifier into a feature extractor: wrapping a plain
-``torchvision.models.resnet50`` yields ``{"s0": (1, 1000)}`` — the logit vector, one entry —
+``torchvision.models.resnet50`` yields ``{"s0": (1, 1000)}`` (the logit vector, one entry)
 because that is what the module returns. Extract features first, then wrap.
 
 There is deliberately no backbone-building helper. Constructing the backbone is your decision and
-its arguments are yours to choose — a helper would have to pin ``out_indices``, which decides
+its arguments are yours to choose: a helper would have to pin ``out_indices``, which decides
 whether you get a pyramid at all (a plain ViT returns four maps at one reduction; ``convnext_*``
 and ``swin_*`` expose only indices 0-3 and raise on a request for 4). Choose them against the
 model you are building, then wrap it::
@@ -72,8 +72,8 @@ class BackboneWrapper(nn.Module):
         out = self.model(x)
         if isinstance(out, dict):
             # Renamed, not passed through: the necks reconstruct pyramid order from these keys
-            # (``sorted(features.keys())``), so a module emitting its own names — torchvision's
-            # ``feat1``/``feat4``, or a staged module's ``low``/``mid``/``high`` — would be
+            # (``sorted(features.keys())``), so a module emitting its own names (torchvision's
+            # ``feat1``/``feat4``, or a staged module's ``low``/``mid``/``high``) would be
             # consumed out of order, silently, whenever the stage widths are uniform.
             feats = list(out.values())
         elif isinstance(out, (list, tuple)):
@@ -140,7 +140,7 @@ def _freeze_sequential_fraction(
         p.requires_grad = True
     children = list(model.named_children())
     # A wrapper whose sole child is a ModuleList keeps its real stages one level
-    # down — descend so freezing is per-stage rather than all-or-nothing. This is
+    # down, so descend to freeze per-stage rather than all-or-nothing. This is
     # the common shape when an agent wraps its own staged backbone.
     if len(children) == 1 and isinstance(children[0][1], nn.ModuleList):
         children = list(children[0][1].named_children())
