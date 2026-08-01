@@ -171,7 +171,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         if not sub_stems:
             return []
         results = predictor.predict_batch(
-            [str(stem_to_image[s]) for s in sub_stems], tile=tile, tile_size=tile_size,
+            [stem_to_image[s] for s in sub_stems], tile=tile, tile_size=tile_size,
             overlap=overlap, tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
             postprocess=postprocess,
         )
@@ -572,9 +572,13 @@ def run_inference(
     if image_paths is None:
         if images_dir is None:
             return {"error": "Provide either image_paths or images_dir"}
-        p = Path(images_dir)
-        image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-        image_paths = sorted(str(f) for f in p.iterdir() if f.suffix.lower() in image_exts)
+        # Fold a `.bandgroup`-grouped capture into its one logical entry (list_logical_images) —
+        # the same enumeration every other reader in this platform shares — instead of this door's
+        # own raw sibling-file listing enumerating each band file as its own (spurious) image.
+        from tcip_mcp.pipelines.image_utils import list_logical_images
+
+        logical = list_logical_images(images_dir)
+        image_paths = [logical[stem] for stem in sorted(logical)]
 
     # Resolve the confidence operating point. CV0: with a trait + labeled calibration dir, DERIVE it
     # per dataset (count-unbiased + held-out validated); otherwise the byte-identical raw path.
@@ -611,7 +615,9 @@ def run_inference(
         # usually UNLABELED, so its GT identity (a content hash) is undefined — pass None and record
         # 'not-comparable-unlabeled-target'. Only when inferencing the SAME labeled set it calibrated
         # on can we compare real hashes and flag cross-dataset inheritance.
-        inf_stems = [Path(pp).stem for pp in image_paths]
+        from tcip_mcp.pipelines.image_utils import stem_of
+
+        inf_stems = [stem_of(pp) for pp in image_paths]
         cal_label_stems = {pp.stem for pp in Path(calibration_labels_dir).glob("*.json")}
         same_images = calibration_images_dir is None or (
             images_dir is not None and Path(calibration_images_dir) == Path(images_dir))
