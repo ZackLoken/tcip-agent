@@ -253,7 +253,7 @@ describe("AnnotateTab subject rendering", () => {
     expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "catkin");
   });
 
-  it("box mode draws an active-subject polygon's read-only derived box (solid, no handles), never a stored box", async () => {
+  it("box mode draws an active-subject polygon's read-only derived box (dashed, no handles), never a stored box", async () => {
     useStore.getState().setRegistry({ catkin: {} });
     const poly = {
       rings: [
@@ -274,14 +274,27 @@ describe("AnnotateTab subject rendering", () => {
     await flush();
 
     // Box mode (setupDataset). The polygon shows only its derived box: a single Rect with no corner
-    // handles (handles are extra Rects), and it never entered canvas.boxes — so unsaveable. Solid
-    // like every committed shape (read-only is enforced structurally, not by line style).
+    // handles (handles are extra Rects), and it never entered canvas.boxes — so unsaveable. Dashed
+    // distinguishes it from a real editable box (solid) — the same convention in-progress/
+    // under-review shapes already use, not read-only enforcement (that's structural).
     const rects = screen.getAllByTestId("k-rect");
     expect(rects).toHaveLength(1);
-    expect(rects[0]).not.toHaveAttribute("data-dash"); // solid — dashed is reserved for transient shapes
+    expect(rects[0]).toHaveAttribute("data-dash", "true");
     expect(rects[0]).toHaveAttribute("data-stroke", subjectColor("catkin"));
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
     expect(useStore.getState().canvas.polygons).toHaveLength(1);
+  });
+
+  it("box mode still draws a real editable box solid, distinct from a derived one", async () => {
+    useStore.getState().setRegistry({ catkin: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    const rects = screen.getAllByTestId("k-rect");
+    expect(rects).toHaveLength(1);
+    expect(rects[0]).not.toHaveAttribute("data-dash");
   });
 
   it("point mode draws a placed point as its reticle mark — never a box or a closed outline", async () => {
@@ -485,5 +498,71 @@ describe("AnnotateTab point tool", () => {
     expect(useStore.getState().gui.mode).toBe("polygon");
     fireEvent.keyDown(window, { key: "m" });
     expect(useStore.getState().gui.mode).toBe("point");
+  });
+});
+
+describe("AnnotateTab AttributePanel", () => {
+  it("collapses to a pill when nothing is selected and there are no image-level ratings", async () => {
+    useStore.getState().setRegistry({ catkin: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    expect(screen.queryByText("Select a shape to set its attributes.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Attributes" })).toBeInTheDocument();
+  });
+
+  it("reopens on its own when a shape gets selected, and can be closed manually", async () => {
+    useStore.getState().setRegistry({ catkin: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
+    // The subject registry also has a "catkin" entry in the (always-mounted, hover-revealed)
+    // legend, so assert on the panel's own close button rather than ambiguous shared text.
+    expect(screen.getByRole("button", { name: "Close attributes panel" })).toBeInTheDocument();
+    expect(useStore.getState().canvas.selectedPolygonIdx).toBeNull(); // sanity: a box, not a polygon, is selected
+
+    fireEvent.click(screen.getByRole("button", { name: "Close attributes panel" }));
+    expect(
+      screen.queryByRole("button", { name: "Close attributes panel" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Attributes" })).toBeInTheDocument();
+  });
+});
+
+describe("AnnotateTab ioError banner", () => {
+  it("can be dismissed manually, independent of the conditional Reload button", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    saveSpy.mockResolvedValueOnce({ status: "conflict" } as SaveResult);
+    pressSave();
+    await flush();
+
+    expect(screen.getByText(/changed elsewhere/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Reload")).not.toBeInTheDocument();
+  });
+});
+
+describe("AnnotateTab legend", () => {
+  it("explains the dashed derived box only in box mode", async () => {
+    useStore.getState().setRegistry({ catkin: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    // Box mode (setupDataset default): the legend button is hover-revealed, so query its content
+    // directly rather than simulating hover.
+    expect(screen.getByText("Dashed = polygon's box (read-only)")).toBeInTheDocument();
+
+    act(() => useStore.getState().setMode("polygon"));
+    expect(screen.queryByText("Dashed = polygon's box (read-only)")).not.toBeInTheDocument();
   });
 });
