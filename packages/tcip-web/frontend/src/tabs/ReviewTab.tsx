@@ -691,9 +691,7 @@ export function ReviewTab() {
       backedUpKeys.current.add(key);
       return true;
     } catch {
-      useStore
-        .getState()
-        .pushToast("Could not back up original labels — nothing was written. Retry the action.");
+      useStore.getState().pushToast("Backup failed. Retry the action.");
       return false;
     }
   }
@@ -708,7 +706,7 @@ export function ReviewTab() {
     if (!dataset.subject) {
       useStore
         .getState()
-        .pushToast("No subject configured for this dataset — cannot record a missed object.");
+        .pushToast("Can't record a missed object: no subject configured for this dataset.");
       return false;
     }
     actionPending.current = true;
@@ -798,7 +796,7 @@ export function ReviewTab() {
     if (!dataset.predictions_dir) {
       useStore
         .getState()
-        .pushToast("No predictions to validate — select a model with predictions.");
+        .pushToast("No predictions to validate. Select a model with predictions first.");
       return;
     }
     setValidating(true);
@@ -836,8 +834,8 @@ export function ReviewTab() {
       useStore
         .getState()
         .pushToast(
-          "This is a point — it marks a location, not an outline, so there is nothing to resize. " +
-            "Accept or reject it here, or move it in Annotate.",
+          "A point marks a location, not an outline, so it can't be resized. Accept or reject it " +
+            "here, or move it in Annotate.",
           "info",
         );
       return;
@@ -849,8 +847,8 @@ export function ReviewTab() {
       useStore
         .getState()
         .pushToast(
-          `This shape covers ${geom.rings.length} separate parts of one object. Adjusting by hand ` +
-            `works on a single outline — accept or reject it here, or redraw it in Annotate.`,
+          `This shape covers ${geom.rings.length} separate parts of one object; hand-adjustment ` +
+            `only works on a single outline. Accept, reject, or redraw it in Annotate.`,
           "info",
         );
       return;
@@ -869,7 +867,7 @@ export function ReviewTab() {
     if (edit.kind === "box") {
       const [x1, y1, x2, y2] = edit.box;
       if (x2 - x1 < MIN_BOX_SIDE || y2 - y1 < MIN_BOX_SIDE) {
-        useStore.getState().pushToast("Box too small to save — drag a corner to enlarge it.");
+        useStore.getState().pushToast("Box too small to save. Drag a corner to enlarge it.");
         return;
       }
       const ok = pendingMiss
@@ -919,9 +917,7 @@ export function ReviewTab() {
     if (!box) return;
     const [x1, y1, x2, y2] = box;
     if (x2 - x1 < MIN_BOX_SIDE || y2 - y1 < MIN_BOX_SIDE) {
-      useStore
-        .getState()
-        .pushToast("Box too small — drag out a bigger area for the missed object.");
+      useStore.getState().pushToast("Box too small. Drag out a bigger area for the missed object.");
       return;
     }
     setPendingMiss(true);
