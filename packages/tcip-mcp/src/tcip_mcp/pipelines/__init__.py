@@ -1,1 +1,1 @@
-"""Pipeline sub-package — data, models, training, evaluation, inference, postprocessing."""
+"""Pipeline sub-package: data, models, training, evaluation, inference, postprocessing."""
