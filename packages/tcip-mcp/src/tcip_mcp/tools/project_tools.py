@@ -339,11 +339,14 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
             zf.write(identity, identity.relative_to(root))
             files_added += 1
 
-        # .tcip config, experiments, audit — the project's working state
+        # .tcip config, experiments, audit — the project's working state. ``.py`` is included
+        # because snapshot_model_source (pipelines/model_build.py) writes a bespoke run's actual
+        # model/training/dataset source under model_src/ as .py files — without it here, the
+        # archive carries the run's provenance manifest but not the code it describes.
         tcip_dir = root / ".tcip"
         if tcip_dir.is_dir():
             for f in tcip_dir.rglob("*"):
-                if f.is_file() and f.suffix in (".toml", ".jsonl", ".txt", ".yaml", ".yml", ".json"):
+                if f.is_file() and f.suffix in (".toml", ".jsonl", ".txt", ".yaml", ".yml", ".json", ".py"):
                     zf.write(f, f.relative_to(root))
                     files_added += 1
 
