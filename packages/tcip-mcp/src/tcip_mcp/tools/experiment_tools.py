@@ -1,4 +1,4 @@
-"""Experiment tracking MCP tools — create, log, compare, and trace experiments."""
+"""Experiment tracking MCP tools: create, log, compare, and trace experiments."""
 
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ def create_experiment(
 
     Use this tool when starting a new training run to track config,
     metrics, artifacts, and data lineage. The experiment_id should be
-    descriptive, e.g. 'exp-001-hazelnut-catkin-det'.
+    descriptive, e.g. 'exp-001-<crop>-<trait>-det'.
 
     Args:
-        experiment_id: Unique experiment name (e.g. 'exp-001-hazelnut-catkin-det').
+        experiment_id: Unique experiment name (e.g. 'exp-001-<crop>-<trait>-det').
         config: Full training configuration to snapshot.
         parent_experiment: Optional parent experiment ID for transfer learning lineage.
         data_source: Optional description of the data source.
@@ -41,7 +41,7 @@ def create_experiment(
 def get_experiment(experiment_id: str, view: str = "full") -> dict:
     """Read an experiment record.
 
-    With ``view='full'`` (default) returns the full state — config, metrics, artifacts,
+    With ``view='full'`` (default) returns the full state: config, metrics, artifacts,
     and lineage. With ``view='lineage'`` returns only the data → model → predictions
     chain (data source, parent model, model weights path, predictions path), enriched
     with the config's data-source block.
