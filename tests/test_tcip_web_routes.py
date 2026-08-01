@@ -587,6 +587,90 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
     assert data["state"]["detections"][0]["action"] == "accepted"  # payload wraps {img_name, state}
 
 
+def test_review_action_resolves_class_id_from_bucket_id_map(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """K25: the verdict entry now carries a resolved ``class_id`` — the producing bucket's own
+    recorded ``id_map`` (``operating_point.json``), read at record time — not the previously-dead
+    ``class_id`` field ``review_to_records`` used to default to 0 for every entry."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred_dir = tmp_path / "predictions"
+    pred_dir.mkdir(parents=True)
+    pred = pred_dir / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    (pred_dir / "operating_point.json").write_text(
+        json.dumps({"checkpoint_sha256": "sha", "experiment_id": None,
+                    "id_map": {"dormant": 0, "elongated": 1}}),
+        encoding="utf-8")
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(
+        client, img_path, gt, project_root,
+        pred_path=str(pred), det_type="tp", class_name="elongated", action="accepted",
+    )
+    assert resp.status_code == 200
+    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
+    data = json.loads(shard_path.read_text(encoding="utf-8"))
+    assert data["state"]["detections"][0]["class_id"] == 1  # resolved via the bucket's id_map
+
+
+def test_review_action_records_unresolvable_class_id_as_none(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """A verdict class_name the producing bucket's id_map does not recognize (e.g. an attribute-
+    scoped bucket handed a GT annotation's raw subject name) records ``class_id: null`` — an honest
+    unresolved fact, never a guessed 0/1. This is exactly the case a later review-confirmed build
+    (``review_calibration.review_to_records``) must refuse on, not silently mis-class."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred_dir = tmp_path / "predictions"
+    pred_dir.mkdir(parents=True)
+    pred = pred_dir / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    (pred_dir / "operating_point.json").write_text(
+        json.dumps({"checkpoint_sha256": "sha", "experiment_id": None,
+                    "id_map": {"dormant": 0, "elongated": 1}}),
+        encoding="utf-8")
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(
+        client, img_path, gt, project_root,
+        pred_path=str(pred), det_type="tp", class_name="catkin", action="accepted",
+    )
+    assert resp.status_code == 200
+    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
+    data = json.loads(shard_path.read_text(encoding="utf-8"))
+    assert data["state"]["detections"][0]["class_id"] is None
+
+
+def test_review_action_no_sidecar_records_unresolvable_class_id(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """No recorded ``id_map`` at all (no sidecar, or a bucket predating K25) also records
+    ``class_id: null`` — never silently defaults to a guessed single class."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+
+    resp = _review_action(
+        client, img_path, gt, project_root,
+        pred_path=str(pred), det_type="tp", class_name="catkin", action="accepted",
+    )
+    assert resp.status_code == 200
+    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
+    data = json.loads(shard_path.read_text(encoding="utf-8"))
+    assert data["state"]["detections"][0]["class_id"] is None
+
+
 def _review_action(client, img_path, gt, project_root, **over):
     body = {
         "project_root": str(project_root),
