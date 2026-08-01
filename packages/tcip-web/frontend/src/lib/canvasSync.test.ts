@@ -113,7 +113,10 @@ describe("buildAnnotateShapes", () => {
     expect(shapes[1].label).toBe("other");
   });
 
-  it("an in-progress drawing rides along as a dashed polyline", () => {
+  it("an in-progress drawing rides along as a dashed polyline in the active subject's colour", () => {
+    // Regression: the mirror used to hardcode amber here while the real canvas's
+    // InProgressPolygon stroke already used the active subject's colour — a divergence the
+    // agent's capture_live_canvas view would show that the breeder's own screen never did.
     const shapes = buildAnnotateShapes({
       ...base,
       currentPolygon: [
@@ -121,7 +124,24 @@ describe("buildAnnotateShapes", () => {
         [2, 2],
       ],
     });
-    expect(shapes.at(-1)).toMatchObject({ kind: "polyline", tag: "in_progress", dashed: true });
+    expect(shapes.at(-1)).toMatchObject({
+      kind: "polyline",
+      tag: "in_progress",
+      dashed: true,
+      color: "#FF0000", // base.colorFor("catkin"), base.activeSubject
+    });
+  });
+
+  it("falls back to amber only when nothing is selected (drawing is otherwise blocked)", () => {
+    const shapes = buildAnnotateShapes({
+      ...base,
+      activeSubject: "",
+      currentPolygon: [
+        [1, 1],
+        [2, 2],
+      ],
+    });
+    expect(shapes.at(-1)).toMatchObject({ kind: "polyline", color: "#FFE7B1" });
   });
 
   it("the labels toggle hides everything, exactly like the canvas", () => {
@@ -144,16 +164,16 @@ describe("buildAnnotateShapes", () => {
     expect(shapes[0].dashed).toBeFalsy();
   });
 
-  it("box mode adds one read-only derived box per active-subject polygon, solid, === ringsBbox", () => {
+  it("box mode adds one read-only derived box per active-subject polygon, dashed, === ringsBbox", () => {
     // Mirrors the canvas overlay: a polygon's detection footprint shows while boxing, and its coords
-    // are exactly ringsBbox — never a stored box. Solid like every committed shape (dashed is
-    // reserved for transient/under-review shapes; read-only is enforced structurally, not by style).
+    // are exactly ringsBbox — never a stored box. Dashed distinguishes it from a real editable box
+    // (solid) — the same convention in-progress/under-review shapes already use.
     const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [] });
     const derived = shapes.filter((s) => s.kind === "box");
     expect(derived).toHaveLength(1); // only the active "catkin" polygon; "other" is filtered out
     expect(derived[0].xyxy).toEqual(ringsBbox(base.polygons[0].rings));
     expect(derived[0].label).toBe("catkin");
-    expect(derived[0].dashed).toBeFalsy(); // solid, not the transient/under-review dashed style
+    expect(derived[0].dashed).toBe(true); // dashed = derived/read-only, not a real editable box
   });
 
   it("pushes every ring of a multi-ring polygon, sharing its colour, labelled once", () => {
