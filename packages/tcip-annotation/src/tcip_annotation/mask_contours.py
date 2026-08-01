@@ -3,8 +3,8 @@
 Both paths that turn a mask into a stored shape call this: SAM-assisted labeling
 (:mod:`tcip_annotation.sam_wrapper`, which produces ground truth a breeder confirms) and model
 prediction export (tcip-mcp's ``mask_geometry.mask_to_polygon_points``, a thin delegate). A single
-implementation is the point: an occlusion-split object (routine in this imagery, a catkin behind a
-branch, a leaf crossed by a stem) is genuinely more than one region, and GT and prediction must not
+implementation is the point: an occlusion-split object (routine in this imagery, a leaf crossed by a
+stem, a fruit behind a branch) is genuinely more than one region, and GT and prediction must not
 disagree about what a mask means. Two extractors did disagree; this module is why they can't again.
 
 Every external contour becomes its own ring, largest-area first; nothing is reduced to the largest
