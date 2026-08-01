@@ -3,7 +3,7 @@
 Single home for:
   * the pycocotools-backed detection / instance_seg metrics (mAP + operating-point
     TP/FP/FN), shared by training ``_validate``, ``run_test_evaluation`` and the
-    agent/GUI tool ``score_predictions`` — one source of
+    agent/GUI tool ``score_predictions``, one source of
     truth, the canonical COCO mAP definition;
   * in-house scalar metrics for classification / ordinal / regression (the seam
     where pycocotools ``iou_type='segm'`` can later cover true instance seg);
@@ -36,16 +36,16 @@ logger = logging.getLogger(__name__)
 # mAP50 terms are multiplied by 10 to lift them onto the same scale as val_loss,
 # so a weight here acts on that *scaled* term (a 0.35 f1 weight ~ 3.5 loss-units
 # of pull at f1=0). See compute_composite_objective for the exact formula.
-# These weights silently decide which checkpoint wins, so they are a caller-owned SELECTION POLICY
+# These weights silently decide which checkpoint wins, so they are a caller-owned selection policy
 # (validated=false, not a data derivation): overridable via the ``score_weights`` kwarg on every
-# eval surface. Documented default, not a frozen truth — no derivation label is claimed for it.
+# eval surface. Documented default, not a frozen truth, no derivation label is claimed for it.
 DEFAULT_SCORE_WEIGHTS: dict[str, float] = {"loss": 0.45, "f1": 0.35, "map50": 0.20}
 
 # The metric keys that ``evaluate()`` labels comparability-only (``map50_role``) once a center-match
 # trait's own governing criterion takes over ``precision``/``recall``/``f1`` (see the center_match
-# branch below) — the AP@0.5-family keys plus the IoU@0.5-convention precision/recall/F1 that get
-# relabeled ``iou_*`` at that point. K9: the single source of truth for "is this metric governing or
-# comparability-only for a center-match trait" — ``resolve_selection_metric`` (generic_trainer.py)
+# branch below), the AP@0.5-family keys plus the IoU@0.5-convention precision/recall/F1 that get
+# relabeled ``iou_*`` at that point. The single source of truth for "is this metric governing or
+# comparability-only for a center-match trait", ``resolve_selection_metric`` (generic_trainer.py)
 # and ``select_best_model`` (model_tools.py) both import this rather than re-encoding the names.
 CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset({
     "map50", "map", "map_at_maxdets", "map50_at_maxdets",
@@ -139,7 +139,7 @@ def _counts_at_operating_point(coco_eval, iou_threshold: float, conf_threshold: 
 def _ap_from_precision(coco_eval, *, iou: float | None, maxdet: int) -> float:
     """Mean AP from ``coco_eval.eval['precision']`` at a given IoU / maxDet, mirroring
     pycocotools' ``_summarize(ap=1)`` (area='all'), but indexed explicitly so we can read AP at
-    BOTH the standard 100 cap and a non-100 operating cap without summarize()'s hardcoded 100."""
+    both the standard 100 cap and a non-100 operating cap without summarize()'s hardcoded 100."""
     p = coco_eval.params
     s = coco_eval.eval["precision"]  # [T(iou), R(rec), K(cat), A(area), M(maxDet)]
     if iou is not None:
@@ -161,7 +161,7 @@ def coco_detection_metrics(
 ) -> dict:
     """Run ``COCOeval`` once over ``per_image`` records and return COCO metrics.
 
-    Returns mAP at the STANDARD 100-detection cap (``map``/``map50``/``map75`` — comparable across
+    Returns mAP at the standard 100-detection cap (``map``/``map50``/``map75``, comparable across
     runs and caps) plus the same at the operating cap (``map_at_maxdets``/``map50_at_maxdets``),
     and operating-point ``precision``/``recall``/``f1``/``tp``/``fp``/``fn`` with per-image counts.
     Short-circuits to all-zero metrics (no exception) for empty predictions
@@ -262,22 +262,22 @@ def coco_detection_metrics(
 # object when its center lands within a derived tolerance of a GT center (the object's actual
 # scale for a given trait/dataset is gt_class_avg_size's job to measure, not a pinned constant
 # here). The operating point (conf) is then
-# derived to minimize the signed per-image count bias E[FP-FN] — not F1 — because the phenotype is a
+# derived to minimize the signed per-image count bias E[FP-FN], not F1, because the phenotype is a
 # count (Sigma pred ~= Sigma gt) for a trait whose recorded count_objective/localization say so
-# (traits.py; K18 B3/B4 — neither is authored, both are derived/decided once and recorded).
+# (traits.py, neither is authored, both are derived/decided once and recorded).
 
 def _centers_xywh(anns: list[dict]) -> list[tuple[float, float]]:
     return [(a["bbox"][0] + a["bbox"][2] / 2.0, a["bbox"][1] + a["bbox"][3] / 2.0) for a in anns]
 
 
 def _char_size_xywh(a: dict) -> float:
-    """Characteristic size of a box = sqrt(w*h) — scale-robust for a tolerance basis."""
+    """Characteristic size of a box = sqrt(w*h), scale-robust for a tolerance basis."""
     w, h = float(a["bbox"][2]), float(a["bbox"][3])
     return (max(w, 0.0) * max(h, 0.0)) ** 0.5
 
 
 def gt_class_avg_size(per_image: list[dict], class_id: int | None = None) -> float:
-    """Average characteristic GT box size — the DERIVED basis for the center-match tolerance.
+    """Average characteristic GT box size, the derived basis for the center-match tolerance.
 
     Derived from the data in hand (not pinned): the tolerance is ``half_class_avg_size`` (traits.py).
     """
@@ -293,10 +293,10 @@ def mean_of_present_counts(counts: Iterable[int]) -> float:
     """Mean of the entries in ``counts`` that are actually positive (> 0).
 
     The shared "typical, when present" statistic behind a relative count-bias tolerance's derived
-    denominator (K4 residual, 2026-07-31): a 0 is not evidence of what a typical image carrying the
+    denominator: a 0 is not evidence of what a typical image carrying the
     thing being counted looks like, so including it would dilute the density figure toward zero for
-    anything present on only some of the population — exactly the dilution the 2026-07-29 decision
-    already rejected for the equivalence test's own standard error (``n_present`` there). Shared by
+    anything present on only some of the population, exactly the dilution already rejected for the
+    equivalence test's own standard error (``n_present`` there). Shared by
     :func:`gt_class_typical_count` (GT per-image records) and
     :func:`operating_point.resolve_classifier_operating_point` (flat classified instances grouped by
     image) so both derive "typical count" the same way rather than each inventing its own.
@@ -306,11 +306,11 @@ def mean_of_present_counts(counts: Iterable[int]) -> float:
 
 
 def gt_class_typical_count(per_image: list[dict], class_id: int | None = None) -> float:
-    """Mean per-image GT count for ``class_id`` (all classes pooled when ``None``) — the DERIVED
+    """Mean per-image GT count for ``class_id`` (all classes pooled when ``None``), the derived
     denominator a relative count-bias tolerance scales against
     (:func:`operating_point._bias_equivalence_ok`).
 
-    Deliberately GT-only and conf-independent — a distinct notion of "present" from
+    Deliberately GT-only and conf-independent, a distinct notion of "present" from
     ``_count_stats_at_conf``'s ``n_present`` (``gt or dt``, at one conf): a class with detections but
     no real GT anywhere has no genuine "typical count" to speak of (it should derive 0, not borrow
     density from its own false positives), and the relative tolerance must not shift as the sweep
@@ -344,24 +344,24 @@ def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tup
 
 def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
                             class_id: int | None = None, iou_threshold: float = 0.5) -> dict:
-    """The ONE localization criterion that GOVERNS a trait's phenotype count + model selection (R3/D9).
+    """The one localization criterion that governs a trait's phenotype count + model selection.
 
     Reads the trait's recorded ``localization`` kind (center_match vs iou_match, traits.py) and
-    derives its per-dataset tolerance from the GT in hand — never a pinned value. Returns
+    derives its per-dataset tolerance from the GT in hand, never a pinned value. Returns
     ``{kind, tolerance | iou_threshold, derived_from, trait}``. With no trait (or an iou_match trait),
-    it is IoU matching at ``iou_threshold`` — the labeled comparability convention (AP@0.5), which
+    it is IoU matching at ``iou_threshold``, the labeled comparability convention (AP@0.5), which
     governs nothing on its own; a count trait's derived center-match tolerance is what the phenotype
     and checkpoint selection rest on.
 
-    K18 B3: ``localization`` is no longer authored — it is derived once, the first time real GT is
+    ``localization`` is no longer authored, it is derived once, the first time real GT is
     available for a trait with no recorded kind (via ``derivations.derive_localization_kind``),
     persisted through ``traits.write_trait_spec_fields`` with ``data_derived_at_runtime``
     provenance, and read from the recorded value on every later call. A recorded kind is also
-    cheaply re-checked against what the CURRENT data would derive, every real call — divergence
+    cheaply re-checked against what the current data would derive, every real call, divergence
     surfaces a warning (``kind_diverged`` in the returned dict) rather than silently switching,
     per the standing "constrain by observation, not permission" rule; only an explicit re-derive
     changes the recorded value. This is also the single point every consumer of a trait's
-    localization criterion goes through — ``generic_trainer.py`` reads the recorded field directly
+    localization criterion goes through, ``generic_trainer.py`` reads the recorded field directly
     (it runs before any GT loads, so it cannot call this), but every site with real GT in hand
     (phenology_tools.py's classifier-calibration matching, this module's own count/selection
     metrics) calls this function rather than re-deriving or re-reading the field independently.
@@ -388,15 +388,15 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
             kind_diverged = True
             logger.warning(
                 "trait %r: recorded localization kind %r diverges from what this call's own GT "
-                "would derive (%r) — not switched (observation, not permission); re-derive "
+                "would derive (%r), not switched (observation, not permission); re-derive "
                 "explicitly via update_trait_spec_fields if this data is now representative.",
                 trait_name, kind, live_derived_kind)
     elif live_derived_kind is not None:
         kind = live_derived_kind
         kind_source = "data_derived_at_runtime"
-        # Stamp via resolution.derived() — NOT aliased on import — so test_provenance_honesty.py's
+        # Stamp via resolution.derived(), not aliased on import, so test_provenance_honesty.py's
         # AST scanner (which matches the literal call name "derived") actually sees this label; the
-        # TraitSpec.provenance entry below is a separate, free-text record of WHO decided (for a
+        # TraitSpec.provenance entry below is a separate, free-text record of who decided (for a
         # human/agent reader), not a substitute for this mechanical check.
         from tcip_mcp.pipelines.resolution import derived
         derived("localization_kind", kind,
@@ -405,7 +405,7 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
             from tcip_mcp import traits as traits_module
             traits_module.write_trait_spec_fields(
                 trait_name, {"localization": kind},
-                [f"localization: data_derived_at_runtime — derived from "
+                [f"localization: data_derived_at_runtime, derived from "
                  f"{sum(len(b) for b in boxes_per_image)} GT boxes (achievable IoU under jitter)"],
             )
         except ValueError:
@@ -413,16 +413,16 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     else:
         raise ValueError(
             f"trait {trait_name!r} has no recorded localization kind and no GT in this call to "
-            "derive one from — cannot resolve a match criterion. Calibrate or evaluate against a "
+            "derive one from, cannot resolve a match criterion. Calibrate or evaluate against a "
             "labeled reference at least once before this trait's localization kind can be known.")
 
-    # Stamp via resolution.derived()/default() — NOT aliased on import, and with the derived_from
-    # LITERAL inlined directly into the call (round-2 stage-6 review: passing it as a variable,
-    # even unaliased, is ALSO invisible to the AST scanner — it only reads a literal string or an
-    # f-string's leading constant written directly at the call site, never a name reference).
+    # Stamp via resolution.derived()/default(), not aliased on import, and with the derived_from
+    # literal inlined directly into the call: passing it as a variable, even unaliased, is also
+    # invisible to the AST scanner, it only reads a literal string or an
+    # f-string's leading constant written directly at the call site, never a name reference.
     # derived() for a real per-dataset computation, default() for the honest "underivable, fell
-    # back" case (never claimed as a derivation — and not scanned by test_provenance_honesty.py at
-    # all, correctly, since it makes no derivation claim to check). The label text lives ONCE, in
+    # back" case (never claimed as a derivation, and not scanned by test_provenance_honesty.py at
+    # all, correctly, since it makes no derivation claim to check). The label text lives once, in
     # the call itself; `.derived_from` reads it back rather than a second, separately-typed copy.
     from tcip_mcp.pipelines.resolution import default, derived
 
@@ -461,14 +461,14 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
 
 def governing_counts(per_image: list[dict], criterion: dict, *, conf_threshold: float,
                      class_id: int | None = None, max_dets: int = 1000) -> dict:
-    """tp/fp/fn/precision/recall/f1 at the criterion that GOVERNS the phenotype count (R3).
+    """tp/fp/fn/precision/recall/f1 at the criterion that governs the phenotype count.
 
     ``center_match`` uses greedy nearest-center matching at the derived tolerance; ``iou_match`` reuses
-    the COCO IoU matcher. This count is what a count-trait phenotype and model selection rest on —
+    the COCO IoU matcher. This count is what a count-trait phenotype and model selection rest on,
     distinct from AP@0.5, which stays a labeled comparability metric that governs nothing.
     """
     if criterion["kind"] == "center_match":
-        # Deliberately uncapped by max_dets (K9), unlike the iou_match branch below: a count
+        # Deliberately uncapped by max_dets, unlike the iou_match branch below: a count
         # trait's total is every conf-surviving detection, not the COCOeval detection-cap
         # convention that AP@0.5 comparability uses.
         tol = float(criterion["tolerance"])
@@ -500,7 +500,7 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
                          class_id: int | None) -> dict:
     """Center-match counting statistics over ``per_image`` at one conf, optionally for one class.
 
-    The single implementation of "match, count, and take the per-image count bias" — the class-pooled
+    The single implementation of "match, count, and take the per-image count bias", the class-pooled
     curve entry and every per-class entry beside it both come from here, so a per-class bias can
     never be measured by a second matcher that drifts from the pooled one.
     """
@@ -530,13 +530,13 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
         "precision": precision, "recall": recall, "f1": f1,
         "count_bias_mean": float(np.mean(biases)) if biases else 0.0,
         "abs_count_error_mean": float(np.mean(abs_biases)) if biases else 0.0,
-        # Tail dispersion (Fix B) — a p90 of |bias|, not another mean, since a mean can hide one
-        # badly-off image among many. Reference-sufficiency terms (Fix C) — computed here, once,
+        # Tail dispersion, a p90 of |bias|, not another mean, since a mean can hide one
+        # badly-off image among many. Reference-sufficiency terms, computed here, once,
         # so the gate never re-derives a second matcher over the same per-image biases.
         "count_error_p90": float(np.quantile(abs_biases, 0.9)) if abs_biases else 0.0,
         "count_bias_std": float(np.std(biases, ddof=1)) if len(biases) > 1 else 0.0,
         "n_images": len(biases),
-        # Images that actually carried this class (gt or a surviving dt) — distinct from n_images
+        # Images that actually carried this class (gt or a surviving dt), distinct from n_images
         # (the whole holdout) because a class scarce in the reference gets its SE denominator from
         # how much evidence there really is, not diluted by images that say nothing about it.
         "n_present": n_present,
@@ -547,7 +547,7 @@ def _class_ids_present(per_image: list[dict], class_id: int | None = None) -> li
     """The class ids to break the sweep down by: those the records carry in gt or dt, derived from
     the data in hand rather than a registry read or a pinned id space.
 
-    An explicit ``class_id`` is returned as-is — the caller has already scoped the sweep to it, and
+    An explicit ``class_id`` is returned as-is, the caller has already scoped the sweep to it, and
     it stays the breakdown's one key even on records that turn out to carry none of it. Every
     annotation and detection must carry ``category_id``; a per-class breakdown of records that do
     not identify their classes is not something to guess at.
@@ -564,20 +564,20 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
     """Sweep the confidence threshold over ``per_image`` records via center-matching.
 
     One model pass produces ``per_image`` (unfiltered dt with scores); this sweeps conf cheaply in
-    Python — no re-forwarding. For each conf: aggregate TP/FP/FN and per-image count bias (FP-FN).
+    Python, no re-forwarding. For each conf: aggregate TP/FP/FN and per-image count bias (FP-FN).
     Passing an explicit ``conf_grid`` (e.g. a single-element ``[conf]``) skips grid construction and
-    evaluates EXACTLY those points — the exact-conf holdout evaluation (no nearest-neighbor snap)
+    evaluates exactly those points, the exact-conf holdout evaluation (no nearest-neighbor snap)
     relies on this. Returns ``{tolerance, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
     count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images, n_present,
     per_class}]}``
-    — the dispersion + reference-sufficiency terms are per-conf statistics across ``per_image`` that
+, the dispersion + reference-sufficiency terms are per-conf statistics across ``per_image`` that
     the operating-point gate reads, never recomputes.
 
-    ``per_class`` (K4 #4) carries the same statistics measured within each class the records carry,
+    ``per_class`` carries the same statistics measured within each class the records carry,
     keyed by ``str(category_id)`` (string keys so an in-memory sweep and one round-tripped through
     the JSON sidecar have the same shape). It exists because the pooled entry beside it cannot see a
     per-class error: matching is class-blind there, so a detector that calls every class-A object
-    class B reports tp-only, zero pooled bias — while the delivered per-class counts, which are the
+    class B reports tp-only, zero pooled bias, while the delivered per-class counts, which are the
     phenotype for a fraction/ratio trait, are both wrong. Class ids come from the records themselves;
     which of them is the trait's positive class is not read here and is not needed to measure bias.
     """
@@ -594,7 +594,7 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
         pooled = _count_stats_at_conf(per_image, tolerance=tolerance, conf=conf, class_id=class_id)
         if len(class_ids) == 1:
             # Filtering to the only class present is a no-op on both gt and dt, so the pooled entry
-            # is that class's entry — reused rather than recomputed, which keeps the single-class
+            # is that class's entry, reused rather than recomputed, which keeps the single-class
             # sweep (every reference the platform builds today) at its original cost.
             per_class = {str(class_ids[0]): pooled}
         else:
@@ -606,7 +606,7 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
 
 
 def worst_class_count_bias(entry: dict) -> float:
-    """The largest |mean per-image count bias| over the classes in one curve entry — the class this
+    """The largest |mean per-image count bias| over the classes in one curve entry, the class this
     conf serves worst, and the one the gate's per-class equivalence test refuses on.
 
     Falls back to the pooled bias for an entry with no per-class breakdown; a single-class sweep
@@ -622,12 +622,12 @@ def pick_count_unbiased(sweep: dict) -> float | None:
     """The conf that minimizes the worst per-class |mean per-image count bias| (tie-break: lower
     pooled |bias|, higher F1, lower |error|, higher conf).
 
-    This is the count-trait operating point — where the model's totals match GT totals — which is
+    This is the count-trait operating point, where the model's totals match GT totals, which is
     generally not the F1-max point (that optimizes matching, not count agreement).
 
-    Aimed at the worst class rather than the pooled bias (K4 #4) so the pick and the gate optimize
+    Aimed at the worst class rather than the pooled bias so the pick and the gate optimize
     the same thing. With two classes of opposite sign the two objectives coincide, which is why the
-    first draft of this fix left the pick pooled — but that reasoning does not survive a third class:
+    first draft of this fix left the pick pooled, but that reasoning does not survive a third class:
     a conf can buy pooled balance by trading one class's over-count against another's under-count and
     be strictly worse for the worst class than a conf on the same curve that the gate would accept
     (see ``test_pick_serves_the_worst_class_not_the_pooled_total``). Picking pooled there refuses a
@@ -635,15 +635,15 @@ def pick_count_unbiased(sweep: dict) -> float | None:
     On a single-class reference the two objectives are the same number, so this changes no operating
     point the platform picks today.
 
-    The final ``-c["conf"]`` tie-break (K2, stage-6 review) is a completion of the existing
-    tie-break, not a new selection objective: when |bias| and F1 and |abs error| are ALL exactly
-    tied across several confs — which happens on a reference filtered to a floor, since nothing
-    below the floor is visible to distinguish them — the lowest tied conf (e.g. the grid's seeded
+    The final ``-c["conf"]`` tie-break is a completion of the existing
+    tie-break, not a new selection objective: when |bias| and F1 and |abs error| are all exactly
+    tied across several confs, which happens on a reference filtered to a floor, since nothing
+    below the floor is visible to distinguish them, the lowest tied conf (e.g. the grid's seeded
     0.0) used to win by default. That is generically the worst of the tied candidates in practice
     (it admits the most low-confidence noise for no better count agreement) and, combined with the
     conf-censoring guard, could make a genuinely trustworthy pick read as censored merely because the
-    tie resolved to the search floor. Preferring the HIGHEST tied conf breaks ties toward the most
-    conservative, best-supported candidate among equals — it does not change what is optimized.
+    tie resolved to the search floor. Preferring the highest tied conf breaks ties toward the most
+    conservative, best-supported candidate among equals, it does not change what is optimized.
     """
     curve = sweep.get("curve") or []
     if not curve:
@@ -657,7 +657,7 @@ def classes_with_evidence(entry: dict) -> set[str]:
     """The classes one curve entry actually says something about: those with a GT object or a
     surviving detection at that conf (``tp + fp + fn > 0``).
 
-    A class whose entry is all zeros is not evidence of an unbiased count for it — the records
+    A class whose entry is all zeros is not evidence of an unbiased count for it, the records
     simply hold none of it at this conf, and a bias of 0.0 there is arithmetic, not measurement.
     Read off the sweep's own statistics so no caller re-derives a second notion of "present".
     """
@@ -666,7 +666,7 @@ def classes_with_evidence(entry: dict) -> set[str]:
 
 
 def pick_f1_max(sweep: dict) -> float | None:
-    """The F1-max conf — reported alongside the count-unbiased point to show the trade-off."""
+    """The F1-max conf, reported alongside the count-unbiased point to show the trade-off."""
     curve = sweep.get("curve") or []
     return max(curve, key=lambda c: c["f1"])["conf"] if curve else None
 
@@ -691,9 +691,9 @@ def records_from_detector(target: dict, output: dict, *, width: int, height: int
     With ``include_masks`` (instance_seg / Mask R-CNN) each GT and prediction also carries
     an RLE ``segmentation``, so the record can be scored with ``iou_type='segm'``.
 
-    ``detections_cap`` (Fix K, non-gating provenance): when the caller knows the in-model
-    ``detections_per_img`` this output was generated under, stamp ``cap_hit`` — whether this
-    image's raw detection count reached that cap — so a reviewer can see per-image cap
+    ``detections_cap`` (non-gating provenance): when the caller knows the in-model
+    ``detections_per_img`` this output was generated under, stamp ``cap_hit``, whether this
+    image's raw detection count reached that cap, so a reviewer can see per-image cap
     saturation without re-deriving it later from a number that's no longer available by then.
     """
     gt = []
@@ -736,14 +736,14 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
     ``gt`` / ``preds`` are ``Annotation`` lists (a prediction carries a ``score``). The COCO
     ``category_id`` is a 1-indexed id per distinct ``subject`` name, shared by GT and predictions.
     Pass ``name_id`` when scoring more than one image: pycocotools accumulates every per-image record
-    into one eval, so a subject must map to the *same* id in every image — a per-image-local map (the
+    into one eval, so a subject must map to the *same* id in every image, a per-image-local map (the
     default when ``name_id`` is ``None``, fine for a single image) pools different subjects into one
     category across images and corrupts per-class AP. ``force_segm`` makes every box carry a
     rectangular ``segmentation`` so a whole dataset can be scored with ``iou_type='segm'``.
 
     A geometry-less annotation and a :class:`~tcip_annotation.state.Point` contribute no record and no
     ``name_id`` entry: neither has a box to score, and emitting one would put a fabricated extent into
-    a delivery-grade AP — as GT nothing can match, or as a detection matching nothing.
+    a delivery-grade AP, as GT nothing can match, or as a detection matching nothing.
     """
     from tcip_annotation.state import Point, Polygon, bbox_of
 
@@ -789,16 +789,17 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
 
 
 # ====================================================================
-# In-house scalar metrics (expansion seam — segm AP already covers
+# In-house scalar metrics (expansion seam, segm AP already covers
 # true instance segmentation once a mask head exists)
 # ====================================================================
 
 def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num_classes: int) -> dict:
     """Accuracy + macro-F1 + per-class precision/recall/f1/support/count_bias.
 
-    ``count_bias[c] = (predicted count - true count) / true count`` matters for validating the
-    elongation classifier: the phenotype is the elongated *fraction*, so a class the classifier
-    over-predicts inflates the fraction even at high accuracy. This is what the phenology gate reads.
+    ``count_bias[c] = (predicted count - true count) / true count`` matters for validating a
+    positive-state classifier: the phenotype is the positive-state *fraction*, so a class the
+    classifier over-predicts inflates the fraction even at high accuracy. This is what the
+    phenology gate reads.
     """
     pred = pred_labels.detach().cpu().long()
     gt = targets.detach().cpu().long()
@@ -855,7 +856,7 @@ def semantic_seg_metrics(preds: torch.Tensor, targets: torch.Tensor, num_classes
 
     ``preds`` and ``targets`` are integer class-id tensors of matching shape (any shape;
     both are flattened). Per class: IoU = ``|P∩G| / |P∪G|`` and Dice = ``2|P∩G| / (|P|+|G|)``.
-    ``mIoU`` / ``dice`` average only over classes present in preds or targets — a class absent
+    ``mIoU`` / ``dice`` average only over classes present in preds or targets, a class absent
     from both has an undefined ratio (reported ``None`` per-class, excluded from the mean), the
     standard convention. ``pixel_acc`` is the fraction of correctly labelled pixels. Pixels equal
     to ``ignore_index`` in the GT are dropped before scoring.
@@ -876,7 +877,7 @@ def semantic_seg_metrics(preds: torch.Tensor, targets: torch.Tensor, num_classes
         inter = int((p & g).sum())
         union = int((p | g).sum())
         denom = int(p.sum()) + int(g.sum())
-        if union == 0:  # class absent from both — ratio undefined, exclude from the mean
+        if union == 0:  # class absent from both, ratio undefined, exclude from the mean
             per_class_iou[c] = None
             per_class_dice[c] = None
             continue
@@ -897,7 +898,7 @@ def semantic_seg_metrics(preds: torch.Tensor, targets: torch.Tensor, num_classes
 
 
 # ====================================================================
-# Task-agnostic evaluate() — loss pass + prediction pass
+# Task-agnostic evaluate(), loss pass + prediction pass
 # ====================================================================
 
 def effective_iou_type(task: str, iou_type: str | None) -> str:
@@ -921,11 +922,11 @@ def evaluate(
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     trait: str | None = None,
 ) -> dict:
-    """Compute per-task validation/test metrics. Returns BARE metric keys.
+    """Compute per-task validation/test metrics. Returns bare metric keys.
 
-    ``trait``: when set, a count trait's DERIVED localization criterion (traits.py, e.g. catkin's
+    ``trait``: when set, a count trait's derived localization criterion (traits.py, e.g. a
     center-match at half the class-average size) governs the reported detection count and the f1 the
-    selection composite optimizes; map50 stays a labeled comparability metric (D9). Absent -> the
+    selection composite optimizes; map50 stays a labeled comparability metric. Absent -> the
     IoU@``iou_threshold`` convention governs (the prior behavior).
     """
     is_detection = task in ("detection", "instance_seg")
@@ -945,9 +946,9 @@ def evaluate(
             images, targets = batch
             images = [img.to(device) for img in images]
             targets = [{k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in t.items()} for t in targets]
-            # Loss pass over the FULL batch — all-negative (empty-box) images contribute their
+            # Loss pass over the full batch, all-negative (empty-box) images contribute their
             # background/objectness loss, so val_loss penalizes false positives on empty frames and
-            # matches the train loop's distribution (CV9). BN stays eval via the train()+BN.eval() trick.
+            # matches the train loop's distribution. BN stays eval via the train()+BN.eval() trick.
             if detector is not None:
                 detector.train()
                 for m in detector.modules():
@@ -1015,7 +1016,7 @@ def evaluate(
             "map_at_maxdets": round(m["map_at_maxdets"], 6),
             "map50_at_maxdets": round(m["map50_at_maxdets"], 6),
         })
-        # R3/D9: a count trait's derived criterion governs the reported count + the selection f1;
+        # A count trait's derived criterion governs the reported count + the selection f1;
         # map50 stays a labeled comparability metric. Without a trait the IoU convention governs.
         criterion = resolve_match_criterion(trait, per_image, iou_threshold=iou_threshold)
         if criterion["kind"] == "center_match":
@@ -1030,7 +1031,7 @@ def evaluate(
         result["objective"] = round(compute_composite_objective(loss, governing_f1, m["map50"], score_weights), 6)
     elif task == "classification" and cls_p:
         num_classes = getattr(model.heads[0], "num_classes", int(torch.cat(cls_g).max()) + 1)
-        # classification_metrics now also returns per_class/count_bias dicts — round only the scalars.
+        # classification_metrics now also returns per_class/count_bias dicts, round only the scalars.
         result.update({k: (round(v, 6) if isinstance(v, (int, float)) else v)
                        for k, v in classification_metrics(torch.cat(cls_p), torch.cat(cls_g), num_classes).items()})
     elif task == "ordinal" and ord_p:
@@ -1050,7 +1051,7 @@ def evaluate(
 def _producer_identity(ckpt_path: str) -> dict:
     """Producing-model identity for a test-results stamp (checkpoint sha + experiment id).
 
-    Best-effort — a foreign checkpoint records the sha and leaves the experiment id null rather
+    Best-effort, a foreign checkpoint records the sha and leaves the experiment id null rather
     than failing the evaluation.
     """
     from tcip_mcp.model_registry import resolve_model_identity
@@ -1069,8 +1070,8 @@ def run_test_evaluation(
 
     ``tiling`` describes the eval dataset regime for provenance only (the loader is built by the
     caller): a tile-level run scores per-tile predictions against per-tile GT (a diagnostic that
-    matches the training-run val mAP), not the delivery regime — the stamp keeps the two from being
-    silently conflated. See CV1: use ``run_full_frame_evaluation`` for a delivery-grade metric.
+    matches the training-run val mAP), not the delivery regime, the stamp keeps the two from being
+    silently conflated. See ``run_full_frame_evaluation`` for a delivery-grade metric.
     """
     from tcip_mcp.pipelines.model_build import build_model
 
@@ -1108,32 +1109,32 @@ def run_full_frame_evaluation(
     max_dets: int = 1000, postprocess: str = "nms", device: str | None = None,
     trait: str | None = None,
 ) -> dict:
-    """Delivery-grade detection eval (CV1 Tier-2): tiled INFERENCE reconstructed to full frame,
+    """Delivery-grade detection eval: tiled inference reconstructed to full frame,
     matched to full-frame GT.
 
     Unlike tile-level eval this exercises the cross-tile merge and scores against un-fragmented GT,
-    so it answers "how well does the shipped full-frame count match ground truth" — the number that
+    so it answers "how well does the shipped full-frame count match ground truth", the number that
     gates a phenotype delivery. Tile-level (``run_test_evaluation`` with ``tiling``) is a diagnostic
     that matches the training-run val mAP; it must not be reported as the delivery metric.
 
-    Only call THIS with a checkpoint that was actually trained tiled (``predictor.train_tile_size``
+    Only call this with a checkpoint that was actually trained tiled (``predictor.train_tile_size``
     persisted), a foreign checkpoint whose geometry you can independently derive and state, or one
-    where you intend to state a tile scale yourself. A checkpoint trained WITHOUT tiling has no
-    "regime mismatch" to reconcile in the first place — ``evaluate_model``'s default
-    (``use_tiled_inference=False``) full-frame single-pass path IS that model's correct delivery
+    where you intend to state a tile scale yourself. A checkpoint trained without tiling has no
+    "regime mismatch" to reconcile in the first place, ``evaluate_model``'s default
+    (``use_tiled_inference=False``) full-frame single-pass path is that model's correct delivery
     gate (same untiled regime end to end), and is the one to call instead of this function.
 
-    ``tile_size``/``overlap`` are resolved (K10 CV3) by the SAME precedence
-    ``run_inference`` uses — explicit > the checkpoint's own persisted training geometry > a
-    documented default — via the shared ``resolve_tile_geometry``. Unlike the exploratory
-    ``run_inference``, THIS is the delivery-gating call: an unresolvable ``tile_size`` (no explicit
+    ``tile_size``/``overlap`` are resolved by the same precedence
+    ``run_inference`` uses, explicit > the checkpoint's own persisted training geometry > a
+    documented default, via the shared ``resolve_tile_geometry``. Unlike the exploratory
+    ``run_inference``, this is the delivery-gating call: an unresolvable ``tile_size`` (no explicit
     value and nothing persisted on the checkpoint) raises rather than silently fabricating 640, since
     a wrong tile scale here is a wrong number that gates a phenotype, not just a wrong preview.
-    ``overlap`` alone falling back to a default does NOT raise — a checkpoint trained with no
+    ``overlap`` alone falling back to a default does not raise, a checkpoint trained with no
     tiling overlap convention at all has no persisted overlap analog, which is a legitimate fact,
     not a missing derivation; only ``tile_size``'s absence changes the object count's scale.
 
-    This is a BOX metric (``iou_type="bbox"``): it requests boxes-only tiled inference
+    This is a box metric (``iou_type="bbox"``): it requests boxes-only tiled inference
     (``predict_tiled(require_masks=False)``), so an instance_seg checkpoint is gated here on its
     boxes/counts, never on its masks. A mask-quality gate is separate work; do not report this
     number as one.
@@ -1153,15 +1154,15 @@ def run_full_frame_evaluation(
         raise ValueError(
             f"Cannot resolve a trustworthy tile_size for {ckpt_path}: no explicit tile_size was "
             "passed and the checkpoint carries no persisted training tile geometry. This is the "
-            "delivery-grade gating path (\"Report THIS to gate a delivery\") — it refuses to silently "
+            "delivery-grade gating path (report this to gate a delivery); it refuses to silently "
             "score at a fabricated default rather than the model's real training scale. If this "
-            "checkpoint was trained WITHOUT tiling, call evaluate_model with "
-            "use_tiled_inference=False instead — that untiled regime IS its correct delivery gate, "
-            "with no scale to reconcile. If you have genuinely derived (or intend to derive, e.g. "
-            "from this dataset's object-size distribution vs. image resolution — 'Parameters: "
-            "derive, don't pin') a tile scale for this checkpoint, pass it explicitly via the "
-            "tiling= dict (and overlap, if known); it is NOT cross-checked against the checkpoint's "
-            "actual training scale, so state it deliberately, not as a guess."
+            "checkpoint was trained without tiling, call evaluate_model with "
+            "use_tiled_inference=False instead, since that untiled regime is its correct delivery "
+            "gate, with no scale to reconcile. If you have genuinely derived (or intend to derive, "
+            "e.g. from this dataset's object-size distribution vs. image resolution, per "
+            "'Parameters: derive, don't pin') a tile scale for this checkpoint, pass it explicitly "
+            "via the tiling= dict (and overlap, if known); it is not cross-checked against the "
+            "checkpoint's actual training scale, so state it deliberately, not as a guess."
         )
     tile_size, overlap = resolved_tile, resolved_overlap
 
@@ -1170,7 +1171,7 @@ def run_full_frame_evaluation(
     # The GT category ids come from the run's single assign_class_ids map, read through the same
     # loader-side reader (_json_det_targets), so delivery-grade GT never diverges from what trained.
     # No try/except here: _resolve_registry_id_map's only exception is its own deliberate
-    # ValueError refusal (attribute classification with no registry to order values) — that must
+    # ValueError refusal (attribute classification with no registry to order values), that must
     # reach the caller, not be silently swallowed into "no ground truth" for a delivery-grade
     # evaluation. Its one legitimate "no registry, that's fine" case (single-class, no attribute)
     # already returns normally without raising.
@@ -1200,8 +1201,8 @@ def run_full_frame_evaluation(
             # Same loader-side reader + id map the training targets use (1-indexed to match the
             # predictor's torchvision labels), so this delivery-grade GT can't diverge from training.
             gboxes, glabels, n_unlabeled = _json_det_targets(str(gt_file), subject, attribute, _gt_id_map)
-            # Stage-6 review N2: an image with ANY instance unlabeled for `attribute` has
-            # incomplete GT for this scope — excluded from delivery-grade scoring entirely (the
+            # An image with any instance unlabeled for `attribute` has
+            # incomplete GT for this scope, excluded from delivery-grade scoring entirely (the
             # same precedent applied to a missing label file just above), never scored against its
             # labeled subset alone, which would turn its real, unlabeled objects into false
             # positives against the very number this function's docstring calls the delivery gate.
@@ -1221,8 +1222,8 @@ def run_full_frame_evaluation(
         dt = [{"category_id": int(lab), "bbox": _xyxy_to_xywh(*b), "score": float(s)}
               for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
         rec = build_coco_image_record(w, h, gt, dt, image_id=p.stem)
-        # K10 finding 2 residual: max_dets is honored verbatim on this gating path (no rescuing
-        # sentinel) — stamp per-image cap saturation so a caller-explicit low max_dets that
+        # max_dets is honored verbatim on this gating path (no rescuing
+        # sentinel), stamp per-image cap saturation so a caller-explicit low max_dets that
         # truncates real detections is visible rather than silently assumed away.
         rec["cap_hit"] = len(dt) >= max_dets
         per_image.append(rec)
@@ -1233,10 +1234,10 @@ def run_full_frame_evaluation(
             "precision", "recall", "f1", "tp", "fp", "fn", "n_images", "n_gt", "n_pred")
     result = {
         **{k: m[k] for k in keys},
-        # task: the predictor's own real task (round-2 stage-6 finding — this used to hardcode
-        # "detection" even for an instance_seg checkpoint, mislabeling its delivery artifact).
+        # task: the predictor's own real task, a hardcoded "detection" would mislabel an
+        # instance_seg checkpoint's delivery artifact.
         # iou_type stays the literal "bbox": this gate always computes a box-only metric by design
-        # (require_masks=False above), true regardless of task — see the docstring.
+        # (require_masks=False above), true regardless of task, see the docstring.
         "model_path": str(ckpt_path), "task": getattr(predictor, "task", "detection"),
         "iou_type": "bbox",
         **_producer_identity(ckpt_path),
@@ -1246,14 +1247,14 @@ def run_full_frame_evaluation(
         "overlap": overlap, "overlap_source": overlap_source,
         "tiled": True, "eval_regime": "full-frame-tiled-inference",
         # Which images this number was computed over, and which were held out for having no
-        # ground truth or incomplete attribute labeling — so a reviewer can reconstruct the
-        # denominator, not just the metric (stage-6 review N2: an excluded-incomplete image is
+        # ground truth or incomplete attribute labeling, so a reviewer can reconstruct the
+        # denominator, not just the metric (an excluded-incomplete image is
         # disclosed here, not silently scored against its labeled subset).
         "scored_images": len(per_image), "sample_counts": sample_counts,
         "n_excluded_incomplete_attribute": n_excluded_incomplete,
     }
-    # R3/D9: for a count trait, the delivery-grade count that gates the phenotype is the derived
-    # criterion's tp/fp/fn (center-match for catkin), NOT AP@0.5 — kept alongside, clearly labeled.
+    # For a count trait, the delivery-grade count that gates the phenotype is the derived
+    # criterion's tp/fp/fn (center-match, for a trait so configured), not AP@0.5, kept alongside, clearly labeled.
     criterion = resolve_match_criterion(trait, per_image, iou_threshold=iou_threshold)
     if criterion["kind"] == "center_match":
         gc = governing_counts(per_image, criterion, conf_threshold=conf_threshold, max_dets=max_dets)
