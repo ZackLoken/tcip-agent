@@ -23,7 +23,7 @@ def _target_class_id(target: dict, class_key: str | None = None) -> int | None:
 
     Detection/instance-seg tensor ``labels`` are 1-indexed (cid + 1, background = 0)
     while ``class_distribution`` keys are 0-indexed cids, so that fallback branch shifts
-    back by 1. An explicit ``class_key`` returns the raw value unshifted — don't pass
+    back by 1. An explicit ``class_key`` returns the raw value unshifted: don't pass
     ``class_key="labels"`` for detection targets; rely on the fallback instead.
     """
     if class_key is not None:
