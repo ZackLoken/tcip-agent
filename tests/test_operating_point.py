@@ -164,12 +164,30 @@ def test_max_dets_from_density_floors_sparse_scenes():
     assert _max_dets_from_density(records) == 100  # floor, not ceil(1.5 * 2)
 
 
+def test_derive_max_dets_from_counts_is_the_shared_formula_records_delegate_to():
+    # K7 residual (detector-cap censoring): scripts/calibrate_operating_point.py derives its
+    # collection-pass cap from raw label counts (known before any model pass), not from already-
+    # collected records — this is the same ~1.5x p99 formula _max_dets_from_density applies over
+    # per-record GT counts, exposed directly so the two callers share one implementation.
+    from tcip_mcp.pipelines.operating_point import _max_dets_from_density, derive_max_dets_from_counts
+    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
+    counts = [80] * 20
+    assert derive_max_dets_from_counts(counts) == 120  # ceil(1.5 * 80)
+    assert derive_max_dets_from_counts([2] * 20) == 100  # floor, not ceil(1.5 * 2)
+    assert derive_max_dets_from_counts([]) == DEFAULT_MAX_DETS  # no counts to derive from
+    # Same result either through the counts directly or through records carrying the same counts.
+    records = [{"gt": [_ann(0, 0)] * 80} for _ in range(20)]
+    assert derive_max_dets_from_counts(counts) == _max_dets_from_density(records)
+
+
 def test_resolve_operating_point_validated_with_holdout():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     cal, hold = _good_cal_holdout()
+    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
-                                staged_conf_floor=0.01)
+                                tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.requires_validation is True and conf.validation_kind == "annotations"
     assert conf.validated_against == "held_out_annotations"
@@ -296,8 +314,10 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
 
     # Calibration/holdout use id prefixes "c"/"h" — disjoint from training's "z" group.
     cal, hold = _good_cal_holdout()
+    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
-                                calibration_records=cal, holdout_records=hold,
+                                calibration_records=cal, holdout_records=hold, tiled=False,
                                 staged_conf_floor=0.01, experiment_id="exp2")
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"
@@ -305,6 +325,46 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
     assert conf.sweep["train_disjointness"] == {"checked": True, "unresolvable": False,
                                                  "leaked_groups": [], "leaked_stems": [],
                                                  "group_check": "performed"}
+
+
+# --- K10: tile_size gates the calibrated path too, not just raw_operating_point -----------------
+
+def test_resolve_operating_point_fabricated_tile_size_floors_shippability_even_with_valid_conf():
+    """The calibrated door (operating_point.py) shares resolve_tile_size_param with the raw door
+    (resolution.py) — not a second, divergent implementation — so a tiled run with no persisted
+    training geometry and no explicit override is caught here too, not only on the uncalibrated
+    path. A cleanly-validated conf must not paper over a fabricated tile scale."""
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
+
+    cal, hold = _good_cal_holdout()
+    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                holdout_records=hold, tiled=True, tile_size=640,
+                                staged_conf_floor=0.01)
+    conf = b.get("conf")
+    assert conf.validated_against == "held_out_annotations"  # conf itself validates cleanly...
+    tile = b.get("tile_size")
+    assert tile.requires_validation is True and tile.validation_kind == "geometry"
+    assert tile.validated_against == VALIDATED_FALSE          # ...but the fabricated scale doesn't
+    assert b.is_shippable is False                            # so the bundle as a whole refuses
+    assert any(i.startswith("tile_size:") for i in b.shippable_issues())
+
+
+def test_resolve_operating_point_derived_tile_size_is_shippable():
+    """The mirror case: a tile_size genuinely derived from the checkpoint's persisted training
+    geometry has a real basis and must not be penalized alongside the fabricated-default case —
+    the rail must admit this legitimate call, not only reject the fabricated one."""
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
+
+    cal, hold = _good_cal_holdout()
+    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                holdout_records=hold, tiled=True, tile_size=224,
+                                tile_size_source="derived", staged_conf_floor=0.01)
+    tile = b.get("tile_size")
+    assert tile.validated_against == VALIDATED_PERSISTED_GEOMETRY
+    assert tile.is_shippable is True
+    assert b.is_shippable is True
 
 
 def test_resolve_operating_point_no_gt_placeholder_unshippable():
@@ -367,9 +427,18 @@ def test_resolve_operating_point_tile_size_derived():
     stamped "derived from persisted training geometry" when nothing was actually derived. The
     caller must now say which it was via ``tile_size_source``; omitting it is honestly "default"."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
+
     b_no_claim = resolve_operating_point("catkin", dataset_hash="h1", tile_size=640)
     assert b_no_claim.get("tile_size").source == "default"
-    assert b_no_claim.get("tile_size").value == 640
+    # K10: a "default"-sourced tile_size, when tiled (the default here — tiled wasn't specified),
+    # is now a real, firewalled unvalidated dimension — ._raw still carries the stored 640, but
+    # .value correctly refuses it (the same firewall conf's own uncalibrated default already
+    # enforces), since "no source claim" is exactly the fabricated-fallback case this cluster closes.
+    assert b_no_claim.get("tile_size")._raw == 640
+    assert b_no_claim.get("tile_size").is_shippable is False
+    with pytest.raises(UnvalidatedOperatingPointError):
+        _ = b_no_claim.get("tile_size").value
 
     b_derived = resolve_operating_point(
         "catkin", dataset_hash="h1", tile_size=640, tile_size_source="derived")
