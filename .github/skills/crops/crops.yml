@@ -3,8 +3,8 @@
 # Ground truth, breeder-defined: trait name, definition, format, units, and which crops
 # carry each trait. Verify traits against this file before asserting one exists.
 #
-# The measurement approach for a trait is derived and validated per trait against real 
-# imagery — never fixed here.
+# The measurement approach for a trait is derived and validated per trait against real
+# imagery, never fixed here.
 #
 # 180 traits across 6 crops: black_locust, chestnut, currant, elderberry, hazelnut, persimmon.
 
