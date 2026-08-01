@@ -53,9 +53,9 @@ def clip_boxes_to_tile(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Intersect full-image-px boxes with a tile; drop seam slivers; emit tile-local xyxy.
 
-    A box clipped by the tile edge is dropped only when the *visible* (clipped) part is a sliver —
+    A box clipped by the tile edge is dropped only when the *visible* (clipped) part is a sliver:
     its characteristic size ``sqrt(iw*ih) < min_box_size``. ``min_box_size`` is derived per dataset
-    from the class's average box size (a partial catkin counts unless it's a tiny sliver; see Q5 /
+    from the class's average box size (a partial catkin counts unless it's a tiny sliver; see
     ``TiledDetectionDataset``), not a fixed fraction. Boxes fully inside the tile are always kept.
     """
     if len(boxes) == 0:
@@ -89,7 +89,7 @@ def _iou(a, b, area_a, area_b) -> float:
 
 
 def _ios(a, b, area_a, area_b) -> float:
-    """Intersection over the SMALLER box area — the NMM match metric. A partial fragment mostly
+    """Intersection over the smaller box area: the NMM match metric. A partial fragment mostly
     inside a fuller detection scores high here even when its IoU is low, which is exactly the
     seam-split case merging is meant to catch (IoU would leave the two boxes separate)."""
     ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
@@ -201,7 +201,7 @@ def global_nms(
         else:
             keep = nms(b, s, iou_thresh)
         return keep.cpu().numpy()
-    except Exception:  # noqa: BLE001 — torch/torchvision absent -> numpy fallback
+    except Exception:  # noqa: BLE001 (torch/torchvision absent -> numpy fallback)
         return _numpy_nms(np.asarray(boxes), np.asarray(scores), np.asarray(labels), iou_thresh, class_aware)
 
 
@@ -210,8 +210,8 @@ def global_merge(
     iou_thresh: float, class_aware: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Cross-tile Non-Max *Merging*: union overlapping same-class boxes (bbox hull, max score)
-    instead of suppressing the lower-score one — recovers an object split across a tile seam
-    into two partial boxes (SAHI's NMM). Returns merged ``(boxes, scores, labels)`` — new boxes,
+    instead of suppressing the lower-score one, recovering an object split across a tile seam
+    into two partial boxes (SAHI's NMM). Returns merged ``(boxes, scores, labels)``, new boxes,
     not a subset of indices like :func:`global_nms`, so callers consume the arrays directly.
     """
     boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
@@ -230,7 +230,7 @@ def global_merge(
         cur = boxes[i].copy()
         cur_score = float(scores[i])
         merged = True
-        while merged:  # keep absorbing boxes overlapping the GROWING hull (transitive seams)
+        while merged:  # keep absorbing boxes overlapping the growing hull (transitive seams)
             merged = False
             cur_area = (cur[2] - cur[0]) * (cur[3] - cur[1])
             for j in order:
