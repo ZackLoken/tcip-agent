@@ -1,26 +1,26 @@
-"""Trait knowledge — the human-defined *semantics* of each measurable trait (Tier C).
+"""Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C).
 
-Most fields here are things the domain expert defines once per trait and the agent *reads* — never
+Most fields here are things the domain expert defines once per trait and the agent *reads*, never
 derives, never re-asks per dataset (CLAUDE.md: the human defines a trait's intent/semantics; the
 agent derives the operating points that realize it). Keeping them in one place, versioned with the
 code, stops a measurement definition from living only in a session's memory.
 
-Two fields are a different shape, by design (K18 B3/B4) — neither is authored blind, and neither
+Two fields are a different shape, by design, neither is authored blind, and neither
 has a default: ``localization`` (what "finding one" means) is derived once from real GT the first
 time it's needed and recorded (a genuine geometric fact about the object's scale, computable from
-data — see ``pipelines.derivations.derive_localization_kind``); ``count_objective`` (what the
+data, see ``pipelines.derivations.derive_localization_kind``); ``count_objective`` (what the
 phenotype *is*, hence what the operating point optimizes) is decided once from a real, plain-language
 answer the breeder gives about what the delivered number needs to be reliable for, and recorded the
 same way. Both get written through ``write_trait_spec_fields``, with a ``provenance`` entry naming
-who decided and how, and both are read from the recorded value on every later call — never silently
+who decided and how, and both are read from the recorded value on every later call, never silently
 defaulted, never copied from another trait's values (the exact failure this replaced: an earlier
-design let both fields default to catkin's own historical values, silently inherited by any trait
-whose config omitted them).
+design let both fields default to one trait's own historical values, silently inherited by any
+trait whose config omitted them).
 
 Everything else in ``TraitSpec`` says: which class in ``classes.json`` is the positive/target state,
-the milestone convention, and the tile-seam sliver policy — genuinely authored-once breeder facts.
+the milestone convention, and the tile-seam sliver policy, genuinely authored-once breeder facts.
 Operating-point *values* (conf, IoU, tolerances) and the CV task / pipeline decomposition (detection
-vs classification, one model vs detect-then-classify) are deliberately absent from this whole class —
+vs classification, one model vs detect-then-classify) are deliberately absent from this whole class,
 those the agent derives and validates per dataset at runtime, the same way the values are.
 """
 
@@ -33,25 +33,25 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Count objectives — what the resolved operating point optimizes. NOT a closed enum (K18 B4):
+# Count objectives, what the resolved operating point optimizes. Not a closed enum:
 # these three names are today's real, implemented picker capabilities
 # (``operating_point.COUNT_OBJECTIVE_PICKERS``), not the only objectives a trait may ever declare.
 # The agent can write and register a new named picker for a trait whose breeder-stated need these
-# three don't cover — a capability the platform can grow, not a category TraitSpec closes over.
+# three don't cover, a capability the platform can grow, not a category TraitSpec closes over.
 COUNT_UNBIASED = "count_unbiased"  # minimize signed per-image count bias E[FP-FN]; the phenotype is a count
 DETECTION_F1 = "detection_f1"      # optimize matching quality; the phenotype is presence/localization
 PRESENCE = "presence"             # only whether the object is present
 
-# The currently-implemented objective names — lives here (torch-free) rather than in
+# The currently-implemented objective names, lives here (torch-free) rather than in
 # ``operating_point.py`` (which imports the torch-heavy ``pipelines.training.evaluation`` at module
 # level) purely so referencing these three names never drags torch into
 # ``get_trait``/``registered_traits``. ``operating_point.py``'s picker/label registry
-# (``COUNT_OBJECTIVE_PICKERS``) shares these same keys rather than maintaining a second list. NOT a
-# validation whitelist — ``_spec_from_config`` no longer rejects a ``count_objective`` outside this
+# (``COUNT_OBJECTIVE_PICKERS``) shares these same keys rather than maintaining a second list. Not a
+# validation whitelist, ``_spec_from_config`` no longer rejects a ``count_objective`` outside this
 # set; a trait may name any objective an agent has implemented and registered a picker for.
 COUNT_OBJECTIVES = {COUNT_UNBIASED, DETECTION_F1, PRESENCE}
 
-# Localization — what counts as "finding" an object.
+# Localization, what counts as "finding" an object.
 CENTER_MATCH = "center_match"  # predicted center within a derived tolerance of a GT center
 IOU_MATCH = "iou_match"        # IoU >= a derived/def threshold
 
@@ -59,124 +59,120 @@ IOU_MATCH = "iou_match"        # IoU >= a derived/def threshold
 @dataclass(frozen=True)
 class TraitSpec:
     """The semantics of one trait. Most fields are read, never derived; ``count_objective`` and
-    ``localization`` are the two exceptions — see the module docstring."""
+    ``localization`` are the two exceptions, see the module docstring."""
 
     name: str
-    # What the delivered phenotype needs to be reliable FOR — hence what the operating point
-    # optimizes. NOT authored blind: a consequence judgment only a human stakeholder can make (does
+    # What the delivered phenotype needs to be reliable for, hence what the operating point
+    # optimizes. Not authored blind: a consequence judgment only a human stakeholder can make (does
     # this number need every object found correctly, or is it fine if errors cancel out as long as
     # the total is right?), asked in plain domain terms, never CV vocabulary. Empty = not yet
-    # decided — never silently defaulted or copied from another trait's value (K18 B4: this field
+    # decided, never silently defaulted or copied from another trait's value (this field
     # used to default to "count_unbiased" and get silently inherited by any trait whose config
     # omitted it). Record the real answer via ``write_trait_spec_fields``, with a ``provenance``
     # entry naming who decided and why; ``resolve_operating_point`` refuses rather than guessing
     # when this is unset.
     count_objective: str = ""
-    # What "a hit" means when validating counts (center_match vs iou_match) — NOT authored: derived
+    # What "a hit" means when validating counts (center_match vs iou_match), not authored: derived
     # once from real GT the first time it's needed and recorded via
     # ``write_trait_spec_fields``/``pipelines.derivations.derive_localization_kind``, then read from
-    # here on every later call (K18 B3). Empty = not yet derived — never silently assumed to be
+    # here on every later call. Empty = not yet derived, never silently assumed to be
     # either kind; ``resolve_match_criterion`` is what fills this in.
     localization: str = ""
     # How the localization tolerance is derived (the recipe string names it; ``localization_tolerance_frac``
-    # is the fallback multiplier when a caller has no GT to derive one from — the real per-dataset
+    # is the fallback multiplier when a caller has no GT to derive one from, the real per-dataset
     # value comes from ``derivations.derive_localization_tolerance_frac`` at runtime).
     localization_tolerance: str = "half_class_avg_size"
-    localization_tolerance_frac: float = 0.5  # fallback only — see derive_localization_tolerance_frac
-    # The class the elongated/positive call resolves to in classes.json, by NAME (the id is a mapping
-    # FACT derived from the labels, not a pinned magic number). Empty = the trait has no positive class.
+    localization_tolerance_frac: float = 0.5  # fallback only, see derive_localization_tolerance_frac
+    # The class the positive call resolves to in classes.json, by name (the id is a mapping
+    # fact derived from the labels, not a pinned magic number). Empty = the trait has no positive class.
     positive_class_name: str = ""
     # Milestone crossing fractions and the quantity they cross.
     milestone_fractions: tuple[float, ...] = ()
     milestone_on: str = ""  # e.g. "positive_fraction"
-    # The "majority" milestone (a crops.yml date such as "most elongated") maps to this crossing key
-    # (e.g. "95per"), flagged provisional until the breeders confirm the reading. Read-semantics, not a
-    # frozen literal buried in the phenology code.
+    # The "majority" milestone (a crops.yml date such as "most pistillate flowers have opened") maps
+    # to this crossing key (e.g. "95per"), flagged provisional until the breeders confirm the
+    # reading. Read-semantics, not a frozen literal buried in the phenology code.
     majority_milestone: str = ""
     majority_provisional: bool = False
-    # Phenology CSV column vocabulary — the milestone-column prefix and the label the majority
+    # Phenology CSV column vocabulary, the milestone-column prefix and the label the majority
     # alias/provisional columns carry, so the delivered schema derives its names from this spec rather
-    # than from literals in the phenology module (catkin -> catkin_elongation_date / catkin_05per_date).
+    # than from literals in the phenology module (<trait> -> <trait>_<milestone>_date / <trait>_<NN>per_date).
     phenology_prefix: str = ""
     majority_label: str = ""
     # How the tile-seam sliver cutoff is derived (the policy string names the basis). Partial objects
     # count unless below ``sliver_frac * class_avg_size``. Not read by ``TiledDetectionDataset``
-    # directly — it derives its own default from the dataset's own size spread
+    # directly, it derives its own default from the dataset's own size spread
     # (``derivations.derive_sliver_frac``) unless the caller passes an explicit override; this field
     # is that optional override, not a value the platform applies for you.
     sliver_policy: str = "class_avg_size"
     sliver_frac: float = 0.5
-    # Max acceptable mean per-image count bias on the held-out split, RELATIVE to the class's (or,
+    # Max acceptable mean per-image count bias on the held-out split, relative to the class's (or,
     # for the pooled gate, the whole reference's) own typical per-image count, for the operating
-    # point to count as validated (a measurement decision — how much relative count error is
-    # trustworthy). A FRACTION (e.g. 0.1 == 10% relative error), breeder-set per trait (D12; K4
-    # residual, 2026-07-31, superseding D12's original "ABSOLUTE, never scaled" framing) — the
-    # breeder still authors the fraction (the same role D12's absolute value played); the platform
-    # derives what it is relative to (each scope's own typical per-image count, from the SAME
-    # holdout reference the equivalence test itself measures — never calibration, which would let a
-    # caller buy a looser holdout tolerance by padding calibration's own density) at runtime, never
-    # invented and never breeder-guessed. Applied identically wherever
-    # `operating_point._bias_equivalence_ok` is called — the pooled and per-class detector gates and
-    # the classifier path's positive-class gate — one field, one unit, everywhere it is read
-    # (deliberately not two different units at two call sites). A near-zero-typical-count scope is
-    # protected by a FLOOR THAT IS ITSELF DERIVED (`1 / n`, the same evidence count the equivalence
-    # test's own standard error already uses — see `operating_point._effective_count_bias_tolerance`),
-    # not by a second authored or platform-invented number. That floor can raise the EFFECTIVE
-    # tolerance above what the fraction term alone would give (it is a `max()`) — it is bounded,
-    # never a runaway number: at n >= 2 (the reference-sufficiency minimum every scope using this
-    # floor is independently gated on — see `insufficient_holdout_images`/
-    # `insufficient_holdout_images_per_class`) the floor itself never exceeds 0.5, at or below D12's
-    # old flat 1.0 default. 0.01 is an interim PLATFORM default (same "not yet authored for this
-    # trait" shape as `classifier_agreement_floor`'s `_PROVISIONAL_KAPPA_FLOOR`) — chosen so this
-    # default does not get looser than D12's old absolute default at the densities this platform's
-    # OWN TEST SUITE's dense fixtures use (~80-100 objects/image, the shape those fixtures' own
-    # docstrings describe as calibrated to a realistic detector, not verified against real breeder
-    # imagery) — pending the domain expert's real per-trait value, and a real density figure from an
-    # actual project once one exists.
+    # point to count as validated (a measurement decision, how much relative count error is
+    # trustworthy). A fraction (e.g. 0.1 == 10% relative error), breeder-set per trait; the breeder
+    # authors the fraction, and the platform derives what it is relative to (each scope's own
+    # typical per-image count, from the same holdout reference the equivalence test itself measures,
+    # never calibration, which would let a caller buy a looser holdout tolerance by padding
+    # calibration's own density) at runtime, never invented and never breeder-guessed. Applied
+    # identically wherever `operating_point._bias_equivalence_ok` is called, the pooled and
+    # per-class detector gates and the classifier path's positive-class gate, one field, one unit,
+    # everywhere it is read (deliberately not two different units at two call sites). A
+    # near-zero-typical-count scope is protected by a floor that is itself derived (`1 / n`, the
+    # same evidence count the equivalence test's own standard error already uses, see
+    # `operating_point._effective_count_bias_tolerance`), not by a second authored or
+    # platform-invented number. That floor can raise the effective tolerance above what the
+    # fraction term alone would give (it is a `max()`), it is bounded, never a runaway number: at
+    # n >= 2 (the reference-sufficiency minimum every scope using this floor is independently gated
+    # on, see `insufficient_holdout_images`/`insufficient_holdout_images_per_class`) the floor
+    # itself never exceeds 0.5, at or below the old flat 1.0 default it replaced. 0.01 is an interim
+    # platform default (same "not yet authored for this trait" shape as
+    # `classifier_agreement_floor`'s `_PROVISIONAL_KAPPA_FLOOR`), chosen so this default does not
+    # get looser than the old absolute default at the densities this platform's own test suite's
+    # dense fixtures use (~80-100 objects/image, the shape those fixtures' own docstrings describe
+    # as calibrated to a realistic detector, not verified against real breeder imagery), pending the
+    # domain expert's real per-trait value, and a real density figure from an actual project once
+    # one exists.
     count_bias_tolerance_frac: float = 0.01
-    # Max acceptable p90 |per-image count error| (a TAIL statistic, not a mean — a population mean
-    # can hide one badly-off image among many) on the held-out split. NO DEFAULT: an invented number
+    # Max acceptable p90 |per-image count error| (a tail statistic, not a mean, a population mean
+    # can hide one badly-off image among many) on the held-out split. No default: an invented number
     # here would be platform-picked measurement semantics masquerading as a domain-expert one. `None`
     # means "not yet authored for this trait" and the dispersion term is skipped, not gated on a
-    # guessed value — it needs the domain expert (or a derivation from real dense-imagery detector
-    # statistics), not a value picked by the agent. PROVISIONAL until authored.
+    # guessed value, it needs the domain expert (or a derivation from real dense-imagery detector
+    # statistics), not a value picked by the agent. Provisional until authored.
     count_error_tolerance: float | None = None
     # Min acceptable Cohen's kappa (chance-corrected classifier/GT agreement) on the held-out split
-    # for K3's classifier operating point to count as validated — catches a compensating-error
+    # for the classifier operating point to count as validated, catches a compensating-error
     # classifier (flips k positives to negative and k negatives to positive, net count-bias ~0) a
     # bare count-bias check can't see. How much agreement is "enough" for a trait's own phenotype is
     # measurement semantics, the same shape as `count_error_tolerance` above: `None` means "not yet
-    # authored for this trait" (stage-6 review Finding B) — it needs the domain expert, not a value
-    # picked by the agent. Unlike `count_error_tolerance`'s dispersion
-    # term, an unauthored floor here does NOT skip the check: `operating_point.py`'s
-    # `_PROVISIONAL_KAPPA_FLOOR` (0.41, platform-chosen, not domain-authored) applies as the real
-    # operative floor until a trait sets its own — the gate is never satisfied by the bare
-    # mathematical minimum `kappa > 0` alone once the platform default is in effect.
+    # authored for this trait", it needs the domain expert, not a value picked by the agent. Unlike
+    # `count_error_tolerance`'s dispersion term, an unauthored floor here does not skip the check:
+    # `operating_point.py`'s `_PROVISIONAL_KAPPA_FLOOR` (0.41, platform-chosen, not domain-authored)
+    # applies as the real operative floor until a trait sets its own, the gate is never satisfied by
+    # the bare mathematical minimum `kappa > 0` alone once the platform default is in effect.
     classifier_agreement_floor: float | None = None
-    # crops.yml controlled-vocab trait names this spec is authored to deliver — the anti-fabrication
+    # crops.yml controlled-vocab trait names this spec is authored to deliver, the anti-fabrication
     # anchor a config-loaded spec is cross-checked against (a spec can't claim a phenotype not in the vocab).
     delivers: tuple[str, ...] = ()
     notes: str = ""
-    # Per-field provenance: who actually asserted each semantic choice above, and how firmly — so a
+    # Per-field provenance: who actually asserted each semantic choice above, and how firmly, so a
     # spec's own history is legible instead of living only in a session's memory or, worse, a fabricated
-    # comment (2026-07-29: a prior session's "confirmed with the domain expert" claim on this trait was
-    # exactly that, and got removed). Each entry is ``"<field>: <kind> — <note>"``; ``<kind>`` is one of
+    # comment. Each entry is ``"<field>: <kind>, <note>"``; ``<kind>`` is one of
     # domain_expert_confirmed / zack_methodology_correction / claude_proposed_unvalidated /
     # claude_recommended_unconfirmed / vocabulary_derived / data_derived_at_runtime. Not a validation
-    # gate — nothing reads this to decide anything; it exists so the next reader (human or agent) does
+    # gate, nothing reads this to decide anything; it exists so the next reader (human or agent) does
     # not have to guess, or worse, invent, why a field holds the value it does.
     provenance: tuple[str, ...] = ()
 
 
 class TraitUnknownError(KeyError):
-    """Raised for an unregistered trait — lists the available traits (the honest no-fabrication signal)."""
+    """Raised for an unregistered trait, lists the available traits (the honest no-fabrication signal)."""
 
 
 # --- Config-driven authoring ------------------------------------------------
-# There are no built-in traits (2026-07-29: catkin's hardcoded TraitSpec — including a prior
-# session's fabricated "confirmed with the domain expert" comment on it — is removed; every trait,
-# catkin included, is authored the same way, as a per-project spec file). This is the only
-# registration path, so it can never be silently outranked by trusted Python the way a builtin
+# There are no built-in traits; every trait is authored the same way, as a
+# per-project spec file. This is the only registration path, so it can never be silently
+# outranked by trusted Python the way a builtin
 # used to outrank config on name collision. Cross-checked against the crops.yml controlled
 # vocabulary, so an agent cannot fabricate a trait definition. Resolution is per-call (not a
 # module-load snapshot) so a repin of the project root is picked up.
@@ -187,7 +183,7 @@ _TUPLE_FIELDS = {"milestone_fractions", "delivers", "provenance"}
 
 
 def _crops_traits() -> list[dict]:
-    """The raw crops.yml trait records, or [] if it can't be read — the one YAML load every
+    """The raw crops.yml trait records, or [] if it can't be read, the one YAML load every
     crops.yml-derived reader (vocab, units) shares, never re-parsed per reader."""
     from tcip_mcp.project_paths import repo_root_from_here
 
@@ -209,7 +205,7 @@ def _crops_vocab() -> set[str]:
 
 def crops_units() -> dict[str, str]:
     """trait name -> crops.yml's declared physical unit (``mm``/``g``/``kg``/``m``/``cm``/…), for
-    every trait that declares one. crops.yml is THE trait-unit authority (CLAUDE.md); a count/
+    every trait that declares one. crops.yml is the trait-unit authority; a count/
     ordinal trait with no physical unit is simply absent from this mapping, never guessed."""
     return {t["name"]: t["units"] for t in _crops_traits() if isinstance(t.get("units"), str)}
 
@@ -218,7 +214,7 @@ def _spec_from_config(data: dict, vocab: set[str]) -> TraitSpec | None:
     """Build a ``TraitSpec`` from one breeder-authored config dict, cross-checked against ``vocab``.
 
     Rejects (returns ``None``) a spec with no ``name``, an unknown field, or a ``delivers`` that is
-    empty or names a phenotype absent from crops.yml — so a config file can never introduce a
+    empty or names a phenotype absent from crops.yml, so a config file can never introduce a
     fabricated trait definition. Registering a real new trait means its delivered outputs are all in
     the controlled vocabulary.
     """
@@ -236,7 +232,7 @@ def _spec_from_config(data: dict, vocab: set[str]) -> TraitSpec | None:
         logger.warning("trait spec %r skipped: delivers must be non-empty and all in crops.yml "
                        "(off-vocab: %s)", name, off_vocab)
         return None
-    # count_objective is NOT validated against a closed vocabulary (K18 B4) — a trait may name any
+    # count_objective is not validated against a closed vocabulary, a trait may name any
     # objective an agent has implemented and registered a picker for in
     # operating_point.COUNT_OBJECTIVE_PICKERS. resolve_operating_point refuses at resolution time
     # if the name has no registered picker, which is the honest place for that check to live (it
@@ -281,20 +277,20 @@ def write_trait_spec_fields(
     trait_name: str, fields_: dict, provenance_entries: list[str] | tuple[str, ...],
     specs_dir: Path | None = None,
 ) -> TraitSpec:
-    """Update one or more fields on an ALREADY-REGISTERED trait spec, appending provenance
-    entries recording who asserted the change and how firmly (K18 B2.5).
+    """Update one or more fields on an already-registered trait spec, appending provenance
+    entries recording who asserted the change and how firmly.
 
-    Refuses (raises ``ValueError``) if the trait has no existing spec file — creating a new trait
+    Refuses (raises ``ValueError``) if the trait has no existing spec file, creating a new trait
     is a separate, still-manual authoring step, out of scope here. Re-validates the merged spec
-    through ``_spec_from_config`` — the same crops.yml cross-check and field validation every
-    config-authored spec already goes through, reused rather than a second implementation — and
+    through ``_spec_from_config``, the same crops.yml cross-check and field validation every
+    config-authored spec already goes through, reused rather than a second implementation, and
     refuses to write anything that would silently fail to load or fall out of
     ``registered_traits()`` afterward. Writes atomically.
 
     This is the only write path for a trait spec anywhere in the platform. Before this, a spec
-    was authored by hand-writing YAML directly, with no ``@audited`` record — this function is
-    what the ``update_trait_spec_fields`` MCP tool calls, and what B3's derived localization kind
-    and B4's recorded count-objective decision both use to persist themselves; neither gets its
+    was authored by hand-writing YAML directly, with no ``@audited`` record, this function is
+    what the ``update_trait_spec_fields`` MCP tool calls, and what the derived localization kind
+    and the recorded count-objective decision both use to persist themselves; neither gets its
     own write implementation.
     """
     from tcip_mcp.project_paths import resolve_state
@@ -309,7 +305,7 @@ def write_trait_spec_fields(
     )
     if path is None:
         raise ValueError(
-            f"no existing trait spec file for {trait_name!r} under {directory} — "
+            f"no existing trait spec file for {trait_name!r} under {directory}, "
             "write_trait_spec_fields only updates an already-registered trait; author the "
             "initial spec file first."
         )
@@ -326,7 +322,7 @@ def write_trait_spec_fields(
     if spec is None:
         raise ValueError(
             f"update to trait spec {trait_name!r} would produce an invalid spec (unknown field, "
-            "off-vocab delivers, or an invalid value) — refusing to write; see the logged warning "
+            "off-vocab delivers, or an invalid value). Refusing to write; see the logged warning "
             "above for which check failed."
         )
 
@@ -353,3 +349,14 @@ def get_trait(name: str) -> TraitSpec:
 
 def registered_traits() -> list[str]:
     return sorted(_all_traits())
+
+
+def registered_traits_for(project_root: str | Path) -> list[str]:
+    """Registered trait names for an explicit project root.
+
+    For a caller (the web backend) that serves more than one project per process and so cannot
+    rely on ``resolve_state``'s single ``$TCIP_PROJECT_ROOT`` pin; ``registered_traits()`` stays
+    the MCP-server-side entry point for the one pinned project.
+    """
+    specs_dir = Path(project_root) / _TRAIT_SPECS_RELPATH
+    return sorted(spec.name for spec in load_trait_specs(specs_dir=specs_dir))
