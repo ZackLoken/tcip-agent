@@ -1,10 +1,10 @@
-"""HPO — hyperparameter optimization on Ray Tune.
+"""HPO, hyperparameter optimization on Ray Tune.
 
 Search *algorithms* and trial *schedulers* are agent-selectable per task/data; no single
 method is welded in. The agent picks from whatever backends are installed (Ray degrades to
 what imports on this machine) and overrides the derivable defaults when the data warrants.
 
-Facts (not a recipe — the agent chooses):
+Facts (not a recipe, the agent chooses):
   - search algorithms: ``random``/``grid`` are native; ``optuna``, ``bayesopt``, ``hyperopt``,
     ``nevergrad``, ``ax``, ``hebo``, ``zoopt``, ``bohb`` need their pip backend.
   - trial schedulers: ``asha`` (async HyperBand), ``hyperband``, ``bohb`` (pair with the bohb
@@ -20,7 +20,7 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-# Native samplers (BasicVariantGenerator) — no extra dependency. ``grid`` becomes a grid
+# Native samplers (BasicVariantGenerator), no extra dependency. ``grid`` becomes a grid
 # over the discrete axes of the space; ``random`` samples them.
 _NATIVE_SEARCH = {"random", "grid", "variant_generator", "", None}
 # The backend module each searcher imports at instantiation (probe with find_spec so
@@ -73,7 +73,7 @@ def available_search_algs() -> list[str]:
 
 
 def available_schedulers() -> list[str]:
-    """Trial schedulers Ray Tune offers (all native — none need an extra backend)."""
+    """Trial schedulers Ray Tune offers (all native, none need an extra backend)."""
     return ["asha", "hyperband", "bohb", "pbt", "median", "none"]
 
 
@@ -110,7 +110,7 @@ def build_search_alg(
 
     ``metric``/``mode`` are set once on the Tuner (Ray forbids setting them in both places),
     so they are not passed here. Raises a clear error if the agent picks a backend that is not
-    installed — the choice is honored, never silently swapped for another algorithm.
+    installed, the choice is honored, never silently swapped for another algorithm.
     """
     key = (name or "random").lower()
     if key in _NATIVE_SEARCH:
@@ -167,12 +167,12 @@ def build_scheduler(
 
 def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
     """Derive a per-trial Ray resource request from the host's actual GPU count and the caller's
-    own requested concurrency (K24) — never a pinned number. ``gpu=0.0`` with no CUDA device;
+    own requested concurrency, never a pinned number. ``gpu=0.0`` with no CUDA device;
     otherwise ``device_count / max_concurrent`` capped at 1.0, so ``max_concurrent`` trials the
     agent asked to run at once actually get non-overlapping (or fairly-shared) GPU allocations
     instead of every trial silently defaulting to Ray's own 0-GPU request and all contending for
     whatever `TrainContext.device` happens to resolve to. ``max_concurrent=1`` (today's default)
-    yields ``gpu=1.0`` — byte-identical to today's implicit whole-device behavior when unset.
+    yields ``gpu=1.0``, byte-identical to today's implicit whole-device behavior when unset.
     """
     try:
         import torch
@@ -205,7 +205,7 @@ def tune_search(
     """Run an HPO sweep on Ray Tune.
 
     Args:
-        objective_fn: ``fn(config, report)`` — trains one trial for the trial's ``config``
+        objective_fn: ``fn(config, report)``, trains one trial for the trial's ``config``
             and calls ``report(value)`` for each step it wants the searcher/scheduler to see
             (report at least once; the last value is the trial's result under ``mode``).
         param_space: platform param-space dict (see ``get_default_space``); ``None`` uses it.
@@ -213,12 +213,12 @@ def tune_search(
         num_samples: number of trials (with a grid space, samples over the grid).
         search_alg / scheduler: agent-selected names (see module docstring). ``None`` schedules
             nothing; native ``random``/``grid`` need no searcher backend.
-        max_concurrent: trials to run at once (default 1 — safe for single-GPU training).
+        max_concurrent: trials to run at once (default 1, safe for single-GPU training).
         warm_start: seed the search with ``baseline_params`` (or the default baseline).
         storage_path: where Ray persists trial results (also the TensorBoard logdir root).
         resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as
             a fraction for sharing). Omit to derive one from the host's real GPU count and
-            ``max_concurrent`` (K24) — an explicit value always wins over the derivation.
+            ``max_concurrent``, an explicit value always wins over the derivation.
 
     Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
     ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).
