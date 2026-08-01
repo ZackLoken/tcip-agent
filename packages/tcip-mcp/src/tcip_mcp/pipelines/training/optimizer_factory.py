@@ -26,7 +26,7 @@ def _build_adamw(params, lr: float = 1e-3, weight_decay: float = 1e-2, **kw):
 
 
 def _build_lamb(params, lr: float = 1e-3, weight_decay: float = 1e-2, **kw):
-    """LAMB optimizer — falls back to AdamW if torch_optimizer not installed."""
+    """LAMB optimizer, falls back to AdamW if torch_optimizer not installed."""
     try:
         from torch_optimizer import Lamb
         return Lamb(params, lr=lr, weight_decay=weight_decay)
@@ -67,7 +67,7 @@ def build_optimizer(
 
 
 # ====================================================================
-# Progressive-unfreezing helpers (W2): effective-batch LR scaling +
+# Progressive-unfreezing helpers: effective-batch LR scaling +
 # name-keyed optimizer-state handoff across stages.
 # ====================================================================
 
