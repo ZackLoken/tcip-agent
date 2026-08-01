@@ -1,4 +1,4 @@
-"""AnnotationEngine — Annotation CRUD, spatial index, undo/redo.
+"""AnnotationEngine: Annotation CRUD, spatial index, undo/redo.
 
 GUI-free. Operates on a :class:`tcip_annotation.state.AnnotationState` instance whose
 ``annotations`` is one flat list of :class:`~tcip_annotation.state.Annotation` records (a box or a
@@ -6,8 +6,8 @@ polygon geometry, plus the subject and attribute values it carries). Can be inst
 for programmatic use (AI agents, training pipelines, CLI, web backend).
 
   * Mutations are in-place so the caller can subscribe by wrapping the engine or polling.
-  * File I/O uses explicit paths passed by the caller — one merged per-image JSON, all subjects.
-  * No ``print`` warnings — failures raise or return a typed status.
+  * File I/O uses explicit paths passed by the caller: one merged per-image JSON, all subjects.
+  * No ``print`` warnings: failures raise or return a typed status.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from tcip_annotation.state import Annotation, AnnotationState, BBox, Point, Poly
 logger = logging.getLogger(__name__)
 
 
-# Snapshot tuple structure — kept compact for memory efficiency with long
+# Snapshot tuple structure, kept compact for memory efficiency with long
 # undo chains on dense annotation sets.
 Snapshot = tuple[list[Annotation], Optional[int], list[str]]
 UNDO_DEPTH = 30
@@ -76,7 +76,7 @@ class AnnotationEngine:
             elif isinstance(geom, Point):
                 # A hit-test extent, not a measurement: the point's own zero-area cell is a real
                 # spatial-index entry (bbox_of refuses one because a *training/delivery* box must
-                # never be fabricated — a different concern from finding the shape under a cursor).
+                # never be fabricated, a different concern from finding the shape under a cursor).
                 s._poly_bboxes.append((geom.x, geom.y, geom.x, geom.y))
             elif isinstance(geom, Polygon) and geom.rings:
                 xs = [p[0] for ring in geom.rings for p in ring]
