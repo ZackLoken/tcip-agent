@@ -1,9 +1,9 @@
-"""Canonical dataset-layout resolver — the single source of truth for where an
+"""Canonical dataset-layout resolver: the single source of truth for where an
 image's ground-truth labels and model predictions live on disk.
 
 Canonical layout (the label tree mirrors ``images/<date>/`` so stem-pairing is trivial and capture
 dates never collide). Labels are **one file per image**, holding every subject's annotations by name;
-the on-disk path no longer carries a subject or task segment — those are properties of the records
+the on-disk path no longer carries a subject or task segment: those are properties of the records
 inside the file, resolved through the dataset's single class registry::
 
     <dataset_root>/
@@ -14,11 +14,11 @@ inside the file, resolved through the dataset's single class registry::
 
 The class registry lives **in the dataset** and travels with the labels: a name-based label
 (``subject``, attribute value) is undecodable without it. A second project opening the same image
-set reads the same names. This module is a pure *locator* — it never parses ``classes.json`` (its
+set reads the same names. This module is a pure *locator*: it never parses ``classes.json`` (its
 contents belong to :mod:`tcip_mcp.class_registry`); it only delegates to that module to list subjects.
 
 ``<date>`` of ``None`` (non-dated datasets) simply omits that segment. This is the single source of
-truth for label/prediction locations — every producer and consumer resolves paths through here.
+truth for label/prediction locations: every producer and consumer resolves paths through here.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from typing import Optional
 LABEL_EXT = {"json": ".json", "coco": ".json"}
 _ANY_EXTS = (".json",)
 DEFAULT_MODEL = "live"
-#: Geometry kinds a task authors — kept as a selector, no longer a label-path segment.
+#: Geometry kinds a task authors, kept as a selector, no longer a label-path segment.
 TASKS = ("detect", "segment")
 #: Split names ``make_splits(materialize=True)`` emits.
 SPLIT_NAMES = ("train", "val", "test")
@@ -38,7 +38,7 @@ CLASSES_FILENAME = "classes.json"
 
 
 def label_ext(fmt: Optional[str]) -> str:
-    """File extension for a label format — always ``.json``; both formats are JSON on disk."""
+    """File extension for a label format: always ``.json``; both formats are JSON on disk."""
     return LABEL_EXT.get((fmt or "json").lower(), ".json")
 
 
@@ -55,7 +55,7 @@ def parse_image_path(image_path: str | Path) -> tuple[Path, Optional[str], str]:
         return parent.parent, None, stem
     if parent.parent.name == "images":
         return parent.parent.parent, parent.name, stem
-    # Unknown structure — best effort (treat the grandparent as the dataset root).
+    # Unknown structure: best effort (treat the grandparent as the dataset root).
     return parent.parent, None, stem
 
 
@@ -64,7 +64,7 @@ def _date_seg(date: Optional[str]) -> tuple[str, ...]:
 
 
 def image_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
-    """``<dataset_root>/images/[<date>/]`` — where an image's bytes live."""
+    """``<dataset_root>/images/[<date>/]``: where an image's bytes live."""
     return Path(dataset_root, "images", *_date_seg(date))
 
 
@@ -82,13 +82,13 @@ def list_dates(dataset_root: str | Path) -> list[str]:
 
 
 def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
-    """``<dataset_root>/annotations/[<date>/]`` (ground truth — one file per image, all subjects)."""
+    """``<dataset_root>/annotations/[<date>/]`` (ground truth, one file per image, all subjects)."""
     return Path(dataset_root, "annotations", *_date_seg(date))
 
 
 def annotation_date(path: str | Path) -> Optional[str]:
     """The ``<date>`` an annotations dir/file lives under, or ``None`` (declared inverse of the
-    ``annotations/<date>/`` layout — the only recoverable path fact now that subject/task are gone).
+    ``annotations/<date>/`` layout, the only recoverable path fact now that subject/task are gone).
 
     ``<root>/annotations`` and non-canonical trees (a split's ``labels/``) yield ``None``.
     """
@@ -128,7 +128,7 @@ def dataset_root_of(path: str | Path) -> Optional[Path]:
 
 
 def classes_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/classes.json`` — the one nested registry that decodes the dataset's labels.
+    """``<dataset_root>/classes.json``: the one nested registry that decodes the dataset's labels.
 
     In the dataset (not a project's private state) and shared across every subject, so it travels
     with the image set. A name-based label means nothing without it, so it is part of the data.
@@ -137,35 +137,35 @@ def classes_path(dataset_root: str | Path) -> Path:
 
 
 def dataset_identity_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/dataset.json`` — the dataset's identity ({crop, id, fingerprint}).
+    """``<dataset_root>/dataset.json``: the dataset's identity ({crop, id, fingerprint}).
 
     Sibling of ``classes.json``: identity is part of the data, so it travels with the image set. The
-    stored fingerprint is a cache — recompute-on-read (``resolution.dataset_fingerprint``) is authority.
+    stored fingerprint is a cache; recompute-on-read (``resolution.dataset_fingerprint``) is authority.
     """
     return Path(dataset_root, "dataset.json")
 
 
 def image_status_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/.tcip/state/image_status.json`` — the confirmed-negatives store.
+    """``<dataset_root>/.tcip/state/image_status.json``: the confirmed-negatives store.
 
     Sibling of ``classes_path``/``dataset_identity_path``: a Complete is a fact about the dataset's
     content (what actually trains), so it travels with the dataset rather than living in whichever
     project's private ``.tcip/`` happens to be an ancestor. The single locator every writer
     (the GUI's review flow, ``materialize_dataset``, ``make_splits``) and every reader
-    (``confirmed_negative_names``, ``doctor.py``) must call — never reconstruct this path locally.
+    (``confirmed_negative_names``, ``doctor.py``) must call; never reconstruct this path locally.
     """
     return Path(dataset_root, ".tcip", "state", "image_status.json")
 
 
 def image_status_digest_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/.tcip/state/image_status_digest.json`` — ``{bucket: {image_name: digest}}``.
+    """``<dataset_root>/.tcip/state/image_status_digest.json``: ``{bucket: {image_name: digest}}``.
 
     Sibling of :func:`image_status_path`, stamped by the same writers at confirmation time with the
     subject's attribute-schema digest in effect (:func:`tcip_mcp.class_registry.attribute_schema_digest`).
     Stamped **per image**, not per bucket: a bucket holds every image a human has ever touched under
     one subject/date, so a bucket-wide stamp would be silently overwritten by the next unrelated
     write to that bucket, un-quarantining a stale confirmation nobody re-reviewed. Lets a reader tell
-    a confirmation made under a since-changed attribute schema from one still valid — see
+    a confirmation made under a since-changed attribute schema from one still valid, see
     ``confirmed_negative_names``'s quarantine logic. Absence of a stamp is not evidence of staleness
     (a rail must admit valid work, not only reject it): only a stamp that positively disagrees with
     the current schema is grounds to quarantine that one image.
@@ -179,14 +179,14 @@ def status_bucket(subject: str, date: Optional[str]) -> str:
     Scoped by subject and date but **not** task: a Complete covers detect and segment together,
     which is how ``derive_image_status`` already evaluates them. A store keyed by image name alone
     re-applies one subject's confirmations to every other subject. ``subject`` must be a real subject
-    (callers supply it) — there is no catch-all default; a bush image confirmed empty of catkins is
+    (callers supply it); there is no catch-all default; a bush image confirmed empty of catkins is
     still positive for bush.
     """
     return f"{subject}/{date}" if date else subject
 
 
 def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
-    """``{bucket: {image_name: status}}`` — a shape guard, shared by every reader.
+    """``{bucket: {image_name: status}}``: a shape guard, shared by every reader.
 
     A bucket is ``status_bucket(subject, date)``. Anything that is not a dict of strings is not a
     subject's confirmations and is ignored, so a malformed store yields no confirmations rather
@@ -201,7 +201,7 @@ def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
 
 
 def prediction_dir(dataset_root: str | Path, model: Optional[str], date: Optional[str]) -> Path:
-    """``<dataset_root>/predictions/<model>/[<date>/]`` (model outputs — one file per image)."""
+    """``<dataset_root>/predictions/<model>/[<date>/]`` (model outputs, one file per image)."""
     return Path(dataset_root, "predictions", model or DEFAULT_MODEL, *_date_seg(date))
 
 
@@ -236,7 +236,7 @@ def prediction_path(
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:
-    """The dataset's subjects, in the registry's declared order (delegated to ``class_registry`` —
+    """The dataset's subjects, in the registry's declared order (delegated to ``class_registry``;
     this module never parses ``classes.json`` itself). ``[]`` when there is no registry."""
     from tcip_mcp import class_registry
 
@@ -251,7 +251,7 @@ def list_subjects(dataset_root: str | Path) -> list[str]:
 
 
 def subjects_on_date(dataset_root: str | Path, date: Optional[str]) -> list[str]:
-    """Distinct subjects that actually appear in the per-image label files on ``date`` — the one
+    """Distinct subjects that actually appear in the per-image label files on ``date``: the one
     per-date label scan, shared by ``subjects_with_labels`` and the GUI's subject selector.
 
     Reads each ``annotations/<date>/<stem>.json`` through ``json_io.read_annotations`` (the single
@@ -269,7 +269,7 @@ def subjects_on_date(dataset_root: str | Path, date: Optional[str]) -> list[str]
 
 
 def subjects_with_labels(dataset_root: str | Path, date: Optional[str]) -> list[str]:
-    """Subjects that actually have ≥1 label on ``date`` — what the GUI's subject selector offers.
+    """Subjects that actually have ≥1 label on ``date``: what the GUI's subject selector offers.
 
     A subject the registry declares but that is unlabeled on the selected date lands the user on an
     empty canvas, so the selector is sourced from the labels present, not the registry.
@@ -287,7 +287,7 @@ def list_models(dataset_root: str | Path) -> list[str]:
 def _dir_has_label_file(d: Path) -> bool:
     """True if ``d`` holds at least one label file (any supported extension).
 
-    An *empty* label file counts here — this answers "was anything written on this date", which is
+    An *empty* label file counts here: this answers "was anything written on this date", which is
     what the GUI's selectors need. It does **not** mean the image is a confirmed negative: that
     requires a human Complete recorded in ``.tcip/state/image_status.json``, and training reads only
     that (``confirmed_negative_names``).
@@ -337,7 +337,7 @@ def find_prediction(
     date: Optional[str] = None,
     fmt: Optional[str] = None,
 ) -> Optional[Path]:
-    """Find an existing prediction file for an image — a specific ``model`` if given, else every
+    """Find an existing prediction file for an image: a specific ``model`` if given, else every
     model. Returns the first existing file, or ``None``."""
     root, img_date, stem = parse_image_path(image_path)
     d = date if date is not None else img_date
