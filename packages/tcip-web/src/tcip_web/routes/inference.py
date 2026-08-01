@@ -239,18 +239,15 @@ def _worker(job: InferenceJob) -> None:
 
         identity = resolve_model_identity(job.checkpoint_path)
 
-        # This run's name->id map (K6/K3): resolved the same way the MCP door's run_inference does
-        # (predictor.config["data"]["subject"]/["attribute"] -> the inference dataset's registry),
-        # never a second implementation — without this, every GUI-produced bucket decodes to raw
+        # This run's name->id map (K6/K3; K25/K13.5-2c): the SAME resolver the MCP door's
+        # run_inference calls (tcip_mcp.tools.inference_tools.resolve_decode_id_map) — prefers the
+        # training run's own recorded map, falling back to the inference dataset's live registry —
+        # never a second implementation. Without this, every GUI-produced bucket decodes to raw
         # index-string subjects and permanently fails the coverage/classifier-validity mechanism.
-        id_map = None
-        try:
-            data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
-            subject = data_cfg.get("subject")
-            if subject and job.images_dir:
-                from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map
+        from tcip_mcp.tools.inference_tools import resolve_decode_id_map
 
-                _reg, id_map = _resolve_registry_id_map(job.images_dir, subject, data_cfg.get("attribute"))
+        try:
+            id_map = resolve_decode_id_map(predictor, job.images_dir)
         except Exception:  # noqa: BLE001 — no run scope for the map; predictions decode by raw id
             id_map = None
 
