@@ -1,4 +1,4 @@
-"""Annotation tools — load, save, and evaluate name-based annotations via MCP."""
+"""Annotation tools, load, save, and evaluate name-based annotations via MCP."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from tcip_mcp.audit import audited
 
 
 def _dims_for(image_path: str) -> tuple[int, int]:
-    """``(width, height)`` for ``image_path``, channel-aware — resolves through the same
+    """``(width, height)`` for ``image_path``, channel-aware, resolves through the same
     enumeration/resolution primitive every other reader now shares (``resolve_image_source``),
     so a ``.bandgroup``-grouped capture measures its real stacked frame instead of ``PIL``
     misreading a manifest file (or a genuinely multi-band raster) as a photograph.
@@ -43,7 +43,7 @@ def _dims_for(image_path: str) -> tuple[int, int]:
 
 
 def _logical_image_names(images_dir) -> list[str]:
-    """Every logical image's on-disk display name under ``images_dir`` — a plain file's own name,
+    """Every logical image's on-disk display name under ``images_dir``, a plain file's own name,
     or (for a ``.bandgroup``-grouped capture) its manifest's filename, the file every other
     by-name reader (``image_name_map``, the dataset gallery route) treats as that capture's name.
     Folding sibling band files into one name here is what lets this tool's frame index agree with
@@ -59,7 +59,7 @@ def _logical_image_names(images_dir) -> list[str]:
 
 def _coerce_xy(pt) -> tuple[float, float]:
     """A ring vertex as ``[x, y]`` (``_ann_dict``'s read-side shape) or ``{"x": x, "y": y}``
-    (``segment_prompt``'s shape, matching its point/box prompt inputs) — the two real producers
+    (``segment_prompt``'s shape, matching its point/box prompt inputs), the two real producers
     of ring data in this module disagree on point shape, so the write door has to take either."""
     if isinstance(pt, dict):
         return float(pt["x"]), float(pt["y"])
@@ -69,7 +69,7 @@ def _coerce_xy(pt) -> tuple[float, float]:
 def _ann_dict(a: Annotation) -> dict:
     """A name-based annotation as a plain JSON dict for a tool response.
 
-    ``rings`` (not ``points``) for a polygon — a stored annotation can genuinely carry more than
+    ``rings`` (not ``points``) for a polygon, a stored annotation can genuinely carry more than
     one ring (an occlusion-split instance_seg prediction), so the read side always represents every
     ring rather than silently reporting only the first. ``point`` is the same ``[x, y]`` key the
     on-disk schema uses, so a prompt/keypoint reads back as itself instead of as a geometry-less label.
@@ -91,7 +91,7 @@ def _ann_dict(a: Annotation) -> dict:
 def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     """Load the ground-truth labels and predictions for a single image.
 
-    Both are the name-based per-image schema — one file per image, all subjects. Reads the canonical
+    Both are the name-based per-image schema, one file per image, all subjects. Reads the canonical
     per-image JSON (an ``annotations`` key) or an assembled dataset-level COCO (an
     ``images``/``categories`` key), detected from the file's own keys unless ``fmt`` is given. An
     unrecognized store returns an ``error`` rather than a guess.
@@ -147,9 +147,9 @@ def save_annotations(
     The label goes to ``<dataset_root>/annotations/<date>/<stem>.json`` (see
     :mod:`tcip_mcp.dataset_layout`); ``date`` is derived from the image path when not given. Pass
     ``path`` to write to an explicit location instead. Each annotation is a dict carrying a
-    **subject** (required — refused when absent, since a name-based label is undecodable without it),
+    ``subject`` (required, refused when absent, since a name-based label is undecodable without it),
     an optional geometry (``bbox`` = [x1,y1,x2,y2], ``points`` = [[x,y],...] for a single-ring polygon
-    contour, ``rings`` = [[[x,y],...], ...] for a multi-ring polygon (an occlusion-split mask —
+    contour, ``rings`` = [[[x,y],...], ...] for a multi-ring polygon (an occlusion-split mask,
     e.g. ``segment_prompt``'s own output, whose ring vertices are ``{x,y}`` dicts and are accepted
     the same as ``[x,y]`` pairs), ``point`` = [x,y] for a single prompt/keypoint location, or none of
     them for an image-level label), and optional ``attributes`` (attribute name -> value name).
@@ -158,7 +158,7 @@ def save_annotations(
         image_path: Absolute path to the image file.
         annotations: List of ``{subject, bbox?/points?/rings?/point?, attributes?}`` dicts (pixel
             coords).
-        fmt: Output format — 'json' (canonical per-image, default) or 'coco'.
+        fmt: Output format, 'json' (canonical per-image, default) or 'coco'.
         date: Capture date; derived from the image path when omitted.
         path: Explicit label path (overrides the canonical location).
         created_by: Producer stamped on each written annotation. Omit to leave provenance unset.
@@ -189,17 +189,17 @@ def save_annotations(
         geometry: BBox | Polygon | Point | None = None
         # Non-empty points first, matching the web converters (labelSerde `a.points && a.points.length`,
         # routes/annotate `if ap.points`): a payload carrying both never drops the polygon (bbox winning
-        # would collapse a polygon to a box-only record — the polygon is the source of truth, its box is
+        # would collapse a polygon to a box-only record, the polygon is the source of truth, its box is
         # derived on write). An empty points list falls through to bbox, so a box payload is not silently
         # lost to a degenerate Polygon([]).
         if a.get("rings"):
             # Multi-ring polygon (an occlusion-split mask reviewed and accepted from segment_prompt,
-            # or a re-save of an annotation read back via _ann_dict's own "rings" key) — checked
+            # or a re-save of an annotation read back via _ann_dict's own "rings" key), checked
             # before "points" since a rings-carrying payload is never less complete than a
             # single-ring one.
             geometry = Polygon(rings=[[_coerce_xy(pt) for pt in ring] for ring in a["rings"]])
         elif a.get("points"):
-            # save_annotations' own single-ring input contract ("points": [[x,y],...]) — an
+            # save_annotations' own single-ring input contract ("points": [[x,y],...]), an
             # agent/human authors one contour per call this way. A caller with more than one ring
             # (occlusion-split) uses "rings" above instead.
             geometry = Polygon(rings=[[_coerce_xy(pt) for pt in a["points"]]])
@@ -207,7 +207,7 @@ def save_annotations(
             x1, y1, x2, y2 = (float(v) for v in a["bbox"])
             geometry = BBox(x1, y1, x2, y2)
         elif a.get("point") is not None:
-            # A single [x, y] — a placed prompt or a keypoint. Singular key, deliberately distinct
+            # A single [x, y], a placed prompt or a keypoint. Singular key, deliberately distinct
             # from `points` (a polygon's contour): the two are different geometries, and letting one
             # spelling serve both would make a one-vertex polygon and a point indistinguishable.
             px, py = (float(v) for v in a["point"])
@@ -291,9 +291,9 @@ def _detection_breakdown(matches: dict, gt: list[Annotation], preds: list[Annota
 
 def _apply_governing_criterion(out: dict, records: list, *, trait: str | None,
                                iou_threshold: float, conf_threshold: float) -> dict:
-    """Override the human-facing TP/FP/FN + P/R/F1 with the trait's DERIVED criterion (R3/D9).
+    """Override the human-facing TP/FP/FN + P/R/F1 with the trait's derived criterion.
 
-    A count trait (catkin's center-match) governs the review count that feeds the phenotype; AP@0.5
+    A count trait using center-match governs the review count that feeds the phenotype; AP@0.5
     stays as a labeled comparability metric. With no trait, ``out`` is returned unchanged.
     """
     from tcip_mcp.pipelines.training.evaluation import governing_counts, resolve_match_criterion
@@ -323,7 +323,7 @@ def _evaluate_image(
 
     mAP / TP / FP / FN come from pycocotools; the ``matches`` block is a per-box overlay for the GUI
     review panel (``compute_matches``). With a count ``trait`` the reported count is governed by the
-    trait's derived criterion (R3), map50 kept as comparability.
+    trait's derived criterion, map50 kept as comparability.
     """
     loaded = _load_image_annotations(image_path)
     if loaded is None:
@@ -466,8 +466,8 @@ def score_predictions(
         path: Absolute path to an image file (single-image match) or a dataset root (aggregate).
         iou_threshold: IoU threshold for a positive match (the AP@0.5 comparability convention).
         conf_threshold: Minimum confidence to consider a prediction.
-        detail: Single-image only — also return the per-detection ``detections`` breakdown.
-        trait: When set, the trait's DERIVED localization criterion governs the reported TP/FP/FN
+        detail: Single-image only, also return the per-detection ``detections`` breakdown.
+        trait: When set, the trait's derived localization criterion governs the reported TP/FP/FN
             count; map50 stays a labeled comparability metric. Absent -> the IoU convention governs.
     """
     p = Path(path)
@@ -492,13 +492,13 @@ def segment_prompt(
 ) -> dict:
     """Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine.
 
-    Returns ``rings`` — the mask's contours as ``[[{x, y}, ...], ...]``, one ring per connected region.
-    An occlusion-split object (a catkin behind a branch) segments to more than one region and all of
+    Returns ``rings``, the mask's contours as ``[[{x, y}, ...], ...]``, one ring per connected region.
+    An occlusion-split object (a leaf crossed by a stem) segments to more than one region and all of
     them come back; keeping only the largest would report part of an object as the whole of it.
 
-    Provide point prompts, a box prompt, OR grid-cell references (e.g. ['B3', 'D5'], converted to
+    Provide point prompts, a box prompt, or grid-cell references (e.g. ['B3', 'D5'], converted to
     foreground point prompts). A cell name means nothing without the grid that produced it, so
-    ``grid_cells`` requires ``cols``/``rows`` — the same dimensions the overlay whose cells are being
+    ``grid_cells`` requires ``cols``/``rows``, the same dimensions the overlay whose cells are being
     named was rendered with (``overlay_reference_grid`` echoes its ``cols``/``rows`` back for exactly
     this). There is no default grid to fall back on: guessing one resolves 'B3' to a pixel in a grid
     nobody looked at. The segmentation method is a capability, not a hardcode: 'sam' is the built-in
@@ -512,7 +512,7 @@ def segment_prompt(
         grid_cells: List of grid cell references like ['B3', 'D5']. Each is a foreground point.
         cols: Columns of the grid the cells were read off. Required with ``grid_cells``.
         rows: Rows of the grid the cells were read off. Required with ``grid_cells``.
-        engine: Segmentation engine — 'sam' (built-in) or a dotted 'module:factory' the agent brings.
+        engine: Segmentation engine, 'sam' (built-in) or a dotted 'module:factory' the agent brings.
         engine_params: Engine-specific knobs forwarded to the engine (e.g. SAM's model_type).
     """
     img = Path(image_path)
@@ -524,7 +524,7 @@ def segment_prompt(
 
     if grid_cells is not None:
         if cols is None or rows is None:
-            return {"error": "grid_cells requires cols and rows — the dimensions of the grid the "
+            return {"error": "grid_cells requires cols and rows, the dimensions of the grid the "
                              "cells were read off (overlay_reference_grid returns them). Without "
                              "them a cell name resolves against a grid nobody rendered."}
         from tcip_annotation.sam_wrapper import grid_to_pixel
@@ -578,7 +578,7 @@ def push_panel_data(
     returns ``{"status": "no_subscribers"}`` so the agent can proceed.
 
     Args:
-        panel: Target panel — 'annotate', 'review', 'training', 'tuning', 'inference', 'results',
+        panel: Target panel, 'annotate', 'review', 'training', 'tuning', 'inference', 'results',
             or 'app' (app-level events like annotate_focus / review_focus / project_changed).
         event_type: Event type the panel switches on (e.g. 'load_matches', 'metrics_update').
         data: Arbitrary JSON data payload.
@@ -611,7 +611,7 @@ def focus(
     iou_threshold: float = 0.5,
     conf_threshold: float = DEFAULT_CONF,
 ) -> dict:
-    """Drive the live GUI to a (subject, date) frame — the Annotate tab or the Review tab.
+    """Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab.
 
     ``tab='annotate'`` lands the Annotate tab on the first frame annotated for ``subject`` in the
     right mode (emits ``annotate_focus``); ``tab='review'`` lands the Review tab on a model's
@@ -619,20 +619,20 @@ def focus(
     false`` if not.
 
     Args:
-        tab: Which GUI surface to drive — 'annotate' or 'review'.
+        tab: Which GUI surface to drive, 'annotate' or 'review'.
         project_root: Project root (== dataset_root for workspace projects).
         dataset_root: Dataset root holding ``images/`` and ``annotations/`` (plus ``predictions/``).
-        subject: Annotation subject (e.g. "catkin", "bush").
+        subject: Annotation subject (e.g. "leaf", "bush").
         date: Capture-date bucket (e.g. "2026-03-02").
         image_index: Index into the date's sorted image list. Default: first frame labeled for
             ``subject`` (annotate) / with a prediction of ``subject`` for the model (review).
-        mode: Annotate only — "box", "polygon" or "point" (default: inferred from the geometry the
+        mode: Annotate only, "box", "polygon" or "point" (default: inferred from the geometry the
             labels on that frame actually carry).
-        model_name: Review only (required when ``tab='review'``) — the model whose predictions.
-        detection_idx: Review only — which detection to center in the Review navigator.
-        filter_type: Review only — "all" | "tp" | "fp" | "fn" match filter.
-        iou_threshold: Review only — IoU cutoff for the TP/FP/FN match classification.
-        conf_threshold: Review only — confidence cutoff for showing predictions.
+        model_name: Review only (required when ``tab='review'``), the model whose predictions.
+        detection_idx: Review only, which detection to center in the Review navigator.
+        filter_type: Review only, "all" | "tp" | "fp" | "fn" match filter.
+        iou_threshold: Review only, IoU cutoff for the TP/FP/FN match classification.
+        conf_threshold: Review only, confidence cutoff for showing predictions.
     """
     if tab == "annotate":
         return _focus_annotate(project_root, dataset_root, subject, date, mode=mode, image_index=image_index)
@@ -665,7 +665,7 @@ def _subject_task(anns: list[Annotation], subject: str) -> str | None:
     return None
 
 
-# The GUI drawing mode each resolved task is edited in — the frontend's own Mode union
+# The GUI drawing mode each resolved task is edited in, the frontend's own Mode union
 # ("box" | "polygon" | "point", store/types.ts). A point-only frame lands in point mode: sending it
 # in box mode would hand the human a tool that cannot edit what is on the canvas.
 _TASK_MODE = {"segment": "polygon", "detect": "box", "point": "point"}
@@ -806,12 +806,12 @@ def stage_proposals(
     overwrite: bool = False,
 ) -> dict:
     """Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas
-    review — the "show on canvas before writing ground truth" guardrail.
+    review, the "show on canvas before writing ground truth" guardrail.
 
     Anything a model produces (a SAM mask, a baseline detection, a shape the agent wants a human to
-    vet) goes to the PREDICTIONS tree, never ``annotations/``, so the human reviews it on the Review
+    vet) goes to the predictions tree, never ``annotations/``, so the human reviews it on the Review
     canvas and accepts/rejects/edits before it becomes GT. Boxes and polygons alike land in the one
-    per-image prediction file, each carrying a **subject** name. This never writes ground truth. Pair
+    per-image prediction file, each carrying a ``subject`` name. This never writes ground truth. Pair
     with ``focus(tab='review')`` to send the human straight to them.
 
     A prediction bucket that already carries review verdicts is immutable: by default a stage into it
@@ -821,7 +821,7 @@ def stage_proposals(
 
     Args:
         dataset_root: Dataset root holding ``predictions/``.
-        model_name: Predictions bucket to stage under — the real producer (stamped as created_by).
+        model_name: Predictions bucket to stage under, the real producer (stamped as created_by).
         date: Capture-date bucket (e.g. "2026-02-11").
         stem: Image stem (filename without extension).
         boxes: ``[{subject, conf, cx, cy, w, h}]`` with cx/cy/w/h normalized to [0, 1].
@@ -910,10 +910,10 @@ def stage_proposals(
         return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
     bucket = staged["bucket"]
 
-    note = ("staged to predictions/ for canvas review — not committed as ground truth; the human "
+    note = ("staged to predictions/ for canvas review, not committed as ground truth; the human "
             "accepts on the Review tab before it becomes GT (focus tab='review' to send them)")
     if staged["redirected"]:
-        note = (f"bucket {model_name!r} has {staged['verdict_count']} review verdict(s) — staged to a "
+        note = (f"bucket {model_name!r} has {staged['verdict_count']} review verdict(s), staged to a "
                 f"fresh bucket {bucket!r} instead so the reviewed predictions stay intact; " + note)
 
     return {
@@ -928,14 +928,14 @@ def stage_proposals(
 @mcp.tool()
 @audited
 def write_class_map(dataset_root: str, subjects: dict, output_path: str = "") -> dict:
-    """Author the dataset's nested class registry — a thin wrapper over ``class_registry``.
+    """Author the dataset's nested class registry, a thin wrapper over ``class_registry``.
 
-    ``subjects`` is the nested registry mapping the expert defines — subjects to their
+    ``subjects`` is the nested registry mapping the expert defines, subjects to their
     ``description`` / provenance and zero or more ``attributes`` (each ``categorical`` | ``ordinal``
     with ordered ``values``). It is validated through :func:`class_registry.registry_from_dict` (a
     malformed shape refuses loudly) and written to ``<dataset_root>/classes.json`` via
     :func:`class_registry.write_registry`. No numeric class ids, no colors, no id enumeration: a
-    label-scan cannot infer an attribute's type or rank — the expert's fact is the input here.
+    label-scan cannot infer an attribute's type or rank, the expert's fact is the input here.
 
     Args:
         dataset_root: Dataset root; the registry is written to ``<dataset_root>/classes.json``.
