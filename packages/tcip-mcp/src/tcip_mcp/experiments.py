@@ -221,7 +221,7 @@ def resolve_experiment_dir_for_run(run_id: str) -> Path | None:
     Tries the exact match first (the common case, ``experiment_id == run_id``). Then the
     fresh-id relaunch format (``f"{experiment_id}_{run_id}"``, always suffixed ``_<run_id>``) via a
     glob. Neither naming convention covers a *custom-named* experiment (an agent/breeder
-    pre-created it via the standalone ``create_experiment`` tool, e.g. ``"exp-001-hazelnut-catkin-
+    pre-created it via the standalone ``create_experiment`` tool, e.g. ``"exp-001-<crop>-<trait>-
     det"``, before any ``run_id`` existed, then launched training against it later, a real, tested
     workflow, not theoretical: ``_ensure_experiment``'s pristine-reuse branch), its directory name
     bears no naming relationship to ``run_id`` at all. For that case, falls back to scanning every
