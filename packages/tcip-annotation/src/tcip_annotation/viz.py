@@ -3,8 +3,7 @@
 All functions return the output file path for consumption by view_image.
 Default output directory: .tcip/artifacts/viz/
 
-Coordinates: functions accept pixel coordinates. Use yolo_to_pixel() for
-normalized YOLO coords.
+Coordinates: functions accept pixel coordinates.
 """
 
 from __future__ import annotations
@@ -94,17 +93,6 @@ def _try_font(size: int = 12) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
             return ImageFont.truetype("DejaVuSans.ttf", size)
         except (OSError, IOError):
             return ImageFont.load_default()
-
-
-def yolo_to_pixel(
-    cx: float, cy: float, bw: float, bh: float, img_w: int, img_h: int,
-) -> tuple[float, float, float, float]:
-    """Convert normalized YOLO center coords to pixel (x1, y1, x2, y2)."""
-    x1 = (cx - bw / 2) * img_w
-    y1 = (cy - bh / 2) * img_h
-    x2 = (cx + bw / 2) * img_w
-    y2 = (cy + bh / 2) * img_h
-    return x1, y1, x2, y2
 
 
 def render_detections(
