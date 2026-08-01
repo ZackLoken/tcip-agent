@@ -283,7 +283,7 @@ def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tupl
     if not name:
         return None, f"trait {spec.name!r} defines no positive_class_name"
     for pred_dir in predictions_by_date.values():
-        id_map = _bucket_id_map(Path(pred_dir))
+        id_map = bucket_id_map(Path(pred_dir))
         if id_map is not None and name in id_map:
             try:
                 return int(id_map[name]), f"resolved {name!r} -> class {id_map[name]} from {pred_dir}"
@@ -293,7 +293,7 @@ def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tupl
                   "produced these predictions never assessed this trait's positive class")
 
 
-def _bucket_id_map(pred_dir: Path) -> dict | None:
+def bucket_id_map(pred_dir: Path) -> dict | None:
     """The bucket's recorded ``id_map`` (name -> int), or ``None`` if absent/malformed.
 
     Read from ``operating_point.json`` — the SAME sidecar every prediction-bucket writer
@@ -388,7 +388,7 @@ def per_plant_series(
     for date_str in mapping:
         pred_dir = predictions_by_date.get(date_str)
         pred_path = Path(pred_dir) if pred_dir else None
-        id_map = _bucket_id_map(pred_path) if pred_path is not None else None
+        id_map = bucket_id_map(pred_path) if pred_path is not None else None
         # [total, positive, unclassified, missing, n_images] per plant, accumulated across that
         # plant's images on this date. ``n_images`` counts every image the mapping NAMES for this
         # (plant, date) — including ones with no prediction file, which ``missing`` counts too —
