@@ -68,4 +68,20 @@ describe("AnnotateToolbar draw mode", () => {
     expect(screen.getByRole("button", { name: /Snap/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Stream/ })).toBeDisabled();
   });
+
+  it("renders Point immediately to the left of Box (Point, Box, Polygon)", () => {
+    renderToolbar();
+    const group = screen.getByRole("group", { name: "Draw mode" });
+    const labels = Array.from(group.querySelectorAll("button")).map((b) => b.textContent);
+    expect(labels).toEqual(["Point", "Box", "Polygon"]);
+  });
+});
+
+describe("AnnotateToolbar status filter", () => {
+  it("lists the start state (Unannotated) before the terminal states, matching Review's convention", () => {
+    renderToolbar();
+    const select = screen.getByTitle("Status filter");
+    const options = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
+    expect(options).toEqual(["All", "Unannotated", "Partial", "Complete", "Negative"]);
+  });
 });
