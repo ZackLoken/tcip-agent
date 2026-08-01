@@ -91,7 +91,7 @@ def test_describe_not_enough_images():
 def test_describe_holdout_bias_failed():
     b = _bundle(validated=VALIDATED_FALSE,
                 sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
-                       "holdout_bias": {"count_bias_mean": 3.0}, "count_bias_tolerance": 1.0,
+                       "holdout_bias": {"count_bias_mean": 3.0}, "count_bias_tolerance_frac": 1.0,
                        "failures": ["count_bias_exceeds_tolerance"]})
     out = describe_review_validation(b, reviewed_image_count=6)
     assert out["validated"] is False
@@ -106,6 +106,44 @@ def test_describe_no_adjudication_coverage():
     out = describe_review_validation(b, reviewed_image_count=5)
     assert out["validated"] is False
     assert "mark missed object" in out["reason"].lower()
+
+
+def test_describe_reports_every_applicable_failure_not_just_the_first():
+    # K2: a breeder who hits two blockers at once (e.g. an all-negative split side AND a per-class
+    # bias failure) must see both in one pass, not fix the first, resubmit, and only then discover
+    # the second. _FAILURE_MESSAGES lists insufficient_calibration_gt before
+    # count_bias_exceeds_tolerance, so both messages must appear, in that order.
+    b = _bundle(validated=VALIDATED_FALSE,
+                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
+                       "failures": ["count_bias_exceeds_tolerance", "insufficient_calibration_gt"]})
+    out = describe_review_validation(b, reviewed_image_count=4)
+    assert out["validated"] is False
+    assert "all-negative" in out["reason"]  # insufficient_calibration_gt's own message fragment
+    assert "agree" in out["reason"]  # count_bias_exceeds_tolerance's own message fragment
+    # Priority order from _FAILURE_MESSAGES, not the order failures happened to list them in.
+    assert out["reason"].index("all-negative") < out["reason"].index("agree")
+
+
+def test_describe_never_asserts_the_counts_agree_when_the_pooled_bias_check_also_failed():
+    # K2 stage-6 review: operating_point.py computes count_bias_ok, per_class_bias_failures,
+    # localization_floor_ok and dispersion_ok independently (no mutual exclusion between their
+    # failures.append calls), so count_bias_exceeds_tolerance can co-occur with any of the three
+    # messages below. Each of those three used to presuppose the pooled check had PASSED ("the
+    # counts happened to match" / "the counts agree on average" / "the overall number... looks
+    # right") — true only under first-match-wins ordering. Now that every applicable message is
+    # joined, a presupposing phrase would directly contradict count_bias_exceeds_tolerance's own
+    # "the model's counts didn't agree closely enough" in the same reason string.
+    for co_failure in ("localization_quality_floor_failed", "count_error_dispersion_too_high",
+                       "count_bias_exceeds_tolerance_per_class"):
+        b = _bundle(validated=VALIDATED_FALSE,
+                    sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
+                           "failures": ["count_bias_exceeds_tolerance", co_failure]})
+        out = describe_review_validation(b, reviewed_image_count=6)
+        reason = out["reason"]
+        assert "didn't agree closely enough" in reason  # count_bias_exceeds_tolerance's own claim
+        for contradicting_phrase in ("happened to match", "agree on average", "looks right"):
+            assert contradicting_phrase not in reason, (
+                f"co_failure={co_failure!r} produced a self-contradictory reason: {reason!r}")
 
 
 def test_describe_unrecognized_failure_name_is_a_loud_error():
@@ -288,6 +326,29 @@ def test_route_unknown_trait_is_honest_400(client, tmp_path: Path):
         "project_root": proj, "trait": "annotations", "pred_dir": pred_dir})
     assert resp.status_code == 400
     assert "not defined for trait" in resp.json()["detail"]
+
+
+def test_route_honestly_refuses_when_class_id_unresolvable(client, tmp_path: Path):
+    # K25: a verdict recorded before this fix (or from a bucket whose id_map never recognized its
+    # class_name) carries class_id=None. The route must refuse loudly (400, naming the real cause)
+    # rather than silently stamp VALIDATED_REVIEW_CONFIRMED on a reference the old dead `class_id`
+    # field would have defaulted to category_id 1 for every entry.
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    review_dir = Path(proj) / ".tcip" / "state" / "review"
+    shard = json.loads((review_dir / "A.jpg.json").read_text(encoding="utf-8"))
+    for entry in shard["state"]["detections"]:
+        entry["class_id"] = None
+    (review_dir / "A.jpg.json").write_text(json.dumps(shard), encoding="utf-8")
+
+    resp = client.post("/api/review/validate_reference", json={
+        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+    assert resp.status_code == 400
+    assert "no resolvable class identity" in resp.json()["detail"]
+    # The refusal happens before any stamping — the sidecar's own generation-time `validated: False`
+    # is untouched, never silently upgraded to VALIDATED_REVIEW_CONFIRMED on bad data.
+    sc = _read_sidecar(pred_dir)
+    assert sc["validated"] is False
+    assert "validated_reference" not in sc
 
 
 def test_route_does_not_downgrade_already_validated(client, tmp_path: Path):
