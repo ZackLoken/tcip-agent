@@ -52,7 +52,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         "majority_label": "",
         "sliver_policy": "class_avg_size",
         "sliver_frac": 0.5,
-        "count_bias_tolerance": 1.0,
+        "count_bias_tolerance_frac": 0.01,
         "delivers": ["bloom_05per_date", "bloom_50per_date", "bloom_95per_date"],
         "notes": "Test-only, provisional (round 11, 2026-07-29): proves the delivery mechanism "
                  "generalizes to a second trait. Not a domain-expert-confirmed measurement.",
