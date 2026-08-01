@@ -87,6 +87,28 @@ def test_check_model_contract_rejects_prediction_free_eval_output():
     assert any("no tensor value" in i for i in report["issues"]), report["issues"]
 
 
+def test_check_model_contract_accepts_a_ragged_nested_eval_output():
+    """A bespoke non-detection task may legitimately return a per-image ragged list of tensors (or
+    a nested dict of them) rather than one flat top-level tensor — e.g. a variable number of
+    per-instance predictions per image. The eval-output check must see the tensor wherever it is
+    nested, not only at the top level of the dict."""
+    import torch.nn as nn
+
+    class _Ragged(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lin = nn.Linear(4, 4)
+
+        def forward(self, images, targets=None):
+            if self.training:
+                return {"loss": self.lin(torch.rand(1, 4)).sum()}
+            # Ragged: a different number of per-instance score tensors per image.
+            return {"per_image": [torch.rand(3), torch.rand(1), torch.rand(0)]}
+
+    report = check_model_contract(_Ragged(), "classification", num_classes=2)
+    assert report["ok"], report["issues"]
+
+
 def test_check_model_contract_detection_ok():
     model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=128)
     report = check_model_contract(model, "detection", num_classes=1, img_size=64)
