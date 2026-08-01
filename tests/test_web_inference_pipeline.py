@@ -129,6 +129,58 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
     assert obj["subject"] == "catkin"  # resolved via id_map, not the raw index "0"
 
 
+def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkeypatch):
+    """K25/K13.5-2c stage-6 review round 1, MUST-FIX 3: the GUI inference worker used to re-derive
+    its id_map locally from the live registry, independently of run_inference's own resolution —
+    a second implementation whose own comment falsely claimed parity once run_inference started
+    preferring a training-recorded map. Both doors now call the SAME
+    tcip_mcp.tools.inference_tools.resolve_decode_id_map — this proves the GUI door genuinely
+    prefers a recorded map too, not just falls through to live-registry derivation."""
+    pytest.importorskip("fastapi")
+    from PIL import Image
+
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
+    out_dir = tmp_path / "out"
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    class FakePredictor:
+        # A recorded id_map naming class 1 "elongated" — deliberately NOT what a live registry at
+        # images_dir would derive (there is no classes.json under images_dir at all), so a pass
+        # here can only mean the recorded map was used, never a registry fallback.
+        config = {"data": {"subject": "catkin", "attribute": "elongation",
+                           "id_map": {"dormant": 0, "elongated": 1}}}
+
+        def __init__(self, checkpoint_path=None, **kwargs):
+            pass
+
+        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
+            return [{"image": p, "width": 100, "height": 100,
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [2], "count": 1}
+                    for p in paths]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+
+    job = InferenceJob(
+        job_id="t3", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
+        slice_hw=(640, 640), overlap=0.2, postprocess="nms",
+    )
+    _worker(job)
+
+    assert job.status == "completed"
+    import json
+    obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
+    assert obj["subject"] == "elongated"  # label 2 -> 0-indexed 1 -> the recorded map's "elongated"
+    sidecar = json.loads((out_dir / "operating_point.json").read_text())
+    assert sidecar["id_map"] == {"dormant": 0, "elongated": 1}
+
+
 def test_web_worker_forces_untiled_for_instance_seg(tmp_path, monkeypatch):
     """Round-2 stage-6 finding: an instance_seg checkpoint launched with the GUI's tile
     checkbox checked used to crash with a raw traceback (tiled inference can't carry masks
