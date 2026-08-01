@@ -1,4 +1,4 @@
-"""MCP server entry point — register all domain tools and run on stdio."""
+"""MCP server entry point: register all domain tools and run on stdio."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ except (ImportError, OSError) as e:
 def list_registered_tools() -> list[str]:
     """Return the sorted names of all tools currently registered on the server.
 
-    This is the single source of truth for "how many tools are there" — docs and
+    This is the single source of truth for "how many tools are there": docs and
     tests read it instead of hard-coding a number. Note the count reflects what
     actually imported in this environment: torch-dependent tool modules only
     register when their dependencies are present (see the guarded imports above).
