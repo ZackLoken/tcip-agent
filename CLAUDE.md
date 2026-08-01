@@ -252,17 +252,41 @@ longer fragments `.tcip/`.
   infrastructure, or domain knowledge the agent lacks.
 - Crop traits are controlled vocabulary in `.github/skills/crops/` — verify there before asserting.
 - Match surrounding code style. (Comment/emphasis style is a global rule — see global `CLAUDE.md`;
-  not restated here.)
-- **A comment or docstring exists to help the agent navigating this code in some future session —
-  never to log what changed, never to cite where a fix came from.** Never write `K<n>`, "Fix <letter>",
-  "finding <n>", "stage-6 review", round numbers, or any other refactor-process vocabulary into a
-  comment or docstring — nor a date a decision was made. Both are bookkeeping for the refactor, not a
-  fact about the platform, and read as noise the moment the numbering/date is forgotten (which is
-  immediately, for anyone who didn't live through this refactor). State the actual technical
-  constraint — the invariant, the non-obvious why —
-  with no process pointer attached, or say nothing. That process narration belongs in the commit
-  message and `decisions/`, never in the diff. No all-caps or em dashes in comments (global rule,
-  restated here because it kept recurring).
+  this bullet is this repo's own elaboration of it, not a duplicate — read both.)
+- **Every piece of prose this repo ships is for whoever reads it next, never a changelog of the work
+  session that wrote it.** This is broader than "comments": it covers comments, docstrings, and every
+  string literal meant to be read as prose — log lines, exception/error messages, HTTPException
+  details, toast/UI text, test names and descriptions (`it(...)`/`describe(...)`/docstrings on test
+  functions) — and it applies everywhere prose lives in this repo, not just `packages/*/src` and
+  `tests/`: `scripts/*.py`, `README.md`, `.github/skills/`, and package-level `CLAUDE.md` files are
+  all in scope too. It does **not** apply to data values — a test fixture's date, a legitimate
+  all-caps identifier/constant/env-var/acronym, or a UI's own placeholder glyph for "no value" (e.g.
+  a bare em dash rendered in a table cell) are not prose and are not the target here.
+  Forbidden in that prose, no exceptions:
+  - A cluster/phase/fix citation under **any** prefix scheme — `K<n>` is only the one this repo
+    happened to use; treat `Fix <letter>`, `finding <n>`, `round <n>`, `stage-<n> review`, `W<n>`,
+    `S<n>`, `L<n>`, `D<n>`, `R<n>`, `G<n>`, `Q<n>`, `N<n>-NEW-<n>`, `RC-NEW-<n>`, `TRAP <n>`,
+    `Phase <n>`, `Part <n>`, or any other project/session-tracking label the same way. A brand-new
+    scheme not on this list is still the same failure mode — pattern-match on "does this name a
+    session's own internal tracking artifact," not on this literal list.
+  - An inline date a decision or fix was made.
+  - All-caps words used for emphasis (write "not"/"never", not "NOT"/"NEVER") and markdown bold used
+    for emphasis (`**word**`) — both forbidden by the global rule; restated here because this repo's
+    own history is exactly what made that rule necessary, and both kept recurring even after being
+    told once.
+  - Em dashes, anywhere in that prose.
+
+  If a real, non-obvious technical fact survives once the process-pointer/date/emphasis is stripped,
+  state it plainly with no process pointer attached. If nothing survives, write nothing — that process
+  narration belongs in the commit message and `decisions/`, never in the diff or in shipped prose.
+  `decisions/` (and any doc explicitly marked superseded/historical) is the one place this vocabulary
+  belongs; don't launder it out of there by the same instinct that removes it everywhere else.
+
+  **A prior sweep to undo this vocabulary across the whole tree needed three separate
+  scope-corrections mid-flight** — first read as "comments/docstrings only," then widened to string
+  literals, then widened again to the rest of the file surface and to markdown bold — before it
+  actually covered what "every piece of prose" means here. That is exactly the failure mode this
+  bullet exists to close: get the full scope right the first time, not after being told three times.
 
 ## Pointers
 
