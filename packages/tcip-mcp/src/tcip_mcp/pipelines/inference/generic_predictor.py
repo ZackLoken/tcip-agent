@@ -7,12 +7,16 @@ batch, and ONNX export.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 from PIL import Image
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 from tcip_mcp.pipelines.model_build import build_model
-from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
+from tcip_mcp.pipelines.image_utils import BandGroupRef, load_image, pil_to_tensor
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU, DEFAULT_TILE_SIZE
 
@@ -24,6 +28,21 @@ _DETECTION_TASKS = frozenset({"detection", "instance_seg"})
 
 
 from tcip_mcp.pipelines.image_utils import crop_pad_tile as _crop_pad_tile  # noqa: E402
+
+
+def _display_path(source: str | Path | BandGroupRef) -> str:
+    """A JSON-safe, human-meaningful identity string for a predict result's ``image`` field.
+
+    A :class:`BandGroupRef` has no single sibling file that names the logical image — its own
+    ``.bandgroup`` manifest path is the closest thing (stable, on disk, unique per capture); a plain
+    path/string is returned as-is. Every ``load_image``/``load_multiband`` call in this module keeps
+    receiving the ORIGINAL source object (never this string), so a band-grouped capture still
+    decodes through the channel-aware loader instead of a stringified dataclass repr that no reader
+    can open.
+    """
+    if isinstance(source, BandGroupRef):
+        return str(source.manifest_path)
+    return str(source)
 
 
 class GenericPredictor:
@@ -80,26 +99,33 @@ class GenericPredictor:
         self.in_chans = int(src.get("in_chans", 3))
 
     @torch.no_grad()
-    def predict(self, image_path: str) -> dict:
-        """Run inference on a single image."""
+    def predict(self, image_path: str | Path | BandGroupRef) -> dict:
+        """Run inference on a single image.
+
+        ``image_path`` may be a plain path/string or a :class:`BandGroupRef` — the SAME image
+        sources ``image_utils.list_logical_images``/``resolve_image_source`` hand every other
+        reader in this platform, so a band-grouped capture decodes through the channel-aware
+        loader here too instead of needing its own stringified stand-in.
+        """
         img = load_image(image_path, self.in_chans)
         w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
         tensor = pil_to_tensor(img).to(self.device)
+        disp = _display_path(image_path)
 
         if self.task in _DETECTION_TASKS:
             outputs = self.model([tensor])
             if isinstance(outputs, list):
                 outputs = outputs[0]
-            return self._format_detection(outputs, image_path, w, h)
+            return self._format_detection(outputs, disp, w, h)
         else:
             outputs = self.model(tensor.unsqueeze(0))
-            return self._format_other(outputs, image_path, w, h)
+            return self._format_other(outputs, disp, w, h)
 
     @torch.no_grad()
     def predict_batch(
-        self, image_paths: list[str], tile: bool = False, tile_size: int = DEFAULT_TILE_SIZE,
-        overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU,
-        batch_size: int = 16, postprocess: str = "nms",
+        self, image_paths: list[str | Path | BandGroupRef], tile: bool = False,
+        tile_size: int = DEFAULT_TILE_SIZE, overlap: float = 0.2, tile_batch_size: int = 96,
+        global_nms_iou: float = DEFAULT_NMS_IOU, batch_size: int = 16, postprocess: str = "nms",
     ) -> list[dict]:
         """Run inference on multiple images (optionally tiled for small objects).
 
@@ -107,6 +133,9 @@ class GenericPredictor:
         (one GPU forward per batch — torchvision detectors take a list of variable-size
         images), instead of one forward per image. Non-detection heads stay per-image
         since their inputs are native-resolution (can't be stacked without resizing).
+
+        Each element of ``image_paths`` may be a plain path/string or a :class:`BandGroupRef`
+        (see :meth:`predict`).
         """
         if tile:
             return [
@@ -120,7 +149,9 @@ class GenericPredictor:
         return [self.predict(p) for p in image_paths]
 
     @torch.no_grad()
-    def _predict_batch_detection(self, image_paths: list[str], batch_size: int) -> list[dict]:
+    def _predict_batch_detection(
+        self, image_paths: list[str | Path | BandGroupRef], batch_size: int,
+    ) -> list[dict]:
         results: list[dict] = []
         for start in range(0, len(image_paths), max(1, batch_size)):
             chunk = image_paths[start:start + max(1, batch_size)]
@@ -129,23 +160,24 @@ class GenericPredictor:
                 img = load_image(p, self.in_chans)
                 w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
                 tensors.append(pil_to_tensor(img).to(self.device))
-                meta.append((p, w, h))
+                meta.append((_display_path(p), w, h))
             outputs = self.model(tensors)  # one forward over the whole chunk
-            for (p, w, h), out in zip(meta, outputs):
-                results.append(self._format_detection(out, p, w, h))
+            for (disp, w, h), out in zip(meta, outputs):
+                results.append(self._format_detection(out, disp, w, h))
         return results
 
     @torch.no_grad()
     def predict_tiled(
-        self, image_path: str, tile_size: int = DEFAULT_TILE_SIZE, overlap: float = 0.2,
-        tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU, postprocess: str = "nms",
-        *, require_masks: bool = True,
+        self, image_path: str | Path | BandGroupRef, tile_size: int = DEFAULT_TILE_SIZE,
+        overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU,
+        postprocess: str = "nms", *, require_masks: bool = True,
     ) -> dict:
         """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict ->
         core-region reconstruction -> cross-tile merge -> full-image detections.
 
         ``postprocess`` selects the cross-tile merge: ``"nms"`` suppresses overlaps, ``"nmm"``
         unions boxes split across a seam. Falls back to :meth:`predict` for non-detection heads.
+        ``image_path`` may be a plain path/string or a :class:`BandGroupRef` (see :meth:`predict`).
 
         ``require_masks`` (default True) is the instance_seg mask contract: this path is boxes-only,
         so a caller that will consume masks is refused rather than handed a result whose masks
@@ -225,7 +257,7 @@ class GenericPredictor:
             boxes, scores, labels = boxes[top], scores[top], labels[top]
 
         return {
-            "image": image_path,
+            "image": _display_path(image_path),
             "width": w,
             "height": h,
             "boxes": boxes.tolist(),
