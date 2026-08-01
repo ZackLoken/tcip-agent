@@ -1,4 +1,4 @@
-"""Materialize a curated detection dataset from human review verdicts (W5).
+"""Materialize a curated detection dataset from human review verdicts.
 
 Torch-free. Turns review verdicts (per-image shards under ``.tcip/state/review/``) into training data:
   - accepted / edited GT boxes  -> positive name-based per-image JSON labels (the canonical format)
@@ -8,8 +8,8 @@ matches ``data_tools._scan_dataset`` so the loop chains straight into ``make_spl
 ``launch_training`` with no glue.
 
 The verdict log stores normalized center-form boxes (``[cx, cy, w, h]``) plus the class *name*
-(``class_name`` — an annotation's subject); positives are denormalized to pixel coordinates using the
-copied image's dimensions (the canonical JSON is pixel-space) — no inference re-run.
+(``class_name``, an annotation's subject); positives are denormalized to pixel coordinates using the
+copied image's dimensions (the canonical JSON is pixel-space), no inference re-run.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def partition_review_verdicts(review_state: dict, *, only_completed: bool = Fals
 
 
 def _find_source_image(source_images_dir: str, img_name: str) -> "Path | BandGroupRef | None":
-    """The logical image ``img_name`` names — a plain ``Path``, or (when a ``.bandgroup``
+    """The logical image ``img_name`` names, a plain ``Path``, or (when a ``.bandgroup``
     manifest groups sibling band files under this stem) a ``BandGroupRef``. ``None`` if unresolvable
     (missing, or a stale group whose manifest references a deleted sibling).
 
@@ -129,8 +129,8 @@ def materialize_dataset(
         from tcip_mcp.pipelines.image_utils import BandGroupRef, image_dimensions
 
         if isinstance(src, BandGroupRef):
-            # A grouped capture materializes as every sibling band file PLUS the .bandgroup
-            # manifest itself — the manifest is what stands in for "the image" in the output
+            # A grouped capture materializes as every sibling band file plus the .bandgroup
+            # manifest itself: the manifest is what stands in for "the image" in the output
             # (its own filename is what every by-name reader treats as this capture's name).
             for band_path in src.bands.values():
                 dst_band = images_out / band_path.name
@@ -165,7 +165,7 @@ def materialize_dataset(
         })
 
     # Hard negatives here come from explicit human rejection verdicts, so mark them in the output's
-    # own status store under the review's subject — training only trusts human-confirmed negatives,
+    # own status store under the review's subject: training only trusts human-confirmed negatives,
     # never bare empty files (someone may have emptied a label mid-work). The subject is threaded
     # (or the single subject the verdicts name); with none, negatives can't be attributed and are
     # left as unconfirmed empties rather than mis-keyed.
@@ -180,7 +180,7 @@ def materialize_dataset(
         status_file.write_text(json.dumps({bucket_key: negatives}, indent=2))
 
         # Give the materialized dataset its own registry copy + a fresh per-image schema stamp, so
-        # quarantine can actually protect these review-harvested negatives later — without this,
+        # quarantine can actually protect these review-harvested negatives later; without this,
         # confirmed_negative_names has no classes.json to compare against and quarantine can never
         # fire here (a permanent no-op, not the "admit until proven stale" default it should be).
         from tcip_mcp.class_registry import attribute_schema_digest, read_registry
