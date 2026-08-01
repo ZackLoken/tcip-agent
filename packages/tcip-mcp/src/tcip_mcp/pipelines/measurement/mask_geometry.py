@@ -1,12 +1,12 @@
-"""Mask-geometry — dimensional measurements on a validated binary/instance mask.
+"""Mask-geometry: dimensional measurements on a validated binary/instance mask.
 
 From a validated mask compute, in **pixels**, the area, perimeter, the extents along the PCA
 principal and secondary axes, and the centroid; when a physical ``scale`` (per-pixel, in a
-caller-stated ``unit`` — never assumed to be millimetres) is supplied, the same quantities are also
-returned in that unit. Numpy-first with no heavy imports — the toolkit primitive the agent composes
+caller-stated ``unit`` (never assumed to be millimetres) is supplied, the same quantities are also
+returned in that unit. Numpy-first with no heavy imports: the toolkit primitive the agent composes
 for dimensional traits. It measures whatever mask it is given; whether that mask is trustworthy is
 the validation invariant's job, not this module's. :func:`resolve_scale` firewalls a candidate
-physical scale the same way :func:`resolve_binarize_threshold` firewalls the binarization threshold —
+physical scale the same way :func:`resolve_binarize_threshold` firewalls the binarization threshold:
 un-shippable until validated against a real reference for its kind.
 
 An axis extent is not an anatomical span. It is the width of the mask's own footprint projected onto
@@ -47,7 +47,7 @@ DEFAULT_MASK_BINARIZE_THRESHOLD = 0.5
 def resolve_binarize_threshold(value: float | None = None):
     """The mask-binarization threshold as a firewalled ``ResolvedParam`` (default 0.5, validated=false).
 
-    Requires validation (``validation_kind="annotations"`` — a mask GT reference, the same kind
+    Requires validation (``validation_kind="annotations"``, a mask GT reference, the same kind
     ``conf`` is validated against, just for masks instead of boxes): un-shippable as a bare number
     until derived/validated against validated masks (``.value`` raises), so a dimensional measurement
     can't silently freeze 0.5. An explicit ``value`` is honored but still stamped unvalidated until a
@@ -66,11 +66,11 @@ def resolve_binarize_threshold(value: float | None = None):
 def resolve_scale(value: float | None = None, *, unit: str = "mm", capture_id: str | None = None):
     """A physical per-pixel scale as a firewalled ``ResolvedParam`` (validated=false by default).
 
-    Requires validation (``validation_kind="physical"``) — shippable only once ``validated_against``
-    names a real physical-measurement reference (``VALIDATED_PHYSICAL_MEASUREMENT``). The DERIVATION
+    Requires validation (``validation_kind="physical"``), shippable only once ``validated_against``
+    names a real physical-measurement reference (``VALIDATED_PHYSICAL_MEASUREMENT``). The derivation
     method (EXIF-derived geometry, a reference-object measurement, or anything else) is not this
-    function's concern — a capability the agent composes per dataset, not a method this platform
-    picks — it only wraps whatever candidate scale a caller has already derived, in whatever ``unit``
+    function's concern, a capability the agent composes per dataset, not a method this platform
+    picks: it only wraps whatever candidate scale a caller has already derived, in whatever ``unit``
     that scale is actually in (never assumed to be mm), and refuses to let it ship until validated.
 
     ``capture_id`` marks the value as scoped to a single capture (a handheld standoff can vary image
@@ -111,7 +111,7 @@ def _axes(binary):
     """PCA on the foreground pixel coords -> (centroid_xy, principal, secondary, major_unit_vector).
 
     ``principal`` / ``secondary`` are pixel-inclusive extents (extent + 1) along the major / minor
-    axis — chords of the mask's footprint, not anatomical spans (see the module docstring).
+    axis: chords of the mask's footprint, not anatomical spans (see the module docstring).
     """
     import numpy as np
 
@@ -135,8 +135,8 @@ def _axes(binary):
 
 
 def _attach_physical(result: dict, scale: float, unit: str) -> None:
-    """Add ``{unit}``-suffixed physical fields from a linear per-pixel scale IN THAT UNIT (area
-    scales by the square). The unit is real data the caller states, never assumed — a scale in cm/px
+    """Add ``{unit}``-suffixed physical fields from a linear per-pixel scale in that unit (area
+    scales by the square). The unit is real data the caller states, never assumed: a scale in cm/px
     passed with ``unit="cm"`` produces ``area_cm2``/``principal_axis_extent_cm``/etc, not a
     silently-wrong ``_mm`` label (the previous hardcoded-mm behavior mislabeled any trait whose real
     unit wasn't mm)."""
@@ -150,14 +150,14 @@ def _attach_physical(result: dict, scale: float, unit: str) -> None:
     result[f"centroid_{unit}"] = (c[0] * s, c[1] * s) if c is not None else None
 
 
-# _attach_physical writes "{field}_{unit}[2]" (area squared, everything else linear) — the naming
+# _attach_physical writes "{field}_{unit}[2]" (area squared, everything else linear), the naming
 # convention any unit-bearing value_key, from mask_geometry or from bespoke agent-composed
 # measurement code, follows to be recognized here. unit_from_value_key is the single reader of it
-# (aggregation.py's delivery CSV calls this rather than re-deriving the pattern with its own regex —
-# "when two paths must agree, call one from the other"). Deliberately NOT a field-name whitelist
-# (mask_geometry has no monopoly on producing dimensional measurements — arc length, a skeleton path,
+# (aggregation.py's delivery CSV calls this rather than re-deriving the pattern with its own regex:
+# "when two paths must agree, call one from the other"). Deliberately not a field-name whitelist
+# (mask_geometry has no monopoly on producing dimensional measurements: arc length, a skeleton path,
 # a landmark distance are all real traits the agent composes elsewhere on the same validated mask):
-# recognized units are derived from crops.yml's own declared vocabulary — the trait authority — plus
+# recognized units are derived from crops.yml's own declared vocabulary, the trait authority, plus
 # each one's mechanically-derived squared form, never an invented category list.
 def _known_units() -> set[str]:
     from tcip_mcp.traits import crops_units
@@ -171,13 +171,13 @@ def unit_from_value_key(key: str) -> tuple[str, str] | None:
     ``None``.
 
     ``display_unit`` is what the units column should say; ``linear_basis`` is what crops.yml's
-    declared (always-linear) unit is cross-checked against — the two differ only for a squared
-    (area-like) key. A pixel-suffixed key (``"principal_axis_extent_px"``) never implies a unit —
-    pixels are not one — and neither does any trailing token outside crops.yml's real declared units
+    declared (always-linear) unit is cross-checked against: the two differ only for a squared
+    (area-like) key. A pixel-suffixed key (``"principal_axis_extent_px"``) never implies a unit,
+    pixels are not one, and neither does any trailing token outside crops.yml's real declared units
     (however plausible it looks: ``"elongated_fraction"`` does not imply a unit called "fraction").
 
     Refuses (raises) rather than silently mislabeling when the key's own name says "area" but its
-    unit isn't squared (``"area_mm"``, missing the ``2``) — a real naming bug in the producing code,
+    unit isn't squared (``"area_mm"``, missing the ``2``), a real naming bug in the producing code,
     not a case to guess through: an area is length², and shipping it labeled with a bare linear unit
     is exactly the kind of silent dimensional mismatch this function exists to catch.
     """
@@ -194,7 +194,7 @@ def unit_from_value_key(key: str) -> tuple[str, str] | None:
         return None
     if "area" in root.split("_") and display == linear_basis:
         raise ValueError(
-            f"{key!r} names 'area' but its unit {trailing!r} isn't squared — an area is length^2, "
+            f"{key!r} names 'area' but its unit {trailing!r} isn't squared, an area is length^2, "
             f"expected a value_key ending in {trailing}2. Fix the value_key (or the computation it "
             "names) rather than shipping a linear label for a squared quantity."
         )
@@ -205,7 +205,7 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str = "mm",
                   threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> dict:
     """Dimensional geometry of a single validated 2D mask (``[H, W]`` or ``[1, H, W]``).
 
-    ``scale`` is a plain float (per-pixel, in ``unit``) — never a ``ResolvedParam``. The firewall
+    ``scale`` is a plain float (per-pixel, in ``unit``), never a ``ResolvedParam``. The firewall
     belongs at the delivery door that resolves/validates the scale (:func:`resolve_scale`), not
     inside this primitive: forcing every call (including diagnostics, visualization, and training-
     loop geometry that are never deliveries) through the firewall would train reflexive
@@ -222,7 +222,7 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str = "mm",
          "secondary_axis_extent_mm", "centroid_mm"}
 
     The two axis extents are chords of the mask's footprint along its own PCA axes, not anatomical
-    spans — see the module docstring before treating one as a trait's length or width.
+    spans: see the module docstring before treating one as a trait's length or width.
 
     An empty mask returns zeros with ``empty=True`` and ``centroid_px=None`` (measurement refuses to
     invent a location for nothing).
@@ -263,7 +263,7 @@ def mask_to_polygon_points(
 ) -> list[list[tuple[float, float]]]:
     """Binary/soft mask -> one simplified polygon ring per connected component (pixel coords).
 
-    The extraction itself is :func:`tcip_annotation.mask_contours.mask_to_polygon_rings` — the same
+    The extraction itself is :func:`tcip_annotation.mask_contours.mask_to_polygon_rings`, the same
     call SAM-assisted labeling makes, so a model's exported prediction and a breeder's SAM-assisted
     GT describe an occlusion-split object the same way instead of one of them silently keeping only
     the largest region. This entry point adds only what belongs to the measurement side: the
