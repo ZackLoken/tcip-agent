@@ -15,16 +15,46 @@ from tcip_annotation import (
     save_annotations_any,
 )
 from tcip_annotation.json_io import read_annotations as read_labels
-from tcip_annotation.utils import get_image_dimensions
 
 from tcip_mcp.dataset_layout import (
     annotation_path_for_image,
     find_gt_label,
     find_prediction,
 )
+from tcip_mcp.pipelines.image_utils import (
+    BandGroupIncomplete,
+    image_dimensions,
+    resolve_image_source,
+)
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
+
+
+def _dims_for(image_path: str) -> tuple[int, int]:
+    """``(width, height)`` for ``image_path``, channel-aware — resolves through the same
+    enumeration/resolution primitive every other reader now shares (``resolve_image_source``),
+    so a ``.bandgroup``-grouped capture measures its real stacked frame instead of ``PIL``
+    misreading a manifest file (or a genuinely multi-band raster) as a photograph.
+    """
+    img = Path(image_path)
+    source = resolve_image_source(img.parent, img.stem)
+    return image_dimensions(source)
+
+
+def _logical_image_names(images_dir) -> list[str]:
+    """Every logical image's on-disk display name under ``images_dir`` — a plain file's own name,
+    or (for a ``.bandgroup``-grouped capture) its manifest's filename, the file every other
+    by-name reader (``image_name_map``, the dataset gallery route) treats as that capture's name.
+    Folding sibling band files into one name here is what lets this tool's frame index agree with
+    the frontend's own image_list, which now enumerates the same way.
+    """
+    from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
+
+    return [
+        src.manifest_path.name if isinstance(src, BandGroupRef) else src.name
+        for src in list_logical_images(images_dir).values()
+    ]
 
 
 def _coerce_xy(pt) -> tuple[float, float]:
@@ -74,7 +104,7 @@ def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    w, h = get_image_dimensions(image_path)
+    w, h = _dims_for(image_path)
     result: dict = {"image": image_path, "width": w, "height": h}
 
     gt_path = find_gt_label(image_path, fmt=fmt)
@@ -149,7 +179,7 @@ def save_annotations(
     if path is None and date is not None and not is_valid_name(date):
         return {"error": f"date must be a single safe path segment (no separators/'..'), got {date!r}"}
 
-    w, h = get_image_dimensions(image_path)
+    w, h = _dims_for(image_path)
 
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc).isoformat()
@@ -214,7 +244,7 @@ def _load_image_annotations(image_path: str):
     img = Path(image_path)
     if not img.is_file():
         return None
-    w, h = get_image_dimensions(image_path)
+    w, h = _dims_for(image_path)
     gt: list[Annotation] = []
     preds: list[Annotation] = []
 
@@ -498,7 +528,7 @@ def segment_prompt(
                              "cells were read off (overlay_reference_grid returns them). Without "
                              "them a cell name resolves against a grid nobody rendered."}
         from tcip_annotation.sam_wrapper import grid_to_pixel
-        w, h = get_image_dimensions(image_path)
+        w, h = _dims_for(image_path)
         points = []
         for cell in grid_cells:
             try:
@@ -617,9 +647,6 @@ def focus(
     return {"error": f"tab must be 'annotate' or 'review', got {tab!r}"}
 
 
-_IMG_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
-
-
 def _subject_task(anns: list[Annotation], subject: str) -> str | None:
     """"segment" if ``subject`` has a polygon here, "detect" if it has a box, "point" if its only
     geometry here is a point, else None (no geometry-bearing annotation of ``subject``).
@@ -660,7 +687,7 @@ def _focus_annotate(
     idir = Path(image_dir(dataset_root, date))
     if not idir.is_dir():
         return {"error": f"no images for date {date} under {dataset_root}"}
-    images = sorted(p.name for p in idir.iterdir() if p.is_file() and p.suffix.lower() in _IMG_EXTS)
+    images = sorted(_logical_image_names(idir))
     if not images:
         return {"error": f"no images on {date}"}
 
@@ -728,7 +755,7 @@ def _focus_review(
     idir = Path(image_dir(dataset_root, date))
     if not idir.is_dir():
         return {"error": f"no images for date {date} under {dataset_root}"}
-    images = sorted(p.name for p in idir.iterdir() if p.is_file() and p.suffix.lower() in _IMG_EXTS)
+    images = sorted(_logical_image_names(idir))
     if not images:
         return {"error": f"no images on {date}"}
 
@@ -847,17 +874,16 @@ def stage_proposals(
             return {"error": f"polygon {i} points look un-normalized; x/y must be in [0,1]"}
         norm_polys.append((subject, conf, pts))
 
-    img_file = None
+    img_source = None
     for idir in (image_dir(dataset_root, date), image_dir(dataset_root, None)):
-        for cand in sorted(Path(idir).glob(f"{stem}.*")):
-            if cand.is_file():
-                img_file = cand
-                break
-        if img_file is not None:
+        try:
+            img_source = resolve_image_source(idir, stem)
             break
-    if img_file is None:
+        except (FileNotFoundError, BandGroupIncomplete):
+            continue
+    if img_source is None:
         return {"error": f"no image found for stem {stem!r} under {image_dir(dataset_root, date)}"}
-    img_w, img_h = get_image_dimensions(str(img_file))
+    img_w, img_h = image_dimensions(img_source)
 
     from datetime import datetime, timezone
     created_at = datetime.now(timezone.utc).isoformat()
