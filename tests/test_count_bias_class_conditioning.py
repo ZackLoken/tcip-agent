@@ -343,9 +343,22 @@ def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap():
 def test_pick_serves_the_worst_class_not_the_pooled_total():
     """With three classes the pooled-unbiased conf can be the one the gate must refuse.
 
-    Stage-6 review's case: at conf 0.9 the pooled bias is 0 while class 3 sits at -2.0 (over
-    catkin's 1.0 tolerance); at conf 0.4, on the same curve, every class is within tolerance. A
-    pooled pick refuses a model that has a valid operating point.
+    Stage-6 review's case: at conf 0.9 the pooled bias is 0 while class 3 sits at -2.0; at conf 0.4,
+    on the same curve, every class's bias magnitude is smaller. A pooled pick refuses a model that
+    has a valid operating point.
+
+    K4 residual (2026-07-31): the end-to-end gate's tolerance is now RELATIVE to each class's (and
+    the pooled scope's) own typical per-image count (derived from the holdout), not catkin's old flat
+    absolute default. Every class here has only 1-3 real objects/image, so classes 1/2's permanent
+    +1 spurious detection and class 3's permanent single miss (unavoidable at any conf: nothing ever
+    detects it) are each a large relative miss no conf can fix — correctly refused by the new gate
+    regardless of which conf is picked, where the OLD absolute default (1.0) let every one of them
+    through at exactly its own boundary (a bias of 1.0 clearing a tolerance of 1.0 via ``<=``). That
+    is the new gate doing its job, not a defect — see
+    ``test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_enough`` below for
+    the same picker mechanism validating end-to-end once every class is dense enough that its own
+    identical permanent miscount is a small relative fraction, the "rail admits valid work" case
+    CLAUDE.md requires for a strengthened gate.
     """
     def build(prefix, offset):
         recs = []
@@ -377,8 +390,256 @@ def test_pick_serves_the_worst_class_not_the_pooled_total():
     assert max(abs(s["count_bias_mean"]) for s in at[0.4]["per_class"].values()) == pytest.approx(1.0)
     assert pick_count_unbiased(sweep) == pytest.approx(0.4)
 
-    # ...and end to end: the conf the picker now chooses is one the gate validates.
+    # ...end to end: the picker still avoids the pooled trap (conf 0.4, not 0.95's misleadingly
+    # unbiased-looking pooled total) — but at THIS toy density every class's permanent per-image
+    # miscount (classes 1/2's +1 spurious detection, class 3's -1 permanent miss) is a large relative
+    # error, correctly refused under the new default relative tolerance (0.01, i.e. 1%) even at the
+    # least-bad conf. Old absolute D12 default (1.0) would have let every one of these through at
+    # this same picked conf (each bias magnitude was exactly 1.0, clearing a tolerance of 1.0 via
+    # ``<=``); the new gate does not, because none of them was ever a trustworthy 1%-relative claim
+    # at this reference's actual density.
     b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=recs, holdout_records=build("h", 5000.0))
+    assert b.params["conf"]._raw == pytest.approx(0.4)  # still the worst-class-aware pick
+    assert "count_bias_exceeds_tolerance" in b.params["conf"].sweep["failures"]        # pooled
+    assert "count_bias_exceeds_tolerance_per_class" in b.params["conf"].sweep["failures"]
+    assert set(b.params["conf"].sweep["per_class_count_bias_failures"]) == {"1", "2", "3"}
+    assert b.params["conf"].validated_against == VALIDATED_FALSE
+
+
+def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_enough():
+    """Same picker mechanism and the same qualitative shape as the test above (a pooled-unbiased
+    conf that traps a naive pick, a worst-class-aware pick that avoids it), but every class also
+    carries 200 always-correctly-detected background objects — real GT, always matched at every conf
+    on this curve, so they contribute zero bias at any threshold and don't touch the
+    pooled-trap-at-0.95 or worst-class-at-0.4 arithmetic the test above already pins. They exist ONLY
+    to make every class's typical per-image count large enough (~201-203) that its existing permanent
+    miscount — class 3's single missed object, AND classes 1/2's own permanent +1 spurious detection
+    (present in the test above too, previously masked by that test's boundary-exact old absolute
+    tolerance of 1.0, which a bias of exactly 1.0 cleared via ``<=``) — is a small relative fraction
+    of it, comfortably inside the new default 1% relative tolerance. This is the "a rail must admit
+    valid work, not only reject invalid work" case CLAUDE.md requires alongside the refusal test
+    above: the new relative gate is not merely stricter everywhere, it correctly ADMITS a reference
+    whose real misses are genuinely small relative to how much of each class there is.
+    """
+    def build(prefix, offset):
+        recs = []
+        for i in range(6):
+            gt, dt = [], []
+            for cat in (1, 2):
+                box = [200.0 * cat + offset, 50.0, 40.0, 40.0]
+                gt.append({"bbox": box, "category_id": cat})
+                dt.append({"bbox": box, "category_id": cat, "score": 0.95})
+                dt.append({"bbox": [200.0 * cat + offset, 400.0, 40.0, 40.0],
+                           "category_id": cat, "score": 0.95})
+                # 200 background objects for this class too, always found -- classes 1/2 carry their
+                # own permanent +1 bias (the spurious detection above), so they need the same density
+                # boost as class 3 to clear the new relative tolerance.
+                for k in range(200):
+                    box2 = [3000.0 + 4000.0 * cat + 60.0 * k + offset, 900.0, 40.0, 40.0]
+                    gt.append({"bbox": box2, "category_id": cat})
+                    dt.append({"bbox": box2, "category_id": cat, "score": 0.95})
+            for k in range(3):
+                gt.append({"bbox": [700.0 + 100.0 * k + offset, 50.0, 40.0, 40.0],
+                           "category_id": 3})
+            dt.append({"bbox": [700.0 + offset, 50.0, 40.0, 40.0], "category_id": 3, "score": 0.95})
+            dt.append({"bbox": [800.0 + offset, 50.0, 40.0, 40.0], "category_id": 3, "score": 0.4})
+            # 200 background class-3 objects, always found (score 0.95, survives every conf on this
+            # curve) -- spaced well outside center-match tolerance from everything above and each
+            # other, in their own row far from the rest of the layout.
+            for k in range(200):
+                box = [1500.0 + 60.0 * k + offset, 900.0, 40.0, 40.0]
+                gt.append({"bbox": box, "category_id": 3})
+                dt.append({"bbox": box, "category_id": 3, "score": 0.95})
+            recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+        return recs
+
+    recs = build("w", 0.0)
+    sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
+    at = {round(c["conf"], 2): c for c in sweep["curve"]}
+    # The pinned arithmetic from the test above is unchanged by the background objects.
+    assert at[0.95]["per_class"]["3"]["count_bias_mean"] == pytest.approx(-2.0)
+    assert max(abs(s["count_bias_mean"]) for s in at[0.4]["per_class"].values()) == pytest.approx(1.0)
+    assert pick_count_unbiased(sweep) == pytest.approx(0.4)
+
+    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+                                calibration_records=recs, holdout_records=build("h", 5000.0))
+    assert b.params["conf"].value == pytest.approx(0.4)
     assert b.params["conf"].sweep["failures"] == []
     assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
+
+
+# ── K4 residual (2026-07-31): the relative tolerance's own derived floor ───────────────────────
+#
+# Stage-6 review Finding F3: nothing above pins ``_effective_count_bias_tolerance`` itself — deleting
+# the floor outright left the whole suite green. These test the floor directly (the pure function)
+# and its effect on the provenance a caller actually reads, not just an indirect pass/fail outcome
+# that a small-n equivalence test's own SE term can obscure.
+
+def test_effective_count_bias_tolerance_floor_governs_a_near_zero_fraction():
+    from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
+
+    # A rare class (typical_count=1) at the platform default fraction (0.01) alone would demand a
+    # tolerance of 0.01 -- an impossible standard for any integer count. The derived floor (1/n) is
+    # what actually governs here, not the fraction term.
+    tol = _effective_count_bias_tolerance(0.01, typical_count=1.0, n=5)
+    assert tol == pytest.approx(0.2)
+    assert tol > 0.01 * 1.0
+
+
+def test_effective_count_bias_tolerance_floor_shrinks_as_evidence_grows():
+    from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
+
+    tol_n5 = _effective_count_bias_tolerance(0.0, typical_count=0.0, n=5)
+    tol_n50 = _effective_count_bias_tolerance(0.0, typical_count=0.0, n=50)
+    assert tol_n5 == pytest.approx(0.2)
+    assert tol_n50 == pytest.approx(0.02)
+    assert tol_n50 < tol_n5  # more evidence behind the mean -> a tighter floor, never looser
+
+
+def test_effective_count_bias_tolerance_floor_never_loosens_past_d12_default_at_n_ge_2():
+    from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
+
+    # D12's old absolute default was 1.0 -- at every n the reference-sufficiency gates actually let
+    # through (n >= 2), the floor alone stays at or below half that, so it can never be the reason a
+    # reference passes today that the old flat gate would have refused.
+    for n in range(2, 60):
+        assert _effective_count_bias_tolerance(0.0, typical_count=0.0, n=n) <= 0.5
+
+
+def test_effective_count_bias_tolerance_fraction_term_dominates_a_dense_reference():
+    from tcip_mcp.pipelines.operating_point import _effective_count_bias_tolerance
+
+    # At the density this platform's own test suite's dense fixtures use (~100 objects/image, not
+    # verified against real production imagery -- round-2 review Finding NEW-5), the fraction term --
+    # not the floor -- sets the tolerance, and reproduces D12's old absolute default of 1.0 exactly at
+    # the new 0.01 default fraction (the property the default was chosen for).
+    assert _effective_count_bias_tolerance(0.01, typical_count=100.0, n=40) == pytest.approx(1.0)
+
+
+def _floor_matters_records(prefix, offset):
+    """Class 1: dense (20/image), perfect, present every image -- keeps the reference from tripping
+    unrelated gates. Class 2: sparse (2/image), present every image, with ONE extra spurious
+    detection on exactly one of the 5 images (a real, non-uniform per-image bias, mean 0.2)."""
+    recs = []
+    for i in range(5):
+        gt, dt = [], []
+        for k in range(20):
+            box = [50.0 + 30.0 * k + offset, 50.0, 20.0, 20.0]
+            gt.append({"bbox": box, "category_id": 1})
+            dt.append({"bbox": box, "category_id": 1, "score": 0.95})
+        for k in range(2):
+            box = [50.0 + 30.0 * k + offset, 900.0, 20.0, 20.0]
+            gt.append({"bbox": box, "category_id": 2})
+            dt.append({"bbox": box, "category_id": 2, "score": 0.95})
+        if i == 0:
+            dt.append({"bbox": [2000.0 + offset, 900.0, 20.0, 20.0], "category_id": 2, "score": 0.95})
+        recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+    return recs
+
+
+def test_per_class_stamped_tolerance_reflects_the_floor_not_just_the_fraction_term():
+    """End-to-end: the sparse class's STAMPED tolerance (what the gate actually compared its bias
+    against) must be the floor (1/n_present == 0.2), not the fraction term alone (0.01 * 2 == 0.02) --
+    a direct pin on ``_effective_count_bias_tolerance`` being live inside ``resolve_operating_point``,
+    not inferred indirectly from a pass/fail outcome an unrelated SE term could also explain.
+    """
+    b = resolve_operating_point(
+        "catkin", dataset_hash="h", staged_conf_floor=0.05,
+        calibration_records=_floor_matters_records("c", 0.0),
+        holdout_records=_floor_matters_records("h", 5000.0))
+    sweep = b.params["conf"].sweep
+    assert sweep["per_class_typical_count"]["2"] == pytest.approx(2.0)
+    # The floor (1/5 == 0.2), not the fraction term alone (0.01 * 2 == 0.02) -- an order of magnitude
+    # apart, so this is not a rounding coincidence.
+    assert sweep["per_class_count_bias_tolerance"]["2"] == pytest.approx(0.2)
+    assert sweep["per_class_count_bias_tolerance"]["2"] > 0.01 * sweep["per_class_typical_count"]["2"]
+
+
+def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_alone():
+    """Stage-6 review Finding F1: without a per-class minimum-presence gate, a class present on
+    exactly one holdout image gets a relative tolerance derived from that ONE image's own density —
+    reachable with no adversarial construction (an ordinary rare class that happens to show up once,
+    in a denser-than-typical frame) — and could admit a reference the old flat-1.0 gate refused on
+    the identical numbers. ``insufficient_holdout_images_per_class`` closes this the same way
+    ``insufficient_holdout_images`` already does for the pooled scope.
+    """
+    def build(prefix, offset):
+        recs = []
+        for i in range(10):
+            gt, dt = [], []
+            for k in range(20):
+                box = [50.0 + 30.0 * k + offset, 50.0, 20.0, 20.0]
+                gt.append({"bbox": box, "category_id": 1})
+                dt.append({"bbox": box, "category_id": 1, "score": 0.95})
+            if i == 0:
+                # class 2 exists ONLY on this one image: 150 real objects, a small (2%) real
+                # over-count -- small enough that a legitimately-derived tolerance from 150 objects
+                # of density would admit it, if one image were enough evidence to trust at all.
+                for k in range(150):
+                    box = [50.0 + 30.0 * k + offset, 900.0, 20.0, 20.0]
+                    gt.append({"bbox": box, "category_id": 2})
+                    dt.append({"bbox": box, "category_id": 2, "score": 0.95})
+                for k in range(3):
+                    dt.append({"bbox": [10000.0 + 30.0 * k + offset, 900.0, 20.0, 20.0],
+                              "category_id": 2, "score": 0.95})
+            recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
+        return recs
+
+    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+                                calibration_records=build("c", 0.0), holdout_records=build("h", 5000.0))
+    sweep = b.params["conf"].sweep
+    assert sweep["holdout_bias"]["per_class"]["2"]["n_present"] == 1
+    assert sweep["per_class_insufficient_images"] == ["2"]
+    assert "insufficient_holdout_images_per_class" in sweep["failures"]
+    assert b.params["conf"].validated_against == VALIDATED_FALSE
+    # Round-2 review Finding NEW-3: the named-failure vocabulary is exhaustive by construction
+    # (describe_review_validation raises on a name it can't translate), so this is what proves the
+    # new name is actually in the breeder-facing vocabulary, not just the internal failures list —
+    # the same obligation test_missing_class_failure_has_its_own_breeder_message already meets for
+    # holdout_missing_class.
+    out = describe_review_validation(b, reviewed_image_count=10)
+    assert out["validated"] is False
+    assert "single image" in out["reason"]
+
+
+def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_image_one():
+    """Round-2 review Finding NEW-1: ``n_present == 0`` (a class evidenced in calibration but with NO
+    holdout presence at all, not even one image) must keep getting ``holdout_missing_class``'s
+    message, not ``insufficient_holdout_images_per_class``'s "held back in exactly one image" —
+    which would be false for a class held back in zero. The per-class insufficient-images conjunct
+    is scoped to ``n_present == 1`` exactly, not ``< 2``, so it never fires here.
+    """
+    cal = _gt_records("cal", 4, swap_classes=True)  # classes 1 and 2 both evidenced in calibration
+    hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)  # holdout: only 1
+    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+                                calibration_records=cal, holdout_records=hold)
+    sweep = b.params["conf"].sweep
+    assert "2" not in sweep["holdout_bias"]["per_class"]  # not present at all -- no n_present==0 key
+    assert sweep["per_class_insufficient_images"] == []
+    assert sweep["holdout_missing_classes"] == ["2"]
+    out = describe_review_validation(b, reviewed_image_count=N_IMAGES)
+    assert "held back" in out["reason"] and "no independent evidence" in out["reason"]
+    assert "single image" not in out["reason"]
+
+
+def test_sweep_summary_surfaces_per_class_tolerance_and_typical_count():
+    """Round-2 review Finding NEW-2: F8 added per-class provenance fields to `_sweep_summary` (the
+    agent-facing compact view) but nothing asserted they actually reach its OUTPUT -- deleting them
+    left the suite green. Drives a real refusal through the real door end to end, then checks the
+    compact view a caller (e.g. run_inference's response) actually sees, not just the full sidecar.
+    """
+    from tcip_mcp.tools.inference_tools import _sweep_summary
+
+    b = resolve_operating_point(
+        "catkin", dataset_hash="h", staged_conf_floor=0.05,
+        calibration_records=_gt_records("cal", 4, swap_classes=True),
+        holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
+    sweep = b.params["conf"].sweep
+    out = _sweep_summary(b.params["conf"])
+    assert out["per_class_count_bias_tolerance"] == sweep["per_class_count_bias_tolerance"]
+    assert out["pooled_typical_count"] == sweep["pooled_typical_count"]
+    assert out["per_class_typical_count"] == sweep["per_class_typical_count"]
+    assert out["per_class_insufficient_images"] == sweep["per_class_insufficient_images"]
+    # Not vacuously equal to None on both sides -- the sidecar actually carries real values here.
+    assert out["per_class_typical_count"] == {"1": 4.0, "2": 4.0}
