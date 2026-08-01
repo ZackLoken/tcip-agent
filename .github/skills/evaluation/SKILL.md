@@ -15,48 +15,48 @@ description: "Model evaluation methods, metrics interpretation, failure triage, 
 | Regression | RMSE | R², MAE, residual distribution |
 | Ordinal | Quadratic weighted κ | Adjacent accuracy, confusion matrix |
 
-These are **labeled comparability metrics** — a fixed-convention number (mAP@50 = AP at IoU 0.5) that
+These are **labeled comparability metrics**: a fixed-convention number (mAP@50 = AP at IoU 0.5) that
 lets runs be compared on the same ruler. They do **not** govern the phenotype. The criterion that
 governs the delivered measurement (which detections are a hit, what the count is) is the *trait's*
-localization criterion with a tolerance derived from the data in hand — e.g. a center-match with
+localization criterion with a tolerance derived from the data in hand, e.g. a center-match with
 `half_class_avg_size` tolerance for small, thin objects like catkins, not a frozen IoU@0.5. Choose the governing
 criterion per trait/data; keep mAP@50 alongside only as the comparability label (see `operating_point`
 / the derive-don't-pin rail). There is no single mandated "primary" metric per task.
 
-Detection/instance-seg metrics (`coco_detection_metrics`) are aggregate only — no per-class AP
+Detection/instance-seg metrics (`coco_detection_metrics`) are aggregate only; no per-class AP
 today. Per-class precision/recall/F1 is real for classification/ordinal (`evaluate_model`).
-Change detection is not a built task type — see README's Roadmap.
+Change detection is not a built task type; see README's Roadmap.
 
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
 | `evaluate_model` | Evaluate a checkpoint on a held-out dataset; writes `test_results.json` |
-| `score_predictions` | Score on-disk predictions vs GT — an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
+| `score_predictions` | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
 | `render_failure_cases` | Surface + render the N images with highest triage error |
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
 
-`evaluate_model` accepts an optional `trait=` — when set, the trait's own governing criterion
+`evaluate_model` accepts an optional `trait=`: when set, the trait's own governing criterion
 (not the IoU@0.5 comparability convention) determines detection counts/F1, matching what governs
 delivery (see Metrics by Task Type above); omit it and the IoU@0.5 convention governs instead. For
 a tile-trained checkpoint, `evaluate_model` reports in one of two regimes: the default tile-level
-run is a DIAGNOSTIC only (matches training-time val mAP, not the shipped full-frame count);
+run is a diagnostic only (matches training-time val mAP, not the shipped full-frame count);
 `use_tiled_inference=True` reconstructs predictions to full frame and is the delivery-grade metric
-to report for gating. An untiled checkpoint has no regime split — its one run already is the
+to report for gating. An untiled checkpoint has no regime split; its one run already is the
 delivery metric (see `evaluate_model`'s own docstring for the full precedence).
 
 ## Failure Triage
 
 When metrics are poor, investigate systematically:
 
-1. **Data issues**: `validate_data_quality` — check for missing labels, format errors, class imbalance
-2. **Worst cases**: `render_failure_cases` — surface and visually inspect the worst N images
-3. **Per-image breakdown**: `score_predictions` on a dataset dir — find images with the
+1. **Data issues**: `validate_data_quality`, check for missing labels, format errors, class imbalance
+2. **Worst cases**: `render_failure_cases`, surface and visually inspect the worst N images
+3. **Per-image breakdown**: `score_predictions` on a dataset dir; find images with the
    highest FP/FN counts (no built-in per-class breakdown for detection; use
    `score_predictions(<image>, detail=True)` per image and aggregate by `class_id` if
    class-level numbers are needed)
-4. **Training dynamics**: Check metrics.jsonl — is loss still decreasing? Overfitting?
+4. **Training dynamics**: Check metrics.jsonl; is loss still decreasing? Overfitting?
 5. **Architecture**: Is the model appropriate for the task and data scale?
 
 ## Comparison Protocol
@@ -65,8 +65,8 @@ When comparing models:
 1. Same dataset split (use `make_splits` with fixed seed)
 2. Same evaluation set
 3. Compare using the metric that governs this trait/task's phenotype (see Metrics by Task Type
-   above) — not necessarily the labeled comparability metric
-4. For classification/ordinal, check per-class performance — overall accuracy can hide
+   above), not necessarily the labeled comparability metric
+4. For classification/ordinal, check per-class performance; overall accuracy can hide
    class-specific failures; for detection, check per-image FP/FN patterns instead (see
-   Failure Triage above — there's no per-class AP today)
+   Failure Triage above; there's no per-class AP today)
 5. Use `compare_experiments` for side-by-side analysis
