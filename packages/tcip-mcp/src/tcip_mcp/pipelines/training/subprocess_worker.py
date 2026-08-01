@@ -1,11 +1,11 @@
-"""K24: the subprocess entry point ``launch_training`` spawns to run one bespoke training run's
-actual body — dataset/loader construction, the audited envelope, ``run_training_envelope()`` — in
+"""The subprocess entry point ``launch_training`` spawns to run one bespoke training run's
+actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in
 an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any
 other concurrent run's process. Everything here mirrors what ``launch_training`` did synchronously
-in-process before K24; only the process boundary moved.
+in-process before this boundary existed; only the process boundary moved.
 
 Invoked as ``python -m tcip_mcp.pipelines.training.subprocess_worker --run-id ... --experiment-id
-... --config-path ... --output-dir ... --resume-from ...`` — never imported for its functions
+... --config-path ... --output-dir ... --resume-from ...``, never imported for its functions
 elsewhere, only run as ``__main__``.
 """
 
@@ -30,8 +30,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict) -> None:
-    """Best-effort: patch the EFFECTIVE tiling geometry (CV2) into the durable experiment record's
-    own ``config.json`` — a small merge, not a rewrite. Never sinks the run if the experiment
+    """Best-effort: patch the effective tiling geometry into the durable experiment record's
+    own ``config.json``, a small merge, not a rewrite. Never sinks the run if the experiment
     directory doesn't exist (experiment tracking is best-effort throughout this path, same as
     every other write in it)."""
     try:
@@ -51,12 +51,12 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict) -> Non
 
 def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute: str | None,
                                     id_map: dict) -> None:
-    """Best-effort: patch this run's resolved name->id map (K25/K13.5-2c) into the durable
-    experiment record's own ``config.json`` — a small merge, not a rewrite, the same shape
-    :func:`_patch_experiment_config_tiling` already uses for CV2's tile geometry. Called from
+    """Best-effort: patch this run's resolved name->id map into the durable
+    experiment record's own ``config.json``, a small merge, not a rewrite, the same shape
+    :func:`_patch_experiment_config_tiling` already uses for the tile geometry. Called from
     ``run()`` right after the dataset is built (mirroring where the tiling patch fires), though
     unlike tile geometry this fact is a pure function of ``data_cfg`` and would be resolvable
-    before the build too — the call site is chosen for symmetry with the tiling patch, not because
+    before the build too, the call site is chosen for symmetry with the tiling patch, not because
     the dataset build is a precondition for it. Never sinks the run if the experiment directory
     doesn't exist."""
     try:
@@ -78,32 +78,32 @@ def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute:
 
 
 def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dict] | None:
-    """This run's resolved name->id map (K25/K13.5-2c), or ``None`` when there is nothing to
+    """This run's resolved name->id map, or ``None`` when there is nothing to
     record. Returns ``(subject, attribute, id_map)``.
 
-    Resolved INDEPENDENTLY of the built dataset object's own attributes (stage-6 review round 1:
+    Resolved independently of the built dataset object's own attributes:
     ``DetectionDataset`` only self-populates ``.id_map`` on its own direct-json build path; the
     COCO-assembled ``auto_val`` default and ``TiledDetectionDataset`` both build through a
     different internal path and expose neither ``.id_map`` nor ``.subject`` at all, so a
-    ``getattr``-off-the-dataset read was silently a no-op on the default and every tiled run — the
-    shipped Phase-1 catkin case). ``assign_class_ids`` is a pure function of
-    ``(registry, subject, attribute)`` — "same registry + scope -> identical map, every call"
-    (``class_registry.py``) — so re-resolving it here from ``data_cfg``'s own
-    subject/attribute/labels_dir, the SAME inputs ``_auto_train_val`` already resolved it from
+    ``getattr``-off-the-dataset read was silently a no-op on the default and every tiled run.
+    ``assign_class_ids`` is a pure function of
+    ``(registry, subject, attribute)``, "same registry + scope -> identical map, every call"
+    (``class_registry.py``), so re-resolving it here from ``data_cfg``'s own
+    subject/attribute/labels_dir, the same inputs ``_auto_train_val`` already resolved it from
     internally (``training_tools.py``'s own COCO-assembly branch calls this exact function),
     reproduces the identical map without depending on which internal dataset shape got built.
 
     ``None`` when ``task`` isn't detection/instance_seg, no ``subject`` is configured, the run
     trains from a pre-built COCO source (``coco_json``/``label_format="coco"``) or a bespoke
-    ``dataset_source`` (stage-6 review round 2, N1: neither route's targets are guaranteed to come
-    from THIS ``(labels_dir, subject, attribute)`` triple at all — a COCO file's own category ids
-    can be authored in any order, and a bespoke builder owns its class space entirely — so
+    ``dataset_source`` (neither route's targets are guaranteed to come
+    from this ``(labels_dir, subject, attribute)`` triple at all, a COCO file's own category ids
+    can be authored in any order, and a bespoke builder owns its class space entirely, so
     re-deriving here could stamp a map that is the wrong id space for what the run actually
     trained on, exactly the class of error class-aware admission exists to prevent; ``build_dataset``
-    itself only calls ``_resolve_registry_id_map`` on the SAME predicate, datasets.py's own
+    itself only calls ``_resolve_registry_id_map`` on the same predicate, datasets.py's own
     ``has_coco``/``dataset_source`` branch), or the one legitimate degraded case
     ``_resolve_registry_id_map`` itself names (an attribute scope with no ``classes.json`` for this
-    labels dir) — honest: no map recorded, decode falls through to its own live-registry
+    labels dir), honest: no map recorded, decode falls through to its own live-registry
     re-derivation, same as before this fix.
     """
     if task not in ("detection", "instance_seg") or not data_cfg.get("subject"):
@@ -123,8 +123,8 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
 
 
 def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resume_from: str) -> None:
-    """The training body — identical in substance to what ``launch_training`` ran synchronously
-    in-process before K24, just executing in this dedicated process instead."""
+    """The training body, identical in substance to what ``launch_training`` ran synchronously
+    in-process before this boundary existed, just executing in this dedicated process instead."""
     from tcip_mcp.pipelines.training.generic_trainer import (
         attach_run, seeded_loader_kwargs, task_collate,
     )
@@ -148,11 +148,11 @@ def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resu
 
     train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
 
-    # K25/K13.5-2c: stamp this run's resolved name->id map onto config["data"] IN PLACE — data_cfg
+    # Stamp this run's resolved name->id map onto config["data"] in place, data_cfg
     # is the same dict object, so this lands on the checkpoint (generic_trainer persists run.config
     # into every checkpoint; GenericPredictor reads it back as predictor.config) as well as the
     # durable experiment record (_patch_experiment_config_id_map). Decode/record at inference time
-    # (inference_tools.py::run_inference) then prefers THIS recorded map over re-deriving from the
+    # (inference_tools.py::run_inference) then prefers this recorded map over re-deriving from the
     # inference dataset's live registry, so a classes.json whose declared attribute-value order
     # changes between train and inference can't silently mis-decode. See _resolve_run_id_map's own
     # docstring for why this is resolved independently of train_ds's own attributes.
@@ -162,8 +162,8 @@ def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resu
         data_cfg["id_map"] = dict(_run_id_map)
         _patch_experiment_config_id_map(experiment_id, _run_subject, _run_attribute, _run_id_map)
 
-    # CV2: resolve the EFFECTIVE tiling geometry (the 224/0.2 defaults used when the tiling dict
-    # omitted them, not just caller-pinned values) — only knowable once the dataset is actually
+    # Resolve the effective tiling geometry (the 224/0.2 defaults used when the tiling dict
+    # omitted them, not just caller-pinned values), only knowable once the dataset is actually
     # built, so patched into the durable experiment record here rather than before launch.
     tiling_cfg = data_cfg.get("tiling")
     if tiling_cfg and tiling_cfg.get("enabled", True):
@@ -179,7 +179,7 @@ def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resu
     from torch.utils.data import DataLoader
 
     sampler = build_sampler(config.get("sampler", "random"), train_ds)
-    # K11: seed the loader's shuffle/worker RNG from the run's own (parent-resolved) seed — the
+    # Seed the loader's shuffle/worker RNG from the run's own (parent-resolved) seed, the
     # same value set_seed uses, so a resumed run's data order is reproducible too.
     loader_kwargs = seeded_loader_kwargs(config.get("seed"))
     batch_size = train_cfg.get("batch_size", 2)
@@ -208,7 +208,7 @@ def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resu
             task, run_id,
         )
 
-    # The dataset identity this run trains on — recomputed here (recompute-on-read is this fact's
+    # The dataset identity this run trains on, recomputed here (recompute-on-read is this fact's
     # own stated authority) rather than threaded across the process boundary; same deterministic
     # result the parent's own copy (used for the lineage record) already produced.
     ds_id, ds_fp = _dataset_identity(data_cfg)
