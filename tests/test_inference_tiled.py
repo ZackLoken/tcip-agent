@@ -63,3 +63,32 @@ def test_run_inference_tile_flag(tmp_path):
     r2 = run_inference(ckpt, image_paths=[img], tile=False, conf_threshold=0.0)
     assert r2["tiled"] is False
     assert len(r2["results"]) == 1  # non-tiled path still works
+
+
+def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path):
+    """K25/K13.5-2c: when the checkpoint's own config carries a recorded id_map (stamped at train
+    time by subprocess_worker.py), run_inference's decode/record map uses THAT — never re-derived
+    from a live registry, and reachable with no images_dir/classes.json at all (proving it is not
+    falling through to the registry-derivation branch)."""
+    import torch as _torch
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                    "builder_kwargs": {"num_classes": 3, "min_size": TILE, "max_size": TILE * 2},
+                    "task": "detection"}
+    from tcip_mcp.pipelines.model_build import build_model
+    model = build_model({"model_source": model_source})
+    recorded_id_map = {"dormant": 0, "elongated": 1}
+    ckpt_path = tmp_path / "model_best.pt"
+    _torch.save({
+        "model_source": model_source,
+        "model_state_dict": model.state_dict(),
+        "config": {"model_source": model_source,
+                   "data": {"subject": "catkin", "attribute": "elongation",
+                            "id_map": recorded_id_map}},
+    }, str(ckpt_path))
+    img = _image(tmp_path)
+
+    r = run_inference(str(ckpt_path), image_paths=[img], conf_threshold=0.0)
+    assert r["id_map"] == recorded_id_map  # the recorded map, not a fresh registry re-derivation
