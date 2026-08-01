@@ -2,7 +2,7 @@
 
 ``prioritize_review_queue`` builds a method→scorer mapping and enforces a composed-detector
 precondition; factoring both here keeps a future second logit-reading entry point from drifting.
-(Its ``confidence_triage`` strategy deliberately does not use these — it partitions by prediction
+(Its ``confidence_triage`` strategy deliberately does not use these: it partitions by prediction
 confidence via ``predict_batch``, which is kind-agnostic and reads no logits.)
 """
 
@@ -15,7 +15,7 @@ def build_scorer(method: str, task: str):
     Resolves through the scorer registry (``scorer.resolve_scorer``): the built-in
     'uncertainty' | 'diversity' | 'combined', any acquisition function registered with
     ``register_scorer``, or a dotted ``module:factory`` you wrote. An unresolvable name raises
-    ``ValueError`` — including a dotted name that fails to import — rather than being silently
+    ``ValueError`` (including a dotted name that fails to import) rather than being silently
     scored as combined, because a queue ordered by an acquisition function nobody chose is worse
     than a refusal. ``task`` is threaded to the logit-reading scorers.
     """
