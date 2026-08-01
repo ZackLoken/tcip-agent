@@ -487,6 +487,7 @@ class ReviewEngine:
         norm_ctx: Optional[ReviewContext] = None,
         producer_identity: Optional[dict] = None,
         conf_threshold: Optional[float] = None,
+        class_id: Optional[int] = None,
     ) -> None:
         """Log an accept / reject / edit action for a detection.
 
@@ -507,10 +508,28 @@ class ReviewEngine:
         effect when this verdict was recorded — persisted so the review-confirmed reference can
         reconstruct the effective floor the reviewed predictions were shown at.
 
+        ``class_id`` (K25): the 0-indexed class identity ``det.class_name`` resolves to under the
+        producing bucket's own recorded name->id map — the SAME shape as ``producer_identity``, a
+        plain fact the CALLER resolves (``tcip-web``, via the bucket's ``operating_point.json``
+        ``id_map``) and this package stores verbatim, never re-derives. ``None`` when the caller
+        could not resolve one (no recorded map, or ``class_name`` isn't one of its keys) — an honest
+        "unresolvable" fact, not a guessed default; a consumer building a class-aware reference from
+        this verdict (``review_calibration.review_to_records``) must refuse rather than assume 0.
+
         On the FIRST verdict recorded for this image, stamps ``gt_preexisting = bool(ctx.gt)`` onto
         the image-level record (Fix H) — the pristine, pre-mutation GT the caller already holds at
         that point, a recorded fact (never inferred later) for whether this image had ground truth
         BEFORE the review session touched it.
+
+        Every entry also stamps ``missed_object_attested`` (Fix H) — ``True`` only when BOTH
+        ``det.gt_idx`` and ``det.pred_idx`` are ``None`` at the moment of THIS call: the exact
+        call-site shape only the "mark missed object" tool produces (a verdict with no existing GT
+        or prediction to key off of — see ``ReviewTab.tsx``'s ``recordMissedObject``). Recorded here,
+        from the caller's own intent, rather than reconstructed later from the entry's persisted
+        ``gt_bbox_norm``/``pred_bbox_norm`` shape — a rejected or accepted FN (an EXISTING,
+        already-indexed GT box being corrected or confirmed) ends up with the identical
+        ``pred_bbox_norm=None, gt_bbox_norm=<box>`` shape once written, so geometry alone cannot tell
+        "a genuinely new missed object was attested" apart from "a pre-existing FN was adjudicated".
         """
         per_image = self._review_state.setdefault("image", {})
         is_first_verdict = ctx.img_name not in per_image
@@ -534,6 +553,8 @@ class ReviewEngine:
             "conf": round(det.conf, 4) if det.conf is not None else None,
             "producer_identity": producer_identity,
             "conf_threshold": conf_threshold,
+            "missed_object_attested": det.gt_idx is None and det.pred_idx is None,
+            "class_id": class_id,
         }
 
         existing = self.find_reviewed_entry(det, ctx)
