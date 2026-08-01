@@ -1,6 +1,6 @@
 ---
 name: pipeline-design
-description: "The one build path, the bespoke seams, and what the platform can ingest today. You build every model one way — an agent-written nn.Module + train(ctx) loop, via model_source. No pipeline shape is supplied; the decomposition is yours to derive from the data. Load when deciding how to measure a new trait, designing an ML pipeline, or building a model architecture for a trait."
+description: "The one build path, the bespoke seams, and what the platform can ingest today. You build every model one way: an agent-written nn.Module + train(ctx) loop, via model_source. No pipeline shape is supplied; the decomposition is yours to derive from the data. Load when deciding how to measure a new trait, designing an ML pipeline, or building a model architecture for a trait."
 ---
 
 # Pipeline Design
@@ -9,17 +9,17 @@ description: "The one build path, the bespoke seams, and what the platform can i
 
 This skill deliberately gives you no pattern to match a trait against. How many stages a trait
 needs, what each one does, and whether it is one model or several is your decomposition to derive
-from the data in hand — and it is the decision this platform exists to have you make.
+from the data in hand, and it is the decision this platform exists to have you make.
 
 Derive it by measuring the dataset, not by classifying the trait:
 
-- `scan_dataset` — how many images, at what resolution, and which capture dates exist.
-- `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)` — the object scale and elongation
+- `scan_dataset`: how many images, at what resolution, and which capture dates exist.
+- `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)`: the object scale and elongation
   that actually occur here, rather than an assumed shape.
-- Object scale against your tile size — whether objects survive tiling, and whether a seam cuts
+- Object scale against your tile size: whether objects survive tiling, and whether a seam cuts
   them. `pipelines.derivations.derive_cross_tile_nms` returns `None` when the GT gives no basis
   for a threshold; that `None` is the honest answer, not a failure.
-- Capture-date bucketing from `ingest_images` — whether a time series exists at all, and at what
+- Capture-date bucketing from `ingest_images`: whether a time series exists at all, and at what
   cadence.
 
 Those readings are facts about *this* dataset. A trait category is not.
@@ -27,24 +27,24 @@ Those readings are facts about *this* dataset. A trait category is not.
 ## What the platform can ingest today
 
 Interface constraints you cannot read off the toolkit. If a trait needs something in the second
-list, say so plainly rather than approximating it — the platform not being able to measure a trait
+list, say so plainly rather than approximating it: the platform not being able to measure a trait
 yet is an honest answer, and a manufactured number is not.
 
 Buildable now:
 
-- 2D imagery from any capture modality — aerial, ground, rover-mounted, lab/benchtop.
+- 2D imagery from any capture modality: aerial, ground, rover-mounted, lab/benchtop.
 - RGB and N-channel rasters (GeoTIFF, NPZ, grayscale). `num_channels` threads to the backbone's
   `in_chans`, and inference is channel-aware.
 - The task strings `build_dataset` routes, or a bespoke `dataset_source` you write for a task it
   does not route. The seam is open; the loader set is not a taxonomy.
 
-Not buildable now — no loader, no task type, no scaffolding carried:
+Not buildable now (no loader, no task type, no scaffolding carried):
 
 - **3D point clouds** (LiDAR / SfM). No point-cloud dataset or loader, and no task type. See
   CLAUDE.md's Scope section and README's Roadmap.
 - **Non-imagery spectral readings** (a bare NIR / hyperspectral sample, not a raster). The dataset
   layer reads 2D imagery; there is no loader for a spectrum.
-- **A *learned* contextual-ranking task** — a model that scores a plant relative to its plot or
+- **A *learned* contextual-ranking task**: a model that scores a plant relative to its plot or
   block neighbours. No task type or loader exists for it. Note this is narrower than it sounds:
   ranking plants by a measurement you already produced is ordinary postprocessing over the
   per-plant table, and is available now.
@@ -52,7 +52,7 @@ Not buildable now — no loader, no task type, no scaffolding carried:
 ## Conditions in this domain's imagery
 
 Properties of the subjects and the capture, observed on real breeding-block imagery. What any of
-them costs you depends on what you are measuring and how — that part is yours to work out.
+them costs you depends on what you are measuring and how; that part is yours to work out.
 
 - Plants in a row overlap and merge at typical standoff; their boundaries are frequently not
   separable in the image at all.
@@ -65,12 +65,12 @@ them costs you depends on what you are measuring and how — that part is yours 
 - Capture cadence is irregular and dates go missing within a season.
 - Wind moves the subject between captures of the same plant.
 
-## You own the model AND the training loop
+## You own the model and the training loop
 
 The platform is a **toolkit you build with, not a mold you fill**. You are the CV scientist:
-for every trait you write a bespoke `nn.Module` — from scratch or by importing the plain
+for every trait you write a bespoke `nn.Module`, from scratch or by importing the plain
 building blocks (FPN/PAN necks, the classification/ordinal/regression/semantic-seg heads, the
-losses, backbone wrappers, and `build_detector` + the `_build_*` detector functions) — and,
+losses, backbone wrappers, and `build_detector` + the `_build_*` detector functions), and,
 when the technique is novel, a custom training loop. There is no model spec, no composer, and
 no component registry: nothing forces a model to a fixed shape or the default trainer.
 
@@ -86,7 +86,7 @@ from tcip_mcp.pipelines.components.detectors import build_detector, BackboneNeck
 
 Compose them inside your own `nn.Module`, or ignore them and write the network from scratch.
 No architecture is imposed. The `toolkit-inventory` skill is the name-and-location map for the
-whole set — the `build_detector` / `build_loss` / task string names, the heads/necks/backbones,
+whole set: the `build_detector` / `build_loss` / task string names, the heads/necks/backbones,
 the derivations, the `ctx` craft library, and the proposal-engine and scorer registries.
 
 **Tailor the architecture to the data in hand** (CLAUDE.md: derive, don't pin):
@@ -95,53 +95,53 @@ the derivations, the `ctx` craft library, and the proposal-engine and scorer reg
   through `pipelines.derivations.gt_aspect_ratios` and set anchor *sizes* from the GT object-size
   distribution, so anchors cover the objects that actually occur (e.g. elongated organs a default
   ratio can't match).
-- **Strides / feature levels to the object scale** — add a finer pyramid level for tiny objects,
+- **Strides / feature levels to the object scale**: add a finer pyramid level for tiny objects,
   drop levels you don't need.
-- **Normalization to the batch size** — with the tiny batches large detectors force, BatchNorm
+- **Normalization to the batch size**: with the tiny batches large detectors force, BatchNorm
   statistics are unreliable; prefer `GroupNorm` (or another batch-independent norm).
-- **Activations / layers where the data warrants** it — this is engineering judgment, not a menu.
+- **Activations / layers where the data warrants** it: this is engineering judgment, not a menu.
 
 **Two seams make bespoke work first-class, and the platform guarantees integrity around it:**
 
-- `pipelines.model_build.build_model(config)` builds from a `model_source` — an *importable*
+- `pipelines.model_build.build_model(config)` builds from a `model_source`: an *importable*
   builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs": {...},
   "source_files": [...], "task": "detection", "in_chans": 3}`). It is imported, never `exec`'d,
   so the run is reproducible from source. `pipelines.model_contract`
-  states the *only* model-side contract — the measurement boundary: your model must train (finite
+  states the *only* model-side contract, the measurement boundary: your model must train (finite
   gradient loss) and emit inference output the library scorers consume. `launch_training` runs this
-  contract for you — `preflight_config(smoke=True)` builds the model and smokes it at the *resolved*
+  contract for you: `preflight_config(smoke=True)` builds the model and smokes it at the *resolved*
   in_chans/num_classes/img_size before the training thread spawns, so a broken builder fails the
   launch, not a wasted run. `ctx.check_contract` / `ctx.overfit_check` are the same proofs on demand.
 - `training_source` points the envelope at your custom `train(ctx)`. The `TrainContext` (`ctx`,
-  `pipelines.training.envelope`) hands you the craft library — prebuilt leakage-free loaders,
+  `pipelines.training.envelope`) hands you the craft library: prebuilt leakage-free loaders,
   `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed`, the
   progressive-unfreeze primitive `ctx.apply_stage_freeze`, `ctx.tiled_dataset`, `ctx.calibrate`,
-  and the correctness checks `ctx.check_contract` / `ctx.overfit_check` — plus the envelope-owned
+  and the correctness checks `ctx.check_contract` / `ctx.overfit_check`, plus the envelope-owned
   sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`, `ctx.should_cancel`. Route
   your loop's metrics and checkpoints through those sinks and the run stays audited, immutably
   versioned, and provenance-snapshotted no matter what your loop does. `ctx.default_train()` is
-  **one convenience**, not a requirement — call it, extend it, or replace it entirely.
+  **one convenience**, not a requirement: call it, extend it, or replace it entirely.
 
-  **Registration needs one more fact your loop states explicitly (K11).** A checkpoint saved via
+  **Registration needs one more fact your loop states explicitly.** A checkpoint saved via
   `ctx.save_checkpoint(state, "model_best")` or `"model_final"` is found automatically after your
   loop returns; any other tag (or the default, untagged `ctx.save_checkpoint(state)`) is not
   registered as the run's deliverable unless you call `ctx.set_final_weights(path)` yourself. A
   "completed" run with no discoverable weights and no `set_final_weights` call is marked `failed`
-  rather than registering a nonexistent path — audit/provenance are unconditional, registration
+  rather than registering a nonexistent path; audit/provenance are unconditional, registration
   is not. Under `run_hpo`, a bespoke loop whose own metrics don't share the stock trainer's key
   names (`selection`/`val_objective`/`val_loss`, the only ones the automatic per-epoch pruning
   signal recognizes) can call `ctx.report_objective(value)` directly to report trial progress for
-  pruning — a no-op outside HPO, safe to call unconditionally.
+  pruning, a no-op outside HPO, safe to call unconditionally.
 
 When the plain blocks and your own primitives both plateau on a trait, the next move is to research the
-literature for a technique that fits — see the `cv-research` skill for the research→implement→validate
+literature for a technique that fits; see the `cv-research` skill for the research→implement→validate
 loop (and the rule that a new method must beat the baseline on the *measured phenotype* before you
 trust it).
 
-**Dimensional traits — mask geometry is a supported measurement.** `pipelines.measurement.mask_geometry`
+**Dimensional traits: mask geometry is a supported measurement.** `pipelines.measurement.mask_geometry`
 (also `ctx.mask_geometry`) computes area, perimeter, centroid and the extents along the mask's own PCA
 principal/secondary axes on a *validated* mask, in pixels and in the caller's stated unit when given a
-scale — geometry on a validated mask is a valid measurement, subject to the same
+scale. Geometry on a validated mask is a valid measurement, subject to the same
 validate-before-you-trust rule as any other. An axis extent is a straight chord of the mask's
 footprint, not an anatomical span: it answers the trait's dimension only when the structure is
 straight and its visual long axis is the statistically dominant one. When the definition calls for a
@@ -151,20 +151,20 @@ compose that computation on the same validated mask instead of relabeling an ext
 ## Multi-phase pipelines
 
 When a trait's decomposition needs more than one training phase, write a logged script in
-`scripts/` that chains the canonical primitives — one build path, every step audited.
+`scripts/` that chains the canonical primitives: one build path, every step audited.
 Each training phase calls `launch_training` (full audited envelope, leakage-free split,
 tiling persistence) against a `model_source` builder; run each stage's model with
 `run_inference`; then aggregate with the importable postprocessing libs
 (`aggregate_per_plant` / `export_aggregated_csv`, or `compute_phenology` for milestone dates):
 
 ```python
-# scripts/<trait>_pipeline.py — chain the primitives; each launch_training goes
+# scripts/<trait>_pipeline.py: chain the primitives; each launch_training goes
 # through the audited envelope, so provenance and immutability hold across the whole run.
 stage_a = launch_training(config={"model_source": {...}, "data": {...}})
 stage_b = launch_training(config={"model_source": {...}, "data": {...}})
 run_inference(model_path=stage_b_best, images_dir=images_dir, output_dir="stage_b_preds")
 
-# aggregate_per_plant never guesses plant identity from a filename — supply a real plant_id_fn.
+# aggregate_per_plant never guesses plant identity from a filename; supply a real plant_id_fn.
 # build_plant_mapping (a GNSS + capture-sequence resolver) is the real mechanism; load its
 # persisted mapping and look each image up by stem.
 from pathlib import Path
@@ -191,7 +191,7 @@ summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
 export_aggregated_csv(summaries, "phenotype_csv", trait_name="<trait>", pred_dirs=["stage_b_preds"])
 ```
 
-How many stages there are, and what each one does, is your decomposition to derive — the chaining
+How many stages there are, and what each one does, is your decomposition to derive; the chaining
 mechanics are identical for one stage or four, and there is no fixed phase vocabulary. See the
 `training` and `delivery` skills for the primitive signatures.
 
@@ -200,7 +200,7 @@ mechanics are identical for one stage or four, and there is no fixed phase vocab
 - Start with the simplest thing that could measure the trait, and add complexity only when the
   data or the metrics justify it (CLAUDE.md's progressive-disclosure rail).
 - **Write a retrospective** (`project_retrospective`) when you finish. Record what you measured
-  about *this* dataset and what it implied — object scale, capture cadence, class imbalance, where
+  about *this* dataset and what it implied: object scale, capture cadence, class imbalance, where
   the operating point resolved and why. Not a reusable pipeline shape: the next dataset re-derives
   its own decomposition, and a shape recorded here would become a recipe for a problem it was never
   measured against.
