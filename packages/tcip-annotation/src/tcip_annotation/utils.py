@@ -1,4 +1,4 @@
-"""Shared utilities — image orientation, geometry helpers."""
+"""Shared utilities: image orientation, geometry helpers."""
 
 from __future__ import annotations
 
