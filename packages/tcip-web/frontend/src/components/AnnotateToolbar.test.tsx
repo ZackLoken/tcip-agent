@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
+import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
 
 const initialStoreState = useStore.getState();
@@ -22,9 +24,40 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderToolbar() {
-  render(<AnnotateToolbar onSave={() => {}} saveDisabled={false} dirty={false} />);
+function renderToolbar(
+  bandsInfo?: ImageBandsResponse | null,
+  bandSelection?: BandSelection | null,
+) {
+  render(
+    <AnnotateToolbar
+      onSave={() => {}}
+      saveDisabled={false}
+      dirty={false}
+      bandsInfo={bandsInfo}
+      bandSelection={bandSelection}
+      onBandSelectionChange={() => {}}
+    />,
+  );
 }
+
+const FOUR_BANDS: ImageBandsResponse = {
+  band_count: 4,
+  bands: [
+    { name: "Blue", wavelength_nm: 475, dtype: "uint16", min: 0, max: 65535 },
+    { name: "Green", wavelength_nm: 560, dtype: "uint16", min: 0, max: 65535 },
+    { name: "Red", wavelength_nm: 650, dtype: "uint16", min: 0, max: 65535 },
+    { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
+  ],
+};
+
+const THREE_BANDS: ImageBandsResponse = {
+  band_count: 3,
+  bands: [
+    { name: "Red", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
+    { name: "Green", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
+    { name: "Blue", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
+  ],
+};
 
 describe("AnnotateToolbar draw mode", () => {
   it("offers all three geometry kinds, with the active one pressed", () => {
@@ -83,5 +116,37 @@ describe("AnnotateToolbar status filter", () => {
     const select = screen.getByTitle("Status filter");
     const options = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
     expect(options).toEqual(["All", "Unannotated", "Partial", "Complete", "Negative"]);
+  });
+});
+
+describe("AnnotateToolbar band picker (progressive disclosure)", () => {
+  function openEditor() {
+    fireEvent.click(screen.getByRole("button", { name: /Editor/ }));
+  }
+
+  it("is absent with no bandsInfo at all (a project with no channel-count fact yet)", () => {
+    renderToolbar(null, null);
+    openEditor();
+    expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
+  });
+
+  it("is hidden for a standard 3-band RGB dataset", () => {
+    renderToolbar(THREE_BANDS, defaultBandSelection(THREE_BANDS.bands));
+    openEditor();
+    expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Band")).not.toBeInTheDocument();
+  });
+
+  it("is shown for a >3-band (multispectral) dataset", () => {
+    renderToolbar(FOUR_BANDS, defaultBandSelection(FOUR_BANDS.bands));
+    openEditor();
+    expect(screen.getByLabelText("R band")).toBeInTheDocument();
+    expect(screen.getByLabelText("G band")).toBeInTheDocument();
+    expect(screen.getByLabelText("B band")).toBeInTheDocument();
+  });
+
+  it("stays hidden while the Editor shelf itself is collapsed, even for a multispectral dataset", () => {
+    renderToolbar(FOUR_BANDS, defaultBandSelection(FOUR_BANDS.bands));
+    expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
   });
 });
