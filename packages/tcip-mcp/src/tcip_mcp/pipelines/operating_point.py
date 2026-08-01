@@ -23,7 +23,10 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
     DEFAULT_MAX_DETS,
     DEFAULT_NMS_IOU,
-    DEFAULT_TILE_SIZE,
+    # K10: no longer read directly in this module (resolve_tile_size_param owns the fallback), but
+    # kept as an explicit re-export — test_golden_consolidated_operating_point_defaults pins
+    # OP.DEFAULT_TILE_SIZE as proof this module carries no second, private copy of the constant.
+    DEFAULT_TILE_SIZE as DEFAULT_TILE_SIZE,
     DEFAULT_TILED,
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
@@ -33,10 +36,13 @@ from tcip_mcp.pipelines.resolution import (
     accepted_references,
     default,
     derived,
+    resolve_tile_size_param,
 )
 from tcip_mcp.pipelines.training.evaluation import (
     classes_with_evidence,
     gt_class_avg_size,
+    gt_class_typical_count,
+    mean_of_present_counts,
     pick_count_unbiased,
     pick_f1_max,
     sweep_operating_point,
@@ -84,7 +90,41 @@ _EQUIVALENCE_Z = 1.645
 _PROVISIONAL_KAPPA_FLOOR = 0.41
 
 
-def _bias_equivalence_ok(mean: float, std: float, n: int, tolerance: float) -> bool:
+def _effective_count_bias_tolerance(tolerance_frac: float, typical_count: float, n: int) -> float:
+    """The absolute per-image count-bias tolerance one scope (pooled, or one class) is actually held
+    to (K4 residual, 2026-07-31): the breeder-authored relative ``tolerance_frac`` scaled by that
+    scope's own DERIVED typical per-image count (:func:`training.evaluation.gt_class_typical_count`
+    / :func:`training.evaluation.mean_of_present_counts`), floored at ``1 / n`` — one whole miscount
+    spread across the ``n`` samples this scope's own evidence rests on.
+
+    The floor is itself DERIVED from ``n`` (the same count :func:`_bias_equivalence_ok`'s own
+    standard error already uses), never an authored or platform-invented constant, and via
+    ``max()`` can only ever raise the result above what ``tolerance_frac * typical_count`` alone
+    would give — never lower it. As a function of ``n`` alone it shrinks monotonically as evidence
+    grows and is bounded: exactly ``1.0`` at ``n == 1`` (never higher — ``n`` is an integer, so
+    ``1/n`` cannot exceed 1.0), and ``<= 0.5`` at every ``n >= 2``, at or below D12's old flat 1.0
+    default.
+
+    ``n < 2`` (the only range where the floor can reach or exceed D12's old default) is exactly the
+    range every caller's own reference-sufficiency gate independently refuses on, so a floor this
+    large is never what admits a reference: the POOLED scope's ``hb["n_images"] < 2`` /
+    ``insufficient_holdout_images`` conjunct, and (stage-6 review Finding F1, fixed the same round
+    this docstring was written) the PER-CLASS scope's own ``s["n_present"] < 2`` /
+    ``insufficient_holdout_images_per_class`` conjunct — added specifically because, before it
+    existed, a class present on exactly one holdout image could reach a passing per-class tolerance
+    end to end (a real, ordinary, non-adversarial reference: a rare class that happens to show up
+    once, in a denser-than-typical frame), which the old flat-1.0 gate would have refused on the
+    identical numbers. Both conjuncts land in the SAME ``failures`` list this function's return value
+    feeds, independent of what this function itself computes.
+
+    ``n == 0`` returns 0.0 (an unachievable tolerance): :func:`_bias_equivalence_ok`'s own ``n == 0``
+    branch already refuses before this matters, so this is a defined-but-moot edge, not a silent pass.
+    """
+    return max(tolerance_frac * typical_count, 1.0 / n) if n > 0 else 0.0
+
+
+def _bias_equivalence_ok(mean: float, std: float, n: int, *, tolerance_frac: float,
+                         typical_count: float) -> bool:
     """Mean-plus-SE equivalence test: is a bias measured across ``n`` per-image samples small
     enough, relative to its own sampling uncertainty, to conclude equivalence with zero? Not a bare
     mean check — this degrades correctly at small ``n`` (SE grows, so less evidence is HARDER to
@@ -92,10 +132,18 @@ def _bias_equivalence_ok(mean: float, std: float, n: int, tolerance: float) -> b
     classifier path (:func:`resolve_classifier_operating_point`) so both judge count bias in the
     same statistical shape and unit — a per-image mean — never two independently-derived criteria
     that happen to share a name and a tolerance field.
+
+    The tolerance itself is computed here, in the ONE place, via
+    :func:`_effective_count_bias_tolerance` (K4 residual) — every caller passes the breeder-authored
+    fraction and the scope's own derived typical count as keyword-only arguments, never a raw
+    already-converted tolerance float, so a future caller cannot silently pass
+    ``trait.count_bias_tolerance_frac`` straight through as if it were already an absolute count (the
+    old, wrong shape this signature makes impossible to spell).
     """
     if n == 0:
         return False
     se = std / math.sqrt(n)
+    tolerance = _effective_count_bias_tolerance(tolerance_frac, typical_count, n)
     return abs(mean) + _EQUIVALENCE_Z * se <= tolerance
 
 
@@ -210,13 +258,23 @@ def _floor_mismatch(records: list[dict] | None, staged_conf_floor: float | None)
     return observed_min is not None and observed_min > staged_conf_floor + 0.05
 
 
-def _max_dets_from_density(records: list[dict], floor: int = 100) -> int:
-    """A generous cap = ~1.5x the p99 GT objects-per-image, so dense scenes aren't truncated."""
+def derive_max_dets_from_counts(counts: list[int], floor: int = 100) -> int:
+    """A generous cap = ~1.5x the p99 object count, so dense scenes aren't truncated.
+
+    Shared by ``_max_dets_from_density`` (per-record GT counts, over already-collected records) and
+    ``scripts/calibrate_operating_point.py`` (raw per-stem label-line counts, known before any model
+    pass) so the record-COLLECTION cap and the eventually-RESOLVED ``max_dets`` agree on one formula
+    rather than two independently-typed derivations that could drift apart.
+    """
     import numpy as np
-    counts = [len(rec.get("gt", [])) for rec in records]
     if not counts:
         return DEFAULT_MAX_DETS
     return max(floor, int(math.ceil(1.5 * float(np.quantile(counts, 0.99)))))
+
+
+def _max_dets_from_density(records: list[dict], floor: int = 100) -> int:
+    """A generous cap = ~1.5x the p99 GT objects-per-image, so dense scenes aren't truncated."""
+    return derive_max_dets_from_counts([len(rec.get("gt", [])) for rec in records], floor=floor)
 
 
 def _record_content_hash(rec: dict) -> str | None:
@@ -551,8 +609,23 @@ def resolve_operating_point(
             # Fix C items 2-4: the mean+SE equivalence/CI criterion, replacing a bare mean check —
             # degrades correctly at small n (SE grows, so less evidence is HARDER to pass, not
             # easier) and needs no second, unrelated tolerance constant.
+            #
+            # K4 residual (2026-07-31): the tolerance `_bias_equivalence_ok` compares against is now
+            # RELATIVE — the breeder-authored fraction scaled by this scope's own typical per-image
+            # count, derived HERE from the holdout GT alone (never calibration): `gt_class_avg_size`'s
+            # `loc_frac`/tolerance split just above is the precedent for this shape (a shared,
+            # calibration-derived POLICY multiplied by a SCALE measured on the side it applies to,
+            # never a scale borrowed from the other side) — the pooled/per-class typical counts here
+            # are that same scale, measured on the holdout because they gate the HOLDOUT's own bias.
+            # Deriving from calibration too would let a caller buy a looser holdout tolerance by
+            # padding calibration with denser images of a class, with no compensating cost in the
+            # holdout's own measured bias — a new, unconstrained lever the locked-split discipline
+            # (`resolve_locked_cal_holdout_split`) does not otherwise close, since it balances total
+            # annotation count per group, not per-class density between sides.
+            pooled_typical = gt_class_typical_count(holdout_records)
             count_bias_ok = _bias_equivalence_ok(
-                hb["count_bias_mean"], hb["count_bias_std"], hb["n_images"], trait.count_bias_tolerance)
+                hb["count_bias_mean"], hb["count_bias_std"], hb["n_images"],
+                tolerance_frac=trait.count_bias_tolerance_frac, typical_count=pooled_typical)
             # K4 #4: the pooled test above is blind to a per-class error. Its matcher ignores
             # category, so a detector that calls every class-A object class B scores tp-only with
             # zero bias, and one that over-detects A exactly as much as it under-detects B nets to
@@ -563,10 +636,35 @@ def resolve_operating_point(
             # zero bias there, exactly as the pooled term does). Which class is the trait's positive
             # one is deliberately not consulted: that needs a name->id registry read this does not
             # have, and requiring every class to be unbiased is the stronger claim anyway.
+            holdout_typical_by_class = {
+                cid: gt_class_typical_count(holdout_records, class_id=int(cid))
+                for cid in hb["per_class"]
+            }
             per_class_bias_failures = sorted(
                 cid for cid, s in hb["per_class"].items()
-                if not _bias_equivalence_ok(s["count_bias_mean"], s["count_bias_std"],
-                                            s["n_present"], trait.count_bias_tolerance))
+                if not _bias_equivalence_ok(s["count_bias_mean"], s["count_bias_std"], s["n_present"],
+                                            tolerance_frac=trait.count_bias_tolerance_frac,
+                                            typical_count=holdout_typical_by_class[cid]))
+            # K4 residual stage-6 review, Finding F1: the pooled scope's own reference-sufficiency
+            # floor (hb["n_images"] < 2` below) has no per-class analogue, and the per-class relative
+            # tolerance's floor (1/n_present) means a class present on exactly ONE holdout image gets
+            # a tolerance derived from that single image's own density — reachable end to end without
+            # any adversarial construction (an ordinary rare class that happens to show up once, in an
+            # unusually dense frame), and demonstrably admits a reference the old flat-1.0 gate would
+            # have refused on the identical numbers. Same positive-evidence discipline the pooled
+            # `insufficient_holdout_gt`/`insufficient_holdout_images` conjuncts already apply: one
+            # image is not enough evidence to certify ANY class's count bias, regardless of what
+            # tolerance it would otherwise clear.
+            # Exactly ``== 1``, not ``< 2`` (round-2 stage-6 review, Finding NEW-1): ``n_present == 0``
+            # is a DIFFERENT, already-correctly-named situation — a class with zero holdout presence
+            # at the shipped conf is exactly what ``holdout_missing_class`` below (when the class was
+            # evidenced in calibration) or the ordinary ``count_bias_exceeds_tolerance_per_class``
+            # path (``_bias_equivalence_ok``'s own ``n == 0`` branch, when it wasn't) already name
+            # correctly. Catching it here too would let this failure's breeder message ("held back in
+            # exactly one image") win the first-match lookup over the true, more specific one for a
+            # class held back in NO images at all.
+            per_class_insufficient_images = sorted(
+                cid for cid, s in hb["per_class"].items() if s["n_present"] == 1)
             # ...and a class the holdout never carries is not a class that passed: its entry is all
             # zeros, so the test above reads bias 0.0 and says nothing. Stage-6 review reached the
             # very hole this gate exists to close through exactly that shape — the confused class
@@ -599,10 +697,10 @@ def resolve_operating_point(
             # Zack sign-off): the per-class equivalence test's SE now uses presence-count
             # (hb["per_class"][cid]["n_present"]), not the whole-holdout count, so a class scarce
             # in the reference no longer borrows statistical confidence it doesn't have — the mean
-            # itself stays pooled over the whole holdout, per count_bias_tolerance's own absolute,
-            # never-scaled shape. Still genuinely open, and still trait semantics: whether
-            # count_bias_tolerance itself should be relative rather than absolute per class. Filed
-            # `needs_human_judgment` for the domain expert, not decided here.
+            # itself stays pooled over the whole holdout. K4 residual (2026-07-31, Zack's call,
+            # resolved above): count_bias_tolerance_frac is now relative — a fraction of each scope's
+            # own derived typical per-image count — rather than the flat absolute value this comment
+            # used to describe as still-open trait semantics.
 
             # Named-failure architecture: every gate condition below is named here, once, so
             # describe_review_validation (and any future caller) maps failures to breeder-legible
@@ -636,6 +734,8 @@ def resolve_operating_point(
                 failures.append("count_bias_exceeds_tolerance")
             if per_class_bias_failures:
                 failures.append("count_bias_exceeds_tolerance_per_class")
+            if per_class_insufficient_images:
+                failures.append("insufficient_holdout_images_per_class")
             if holdout_missing_classes:
                 failures.append("holdout_missing_class")
             if not localization_floor_ok:
@@ -645,8 +745,24 @@ def resolve_operating_point(
             passed = not failures
 
             sweep_data = {"calibration": cal_sweep, "f1_max_conf": pick_f1_max(cal_sweep),
-                          "holdout_bias": hb, "count_bias_tolerance": trait.count_bias_tolerance,
+                          "holdout_bias": hb,
+                          "count_bias_tolerance_frac": trait.count_bias_tolerance_frac,
+                          # Reconstructibility (K4 residual): the fraction alone no longer says what
+                          # a pass/refusal actually compared against — the derived typical count and
+                          # the resulting absolute tolerance, per scope, so a reviewer can rebuild the
+                          # gate's own arithmetic from this record alone.
+                          "pooled_typical_count": pooled_typical,
+                          "pooled_count_bias_tolerance": _effective_count_bias_tolerance(
+                              trait.count_bias_tolerance_frac, pooled_typical, hb["n_images"]),
+                          "per_class_typical_count": holdout_typical_by_class,
+                          "per_class_count_bias_tolerance": {
+                              cid: _effective_count_bias_tolerance(
+                                  trait.count_bias_tolerance_frac, holdout_typical_by_class[cid],
+                                  s["n_present"])
+                              for cid, s in hb["per_class"].items()
+                          },
                           "per_class_count_bias_failures": per_class_bias_failures,
+                          "per_class_insufficient_images": per_class_insufficient_images,
                           "holdout_missing_classes": holdout_missing_classes,
                           "calibration_bias_at_conf": cb,
                           "count_error_tolerance": trait.count_error_tolerance,
@@ -694,16 +810,13 @@ def resolve_operating_point(
             derived_from="trait default (no GT for this dataset)")
 
     # --- structural facts / distribution statistics / documented-default params ---
-    if tile_size and tile_size_source == "explicit":
-        params["tile_size"] = ResolvedParam(
-            "tile_size", int(tile_size), source="explicit", derived_from="caller override")
-    elif tile_size and tile_size_source == "derived":
-        params["tile_size"] = derived(
-            "tile_size", int(tile_size),
-            derived_from="model imgsz / persisted training geometry")
-    else:
-        params["tile_size"] = default("tile_size", tile_size or DEFAULT_TILE_SIZE)
+    # K10: tile_size is resolved BEFORE it's needed to know whether tiling is actually operative — a
+    # gating dimension only when tiled, the same shared construction resolve_tile_size_param() also
+    # gives raw_operating_point (the uncalibrated door), so the two doors can't drift into
+    # disagreeing about when a tile scale is trustworthy.
     resolved_tiled = DEFAULT_TILED if tiled is None else bool(tiled)
+    params["tile_size"] = resolve_tile_size_param(
+        tile_size, tiled=resolved_tiled, tile_size_source=tile_size_source)
     if tiled is not None and tiled_source == "explicit":
         params["tiled"] = ResolvedParam(
             "tiled", resolved_tiled, source="explicit", derived_from="caller override")
@@ -857,8 +970,15 @@ def resolve_classifier_operating_point(
     # systematically more permissive, worst at small n, which is exactly where the equivalence
     # test's SE penalty is supposed to bite hardest.
     count_bias_std = statistics.stdev(per_image_bias) if n_bias_images > 1 else 0.0
+    # K4 residual (2026-07-31): the SAME relative-tolerance shape the detection path uses — the
+    # positive class's own typical per-image count (true positives = real GT-positive calls, over
+    # images that carry at least one), reusing the SAME `by_image` grouping just built above rather
+    # than a second pass over `holdout_items`.
+    typical_positive_count = mean_of_present_counts(
+        sum(1 for it in its if it["is_true_positive"]) for its in by_image.values())
     count_bias_ok = _bias_equivalence_ok(
-        count_bias, count_bias_std, n_bias_images, trait.count_bias_tolerance)
+        count_bias, count_bias_std, n_bias_images,
+        tolerance_frac=trait.count_bias_tolerance_frac, typical_count=typical_positive_count)
 
     kappa = _classification_kappa(holdout_items)
     # kappa is None only when the holdout is degenerate (a single class throughout) — a real
@@ -907,7 +1027,17 @@ def resolve_classifier_operating_point(
         "content_overlap_frac": content["content_overlap_frac"], "content_duplicated": content["duplicated"],
         "train_disjointness": td, "disjoint": disjoint, "adjudication_covered": adjudication_ok,
         "count_bias": count_bias, "count_bias_std": count_bias_std, "count_bias_n_images": n_bias_images,
-        "count_bias_tolerance": trait.count_bias_tolerance,
+        "count_bias_tolerance_frac": trait.count_bias_tolerance_frac,
+        "typical_positive_count": typical_positive_count,
+        # Never the bare "count_bias_tolerance" baseline once used for the AUTHORED value here:
+        # stage-6 review Finding F4 caught that reusing that exact name for the DERIVED effective
+        # value would silently swap what the same key means, the reuse-a-name-for-a-different-concept
+        # footgun CLAUDE.md's global rules warn about. Deliberately NOT named to match the detector
+        # path's "pooled_count_bias_tolerance" either (round-2 review Finding NEW-4 caught an earlier
+        # comment here claiming that symmetry) — this sidecar has no "pooled" vs "per-class" split to
+        # distinguish from, so it needs its own name, not a borrowed one.
+        "count_bias_tolerance_absolute": _effective_count_bias_tolerance(
+            trait.count_bias_tolerance_frac, typical_positive_count, n_bias_images),
         "kappa": kappa, "kappa_floor": agreement_floor,
         "kappa_floor_source": ("trait" if trait.classifier_agreement_floor is not None
                                else "platform_provisional_default"),
