@@ -1,4 +1,4 @@
-"""Neck modules — adapt backbone features for downstream heads.
+"""Neck modules: adapt backbone features for downstream heads.
 
 Necks sit between the backbone and head(s), transforming multi-scale
 feature maps into the format each head expects.
@@ -56,7 +56,7 @@ class FPN(nn.Module):
 
 
 class PAN(nn.Module):
-    """Path Aggregation Network — bidirectional FPN.
+    """Path Aggregation Network: bidirectional FPN.
 
     Adds bottom-up pathway after FPN top-down for better low-level features.
     """
@@ -84,7 +84,7 @@ class PAN(nn.Module):
 
 
 class IdentityNeck(nn.Module):
-    """Pass-through — returns features unchanged.
+    """Pass-through: returns features unchanged.
 
     Use when the head directly consumes backbone features (e.g. when
     only the final feature map is needed).
@@ -100,7 +100,7 @@ class IdentityNeck(nn.Module):
 
 
 class GlobalAvgPoolNeck(nn.Module):
-    """Global average pooling — produces a flat feature vector.
+    """Global average pooling: produces a flat feature vector.
 
     Takes the last-stage feature map from backbone and pools it to
     [B, C].  Used for classification, ordinal, and regression heads.
