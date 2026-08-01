@@ -23,48 +23,26 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 
+from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
 from tcip_mcp.pipelines.image_utils import (
-    crop_pad_tile, image_dimensions, load_image, pil_to_tensor,
+    IMAGE_EXTS, crop_pad_tile, image_dimensions, list_logical_images, load_image, pil_to_tensor,
+    resolve_image_source,
 )
 
 logger = logging.getLogger(__name__)
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-
-
-def _find_image(images_dir: Path, stem: str) -> Path:
-    """The image file for ``stem``, case-agnostically — sensors save both ``.JPG`` and ``.jpg`` and a
-    project mixes them. Probes each known extension in both cases (cheap, and correct on a
-    case-sensitive filesystem), then falls back to a real directory scan so any-case extension
-    resolves. For matching a name against a store, use ``image_name_map`` (the real on-disk name);
-    this returns a path good for *opening*, whose ``.name`` may be miscased on a case-insensitive FS.
-    """
-    images_dir = Path(images_dir)
-    for ext in sorted(IMAGE_EXTS):
-        for e in (ext, ext.upper()):
-            p = images_dir / f"{stem}{e}"
-            if p.exists():
-                return p
-    if images_dir.is_dir():  # exotic/mixed casing (e.g. ``.Jpg``) — resolve from the real listing
-        for p in images_dir.iterdir():
-            if p.stem == stem and p.suffix.lower() in IMAGE_EXTS:
-                return p
-    raise FileNotFoundError(f"No image for stem: {stem}")
-
 
 def image_name_map(images_dir) -> dict[str, str]:
-    """``{stem: real on-disk filename}`` from one directory listing.
+    """``{stem: real on-disk filename}`` from one directory listing (``list_logical_images``).
 
-    ``_find_image`` probes *constructed* paths, and ``Path.exists()`` is case-insensitive on Windows
-    and macOS, so it returns the name it built rather than the one on disk — ``IMG_0002.jpg`` for an
-    on-disk ``IMG_0002.JPG``. That is harmless for opening the file and wrong for anything that
-    compares names, because ``image_status.json`` and the review store are keyed on the real
-    filename. Comparing a fabricated name against them silently matches nothing.
+    A ``BandGroupRef``'s "name" is its own ``.bandgroup`` manifest's filename — the file that
+    stands in for the grouped capture everywhere a name is matched against a store
+    (``image_status.json``, a COCO ``file_name``), never one of its sibling band files.
     """
-    d = Path(images_dir)
-    if not d.is_dir():
-        return {}
-    return {p.stem: p.name for p in sorted(d.iterdir()) if p.suffix.lower() in IMAGE_EXTS}
+    result: dict[str, str] = {}
+    for stem, src in list_logical_images(images_dir).items():
+        result[stem] = src.manifest_path.name if isinstance(src, BandGroupRef) else src.name
+    return result
 
 
 def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
@@ -590,12 +568,13 @@ class BaseImageDataset(BaseDataset):
     images_dir: Path
     transforms: Any = None
 
-    def _resolve_path(self, stem: str) -> Path:
-        """A ``stem`` may be a literal path (classification folder mode) or a stem in images_dir."""
+    def _resolve_path(self, stem: str) -> Path | BandGroupRef:
+        """A ``stem`` may be a literal path (classification folder mode), a stem in images_dir, or
+        (when a ``.bandgroup`` manifest groups sibling band files under it) a ``BandGroupRef``."""
         p = Path(stem)
         if p.is_absolute() or p.exists():
             return p
-        return _find_image(self.images_dir, stem)
+        return resolve_image_source(self.images_dir, stem)
 
     def _open_image(self, stem: str):
         """Open an image honoring ``expected_channels`` (PIL for 1/3/4 ch, else ndarray)."""
@@ -691,8 +670,7 @@ class DetectionDataset(BaseImageDataset):
         )
         _require_samples(self.stems, self.sample_counts, self.labels_dir)
         # Real on-disk filenames, for matching a stem to the COCO's ``file_name`` (which carries the
-        # true name). ``_find_image`` returns a constructed, possibly-miscased name (Path.exists is
-        # case-insensitive on Windows), so it must not be used for that comparison — see image_name_map.
+        # true name) — image_name_map reads the actual directory listing, never a constructed guess.
         self._image_names = image_name_map(self.images_dir)
 
     def _det_targets(self, stem: str, file_name: str) -> tuple[list, list]:
@@ -807,10 +785,10 @@ class TiledDetectionDataset(BaseImageDataset):
         stems_data: list[tuple[str, np.ndarray, np.ndarray, int, int]] = []
         char_sizes: list[float] = []
         for stem in base.stems:
-            img_path = _find_image(base.images_dir, stem)
+            img_source = resolve_image_source(base.images_dir, stem)
             # Measured the way __getitem__ will decode it: PIL's header read misreports a
             # multi-band raster's axes, which would clip labels in a frame the tiles never use.
-            w, h = image_dimensions(img_path, self.expected_channels)
+            w, h = image_dimensions(img_source, self.expected_channels)
             # The frame the boxes were actually drawn in, recorded in the label file itself. The
             # annotation stack measures with PIL, which reports a 40x24x5 GeoTIFF as 5x40 — so on a
             # multi-band raster the authored frame and the decoded frame genuinely disagree, and
@@ -1345,28 +1323,39 @@ def _probe_num_channels(images_dir: str | Path | None, stems: list[str] | None,
 
     Probes a single image (guard: one sample, not every image) so a multi-band raster threads its
     real channel count through ``in_chans`` instead of silently defaulting to RGB. Falls back to
-    ``default`` when no readable raster is found — an honest default, never a crash.
+    ``default`` only when no readable raster is found at all, or a genuinely unexpected decode error
+    hits it — never for a stale ``.bandgroup`` manifest (``BandGroupIncomplete`` propagates loudly
+    instead), since a confidently-wrong channel count silently sizes the model wrong for every
+    dataset that hits it.
     """
     if not images_dir:
         return default
     images_dir = Path(images_dir)
-    sample: Path | None = None
+    sample: Path | BandGroupRef | None = None
     for stem in (stems or []):
         try:
-            sample = _find_image(images_dir, stem)
+            sample = resolve_image_source(images_dir, stem)
             break
         except FileNotFoundError:
+            # Per-stem skip-and-try-the-next-one (BandGroupIncomplete included): with multiple
+            # candidate stems, one stale/missing entry doesn't preclude probing a different, intact
+            # one — only the single-sample fallback below has no "next stem" to fall back to.
             continue
     if sample is None:
-        for f in sorted(images_dir.iterdir()) if images_dir.is_dir() else []:
-            if f.suffix.lower() in IMAGE_EXTS:
-                sample = f
-                break
+        logical = list_logical_images(images_dir)
+        if logical:
+            # Through resolve_image_source (not a bare dict pick): its completeness check is what
+            # turns a stale manifest into a named BandGroupIncomplete here, rather than a bare
+            # decode error surfacing later inside probe_channels.
+            sample = resolve_image_source(images_dir, sorted(logical)[0])
     if sample is None:
         return default
+    from tcip_mcp.pipelines.derivations import probe_channels
+
     try:
-        from tcip_mcp.pipelines.derivations import probe_channels
         return int(probe_channels(sample))
+    except BandGroupIncomplete:
+        raise
     except Exception:
         return default
 
