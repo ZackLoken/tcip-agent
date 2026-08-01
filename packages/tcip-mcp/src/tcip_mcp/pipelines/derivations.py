@@ -12,10 +12,24 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 
-def probe_channels(image_path: str | Path) -> int:
-    """Band count of a raster read from disk — the artifact in hand, not a sensor-name guess."""
+def probe_channels(image_path: "str | Path | BandGroupRef") -> int:
+    """Band count of a raster read from disk — the artifact in hand, not a sensor-name guess.
+
+    A :class:`~tcip_mcp.pipelines.data.band_groups.BandGroupRef` (sibling single-band files
+    grouped as one logical image) probes each sibling on its own and sums them — usually 1 each,
+    never assumed, since a group's members are independent files with no shared header to trust.
+    """
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.image_utils import _channels_from_shape, _tiff_series_shape
+
+    if isinstance(image_path, BandGroupRef):
+        return sum(probe_channels(p) for p in image_path.bands.values())
     path = Path(image_path)
     ext = path.suffix.lower()
     if ext == ".npy":
@@ -28,16 +42,16 @@ def probe_channels(image_path: str | Path) -> int:
             arr = z[list(z.files)[0]]
         return int(arr.shape[-1]) if arr.ndim == 3 else 1
     if ext in (".tif", ".tiff"):
+        shape = _tiff_series_shape(path)  # header-only; no pixel decode when this succeeds
+        if shape is not None:
+            return _channels_from_shape(shape)
         import numpy as np
         import tifffile
         arr = np.asarray(tifffile.imread(str(path)))
-        if arr.ndim == 2:
-            return 1
-        # channel-first (C,H,W) if the leading axis is the smallest, else channel-last.
-        return int(arr.shape[0]) if arr.shape[0] < arr.shape[-1] else int(arr.shape[-1])
+        return _channels_from_shape(arr.shape)
     from PIL import Image
     with Image.open(path) as im:
-        return len(im.getbands())  # RGB->3, L->1, RGBA->4
+        return len(im.getbands())  # RGB->3, L->1, RGBA->4 — already header-only (PIL is lazy)
 
 
 def num_classes_from_distribution(class_distribution: dict[int, int]) -> int:
