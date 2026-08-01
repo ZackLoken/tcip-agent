@@ -2,8 +2,8 @@
 
 Each dataset type returns (image_tensor, target_dict) where the target
 format is task-specific but always dict-based. A factory function
-`build_dataset` dispatches to the correct class by task type, or — for a
-task the known loaders don't cover — to a bespoke ``dataset_source`` builder
+`build_dataset` dispatches to the correct class by task type, or, for a
+task the known loaders don't cover, to a bespoke ``dataset_source`` builder
 the agent supplies (mirrors ``model_source``; see `build_from_dataset_source`).
 """
 
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 def image_name_map(images_dir) -> dict[str, str]:
     """``{stem: real on-disk filename}`` from one directory listing (``list_logical_images``).
 
-    A ``BandGroupRef``'s "name" is its own ``.bandgroup`` manifest's filename — the file that
+    A ``BandGroupRef``'s "name" is its own ``.bandgroup`` manifest's filename, the file that
     stands in for the grouped capture everywhere a name is matched against a store
     (``image_status.json``, a COCO ``file_name``), never one of its sibling band files.
     """
@@ -49,7 +49,7 @@ def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
                     file_name: str = "") -> tuple[int, int] | None:
     """``(width, height)`` the labels record, or ``None`` when they record none.
 
-    The frame the boxes were drawn in, straight from the annotation a human produced — the only
+    The frame the boxes were drawn in, straight from the annotation a human produced, the only
     reference that can catch a reader disagreeing with the authoring tool.
     """
     if coco is not None:
@@ -69,7 +69,7 @@ def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
         import json
 
         data = json.loads(path.read_text(encoding="utf-8")) or {}
-    except Exception:  # noqa: BLE001 — an unreadable label file is the reader's problem, not ours
+    except Exception:  # noqa: BLE001, an unreadable label file is the reader's problem, not ours
         return None
     w, h = int(data.get("width", 0) or 0), int(data.get("height", 0) or 0)
     return (w, h) if w > 0 and h > 0 else None
@@ -78,10 +78,10 @@ def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
 def resolved_classes_path(dataset_dir) -> Path | None:
     """The real ``classes.json`` path for the dataset containing ``dataset_dir``, or ``None`` if it
     doesn't exist. The one fact ``_resolve_registry_id_map``'s attribute-without-registry refusal
-    and any caller wanting to precheck it (K18 B2 stage-6 review: ``inference_tools.run_inference``
-    precondition-checks this before attempting resolution, so a legitimately absent registry
-    degrades to an honest ``id_map=None`` instead of a caught-and-swallowed exception) both need —
-    computed once, never two independent implementations of the same "does a registry exist" fact.
+    and any caller wanting to precheck it (``inference_tools.run_inference`` precondition-checks
+    this before attempting resolution, so a legitimately absent registry degrades to an honest
+    ``id_map=None`` instead of a caught-and-swallowed exception) both need, computed once, never
+    two independent implementations of the same "does a registry exist" fact.
     """
     from tcip_mcp.dataset_layout import classes_path, dataset_root_of
 
@@ -95,8 +95,8 @@ def _resolve_registry_id_map(labels_dir, subject: str | None, attribute: str | N
 
     The single name→id derivation is :func:`class_registry.assign_class_ids`; the loader below,
     ``assemble_coco``, and the contract dims all read *this* map, never a second one. A plain
-    single-class detector (``attribute`` is ``None``) needs no registry file — the subject *is* the
-    class — so it is derived from a synthesized single-subject registry through the same
+    single-class detector (``attribute`` is ``None``) needs no registry file, the subject *is* the
+    class, so it is derived from a synthesized single-subject registry through the same
     ``assign_class_ids``, not a local ``{subject: 0}`` literal. Attribute classification needs the
     registry to order its values, and refuses when there is none.
     """
@@ -142,16 +142,16 @@ def _json_det_targets(path, subject, attribute, id_map):
 
     Filters to ``subject`` + a box-derivable geometry, then maps each kept annotation to its
     0-indexed id via ``id_map`` (the single ``assign_class_ids`` map), +1 for background. An
-    annotation the registry cannot decode raises — a real label read as nothing is a measurement bug.
+    annotation the registry cannot decode raises, a real label read as nothing is a measurement bug.
 
     ``n_unlabeled`` counts instances of ``subject`` never assessed for ``attribute`` yet (a soft,
-    expected gap, not a decode bug — excluded from ``boxes``/``labels`` rather than raising).
-    Returning the count, not just silently dropping it, is what stage-6 review N2 requires: an
-    image with any unlabeled instance has INCOMPLETE ground truth for this scope, and a caller
-    scoring/training only the labeled subset turns its real, unlabeled objects into silent false
-    positives or background noise. Callers that build per-image records fresh each call (delivery
-    evaluation, operating-point calibration) must exclude the WHOLE image when ``n_unlabeled > 0``
-    — the same precedent already applied to a missing label file — rather than partially trusting
+    expected gap, not a decode bug, excluded from ``boxes``/``labels`` rather than raising).
+    Returning the count, not just silently dropping it, matters because an image with any
+    unlabeled instance has incomplete ground truth for this scope, and a caller scoring/training
+    only the labeled subset turns its real, unlabeled objects into silent false positives or
+    background noise. Callers that build per-image records fresh each call (delivery
+    evaluation, operating-point calibration) must exclude the whole image when ``n_unlabeled > 0``
+   , the same precedent already applied to a missing label file, rather than partially trusting
     it; a caller bound to a fixed per-image dataset length (a `Dataset.__getitem__`) cannot do that
     without a deeper stems-selection change, and currently only surfaces the count.
     """
@@ -161,8 +161,8 @@ def _json_det_targets(path, subject, attribute, id_map):
     boxes, labels = [], []
     n_unlabeled = 0
     for a in json_io.read_annotations(path):
-        # allow_unlabeled=True (stage-6 review, K4/K5): an instance never assessed for `attribute`
-        # yet is a soft, expected gap, not a decode bug — must not raise and abort the whole read.
+        # allow_unlabeled=True: an instance never assessed for `attribute` yet is a soft, expected
+        # gap, not a decode bug, must not raise and abort the whole read.
         cid = json_io.target_class_id(a, subject, attribute, id_map, allow_unlabeled=True)
         if cid == json_io.UNLABELED:
             n_unlabeled += 1
@@ -179,7 +179,7 @@ def dir_label_format(labels_dir) -> str | None:
     """``"json"`` if this dir holds canonical per-image labels, else ``None``.
 
     Used to route a JSON label store onto the COCO training path. A ``.json`` that is not our
-    schema is not claimed — an unrecognized store must not be read as an all-empty one.
+    schema is not claimed, an unrecognized store must not be read as an all-empty one.
     """
     from tcip_annotation.json_io import ANNOTATIONS_KEY
 
@@ -206,7 +206,7 @@ def trainable_stems(
 
     - it has ≥1 annotation of ``subject``, or
     - it has none and a human marked that image negative for ``subject``
-      (``confirmed_negative_names`` — the Complete in ``.tcip/state/image_status.json``).
+      (``confirmed_negative_names``, the Complete in ``.tcip/state/image_status.json``).
 
     An image with no label file, or an empty label file nobody confirmed, is **unannotated**, not a
     negative. Enumerating samples from ``images_dir`` instead served both as zero-box samples, so a
@@ -216,22 +216,23 @@ def trainable_stems(
     ``skipped_unannotated`` / ``skipped_unconfirmed_empty`` / ``skipped_incomplete_attribute`` /
     ``quarantined_stale_definition`` so a run can record what it dropped.
     ``quarantined_stale_definition`` is distinct from ``skipped_unconfirmed_empty``: it means
-    a human DID confirm the image negative, but the subject's attribute schema has since changed and
-    the confirmation can no longer be trusted as-is — a different situation from nobody ever having
+    a human did confirm the image negative, but the subject's attribute schema has since changed and
+    the confirmation can no longer be trusted as-is, a different situation from nobody ever having
     looked, and one a reproduce-a-number chain must be able to tell apart (see
     ``confirmed_negative_names``'s quarantine logic).
 
-    ``skipped_incomplete_attribute`` (stage-6 review round 4) is the whole-image attribute-completeness
-    rail: with ``attribute`` set, an image carrying ANY instance never assessed for it has incomplete
-    ground truth for this scope and is dropped ENTIRELY, never trained on its labelled subset (which
+    ``skipped_incomplete_attribute`` is the whole-image attribute-completeness rail: with
+    ``attribute`` set, an image carrying any instance never assessed for it has incomplete ground
+    truth for this scope and is dropped entirely, never trained on its labelled subset (which
     would leave its real, unlabelled objects to train as background). It lives here, in the one
     partition that already decides admission, rather than as a second filter over this function's
-    output — a filter downstream cannot record *why* a stem left, and the round-4 attempt that tried
-    corrupted these counts outright. Both label paths reach the same verdict from one implementation:
+    output: a filter downstream cannot record *why* a stem left, and applying the rail there
+    instead corrupts these counts outright. Both label paths reach the same verdict from one
+    implementation:
     the COCO path reads the ``excluded_incomplete_attribute`` names ``to_coco_dataset`` already
     computed during assembly (never re-deriving them, and never mistaking that absence for
     "empty label file nobody confirmed"), and the direct-JSON path applies the rail through
-    ``_json_det_targets`` — the same reader the loader itself uses. ``attribute``/``id_map`` unset
+    ``_json_det_targets``, the same reader the loader itself uses. ``attribute``/``id_map`` unset
     (every non-attribute run) applies no such rail.
     """
     names = image_name_map(images_dir)
@@ -253,7 +254,7 @@ def trainable_stems(
         coco_names = set(by_id.values())
         coco_annotated = {by_id.get(a.get("image_id"), "") for a in coco.get("annotations", [])}
         # Which images to_coco_dataset dropped for attribute-incompleteness, read from its own
-        # record rather than re-derived — their absence from ``images`` is otherwise
+        # record rather than re-derived, their absence from ``images`` is otherwise
         # indistinguishable from an unconfirmed-empty one, and reporting that reason would be a lie.
         incomplete_names = {str(n) for n in coco.get("excluded_incomplete_attribute", [])}
     elif attribute is not None and id_map is not None:
@@ -278,7 +279,7 @@ def trainable_stems(
             continue
         if image_name in incomplete_names:
             # Checked before every other verdict: an image with incomplete attribute GT is dropped
-            # for THAT reason, not for whichever downstream category its absence happens to resemble.
+            # for that reason, not for whichever downstream category its absence happens to resemble.
             counts["skipped_incomplete_attribute"] += 1
             continue
         if coco_names is not None:
@@ -287,7 +288,7 @@ def trainable_stems(
                 # the same way an unconfirmed one is (assemble_coco's confirmed_negative_names call
                 # never sees a quarantined name as a negative), so it must be checked here too, or a
                 # human-confirmed-but-schema-stale negative reads as "nobody ever looked" instead of
-                # "looked, but the schema changed since" — the exact distinction this count exists
+                # "looked, but the schema changed since", the exact distinction this count exists
                 # to preserve, and the one the direct-JSON branch below already gets right.
                 if image_name in quarantined:
                     counts["quarantined_stale_definition"] += 1
@@ -330,7 +331,7 @@ def trainable_stems(
 def _require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> None:
     """Refuse an empty sample set, naming why each image was dropped.
 
-    Filtering to the label store can legitimately empty a dataset — an images_dir where nothing is
+    Filtering to the label store can legitimately empty a dataset, an images_dir where nothing is
     annotated yet. Building it anyway would train on nothing and report success.
     """
     if stems:
@@ -338,16 +339,16 @@ def _require_samples(stems: list[str], counts: dict[str, int], labels_dir) -> No
     quarantined = counts.get("quarantined_stale_definition", 0)
     quarantine_note = (
         f" {quarantined} more were confirmed negative but quarantined because the subject's "
-        f"attribute schema changed since — re-confirm them or revert the schema edit."
+        f"attribute schema changed since, re-confirm them or revert the schema edit."
         if quarantined else ""
     )
     # Read defensively: this is the refusal path, and a counts dict missing a key here would
-    # replace the explanation with a bare KeyError — exactly the round-4 regression this names.
+    # replace the explanation with a bare KeyError.
     incomplete = counts.get("skipped_incomplete_attribute", 0)
     incomplete_note = (
         f" {incomplete} more carry at least one instance never assessed for this run's attribute, "
         f"so their ground truth is incomplete for this scope and the whole image is held out "
-        f"rather than trained on its labelled subset — finish attributing them, or run without "
+        f"rather than trained on its labelled subset, finish attributing them, or run without "
         f"an attribute scope."
         if incomplete else ""
     )
@@ -365,7 +366,7 @@ def _label_record_state(stem: str, labels_dir, subject: str | None) -> tuple[boo
 
     ``has_objects`` is subject-scoped *and box/polygon-bearing*: the unified file holds every subject,
     so "annotated" for a catkin run means it carries a catkin annotation whose geometry is a real
-    detection/seg target — the same membership ``to_coco_dataset``/``target_class_id`` apply (a
+    detection/seg target, the same membership ``to_coco_dataset``/``target_class_id`` apply (a
     box/polygon is a target; a geometry-less image-level label and a ``Point`` are not). Counting an
     image whose only annotations are non-targets as annotated would keep it on the direct-json path
     and train it as a zero-object negative, diverging from the COCO path and fabricating a negative no
@@ -392,27 +393,27 @@ def confirmed_negative_names(
 ) -> set[str]:
     """Image names a human marked negative (empty + Complete) **for this subject**.
 
-    Reads the dataset-native ``image_status_path`` — a sibling of ``classes.json``, so confirmations
+    Reads the dataset-native ``image_status_path``, a sibling of ``classes.json``, so confirmations
     travel with the dataset rather than living in whichever project's private ``.tcip/`` happened to
-    be an ancestor — and returns only the ``status_bucket(subject, date)`` bucket. A confirmation is
+    be an ancestor, and returns only the ``status_bucket(subject, date)`` bucket. A confirmation is
     a human's statement about one subject on one image; a store keyed by image name alone re-applies
     it to subjects they never looked at, so an image full of bushes trains as "contains no bushes".
 
-    A negative is **quarantined** — excluded from the return value — only when the dataset's
-    ``image_status_digest.json`` sidecar carries an explicit stamp for THAT image (not merely its
-    bucket — a bucket holds every image ever touched under the subject/date, so a bucket-wide stamp
+    A negative is **quarantined**, excluded from the return value, only when the dataset's
+    ``image_status_digest.json`` sidecar carries an explicit stamp for that image (not merely its
+    bucket, a bucket holds every image ever touched under the subject/date, so a bucket-wide stamp
     would be silently overwritten by the next unrelated write and un-quarantine a stale confirmation
-    nobody re-reviewed) AND it no longer matches the subject's current
+    nobody re-reviewed) and it no longer matches the subject's current
     :func:`~tcip_mcp.class_registry.attribute_schema_digest`: positive, provable evidence the
-    subject's classification schema changed since that confirmation was made. Absence of a stamp —
-    no sidecar, no stamp for that image, or a dataset that predates this mechanism entirely — is
+    subject's classification schema changed since that confirmation was made. Absence of a stamp,
+    no sidecar, no stamp for that image, or a dataset that predates this mechanism entirely, is
     **not** quarantined: a rail must admit valid work, not only reject it, and treating "nobody
     stamped this yet" as "unverifiable, therefore invalid" would silently empty
     every pre-existing project's confirmed negatives. Pass ``quarantined_out`` (a set, mutated in
-    place) to also learn which names were excluded — see :func:`trainable_stems`'s
+    place) to also learn which names were excluded, see :func:`trainable_stems`'s
     ``quarantined_stale_definition`` count.
 
-    ``subject`` is threaded explicitly — the per-subject label dir it used to be recovered from is
+    ``subject`` is threaded explicitly, the per-subject label dir it used to be recovered from is
     gone. When ``subject`` is unthreaded and the dataset holds confirmed negatives, this **refuses
     loudly** rather than returning nothing: a silent empty would drop every hard negative the review
     loop harvested. With no locatable dataset root, no store, or no confirmations for this subject,
@@ -485,7 +486,7 @@ def confirmed_negative_names(
         return negatives  # nothing current to compare against -> admit
 
     # Per-image, not per-bucket: a bucket holds every image ever touched under this subject/date, so
-    # a later, unrelated write to the SAME bucket must never resurrect a DIFFERENT image's stale,
+    # a later, unrelated write to the same bucket must never resurrect a different image's stale,
     # never-re-reviewed confirmation just because the bucket as a whole got re-stamped.
     trusted: set[str] = set()
     for name in negatives:
@@ -504,8 +505,8 @@ def assemble_coco(
 ) -> dict:
     """Assemble a dataset-level COCO dict from the name-based per-image JSON, scoped to ``subject``.
 
-    Pairs each stem's ``<labels_dir>/<stem>.json`` with its image's on-disk file name — the same
-    name the dataset resolves at read time — so the COCO ``file_name`` keys line up. ``id_map`` is
+    Pairs each stem's ``<labels_dir>/<stem>.json`` with its image's on-disk file name, the same
+    name the dataset resolves at read time, so the COCO ``file_name`` keys line up. ``id_map`` is
     the run's ``assign_class_ids`` map; this is the single delegation to ``json_io.to_coco_dataset``,
     so the COCO categories, the loader targets, and the contract dims all rest on one name→id map.
     Stems whose image is missing are skipped. This is how per-image JSON reaches training: a COCO the
@@ -559,7 +560,7 @@ class BaseDataset(Dataset, ABC):
 
 
 class BaseImageDataset(BaseDataset):
-    """Base for image datasets — centralizes channel-aware loading + finalization.
+    """Base for image datasets, centralizes channel-aware loading + finalization.
 
     Subclasses set ``self.images_dir`` and ``self.transforms`` (and inherit
     ``expected_channels`` from build_dataset), then build only the task-specific target.
@@ -614,7 +615,7 @@ class DetectionDataset(BaseImageDataset):
     """Object detection. ``label_format`` selects the on-disk label format:
 
     - ``json`` (default): canonical per-image ``<labels_dir>/<stem>.json`` (json_io schema)
-    - ``coco``: a single COCO JSON at ``coco_json`` — the assembled dataset view of the per-image
+    - ``coco``: a single COCO JSON at ``coco_json``, the assembled dataset view of the per-image
       JSON, used for training (annotations matched by file name)
     """
 
@@ -656,13 +657,13 @@ class DetectionDataset(BaseImageDataset):
             _reg, id_map = _resolve_registry_id_map(self.labels_dir, subject, attribute)
             self._num_classes = len(id_map)
         self.id_map = id_map
-        # The attribute-completeness rail (an image with ANY instance never assessed for `attribute`
-        # is held out WHOLE, never trained on its labelled subset) lives inside trainable_stems, the
-        # one partition that already decides admission and records why — see its docstring. Round 4
-        # first tried it as a second filter over trainable_stems' *output*, which both corrupted
-        # those counts and never ran at all on the real build_dataset path (which assembles COCO and
-        # so takes the `label_format == "coco"` branch). Applying it at the partition covers both
-        # label paths from one implementation and reports a truthful reason for each drop.
+        # The attribute-completeness rail (an image with any instance never assessed for `attribute`
+        # is held out whole, never trained on its labelled subset) lives inside trainable_stems, the
+        # one partition that already decides admission and records why, see its docstring. A second
+        # filter over trainable_stems' *output* would both corrupt those counts and never run at all
+        # on the real build_dataset path (which assembles COCO and so takes the
+        # `label_format == "coco"` branch). Applying it at the partition covers both label paths
+        # from one implementation and reports a truthful reason for each drop.
         self.stems, self.sample_counts = trainable_stems(
             self.labels_dir, self.images_dir, stems,
             subject=subject, date=date, coco=self._coco,
@@ -670,14 +671,14 @@ class DetectionDataset(BaseImageDataset):
         )
         _require_samples(self.stems, self.sample_counts, self.labels_dir)
         # Real on-disk filenames, for matching a stem to the COCO's ``file_name`` (which carries the
-        # true name) — image_name_map reads the actual directory listing, never a constructed guess.
+        # true name), image_name_map reads the actual directory listing, never a constructed guess.
         self._image_names = image_name_map(self.images_dir)
 
     def _det_targets(self, stem: str, file_name: str) -> tuple[list, list]:
         """Pixel-xyxy boxes + 1-indexed labels for one image (coco or name-based json).
 
         ``self.stems`` already excludes any image with an instance unlabeled for ``attribute``
-        (``trainable_stems``' ``skipped_incomplete_attribute`` rail — a fixed-length dataset can't
+        (``trainable_stems``' ``skipped_incomplete_attribute`` rail, a fixed-length dataset can't
         act on this per-``__getitem__`` call, only once, up front), so ``n_unlabeled`` is always 0
         here by construction; the 3-tuple is unpacked for the shared ``_json_det_targets``
         signature, not because a nonzero count is expected at this point.
@@ -700,9 +701,9 @@ class DetectionDataset(BaseImageDataset):
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
         if self.label_format == "coco" and self._coco:
-            # self._coco may be shared across a full/train/val split trio (training_tools.py's
-            # Backend#3: assembled once, threaded into all three builds rather than re-assembled
-            # per split) — its annotations cover the WHOLE dataset, not just this dataset's own
+            # self._coco may be shared across a full/train/val split trio (assembled once in
+            # training_tools.py, threaded into all three builds rather than re-assembled per
+            # split), its annotations cover the whole dataset, not just this dataset's own
             # self.stems, so every consumer must filter to its own image set or a split's
             # class_distribution reports the identical, unsplit whole for train and val alike.
             own_names = {self._image_names.get(s, "") for s in self.stems}
@@ -738,7 +739,7 @@ class DetectionDataset(BaseImageDataset):
 
 class TiledDetectionDataset(BaseImageDataset):
     """Wrap a ``DetectionDataset`` and expand each source image into native-resolution
-    tiles with labels clipped/remapped to tile space (W3).
+    tiles with labels clipped/remapped to tile space.
 
     Tile membership is computed at ``__init__`` (header-only image sizes + the YOLO
     txt) so the dataset can return one sample per tile index. ``__getitem__`` decodes
@@ -765,7 +766,7 @@ class TiledDetectionDataset(BaseImageDataset):
 
         self.base = base
         # This wrapper does its own channel-aware reads rather than delegating to base. Inherit the
-        # band count from the dataset being wrapped so every construction path carries it —
+        # band count from the dataset being wrapped so every construction path carries it,
         # build_dataset stamps it afterwards, but ctx.tiled_dataset constructs this directly and
         # would otherwise fall back to the 3-channel class default.
         self.images_dir = base.images_dir
@@ -775,7 +776,7 @@ class TiledDetectionDataset(BaseImageDataset):
         self.transforms = transforms
         self.stride = compute_stride(tile_size, overlap)
         self._index: list[dict] = []
-        # (w, h) this index was built against, per stem — asserted again at decode time.
+        # (w, h) this index was built against, per stem, asserted again at decode time.
         self._decoded_frame: dict[str, tuple[int, int]] = {}
 
         # Pass 1: read every image's upright dims + full-image-px boxes, and accumulate GT box sizes
@@ -790,7 +791,7 @@ class TiledDetectionDataset(BaseImageDataset):
             # multi-band raster's axes, which would clip labels in a frame the tiles never use.
             w, h = image_dimensions(img_source, self.expected_channels)
             # The frame the boxes were actually drawn in, recorded in the label file itself. The
-            # annotation stack measures with PIL, which reports a 40x24x5 GeoTIFF as 5x40 — so on a
+            # annotation stack measures with PIL, which reports a 40x24x5 GeoTIFF as 5x40, so on a
             # multi-band raster the authored frame and the decoded frame genuinely disagree, and
             # every box would be cropped from somewhere it was never drawn. Comparing the two
             # decoders instead would prove nothing: they share a branch and agree by construction.
@@ -819,7 +820,7 @@ class TiledDetectionDataset(BaseImageDataset):
 
         self.class_avg_size = float(np.mean(char_sizes)) if char_sizes else 0.0
         # A caller-supplied fraction wins; otherwise derive it from this dataset's own size spread
-        # (a class with wide natural size variation needs a lower cutoff than a tightly-sized one —
+        # (a class with wide natural size variation needs a lower cutoff than a tightly-sized one,
         # a fixed fraction can't tell a genuinely small-but-complete object from a real tile-seam
         # fragment). Falls back to 0.5 only when the spread itself is underivable (too few boxes to
         # measure a spread from, or none at all).
@@ -934,10 +935,10 @@ class InstanceSegDataset(BaseImageDataset):
             _reg, id_map = _resolve_registry_id_map(self.labels_dir, subject, attribute)
             self._num_classes = len(id_map)
         self.id_map = id_map
-        # attribute/id_map threaded through (round 12, 2026-07-29): without them the direct-JSON
-        # instance_seg path had no attribute-completeness rail at all — an image with any instance
-        # never assessed for `attribute` trained on its labeled subset instead of being held out
-        # whole, exactly the gap DetectionDataset's own call already closed.
+        # attribute/id_map must be threaded through: without them the direct-JSON instance_seg path
+        # has no attribute-completeness rail at all, an image with any instance never assessed for
+        # `attribute` trains on its labeled subset instead of being held out whole, the same gap
+        # DetectionDataset's own call already closes.
         self.stems, self.sample_counts = trainable_stems(
             self.labels_dir, self.images_dir, stems,
             subject=subject, date=date, coco=self._coco,
@@ -948,10 +949,10 @@ class InstanceSegDataset(BaseImageDataset):
         self._image_names = image_name_map(self.images_dir)
 
     def _read_polys(self, stem: str, w: int, h: int) -> list[tuple[list[list[tuple[float, float]]], int]]:
-        """(pixel polygon rings, 1-indexed label) per instance — from the assembled COCO or the
+        """(pixel polygon rings, 1-indexed label) per instance, from the assembled COCO or the
         name-based per-image ``<stem>.json`` (filtered to ``subject`` + polygon geometry). Both are
         already pixel-space; the +1 background offset is the loader's, nothing on disk carries it.
-        An instance's rings is a list — an occlusion-split instance (a catkin behind a branch, a
+        An instance's rings is a list, an occlusion-split instance (a catkin behind a branch, a
         leaf crossed by a stem) is genuinely more than one ring; ``__getitem__`` rasterizes every
         ring of an instance into that instance's one mask."""
         out: list[tuple[list[list[tuple[float, float]]], int]] = []
@@ -982,7 +983,7 @@ class InstanceSegDataset(BaseImageDataset):
             if key is None or self.id_map is None or key not in self.id_map:
                 raise ValueError(
                     f"annotation of subject {self.subject!r} has class key {key!r} not in the run's "
-                    f"id map — the registry cannot decode its own labels")
+                    f"id map, the registry cannot decode its own labels")
             out.append(([list(ring) for ring in a.geometry.rings], self.id_map[key] + 1))
         return out
 
@@ -1009,7 +1010,7 @@ class InstanceSegDataset(BaseImageDataset):
             boxes.append([min(xs), min(ys), max(xs), max(ys)])
             labels.append(lab)
 
-            # Rasterize every ring into the SAME instance mask — a multi-ring instance is one
+            # Rasterize every ring into the same instance mask, a multi-ring instance is one
             # occlusion-split object, not several separate ones; ImageDraw fills union naturally
             # since a pixel already painted 1 stays 1.
             mask = np.zeros((h, w), dtype=np.uint8)
@@ -1057,7 +1058,7 @@ class SemanticSegDataset(BaseImageDataset):
         self._num_classes = num_classes
         # A sample needs a mask. Unlike detection there is no unconfirmed-empty case: an
         # all-background mask is an explicit annotation, so existence is the whole rail here.
-        # Serving an image with no mask would train it as entirely background — a fabricated
+        # Serving an image with no mask would train it as entirely background, a fabricated
         # negative by another route.
         mask_stems = {p.stem for p in self.masks_dir.iterdir()} if self.masks_dir.is_dir() else set()
         candidates = stems or sorted(image_name_map(self.images_dir))
@@ -1271,19 +1272,19 @@ DATASET_SOURCE_KEY = "dataset_source"
 
 
 def build_from_dataset_source(dataset_source: dict, **kwargs: Any) -> Dataset:
-    """Import the agent's dataset builder and call it — the bespoke-task escape (mirrors
+    """Import the agent's dataset builder and call it, the bespoke-task escape (mirrors
     ``build_from_model_source``). Registry-free, no ``exec``: the builder is imported like any
     module. It receives the run's data context (``images_dir`` / ``labels_dir`` / ``stems`` /
-    ``transforms`` / ``task`` — whatever ``build_dataset`` was given) merged with its own
+    ``transforms`` / ``task``, whatever ``build_dataset`` was given) merged with its own
     ``builder_kwargs`` (which win on conflict), and must return a torch ``Dataset``. Declare
     ``**kwargs`` on the builder to ignore context keys it doesn't use.
 
     ``dataset_source`` schema (parallels ``model_source``)::
 
-        {"builder": "my_module:build_ds",  # required — 'module:function' (or 'module.function')
-         "builder_kwargs": {...},          # optional — passed to the builder (win on conflict)
-         "source_files": [...],            # optional — provenance (snapshot_model_source copies these)
-         "task": "..."}                    # optional — measurement/eval routing
+        {"builder": "my_module:build_ds",  # required, 'module:function' (or 'module.function')
+         "builder_kwargs": {...},          # optional, passed to the builder (win on conflict)
+         "source_files": [...],            # optional, provenance (snapshot_model_source copies these)
+         "task": "..."}                    # optional, measurement/eval routing
     """
     if not isinstance(dataset_source, dict):
         raise ValueError("dataset_source must be a dict")
@@ -1319,12 +1320,12 @@ def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | Non
 
 def _probe_num_channels(images_dir: str | Path | None, stems: list[str] | None,
                         default: int = 3) -> int:
-    """Band count of ONE sample raster from ``images_dir`` (derive-don't-pin, not a pinned 3).
+    """Band count of one sample raster from ``images_dir`` (derive-don't-pin, not a pinned 3).
 
     Probes a single image (guard: one sample, not every image) so a multi-band raster threads its
     real channel count through ``in_chans`` instead of silently defaulting to RGB. Falls back to
     ``default`` only when no readable raster is found at all, or a genuinely unexpected decode error
-    hits it — never for a stale ``.bandgroup`` manifest (``BandGroupIncomplete`` propagates loudly
+    hits it, never for a stale ``.bandgroup`` manifest (``BandGroupIncomplete`` propagates loudly
     instead), since a confidently-wrong channel count silently sizes the model wrong for every
     dataset that hits it.
     """
@@ -1339,7 +1340,7 @@ def _probe_num_channels(images_dir: str | Path | None, stems: list[str] | None,
         except FileNotFoundError:
             # Per-stem skip-and-try-the-next-one (BandGroupIncomplete included): with multiple
             # candidate stems, one stale/missing entry doesn't preclude probing a different, intact
-            # one — only the single-sample fallback below has no "next stem" to fall back to.
+            # one, only the single-sample fallback below has no "next stem" to fall back to.
             continue
     if sample is None:
         logical = list_logical_images(images_dir)
@@ -1365,7 +1366,7 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
 
     An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac,
     dedup_iou, skip_empty}``) wraps the detection dataset in a
-    :class:`TiledDetectionDataset` (W3). Ignored for non-detection tasks.
+    :class:`TiledDetectionDataset`. Ignored for non-detection tasks.
 
     ``num_channels`` is derived by probing one sample raster when the caller does not pin it, so a
     multi-band input threads its real band count through ``in_chans`` instead of defaulting to RGB.
@@ -1373,7 +1374,7 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
     ``dataset_source`` is the bespoke seam (mirrors ``model_source``): when given, an agent-supplied
     importable builder produces the dataset for a task the known loaders don't cover. The known
     loaders stay the default; the ``Unknown task`` error below is still raised for a bad known-task
-    NAME (an honest typo signal) — the seam is the escape for a genuinely new task.
+    name (an honest typo signal), the seam is the escape for a genuinely new task.
     """
     tiling = kwargs.pop("tiling", None)
     num_channels = kwargs.pop("num_channels", None)
@@ -1397,7 +1398,7 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
                     or (kwargs.get("label_format") or "").lower() == "coco")
         if not has_coco and kwargs.get("labels_dir"):
             # Name-based json: resolve the single id map once, set num_classes and assemble the COCO
-            # from it — the loader, the categories, and resolve_contract_dims all read this one map.
+            # from it, the loader, the categories, and resolve_contract_dims all read this one map.
             _registry, id_map = _resolve_registry_id_map(kwargs["labels_dir"], subject, attribute)
             kwargs["id_map"] = id_map
             kwargs["num_classes"] = len(id_map)
