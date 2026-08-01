@@ -22,6 +22,7 @@ import io
 import json
 import logging
 import math
+from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
@@ -286,6 +287,40 @@ def gt_class_avg_size(per_image: list[dict], class_id: int | None = None) -> flo
         if class_id is None or a["category_id"] == class_id
     ]
     return float(np.mean(sizes)) if sizes else 0.0
+
+
+def mean_of_present_counts(counts: Iterable[int]) -> float:
+    """Mean of the entries in ``counts`` that are actually positive (> 0).
+
+    The shared "typical, when present" statistic behind a relative count-bias tolerance's derived
+    denominator (K4 residual, 2026-07-31): a 0 is not evidence of what a typical image carrying the
+    thing being counted looks like, so including it would dilute the density figure toward zero for
+    anything present on only some of the population — exactly the dilution the 2026-07-29 decision
+    already rejected for the equivalence test's own standard error (``n_present`` there). Shared by
+    :func:`gt_class_typical_count` (GT per-image records) and
+    :func:`operating_point.resolve_classifier_operating_point` (flat classified instances grouped by
+    image) so both derive "typical count" the same way rather than each inventing its own.
+    """
+    present = [c for c in counts if c > 0]
+    return float(np.mean(present)) if present else 0.0
+
+
+def gt_class_typical_count(per_image: list[dict], class_id: int | None = None) -> float:
+    """Mean per-image GT count for ``class_id`` (all classes pooled when ``None``) — the DERIVED
+    denominator a relative count-bias tolerance scales against
+    (:func:`operating_point._bias_equivalence_ok`).
+
+    Deliberately GT-only and conf-independent — a distinct notion of "present" from
+    ``_count_stats_at_conf``'s ``n_present`` (``gt or dt``, at one conf): a class with detections but
+    no real GT anywhere has no genuine "typical count" to speak of (it should derive 0, not borrow
+    density from its own false positives), and the relative tolerance must not shift as the sweep
+    moves through conf values just because a different set of low-score detections happens to survive.
+    """
+    counts = [
+        sum(1 for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id)
+        for rec in per_image
+    ]
+    return mean_of_present_counts(counts)
 
 
 def _center_match_image(gt: list[dict], dt: list[dict], tolerance: float) -> tuple[int, int, int]:
