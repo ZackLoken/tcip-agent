@@ -75,6 +75,21 @@ export type SaveResult = { status: "ok"; base_mtime: string | null } | { status:
  */
 export const IMAGE_MAX_WIDTH = 4096;
 
+/** One band's symbology, as `GET /api/images/bands` reports it — a declared name where the
+ *  source has one (else its 0-index as a string), the sensor's own wavelength when known. */
+export interface ImageBandInfo {
+  name: string;
+  wavelength_nm: number | null;
+  dtype: string;
+  min: number;
+  max: number;
+}
+
+export interface ImageBandsResponse {
+  band_count: number;
+  bands: ImageBandInfo[];
+}
+
 export interface ProjectSummary {
   name: string;
   path: string;
@@ -165,8 +180,12 @@ export const api = {
   },
 
   images: {
-    url: (path: string, max_width?: number, quality?: number) =>
-      `/api/images?${q({ path, max_width, quality })}`,
+    url: (path: string, max_width?: number, quality?: number, bands?: string, stretch?: string) =>
+      `/api/images?${q({ path, max_width, quality, bands, stretch })}`,
+
+    // Per-band symbology plus the one fact that gates the band picker's visibility
+    // (band_count > 3) — never shown for a standard RGB dataset.
+    bands: (path: string) => call<ImageBandsResponse>(`/api/images/bands?${q({ path })}`),
   },
 
   annotate: {
