@@ -1,12 +1,12 @@
-"""Annotation I/O for the two on-disk formats — the canonical per-image JSON and a single-file COCO.
+"""Annotation I/O for the two on-disk formats: the canonical per-image JSON and a single-file COCO.
 
 The internal representation is always the name-based :class:`~tcip_annotation.state.Annotation`
 (pixel-coordinate geometry, ``subject`` + attribute values by name); format only matters at the file
 I/O boundary.
 
-  - json  — one ``.json`` per image (the canonical ``json_io`` schema, an ``"annotations"`` key of
+  - json: one ``.json`` per image (the canonical ``json_io`` schema, an ``"annotations"`` key of
     name-based records)
-  - coco  — a single dataset-level ``.json`` (an ``"images"`` / ``"annotations"`` / ``"categories"``
+  - coco: a single dataset-level ``.json`` (an ``"images"`` / ``"annotations"`` / ``"categories"``
     key); a genuine interop format, so its numeric ``category_id`` is decoded through the file's own
     ``categories`` back to names on read and encoded from a name→id map on write.
 
@@ -39,9 +39,9 @@ def detect_format(path: str) -> AnnotFormat:
 
     ``"json"`` is the canonical per-image label file (``json_io`` schema, keyed on
     :data:`~tcip_annotation.json_io.ANNOTATIONS_KEY`); ``"coco"`` is an assembled dataset-level COCO
-    (keyed on ``images`` / ``categories``). The pre-K13.5 ``objects`` schema is **not** sniffed — it
-    raises. Old files are converted once, never read in place: reading an unconverted file as the new
-    schema would silently yield zero annotations and train on fabricated empty negatives.
+    (keyed on ``images`` / ``categories``). The old ``objects`` schema is not sniffed; it raises.
+    Old files are converted once, never read in place: reading an unconverted file as the new schema
+    would silently yield zero annotations and train on fabricated empty negatives.
     """
     p = Path(path)
     candidates = sorted(p.glob("*.json")) if p.is_dir() else [p]
@@ -57,7 +57,7 @@ def detect_format(path: str) -> AnnotFormat:
 
 def _detect_json_format(path: Path) -> AnnotFormat | None:
     """``"json"`` / ``"coco"`` from a file's keys, or ``None`` if it is neither. Raises on the
-    pre-K13.5 ``objects`` shape rather than sniffing it (it is converted, not read)."""
+    old ``objects`` shape rather than sniffing it (it is converted, not read)."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -67,7 +67,7 @@ def _detect_json_format(path: Path) -> AnnotFormat | None:
         return None
     if "objects" in data:
         raise ValueError(
-            f"{path} is the pre-K13.5 'objects' label schema. It is not read in place — convert it "
+            f"{path} is the old 'objects' label schema, which is not read in place. Convert it "
             f"to the name-based per-image schema first; reading it as-is would yield zero "
             f"annotations and train on fabricated empty negatives."
         )
@@ -90,7 +90,7 @@ def _parse_coco_json(path: str) -> dict:
 
 
 def _coco_categories(coco: dict) -> dict[int, str]:
-    """``{category_id: name}`` from a COCO ``categories`` list — the file's own name map."""
+    """``{category_id: name}`` from a COCO ``categories`` list, the file's own name map."""
     out: dict[int, str] = {}
     for c in coco.get("categories", []) if isinstance(coco, dict) else []:
         if isinstance(c, dict) and "id" in c and c.get("name"):
@@ -137,7 +137,7 @@ def parse_coco_annotations(
     """Parse one image's COCO annotations into name-based :class:`Annotation` records.
 
     ``subject`` is the ``category_id``'s name from the file's own ``categories``. An annotation whose
-    ``category_id`` has no category name is skipped — a name-based label is undecodable without it. A
+    ``category_id`` has no category name is skipped, since a name-based label is undecodable without it. A
     polygon geometry wins over a box when both are present (the polygon is the source of truth).
     """
     anns, _, _ = _coco_image_annotations(coco, image_id, file_name)
@@ -183,11 +183,11 @@ def write_coco(
 
     ``images_annotations`` maps ``file_name -> (annotations, img_w, img_h)``. ``id_map`` is a
     ``subject -> category_id`` map; when omitted it is enumerated from the distinct subjects present
-    (COCO carries its category names in the file, so the enumeration travels with the data — this is
+    (COCO carries its category names in the file, so the enumeration travels with the data; this is
     interop export, not the training id assignment, which is ``class_registry.assign_class_ids``).
 
     Every emitted record is a box (plus a polygon's ``segmentation``), so a geometry-less annotation
-    and a :class:`~tcip_annotation.state.Point` are both skipped — COCO's own box/segmentation record
+    and a :class:`~tcip_annotation.state.Point` are both skipped: COCO's own box/segmentation record
     has no honest representation for a point, and fabricating a zero-area one would export it as a
     detection target.
     """
@@ -269,7 +269,7 @@ def save_annotations(
 
     ``json`` writes the canonical per-image label file; ``coco`` writes a single-file COCO for the
     image (pass ``file_name`` to key it). ``keep_empty`` (json only): an empty list writes an
-    ``"annotations": []`` record instead of deleting the label — an empty record is not a negative
+    ``"annotations": []`` record instead of deleting the label; an empty record is not a negative
     until a human confirms it.
     """
     if fmt == "json":
