@@ -527,8 +527,8 @@ def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> No
         {"image_id": "c0", "is_true_positive": True, "is_pred_positive": True, "bbox": [0.0, 0.0, 10.0, 10.0]},
         {"image_id": "c1", "is_true_positive": False, "is_pred_positive": False, "bbox": [20.0, 0.0, 30.0, 10.0]},
     ]
-    # 20 instances, ALL on one image -- a real net bias of +1 (matching trait.count_bias_tolerance's
-    # default of 1.0 exactly), which the equivalence test's SE=0 (n_images=1) would let through.
+    # 20 instances, ALL on one image -- a real net bias of +1, which the equivalence test's SE=0
+    # (n_images=1) would let through regardless of tolerance.
     hold = [
         {"image_id": "h0", "is_true_positive": i < 10, "is_pred_positive": i < 11,
          "bbox": [float(100 + i), 0.0, float(110 + i), 10.0]}
@@ -539,6 +539,52 @@ def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> No
 
     assert res["passed"] is False
     assert "insufficient_holdout_images" in res["failures"], res["failures"]
+
+
+def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
+    """``pos_per_image`` correctly-called positives per image, plus one token negative per image (so
+    kappa stays defined). On ``miscall_images`` (indices), one EXTRA false-positive-called instance
+    is added -- the SAME absolute miscall, regardless of density."""
+    items = []
+    for i in range(n_images):
+        for k in range(pos_per_image):
+            items.append({"image_id": f"{prefix}{i}", "is_true_positive": True, "is_pred_positive": True,
+                         "bbox": [float(k * 15), 0.0, float(k * 15 + 10), 10.0]})
+        if i in miscall_images:
+            items.append({"image_id": f"{prefix}{i}", "is_true_positive": False, "is_pred_positive": True,
+                         "bbox": [9000.0, 0.0, 9010.0, 10.0]})
+        items.append({"image_id": f"{prefix}{i}", "is_true_positive": False, "is_pred_positive": False,
+                     "bbox": [-100.0 - i, 0.0, -90.0 - i, 10.0]})
+    return items
+
+
+def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_class_the_dense_admits():
+    """K4 residual (2026-07-31), stage-6 review Finding F4: the classifier path's count-bias
+    tolerance is relative too (same field, same `_bias_equivalence_ok`), and nothing exercised its
+    MAGNITUDE before this — the one passing classifier fixture in this file has bias exactly 0.0,
+    true at any tolerance. This pins both directions with the IDENTICAL absolute miscall (one extra
+    false-positive-called instance, on one holdout image out of 20): sparse (1 real positive/image)
+    refuses; dense (150 real positives/image) admits the SAME miscall as a small relative fraction.
+    """
+    from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
+
+    sparse = resolve_classifier_operating_point(
+        "catkin", calibration_items=_classifier_items("c", 20, 1),
+        holdout_items=_classifier_items("h", 20, 1, miscall_images=[0]), experiment_id=None)
+    assert sparse["sweep_data"]["typical_positive_count"] == pytest.approx(1.0)
+    assert sparse["passed"] is False
+    assert "count_bias_exceeds_tolerance" in sparse["failures"]
+
+    dense = resolve_classifier_operating_point(
+        "catkin", calibration_items=_classifier_items("c", 20, 150),
+        holdout_items=_classifier_items("h", 20, 150, miscall_images=[0]), experiment_id=None)
+    assert dense["sweep_data"]["typical_positive_count"] == pytest.approx(150.0)
+    # Same count_bias/count_bias_std as the sparse case (the miscall pattern is identical) -- only
+    # the DERIVED tolerance differs, proving density is what changed the outcome.
+    assert dense["sweep_data"]["count_bias"] == pytest.approx(sparse["sweep_data"]["count_bias"])
+    assert dense["sweep_data"]["count_bias_std"] == pytest.approx(sparse["sweep_data"]["count_bias_std"])
+    assert dense["sweep_data"]["count_bias_tolerance_absolute"] > sparse["sweep_data"]["count_bias_tolerance_absolute"]
+    assert "count_bias_exceeds_tolerance" not in dense["failures"]
 
 
 def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floor(
