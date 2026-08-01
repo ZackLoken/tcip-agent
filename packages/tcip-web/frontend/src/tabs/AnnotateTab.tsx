@@ -69,7 +69,8 @@ function withRing(p: PolygonShape, ringIdx: number, ring: [number, number][]): P
   return { ...p, rings };
 }
 
-/** The mode `m` advances to: Box -> Polygon -> Point -> Box, the toolbar's left-to-right order. */
+/** The mode `m` advances to: Point -> Box -> Polygon -> Point, the toolbar's left-to-right order
+ *  (the array below is a rotation of the same cycle, so the transitions are unchanged). */
 function nextMode(mode: Mode): Mode {
   const order: Mode[] = ["box", "polygon", "point"];
   return order[(order.indexOf(mode) + 1) % order.length];
@@ -173,8 +174,8 @@ const AnnotationShapes = memo(function AnnotationShapes({
       {/* Read-only derived boxes: each active-subject polygon's bounding box, shown in box mode so a
           polygon's detection footprint is visible while boxing. Render-only — derived from
           polygonBbox here and never added to canvas.boxes, so it can't be selected/edited/deleted or
-          saved (handle-less; solid like every committed shape — how to signal derived-vs-editable is
-          deferred GUI-polish, see the plan). */}
+          saved (handle-less). Dashed marks it as read-only, distinct from a real editable box
+          (solid) — the same convention in-progress/under-review shapes already use. */}
       {mode === "box" &&
         polygons.map((p, i) =>
           p.subject === activeSubject ? (
@@ -185,6 +186,7 @@ const AnnotationShapes = memo(function AnnotationShapes({
               width={boxStroke}
               labelSize={labelSize}
               label={p.subject}
+              dashed
             />
           ) : null,
         )}
@@ -468,12 +470,10 @@ export function AnnotateTab() {
       // banner over the image now on screen.
       if (interactive && loadedPathsRef.current === paths) {
         setIoError(
-          "Could not save annotations — your edits are kept in the editor; press Save to retry.",
+          "Could not save annotations. Your edits are kept in the editor; press Save to retry.",
         );
       } else {
-        useStore
-          .getState()
-          .pushToast(`Could not save ${imgFileName} — edits made there were not written.`);
+        useStore.getState().pushToast(`Save failed: ${imgFileName}'s edits were not written.`);
       }
       return;
     }
@@ -485,13 +485,13 @@ export function AnnotateTab() {
       if (interactive && loadedPathsRef.current === paths) {
         setConflict(true);
         setIoError(
-          "These labels changed elsewhere (the agent or another tab). Reload to load the latest — this discards your unsaved edits — or keep editing.",
+          "These labels changed elsewhere (the agent or another tab). Reload to load the latest (discards your unsaved edits), or keep editing.",
         );
       } else {
         useStore
           .getState()
           .pushToast(
-            `Edits to ${imgFileName} were not saved — its labels changed elsewhere (the agent or another tab) first.`,
+            `Save failed: ${imgFileName}'s labels changed elsewhere (agent or another tab) first.`,
           );
       }
       return;
@@ -558,7 +558,7 @@ export function AnnotateTab() {
       setConflict(false);
       setSaveBlocked(false);
     } catch {
-      setIoError("Reload failed — check the connection and try again.");
+      setIoError("Reload failed. Check the connection and try again.");
     }
   }
 
@@ -652,7 +652,7 @@ export function AnnotateTab() {
         setSaveBlocked(true);
         setConflict(false);
         setIoError(
-          "Could not load this image's labels — saving is disabled to avoid overwriting the labels on disk.",
+          "Could not load this image's labels. Saving is disabled to avoid overwriting the labels on disk.",
         );
         startImageSessionTracking(currentImageName, 0);
       }
@@ -1406,6 +1406,18 @@ export function AnnotateTab() {
                 Reload
               </button>
             )}
+            <button
+              type="button"
+              className="text-tcip-fp/70 hover:text-tcip-fp"
+              aria-label="Dismiss"
+              title="Dismiss"
+              onClick={() => {
+                setIoError(null);
+                setConflict(false);
+              }}
+            >
+              ✕
+            </button>
           </div>
         )}
 
@@ -1470,9 +1482,42 @@ function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
     }
   };
 
+  // Manually dismissible (unlike the legends, this panel holds real inputs, so hover-to-reveal
+  // would fight the user reaching into it). Re-opens on a fresh selection so a stale dismiss can't
+  // hide the one shape you're now trying to edit.
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    if (selected) setDismissed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.kind, selected?.idx]);
+
+  const hasContent = !!selected || imageAnnotations.length > 0;
+  if (dismissed || !hasContent) {
+    return (
+      <button
+        type="button"
+        onClick={() => setDismissed(false)}
+        className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur hover:border-tcip-border-hover hover:text-tcip-fg"
+      >
+        Attributes
+      </button>
+    );
+  }
+
   return (
     <div className="absolute top-3 right-3 z-20 w-60 rounded-md border border-tcip-border bg-tcip-panel/95 p-3 text-[11px] shadow-lg backdrop-blur">
-      <h4 className="mb-1 text-[11px] font-semibold tracking-wide text-tcip-fg">Attributes</h4>
+      <div className="mb-1 flex items-center justify-between">
+        <h4 className="text-[11px] font-semibold tracking-wide text-tcip-fg">Attributes</h4>
+        <button
+          type="button"
+          onClick={() => setDismissed(true)}
+          aria-label="Close attributes panel"
+          title="Close"
+          className="text-tcip-muted hover:text-tcip-fg"
+        >
+          ✕
+        </button>
+      </div>
       {selected ? (
         <div className="mb-2">
           <div className="mb-1 text-tcip-muted">
@@ -1576,9 +1621,11 @@ function AttributeEditors({
 
 /** Hover-triggered legend, anchored lower-left of the canvas. Lists the dataset's subjects
  *  (outline colour = subject, GUI-local) plus the selected-shape blue — the same grammar as
- *  Review. */
+ *  Review. In box mode, an extra row explains the dashed boxes: a polygon's own read-only bounds,
+ *  not a second editable annotation. */
 function AnnotateLegend() {
   const registry = useStore((s) => s.registry.subjects);
+  const mode = useStore((s) => s.gui.mode);
   const names = Object.keys(registry);
   return (
     <div className="group absolute bottom-3 left-3 z-20">
@@ -1603,6 +1650,15 @@ function AnnotateLegend() {
             />
             <span className="text-tcip-fg">Selected</span>
           </li>
+          {mode === "box" && (
+            <li className="flex items-center gap-2.5 text-[12px]">
+              <span
+                className="inline-block h-[13px] w-[18px] shrink-0 rounded-[2px] border-[2.5px] border-dashed"
+                style={{ borderColor: "currentColor" }}
+              />
+              <span className="text-tcip-muted">Dashed = polygon&apos;s box (read-only)</span>
+            </li>
+          )}
         </ul>
       </div>
       <button
@@ -1637,6 +1693,7 @@ const BoxOverlay = memo(function BoxOverlay({
   label,
   selected,
   handleR,
+  dashed,
 }: {
   box: Box;
   stroke: string;
@@ -1645,6 +1702,7 @@ const BoxOverlay = memo(function BoxOverlay({
   label: string;
   selected?: boolean;
   handleR?: number;
+  dashed?: boolean;
 }) {
   const corners: [number, number][] = [
     [box.x1, box.y1],
@@ -1661,6 +1719,7 @@ const BoxOverlay = memo(function BoxOverlay({
         height={box.y2 - box.y1}
         stroke={stroke}
         strokeWidth={width}
+        dash={dashed ? [6 * width, 4 * width] : undefined}
       />
       {selected &&
         handleR &&
