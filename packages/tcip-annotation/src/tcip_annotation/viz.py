@@ -1,4 +1,4 @@
-"""Visualization rendering — draws annotations and predictions on images.
+"""Visualization rendering: draws annotations and predictions on images.
 
 All functions return the output file path for consumption by view_image.
 Default output directory: .tcip/artifacts/viz/
@@ -15,7 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from tcip_annotation.utils import auto_orient_image, get_image_dimensions
 
-# 20-class color palette (RGB) — consistent with the GUI annotation canvas
+# 20-class color palette (RGB), consistent with the GUI annotation canvas
 COLOR_PALETTE: list[tuple[int, int, int]] = [
     (255, 0, 0),       # red
     (0, 255, 0),       # green
@@ -45,8 +45,8 @@ MAX_RENDER_EDGE = 1024
 def _viz_base() -> Path:
     """The ``.tcip`` base for viz output. Honors ``TCIP_PROJECT_ROOT`` (the platform-state root the
     MCP server / web backend pin to the active project) so renders land under the project, not the
-    process CWD — the agent's CWD is often the repo, which fragmented artifacts away from the
-    project and returned a CWD-relative path callers couldn't resolve. Falls back to CWD-relative
+    process CWD (the agent's CWD is often the repo, which fragmented artifacts away from the
+    project and returned a CWD-relative path callers couldn't resolve). Falls back to CWD-relative
     for standalone ``tcip_annotation`` use."""
     import os
 
@@ -171,7 +171,7 @@ def render_segmentations(
 
     Args:
         image_path: Path to the source image.
-        polygons: List of dicts with 'rings' (list of rings, each a list of (x,y) pixel tuples —
+        polygons: List of dicts with 'rings' (list of rings, each a list of (x,y) pixel tuples;
                   an occlusion-split instance is more than one ring, drawn as one instance) and
                   'class_id'.
         class_names: Mapping from class_id to display name.
@@ -296,7 +296,7 @@ def render_grid(
     output_path = output_path or _default_output("grid")
     n = len(image_paths)
     if n == 0:
-        # Empty grid — create a small placeholder
+        # Empty grid: create a small placeholder
         img = Image.new("RGB", (cell_size, cell_size), (64, 64, 64))
         draw = ImageDraw.Draw(img)
         draw.text((10, cell_size // 2), "No images", fill=(200, 200, 200))
@@ -348,7 +348,7 @@ def render_confusion_examples(
     """Render the worst prediction cases for visual failure analysis.
 
     Args:
-        worst_predictions: From get_worst_predictions — list of dicts
+        worst_predictions: From get_worst_predictions, a list of dicts
             with 'image', 'gt_boxes', 'pred_boxes', optional 'error_type'.
         images_dir: Directory containing source images.
         output_dir: Where to save renders. Defaults to .tcip/artifacts/viz/failures/.
@@ -397,7 +397,7 @@ def render_candidates(
 
     Each candidate is drawn as a semi-transparent colored polygon with a
     large numbered label. Colors cycle through the palette. Engine-agnostic.
-    Every ring of a candidate is drawn — an occlusion-split proposal must look split, not whole.
+    Every ring of a candidate is drawn: an occlusion-split proposal must look split, not whole.
 
     Args:
         image_path: Path to the source image.
@@ -583,7 +583,7 @@ def render_canvas_state(
 
     ``shapes`` come from the canvas-state push, each already carrying the exact symbology the
     GUI rendered: ``{kind: box|polygon|polyline|point, xyxy|points (pixel), color '#hex', fill?,
-    dashed?, label?}`` — so this draws what the annotator sees rather than re-deriving colors. A
+    dashed?, label?}``, so this draws what the annotator sees rather than re-deriving colors. A
     ``point`` carries one coordinate in ``points`` and draws as the GUI's mark (a core with radial
     ticks); it is never widened into a box, which would show the agent an extent the annotation
     does not claim.
@@ -661,7 +661,7 @@ def render_canvas_state(
             draw.polygon(pts, fill=color + (38,))
     for s, pts, color, closed in parsed:  # pass 2: outlines + vertices
         if s.get("kind") == "point":
-            # The GUI's reticle: a core plus four radial ticks converging on the coordinate — the
+            # The GUI's reticle: a core plus four radial ticks converging on the coordinate, the
             # mark that distinguishes a location from a very small box on the same canvas.
             px, py = pts[0]
             core = dot_r * 1.6
