@@ -1,7 +1,7 @@
 """Geometry helpers and GT-vs-prediction matching engine.
 
 All functions are pure (no GUI dependencies). Ground truth and predictions are both
-:class:`~tcip_annotation.state.Annotation` lists — a prediction is an annotation whose ``score`` is
+:class:`~tcip_annotation.state.Annotation` lists: a prediction is an annotation whose ``score`` is
 set. Matching groups by *class name* (an annotation's ``subject``); an integer class id never appears.
 """
 
@@ -95,7 +95,7 @@ def _is_box(a: Annotation) -> bool:
 
 
 def _rings_to_shapely(rings: list[list[tuple[float, float]]]):
-    """One or more simple closed rings -> a Shapely Polygon (one ring) or MultiPolygon (several) —
+    """One or more simple closed rings -> a Shapely Polygon (one ring) or MultiPolygon (several);
     every ring contributes, never just the first/largest."""
     valid = [r for r in rings if len(r) >= 3]
     if len(valid) == 1:
@@ -128,7 +128,7 @@ def compute_matches(
 
     ``gt`` / ``preds`` are :class:`Annotation` lists (a prediction carries a ``score``). Matching is
     per class name (``subject``) using greedy IoU. Geometry-less annotations (image-level labels)
-    carry no spatial extent and are ignored here — as is a :class:`~tcip_annotation.state.Point`,
+    carry no spatial extent and are ignored here, as is a :class:`~tcip_annotation.state.Point`,
     which has no area and so no IoU with anything: it can be neither matched, nor a FP, nor a FN
     without fabricating a spatial claim it does not make.
 
