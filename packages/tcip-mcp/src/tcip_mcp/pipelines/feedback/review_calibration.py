@@ -39,12 +39,19 @@ from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED, ResolvedBu
 _POSITIVE_ACTIONS = {"accepted", "edited"}
 
 # Every name resolve_operating_point can put in sweep["failures"] (cross-cutting named-failure
-# architecture), paired with its breeder-facing message, IN PRIORITY ORDER (first match wins when
-# more than one failure applies at once). This is the ONE place that association is spelled out —
-# describe_review_validation's exhaustiveness check and its message selection both read from this
-# same list, so there is no second, separately-maintained "known names" set to drift out of sync
-# with it (an earlier version had exactly that: a name set and an if/elif chain, kept in agreement
-# by hand).
+# architecture), paired with its breeder-facing message. describe_review_validation surfaces the
+# message for EVERY name present in "failures" (K2 — not just the first), in this list's order, so
+# order here is READING order for a breeder facing several at once, not a first-match-wins priority.
+# Each message must therefore stay true on its own regardless of which OTHER names are also present
+# — never phrase one as if it were the only failure the reference could have (stage-6 review: an
+# earlier version of the localization/dispersion/per-class messages below asserted "the counts
+# agree"/"the total looks right", which becomes a false statement exactly when count_bias_exceeds_
+# tolerance is ALSO present, since all four gate conditions are computed independently and can
+# co-occur — operating_point.py's failures.append calls have no mutual exclusion between them).
+# This is the ONE place the name<->message association is spelled out — describe_review_validation's
+# exhaustiveness check and its message selection both read from this same list, so there is no
+# second, separately-maintained "known names" set to drift out of sync with it (an earlier version
+# had exactly that: a name set and an if/elif chain, kept in agreement by hand).
 _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
     (("conf_censored",),
      "Not yet. The check can't see the borderline detections it needs — either the predictions were "
@@ -67,6 +74,15 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "Not yet. Only one image was held back to check against — the platform needs at least two so "
      "it can judge how consistent the counts are, not just whether they happen to agree once. "
      "Review a few more images, then try again."),
+    # K4 residual (2026-07-31, stage-6 review Finding F1): one kind of object IS held back, but on
+    # only a single image — not enough to judge its own count consistency against, the same
+    # evidence-sufficiency shape as insufficient_holdout_images above, scoped to one class rather
+    # than the whole reference.
+    (("insufficient_holdout_images_per_class",),
+     "Not yet. One kind of object was held back to check, but only in a single image — the platform "
+     "needs at least two images carrying that kind so it can judge how consistent its count is, not "
+     "just whether it happened to agree once. Review a few more images containing that kind of "
+     "object, then try again."),
     # An evidence-sufficiency refusal, so it sits with the two above rather than down among the
     # accuracy ones: nothing about the counts has been judged wrong, there is simply nothing held
     # back to judge this kind of object against.
@@ -91,24 +107,22 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "can't function as an independent check. Review a genuinely distinct set of images, then try "
      "again."),
     (("localization_quality_floor_failed",),
-     "Not yet. On the held-back images, the counts happened to match, but the model's predictions "
-     "didn't actually line up with what you confirmed — the agreement is coincidental, not real "
-     "matching. Review more images, or improve the model."),
+     "Not yet. On the held-back images, the model's predictions don't actually line up with what "
+     "you confirmed — even where the counts agree, that agreement can be coincidental rather than "
+     "real matching. Review more images, or improve the model."),
     (("count_error_dispersion_too_high",),
-     "Not yet. On the held-back images, the counts agree on average, but individual images are far "
-     "off in ways that cancel out overall — the count isn't reliable image-to-image yet. Review "
+     "Not yet. Individual held-back images can be far off in opposite directions that cancel out "
+     "in the total — the count isn't reliable image-to-image, whatever the total shows. Review "
      "more images, or improve the model."),
     (("count_bias_exceeds_tolerance",),
      "Not yet. On the held-back images, the model's counts didn't agree closely enough with your "
      "review to trust them yet. Reviewing more images, or improving the model, can help."),
-    # Placed after the pooled entry deliberately: this message's "the total looks right" claim holds
-    # only when the pooled check passed, which is exactly what first-match-wins ordering guarantees.
     (("count_bias_exceeds_tolerance_per_class",),
-     "Not yet. The overall number of objects on the held-back images looks right, but the split "
-     "between kinds of object doesn't — the model is finding too many of one kind and too few of "
-     "another, and in the total those two errors hide each other. Any result that separates the "
-     "kinds (a percentage of one kind, for instance) would be wrong. Correcting the mislabelled "
-     "kinds in your review, or improving the model, can help."),
+     "Not yet. The split between kinds of object doesn't agree with your review — the model is "
+     "finding too many of one kind and too few of another, in a way that can cancel out in the "
+     "total even when the total itself agrees. Any result that separates the kinds (a percentage "
+     "of one kind, for instance) would be wrong. Correcting the mislabelled kinds in your review, "
+     "or improving the model, can help."),
 ]
 _KNOWN_FAILURE_NAMES = {name for names, _ in _FAILURE_MESSAGES for name in names}
 
@@ -182,9 +196,15 @@ def review_to_records(
     positive evidence a human could have caught a missed object on this image:
 
       - a verdict-bearing image: the image's ``gt_preexisting`` fact is ``True``, OR at least one
-        of its (scoped) verdict entries is a gt-only entry (``pred_bbox_norm is None and
-        gt_bbox_norm is not None``) — the breeder actually swept this image for missed objects,
-        whether or not they found one.
+        of its (scoped) verdict entries carries ``missed_object_attested`` — a fact
+        ``record_detection_action`` stamps explicitly at the moment a verdict is recorded (from
+        whether the caller supplied neither a ``gt_idx`` nor a ``pred_idx`` — the exact shape only
+        the "mark missed object" tool produces), never reconstructed here from the entry's bbox
+        geometry. Geometry alone is ambiguous: a REJECTED or ACCEPTED pre-existing FN (an existing,
+        already-indexed GT box being corrected or confirmed, not a newly-attested miss) ends up with
+        the identical ``pred_bbox_norm=None, gt_bbox_norm=<box>`` shape once persisted, so an
+        earlier version of this check that inferred coverage from that shape silently counted an FN
+        correction as if it were a swept-for-a-missed-object attestation.
       - a zero-verdict (``mark_complete``) image: the RECORDED ``adjudication_covered`` fact the
         route stamped at completion time (stage-6 review) — ``True`` only for a genuine negative
         (the route confirmed the bucket held zero predictions for this image, so there was nothing
@@ -243,7 +263,24 @@ def review_to_records(
         dt: list[dict] = []
         for entry in scoped:
             action = entry.get("action")
-            cid = int(entry.get("class_id", 0))
+            cid_raw = entry.get("class_id")
+            if cid_raw is None:
+                # K25: an unresolved class identity (never recorded, or the producing bucket's own
+                # id_map didn't recognize this verdict's class_name — e.g. an attribute-scoped
+                # bucket, whose id_map is keyed by attribute VALUES, being handed a GT annotation's
+                # raw subject name) must refuse the WHOLE reference, not silently drop this one
+                # entry or default it to class 0. A partial drop is a fail-open here: dropping a
+                # confirmed-miss (FN) entry while keeping an in-vocabulary accepted-FP entry can
+                # make gt/dt agree by construction and pass the count-bias gate on a reference that
+                # is missing real evidence — the opposite of what class-aware admission is for.
+                raise ValueError(
+                    f"review verdict on {img_name!r} (class {entry.get('class_name')!r}) has no "
+                    "resolvable class identity for its producing prediction bucket — either no "
+                    "id_map was recorded for that bucket, or this class name is not one of its "
+                    "keys. Class-aware review-confirmed validation isn't available for this "
+                    "bucket/trait combination yet."
+                )
+            cid = int(cid_raw)
             gt_norm = entry.get("gt_bbox_norm")
             pred_norm = entry.get("pred_bbox_norm")
             conf = entry.get("conf")
@@ -257,12 +294,10 @@ def review_to_records(
                 if box and len(box) == 4:
                     gt.append({"category_id": cid + 1, "bbox": _to_xywh(box, img_w, img_h),
                                "iscrowd": 0})
-        has_gt_only_entry = any(
-            e.get("pred_bbox_norm") is None and e.get("gt_bbox_norm") is not None for e in scoped
-        )
+        has_missed_object_attestation = any(e.get("missed_object_attested") for e in scoped)
         records.append({"width": int(img_w), "height": int(img_h),
                         "image_id": Path(img_name).stem, "gt": gt, "dt": dt,
-                        "adjudication_covered": gt_preexisting or has_gt_only_entry})
+                        "adjudication_covered": gt_preexisting or has_missed_object_attestation})
     return records
 
 
@@ -403,9 +438,13 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
     Reads the conf param's own sweep diagnostics (the SAME gate output ``resolve_operating_point``
     already produced — never a re-run) and maps them to plain language a non-CV breeder can act on.
     ``resolve_operating_point``'s named ``failures`` list (cross-cutting, K2) is the single source of
-    truth for WHICH check refused; this function's job is only to translate each name to a message —
-    exhaustively, so an unrecognized failure name is a loud error here, not a silent fallthrough to
-    the generic "counts didn't agree" message. Pure over the bundle — no torch, no re-derivation.
+    truth for WHICH check(s) refused; this function's job is only to translate each name to a
+    message — exhaustively, so an unrecognized failure name is a loud error here, not a silent
+    fallthrough to the generic "counts didn't agree" message. When more than one named failure
+    applies at once (e.g. too few images AND a censored floor), every one of them gets its own
+    message rather than only the highest-priority match — a breeder who fixes the first blocker and
+    resubmits must not discover the second only then. Pure over the bundle — no torch, no
+    re-derivation.
 
     Fix I: the "Validated" message's miss-coverage claim is read directly off the exact-conf holdout
     curve entry Fix F produces (``sweep['holdout_bias']``, already carrying ``tp``/``fn``/``recall``
@@ -448,12 +487,14 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
                   "reviewed images so it can hold some back to test against. Review a few more, then "
                   "try again.")
     else:
-        match = next((msg for names, msg in _FAILURE_MESSAGES if any(n in failures for n in names)),
-                     None)
-        if match is None:
+        # Every applicable failure gets its own message, in _FAILURE_MESSAGES' priority order (K2)
+        # — not just the first match. A breeder who hits two blockers at once (e.g. too few images
+        # AND a censored floor) must see both, not fix the first and only then discover the second.
+        matched = [msg for names, msg in _FAILURE_MESSAGES if any(n in failures for n in names)]
+        if not matched:
             raise AssertionError(
                 f"resolve_operating_point set an unvalidated result with a completed holdout gate "
                 f"but no recognized failure name (failures={failures!r}) — "
                 "describe_review_validation cannot explain this refusal.")
-        reason = match
+        reason = "\n\n".join(matched)
     return {"validated": validated, "reference": reference, "conf": conf_value, "reason": reason}
