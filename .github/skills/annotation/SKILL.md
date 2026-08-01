@@ -5,7 +5,7 @@ description: "Annotation and review workflows for TCIP's native per-image JSON l
 
 # Annotation Workflow
 
-## Canonical format — per-image JSON with provenance
+## Canonical format: per-image JSON with provenance
 
 The on-disk default for both GT and predictions is **one per-image, COCO-shaped `.json`**
 (`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
@@ -23,31 +23,31 @@ directly. An unspecified format resolves to `.json` (`dataset_layout.py`'s `labe
 
 Both are read by `format_io.load_annotations` / written by `save_annotations`; the agent-facing
 MCP tool wrapping the read side is `read_annotations` (see Tools below). `format_io.detect_format`
-reads the format off the file's own keys and **raises** on anything else rather than guessing — a
+reads the format off the file's own keys and **raises** on anything else rather than guessing: a
 misdetected format reads real annotations as empty, so no answer beats a wrong one.
 
 A collaborator's delivery in some other schema is yours to convert: read a sample, write a
 converter in `scripts/`, and emit the canonical per-image JSON. The platform carries no built-in
 importers, so nothing constrains you to a format someone else's tool happened to use.
 
-## Coordinate frame — upright, EXIF applied once
+## Coordinate frame: upright, EXIF applied once
 
 Every coordinate (normalized or pixel) lives in the **EXIF-upright** frame. Images are
-decoded through one door — `load_image` (`image_utils.py`) / `get_image_dimensions`, both
-via `auto_orient_image` — which applies the EXIF orientation exactly once, so the GUI
+decoded through one door, `load_image` (`image_utils.py`) / `get_image_dimensions`, both
+via `auto_orient_image`, which applies the EXIF orientation exactly once, so the GUI
 canvas, the model, tiling, and viz all share one pixel space. This matters most for
 Orientation-6 phone/camera JPEGs whose stored frame is transposed (e.g. 5712×4284 ↔
 4284×5712): denormalizing an upright-authored box against the raw sensor frame scatters
 every box. Do not re-open images with a bare `PIL.Image.open` for anything coordinate-
-bearing (denormalizing, cropping, drawing) — go through `load_image` so orientation isn't
+bearing (denormalizing, cropping, drawing); go through `load_image` so orientation isn't
 applied twice or skipped.
 
 ## Stages
 
-1. **Initial labeling** — Manual or engine-assisted bounding box and polygon annotation
-2. **Review** — IoU matching between predictions and ground truth to accept/correct/reject
-3. **Active learning** — Score unlabeled images by model uncertainty to prioritize annotation effort
-4. **Quality audit** — Per-class AP, coverage analysis, inter-annotator agreement
+1. **Initial labeling**: manual or engine-assisted bounding box and polygon annotation
+2. **Review**: IoU matching between predictions and ground truth to accept/correct/reject
+3. **Active learning**: score unlabeled images by model uncertainty to prioritize annotation effort
+4. **Quality audit**: per-class AP, coverage analysis, inter-annotator agreement
 
 ## Tools
 
@@ -66,25 +66,25 @@ applied twice or skipped.
 Auto-labeling runs through a **method-neutral proposal seam** (`tcip_mcp.pipelines.proposal`): the
 agent names an `engine` and the platform runs it. `engine='sam'` is the built-in SAM2 reference; the
 agent can register another engine (`register_proposal_engine`) or pass a dotted `module:factory` it
-wrote — a Grounding DINO / open-vocab detector, or a bespoke proposer — exactly the way `model_source`
+wrote, a Grounding DINO / open-vocab detector, or a bespoke proposer, exactly the way `model_source`
 lets it bring a model. Engine-specific knobs travel in `engine_params`; the candidate schema is
 neutral (`candidate_id` / `bbox` / `area` / `rings` / `score`), engine signals under `engine_meta`
-(`rings` is `Polygon.rings` — one contour per connected region of the proposed mask, so an
+(`rings` is `Polygon.rings`, one contour per connected region of the proposed mask, so an
 occlusion-split object stays split from proposal through accept).
 That bespoke proposer may be classical-analysis-based (an OpenCV / scikit-image pipeline the agent
-writes) — one option among engines, not a prescribed step; its proposals are soft and prove out only
+writes), one option among engines, not a prescribed step; its proposals are soft and prove out only
 by surviving review.
 
-**Trial and compare by review — pick the engine the data justifies.** Don't assume one engine; wire
+**Trial and compare by review: pick the engine the data justifies.** Don't assume one engine; wire
 two or three, propose on the same images, and let the breeder's review decide: the useful engine is
 the one whose high-confidence proposals *survive review* (high accept rate, few edits). That accept
-rate is the measured comparison — the same signal that gates auto-accept in the review→retrain loop.
+rate is the measured comparison, the same signal that gates auto-accept in the review→retrain loop.
 Do not promise an engine that isn't built; SAM is the one that ships as a runnable example.
 
 ### Manual/prompted segmentation
 1. User clicks a point or draws a rough box on the annotation canvas (or the agent names a grid cell)
 2. `segment_prompt(image_path, points=/box=/grid_cells=, engine='sam')` returns precise polygon
-   `rings` — one per connected region of the mask, so a partly-occluded object comes back whole
+   `rings`, one per connected region of the mask, so a partly-occluded object comes back whole
 3. The rings are saved as one polygon annotation in the project's configured annotation format
 4. Supports point prompts (positive/negative), box prompts, and grid-cell references
 
@@ -98,7 +98,7 @@ classification and QA.
 2. Agent `view_image` on overlay → identifies and classifies each candidate
 3. `accept_proposals(image_path, assignments=[{candidate_id: 0, class_id: 1}, ...])` → stages
    accepted candidates as predictions (`created_by=<engine>`) in the predictions tree for human
-   review on the Review canvas — never writes GT directly, and through the verdict-guarded staging
+   review on the Review canvas, never writes GT directly, and through the verdict-guarded staging
    helper so a re-run never orphans recorded verdicts
 4. Agent `view_image` on the staged result → visual QA pass
 
@@ -114,7 +114,7 @@ classification and QA.
   and echoes the `cols`/`rows` it used
 - Agent references cells like "B3" or "F5" instead of pixel coordinates
 - A cell name is meaningless without its grid, so `segment_prompt(grid_cells=...)` requires the same
-  `cols`/`rows` that rendered the overlay you read the cells off — it refuses rather than assume a grid
+  `cols`/`rows` that rendered the overlay you read the cells off; it refuses rather than assume a grid
 - `grid_to_pixel()` in `sam_wrapper.py` converts to center pixel coords
 
 | Tool | Role | Phase |
@@ -134,16 +134,16 @@ classification and QA.
    its class id, box/polygon, IoU, and confidence)
 4. Review in panel: accept correct predictions, correct errors, add missed objects
 
-### The review channel — propose on canvas, never write GT blind
+### The review channel: propose on canvas, never write GT blind
 
 The agent must **never write ground truth the human hasn't seen**. Stage proposals to the
 *predictions* tree and drive the human to review them:
 
 - **`stage_proposals(dataset_root, model_name, date, stem, boxes)`** writes agent-proposed
-  detections to `predictions/<model>/<date>/detect/<stem>.json` (per-image COCO/JSON) — the
+  detections to `predictions/<model>/<date>/detect/<stem>.json` (per-image COCO/JSON), the
   predictions tree, **not** `annotations/`. They render on the Review canvas as predictions for
   the human to accept/reject/edit. `model_name` is stamped as each object's `created_by`, so name
-  the real producer (`sam`, `claude`, `groundingdino`, `model:<run>`) — not a generic placeholder.
+  the real producer (`sam`, `claude`, `groundingdino`, `model:<run>`), not a generic placeholder.
   A bucket that already carries review verdicts is immutable: a stage into it is redirected to a
   fresh `<model>@r2` bucket (the response's `bucket` field is the one actually written), so a
   re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place, which is
@@ -166,7 +166,7 @@ frames → they accept on the canvas → only then does it become GT. See
   Complete on that image, recorded as the status token `"negative"` in
   `.tcip/state/image_status.json`, scoped to the campaign. `to_coco_dataset` silently skips an
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
-  negatives — writing empty label files does not create them; only the human's Complete does.
+  negatives; writing empty label files does not create them; only the human's Complete does.
   `python scripts/doctor.py <root>` flags every empty-label/status disagreement. Never delete
   empty label files without asking.
 - **Cohen's κ**: inter-annotator agreement (if multiple annotators)
