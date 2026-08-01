@@ -1,4 +1,4 @@
-"""``build_model`` — the one indirection between a config/checkpoint and an ``nn.Module``.
+"""``build_model``, the one indirection between a config/checkpoint and an ``nn.Module``.
 
 The single build path is ``model_source``: import a dotted builder the agent wrote and call it.
 No ``exec``; the builder is imported like any module. The CV-scientist agent supplies an arbitrary
@@ -8,11 +8,11 @@ its inference output must be something the platform's library scorers can consum
 
 ``model_source`` schema::
 
-    {"builder": "my_module:build_net",     # required — 'module:function' (or 'module.function')
-     "builder_kwargs": {...},              # optional — passed to the builder
-     "source_files": [...],                # optional — provenance (snapshot_model_source copies these)
-     "task": "detection",                  # optional — measurement/eval routing
-     "in_chans": 3}                        # optional — channel-compat check
+    {"builder": "my_module:build_net",     # required, 'module:function' (or 'module.function')
+     "builder_kwargs": {...},              # optional, passed to the builder
+     "source_files": [...],                # optional, provenance (snapshot_model_source copies these)
+     "task": "detection",                  # optional, measurement/eval routing
+     "in_chans": 3}                        # optional, channel-compat check
 
 Pure-stdlib at import time (importlib only); torch imports lazily inside the builder so
 MCP-server startup stays fast.
@@ -102,7 +102,7 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
     data = config.get("data") or {}
     # Precondition check, not a broad except: a config with no subject in scope (a bespoke
     # dataset_source, or a registry-less build) legitimately fails open to the head's declared
-    # count below — that is the one real "no registry in scope" case. A subject THAT IS given but
+    # count below, that is the one real "no registry in scope" case. A subject that is given but
     # whose read fails for a real reason (corrupted classes.json, an attribute needing a registry
     # that isn't there) must not be silently swallowed into the same fallback.
     if task in ("detection", "instance_seg") and data.get("subject"):
@@ -119,7 +119,7 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
     return {"in_chans": in_chans, "num_classes": num_classes, "img_size": img_size}
 
 
-# The checkout's commit can't change within a process — resolve it once (a subprocess per training
+# The checkout's commit can't change within a process, resolve it once (a subprocess per training
 # run is wasteful and its latency widens audit races between concurrent runs). Sentinel: unset.
 _GIT_COMMIT: str | None = ""
 
@@ -158,7 +158,7 @@ def capture_env() -> dict:
             env[name] = getattr(__import__(name), "__version__", "unknown")
         except Exception:
             env[name] = None
-    # CUDA/driver fingerprint — a run's numerics depend on it; null on a CPU-only or torch-less env.
+    # CUDA/driver fingerprint, a run's numerics depend on it; null on a CPU-only or torch-less env.
     try:
         import torch
 
@@ -173,13 +173,13 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
 
     Called by the training envelope when ``model_source`` / ``training_source`` / ``data.dataset_source``
     is set. Records the agent-written source files (each source's ``source_files`` + the builder/loop
-    module files) so the run is reproducible from importable builders — never ``exec``. Best-effort: a
-    missing file is skipped and any failure returns without raising (provenance must not sink a run) —
+    module files) so the run is reproducible from importable builders, never ``exec``. Best-effort: a
+    missing file is skipped and any failure returns without raising (provenance must not sink a run),
     but the manifest is self-describing about what it failed to capture (``missing``/``snapshot_errors``)
-    rather than silently indistinguishable from a complete one (K12 finding 1). Destination files are
+    rather than silently indistinguishable from a complete one. Destination files are
     content-addressed (``<sha256[:8]>/<basename>``), so two distinct source files sharing a basename never
     clobber each other, and the same file reached via two different path spellings dedups to one entry
-    rather than two rows claiming the same basename with different hashes (K12 finding 2).
+    rather than two rows claiming the same basename with different hashes.
     Returns the manifest, or ``None`` when there is nothing bespoke to snapshot.
     """
     import hashlib
@@ -203,7 +203,7 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
         dataset_builder = dataset_source.get("builder")
         files.extend(dataset_source.get("source_files") or [])
     snapshot_errors: list[str] = []
-    # Snapshot the agent's training-loop + dataset modules too (best-effort — resolve mod:fn -> file).
+    # Snapshot the agent's training-loop + dataset modules too (best-effort, resolve mod:fn -> file).
     for dotted in (builder, training_source, dataset_builder):
         if isinstance(dotted, str) and dotted:
             mod_name = dotted.partition(":")[0] if ":" in dotted else dotted.rpartition(".")[0]
@@ -216,7 +216,7 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
                 else:
                     snapshot_errors.append(
                         f"{dotted!r} imported but its module has no __file__ (namespace/frozen "
-                        "module?) — cannot snapshot its source")
+                        "module?), cannot snapshot its source")
             except Exception as exc:
                 snapshot_errors.append(f"could not import {dotted!r}: {exc}")
 
@@ -261,7 +261,7 @@ def stamp_model_ref(payload: dict, config: dict, *, experiment_id: str | None = 
 
     So a hand-rolled loop's checkpoint (via ``ctx.save_checkpoint``) and the default trainer's are
     both reproducible, kind-routable, and traceable back to the run that produced them. Uses
-    ``setdefault`` — an explicit value the caller already put in ``payload`` wins. ``experiment_id``
+    ``setdefault``, an explicit value the caller already put in ``payload`` wins. ``experiment_id``
     is optional: a raw/foreign checkpoint legitimately has none, so it is stamped only when known.
     """
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
