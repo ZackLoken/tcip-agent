@@ -80,6 +80,26 @@ def _synth_batch(task: str, *, in_chans: int, num_classes: int, img_size: int, d
     return images, targets
 
 
+def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
+    """Whether ``value`` is a tensor, or a list/tuple/dict that carries one — any depth up to
+    ``_max_depth``. A bespoke non-detection output's per-key shape is the agent's to choose (e.g. a
+    ragged per-image list of tensors, or a nested dict of them), so a scorer-consumable prediction
+    is not only a top-level tensor value; the depth bound just keeps this from walking an unbounded
+    or self-referential structure someone's eval output happens to contain.
+    """
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        return True
+    if _depth >= _max_depth:
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_contains_tensor(v, _depth + 1, _max_depth) for v in value)
+    if isinstance(value, dict):
+        return any(_contains_tensor(v, _depth + 1, _max_depth) for v in value.values())
+    return False
+
+
 def _forward_loss(model: Any, images: Any, targets: Any):
     """Train-mode forward → a single scalar loss tensor (sums a returned loss dict)."""
     out = model(images, targets)
@@ -173,9 +193,10 @@ def check_model_contract(
             report["eval_output_type"] = "dict"
             if not isinstance(out, dict):
                 issues.append(f"non-detection eval output is not a dict (got {type(out).__name__})")
-            elif not any(isinstance(v, torch.Tensor) for v in out.values()):
+            elif not any(_contains_tensor(v) for v in out.values()):
                 # Which keys a task uses is the agent's to choose, so none are named here. But a
-                # dict carrying no tensor is not a prediction, and no scorer can consume it.
+                # dict carrying no tensor — anywhere in a value's own list/tuple/dict nesting, not
+                # only at the top level — is not a prediction, and no scorer can consume it.
                 issues.append(
                     f"non-detection eval output carries no tensor value (keys: {sorted(out)}) — "
                     "nothing downstream can read a measurement from it"
