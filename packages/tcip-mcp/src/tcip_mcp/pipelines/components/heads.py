@@ -1,4 +1,4 @@
-"""Task-specific heads — each knows its loss, metric, and output format.
+"""Task-specific heads: each knows its loss, metric, and output format.
 
 Every head implements ``BaseHead`` with ``forward()``, ``compute_loss()``,
 and ``decode()`` so the composer and trainer are task-agnostic.
@@ -120,7 +120,7 @@ class OrdinalHead(BaseHead):
 
 
 def _corn_loss(logits: torch.Tensor, ranks: torch.Tensor, num_ranks: int) -> torch.Tensor:
-    """CORN loss — conditional ordinal regression.
+    """CORN loss: conditional ordinal regression.
 
     For each rank k in [0, K-2], classifier k is trained only on
     samples where Y >= k, predicting P(Y > k | Y >= k).
@@ -173,7 +173,7 @@ class SemanticSegHead(BaseHead):
 
     Takes no ``loss`` name, and ``default_loss`` is empty on purpose: this head computes its own
     CE + multi-class Dice blend in ``compute_loss``, and there is no registry loss to route to.
-    ``build_loss("cross_entropy+dice")`` constructs but raises at forward — the registry's
+    ``build_loss("cross_entropy+dice")`` constructs but raises at forward: the registry's
     ``DiceLoss`` is binary (sigmoid + flatten) while this head emits multi-class logits.
     ``class_weights`` *is* honored, applied to the CE term.
     """
