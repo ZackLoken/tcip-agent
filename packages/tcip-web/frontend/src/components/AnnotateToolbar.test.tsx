@@ -96,7 +96,11 @@ describe("AnnotateToolbar draw mode", () => {
 
   it("Snap and Stream stay polygon-only in point mode (they have no meaning for a point)", () => {
     renderToolbar();
-    fireEvent.click(screen.getByRole("button", { name: /Editor/ })); // drop the tools shelf
+    // The shelf's open/closed state persists to localStorage, which vitest keeps across every
+    // test in this file (one jsdom environment per file, not per test) — a blind toggle click can
+    // close a shelf an earlier test left open instead of opening it.
+    const editorBtn = screen.getByRole("button", { name: /Editor/ });
+    if (editorBtn.getAttribute("aria-expanded") !== "true") fireEvent.click(editorBtn);
     fireEvent.click(modeButton("Point"));
     expect(screen.getByRole("button", { name: /Snap/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Stream/ })).toBeDisabled();
@@ -121,7 +125,8 @@ describe("AnnotateToolbar status filter", () => {
 
 describe("AnnotateToolbar band picker (progressive disclosure)", () => {
   function openEditor() {
-    fireEvent.click(screen.getByRole("button", { name: /Editor/ }));
+    const btn = screen.getByRole("button", { name: /Editor/ });
+    if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
   }
 
   it("is absent with no bandsInfo at all (a project with no channel-count fact yet)", () => {
