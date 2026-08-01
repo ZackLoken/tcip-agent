@@ -106,10 +106,34 @@ class TraitSpec:
     # is that optional override, not a value the platform applies for you.
     sliver_policy: str = "class_avg_size"
     sliver_frac: float = 0.5
-    # Max acceptable mean per-image count bias on the held-out split for the operating point to count
-    # as validated (a measurement decision — how unbiased the count must be to be trustworthy).
-    # ABSOLUTE count/image, breeder-set per trait (D12) — never scaled to a "typical" count, never derived.
-    count_bias_tolerance: float = 1.0
+    # Max acceptable mean per-image count bias on the held-out split, RELATIVE to the class's (or,
+    # for the pooled gate, the whole reference's) own typical per-image count, for the operating
+    # point to count as validated (a measurement decision — how much relative count error is
+    # trustworthy). A FRACTION (e.g. 0.1 == 10% relative error), breeder-set per trait (D12; K4
+    # residual, 2026-07-31, superseding D12's original "ABSOLUTE, never scaled" framing) — the
+    # breeder still authors the fraction (the same role D12's absolute value played); the platform
+    # derives what it is relative to (each scope's own typical per-image count, from the SAME
+    # holdout reference the equivalence test itself measures — never calibration, which would let a
+    # caller buy a looser holdout tolerance by padding calibration's own density) at runtime, never
+    # invented and never breeder-guessed. Applied identically wherever
+    # `operating_point._bias_equivalence_ok` is called — the pooled and per-class detector gates and
+    # the classifier path's positive-class gate — one field, one unit, everywhere it is read
+    # (deliberately not two different units at two call sites). A near-zero-typical-count scope is
+    # protected by a FLOOR THAT IS ITSELF DERIVED (`1 / n`, the same evidence count the equivalence
+    # test's own standard error already uses — see `operating_point._effective_count_bias_tolerance`),
+    # not by a second authored or platform-invented number. That floor can raise the EFFECTIVE
+    # tolerance above what the fraction term alone would give (it is a `max()`) — it is bounded,
+    # never a runaway number: at n >= 2 (the reference-sufficiency minimum every scope using this
+    # floor is independently gated on — see `insufficient_holdout_images`/
+    # `insufficient_holdout_images_per_class`) the floor itself never exceeds 0.5, at or below D12's
+    # old flat 1.0 default. 0.01 is an interim PLATFORM default (same "not yet authored for this
+    # trait" shape as `classifier_agreement_floor`'s `_PROVISIONAL_KAPPA_FLOOR`) — chosen so this
+    # default does not get looser than D12's old absolute default at the densities this platform's
+    # OWN TEST SUITE's dense fixtures use (~80-100 objects/image, the shape those fixtures' own
+    # docstrings describe as calibrated to a realistic detector, not verified against real breeder
+    # imagery) — pending the domain expert's real per-trait value, and a real density figure from an
+    # actual project once one exists.
+    count_bias_tolerance_frac: float = 0.01
     # Max acceptable p90 |per-image count error| (a TAIL statistic, not a mean — a population mean
     # can hide one badly-off image among many) on the held-out split. NO DEFAULT: an invented number
     # here would be platform-picked measurement semantics masquerading as a domain-expert one. `None`
