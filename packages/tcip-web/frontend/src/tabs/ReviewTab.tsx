@@ -14,9 +14,11 @@ import type Konva from "konva";
 import { api, IMAGE_MAX_WIDTH } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
 import { resultsApi, type RegisteredModel } from "@/api/inference";
+import { BandPicker } from "@/components/BandPicker";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
+import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
@@ -36,6 +38,7 @@ import {
   type CanvasStateBody,
 } from "@/lib/canvasSync";
 import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
+import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/datasetUiState";
 import {
   annotationGeometry,
@@ -133,6 +136,19 @@ export function ReviewTab() {
   const detectionIdx = filters.detection_idx;
   const { path: imgPath, name: imgName } = currentImagePath(dataset);
   const paths = useMemo(() => labelPaths(dataset, imgName), [dataset, imgName]);
+
+  // Band-composite picker (multispectral only). bandsInfo drives conditional visibility
+  // (band_count > 3); the selection is seeded from the reported bands and otherwise left to
+  // the breeder, carried across image navigation until the dataset's own band set changes.
+  const bandsInfo = useImageBands(imgPath);
+  const [bandSelection, setBandSelection] = useState<BandSelection | null>(null);
+  useEffect(() => {
+    if (bandsInfo && bandsInfo.band_count > 3) {
+      setBandSelection((prev) => prev ?? defaultBandSelection(bandsInfo.bands));
+    } else {
+      setBandSelection(null);
+    }
+  }, [bandsInfo]);
 
   // One GT dir + one prediction dir now (the detect/segment split is gone); a unified label file
   // holds every subject's box and polygon annotations together.
@@ -1004,7 +1020,19 @@ export function ReviewTab() {
     },
   ]);
 
-  const imageUrl = imgPath ? api.images.url(imgPath, IMAGE_MAX_WIDTH) : null;
+  const bandsParam =
+    bandsInfo && bandsInfo.band_count > 3 && bandSelection
+      ? `${bandSelection.r},${bandSelection.g},${bandSelection.b}`
+      : undefined;
+  const imageUrl = imgPath
+    ? api.images.url(
+        imgPath,
+        IMAGE_MAX_WIDTH,
+        undefined,
+        bandsParam,
+        bandsParam ? bandSelection?.stretch : undefined,
+      )
+    : null;
   const imgW = matches?.img_width ?? 0;
   const imgH = matches?.img_height ?? 0;
 
@@ -1322,6 +1350,18 @@ export function ReviewTab() {
             )}
             {pqStatus === "failed" && pqError && (
               <span className="text-tcip-fp max-w-[280px]">{pqError}</span>
+            )}
+
+            {bandsInfo && bandsInfo.band_count > 3 && bandSelection && (
+              <>
+                <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
+                <BandPicker
+                  bandCount={bandsInfo.band_count}
+                  bands={bandsInfo.bands}
+                  selection={bandSelection}
+                  onChange={setBandSelection}
+                />
+              </>
             )}
           </div>
         )}
