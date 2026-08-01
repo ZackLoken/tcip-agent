@@ -168,6 +168,85 @@ def test_capture_scoped_param_is_not_comparable_without_a_capture_id():
                .shippable_issues(target_capture_id="cap2"))
 
 
+# --- K10: tile_size gates the same shape conf already does ----------------
+
+def test_tile_size_untiled_is_never_gating():
+    # An untiled run's count never depends on tile_size — it stays a plain non-gating fact (mirrors
+    # in_chans), never manufacturing a refusal over a dimension that was never operative.
+    from tcip_mcp.pipelines.resolution import resolve_tile_size_param
+
+    p = resolve_tile_size_param(640, tiled=False, tile_size_source="default")
+    assert p.requires_validation is False
+    assert p.validation_kind is None
+    assert p._raw is None
+    assert p.is_shippable is True
+
+
+def test_tile_size_derived_from_checkpoint_geometry_is_shippable():
+    from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY, resolve_tile_size_param
+
+    p = resolve_tile_size_param(224, tiled=True, tile_size_source="derived")
+    assert p.requires_validation is True and p.validation_kind == "geometry"
+    assert p.validated_against == VALIDATED_PERSISTED_GEOMETRY
+    assert p.is_shippable is True
+    assert p.value == 224
+
+
+def test_tile_size_explicit_caller_override_is_shippable():
+    # Accepted on the same terms run_full_frame_evaluation already accepts an explicit value on: not
+    # cross-checked against the checkpoint's real training scale, but a stated decision, not a guess.
+    from tcip_mcp.pipelines.resolution import VALIDATED_EXPLICIT_GEOMETRY, resolve_tile_size_param
+
+    p = resolve_tile_size_param(512, tiled=True, tile_size_source="explicit")
+    assert p.requires_validation is True and p.validation_kind == "geometry"
+    assert p.validated_against == VALIDATED_EXPLICIT_GEOMETRY
+    assert p.is_shippable is True
+    assert p.value == 512
+
+
+def test_tile_size_fabricated_default_is_not_shippable():
+    # The exact hole K10 closes: a checkpoint with no persisted geometry and no explicit override
+    # fabricates a fallback (640) with no real basis — now firewalled the same shape conf is.
+    from tcip_mcp.pipelines.resolution import resolve_tile_size_param
+
+    p = resolve_tile_size_param(640, tiled=True, tile_size_source="default")
+    assert p.requires_validation is True and p.validation_kind == "geometry"
+    assert p.validated_against == VALIDATED_FALSE
+    assert p.is_shippable is False
+    with pytest.raises(UnvalidatedOperatingPointError):
+        _ = p.value
+    assert p.unvalidated_value(acknowledge_unvalidated=True) == 640
+
+
+def test_raw_operating_point_fabricated_tiled_default_surfaces_its_own_shippable_issue():
+    # Before K10: tile_size never participated in shippable_issues() at all, regardless of source —
+    # a fabricated 640 fallback was silently shippable engineering trivia. Now it surfaces its own
+    # named issue, independent of (and in addition to) conf's own always-unvalidated raw-path issue.
+    from tcip_mcp.pipelines.resolution import raw_operating_point
+
+    b = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=1000)
+    issues = b.shippable_issues()
+    assert any(i.startswith("tile_size:") for i in issues)
+    assert any(i.startswith("conf:") for i in issues)  # both dimensions gate independently
+
+
+def test_raw_operating_point_untiled_never_gates_tile_size():
+    # The rail must admit valid work, not only reject invalid work: an untiled call must never be
+    # refused over a tile_size that was never operative for it. Asserted as a CONTRAST against the
+    # same fabricated tile_size value actually gating once tiled=True — an untiled-only assertion
+    # alone would pass just as well against a broken build where tile_size never gates at all
+    # (exactly the pre-K10 baseline), so this pins the "only when operative" boundary, not merely
+    # "untiled is fine" in isolation.
+    from tcip_mcp.pipelines.resolution import raw_operating_point
+
+    tiled = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=1000)
+    assert any(i.startswith("tile_size:") for i in tiled.shippable_issues())
+
+    untiled = raw_operating_point(conf=0.9, cross_tile_nms=None, tiled=False, tile_size=None, max_dets=1000)
+    assert not any(i.startswith("tile_size:") for i in untiled.shippable_issues())
+    assert untiled.get("tile_size").requires_validation is False
+
+
 # --- bundle shippability + provenance ---
 
 def test_bundle_shippable_only_when_all_calibration_validated():
@@ -281,7 +360,7 @@ def test_catkin_trait_semantics():
     assert t.milestone_fractions == (0.05, 0.50, 0.95)
     assert t.milestone_on == "positive_fraction"
     assert t.sliver_policy == "class_avg_size"
-    assert t.count_bias_tolerance == 1.0
+    assert t.count_bias_tolerance_frac == 0.01
 
 
 def test_unknown_trait_lists_available():
