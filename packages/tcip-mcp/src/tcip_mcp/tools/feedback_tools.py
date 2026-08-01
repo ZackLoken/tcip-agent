@@ -1,4 +1,4 @@
-"""Review -> retrain feedback MCP tools (W5).
+"""Review -> retrain feedback MCP tools.
 
 ``materialize_review_dataset`` turns human review verdicts into a curated YOLO
 detection training set (with experiment lineage); ``prioritize_review_queue`` ranks
@@ -42,7 +42,7 @@ def materialize_review_dataset(
     """Build a curated detection dataset from human review verdicts.
 
     Accepted/edited GT boxes become positive name-based labels; rejected-only images become
-    empty-label hard negatives (keyed under ``subject`` — derived from the verdicts when omitted).
+    empty-label hard negatives (keyed under ``subject``, derived from the verdicts when omitted).
     When ``experiment_id`` is given, records the review session as experiment lineage. Output
     (``images/`` + ``annotations/``) chains straight into ``make_splits`` / ``launch_training``.
 
@@ -114,7 +114,7 @@ def prioritize_review_queue(
     """Order un-reviewed images for the next review batch.
 
     Two strategies:
-    - ``informativeness`` (default): rank by active-learning score (``method``) — the most
+    - ``informativeness`` (default): rank by active-learning score (``method``), the most
       uncertain/diverse frames first.
     - ``confidence_triage``: partition by prediction confidence into auto-accept
       (>= ``auto_threshold``) vs needs-review (in ``[low, high]``) queues.
@@ -126,7 +126,7 @@ def prioritize_review_queue(
             already-completed images.
         strategy: ``informativeness`` | ``confidence_triage``.
         method: Informativeness scorer. ``uncertainty`` | ``diversity`` | ``combined`` are the
-            built-in reference implementations, not the allowed set — register your own with
+            built-in reference implementations, not the allowed set: register your own with
             ``register_scorer``, or pass a dotted ``module:factory`` you wrote. An
             unresolvable name is refused rather than silently scored as ``combined``.
         task: Task type for the uncertainty scorer.
@@ -134,12 +134,12 @@ def prioritize_review_queue(
         skip_reviewed: Exclude already-completed images from the queue.
         low: Lower confidence bound for the review band (``confidence_triage`` only).
         high: Upper confidence bound for the review band (``confidence_triage`` only).
-        auto_threshold: Confidence at/above which a prediction is auto-accepted AS GROUND TRUTH
+        auto_threshold: Confidence at/above which a prediction is auto-accepted as ground truth
             (``confidence_triage`` only). ``None`` (default) refuses to auto-accept: turning
             predictions into GT at a pinned 0.8 fabricates labels the model was never confirmed to
-            get right. Per D11, derive this threshold from the model's VALIDATED confidence
+            get right. Derive this threshold from the model's validated confidence
             distribution and confirm with a breeder spot-check that high-conf actually equals truth,
-            then pass it explicitly — the result is stamped as requiring that confirmation.
+            then pass it explicitly: the result is stamped as requiring that confirmation.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -176,7 +176,7 @@ def prioritize_review_queue(
         predictor = build_predictor(checkpoint_path)
         predictions = predictor.predict_batch(paths)
         needs_review = review_queue(predictions, low=low, high=high)
-        # D11: auto-accept turns predictions into GT. Refuse to do so at a pinned threshold — the
+        # Auto-accept turns predictions into GT. Refuse to do so at a pinned threshold: the
         # threshold must be derived from the model's validated conf distribution and breeder
         # spot-checked. With no explicit (confirmed) threshold, accept nothing and say why.
         if auto_threshold is None:
@@ -188,7 +188,7 @@ def prioritize_review_queue(
                 "auto_accept_refused": (
                     "auto_threshold=None: auto-accepting predictions as GT requires a threshold "
                     "derived from the model's validated confidence distribution and confirmed by a "
-                    "breeder spot-check (D11); pass auto_threshold explicitly once confirmed."),
+                    "breeder spot-check; pass auto_threshold explicitly once confirmed."),
                 "needs_review": len(needs_review),
                 "review_images": [r.get("image", "") for r in needs_review],
                 "auto_accepted_images": [],
@@ -201,7 +201,7 @@ def prioritize_review_queue(
             "auto_accepted": len(accepted),
             "auto_accept_requires_breeder_confirmation": (
                 "auto-accepted labels are GT only if this threshold was breeder-confirmed on a "
-                "high-conf sample (D11)"),
+                "high-conf sample"),
             "needs_review": len(needs_review),
             "review_images": [r.get("image", "") for r in needs_review],
             "auto_accepted_images": [a.get("image", "") for a in accepted],
@@ -222,7 +222,7 @@ def prioritize_review_queue(
         return {"error": guard}
     try:
         scorer = build_scorer(method, task)
-    except ValueError as e:  # unknown scorer — refuse rather than silently reordering the queue
+    except ValueError as e:  # unknown scorer: refuse rather than silently reordering the queue
         return {"error": str(e)}
 
     scored = scorer.score(paths, predictor.model, predictor.device)[:budget]
