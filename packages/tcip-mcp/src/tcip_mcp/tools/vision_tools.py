@@ -12,7 +12,6 @@ from typing import Callable
 
 from tcip_annotation import Annotation, Point, Polygon, bbox_of, load_annotations_any
 from tcip_annotation.json_io import read_annotations as read_labels
-from tcip_annotation.utils import get_image_dimensions
 from tcip_annotation.viz import (
     render_candidates,
     render_canvas_state,
@@ -27,6 +26,82 @@ from tcip_annotation.viz import (
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import mcp
+
+
+def _materialize_if_needed(source) -> str:
+    """The real path to hand a (photographic-only) renderer for an already-resolved image source.
+
+    A plain photographic file (jpg/png/heic/bmp) is returned unchanged. So is an ordinary
+    photographic-shaped GeoTIFF (1/3/4 bands — a real, pre-existing supported format PIL decodes
+    in true color, unchanged from before band-group support existed). Only a genuinely
+    non-standard source — a ``.bandgroup``-grouped capture, or a raster whose band count PIL's own
+    1/3/4-channel modes don't cover (npy/npz, or a >4-band GeoTIFF) — decodes through the
+    channel-aware ``image_utils`` and is materialized to a throwaway 8-bit RGB preview (first three
+    bands, independently min-max stretched; a single band is repeated across channels) under
+    ``.tcip/artifacts/viz/_band_previews/``. Never a measurement artifact — visualization only.
+    """
+    from tcip_mcp.pipelines import image_utils
+    from tcip_mcp.pipelines.derivations import probe_channels
+
+    if isinstance(source, Path):
+        ext = source.suffix.lower()
+        if ext not in (".npy", ".npz", ".tif", ".tiff"):
+            return str(source)
+        if ext in (".tif", ".tiff") and probe_channels(source) in (1, 3, 4):
+            # A photographic-shaped GeoTIFF: PIL decodes it directly, same as any other
+            # supported format — no synthetic stretch for what is really an ordinary image.
+            return str(source)
+
+    n = probe_channels(source)
+    arr = image_utils.load_multiband(source, n)
+    return _band_preview_png(arr, source.stem)
+
+
+def _band_preview_png(arr, stem: str) -> str:
+    import numpy as np
+    from PIL import Image as _Image
+
+    n_bands = arr.shape[-1]
+    idxs = [0, 1, 2] if n_bands >= 3 else [0, 0, 0]
+    channels = []
+    for i in idxs:
+        band = arr[:, :, i].astype(np.float64)
+        lo, hi = float(band.min()), float(band.max())
+        stretched = (band - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(band)
+        channels.append(stretched.astype(np.uint8))
+    rgb = np.stack(channels, axis=-1)
+
+    from tcip_mcp.project_paths import resolve_state
+
+    out_dir = resolve_state(Path(".tcip") / "artifacts" / "viz" / "_band_previews")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{stem}.png"
+    _Image.fromarray(rgb, mode="RGB").save(out_path)
+    return str(out_path)
+
+
+def _resolve_render_path(images_dir, stem: str) -> str | None:
+    """The real path to hand a renderer for ``stem`` in ``images_dir`` — ``None`` if ``stem``
+    isn't a resolvable logical image (missing, or a stale band-group manifest)."""
+    from tcip_mcp.pipelines import image_utils
+
+    try:
+        source = image_utils.resolve_image_source(images_dir, stem)
+    except (FileNotFoundError, image_utils.BandGroupIncomplete):
+        return None
+    return _materialize_if_needed(source)
+
+
+def _renderable_path(image_path: str) -> str:
+    """As ``_resolve_render_path``, for a caller that already has a path rather than a
+    ``(dir, stem)`` pair. Falls back to ``image_path`` unchanged when it isn't resolvable through
+    the enumeration primitive (e.g. a path outside any recognized ``images/`` layout) — the
+    caller's own not-a-file / not-found handling surfaces the real error instead of this silently
+    swallowing it.
+    """
+    img = Path(image_path)
+    out = _resolve_render_path(img.parent, img.stem)
+    return out if out is not None else image_path
 
 
 def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
@@ -160,9 +235,10 @@ def _viz_annotations(
     idx, index = _subject_indexer()
 
     n_points = _n_points(anns)
+    render_path = _renderable_path(image_path)
     if task == "detect":
         shapes = _boxable(anns)
-        out = render_detections(image_path, [_box_dict(a, index) for a in shapes],
+        out = render_detections(render_path, [_box_dict(a, index) for a in shapes],
                                 class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} detections on {img.name}"
         if shapes:
@@ -172,7 +248,7 @@ def _viz_annotations(
         summary += _point_note(n_points)
     else:
         shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
-        out = render_segmentations(image_path, [_poly_dict(a, index) for a in shapes],
+        out = render_segmentations(render_path, [_poly_dict(a, index) for a in shapes],
                                    class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} segmentation masks on {img.name}" + _point_note(n_points)
 
@@ -213,14 +289,15 @@ def _viz_predictions(
     idx, index = _subject_indexer()
 
     n_points = _n_points(preds)
+    render_path = _renderable_path(image_path)
     if task == "detect":
         shapes = _boxable(preds)
-        out = render_detections(image_path, [_box_dict(a, index) for a in shapes],
+        out = render_detections(render_path, [_box_dict(a, index) for a in shapes],
                                 class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} predictions on {img.name}" + _point_note(n_points)
     else:
         shapes = [a for a in preds if isinstance(a.geometry, Polygon)]
-        out = render_segmentations(image_path, [_poly_dict(a, index) for a in shapes],
+        out = render_segmentations(render_path, [_poly_dict(a, index) for a in shapes],
                                    class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} prediction masks on {img.name}" + _point_note(n_points)
 
@@ -280,7 +357,8 @@ def _viz_comparison(
     else:
         tp, fp, fn = 0, 0, len(gt)
 
-    out = render_comparison(image_path, gt_dicts, pred_dicts, matches=[], class_names=_name_map(idx))
+    out = render_comparison(_renderable_path(image_path), gt_dicts, pred_dicts, matches=[],
+                            class_names=_name_map(idx))
 
     return {
         "image_path": out,
@@ -342,13 +420,7 @@ def render_failure_cases(
     img_dir = Path(images_dir)
     for item in worst_items:
         stem = item["stem"]
-        # Find actual image path
-        img_path = None
-        for ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
-            candidate = img_dir / f"{stem}{ext}"
-            if candidate.is_file():
-                img_path = str(candidate)
-                break
+        img_path = _resolve_render_path(img_dir, stem)
         if not img_path:
             continue
 
@@ -398,46 +470,57 @@ def _viz_dataset_sample(
     """Render a grid of random annotated dataset samples. See ``visualize``."""
     from tcip_annotation.format_io import detect_format
     from tcip_mcp.dataset_layout import find_gt_label
+    from tcip_mcp.pipelines.image_utils import (
+        BandGroupIncomplete, BandGroupRef, list_logical_images, resolve_image_source,
+    )
 
     root = Path(folder_path)
     images_dir = root / "images"
     if not images_dir.is_dir():
         return {"error": f"Images directory not found: {images_dir}"}
 
-    # Collect all image paths (recurse for the canonical images/<date>/ layout).
-    all_images = sorted(
-        p for p in images_dir.rglob("*")
-        if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".tif", ".tiff")
-    )
+    # Every logical image at or under images_dir, folding sibling band files into one grouped
+    # entry per capture — recurses into images/<date>/ subfolders (the canonical layout) and any
+    # deeper nesting, mirroring the old flat rglob extension scan.
+    dirs = {images_dir} | {p for p in images_dir.rglob("*") if p.is_dir()}
+    all_images: list[tuple[Path, str]] = [
+        (d, stem) for d in sorted(dirs) for stem in sorted(list_logical_images(d))
+    ]
     if not all_images:
         return {"error": "No images found in dataset"}
 
     sample = random.sample(all_images, min(n, len(all_images)))
     rendered_paths = []
     titles = []
-    for img_path in sample:
-        label_path = find_gt_label(str(img_path))
+    for d, stem in sample:
+        try:
+            source = resolve_image_source(d, stem)
+        except (FileNotFoundError, BandGroupIncomplete):
+            continue
+        rep_path = source.manifest_path if isinstance(source, BandGroupRef) else source
+        label_path = find_gt_label(str(rep_path))
         if label_path is not None:
             try:
                 fmt = detect_format(str(label_path))
             except ValueError:
                 label_path = None  # unrecognized store: render the image without labels
+        render_path = _materialize_if_needed(source)
         if label_path is not None:
             idx, index = _subject_indexer()
-            anns = load_annotations_any(str(label_path), fmt=fmt, file_name=img_path.name)
+            anns = load_annotations_any(str(label_path), fmt=fmt, file_name=rep_path.name)
             if task == "detect":
                 shapes = _boxable(anns)
-                out = render_detections(str(img_path), [_box_dict(a, index) for a in shapes],
+                out = render_detections(render_path, [_box_dict(a, index) for a in shapes],
                                         class_names=_name_map(idx))
             else:
                 shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
-                out = render_segmentations(str(img_path), [_poly_dict(a, index) for a in shapes],
+                out = render_segmentations(render_path, [_poly_dict(a, index) for a in shapes],
                                            class_names=_name_map(idx))
-            titles.append(f"{img_path.stem} ({len(shapes)})")
+            titles.append(f"{stem} ({len(shapes)})")
         else:
             # No annotations — just use raw image
-            out = str(img_path)
-            titles.append(f"{img_path.stem} (no labels)")
+            out = render_path
+            titles.append(f"{stem} (no labels)")
 
         rendered_paths.append(out)
 
@@ -504,7 +587,7 @@ def propose_annotations(
             "candidates": [],
         }
 
-    out = render_candidates(image_path, candidates)
+    out = render_candidates(_renderable_path(image_path), candidates)
 
     # Resolve state via the platform root, not a CWD-relative path, so the
     # handoff to accept_proposals survives CWD != project root. The envelope records the engine so
@@ -576,7 +659,9 @@ def accept_proposals(
     candidates = envelope.get("candidates", [])
     cand_map = {c["candidate_id"]: c for c in candidates}
 
-    w, h = get_image_dimensions(image_path)
+    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
+
+    w, h = image_dimensions(resolve_image_source(img.parent, img.stem))
 
     # Build name-based predictions from accepted candidates (created_by=<engine>, score = the
     # engine's proposal score). Each candidate becomes ONE Annotation under its subject carrying
@@ -620,7 +705,7 @@ def accept_proposals(
 
     # Render final result for QA
     idx, index = _subject_indexer()
-    out = render_detections(image_path, [_box_dict(a, index) for a in proposals],
+    out = render_detections(_renderable_path(image_path), [_box_dict(a, index) for a in proposals],
                             class_names=_name_map(idx))
 
     note = (f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
@@ -711,7 +796,7 @@ def capture_live_canvas(
     )
     shapes = (sdoc.get("shapes") or []) if shapes_valid else []
     out = render_canvas_state(
-        src_image, shapes, viewport=state.get("viewport"),
+        _renderable_path(src_image), shapes, viewport=state.get("viewport"),
         crop_to_viewport=crop_to_viewport, max_edge=max_edge,
     )
 
@@ -785,7 +870,7 @@ def overlay_reference_grid(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    out = render_grid_overlay(image_path, cols=cols, rows=rows)
+    out = render_grid_overlay(_renderable_path(image_path), cols=cols, rows=rows)
 
     return {
         "image_path": out,
