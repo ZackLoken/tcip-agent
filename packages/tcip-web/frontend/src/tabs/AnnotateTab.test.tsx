@@ -45,6 +45,7 @@ vi.mock("@/components/Canvas/CanvasStage", () => ({
   CanvasStage: (props: {
     children?: React.ReactNode;
     overlay?: React.ReactNode;
+    imageUrl?: string | null;
     onPixelDown?: (x: number, y: number, ev: unknown) => void;
     onPixelMove?: (x: number, y: number, ev: unknown) => void;
     onPixelUp?: (x: number, y: number, ev: unknown) => void;
@@ -53,6 +54,7 @@ vi.mock("@/components/Canvas/CanvasStage", () => ({
   }) => (
     <div
       data-testid="canvas-stage"
+      data-image-url={props.imageUrl ?? ""}
       onMouseDown={(e) => props.onPixelDown?.(e.clientX, e.clientY, { evt: { button: e.button } })}
       onMouseMove={(e) => props.onPixelMove?.(e.clientX, e.clientY, { evt: { buttons: 1 } })}
       onMouseUp={(e) => props.onPixelUp?.(e.clientX, e.clientY, { evt: {} })}
@@ -69,7 +71,9 @@ vi.mock("@/components/Canvas/CanvasStage", () => ({
   ),
 }));
 vi.mock("@/components/AnnotateToolbar", () => ({
-  AnnotateToolbar: () => <div data-testid="toolbar" />,
+  AnnotateToolbar: (props: { bandsInfo?: { band_count: number } | null }) => (
+    <div data-testid="toolbar" data-band-count={props.bandsInfo?.band_count ?? ""} />
+  ),
 }));
 
 const initialStoreState = useStore.getState();
@@ -134,6 +138,16 @@ beforeEach(() => {
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue({ status: "ok", base_mtime: "1" });
   vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
   vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({});
+  // Default: a standard 3-band RGB image — the band picker's own describe block overrides this
+  // per-case to exercise the >3-band path.
+  vi.spyOn(api.images, "bands").mockResolvedValue({
+    band_count: 3,
+    bands: [
+      { name: "Red", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
+      { name: "Green", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
+      { name: "Blue", wavelength_nm: null, dtype: "uint8", min: 0, max: 255 },
+    ],
+  });
 });
 
 afterEach(cleanup);
@@ -564,5 +578,41 @@ describe("AnnotateTab legend", () => {
 
     act(() => useStore.getState().setMode("polygon"));
     expect(screen.queryByText("Dashed = polygon's box (read-only)")).not.toBeInTheDocument();
+  });
+});
+
+describe("AnnotateTab band-composite wiring", () => {
+  it("passes the standard 3-band dataset's own bandsInfo down to the toolbar untouched", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    expect(screen.getByTestId("toolbar")).toHaveAttribute("data-band-count", "3");
+    // No bands/stretch param for a plain RGB dataset — the canvas URL is unaffected.
+    const url = screen.getByTestId("canvas-stage").getAttribute("data-image-url") ?? "";
+    expect(url).not.toContain("bands=");
+    expect(url).not.toContain("stretch=");
+  });
+
+  it("carries a >3-band dataset's picked bands/stretch into the canvas image URL", async () => {
+    vi.spyOn(api.images, "bands").mockResolvedValue({
+      band_count: 4,
+      bands: [
+        { name: "Blue", wavelength_nm: 475, dtype: "uint16", min: 0, max: 65535 },
+        { name: "Green", wavelength_nm: 560, dtype: "uint16", min: 0, max: 65535 },
+        { name: "Red", wavelength_nm: 650, dtype: "uint16", min: 0, max: 65535 },
+        { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
+      ],
+    });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("toolbar")).toHaveAttribute("data-band-count", "4"),
+    );
+    const url = screen.getByTestId("canvas-stage").getAttribute("data-image-url") ?? "";
+    // Defaulted to the first three reported bands (Blue, Green, Red) and the Min-Max stretch.
+    expect(url).toContain(`bands=${encodeURIComponent("Blue,Green,Red")}`);
+    expect(url).toContain("stretch=minmax");
   });
 });
