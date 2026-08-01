@@ -310,7 +310,7 @@ def get_augmentation_preset(name: str, image_size: tuple[int, int] = (640, 640))
 
     ``nadir_rotation`` mirrors the chestnut-burr small-object policy (training.py
     317-320): free rotation + h/v flips + mild jitter, with mosaic/copy-paste/mixup
-    intentionally OMITTED (they shrink small objects / stitch unnatural composites).
+    intentionally omitted (they shrink small objects / stitch unnatural composites).
     """
     presets: dict[str, dict] = {
         "nadir_rotation": {
@@ -356,7 +356,7 @@ def build_augmentation(config: dict | str, backend: str = "pil") -> Compose:
       - bool: True → use defaults
 
     ``backend="albumentations"`` is accepted for forward-compatibility but currently
-    falls back to the PIL pipeline (with a warning) — the PIL transforms preserve the
+    falls back to the PIL pipeline (with a warning); the PIL transforms preserve the
     ``(PIL, target) -> (tensor, target)`` contract.
 
     Returns a Compose([..., ToTensor()]) pipeline.
