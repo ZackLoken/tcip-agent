@@ -160,3 +160,63 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
     # Fix D: the applied score_thresh (0.01) is threaded through as staged_conf_floor, not a bare
     # literal re-typed a third time.
     assert calls["resolve_operating_point_kwargs"]["staged_conf_floor"] == pytest.approx(0.01)
+    # K10: this script's own pass (_records) is always untiled (a plain DataLoader, never
+    # predict_tiled) — tiled=False must be stated explicitly, or resolve_operating_point's
+    # tiled=True default would wrongly gate (or falsely validate) a tile_size dimension that was
+    # never actually operative for this untiled calibration pass.
+    assert calls["resolve_operating_point_kwargs"]["tiled"] is False
+
+
+def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypatch, tmp_path):
+    """K7 residual (detector-cap censoring): the cap that actually governs the collection pass is
+    set_detector_operating_point's detections_per_img call, which executes AFTER build_predictor's
+    construction-time DEFAULT_MAX_DETS and overrides it. This split's labels are sparse (2 objects
+    per stem) so the density-derived cap floors at 100 — well below DEFAULT_MAX_DETS (1000) — proving
+    the collection pass is no longer capped at the flat constant."""
+    from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
+
+    class _Model:
+        detector = SimpleNamespace(roi_heads=SimpleNamespace(
+            score_thresh=0.5, nms_thresh=0.5, detections_per_img=DEFAULT_MAX_DETS))
+
+    class _Predictor:
+        def __init__(self):
+            self.model = _Model()
+            self.device = "cpu"
+            self.train_tile_size = None
+
+    monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
+                        lambda *, checkpoint_path, device, max_dets=None, **kw: _Predictor())
+
+    class _Probe:
+        stems = ["a", "b"]
+
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
+    # Sparse split: 2 objects/stem -> derive_max_dets_from_counts floors at 100, well under
+    # DEFAULT_MAX_DETS (1000) — a real, visible difference from the flat constant.
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s: 2)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
+                        lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
+    monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
+    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.records_over_loader",
+                        lambda model, loader, device, task: [])
+
+    def _resolve_op(trait_name, **kw):
+        from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
+        conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
+                       derived_from="x", validated_against="false", sweep={})
+        return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"), params={"conf": conf})
+
+    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
+    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
+                        lambda b, locked: None)
+    monkeypatch.setattr("tcip_mcp.project_paths.project_root", lambda: tmp_path)
+
+    from scripts.calibrate_operating_point import main
+
+    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images")])
+    assert rc == 0
+    applied_cap = _Model.detector.roi_heads.detections_per_img
+    assert applied_cap == 100  # derive_max_dets_from_counts([2, 2]) floor
+    assert applied_cap != DEFAULT_MAX_DETS
