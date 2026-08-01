@@ -165,6 +165,24 @@ def build_scheduler(
     return create_scheduler(ray_name, **kwargs)
 
 
+def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
+    """Derive a per-trial Ray resource request from the host's actual GPU count and the caller's
+    own requested concurrency (K24) — never a pinned number. ``gpu=0.0`` with no CUDA device;
+    otherwise ``device_count / max_concurrent`` capped at 1.0, so ``max_concurrent`` trials the
+    agent asked to run at once actually get non-overlapping (or fairly-shared) GPU allocations
+    instead of every trial silently defaulting to Ray's own 0-GPU request and all contending for
+    whatever `TrainContext.device` happens to resolve to. ``max_concurrent=1`` (today's default)
+    yields ``gpu=1.0`` — byte-identical to today's implicit whole-device behavior when unset.
+    """
+    try:
+        import torch
+        count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    except Exception:
+        count = 0
+    gpu = 0.0 if count == 0 else min(1.0, count / max(max_concurrent, 1))
+    return {"cpu": 1.0, "gpu": gpu}
+
+
 def tune_search(
     objective_fn: Callable[[dict, Callable[[float], None]], Any],
     param_space: dict | None = None,
@@ -182,6 +200,7 @@ def tune_search(
     baseline_params: dict | None = None,
     storage_path: str | None = None,
     study_name: str = "tcip_hpo",
+    resources_per_trial: dict | None = None,
 ) -> dict:
     """Run an HPO sweep on Ray Tune.
 
@@ -197,6 +216,9 @@ def tune_search(
         max_concurrent: trials to run at once (default 1 — safe for single-GPU training).
         warm_start: seed the search with ``baseline_params`` (or the default baseline).
         storage_path: where Ray persists trial results (also the TensorBoard logdir root).
+        resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as
+            a fraction for sharing). Omit to derive one from the host's real GPU count and
+            ``max_concurrent`` (K24) — an explicit value always wins over the derivation.
 
     Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
     ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).
@@ -205,6 +227,7 @@ def tune_search(
     from ray import tune
 
     space = _to_tune_space(param_space or get_default_space(), grid=(search_alg == "grid"))
+    resources = resources_per_trial or _default_trial_resources(max_concurrent)
 
     points = None
     if warm_start:
@@ -233,6 +256,8 @@ def tune_search(
 
     def trainable(config: dict) -> None:
         objective_fn(config, lambda value: tune.report({metric: float(value)}))
+
+    trainable = tune.with_resources(trainable, resources=resources)
 
     run_kwargs: dict[str, Any] = {"verbose": 0}
     if storage_path:
