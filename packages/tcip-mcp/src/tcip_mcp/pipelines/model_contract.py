@@ -1,16 +1,16 @@
-"""The one model-side contract: the measurement boundary — as a behavioral check, not a mold.
+"""The one model-side contract: the measurement boundary, as a behavioral check, not a mold.
 
 TCIP Agent owns architecture and the training loop; the platform does not dictate a model's
 internals. The single thing a model must honor is that it *trains* and its *inference output is
 something the library scorers can measure*:
 
-* ``TCIPModel`` — a ``runtime_checkable`` Protocol naming the minimal surface (any ``nn.Module``
-  satisfies it). It is a duck-type marker, not an architecture requirement — no ``freeze_backbone``
+* ``TCIPModel``: a ``runtime_checkable`` Protocol naming the minimal surface (any ``nn.Module``
+  satisfies it). It is a duck-type marker, not an architecture requirement; no ``freeze_backbone``
   / ``head0_*`` here (those are optional conveniences the default trainer uses if present).
-* ``check_model_contract(model, task)`` — a behavioral smoke: a train-mode forward yields a finite
+* ``check_model_contract(model, task)``: a behavioral smoke: a train-mode forward yields a finite
   loss with a gradient, and an eval-mode forward yields the documented shape for the task
   (``list[dict]`` per image for detection/instance_seg, a ``dict`` of tensors otherwise).
-* ``overfit_check(model, task, steps)`` — the cheap proof a from-scratch model actually learns:
+* ``overfit_check(model, task, steps)``: the cheap proof a from-scratch model actually learns:
   a few optimizer steps on one fixed tiny batch (seeded, CPU) must drive the loss down.
 
 All torch use is lazy (inside the functions) so importing this module stays cheap.
@@ -22,7 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 
 _DETECTION_TASKS = {"detection", "instance_seg"}
 # The tasks ``_synth_batch`` can shape a batch for. A task outside this set is not refused as
-# unsupported — the platform has no fixed task taxonomy — but it cannot be smoked blind, so the
+# unsupported (the platform has no fixed task taxonomy), but it cannot be smoked blind, so the
 # caller supplies ``sample_batch=`` instead of the contract inventing a shape for it.
 _SYNTHESIZABLE_TASKS = _DETECTION_TASKS | {
     "classification", "ordinal", "regression", "semantic_seg",
@@ -81,7 +81,7 @@ def _synth_batch(task: str, *, in_chans: int, num_classes: int, img_size: int, d
 
 
 def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
-    """Whether ``value`` is a tensor, or a list/tuple/dict that carries one — any depth up to
+    """Whether ``value`` is a tensor, or a list/tuple/dict that carries one, any depth up to
     ``_max_depth``. A bespoke non-detection output's per-key shape is the agent's to choose (e.g. a
     ragged per-image list of tensors, or a nested dict of them), so a scorer-consumable prediction
     is not only a top-level tensor value; the depth bound just keeps this from walking an unbounded
@@ -145,10 +145,10 @@ def check_model_contract(
     dev = torch.device(device)
     try:
         model.to(dev)
-    except Exception:  # noqa: BLE001 — a model without .to still may be usable on cpu
+    except Exception:  # noqa: BLE001, a model without .to still may be usable on cpu
         pass
 
-    # Train pass — finite loss with a gradient.
+    # Train pass: finite loss with a gradient.
     try:
         model.train()
         images, targets = (sample_batch if sample_batch is not None else
@@ -170,7 +170,7 @@ def check_model_contract(
     except Exception as exc:  # noqa: BLE001
         issues.append(f"train-mode forward/backward failed: {exc}")
 
-    # Eval pass — documented output shape.
+    # Eval pass: documented output shape.
     try:
         model.eval()
         images, _ = (sample_batch if sample_batch is not None else
@@ -183,7 +183,7 @@ def check_model_contract(
             required = {"boxes", "scores", "labels"}
             if task == "instance_seg":
                 # instance_seg trains on real masks (_synth_batch above already supplies
-                # target["masks"]) — a model whose eval output drops them passes as a detector
+                # target["masks"]); a model whose eval output drops them passes as a detector
                 # while the platform's only sanctioned dimensional measurement can never reach it.
                 required = required | {"masks"}
             if not (isinstance(out, list) and out and isinstance(out[0], dict)
@@ -195,10 +195,10 @@ def check_model_contract(
                 issues.append(f"non-detection eval output is not a dict (got {type(out).__name__})")
             elif not any(_contains_tensor(v) for v in out.values()):
                 # Which keys a task uses is the agent's to choose, so none are named here. But a
-                # dict carrying no tensor — anywhere in a value's own list/tuple/dict nesting, not
-                # only at the top level — is not a prediction, and no scorer can consume it.
+                # dict carrying no tensor, anywhere in a value's own list/tuple/dict nesting, not
+                # only at the top level, is not a prediction, and no scorer can consume it.
                 issues.append(
-                    f"non-detection eval output carries no tensor value (keys: {sorted(out)}) — "
+                    f"non-detection eval output carries no tensor value (keys: {sorted(out)}); "
                     "nothing downstream can read a measurement from it"
                 )
     except Exception as exc:  # noqa: BLE001
@@ -213,16 +213,16 @@ def overfit_check(
     img_size: int = 64, seed: int = 0, lr: float = 1e-2, device: str = "cpu",
     sample_batch: Any = None,
 ) -> dict:
-    """Drive ``steps`` optimizer updates on ONE fixed tiny batch; the loss must fall.
+    """Drive ``steps`` optimizer updates on one fixed tiny batch; the loss must fall.
 
     Seeded + CPU by default so the result is reproducible. Returns
     ``{"passed": bool, "losses": [...], "initial": float, "final": float, "issue": str|None}``.
-    ``passed`` iff every loss is finite and the final loss is strictly below the initial one —
+    ``passed`` iff every loss is finite and the final loss is strictly below the initial one,
     the minimal evidence a bespoke model with a real learnable path actually optimizes.
 
     ``sample_batch`` is an ``(images, targets)`` pair from your own dataset, required for a task
     outside ``_SYNTHESIZABLE_TASKS``. Without it such a task returns ``passed: False`` with the
-    reason in ``issue`` — it never raises.
+    reason in ``issue``; it never raises.
     """
     import torch
 
@@ -239,7 +239,7 @@ def overfit_check(
         images, targets = (sample_batch if sample_batch is not None else
                            _synth_batch(task, in_chans=in_chans, num_classes=num_classes,
                                         img_size=img_size, device=dev))
-    except ValueError as exc:  # no schema for this task — report, never raise (this returns a dict)
+    except ValueError as exc:  # no schema for this task: report, never raise (this returns a dict)
         return {"passed": False, "losses": [], "initial": None, "final": None, "issue": str(exc)}
     optimizer = torch.optim.Adam((p for p in model.parameters() if p.requires_grad), lr=lr)
 
