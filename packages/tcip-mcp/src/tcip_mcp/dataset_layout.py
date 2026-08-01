@@ -179,8 +179,8 @@ def status_bucket(subject: str, date: Optional[str]) -> str:
     Scoped by subject and date but **not** task: a Complete covers detect and segment together,
     which is how ``derive_image_status`` already evaluates them. A store keyed by image name alone
     re-applies one subject's confirmations to every other subject. ``subject`` must be a real subject
-    (callers supply it); there is no catch-all default; a bush image confirmed empty of catkins is
-    still positive for bush.
+    (callers supply it); there is no catch-all default; a bush image confirmed empty of one
+    subject is still positive for another.
     """
     return f"{subject}/{date}" if date else subject
 
