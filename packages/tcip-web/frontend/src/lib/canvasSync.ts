@@ -189,7 +189,9 @@ export function buildAnnotateShapes(args: {
       shapes.push({
         kind: "polyline",
         points: rPts(args.currentPolygon),
-        color: "#FFE7B1",
+        // Mirrors the canvas's own InProgressPolygon stroke exactly: the active subject's colour,
+        // amber only in the edge case where nothing is selected (drawing is otherwise blocked).
+        color: args.activeSubject ? args.colorFor(args.activeSubject) : "#FFE7B1",
         dashed: true,
         label: "drawing",
         tag: "in_progress",
@@ -218,8 +220,8 @@ export function buildAnnotateShapes(args: {
   // ...plus each active-subject polygon's read-only derived box, mirroring the canvas so the capture
   // stays faithful. Derived from ringsBbox here — the same min/max the loader and COCO export
   // re-derive, over every ring — never a stored box, so it can't be double-counted as its own
-  // annotation. Solid like every committed shape (dashed is reserved for transient/under-review
-  // shapes); how to signal derived-vs-editable is deferred GUI-polish (see the plan).
+  // annotation. Dashed distinguishes it from a real editable box (solid) — the same convention the
+  // in-progress/under-review shapes already use for "not a committed, directly-editable annotation."
   args.polygons.forEach((p) => {
     if (!boxMode || p.subject !== args.activeSubject) return;
     const [x1, y1, x2, y2] = ringsBbox(p.rings);
@@ -227,6 +229,7 @@ export function buildAnnotateShapes(args: {
       kind: "box",
       xyxy: [r1(x1), r1(y1), r1(x2), r1(y2)],
       color: args.colorFor(p.subject),
+      dashed: true,
       label: p.subject,
       tag: "gt",
       created_by: p.created_by ?? null,
