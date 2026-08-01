@@ -78,8 +78,10 @@ def test_reference_floored_at_the_real_calibration_floor_still_validates():
     # original test obligations despite the design's own warning that a naive fix could make
     # validation permanently unreachable.
     cal, hold = _cal_holdout(fp_score=0.05)
+    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, staged_conf_floor=0.01)
+                                holdout_records=hold, tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.9)
     assert conf.validated_against == "held_out_annotations"
@@ -127,8 +129,10 @@ def test_asserted_vs_observed_floor_mismatch_is_surfaced_but_never_gates():
     # must not by itself refuse a reference whose pick (0.9) is genuinely above the floor and whose
     # count bias otherwise passes cleanly.
     cal, hold = _cal_holdout(fp_score=0.5)
+    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
-                                holdout_records=hold, staged_conf_floor=0.01)
+                                holdout_records=hold, tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
