@@ -23,6 +23,65 @@ from tcip_mcp.pipelines.resolution import (
 logger = logging.getLogger(__name__)
 
 
+def resolve_decode_id_map(predictor, images_dir: str | None) -> dict | None:
+    """This run's name->id map for recording + decoding predictions (K25/K13.5-2c).
+
+    The ONE resolution every door that writes predictions to disk calls — this tool's own
+    ``run_inference`` and the web GUI's inference worker (``tcip_web.routes.inference``) — never a
+    second implementation (CLAUDE.md: "when two code paths must agree, call one from the other").
+    An earlier version of the GUI worker re-derived this locally and its own comment claimed parity
+    with this function while doing something different once this function started preferring the
+    training-recorded map — exactly the drift that rule exists to prevent.
+
+    Prefers the *training* run's own recorded map (stamped onto ``config["data"]["id_map"]`` by
+    ``subprocess_worker.py::run`` right after the dataset is built, so it travels on the checkpoint
+    the SAME way ``subject``/``attribute`` already do) over re-deriving one from the inference
+    dataset's live registry — the model can only speak the vocabulary it was trained on, so the
+    training map is the correct decode map by definition, and it is immune to a ``classes.json``
+    whose declared attribute-value order was edited after training. A checkpoint with no recorded
+    map (a bespoke ``dataset_source`` with no registry scope, or a run trained from a pre-built COCO
+    source whose id space isn't registry-derived — ``_resolve_run_id_map`` deliberately does not
+    record one for either) falls through to the live-registry derivation — the same honest,
+    order-invariant-for-single-class degraded path this already was.
+
+    A registry read that fails for a REAL reason (corrupted file, an id-space mismatch) propagates
+    loudly from here — but ``run_inference`` lets that reach its own caller, while the GUI worker
+    (``routes/inference.py``) wraps this whole call in a broad except and degrades to ``id_map=None``
+    on ANY failure; the two doors share this one resolution but choose different failure postures on
+    top of it, not two different resolutions.
+    """
+    data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
+    subject = data_cfg.get("subject")
+    attribute = data_cfg.get("attribute")
+    recorded_id_map = data_cfg.get("id_map")
+    if isinstance(recorded_id_map, dict) and recorded_id_map:
+        return {str(k): int(v) for k, v in recorded_id_map.items()}
+    if not (subject and images_dir):
+        return None
+
+    from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, resolved_classes_path
+
+    # Precondition check, not a broad except (K18 B2 stage-6 review, round 2): attribute-scoped
+    # decode with no classes.json for this dataset is a legitimate, honest degraded case
+    # write_predictions_json already documents and accepts ("the raw 0-indexed id is used as
+    # the name... never a re-derivation") — id_map stays None rather than crashing on already-
+    # completed, valid prediction work. Reuses resolved_classes_path — the SAME "does a
+    # registry exist" check _resolve_registry_id_map's own refusal is built on, not a second
+    # independent re-derivation of that fact (round-1 review found the first version of this
+    # fix duplicated it locally). A registry that IS present but fails to read/resolve for a
+    # real reason (corrupted file, an id-space mismatch) still propagates loudly — this
+    # precondition only short-circuits the one case that's supposed to degrade honestly, the
+    # same case _resolve_registry_id_map's own attribute-without-registry ValueError names.
+    # Not the same shape as model_build.py's resolve_contract_dims precondition (that one
+    # gates on subject alone and lets the attribute-without-registry refusal reach the
+    # caller); this site's downstream consumer has its own documented accepted-degradation
+    # contract that resolve_contract_dims's caller does not.
+    if attribute is not None and resolved_classes_path(images_dir) is None:
+        return None
+    _reg, id_map = _resolve_registry_id_map(images_dir, subject, attribute)
+    return id_map
+
+
 def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                                tile, tile_size, overlap, tile_batch_size,
                                global_nms_iou, postprocess, cross_tile_nms, max_dets,
@@ -191,12 +250,20 @@ def _sweep_summary(conf_param) -> dict:
         "per_class_holdout_bias": {cid: s["count_bias_mean"]
                                    for cid, s in (hb.get("per_class") or {}).items()},
         "per_class_count_bias_failures": sweep.get("per_class_count_bias_failures"),
+        "per_class_insufficient_images": sweep.get("per_class_insufficient_images"),
         "holdout_missing_classes": sweep.get("holdout_missing_classes"),
         "passed_holdout": sweep.get("passed_holdout"),
         "failures": sweep.get("failures"),
         "conf_censored": sweep.get("conf_censored"),
         "conf_floor_mismatch": sweep.get("conf_floor_mismatch"),
-        "count_bias_tolerance": sweep.get("count_bias_tolerance"),
+        "count_bias_tolerance_frac": sweep.get("count_bias_tolerance_frac"),
+        "pooled_count_bias_tolerance": sweep.get("pooled_count_bias_tolerance"),
+        # K4 residual, stage-6 review Finding F8: a per-class refusal is unexplainable from this
+        # compact view without the actual bar each class was held to — the pooled tolerance alone
+        # (above) is not it, since each class scales against its OWN typical count.
+        "per_class_count_bias_tolerance": sweep.get("per_class_count_bias_tolerance"),
+        "pooled_typical_count": sweep.get("pooled_typical_count"),
+        "per_class_typical_count": sweep.get("per_class_typical_count"),
         "count_error_tolerance": sweep.get("count_error_tolerance"),
         "count_error_p90": hb.get("count_error_p90") if isinstance(hb, dict) else None,
         "disjoint": sweep.get("disjoint"),
@@ -649,37 +716,11 @@ def run_inference(
     # downstream deliverable can name the exact checkpoint (content hash) + run behind the count.
     from datetime import datetime, timezone
 
-    # This run's name→id map, derived once here (assign_class_ids over the inference dataset's
-    # classes.json for the config's subject/attribute) and reused for both recording and decode, so
-    # export records it in operating_point.json and decodes predictions to names through this one map —
-    # consistent within the run. Single-class detection is order-invariant ({subject: 0}), so this
-    # matches the training run's map today. Binding it to the *training* run's recorded map — so a
-    # registry whose value order was edited between train and inference cannot mis-decode a multi-value
-    # attribute — lands with K4/K5, which is where attribute order first matters.
-    id_map = None
-    data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
-    subject = data_cfg.get("subject")
-    attribute = data_cfg.get("attribute")
-    if subject and images_dir:
-        from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, resolved_classes_path
-
-        # Precondition check, not a broad except (K18 B2 stage-6 review, round 2): attribute-scoped
-        # decode with no classes.json for this dataset is a legitimate, honest degraded case
-        # write_predictions_json already documents and accepts ("the raw 0-indexed id is used as
-        # the name... never a re-derivation") — id_map stays None rather than crashing on already-
-        # completed, valid prediction work. Reuses resolved_classes_path — the SAME "does a
-        # registry exist" check _resolve_registry_id_map's own refusal is built on, not a second
-        # independent re-derivation of that fact (round-1 review found the first version of this
-        # fix duplicated it locally). A registry that IS present but fails to read/resolve for a
-        # real reason (corrupted file, an id-space mismatch) still propagates loudly — this
-        # precondition only short-circuits the one case that's supposed to degrade honestly, the
-        # same case _resolve_registry_id_map's own attribute-without-registry ValueError names.
-        # Not the same shape as model_build.py's resolve_contract_dims precondition (that one
-        # gates on subject alone and lets the attribute-without-registry refusal reach the
-        # caller); this site's downstream consumer has its own documented accepted-degradation
-        # contract that resolve_contract_dims's caller does not.
-        if attribute is None or resolved_classes_path(images_dir) is not None:
-            _reg, id_map = _resolve_registry_id_map(images_dir, subject, attribute)
+    # This run's name→id map, reused for both recording and decode, so export records it in
+    # operating_point.json and decodes predictions to names through this one map — consistent
+    # within the run. The ONE resolution both doors that write predictions to disk use (this tool
+    # and the web GUI's own inference worker, routes/inference.py) — never a second implementation.
+    id_map = resolve_decode_id_map(predictor, images_dir)
     out = {
         "checkpoint": checkpoint_path,
         "checkpoint_sha256": identity["sha256"],
@@ -887,11 +928,15 @@ def tabulate_counts(
     hardcoded ``conf=0.5`` and passed no tiling/max_dets, under-reporting dense
     small-object counts relative to the other two doors.
 
-    Delivery gate: the count is a phenotype, so the CSV is not written unless the count operating
-    point is validated on the run's own resolved bundle (not a caller string) — or
+    Delivery gate: the count is a phenotype, so the CSV is not written unless every gating dimension
+    of the run's own resolved bundle is validated (not a caller string) — or
     ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional CSV stamped
     ``measurement_validated=false``. Calibrate per dataset (``trait`` + ``calibration_labels_dir``)
-    to reach a validated count.
+    to reach a validated conf. K10: a tiled run's ``tile_size`` gates the same way — a fabricated
+    640 fallback with no persisted training geometry and no explicit caller override refuses here
+    too (closing the asymmetry with ``run_full_frame_evaluation``, which already refuses outright
+    for that same case); pass an explicit ``tile_size`` or retrain with tile geometry persisted to
+    reach a validated tile scale. An untiled run is never gated on tile_size at all.
 
     Args:
         checkpoint_path: Path to model .pt checkpoint.
@@ -951,12 +996,28 @@ def tabulate_counts(
     op_ref = conf_prov.get("validated_against")
     if op_ref not in accepted_references("annotations"):
         op_ref = VALIDATED_FALSE
-    gate = check_delivery_gate({"operating_point": op_ref},
-                               acknowledge_unvalidated=acknowledge_unvalidated)
+    flags = {"operating_point": op_ref}
+
+    # K10: tile_size gates the same way, closing the asymmetry with run_full_frame_evaluation (which
+    # already refuses outright for a checkpoint with no persisted tile geometry) — a fabricated 640
+    # fallback is exactly as untrustworthy for a delivered count as an uncalibrated conf. Only added
+    # to the gate when tile_size is actually a gating dimension for THIS run (requires_validation is
+    # only set when tiled=True — see resolve_tile_size_param), so an untiled run's tile_size, never
+    # operative, can't manufacture a spurious refusal.
+    tile_prov = op.get("tile_size") or {}
+    tile_ref: str | None = None
+    if tile_prov.get("requires_validation"):
+        tile_ref = tile_prov.get("validated_against")
+        if tile_ref not in accepted_references("geometry"):
+            tile_ref = VALIDATED_FALSE
+        flags["tile_size"] = tile_ref
+
+    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         return {
             "error": gate.reason,
             "operating_point_validated": op_ref,
+            "tile_size_validated": tile_ref,
             "operating_point": result.get("operating_point"),
             "validated": False,
             "image_count": result["image_count"],
@@ -969,9 +1030,15 @@ def tabulate_counts(
         "operating_point_conf": op.get("conf"),
         "produced_at": result.get("produced_at"),
     }
+    # gate.ok already means every gated dimension cleared (or was explicitly acknowledged) — but the
+    # CSV's single measurement_validated column must reflect the WHOLE gate, not just conf's own
+    # reference: with acknowledge_unvalidated=True a genuinely-unvalidated tile_size can still reach
+    # here, and stamping conf's (possibly real) reference alone would misreport a partially
+    # acknowledged-provisional delivery as fully validated.
+    csv_measurement_validated = VALIDATED_FALSE if gate.unvalidated else gate.stamp["operating_point"]
     csv_path = export_detection_csv(
         result["results"], output_path, provenance=provenance,
-        measurement_validated=gate.stamp["operating_point"],
+        measurement_validated=csv_measurement_validated,
         acknowledge_unvalidated=acknowledge_unvalidated,
     )
     out = {
@@ -983,6 +1050,7 @@ def tabulate_counts(
         "operating_point": result.get("operating_point"),
         "validated": bool(result.get("validated", False)),
         "operating_point_validated": gate.stamp["operating_point"],
+        "tile_size_validated": gate.stamp.get("tile_size"),
         "conf_source": result.get("conf_source"),
         "checkpoint_sha256": result.get("checkpoint_sha256"),
         "experiment_id": result.get("experiment_id"),
