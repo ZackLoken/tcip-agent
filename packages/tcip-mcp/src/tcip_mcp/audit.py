@@ -41,7 +41,7 @@ def _write_entry(entry: dict[str, Any]) -> None:
 
         append_jsonl(resolve_state(AUDIT_PATH), entry)
     except Exception:
-        # A dropped audit line is a real provenance gap — surface it, don't bury it at debug.
+        # A dropped audit line is a real provenance gap, surface it, don't bury it at debug.
         logger.warning("Failed to write audit entry", exc_info=True)
 
 
@@ -52,7 +52,7 @@ def record_event(
 
     The training envelope uses this to bracket the training body (which runs in a background
     thread, outside any ``@audited`` MCP call) with open/close events on the same append-only
-    ``.tcip/audit.jsonl`` sink — closing the hole where the whole ``train()`` body + registration
+    ``.tcip/audit.jsonl`` sink, closing the hole where the whole ``train()`` body + registration
     left no audit record. Best-effort, never raises.
     """
     entry: dict[str, Any] = {
@@ -68,9 +68,9 @@ def record_event(
 def audited(fn: Callable) -> Callable:
     """Decorator that logs MCP tool calls to .tcip/audit.jsonl.
 
-    Binds positional args to their parameter names (K12 finding 6) so a caller that invokes the
-    tool positionally — e.g. the web routes, which call ``launch_training(payload.config,
-    payload.output_dir)`` rather than by keyword — is recorded with the same fidelity as a keyword
+    Binds positional args to their parameter names so a caller that invokes the
+    tool positionally, e.g. the web routes, which call ``launch_training(payload.config,
+    payload.output_dir)`` rather than by keyword, is recorded with the same fidelity as a keyword
     call, instead of writing an empty ``arguments`` dict. Binding failures never abort the call this
     decorator only observes; they fall back to the kwargs-only record.
     """
