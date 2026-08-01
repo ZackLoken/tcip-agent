@@ -21,28 +21,28 @@ def write_predictions_json(
 
     ``result`` carries pixel-xyxy ``boxes``, 1-indexed ``labels`` (background=0), ``scores``, and
     image ``width``/``height``. Each detection's numeric label is decoded to a **name** (its
-    ``subject``) via ``id_map`` — the run's *recorded* ``operating_point.json`` name→id map — so a
+    ``subject``) via ``id_map`` (the run's *recorded* ``operating_point.json`` name→id map), so a
     prediction on disk carries the same names its labels do, and decode is never a fresh
     ``assign_class_ids``. Absent a recorded map, the raw 0-indexed id is used as the name (a degraded
     but honest fallback, never a re-derivation). ``keep_empty=True`` so a processed image with zero
     detections still yields an ``{"annotations": []}`` file. ``created_by`` stamps the producing model
     on every prediction so the origin travels into GT when a human accepts it.
 
-    When ``result`` carries ``masks`` (one soft ``[H, W]`` array per detection — ``instance_seg``, see
+    When ``result`` carries ``masks`` (one soft ``[H, W]`` array per detection: ``instance_seg``, see
     :mod:`tcip_mcp.pipelines.inference.generic_predictor`), each mask is binarized via
     :func:`tcip_mcp.pipelines.measurement.mask_geometry.resolve_binarize_threshold` (never a bare
-    hardcoded threshold) and converted to a real ``Polygon`` — every connected component becomes its
+    hardcoded threshold) and converted to a real ``Polygon``: every connected component becomes its
     own ring (an occlusion-split instance, routine in this imagery, is genuinely more than one
     region), so the stored geometry never silently drops part of the object. A mask that binarizes to
     nothing falls back to the detection's ``BBox`` (a warning is logged) since there is no contour to
     store at all.
 
-    The threshold is an unvalidated default — its own :class:`ResolvedParam` contract requires the
+    The threshold is an unvalidated default; its own :class:`ResolvedParam` contract requires the
     consuming output to carry ``validated=false`` so the uncertainty travels on. ``Annotation.attributes``
-    is the wrong home for that (it is the domain trait namespace — a fixed vocabulary of names, and a
+    is the wrong home for that (it is the domain trait namespace, a fixed vocabulary of names, and a
     machine-provenance float stamped there survives unfixed into GT the moment a breeder accepts the
     prediction). The threshold is a run constant, not a per-detection fact, so it belongs in the run's
-    own ``operating_point.json`` instead — see :func:`mask_binarize_provenance`, which the two doors
+    own ``operating_point.json`` instead; see :func:`mask_binarize_provenance`, which the two doors
     that write predictions to disk (``export_predictions``, the web inference route) call once and
     fold into that same stamp, mirroring how ``tiled``/``tile_size``/``conf`` already travel there.
     """
@@ -74,7 +74,7 @@ def write_predictions_json(
 
 def mask_binarize_provenance() -> dict:
     """The run-constant unvalidated binarize threshold ``_mask_geometry_for_export`` actually used,
-    as a stamp for the caller's own ``operating_point.json`` — never a per-annotation attribute (see
+    as a stamp for the caller's own ``operating_point.json``, never a per-annotation attribute (see
     :func:`write_predictions_json`'s docstring). Call once per run, when ``masks`` were present."""
     from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
 
@@ -95,7 +95,7 @@ def _mask_geometry_for_export(
     if rings:
         return Polygon(rings=rings)
     logger.warning(
-        "%s: mask binarized to nothing at threshold=%.3f — exporting BBox (no contour to store).",
+        "%s: mask binarized to nothing at threshold=%.3f, exporting BBox (no contour to store).",
         subject, threshold,
     )
     x1, y1, x2, y2 = bbox_xyxy
@@ -121,7 +121,7 @@ def export_detection_csv(
     stamps the reconciled validity into every row. Pass ``measurement_validated`` = the count
     operating point's reconciled state (a shippable reference), or ``acknowledge_unvalidated=True``
     to write a clearly-flagged provisional CSV stamped ``validated=false``. The ``provenance`` stamp
-    (producing checkpoint sha, experiment id, operating-point conf, timestamp) travels alongside — the
+    (producing checkpoint sha, experiment id, operating-point conf, timestamp) travels alongside; the
     number is only as trustworthy as the operating point + model behind it.
 
     Args:
