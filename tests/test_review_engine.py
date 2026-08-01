@@ -11,6 +11,7 @@ from tcip_annotation import (
     BBox,
     Polygon,
     ReviewContext,
+    ReviewDetection,
     ReviewEngine,
     compute_matches,
 )
@@ -199,6 +200,38 @@ def test_record_overrides_existing(engine: ReviewEngine, ctx: ReviewContext) -> 
     # Should still be exactly one entry, not two
     img_data = engine.raw_state["image"][ctx.img_name]
     assert len(img_data["detections"]) == 1
+
+
+def test_record_stamps_missed_object_attested_for_a_genuine_new_attestation(
+    engine: ReviewEngine, ctx: ReviewContext
+) -> None:
+    # Fix H: the "mark missed object" tool's exact call shape (ReviewTab.tsx's recordMissedObject)
+    # — neither an existing GT nor an existing prediction to key off of. missed_object_attested is
+    # stamped from that call-site fact directly, not reconstructed later from bbox geometry.
+    det = ReviewDetection(det_type="fn", class_name="catkin", conf=None, iou=None,
+                          gt_idx=None, pred_idx=None, bbox=(10, 10, 20, 20))
+    engine.record_detection_action(det, ctx, action="edited")
+    entry = engine.raw_state["image"][ctx.img_name]["detections"][0]
+    assert entry["missed_object_attested"] is True
+
+
+def test_record_does_not_mistake_an_existing_fn_rejection_for_a_missed_object_attestation(
+    engine: ReviewEngine, ctx: ReviewContext
+) -> None:
+    # A REJECTED pre-existing FN (an existing, already-indexed GT box the breeder decided was wrong,
+    # not a newly-attested miss) ends up with the SAME persisted bbox shape as a genuine attestation
+    # once written (pred_bbox_norm=None, gt_bbox_norm=<box>) — geometry alone can't tell them apart.
+    # missed_object_attested must read False here, since the call site supplied a real gt_idx.
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
+    dets = engine.build_detection_list(ctx, matches)
+    fn_det = next(d for d in dets if d.det_type == "fn")
+    assert fn_det.gt_idx is not None and fn_det.pred_idx is None  # a real, indexed FN
+
+    engine.record_detection_action(fn_det, ctx, action="rejected")
+    entry = engine.find_reviewed_entry(fn_det, ctx)
+    assert entry is not None
+    assert entry["pred_bbox_norm"] is None and entry["gt_bbox_norm"] is not None  # the ambiguous shape
+    assert entry["missed_object_attested"] is False
 
 
 def test_build_detection_list_never_hides_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> None:
