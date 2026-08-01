@@ -1,1 +1,1 @@
-"""Inference pipeline — model loading and batch prediction."""
+"""Inference pipeline: model loading and batch prediction."""
