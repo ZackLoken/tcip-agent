@@ -55,7 +55,7 @@ def clip_boxes_to_tile(
 
     A box clipped by the tile edge is dropped only when the *visible* (clipped) part is a sliver:
     its characteristic size ``sqrt(iw*ih) < min_box_size``. ``min_box_size`` is derived per dataset
-    from the class's average box size (a partial catkin counts unless it's a tiny sliver; see
+    from the class's average box size (a partial object counts unless it's a tiny sliver; see
     ``TiledDetectionDataset``), not a fixed fraction. Boxes fully inside the tile are always kept.
     """
     if len(boxes) == 0:
