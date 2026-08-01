@@ -4,14 +4,14 @@ name→id assignment a training run uses (and records, so predictions stay decod
 The on-disk registry (``<dataset_root>/classes.json``) is self-describing and name-based::
 
     {
-      "bush":   {"description": "one hazelnut bush crown", "defined_by": "...", "defined_at": "..."},
-      "catkin": {"description": "a hazelnut catkin", "defined_by": "...", "defined_at": "...",
-                 "attributes": {
-                   "elongation": {"type": "categorical", "values": ["dormant", "elongated"]}
-                 }}
+      "bush": {"description": "one bush crown", "defined_by": "...", "defined_at": "..."},
+      "leaf": {"description": "one leaf", "defined_by": "...", "defined_at": "...",
+               "attributes": {
+                 "condition": {"type": "categorical", "values": ["healthy", "diseased"]}
+               }}
     }
 
-A *subject* is the object a label set is about (catkin, bush, efb). A subject with no
+A *subject* is the object a label set is about (leaf, bush, efb). A subject with no
 ``attributes`` is simply detected. An *attribute* is an independent axis a subject's instances
 carry, ``categorical`` (unordered) or ``ordinal`` (ordered; the ``values`` order is the rank).
 Numeric is not an attribute type; measured/field values live in the plant-keyed field CSVs.
