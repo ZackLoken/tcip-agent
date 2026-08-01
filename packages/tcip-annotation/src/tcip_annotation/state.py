@@ -27,7 +27,7 @@ class Polygon:
     """One or more simple closed contours (rings) in pixel coordinates.
 
     Most annotations are a single ring: a person draws one contour. A model-predicted mask can be
-    more than one: an occlusion-split instance (a catkin behind a branch, a leaf crossed by a stem,
+    more than one: an occlusion-split instance (a leaf crossed by a stem, a fruit behind a branch,
     routine in this imagery) is genuinely more than one region, and holding every ring is what makes
     that a represented fact instead of a silently truncated one.
     """
@@ -58,7 +58,7 @@ class Point:
 class Annotation:
     """One annotation on an image.
 
-    ``subject`` is the object it is about (``catkin``, ``bush``, ``efb``).  ``geometry`` is a box, a
+    ``subject`` is the object it is about (``bush``, ``leaf``, ``efb``).  ``geometry`` is a box, a
     polygon, a point, or ``None`` for an image/plant-level label.  ``attributes`` maps an attribute
     name to its value name (e.g. ``{"elongation": "elongated"}``): names, never a numeric class id.
     ``score`` set means this is a prediction.  Provenance travels with the annotation: who authored it
