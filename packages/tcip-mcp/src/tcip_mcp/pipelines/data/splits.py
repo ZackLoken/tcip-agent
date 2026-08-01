@@ -30,10 +30,13 @@ import random
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Sequence
 
 from tcip_mcp.project_paths import project_root
 from tcip_mcp.utils.atomic_io import atomic_write_json
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 logger = logging.getLogger(__name__)
 
@@ -270,12 +273,9 @@ def cal_holdout_lock_path(identity_hash: str) -> Path:
     return project_root() / ".tcip" / "artifacts" / f"cal_holdout_split_{identity_hash}.json"
 
 
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-
-
 def label_image_stems(
     labels_dir: str | Path, images_dir: str | Path | None = None,
-) -> tuple[list[str], dict[str, Path]]:
+) -> tuple[list[str], dict[str, "Path | BandGroupRef"]]:
     """Stems with a readable per-image label file, one scan shared by every caller (K1 finding 4).
 
     ``_calibrate_operating_point`` and ``force_redraw_cal_holdout_split`` each used to run their
@@ -287,16 +287,17 @@ def label_image_stems(
     With ``images_dir`` omitted, returns every stem with a label file (``stem_to_image`` empty) —
     the label-only universe, for a caller (e.g. a redraw with no images to check) that has no
     images directory to intersect against. With ``images_dir`` given, only stems that ALSO have a
-    matching image file on disk survive, so a stem in the labels dir with no image left
-    (deleted/renamed) never enters the split universe in the first place.
+    matching logical image (a plain file, or a ``.bandgroup``-grouped capture) survive, so a stem
+    in the labels dir with no image left (deleted/renamed) never enters the split universe.
     """
     labels_p = Path(labels_dir)
     label_stems = {p.stem for p in labels_p.glob("*.json")}
     if images_dir is None:
         return sorted(label_stems), {}
-    images_p = Path(images_dir)
-    stem_to_image = {p.stem: p for p in images_p.iterdir()
-                     if p.suffix.lower() in _IMAGE_EXTS and p.stem in label_stems}
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+
+    stem_to_image = {stem: src for stem, src in list_logical_images(images_dir).items()
+                     if stem in label_stems}
     return sorted(stem_to_image), stem_to_image
 
 
