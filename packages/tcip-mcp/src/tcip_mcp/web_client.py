@@ -6,7 +6,7 @@ Replaces the legacy ``.tcip/events/`` file-bridge. MCP tools call
 Port discovery order:
   1. ``TCIP_WEB_PORT`` environment variable.
   2. ``.tcip/state/web_port.txt`` under the pinned platform root.
-  3. The same file under the repo root — the backend writes it at ITS startup root (the repo,
+  3. The same file under the repo root: the backend writes it at its startup root (the repo,
      pre-adoption), so after ``set_active_project`` repins this process's root to a project the
      pinned location no longer holds the file; without this fallback the ping silently degraded
      to the default port whenever the backend ran on a non-default one.
@@ -16,7 +16,7 @@ Host discovery:
   1. ``TCIP_WEB_HOST`` environment variable.
   2. Default: 127.0.0.1.
 
-Connection failures are treated as soft errors — the MCP tool returns
+Connection failures are treated as soft errors: the MCP tool returns
 ``{"status": "no_subscribers"}`` rather than raising. This keeps agent
 workflows working when the GUI is closed.
 """
@@ -49,7 +49,7 @@ def resolve_web_port(project_root: Optional[Path] = None) -> int:
     ----------
     project_root : Path, optional
         Directory that contains ``.tcip/state/web_port.txt``. Defaults to the pinned platform
-        state root (``$TCIP_PROJECT_ROOT`` or cwd) — the same place the web backend writes it —
+        state root (``$TCIP_PROJECT_ROOT`` or cwd), the same place the web backend writes it,
         so the port is found regardless of the reader's cwd.
     """
     env = os.environ.get("TCIP_WEB_PORT")
@@ -100,7 +100,7 @@ def post_panel_event(
     import urllib.error
     import urllib.request
 
-    # Hermetic under pytest: focus/web tests must never steer a LIVE GUI session to ephemeral
+    # Hermetic under pytest: focus/web tests must never steer a live GUI session to ephemeral
     # fixture paths (the browser then 404s on deleted tmp dirs). Tests that exercise real
     # delivery opt back in with TCIP_ALLOW_PANEL_EVENTS=1.
     if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("TCIP_ALLOW_PANEL_EVENTS"):
