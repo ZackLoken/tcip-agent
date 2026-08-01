@@ -114,8 +114,8 @@ def _build_faster_rcnn(
     from torchvision.ops import MultiScaleRoIAlign
 
     sizes = _default_anchor_sizes(num_levels, anchor_base_size)
-    # aspect_ratios is a builder kwarg (was hardcoded): set/derive it per trait, since elongated catkins
-    # (~1:3-1:6) need a tall ratio the default (0.5,1,2) can't match.
+    # aspect_ratios is a builder kwarg (was hardcoded): set/derive it per trait, since an elongated
+    # object class (~1:3-1:6) needs a tall ratio the default (0.5,1,2) can't match.
     ar = tuple(float(r) for r in aspect_ratios)
     anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
     roi_pool = MultiScaleRoIAlign(featmap_names=featmap_names, output_size=7, sampling_ratio=2)
