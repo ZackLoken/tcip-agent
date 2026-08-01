@@ -1,4 +1,4 @@
-"""Model management tools — registry, listing, comparison."""
+"""Model management tools, registry, listing, comparison."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def register_model(
         re-registration.)
 
     Args:
-        name: Model name (e.g. 'hazelnut_catkin_v1'); defaults to the experiment id in experiment mode.
+        name: Model name (e.g. '<crop>_<trait>_v1'); defaults to the experiment id in experiment mode.
         checkpoint_path: Path to the .pt checkpoint.
         config: Training configuration used (explicit mode; ignored when ``experiment_id`` is set).
         project_path: Project root directory. Empty defaults to the platform state root.
@@ -46,7 +46,7 @@ def register_model(
     if experiment_id:
         from tcip_mcp.experiments import register_model_from_experiment as _reg
         return _reg(experiment_id, checkpoint_path, project_path=project_path, name=name or None)
-    # Record the model kind so the GUI + agent know how to run it; best-effort — a checkpoint
+    # Record the model kind so the GUI + agent know how to run it; best-effort, a checkpoint
     # that can't be sniffed still registers, and build_predictor re-sniffs at inference time.
     kind = None
     try:
@@ -86,19 +86,19 @@ def _labeled_available_metrics(models: list[dict]) -> list[dict]:
 @mcp.tool()
 @audited
 def select_best_model(project_path: str = "", metric: str = "") -> dict:
-    """Get the best registered model by an explicit metric — no default is assumed (K9).
+    """Get the best registered model by an explicit metric, no default is assumed.
 
     map50-family metrics (and, once a center-match trait is in play, the IoU-convention
     precision/recall/F1 relabeled ``iou_*``) are a labeled comparability convention, not
     necessarily what governs a trait's phenotype (see the evaluation skill /
-    ``resolve_match_criterion``) — silently ranking by ``val_map50`` could promote a model that is
+    ``resolve_match_criterion``), silently ranking by ``val_map50`` could promote a model that is
     worse on the trait's own governing criterion. Call with ``metric=""`` (or an unknown metric) to
     get ``available_metrics`` instead of guessing, each labeled ``comparability_only`` vs
     ``unlabeled``.
 
     Args:
         project_path: Project root directory. Empty defaults to the platform state root.
-        metric: Metric key to rank by — required. loss/error keys rank ascending, others descending.
+        metric: Metric key to rank by, required. loss/error keys rank ascending, others descending.
     """
     registry = ModelRegistry(_registry_root(project_path))
     models = registry.list_models()
@@ -106,7 +106,7 @@ def select_best_model(project_path: str = "", metric: str = "") -> dict:
         return {"error": "No models registered"}
     if not metric:
         return {
-            "error": "metric is required — select_best_model no longer defaults to 'val_map50' "
+            "error": "metric is required, select_best_model no longer defaults to 'val_map50' "
                      "(a labeled comparability metric, not necessarily what governs a trait's "
                      "phenotype). Pick one of available_metrics.",
             "available_metrics": _labeled_available_metrics(models),
