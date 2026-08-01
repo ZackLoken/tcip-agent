@@ -10,6 +10,126 @@ import pytest
 torch = pytest.importorskip("torch")
 
 
+# ── K25/K13.5-2c: persist the training run's class id_map ──────────────────────────
+
+
+def _write_classes_json(dataset_root, subject="catkin", attribute=None, values=None):
+    # classes.json lives at the DATASET ROOT, the parent of the canonical labels/images/annotations
+    # segment (dataset_layout.py's _DATASET_SEGMENTS) — not inside the labels dir itself.
+    from pathlib import Path
+
+    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+
+    attrs = ()
+    if attribute:
+        attrs = (Attribute(name=attribute, type="categorical", values=tuple(values)),)
+    write_registry(Path(dataset_root) / "classes.json",
+                   ClassRegistry((Subject(subject, attributes=attrs),)))
+
+
+def test_resolve_run_id_map_works_with_no_dataset_object_at_all(tmp_path):
+    """Stage-6 review round 1 (MUST-FIX 1): the OLD version of this hook read
+    ``train_ds.id_map``/``.subject``, which is silently absent for the COCO-assembled ``auto_val``
+    default AND for every ``TiledDetectionDataset`` build — the shipped Phase-1 catkin path. The
+    fix resolves independently of any dataset object; this test proves that directly, passing no
+    dataset at all (only the ``data_cfg`` a real run always has), for BOTH the plain-subject and
+    the attribute-scoped case."""
+    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+
+    proj1 = tmp_path / "proj1"
+    (proj1 / "labels").mkdir(parents=True)
+    _write_classes_json(proj1, subject="catkin")
+    data_cfg = {"images_dir": str(proj1 / "images"), "labels_dir": str(proj1 / "labels"),
+               "subject": "catkin"}
+    result = _resolve_run_id_map("detection", data_cfg)
+    assert result == ("catkin", None, {"catkin": 0})
+
+    proj2 = tmp_path / "proj2"
+    (proj2 / "labels").mkdir(parents=True)
+    _write_classes_json(proj2, subject="catkin", attribute="elongation",
+                        values=["dormant", "elongated"])
+    data_cfg2 = {"images_dir": str(proj2 / "images"), "labels_dir": str(proj2 / "labels"),
+                "subject": "catkin", "attribute": "elongation"}
+    result2 = _resolve_run_id_map("detection", data_cfg2)
+    assert result2 == ("catkin", "elongation", {"dormant": 0, "elongated": 1})
+
+
+def test_resolve_run_id_map_none_for_non_detection_task_or_no_subject(tmp_path):
+    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+
+    assert _resolve_run_id_map("classification", {"subject": "catkin", "labels_dir": "x"}) is None
+    assert _resolve_run_id_map("detection", {"labels_dir": "x"}) is None  # no subject
+
+
+def test_resolve_run_id_map_none_for_coco_or_bespoke_source(tmp_path):
+    """Stage-6 review round 2, N1: a run trained from a pre-built COCO file or a bespoke
+    dataset_source doesn't necessarily get its targets from (labels_dir, subject, attribute) at
+    all — a COCO file's own category ids can be authored in any order, and a bespoke builder owns
+    its class space entirely. Re-deriving via the registry anyway could stamp a map that is the
+    WRONG id space for what the run actually trained on and record it as an authoritative fact —
+    worse than recording nothing. Must return None for both, even with a real, resolvable registry
+    present (build_dataset itself never reaches the registry resolution on this same predicate,
+    datasets.py's has_coco/dataset_source branch)."""
+    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+
+    proj = tmp_path / "proj"
+    (proj / "labels").mkdir(parents=True)
+    _write_classes_json(proj, subject="catkin")
+
+    coco_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
+               "subject": "catkin", "coco_json": str(proj / "coco.json")}
+    assert _resolve_run_id_map("detection", coco_cfg) is None
+
+    coco_fmt_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
+                    "subject": "catkin", "label_format": "coco"}
+    assert _resolve_run_id_map("detection", coco_fmt_cfg) is None
+
+    bespoke_cfg = {"images_dir": str(proj / "images"), "labels_dir": str(proj / "labels"),
+                   "subject": "catkin", "dataset_source": "tests.bespoke_models:build_dataset"}
+    assert _resolve_run_id_map("detection", bespoke_cfg) is None
+
+
+def test_resolve_run_id_map_none_for_attribute_scope_with_no_registry(tmp_path):
+    """The one legitimate degraded case _resolve_registry_id_map itself names — must not raise."""
+    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir()  # no classes.json
+    data_cfg = {"labels_dir": str(labels_dir), "subject": "catkin", "attribute": "elongation"}
+    assert _resolve_run_id_map("detection", data_cfg) is None
+
+
+def test_patch_experiment_config_id_map_merges_into_durable_config(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import experiments_dir
+    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
+
+    exp_dir = experiments_dir() / "exp1"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "config.json").write_text(
+        json.dumps({"model_source": {"builder": "x:y"}, "data": {"images_dir": "img"}}),
+        encoding="utf-8")
+
+    _patch_experiment_config_id_map("exp1", "catkin", "elongation", {"dormant": 0, "elongated": 1})
+
+    cfg = json.loads((exp_dir / "config.json").read_text(encoding="utf-8"))
+    assert cfg["data"]["id_map"] == {"dormant": 0, "elongated": 1}
+    assert cfg["data"]["subject"] == "catkin"
+    assert cfg["data"]["attribute"] == "elongation"
+    assert cfg["data"]["images_dir"] == "img"  # a merge, not a rewrite
+    assert cfg["model_source"] == {"builder": "x:y"}  # untouched sibling key
+
+
+def test_patch_experiment_config_id_map_never_sinks_a_run_with_no_experiment_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
+
+    # No experiments/<id>/config.json exists at all — best-effort, must not raise.
+    _patch_experiment_config_id_map("no_such_exp", "catkin", None, {"catkin": 0})
+
+
 # ── attach_run (finding 2) ──────────────────────────────────────────────────────────
 
 
