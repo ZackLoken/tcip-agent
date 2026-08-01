@@ -150,9 +150,11 @@ def test_golden_resolve_operating_point_validated_conf():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_cal_holdout()
+    # tiled=False: this golden is about conf-calibration shippability, not tiling (K10 — tile_size
+    # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
-                                staged_conf_floor=0.01)
+                                tiled=False, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.9)  # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert conf.requires_validation is True and conf.validation_kind == "annotations"
@@ -272,9 +274,11 @@ def test_golden_stamp_shape_calibrated_validated():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_cal_holdout()
+    # tiled=False: this golden is about conf-calibration shippability, not tiling (K10 — tile_size
+    # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
-                                staged_conf_floor=0.01)
+                                tiled=False, staged_conf_floor=0.01)
     stamp = _stamp(b, validated=b.is_shippable, issues=b.shippable_issues())
     assert set(stamp.keys()) == {"operating_point", "validated", "shippable_issues"}
     assert stamp["validated"] is True  # held-out calibration passed
