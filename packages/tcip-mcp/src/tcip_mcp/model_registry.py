@@ -1,4 +1,4 @@
-"""Model registry — track trained models and their performance."""
+"""Model registry, track trained models and their performance."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def _compute_sha256(filepath: str | Path) -> str:
 
 
 # Process-level cache so a multi-GB checkpoint is hashed once per run, not once per delivery
-# call (G7). Keyed by (resolved path, size, mtime) so an edited/replaced file re-hashes.
+# call. Keyed by (resolved path, size, mtime) so an edited/replaced file re-hashes.
 _SHA_CACHE: dict[tuple[str, int, int], str] = {}
 
 
@@ -54,19 +54,19 @@ def resolve_model_identity(
     """Best-effort producing-model identity for a checkpoint: ``{checkpoint, sha256, experiment_id}``.
 
     ``sha256`` is the cached content hash (never re-hashed per call). ``experiment_id`` resolves,
-    in order: the caller's explicit value; the checkpoint payload's OWN stamped ``experiment_id``
-    (every checkpoint saved through the audited envelope carries one via ``stamp_model_ref`` —
-    K1: without this, the ordinary train-then-calibrate workflow silently resolved to ``None`` and
+    in order: the caller's explicit value; the checkpoint payload's own stamped ``experiment_id``
+    (every checkpoint saved through the audited envelope carries one via ``stamp_model_ref``,
+    without this, the ordinary train-then-calibrate workflow silently resolved to ``None`` and
     bypassed the train-disjointness gate entirely, not just genuinely-foreign checkpoints); then a
     best-effort registry lookup (a checkpoint registered but never carrying the stamp, e.g. from
-    before the stamp existed). A raw/foreign checkpoint legitimately has no experiment — the
+    before the stamp existed). A raw/foreign checkpoint legitimately has no experiment, the
     identity records the sha and leaves ``experiment_id`` ``None`` rather than failing.
 
-    Reads the checkpoint with ``weights_only=True`` — sufficient to read the stamped ``str`` (a
+    Reads the checkpoint with ``weights_only=True``, sufficient to read the stamped ``str`` (a
     payload of tensors/dicts/basic Python types, which is what ``stamp_model_ref`` produces and
     what this reads back) without executing arbitrary pickle content or loading the full weights
     just to read one field. A checkpoint that fails even this safe load is logged and treated as
-    "no stamp" — the SAME ``experiment_id=None`` outcome as a genuinely foreign checkpoint, but a
+    "no stamp", the same ``experiment_id=None`` outcome as a genuinely foreign checkpoint, but a
     distinct, visible log line rather than an indistinguishable silent ``pass``, since "the stamp
     couldn't be read" and "there was never a stamp" are materially different situations.
     """
@@ -88,7 +88,7 @@ def resolve_model_identity(
             logger.warning(
                 "could not read a stamped experiment_id from checkpoint %s (%s); treating it as "
                 "unstamped for this identity resolution (falls through to the registry lookup, "
-                "then a foreign/no-provenance identity) — this is distinct from a checkpoint that "
+                "then a foreign/no-provenance identity), which is distinct from a checkpoint that "
                 "genuinely never carried a stamp.", ckpt, exc,
             )
     if exp is None and sha is not None:
@@ -148,13 +148,13 @@ class ModelRegistry:
                 know how to run it; ``build_predictor`` can still sniff it at inference time.
 
         Raises:
-            FileNotFoundError: ``checkpoint_path`` does not exist — refuses to register a
-                phantom deliverable (K11) rather than silently storing a null-checksum entry.
+            FileNotFoundError: ``checkpoint_path`` does not exist, refuses to register a
+                phantom deliverable rather than silently storing a null-checksum entry.
         """
         ckpt = Path(checkpoint_path)
         if not ckpt.is_file():
             raise FileNotFoundError(
-                f"register_model: checkpoint_path {checkpoint_path!r} does not exist — "
+                f"register_model: checkpoint_path {checkpoint_path!r} does not exist, "
                 "refusing to register a phantom registry entry."
             )
         sha256 = _compute_sha256(ckpt)
@@ -179,9 +179,9 @@ class ModelRegistry:
             self._index = [e for e in self._index if e["name"] != name]
             self._index.append(entry)
             self._save_index()
-        # K12 finding 4: a replace-by-name that actually changes content (a resumed or re-registered
-        # run under the same name) had no record anywhere — the prior sha256/config/metrics were
-        # destroyed silently. Purely additive: nothing here changes what get_model/best_model/
+        # A replace-by-name that actually changes content (a resumed or re-registered run under the
+        # same name) needs a record, or the prior sha256/config/metrics are destroyed silently.
+        # Purely additive: nothing here changes what get_model/best_model/
         # list_registered_models return, only whether the supersession is durably auditable.
         if superseded is not None and superseded.get("sha256") != sha256:
             from tcip_mcp.audit import record_event
@@ -215,7 +215,7 @@ class ModelRegistry:
             "valid": actual_hash == stored_hash,
             "expected": stored_hash,
             "actual": actual_hash,
-            "error": None if actual_hash == stored_hash else "Checksum mismatch — file may be corrupted or modified",
+            "error": None if actual_hash == stored_hash else "Checksum mismatch, file may be corrupted or modified",
         }
 
     def list_models(self, tag: str | None = None) -> list[dict]:
@@ -236,7 +236,7 @@ class ModelRegistry:
     ) -> dict | None:
         """Get the registered model with the best value for ``metric_key``.
 
-        Only models that actually carry the metric are considered — a missing metric is
+        Only models that actually carry the metric are considered, a missing metric is
         skipped, not scored as a sentinel, so ``None`` cleanly means "no model has it".
         ``higher_is_better`` defaults to a name heuristic: loss/error keys rank ascending,
         everything else (map/f1/accuracy/…) descending.
