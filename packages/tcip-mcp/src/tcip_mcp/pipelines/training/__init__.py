@@ -1,1 +1,1 @@
-"""Training pipeline — trainer, progressive unfreezing, HPO."""
+"""Training pipeline: trainer, progressive unfreezing, HPO."""
