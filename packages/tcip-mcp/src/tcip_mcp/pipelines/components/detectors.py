@@ -1,4 +1,4 @@
-"""2D object-detector builders — plain torchvision detector factories.
+"""2D object-detector builders: plain torchvision detector factories.
 
 Bespoke model code imports these directly: build a ``BackboneNeckAdapter`` over an
 agent-composed backbone+neck, then call ``build_detector`` (or a ``_build_*`` builder
@@ -84,7 +84,7 @@ def _normalization(adapter: Any, in_chans: int | None, image_mean, image_std,
         raise ValueError(
             f"build_detector('{detector}', ..., in_chans={in_chans}) needs per-band image_mean and "
             f"image_std of length {in_chans}: torchvision normalizes with 3-element ImageNet "
-            f"statistics by default, which do not describe a {in_chans}-band image — at 1 channel "
+            f"statistics by default, which do not describe a {in_chans}-band image: at 1 channel "
             f"they silently broadcast it to 3, and at any other count they raise inside the "
             f"transform. Derive them from your training split with "
             f"pipelines.derivations.band_normalization_stats(...) and pass both."
@@ -114,7 +114,7 @@ def _build_faster_rcnn(
     from torchvision.ops import MultiScaleRoIAlign
 
     sizes = _default_anchor_sizes(num_levels, anchor_base_size)
-    # aspect_ratios is a builder kwarg (was hardcoded): set/derive it per trait — elongated catkins
+    # aspect_ratios is a builder kwarg (was hardcoded): set/derive it per trait, since elongated catkins
     # (~1:3-1:6) need a tall ratio the default (0.5,1,2) can't match.
     ar = tuple(float(r) for r in aspect_ratios)
     anchor_generator = AnchorGenerator(sizes=sizes, aspect_ratios=(ar,) * num_levels)
@@ -200,7 +200,7 @@ _DETECTOR_BUILDERS = {
 
 # The torchvision class each builder constructs. Its own constructor parameters (box_score_thresh,
 # rpn_nms_thresh, detections_per_img, ...) are part of the surface an agent may tune, so they are
-# accepted and forwarded rather than rejected as unknown — while a typo still raises.
+# accepted and forwarded rather than rejected as unknown, while a typo still raises.
 _DETECTOR_CLASSES = {
     "faster_rcnn": ("torchvision.models.detection", "FasterRCNN"),
     "fcos": ("torchvision.models.detection", "FCOS"),
@@ -242,7 +242,7 @@ def build_detector(name: str, adapter: Any, num_classes: int, **kwargs: Any) -> 
     Raises ``KeyError`` for an unknown name and ``TypeError`` for an unrecognized kwarg, so a
     mistyped or inapplicable key cannot leave the parameter it was meant to set at a pinned default
     with no error and no record. Accepted keys are the builder's own plus the torchvision detector
-    class's, which the builder forwards — the library's real surface, not a shorter list of it.
+    class's, which the builder forwards: the library's real surface, not a shorter list of it.
 
     An ``in_chans != 3`` build additionally requires ``image_mean``/``image_std`` of that length;
     see ``_normalization``.
