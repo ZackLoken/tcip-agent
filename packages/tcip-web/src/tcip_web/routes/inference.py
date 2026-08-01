@@ -21,7 +21,7 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -35,11 +35,12 @@ from tcip_mcp.pipelines.resolution import (
 )
 from tcip_web.paths import assert_path_allowed
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/inference", tags=["inference"])
-
-IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp")
 
 
 # ── Job registry ────────────────────────────────────────────────────────
@@ -154,10 +155,25 @@ def rehydrate() -> None:
 # ── Worker ─────────────────────────────────────────────────────────────
 
 
-def _list_images(images_dir: Path) -> list[Path]:
-    if not images_dir.is_dir():
-        return []
-    return sorted(p for p in images_dir.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
+def _list_images(images_dir: Path) -> list[Path | BandGroupRef]:
+    """Every logical image in ``images_dir`` — a ``.bandgroup``-grouped multi-band capture folds
+    into ONE entry here (see ``image_utils.list_logical_images``), the same enumeration every other
+    reader in this platform shares, instead of this route's own raw sibling-file listing enumerating
+    each band file as its own (spurious) image."""
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+
+    logical = list_logical_images(images_dir)
+    return [logical[stem] for stem in sorted(logical)]
+
+
+def _display_name(src: Path | BandGroupRef) -> str:
+    """The filename to report for a job result / prediction filename stem — the manifest's own
+    name for a grouped capture (there is no single sibling file that names the logical image)."""
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+
+    if isinstance(src, BandGroupRef):
+        return src.manifest_path.name
+    return src.name
 
 
 def _worker(job: InferenceJob) -> None:
@@ -274,7 +290,7 @@ def _worker(job: InferenceJob) -> None:
             if job.cancel_event.is_set():
                 break
             results = predictor.predict_batch(
-                [str(img)],
+                [img],
                 tile=job.tile,
                 tile_size=resolved_tile,
                 overlap=resolved_overlap,
@@ -283,7 +299,7 @@ def _worker(job: InferenceJob) -> None:
             )
             write_predictions_json(output_dir / f"{img.stem}.json", results[0],
                                    created_by=f"model:{Path(job.checkpoint_path).stem}", id_map=id_map)
-            job.results.append({"image": img.name, "n_detections": results[0]["count"]})
+            job.results.append({"image": _display_name(img), "n_detections": results[0]["count"]})
             job.done += 1
 
         job.status = "cancelled" if job.cancel_event.is_set() else "completed"
