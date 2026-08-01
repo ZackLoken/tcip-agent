@@ -24,11 +24,11 @@ __all__ = [
 
 class AmbiguousImageStem(ValueError):
     """A directory listing found a raw standalone file whose own stem collides with a
-    ``.bandgroup`` manifest's canonical stem — two unrelated identities claiming the same name.
+    ``.bandgroup`` manifest's canonical stem: two unrelated identities claiming the same name.
 
     Raised from :func:`list_logical_images` rather than silently keeping only the manifest's entry
-    (which would make the standalone file vanish from every listing — training, splits, review,
-    gallery — with no error): CLAUDE.md's "no silent fallback on ambiguous identity" rule.
+    (which would make the standalone file vanish from every listing, including training, splits,
+    review, and gallery, with no error): CLAUDE.md's "no silent fallback on ambiguous identity" rule.
     """
 
 # The recognized "this is an image" extensions shared by every enumeration/resolution call site
@@ -41,14 +41,14 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".heic", ".tif", ".tiff", ".npy",
 def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRef"]:
     """Every logical image in ``images_dir``, by canonical stem.
 
-    Scans for ``.bandgroup`` manifests first — each becomes a :class:`BandGroupRef`, and its
+    Scans for ``.bandgroup`` manifests first: each becomes a :class:`BandGroupRef`, and its
     referenced sibling filenames are excluded from the raw-file listing below, so a stem with an
     existing manifest never also appears as its own single-band entry. An unreadable/corrupt
-    manifest is skipped (claims nothing), not raised — a directory listing must not fail whole
+    manifest is skipped (claims nothing), not raised: a directory listing must not fail whole
     because one manifest is bad; ``resolve_image_source`` is where a caller pays for its own stem.
 
     Raises :class:`AmbiguousImageStem` when a raw standalone file's stem collides with a
-    manifest's own canonical stem (and that file isn't one of the manifest's own sibling bands) —
+    manifest's own canonical stem (and that file isn't one of the manifest's own sibling bands):
     two unrelated identities can't share one name silently; the caller (agent or human) renames one.
     """
     d = Path(images_dir)
@@ -82,14 +82,14 @@ def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRe
     if ambiguous:
         raise AmbiguousImageStem(
             f"{d}: stem(s) {sorted(ambiguous)} name both a .bandgroup manifest's canonical stem "
-            "and an unrelated standalone file — refusing to silently keep only one. Rename the "
+            "and an unrelated standalone file, refusing to silently keep only one. Rename the "
             "standalone file(s), or the manifest, so each logical image has one unambiguous stem."
         )
     return result
 
 
 def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroupRef":
-    """``list_logical_images(images_dir)[stem]`` — never a second implementation of "what images
+    """``list_logical_images(images_dir)[stem]``: never a second implementation of "what images
     live here."
 
     Raises ``FileNotFoundError`` for an unknown stem. For a ``BandGroupRef`` whose manifest
@@ -125,7 +125,7 @@ def stem_of(source: "str | Path | BandGroupRef") -> str:
 
 def _channels_from_shape(shape: tuple[int, ...]) -> int:
     """1 for a 2-D ``(H, W)`` shape; otherwise the channel axis of a channel-first-or-last 3-D
-    shape, by "the smaller of the two non-spatial-looking axes is the channel axis" — used only
+    shape, by "the smaller of the two non-spatial-looking axes is the channel axis", used only
     where no expected channel count is already known to compare against (``derivations.probe_channels``'s
     TIFF branch); a caller that already knows the expected count (``image_dimensions``,
     ``load_multiband``) compares against it directly instead, which is the more precise formula."""
@@ -135,7 +135,7 @@ def _channels_from_shape(shape: tuple[int, ...]) -> int:
 
 
 def _tiff_series_shape(path: Path) -> tuple[int, ...] | None:
-    """Header-only TIFF series shape (no pixel decode) — ``None`` if it can't be read this way.
+    """Header-only TIFF series shape (no pixel decode); ``None`` if it can't be read this way.
 
     ``tif.series[0].shape``, not ``pages[0]``: a channel-last TIFF stores each row-block as its
     own page, so ``pages[0]`` of a 24x40x5 raster is ``(40, 5)``. Shared by ``image_dimensions``
@@ -146,7 +146,7 @@ def _tiff_series_shape(path: Path) -> tuple[int, ...] | None:
 
         with tifffile.TiffFile(str(path)) as tif:
             return tuple(int(x) for x in tif.series[0].shape)
-    except Exception:  # noqa: BLE001 — fall through to a full read rather than guess
+    except Exception:  # noqa: BLE001, fall through to a full read rather than guess
         return None
 
 
@@ -154,13 +154,13 @@ def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int = 3) -
     """``(width, height)`` as ``load_image`` will decode it, without decoding pixels where possible.
 
     ``tcip_annotation.get_image_dimensions`` reads through PIL, which is right for the photographic
-    formats it was written for and wrong for a multi-band raster — PIL reports a 5-band 40x24
+    formats it was written for and wrong for a multi-band raster: PIL reports a 5-band 40x24
     GeoTIFF as 5x40. Labels clipped against one frame and tiles cropped from another displace every
     box silently, so anything that measures a frame it will later decode must route the same way
     ``load_image`` does.
 
     A :class:`BandGroupRef` reads its dims from one sibling band file (a group's members share one
-    spatial frame by construction — that's what makes stacking them into ``[H, W, C]`` valid).
+    spatial frame by construction, which is what makes stacking them into ``[H, W, C]`` valid).
     """
     if isinstance(path, BandGroupRef):
         one_band = next(iter(path.bands.values()))
@@ -254,7 +254,7 @@ def load_multiband(path: "str | Path | BandGroupRef", num_channels: int) -> np.n
     """Load a multi-band image as ``[H, W, C]`` (NPY/NPZ natively; GeoTIFF via tifffile).
 
     A :class:`BandGroupRef` decodes each sibling file (each already a supported single-band
-    source) and stacks them into one ``[H, W, C]`` array in the manifest's declared band order —
+    source) and stacks them into one ``[H, W, C]`` array in the manifest's declared band order:
     the one place virtual (in-memory) stacking happens; never written back to disk.
     """
     if isinstance(path, BandGroupRef):
