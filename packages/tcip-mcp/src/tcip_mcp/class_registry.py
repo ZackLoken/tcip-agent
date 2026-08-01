@@ -1,4 +1,4 @@
-"""The dataset's class registry — subjects, their attributes, and the deterministic
+"""The dataset's class registry, subjects, their attributes, and the deterministic
 name→id assignment a training run uses (and records, so predictions stay decodable).
 
 The on-disk registry (``<dataset_root>/classes.json``) is self-describing and name-based::
@@ -13,23 +13,23 @@ The on-disk registry (``<dataset_root>/classes.json``) is self-describing and na
 
 A *subject* is the object a label set is about (catkin, bush, efb). A subject with no
 ``attributes`` is simply detected. An *attribute* is an independent axis a subject's instances
-carry — ``categorical`` (unordered) or ``ordinal`` (ordered; the ``values`` order is the rank).
+carry, ``categorical`` (unordered) or ``ordinal`` (ordered; the ``values`` order is the rank).
 Numeric is not an attribute type; measured/field values live in the plant-keyed field CSVs.
 
 Labels reference these names, never integer ids. Integer class ids exist only inside a training
 run: :func:`assign_class_ids` maps the names in a training scope to contiguous 0-indexed ids in
-their *declared order*, deterministically and re-derivably — so the loader that builds targets,
+their *declared order*, deterministically and re-derivably, so the loader that builds targets,
 the model that predicts, and the code that later decodes a prediction all agree by construction.
 Ordering is the declared ``values`` order and never sorted: ordinal values carry rank, which
 sorting would corrupt. The registry file's order could change between training and decode, so a run
-*records* the map it used (K25: ``subprocess_worker.py::run`` resolves it via
+*records* the map it used (``subprocess_worker.py::run`` resolves it via
 ``_resolve_run_id_map`` right after the dataset is built and stamps it onto ``config["data"]
-["id_map"]`` — which travels onto the checkpoint via the run's own config object — and, best-effort,
+["id_map"]``, which travels onto the checkpoint via the run's own config object, and, best-effort,
 onto the durable experiment record via ``_patch_experiment_config_id_map``) and decode reads that
 recorded map first (``inference_tools.resolve_decode_id_map``, the one resolution both doors that
-write predictions to disk — ``inference_tools.run_inference`` and the web GUI's inference worker —
+write predictions to disk, ``inference_tools.run_inference`` and the web GUI's inference worker,
 call), falling back to a fresh derivation from the inference dataset's registry only for a
-checkpoint with no recorded map — a bespoke ``dataset_source`` with no registry scope, or a run
+checkpoint with no recorded map, a bespoke ``dataset_source`` with no registry scope, or a run
 trained from a pre-built COCO source whose id space isn't registry-derived.
 """
 
@@ -40,15 +40,15 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-#: The attribute kinds a subject may carry. Numeric is deliberately absent — see the module docstring.
+#: The attribute kinds a subject may carry. Numeric is deliberately absent, see the module docstring.
 ATTR_TYPES = ("categorical", "ordinal")
 
 
 @dataclass(frozen=True)
 class Attribute:
     """One classification axis of a subject's instances. ``values`` are ordered; for an ``ordinal``
-    attribute that order is the rank (severity 0 < 1 < 2). The value invariant — a known ``type`` and a
-    non-empty list of distinct names — is enforced here, so no ``Attribute``, however it is built, can
+    attribute that order is the rank (severity 0 < 1 < 2). The value invariant, a known ``type`` and a
+    non-empty list of distinct names, is enforced here, so no ``Attribute``, however it is built, can
     hold values that would silently collapse the name→id map in :func:`assign_class_ids`."""
 
     name: str
@@ -66,7 +66,7 @@ class Attribute:
 
 @dataclass(frozen=True)
 class Subject:
-    """The object a label set is about. ``attributes`` may be empty — such a subject is only detected."""
+    """The object a label set is about. ``attributes`` may be empty, such a subject is only detected."""
 
     name: str
     description: str = ""
@@ -83,7 +83,7 @@ class Subject:
 
 @dataclass(frozen=True)
 class ClassRegistry:
-    """The whole ``classes.json`` — the dataset's subjects, in declared order."""
+    """The whole ``classes.json``, the dataset's subjects, in declared order."""
 
     subjects: tuple[Subject, ...] = ()
 
@@ -124,7 +124,7 @@ def registry_from_dict(data: object) -> ClassRegistry:
             values = abody.get("values")
             if not isinstance(values, list):
                 raise RegistryError(f"attribute {sname}.{aname} 'values' must be a list")
-            # The value invariant (known type, non-empty, distinct) lives on Attribute — one guard,
+            # The value invariant (known type, non-empty, distinct) lives on Attribute, one guard,
             # shared by the parser and any code that constructs an Attribute directly.
             try:
                 attrs.append(Attribute(name=aname, type=abody.get("type"), values=tuple(values)))
@@ -158,11 +158,11 @@ def attribute_schema_digest(registry: ClassRegistry, subject: str) -> str | None
     """Digest over ``subject``'s attribute vocabulary (name -> {type, declared-order values}) only.
 
     ``None`` if ``subject`` is not in the registry at all. Deliberately excludes ``description``/
-    ``defined_by``/``defined_at`` — free-text provenance whose editing (a typo fix, a citation
+    ``defined_by``/``defined_at``, free-text provenance whose editing (a typo fix, a citation
     update) says nothing about what an instance of the subject looks like, so hashing it would
     quarantine confirmations over changes that never affected them. This is attribute-*schema* drift
     detection, not full subject-redefinition detection: a ``description``-only redefinition of what
-    the subject *is* is real but is a domain-expert judgment call, not something a hash can catch —
+    the subject *is* is real but is a domain-expert judgment call, not something a hash can catch,
     an attribute-less subject (e.g. ``bush``) still gets a real, stable digest of ``{}``.
     """
     s = registry.subject(subject)
@@ -191,9 +191,9 @@ def assign_class_ids(registry: ClassRegistry, subject: str, attribute: str | Non
     """The deterministic name→id map for one training scope, in the registry's *declared* order.
 
     - ``attribute`` given: one class per value of that attribute (``{value: 0..N-1}``), in the order
-      the registry declares them — the rank order for an ordinal attribute.
+      the registry declares them, the rank order for an ordinal attribute.
     - ``attribute`` is ``None``: the subject is trained as a single detection class (``{subject: 0}``),
-      whether or not it carries attributes — a plain detector that does not classify instances.
+      whether or not it carries attributes, a plain detector that does not classify instances.
 
     Same registry + scope → identical map, every call: the assignment iterates the declared ``values``
     tuple, never a set/dict, so nothing depends on hashing or insertion iteration. Callers that need
@@ -214,7 +214,7 @@ def assign_class_ids(registry: ClassRegistry, subject: str, attribute: str | Non
 
 
 def num_classes(registry: ClassRegistry, subject: str, attribute: str | None = None) -> int:
-    """Class count for a training scope — the size of :func:`assign_class_ids` (0 = background is the
+    """Class count for a training scope, the size of :func:`assign_class_ids` (0 = background is the
     detector's own offset, applied by the loader, not counted here)."""
     return len(assign_class_ids(registry, subject, attribute))
 
