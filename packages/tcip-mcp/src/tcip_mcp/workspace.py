@@ -1,15 +1,15 @@
-"""Workspace resolver — where TCIP projects live on disk.
+"""Workspace resolver: where TCIP projects live on disk.
 
 A single configured workspace root (``TCIP_WORKSPACE``, default ``~/tcip-projects/``)
 holds one directory per project (``<workspace>/<name>/``). The agent creates
 projects here (``ingest_images``); the GUI lists and opens them (``/api/projects``).
 Both ``tcip-mcp`` tools and the ``tcip-web`` backend resolve through this module so
-there is one source of truth for the workspace location — the same spirit as
+there is one source of truth for the workspace location, the same spirit as
 :mod:`tcip_mcp.dataset_layout` for the in-project layout.
 
 The active-project marker (``<workspace>/.active``) records which workspace project
 the GUI should open. The agent sets it after ingesting a project so the breeder flow
-("I structured your images, opening ``hazelnut_catkin_valley-farm``") closes the loop.
+("I structured your images, opening ``<crop>_<trait>_valley-farm``") closes the loop.
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def read_active_project() -> Optional[str]:
         val = p.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
         # A marker written with the wrong encoding (e.g. UTF-16 from PowerShell) must not
-        # 500 the whole front door — treat it as unset.
+        # 500 the whole front door: treat it as unset.
         return None
     return val or None
 
@@ -97,7 +97,7 @@ def set_active_project(name: str) -> Path:
 
     Adopting also repins this process's ``TCIP_PROJECT_ROOT`` to the project, so the
     ``@audited`` log, the experiment store, and the model registry all resolve under
-    ``<project>/.tcip/`` — one self-contained ``.tcip`` per project. The repin is an
+    ``<project>/.tcip/``, one self-contained ``.tcip`` per project. The repin is an
     explicit action (not a passive marker read), so an in-flight training run keeps writing
     to the project it started under until the agent deliberately adopts a different one.
     """
