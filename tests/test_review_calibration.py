@@ -39,10 +39,12 @@ _IDENTITY_A = {"checkpoint_sha256": "sha-model-a", "experiment_id": None}
 _IDENTITY_B = {"checkpoint_sha256": "sha-model-b", "experiment_id": None}
 
 
-def _entry(mt, action, cid, gt, pred, conf, *, producer_identity=_IDENTITY_A, conf_threshold=None):
+def _entry(mt, action, cid, gt, pred, conf, *, producer_identity=_IDENTITY_A, conf_threshold=None,
+           missed_object_attested=False):
     return {"match_type": mt, "action": action, "class_id": cid,
             "gt_bbox_norm": gt, "pred_bbox_norm": pred, "conf": conf,
-            "producer_identity": producer_identity, "conf_threshold": conf_threshold}
+            "producer_identity": producer_identity, "conf_threshold": conf_threshold,
+            "missed_object_attested": missed_object_attested}
 
 
 def _floored_state():
@@ -89,7 +91,8 @@ def _dense_review_state(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, 
             row, col = divmod(k, cols)
             box = [0.05 + col * 0.02 + jitter, 0.05 + row * 0.02, 0.01, 0.01]
             if k < miss_pattern[i]:
-                dets.append(_entry("FN", "edited", 0, box, None, None, producer_identity=identity))
+                dets.append(_entry("FN", "edited", 0, box, None, None, producer_identity=identity,
+                                   missed_object_attested=True))
             else:
                 dets.append(_entry("TP", "accepted", 0, box, box, conf, producer_identity=identity))
         for j in range(fp_pattern[i]):
@@ -136,8 +139,10 @@ def test_review_only_completed_images():
 def test_review_confirmed_stamps_when_the_same_gate_passes():
     # staged_conf_floor SIMULATES what the review-path threading computes and passes (Fix D item 4,
     # threaded from routes/review.py) — the seam here is a caller-supplied value.
+    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # only gates a bundle when tiled).
     b = resolve_operating_point_from_review(_good_review_state(), "catkin", staged_conf_floor=0.01,
-                                            bucket_identities=[_IDENTITY_A])
+                                            tiled=False, bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
     # A disjoint, uncensored, count-bias-passing review reference earns review_confirmed (distinct
     # from VALIDATED_HELD_OUT so provenance records WHICH reference validated) and is shippable.
@@ -214,6 +219,34 @@ def test_missing_producer_identity_fails_closed_not_grandfathered():
     assert recs == []
 
 
+def test_unresolvable_class_id_refuses_the_whole_reference_not_a_silent_drop():
+    # K25: a verdict whose class_id is None (the producing bucket's own id_map either doesn't
+    # exist or doesn't recognize this verdict's class_name) must refuse the WHOLE reference, not
+    # silently exclude the one entry. A silent per-entry drop is a fail-open here: it can delete a
+    # confirmed miss (FN) while keeping an in-vocabulary accepted-FP entry, making gt/dt agree by
+    # construction and pass the count-bias gate on a reference missing real evidence.
+    state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
+        {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "catkin",
+         "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
+         "conf": 0.9, "producer_identity": _IDENTITY_A}
+    ]}}}
+    with pytest.raises(ValueError, match="no resolvable class identity"):
+        review_to_records(state, image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
+
+
+def test_missing_class_id_key_also_refuses_not_defaulted_to_class_one():
+    # The pre-K25 defect, exactly reproduced: a verdict entry with no class_id key at all (the
+    # shape record_detection_action wrote before this fix) used to silently default to category_id
+    # 1 for every entry. It must now refuse instead of guessing.
+    state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
+        {"match_type": "TP", "action": "accepted", "class_name": "catkin",
+         "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
+         "conf": 0.9, "producer_identity": _IDENTITY_A}
+    ]}}}
+    with pytest.raises(ValueError, match="no resolvable class identity"):
+        review_to_records(state, image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
+
+
 def test_confirmed_negative_image_carries_its_own_producer_identity():
     # A confirmed negative (mark_complete, zero verdict entries) stamps identity at the image
     # level (Fix G item 2) — it must remain in the reference, correctly attributed, not silently
@@ -239,8 +272,16 @@ def test_previously_unlabeled_session_with_marked_misses_can_still_validate():
     # numerically cancel it at the low-conf grid point (both magnitude 1), making the picker land
     # there instead of the true high-conf agreement point — an arithmetic coincidence of the
     # fixture, not a real ambiguity; 2 avoids it while staying realistic (rule 17).
+    #
+    # objects_per_image=250, not the module default 40 (K4 residual, 2026-07-31): the new relative
+    # count-bias tolerance scales with this reference's own typical per-image count, and at 40 a
+    # single permanent miss is a real ~2.5% relative error — over the new default 1% fraction, so the
+    # fixture would fail on tolerance MAGNITUDE (an unrelated concern this test doesn't exist to
+    # exercise) before the Fix H coverage mechanism under test ever mattered. 250 keeps the SAME
+    # miss=1/fp=2 counts (preserving the arithmetic-coincidence reasoning above) while making that
+    # identical single miss a ~0.4% relative error, comfortably inside tolerance.
     state = _dense_review_state(gt_preexisting=False, miss_pattern=[1] * N_IMAGES,
-                                fp_pattern=[2] * N_IMAGES)
+                                fp_pattern=[2] * N_IMAGES, objects_per_image=250)
     b = resolve_operating_point_from_review(state, "catkin", staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
@@ -268,6 +309,22 @@ def test_gt_backed_session_passes_unaffected_by_the_coverage_gate():
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
     assert "insufficient_adjudication_coverage" not in conf.sweep["failures"]
+
+
+def test_rejected_fn_geometry_is_not_mistaken_for_a_missed_object_attestation():
+    # Reproduces the exact ambiguity the "record explicitly, don't infer" fix closes: a REJECTED
+    # pre-existing FN (the breeder decided an existing GT box was wrong and removed it — not a
+    # newly-attested miss) leaves the identical pred_bbox_norm=None / gt_bbox_norm=<box> shape a
+    # genuine "mark missed object" attestation would. missed_object_attested — the explicit,
+    # call-site-derived fact record_detection_action stamps, never bbox geometry — is what
+    # adjudication_covered must key off of.
+    state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": False, "detections": [
+        _entry("FN", "rejected", 0, [0.25, 0.25, 0.05, 0.05], None, None,
+              missed_object_attested=False),
+    ]}}}
+    recs = review_to_records(state, image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
+    assert len(recs) == 1
+    assert recs[0]["adjudication_covered"] is False
 
 
 # ── Fix D item 4 — review_conf_threshold (no unit coverage anywhere before this) ────────────
