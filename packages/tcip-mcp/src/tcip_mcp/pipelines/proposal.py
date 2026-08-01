@@ -1,4 +1,4 @@
-"""Annotation-proposal engines — a method-neutral seam for auto-labeling.
+"""Annotation-proposal engines: a method-neutral seam for auto-labeling.
 
 An auto-labeling *engine* turns an image into candidate shapes a human then reviews. This seam is
 deliberately as open as ``model_source``: name a built-in engine ('sam') or bring your own by dotted
@@ -7,14 +7,14 @@ open-vocab, a bespoke proposer it writes) and deduce which serves a task best by
 engine's high-conf proposals survive breeder review. No engine is privileged; SAM is the one that
 ships as a runnable reference.
 
-An engine implements :class:`Proposer` — ``propose`` for whole-image candidates (auto-labeling) and
+An engine implements :class:`Proposer`: ``propose`` for whole-image candidates (auto-labeling) and
 ``segment`` for a prompted single mask; an engine may supply either, and the dispatch checks for the
 method it needs. Candidates use a neutral schema (``candidate_id`` / ``bbox`` / ``area`` /
 ``rings`` / ``score`` / ``engine`` / ``engine_meta``); engine-specific signals (SAM's stability
 and predicted-IoU scores) live under ``engine_meta`` so the shared review/staging path stays
 method-agnostic.
 
-``rings`` is a candidate's geometry as ``Polygon.rings`` — one closed contour per connected region of
+``rings`` is a candidate's geometry as ``Polygon.rings``: one closed contour per connected region of
 the proposed mask. An engine that only ever finds whole objects yields one ring per candidate; one
 that proposes an occlusion-split object yields several, and the staging path keeps all of them.
 """
@@ -58,7 +58,7 @@ def neutral_candidate(raw: dict, *, engine: str, score_key: str, meta_keys: tupl
 
 
 class SamProposer:
-    """The built-in SAM2 reference engine — auto-mask proposal + prompted segmentation.
+    """The built-in SAM2 reference engine: auto-mask proposal + prompted segmentation.
 
     A thin adapter over ``tcip_annotation.sam_wrapper``; SAM's mask-quality signals (stability score,
     predicted IoU) are carried through under ``engine_meta`` and its predicted IoU is the neutral
@@ -128,7 +128,7 @@ def available_engines() -> list[str]:
 def resolve_proposer(engine: str) -> Proposer:
     """Resolve an engine: a registered built-in name, else a dotted ``module:factory`` the agent brings.
 
-    Mirrors ``model_source`` — a bring-your-own engine is imported (never ``exec``'d) and, if the
+    Mirrors ``model_source``: a bring-your-own engine is imported (never ``exec``'d) and, if the
     imported target is callable (a class or factory), instantiated. A dotted name that fails to
     import raises ``ValueError`` like an unknown one, so one ``except`` covers both.
     """
@@ -140,7 +140,7 @@ def resolve_proposer(engine: str) -> Proposer:
 
         try:
             target = _import_dotted(engine)
-        except Exception as exc:  # noqa: BLE001 — any import failure is an unresolvable name
+        except Exception as exc:  # noqa: BLE001 (any import failure is an unresolvable name)
             raise ValueError(f"Could not import proposal engine {engine!r}: {exc}") from exc
         return target() if callable(target) else target
     raise ValueError(
