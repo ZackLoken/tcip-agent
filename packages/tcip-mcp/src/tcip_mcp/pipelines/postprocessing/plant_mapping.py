@@ -12,7 +12,7 @@ ambiguity with a hybrid:
 Fallback: when sequence anchoring fails (missing timestamps, unordered
 capture), fall back to nearest-neighbour GPS with a configurable tolerance.
 Each assignment records its match ``source`` and the GPS ``distance_m`` to the
-matched plant — honest, interpretable signals. It deliberately does not emit a
+matched plant, honest, interpretable signals. It deliberately does not emit a
 0–1 "confidence": a linear ``1 − d/tol`` score read as a probability was
 fabricated (uncalibrated against any hand-checked assignment) and has been
 removed; use ``distance_m`` + ``source`` to judge a match (see the CLAUDE.md
@@ -306,7 +306,7 @@ def assign_plants(
                     best_d = d
 
             if best_idx < 0 or best_d is None or best_d > nn_tolerance_m * 2:
-                # Fall through to plain NN, even if claimed — duplicates can happen
+                # Fall through to plain NN, even if claimed: duplicates can happen
                 plant, d = _nearest_plant(s.lat, s.lon, plants)
                 if plant is None or d is None or d > nn_tolerance_m * 3:
                     out.append(
@@ -360,7 +360,7 @@ def grid_pitch_m(plants: list[PlantRecord]) -> float:
     """Median nearest-neighbor spacing of the plant centroids = the planting grid pitch (m).
 
     Derived from the layout in hand (not pinned): used to cap the GPS match tolerance so a
-    detection can't be attributed to a plant more than half a grid cell away — beyond that, the
+    detection can't be attributed to a plant more than half a grid cell away; beyond that, the
     nearest plant is as likely to be the wrong (adjacent) plot as the right one.
     """
     pts = [(p.lat, p.lon) for p in plants if p.lat is not None and p.lon is not None]
@@ -382,7 +382,7 @@ def build_mapping(
 ) -> dict[str, list[Assignment]]:
     """Build per-date plant assignments for every image under ``images_root``.
 
-    ``nn_tolerance_m`` is DERIVED from the plot's ``grid_pitch_m`` when the caller does not pin it
+    ``nn_tolerance_m`` is derived from the plot's ``grid_pitch_m`` when the caller does not pin it
     (not a pinned 10 m): pitch/6, so assign_plants' loosest 3x gate keeps the effective match radius
     within half a grid cell. An explicit value is honored but still capped at that ceiling. No
     derivable pitch (< 2 georeferenced plants) -> the honest ``NN_TOLERANCE_METERS`` fallback.
