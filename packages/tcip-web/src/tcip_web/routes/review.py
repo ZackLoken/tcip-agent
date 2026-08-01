@@ -7,7 +7,10 @@ project (keyed by project_root). Review state is persisted via the engine to per
 Ground truth and predictions are each one JSON file per image holding every subject's annotations by
 name (a prediction is an :class:`~tcip_annotation.state.Annotation` whose ``score`` is set); a class
 is named by its ``subject``, never an integer id, so the recorded verdict carries the real subject
-name with no registry lookup.
+name. K25: the verdict ALSO carries a resolved ``class_id`` — the producing bucket's own recorded
+name->id map, read once at record time (``_resolve_verdict_class_id``), never a registry
+re-derivation — so a class-aware reference (``review_calibration.review_to_records``) can be built
+from these verdicts without guessing.
 """
 
 from __future__ import annotations
@@ -117,6 +120,38 @@ def _resolve_producer_identity(pred_path: Optional[str]) -> Optional[dict]:
     if not pred_path:
         return None
     return _resolve_producer_identity_for_dir(str(Path(pred_path).parent))
+
+
+def _resolve_verdict_class_id(pred_path: Optional[str], class_name: str) -> Optional[int]:
+    """The 0-indexed class identity ``class_name`` resolves to under the producing bucket's own
+    recorded name->id map (K25) — resolved HERE, at verdict-record time, from the SAME
+    ``operating_point.json`` ``id_map`` field ``phenology.resolve_positive_class_id`` reads for a
+    prediction bucket, never a fresh registry re-derivation (the recorded map is what the bucket's
+    predictions were actually decoded through; the registry could have changed since).
+
+    ``None`` when there is no bucket, no recorded ``id_map`` on it, or ``class_name`` is not one of
+    its keys (e.g. a GT annotation's raw ``subject`` on an attribute-scoped bucket, whose id_map is
+    keyed by attribute VALUES, not the subject name — class-aware admission does not yet reach that
+    case; see ``review_calibration.review_to_records``, which refuses rather than guesses when this
+    is ``None``). Never defaults to 0 — an unresolved identity is an honest fact, not a class.
+    """
+    if not pred_path:
+        return None
+    from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
+
+    id_map = bucket_id_map(Path(pred_path).parent)
+    if id_map is None:
+        return None
+    cid = id_map.get(class_name)
+    if cid is None:
+        return None
+    try:
+        # Guards the same malformed-value case phenology.resolve_positive_class_id already guards
+        # (a corrupt/hand-edited sidecar whose id_map value isn't actually numeric) — a bad sidecar
+        # must not 500 the breeder's accept/reject/edit click; it degrades to "unresolved" instead.
+        return int(cid)
+    except (TypeError, ValueError):
+        return None
 
 
 def _image_dims(path: str) -> tuple[int, int]:
@@ -412,9 +447,11 @@ def record_action(payload: ActionPayload) -> dict:
         norm_det = replace(det, gt_idx=landed_idx)
         norm_ctx = work
     producer_identity = _resolve_producer_identity(payload.pred_path)
+    class_id = _resolve_verdict_class_id(payload.pred_path, payload.class_name)
     engine.record_detection_action(
         det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx,
         producer_identity=producer_identity, conf_threshold=payload.conf_threshold,
+        class_id=class_id,
     )
 
     # Write the single per-image GT file (keep_empty: an emptied GT stays an {"annotations": []}
