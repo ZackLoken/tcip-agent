@@ -1,7 +1,7 @@
-"""Active learning scorers — rank unlabeled images by informativeness.
+"""Active learning scorers: rank unlabeled images by informativeness.
 
 An acquisition function is a capability, not a fixed menu: scorers resolve through a small dict
-registry (``resolve_scorer``) the agent can extend with ``register_scorer`` — compose a new
+registry (``resolve_scorer``) the agent can extend with ``register_scorer``, composing a new
 acquisition function (e.g. margin, least-confidence) and register it rather than pick from a welded
 if/elif. The built-in reference scorers:
   - UncertaintyScorer: prediction entropy / confidence spread
@@ -210,7 +210,7 @@ def resolve_scorer(method: str, task: str) -> BaseScorer:
     """Resolve a scorer: a registered built-in name, else a dotted ``module:factory`` you wrote.
 
     Mirrors ``resolve_proposer``. An unresolvable name raises ``ValueError`` rather than falling
-    back to the combined scorer — a silent substitution means the queue is ordered by an acquisition
+    back to the combined scorer: a silent substitution means the queue is ordered by an acquisition
     function the caller did not choose, while the result still reports the name that was asked for.
     A dotted name that fails to import raises ``ValueError`` too, so one ``except`` covers both.
     """
@@ -222,7 +222,7 @@ def resolve_scorer(method: str, task: str) -> BaseScorer:
 
         try:
             target = _import_dotted(method)
-        except Exception as exc:  # noqa: BLE001 — any import failure is an unresolvable name
+        except Exception as exc:  # noqa: BLE001 (any import failure is an unresolvable name)
             raise ValueError(f"Could not import scorer {method!r}: {exc}") from exc
         return target(task) if callable(target) else target
     raise ValueError(
