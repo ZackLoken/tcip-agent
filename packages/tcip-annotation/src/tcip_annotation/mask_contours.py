@@ -1,23 +1,23 @@
 """Mask -> polygon rings: the one contour extractor behind every mask-derived shape.
 
-Both paths that turn a mask into a stored shape call this — SAM-assisted labeling
+Both paths that turn a mask into a stored shape call this: SAM-assisted labeling
 (:mod:`tcip_annotation.sam_wrapper`, which produces ground truth a breeder confirms) and model
 prediction export (tcip-mcp's ``mask_geometry.mask_to_polygon_points``, a thin delegate). A single
-implementation is the point: an occlusion-split object (routine in this imagery — a catkin behind a
+implementation is the point: an occlusion-split object (routine in this imagery, a catkin behind a
 branch, a leaf crossed by a stem) is genuinely more than one region, and GT and prediction must not
 disagree about what a mask means. Two extractors did disagree; this module is why they can't again.
 
 Every external contour becomes its own ring, largest-area first; nothing is reduced to the largest
 component. Lives here (not in tcip-mcp) because tcip-annotation depends on neither sibling package,
-and ``state.Polygon`` — whose ``rings`` this feeds — is defined alongside it.
+and ``state.Polygon``, whose ``rings`` this feeds, is defined alongside it.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-#: Simplification tolerance as a fraction of each ring's OWN perimeter, so the deviation a ring is
-#: allowed is proportional to that ring's size — a small fragment is not flattened by the same
+#: Simplification tolerance as a fraction of each ring's own perimeter, so the deviation a ring is
+#: allowed is proportional to that ring's size: a small fragment is not flattened by the same
 #: absolute tolerance that suits a large one.
 DEFAULT_EPSILON_FRAC = 0.005
 
@@ -27,7 +27,7 @@ def mask_to_polygon_rings(
 ) -> list[list[tuple[float, float]]]:
     """One simplified polygon ring per connected component of ``mask``, in pixel coords.
 
-    ``threshold=None`` treats the mask as already binary (any nonzero pixel is foreground) — what a
+    ``threshold=None`` treats the mask as already binary (any nonzero pixel is foreground): what a
     SAM boolean mask is. A soft/probability mask passes the binarization threshold its caller
     resolved; this function never picks one for it.
 
