@@ -501,15 +501,36 @@ def test_cv2_explicit_tile_size_wins(tmp_path, monkeypatch):
 
 
 def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch):
+    """K24: launch_training now runs the training body in a real subprocess, so the effective
+    tiling geometry can only be known (and patched into the durable experiment record) once that
+    child builds the dataset — after launch_training has already returned. Polls for it instead of
+    asserting synchronously.
+
+    Also pins the isolation itself, not just the timing change: this monkeypatches
+    ``generic_trainer.train`` in THIS process to raise if ever called. Before K24 (a background
+    thread in the same interpreter) that monkeypatch would have reached the run and failed it —
+    against that baseline this test's "status == completed" assertion below would fail, since the
+    poisoned ``train`` would be the one actually invoked. After K24 (a real subprocess, which
+    re-imports fresh) the monkeypatch has no effect at all, so the run completes normally despite
+    it — proving the training body genuinely executes outside this process, not merely that the
+    API still returns the right shape."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
     import json
+    import os
+    import time
 
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     import tcip_mcp.pipelines.training.generic_trainer as gt
     from tcip_mcp.tools import training_tools
+
+    def _poison_train(*a, **k):
+        raise AssertionError(
+            "generic_trainer.train ran inside the launching process — subprocess isolation broken")
+
+    monkeypatch.setattr(gt, "train", _poison_train)
 
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
@@ -525,11 +546,6 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
     json_io.write_annotations(str(val_labels / "v0.json"),
                               [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
-    def _stub_train(run, *a, **k):
-        run.status = "completed"
-        return run
-
-    monkeypatch.setattr(gt, "train", _stub_train)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
@@ -541,20 +557,47 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
                  "val_images_dir": str(val_images), "val_labels_dir": str(val_labels),
                  "tiling": {"enabled": True}},  # no tile_size -> effective default must be persisted
         "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
-                     "mixed_precision": False},
+                     "mixed_precision": False, "device": "cpu"},
     }
-    import threading
-    before = set(threading.enumerate())
     res = training_tools.launch_training(cfg, str(tmp_path / "out"))
+    assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]
-    persisted = json.loads((tmp_path / ".tcip" / "experiments" / eid / "config.json").read_text())
-    assert persisted["data"]["tiling"]["tile_size"] == 224  # TiledDetectionDataset default
-    assert persisted["data"]["tiling"]["overlap"] == pytest.approx(0.2)
-    # Await the background training thread so its audit close-event lands in this test's pinned
-    # root; leaking the daemon lets that event bleed into a later test's log (tests repin
-    # TCIP_PROJECT_ROOT per test, so a late write resolves against whoever is running then).
-    for t in set(threading.enumerate()) - before:
-        t.join(timeout=60)
+    run_id = res["run_id"]
+    config_path = tmp_path / ".tcip" / "experiments" / eid / "config.json"
+
+    deadline = time.monotonic() + 90
+    tiling: dict = {}
+    while time.monotonic() < deadline:
+        if config_path.is_file():
+            tiling = json.loads(config_path.read_text()).get("data", {}).get("tiling", {})
+            if "tile_size" in tiling:
+                break
+        status = training_tools.check_training_status(run_id)
+        if status.get("status") in ("failed", "cancelled"):
+            pytest.fail(f"training subprocess ended early: {status}")
+        time.sleep(0.5)
+    else:
+        pytest.fail("timed out waiting for effective tiling geometry to be persisted")
+
+    assert tiling["tile_size"] == 224  # TiledDetectionDataset default
+    assert tiling["overlap"] == pytest.approx(0.2)
+
+    # Let the subprocess actually finish rather than leaking it — it keeps writing to this test's
+    # pinned TCIP_PROJECT_ROOT, and a late write after the test moves on would resolve against
+    # whoever is running then (tests repin TCIP_PROJECT_ROOT per test, they don't isolate the OS
+    # process tree). Asserting specifically on "completed" (not just any terminal state) is what
+    # makes the poisoned gt.train monkeypatch load-bearing: if the child ran inside this process,
+    # it would hit _poison_train and the run would be "failed", not "completed".
+    final_status = None
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        final_status = training_tools.check_training_status(run_id).get("status")
+        if final_status in ("completed", "failed", "cancelled"):
+            break
+        time.sleep(0.5)
+    else:
+        pytest.fail("timed out waiting for training subprocess to finish")
+    assert final_status == "completed"
 
 
 # ======================================================================
