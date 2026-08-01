@@ -1,1 +1,1 @@
-"""Components sub-package — composable ML primitives."""
+"""Components sub-package: composable ML primitives."""
