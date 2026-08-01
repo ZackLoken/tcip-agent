@@ -1,4 +1,4 @@
-"""Runtime parameter resolution — the "derive, don't pin" currency.
+"""Runtime parameter resolution, the "derive, don't pin" currency.
 
 Every result-affecting parameter that varies by dataset/model/trait is resolved at runtime into a
 ``ResolvedParam`` carrying not just a value but *how it was derived* and *whether it is trustworthy*.
@@ -13,7 +13,7 @@ number* unless it was checked against the right kind of real-world reference for
 ``unvalidated_value(...)`` and say so explicitly. This makes an unvalidated measurement value
 physically un-shippable rather than merely discouraged.
 
-Pure stdlib — no torch, safe to import anywhere.
+Pure stdlib, no torch, safe to import anywhere.
 """
 
 from __future__ import annotations
@@ -27,25 +27,24 @@ from typing import Any, Callable
 # --- vocabularies ---------------------------------------------------------
 SOURCES = ("explicit", "derived", "default")
 
-# validated_against records WHICH reference confirmed a value that requires validation — the
+# validated_against records which reference confirmed a value that requires validation, the
 # shared-reference principle (CLAUDE.md): a reference sized to the trait, not dense GT for every
 # trait. "false" is a real, distinct value (not Python None) so a sidecar/provenance record can say
 # "checked, and it wasn't" rather than leaving the field merely absent.
 VALIDATED_HELD_OUT = "held_out_annotations"          # a disjoint held-out split of this dataset's GT
 VALIDATED_REVIEW_CONFIRMED = "reviewer_confirmed_annotations"  # a breeder-confirmed output sample
 VALIDATED_PHYSICAL_MEASUREMENT = "physical_measurement"  # checked against a known physical dimension
-# K10: a tile scale's own real basis for trust — the checkpoint's own persisted training geometry, or
-# a caller's deliberate stated override (the same two bases run_full_frame_evaluation already accepts
-# on the delivery-gating path; only a fabricated no-basis fallback is untrustworthy).
+# A tile scale's own real basis for trust is either the checkpoint's own persisted training
+# geometry, or a caller's deliberate stated override (the same two bases run_full_frame_evaluation
+# already accepts on the delivery-gating path; only a fabricated no-basis fallback is untrustworthy).
 VALIDATED_PERSISTED_GEOMETRY = "persisted_training_geometry"
 VALIDATED_EXPLICIT_GEOMETRY = "explicit_caller_stated_geometry"
 VALIDATED_FALSE = "false"
 
-# Which validated_against values legitimately clear validation for which KIND of thing being
-# validated — an annotation-count operating point (conf, a mask-binarize threshold), a physical
+# Which validated_against values legitimately clear validation for which kind of thing being
+# validated, an annotation-count operating point (conf, a mask-binarize threshold), a physical
 # scale, and a tile geometry are checked against fundamentally different references, and none may
-# satisfy another's requirement (that cross-satisfaction was a real, closed hole: see resolution.py's
-# own history).
+# satisfy another's requirement.
 VALIDATION_KINDS = ("annotations", "physical", "geometry")
 _ACCEPTED_REFERENCES: dict[str, tuple[str, ...]] = {
     "annotations": (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED),
@@ -59,10 +58,10 @@ def accepted_references(validation_kind: str) -> tuple[str, ...]:
     return _ACCEPTED_REFERENCES[validation_kind]
 
 
-# The union of every real (non-"false") shippable reference, across every kind — used only by
+# The union of every real (non-"false") shippable reference, across every kind, used only by
 # dimension-agnostic logic (check_delivery_gate, _validity_rank) whose callers have already
 # resolved the right kind per-dimension upstream via accepted_references()/is_shippable. Never used
-# to decide whether a SPECIFIC param's reference is the right kind for it — that decision belongs to
+# to decide whether a specific param's reference is the right kind for it, that decision belongs to
 # accepted_references(validation_kind), always.
 VALIDATED_SHIPPABLE = (
     VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT,
@@ -76,7 +75,7 @@ DEFAULT_NMS_IOU = 0.3
 DEFAULT_TILED = True
 DEFAULT_TILE_SIZE = 640
 DEFAULT_OVERLAP = 0.2
-# A high full-frame detection cap so dense scenes (hundreds of catkins) aren't silently truncated
+# A high full-frame detection cap so dense scenes (hundreds of objects) aren't silently truncated
 # at a framework default (torchvision 100 / ultralytics 300). Enforced after any tiled merge.
 DEFAULT_MAX_DETS = 1000
 
@@ -97,15 +96,15 @@ class UnvalidatedOperatingPointError(RuntimeError):
 class ResolvedParam:
     """One parameter, resolved from the data in hand, with provenance and a validation status.
 
-    Most parameters never need validation — a fact read from the data (``in_chans``), a statistic
+    Most parameters never need validation, a fact read from the data (``in_chans``), a statistic
     computed from this dataset's own spread (``cross_tile_nms``), or a plain configuration default
     (``tiled``) are all trustworthy by construction (``requires_validation=False``, the default).
-    ``derived_from`` (free text) is where *how it was produced* is described — there is no separate
+    ``derived_from`` (free text) is where *how it was produced* is described, there is no separate
     category label to learn on top of that.
 
-    A parameter that DOES need validation (a confidence threshold, a physical scale) sets
-    ``requires_validation=True`` and a real ``validation_kind`` (what KIND of reference can validate
-    it — see ``VALIDATION_KINDS``); it is shippable only once ``validated_against`` names a reference
+    A parameter that does need validation (a confidence threshold, a physical scale) sets
+    ``requires_validation=True`` and a real ``validation_kind`` (what kind of reference can validate
+    it, see ``VALIDATION_KINDS``); it is shippable only once ``validated_against`` names a reference
     ``accepted_references(validation_kind)`` recognizes for that kind.
     """
 
@@ -114,7 +113,7 @@ class ResolvedParam:
     source: str  # one of SOURCES
     derived_from: str = ""  # human-readable: what artifact/analysis produced it
     requires_validation: bool = False
-    validation_kind: str | None = None  # one of VALIDATION_KINDS — required iff requires_validation
+    validation_kind: str | None = None  # one of VALIDATION_KINDS, required iff requires_validation
     validated_against: str | None = None  # None | a member of VALIDATED_SHIPPABLE | VALIDATED_FALSE
     dataset_scoped: bool = False  # True => only valid for the dataset named by dataset_hash
     dataset_hash: str | None = None
@@ -128,13 +127,13 @@ class ResolvedParam:
         if self.requires_validation and self.validation_kind not in VALIDATION_KINDS:
             raise ValueError(
                 f"{self.name!r}: requires_validation=True needs a real validation_kind in "
-                f"{VALIDATION_KINDS}, got {self.validation_kind!r} — a param that needs validation "
+                f"{VALIDATION_KINDS}, got {self.validation_kind!r}, a param that needs validation "
                 f"must say what kind of reference can validate it, never left to a silent default."
             )
         if not self.requires_validation and self.validation_kind is not None:
             raise ValueError(
                 f"{self.name!r}: validation_kind={self.validation_kind!r} set but "
-                f"requires_validation=False — a kind with nothing to validate is a contradiction."
+                f"requires_validation=False, a kind with nothing to validate is a contradiction."
             )
         if self.validated_against is not None and self.validated_against not in (
                 *VALIDATED_SHIPPABLE, VALIDATED_FALSE):
@@ -146,7 +145,7 @@ class ResolvedParam:
 
         A param that doesn't require validation is always shippable. One that does is shippable only
         once ``validated_against`` is a reference ``accepted_references(validation_kind)`` recognizes
-        for its own kind — a physical scale can never be satisfied by an annotation-based reference,
+        for its own kind, a physical scale can never be satisfied by an annotation-based reference,
         or vice versa.
         """
         if not self.requires_validation:
@@ -155,11 +154,11 @@ class ResolvedParam:
 
     @property
     def value(self) -> Any:
-        """The trustworthy value — raises the firewall for an unvalidated param that requires it."""
+        """The trustworthy value, raises the firewall for an unvalidated param that requires it."""
         if not self.is_shippable:
             raise UnvalidatedOperatingPointError(
                 f"{self.name!r} requires validation ({self.validation_kind}) and has "
-                f"validated_against={self.validated_against!r} — cannot be consumed as a trustworthy "
+                f"validated_against={self.validated_against!r}, cannot be consumed as a trustworthy "
                 f"value. Validate it against a real reference for its kind, or consume it via "
                 f"unvalidated_value(acknowledge_unvalidated=True) and stamp the result validated=false."
             )
@@ -211,7 +210,7 @@ def derived(name: str, value: Any, *, derived_from: str,
 
 
 def default(name: str, value: Any, *, derived_from: str = "documented default") -> ResolvedParam:
-    """Convenience constructor for a documented default (``source="default"``) — never requires
+    """Convenience constructor for a documented default (``source="default"``), never requires
     validation; a param that does is always constructed explicitly with ``requires_validation=True``."""
     return ResolvedParam(name=name, _raw=value, source="default", derived_from=derived_from)
 
@@ -228,7 +227,7 @@ class ResolvedBundle:
     trait: str
     dataset_hash: str | None
     params: dict[str, ResolvedParam] = field(default_factory=dict)
-    classifier_validated_vs_gt: str | None = None  # for the elongation classifier
+    classifier_validated_vs_gt: str | None = None  # for a trait's positive-class classifier
 
     def get(self, name: str) -> ResolvedParam:
         return self.params[name]
@@ -255,19 +254,19 @@ class ResolvedBundle:
             if p.dataset_scoped and target_dataset_hash is not None and p.dataset_hash != target_dataset_hash:
                 issues.append(
                     f"{p.name}: dataset-scoped value derived on {p.dataset_hash} inherited across a "
-                    f"different dataset {target_dataset_hash} — re-resolve per dataset, never inherit"
+                    f"different dataset {target_dataset_hash}, re-resolve per dataset, never inherit"
                 )
             if p.capture_scoped and p.capture_id is None:
-                # No deriver for capture_id exists yet — an honest "not comparable" marker rather
+                # No deriver for capture_id exists yet, an honest "not comparable" marker rather
                 # than silently passing a check that cannot actually run.
                 issues.append(
-                    f"{p.name}: capture-scoped but no capture_id was ever derived for it — "
+                    f"{p.name}: capture-scoped but no capture_id was ever derived for it, "
                     "cross-capture reuse cannot be checked (not comparable, not confirmed safe)"
                 )
             elif p.capture_scoped and target_capture_id is not None and p.capture_id != target_capture_id:
                 issues.append(
                     f"{p.name}: capture-scoped value derived for capture {p.capture_id} inherited "
-                    f"across a different capture {target_capture_id} — re-resolve per capture, "
+                    f"across a different capture {target_capture_id}, re-resolve per capture, "
                     "never inherit"
                 )
         return issues
@@ -284,19 +283,19 @@ class ResolvedBundle:
 def resolve_tile_size_param(
     tile_size: int | None, *, tiled: bool, tile_size_source: str,
 ) -> ResolvedParam:
-    """The ``tile_size`` dimension, gated the same shape ``conf`` already is (K10) — the shared
+    """The ``tile_size`` dimension, gated the same shape ``conf`` already is, the shared
     construction site both :func:`raw_operating_point` (here) and
     :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point` (the calibrated path) call,
     so the two doors can't drift into disagreeing about when a tile scale is trustworthy.
 
     Only meaningful when ``tiled``: an untiled run's count never depends on tile_size, so it stays a
-    plain non-gating fact there (mirrors ``in_chans``) — gating it anyway would refuse legitimate
+    plain non-gating fact there (mirrors ``in_chans``), gating it anyway would refuse legitimate
     untiled work over a dimension that was never operative. When tiled, the value is shippable only
     when its source names a real basis for trusting the scale: the checkpoint's own persisted
-    training geometry (``"derived"``), or a caller's deliberate explicit override (``"explicit"`` —
+    training geometry (``"derived"``), or a caller's deliberate explicit override (``"explicit"``,
     accepted on the same terms ``run_full_frame_evaluation`` already accepts an explicit value on:
     not cross-checked against the checkpoint's real training scale, but a stated decision, not a
-    guess). A bare ``"default"`` fallback (no persisted geometry, nothing explicit — the fabricated
+    guess). A bare ``"default"`` fallback (no persisted geometry, nothing explicit, the fabricated
     640) has no basis and floors to unvalidated, closing the asymmetry with the delivery-gating path
     (``run_full_frame_evaluation``), which already refuses outright for this exact case.
     """
@@ -326,7 +325,7 @@ def raw_operating_point(
     *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
     max_dets: int, tile_size_source: str = "default", tiled_source: str = "default",
 ) -> ResolvedBundle:
-    """The operating point for RAW (uncalibrated) inference — the one both doors resolve through.
+    """The operating point for raw (uncalibrated) inference, the one both doors resolve through.
 
     ``conf`` is a documented default with no per-dataset GT behind it, so it requires validation and
     is stamped ``validated_against=false``: reading it requires ``unvalidated_value(...)`` and the
@@ -334,13 +333,13 @@ def raw_operating_point(
     giving a different count (the phenotype) for the same model + images by entry point.
 
     ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
-    geometry, ``explicit`` (caller override), or a ``default`` fallback (CV2) — so a 224-train /
-    640-infer scale mismatch is visible in the provenance rather than silent, AND (K10) whether tiled
-    inference's tile_size has a real basis at all: see :func:`resolve_tile_size_param` — a tiled run
-    with no persisted/explicit basis is now a real, gating-firewalled unvalidated dimension, not
-    silently shippable engineering trivia. ``tiled_source`` is the same provenance vocabulary for the
-    boolean itself (K10 finding 3) — a caller that explicitly chose to tile (or not) stamps
-    ``"explicit"``; a caller who passed nothing gets ``"default"``. Both callers of this function
+    geometry, ``explicit`` (caller override), or a ``default`` fallback, so a 224-train / 640-infer
+    scale mismatch is visible in the provenance rather than silent, and whether tiled inference's
+    tile_size has a real basis at all: see :func:`resolve_tile_size_param`, a tiled run with no
+    persisted/explicit basis is a real, gating-firewalled unvalidated dimension, not silently
+    shippable engineering trivia. ``tiled_source`` is the same provenance vocabulary for the boolean
+    itself: a caller that explicitly chose to tile (or not) stamps ``"explicit"``; a caller who passed
+    nothing gets ``"default"``. Both callers of this function
     resolve their own bool once (``None`` sentinel -> ``DEFAULT_TILED`` internally) before reaching
     here, so ``tiled`` itself is always a concrete bool.
     """
@@ -365,7 +364,7 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     """A content-addressed hash identifying a dataset's ground truth.
 
     Two datasets with the same labels hash equal (so a calibration is valid iff its hash matches the
-    inference dataset's). Content-based (label bytes), so it is machine-independent — a path can move
+    inference dataset's). Content-based (label bytes), so it is machine-independent, a path can move
     between machines but the GT identity does not. Missing labels are hashed as empty (they are valid
     negatives), so their presence/absence still contributes to identity.
     """
@@ -393,7 +392,7 @@ def _labels_term(annotations_root: Path) -> str | None:
 
     Labels live at ``annotations/<date>/*.json`` (date-nested) or flat ``annotations/*.json``.
     ``dataset_hash`` is the single label-byte hasher (flat glob), so this *calls* it per dir and
-    combines the per-dir digests keyed by dir name — never re-implementing label hashing. ``None``
+    combines the per-dir digests keyed by dir name, never re-implementing label hashing. ``None``
     when no labels exist anywhere.
     """
     if not annotations_root.is_dir():
@@ -408,7 +407,7 @@ def _labels_term(annotations_root: Path) -> str | None:
             continue
         any_labels = True
         # A real subdir name can never be empty, so the flat root keys with "" rather than its own
-        # name — otherwise a dated subdir named literally "annotations" would key identically to the
+        # name, otherwise a dated subdir named literally "annotations" would key identically to the
         # flat case and collide with it.
         key = "" if flat else d.name
         h.update(key.encode("utf-8"))
@@ -419,7 +418,7 @@ def _labels_term(annotations_root: Path) -> str | None:
 
 
 def _images_term(images_root: Path, cache_path: Path | None) -> str | None:
-    """Whole-dataset image identity from each image's *pixel bytes* (content, not name/size) — so a
+    """Whole-dataset image identity from each image's *pixel bytes* (content, not name/size), so a
     re-encode under the same filename changes identity (closes the labels-only/pixel-blind gap). Each
     file's sha is cached by ``(relpath, size, mtime_ns)`` so only changed files re-hash; a cache miss
     always hashes the bytes. ``None`` when there are no images (bespoke/imageless).
@@ -482,12 +481,12 @@ def _registry_term(dataset_root: Path) -> str:
 def _confirmations_term(dataset_root: Path) -> str:
     """Digest over the dataset-native confirmed-negative store's raw content (all buckets, sorted).
 
-    Reads ``dataset_layout.image_status_path`` only — never a foreign/legacy store — since
-    confirmations are now dataset-native (K13.5 slice 4), the same way ``_registry_term`` reads only
-    ``classes_path``. Hashes RAW on-disk negative membership, not the quarantine-filtered view
+    Reads ``dataset_layout.image_status_path`` only, never a foreign/legacy store, since
+    confirmations are dataset-native, the same way ``_registry_term`` reads only
+    ``classes_path``. Hashes raw on-disk negative membership, not the quarantine-filtered view
     ``confirmed_negative_names`` returns: fingerprint is content identity (should two datasets be
     considered the same content), quarantine is a training-time trust decision, and conflating them
-    would make the fingerprint *less* sensitive to a real on-disk difference than it should be — the
+    would make the fingerprint *less* sensitive to a real on-disk difference than it should be, the
     unsafe direction. Empty string when there is no store or no negative entries, matching
     ``_registry_term``'s "optional, additive" convention so a dataset with zero confirmed negatives
     still gets a valid non-None fingerprint.
@@ -526,14 +525,14 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     class registry; the confirmations term digests the dataset-native confirmed-negative store.
     Content-addressed, so it is machine-independent (a moved dataset keeps its fingerprint) and detects
     a change to any of the four (a re-encode, a relabel, a registry edit, confirming/un-confirming a
-    negative). ``None`` for a dataset with no images or no labels (e.g. a bespoke ``dataset_source``) —
+    negative). ``None`` for a dataset with no images or no labels (e.g. a bespoke ``dataset_source``),
     matching ``dataset_hash``'s honesty rather than fabricating identity. Authority is recompute-on-read;
     a stored fingerprint (``dataset.json``) is a cache.
 
-    Adding the confirmations term is a one-time formula-version shift (K13.5 slice 4): recomputing
-    against an existing ``dataset.json``/experiment ``lineage.json`` written under the 3-term formula
-    reads as CHANGED even with identical on-disk content. That is expected, not corruption — experiments
-    are immutable, so old lineage records keep their old fingerprint value rather than being rewritten.
+    Adding the confirmations term was a one-time formula-version shift: recomputing against an
+    existing ``dataset.json``/experiment ``lineage.json`` written under the 3-term formula reads as
+    changed even with identical on-disk content. That is expected, not corruption, experiments are
+    immutable, so old lineage records keep their old fingerprint value rather than being rewritten.
     """
     root = Path(dataset_root)
     labels = _labels_term(root / "annotations")
@@ -568,8 +567,8 @@ def read_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
 def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
     """The bucket's ``classifier_operating_point.json`` stamp, or ``None`` if absent/unreadable.
 
-    A file distinct from ``operating_point.json`` (K3) — the classifier-validity dimension is
-    structurally independent from the count operating point's, so the two are never written to the
+    A file distinct from ``operating_point.json``: the classifier-validity dimension is structurally
+    independent from the count operating point's, so the two are never written to the
     same fields a generic writer could conflate (``_sidecar_reference`` reads exactly
     ``validated``/``operating_point.conf.validated_against``, which must stay the count dimension's
     alone).
@@ -586,10 +585,10 @@ def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None
 def _sidecar_reference(
     sidecar: dict | None, *, param_key: str = "conf", validation_kind: str = "annotations",
 ) -> str:
-    """Which reference the sidecar's named param cleared, for its ``validation_kind`` — or
+    """Which reference the sidecar's named param cleared, for its ``validation_kind``, or
     ``VALIDATED_FALSE``.
 
-    Never upgrades a missing/unrecognized/wrong-kind value to a shippable reference — a param whose
+    Never upgrades a missing/unrecognized/wrong-kind value to a shippable reference, a param whose
     own recorded reference is absent, or belongs to a different validation kind than this one, floors
     to ``false`` rather than being read as validated. (Upgrading on a bare top-level ``validated``
     bool was a real laundering path: a physical-measurement reference could read back as an
@@ -606,8 +605,8 @@ def _sidecar_reference(
 
 def _validity_rank(state: str | None) -> int:
     """Floor ordering: unvalidated (0) < any shippable reference, any kind (1). ``None`` = no
-    assertion (skip). Comparing rank between two states already scoped to the SAME dimension/param —
-    never used to decide whether a state is the right KIND for a given param (that is
+    assertion (skip). Comparing rank between two states already scoped to the same dimension/param,
+    never used to decide whether a state is the right kind for a given param (that is
     ``accepted_references``'s job)."""
     if state is None:
         return 99
@@ -619,9 +618,9 @@ def _reconcile_validity(
     read_sidecar: Callable[[str | Path], dict | None], param_key: str,
     validation_kind: str = "annotations",
 ) -> dict:
-    """Floor a validity dimension against every bucket's on-disk sidecar (T5-3 fix), generalized.
+    """Floor a validity dimension against every bucket's on-disk sidecar, generalized.
 
-    Shared by :func:`reconcile_operating_point_validity` and :func:`reconcile_classifier_validity` —
+    Shared by :func:`reconcile_operating_point_validity` and :func:`reconcile_classifier_validity`,
     the flooring logic (read on-disk, never trust a caller string, an asserted value may only lower
     the result) is identical for both dimensions; only which sidecar file, which param key, and which
     validation kind is read differs, threaded in by the two thin public wrappers below.
@@ -676,8 +675,8 @@ def reconcile_operating_point_validity(
     """Floor the count operating-point validity against every bucket's ``operating_point.json``.
 
     The delivery gate must not trust a caller's asserted string: it reads each prediction bucket's
-    on-disk sidecar and takes the FLOOR of asserted-vs-on-disk. A missing/unreadable sidecar, or any
-    bucket stamped ``validated=false``, floors the whole curve to ``false`` — never a crash. See
+    on-disk sidecar and takes the floor of asserted-vs-on-disk. A missing/unreadable sidecar, or any
+    bucket stamped ``validated=false``, floors the whole curve to ``false``, never a crash. See
     :func:`_reconcile_validity` for the shared mechanism.
     """
     return _reconcile_validity(
@@ -692,10 +691,10 @@ def reconcile_classifier_validity(
     """Floor the classifier validity against every bucket's ``classifier_operating_point.json``.
 
     Structurally the same reconciliation :func:`reconcile_operating_point_validity` performs for the
-    count operating point — the same function, parameterized to a different sidecar file and param
-    key (K3) — never a hand-written sibling. A bucket with no persisted classifier-calibration run
-    floors to ``false``: there is no legitimate way to earn a classifier-validated stamp without one
-    (TRAP 2), so this never falls back to a caller-asserted string.
+    count operating point, the same function, parameterized to a different sidecar file and param
+    key, never a hand-written sibling. A bucket with no persisted classifier-calibration run floors
+    to ``false``: there is no legitimate way to earn a classifier-validated stamp without one, so this
+    never falls back to a caller-asserted string.
     """
     return _reconcile_validity(
         pred_dirs, asserted=asserted,
@@ -715,13 +714,13 @@ def bind_classifier_validity(
 
     Unlike the count dimension (which reconciles from the same buckets it delivers),
     :func:`reconcile_classifier_validity` alone cannot see whether a genuinely-validated stamp was
-    calibrated for an unrelated model or trait — it reads only the validity field. A sidecar's own
+    calibrated for an unrelated model or trait, it reads only the validity field. A sidecar's own
     recorded ``trait``/``experiment_id`` (written by ``calibrate_classifier_operating_point``) must
     agree with what is actually being delivered. A foreign/unregistered checkpoint calibration
-    (``experiment_id=None``, the K3 owner decision) is not rejected for lacking one to compare
-    against; a ``trait`` mismatch always is, since the real writer always records one.
+    (``experiment_id=None``) is not rejected for lacking one to compare against; a ``trait`` mismatch
+    always is, since the real writer always records one.
 
-    Returns ``(state, note)`` — ``state`` floored to ``VALIDATED_FALSE`` on a mismatch, and a
+    Returns ``(state, note)``, ``state`` floored to ``VALIDATED_FALSE`` on a mismatch, and a
     breeder-readable ``note`` naming which sidecar failed and why (empty when nothing was floored).
 
     Every delivery door must call this after reconciling, not just the one that first needed it:
@@ -742,11 +741,11 @@ def bind_classifier_validity(
         if stamped_trait != trait:
             return VALIDATED_FALSE, (
                 f"classifier_operating_point.json at {d!r} was calibrated for trait "
-                f"{stamped_trait!r}, not {trait!r} — the stamp is not trusted for this delivery.")
+                f"{stamped_trait!r}, not {trait!r}, the stamp is not trusted for this delivery.")
         if stamped_exp is not None and producing_experiment_ids and stamped_exp not in producing_experiment_ids:
             return VALIDATED_FALSE, (
                 f"classifier_operating_point.json at {d!r} was calibrated against experiment "
-                f"{stamped_exp!r}, not the producing run ({sorted(producing_experiment_ids)}) — "
+                f"{stamped_exp!r}, not the producing run ({sorted(producing_experiment_ids)}), "
                 "the stamp is not trusted for this delivery.")
     return classifier_state, ""
 
@@ -770,11 +769,11 @@ def check_delivery_gate(
 
     ``flags`` maps each measurement dimension the deliverable depends on (e.g. ``"operating_point"``,
     ``"classifier"``, or a single ``"measurement"`` for a continuous/ordinal trait with no conf
-    op-point) to its RECONCILED validity state — a shippable reference (any member of
+    op-point) to its reconciled validity state, a shippable reference (any member of
     ``VALIDATED_SHIPPABLE``) or anything else (treated as unvalidated). Read the on-disk state before
     calling; the gate does not trust a caller-asserted string on its own.
 
-    Every dimension validated -> the gate passes. Any not -> it refuses UNLESS
+    Every dimension validated -> the gate passes. Any not -> it refuses unless
     ``acknowledge_unvalidated=True``, the escape hatch that ships a clearly-flagged provisional
     deliverable and stamps every unvalidated dimension ``false`` so the un-trustworthiness travels
     downstream. The refusal targets a *silent bare number*, not an honestly-acknowledged provisional
@@ -809,7 +808,7 @@ def validate_resolved_bundle(
 ) -> list[str]:
     """Return human-readable issues for a resolved bundle (empty list = valid).
 
-    Live checks (each guards a real failure the audit found):
+    Live checks (each guards a real failure mode):
     - ``in_chans`` must equal the probed raster band count (mismatch trains/infers channel-wrong).
     - a calibration operating point with ``validated=false`` must not feed an export/delivery.
     - the eval operating point must equal the inference operating point on the same dataset
@@ -831,7 +830,7 @@ def validate_resolved_bundle(
     if for_export and not bundle.is_shippable:
         issues.append("export/delivery requires a validated (held-out) operating point; this bundle is not shippable")
 
-    # eval op-point must match inference op-point on the same dataset — every param the two bundles
+    # eval op-point must match inference op-point on the same dataset, every param the two bundles
     # have in common, not a hardcoded list (a new param added to one bundle's construction site is
     # covered automatically rather than silently exempt from this check).
     if inference_bundle is not None:
