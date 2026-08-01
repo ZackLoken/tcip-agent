@@ -9,8 +9,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import type { ImageBandsResponse } from "@/api/client";
 import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
+import { BandPicker } from "@/components/BandPicker";
 import { useImageNav } from "@/hooks/useImageNav";
+import type { BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
 
 // Progression order (start state first, terminal states last) — matches Review's parallel
@@ -63,10 +66,17 @@ export function AnnotateToolbar({
   onSave,
   saveDisabled,
   dirty,
+  bandsInfo,
+  bandSelection,
+  onBandSelectionChange,
 }: {
   onSave: () => void;
   saveDisabled: boolean;
   dirty: boolean;
+  // Band-composite picker (multispectral only) — omitted/null for a standard RGB dataset.
+  bandsInfo?: ImageBandsResponse | null;
+  bandSelection?: BandSelection | null;
+  onBandSelectionChange?: (next: BandSelection) => void;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const mode = useStore((s) => s.gui.mode);
@@ -477,6 +487,17 @@ export function AnnotateToolbar({
               title="Show or hide annotation overlays"
             />
           </div>
+          {bandsInfo && bandsInfo.band_count > 3 && bandSelection && onBandSelectionChange && (
+            <>
+              <span aria-hidden className="h-5 w-px bg-tcip-border" />
+              <BandPicker
+                bandCount={bandsInfo.band_count}
+                bands={bandsInfo.bands}
+                selection={bandSelection}
+                onChange={onBandSelectionChange}
+              />
+            </>
+          )}
           <div className="flex-1" />
           <div className="flex items-center gap-2">
             <button className="tcip-btn text-[12px]" onClick={() => undo()} title="Undo (Ctrl+Z)">
