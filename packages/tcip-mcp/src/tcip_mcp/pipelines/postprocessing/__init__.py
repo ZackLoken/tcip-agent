@@ -1,1 +1,1 @@
-"""Postprocessing pipeline — temporal aggregation and CSV export."""
+"""Postprocessing pipeline: temporal aggregation and CSV export."""
