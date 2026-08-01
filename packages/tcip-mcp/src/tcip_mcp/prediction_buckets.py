@@ -1,4 +1,4 @@
-"""Prediction-bucket immutability — never silently overwrite predictions a human reviewed.
+"""Prediction-bucket immutability: never silently overwrite predictions a human reviewed.
 
 A *bucket* is a directory (or set of task directories) holding per-image ``<stem>.json``
 prediction files. Once a reviewer has recorded verdicts (accept/reject/edit) against any of
@@ -33,7 +33,7 @@ def bucket_stems(*dirs: Path | str) -> set[str]:
 
 def verdict_count(review_state_dir: Path | str, names: Iterable[str]) -> int:
     """Review verdicts recorded against ``names`` (image stems). 0 when no review state
-    exists yet — no engine is created for a never-reviewed project."""
+    exists yet: no engine is created for a never-reviewed project."""
     from tcip_annotation.review_engine import REVIEW_SHARD_DIRNAME, ReviewEngine
 
     d = Path(review_state_dir)
@@ -66,7 +66,7 @@ class BucketResolution:
 
 def _bucket_verdicts(review_state_dir: Path | str, dirs: list[Path]) -> int:
     stems = bucket_stems(*dirs)
-    if not stems:  # empty (or missing) bucket — nothing was ever reviewed there
+    if not stems:  # empty (or missing) bucket: nothing was ever reviewed there
         return 0
     return verdict_count(review_state_dir, stems)
 
