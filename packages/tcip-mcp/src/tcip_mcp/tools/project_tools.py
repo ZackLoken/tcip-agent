@@ -40,7 +40,7 @@ def read_datasets(project_root: str | Path) -> list[dict]:
 
 
 def upsert_dataset(project_root: str | Path, entry: dict) -> None:
-    """Add or refresh a dataset in the project's registry, matched by ``id`` — a moved dataset updates
+    """Add or refresh a dataset in the project's registry, matched by ``id``: a moved dataset updates
     the ``path`` of its existing id rather than duplicating, so identity survives a move."""
     p = _datasets_registry_path(project_root)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -56,9 +56,9 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
 
     Writes ``<dataset_root>/dataset.json = {crop, id, fingerprint}`` (identity travels with the data)
     and upserts the dataset into the project's ``.tcip/datasets.json``. ``crop`` is the human's fact and
-    is required — never inferred from a path or slug. ``id`` is minted once and preserved across
+    is required, never inferred from a path or slug. ``id`` is minted once and preserved across
     re-runs and path moves; ``fingerprint`` is the whole-dataset content digest (labels + image pixels
-    + registry + confirmed negatives), recomputed here — but the stored value is a cache, and
+    + registry + confirmed negatives), recomputed here, but the stored value is a cache, and
     recompute-on-read (``resolution.dataset_fingerprint``) is the authority.
 
     Args:
@@ -97,7 +97,7 @@ def _scaffold_project(project_path: str) -> dict:
 
     The internals of :func:`init_project`, factored out so other tools that
     stand up a project (e.g. ``ingest_images``) reuse the exact same scaffolding
-    instead of re-implementing it. Idempotent — re-running only re-mkdirs.
+    instead of re-implementing it. Idempotent: re-running only re-mkdirs.
     """
     tcip = _project_dir(project_path)
     (tcip / "artifacts").mkdir(exist_ok=True)
@@ -146,8 +146,8 @@ def set_active_project(name: str) -> dict:
     """Set the workspace's active project so the GUI opens it.
 
     Writes the workspace active-project marker (``<workspace>/.active``) and notifies a
-    running GUI to open the project — the loop-closer for the breeder flow ("I structured
-    your images into ``hazelnut_catkin_valley-farm`` — opening it now"). ``name`` is a
+    running GUI to open the project: the loop-closer for the breeder flow ("I structured
+    your images into ``<crop>_<trait>_valley-farm``, opening it now"). ``name`` is a
     workspace project slug (``{crop}_{trait}_{site}``).
 
     Args:
@@ -254,7 +254,7 @@ def inspect_project(project_path: str = "") -> dict:
     if artifacts_dir.is_dir():
         status["artifact_count"] = len(list(artifacts_dir.iterdir()))
 
-    # Data — the canonical layout puts images under <root>/images/<date>/ (see
+    # Data: the canonical layout puts images under <root>/images/<date>/ (see
     # tcip_mcp.dataset_layout); ingest_images writes there. Count that tree
     # recursively so date buckets aren't missed, and report the capture dates.
     image_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
@@ -323,7 +323,7 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
                         zf.write(sub, sub.relative_to(root))
                         files_added += 1
 
-        # The single nested registry decodes the labels' subject/attribute names — without it the
+        # The single nested registry decodes the labels' subject/attribute names: without it the
         # archived annotations are undecodable, so a self-contained bundle must carry it.
         from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
 
@@ -332,16 +332,16 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
             zf.write(registry, registry.relative_to(root))
             files_added += 1
 
-        # dataset.json — the dataset's identity ({crop, id, fingerprint}); identity is part of the
+        # dataset.json: the dataset's identity ({crop, id, fingerprint}); identity is part of the
         # data, so it travels with the registry it sits beside.
         identity = dataset_identity_path(root)
         if identity.is_file():
             zf.write(identity, identity.relative_to(root))
             files_added += 1
 
-        # .tcip config, experiments, audit — the project's working state. ``.py`` is included
+        # .tcip config, experiments, audit: the project's working state. ``.py`` is included
         # because snapshot_model_source (pipelines/model_build.py) writes a bespoke run's actual
-        # model/training/dataset source under model_src/ as .py files — without it here, the
+        # model/training/dataset source under model_src/ as .py files; without it here, the
         # archive carries the run's provenance manifest but not the code it describes.
         tcip_dir = root / ".tcip"
         if tcip_dir.is_dir():
@@ -386,7 +386,7 @@ def import_project(zip_path: str, destination: str) -> dict:
 
     files_extracted = 0
     with zipfile.ZipFile(str(zp), "r") as zf:
-        # Validate paths — prevent zip slip
+        # Validate paths: prevent zip slip
         for info in zf.infolist():
             target = dest / info.filename
             resolved = target.resolve()
