@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from tcip_annotation import BBox, Point, Polygon
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation
-from tcip_annotation.utils import get_image_dimensions
+from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import PredictionReference, store
@@ -73,7 +73,10 @@ def _image_dims(path: str) -> tuple[int, int]:
         raise HTTPException(403, str(exc)) from exc
     if not p.is_file():
         raise HTTPException(404, f"image not found: {path}")
-    return get_image_dimensions(str(p))  # header-only (w, h); never decodes pixels
+    # Channel-aware: resolve_image_source folds a `.bandgroup` manifest (or a genuinely
+    # multi-band raster) into the real frame image_dimensions measures, instead of a bare PIL
+    # header read misreporting its axes.
+    return image_dimensions(resolve_image_source(p.parent, p.stem))
 
 
 def _guard_label_path(path: Optional[str]) -> None:
