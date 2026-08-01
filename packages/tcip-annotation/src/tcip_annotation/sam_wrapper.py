@@ -18,7 +18,7 @@ Public API:
     grid_to_pixel(cell, img_w, img_h, cols, rows)
 
 The prompted predictors return polygon **rings** (a mask with two disjoint regions is two rings),
-via the shared :func:`tcip_annotation.mask_contours.mask_to_polygon_rings` — the same extractor the
+via the shared :func:`tcip_annotation.mask_contours.mask_to_polygon_rings`, the same extractor the
 model-prediction export path uses, so SAM-assisted GT and a model's prediction describe an
 occlusion-split object identically.
 
@@ -65,7 +65,7 @@ _MODEL_MAP = {
 }
 
 def checkpoint_path(model_type: str = "hiera_b+") -> Path:
-    """The local checkpoint path ``_get_predictor`` loads for ``model_type`` — the single source of
+    """The local checkpoint path ``_get_predictor`` loads for ``model_type``: the single source of
     truth for the filename/location, so callers (and tests that gate on availability) never drift.
     ``Path.home()`` is read at call time (not cached at import) so a test that redirects it works."""
     if model_type not in _MODEL_MAP:
@@ -150,7 +150,7 @@ def predict_from_point(
         model_type: hiera_t, hiera_s, hiera_b+, or hiera_l.
 
     Returns:
-        Polygon rings — one list of (x, y) pixel vertices per connected region of the mask.
+        Polygon rings: one list of (x, y) pixel vertices per connected region of the mask.
     """
     import numpy as np
     predictor = _get_predictor(model_type)
