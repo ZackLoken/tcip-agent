@@ -67,7 +67,7 @@ a derivation label can never again be stamped without a computation behind it.
 
 | Seam | Where | What you supply |
 |------|-------|-----------------|
-| `model_source` | `pipelines.model_build.build_model` | `{"builder": "my_module:build_net", "builder_kwargs": {...}, "source_files": [...], "task": "detection", "in_chans": 3}` — your `nn.Module`. `preflight_config(smoke=True)` (run by `launch_training`) builds + smokes it at the resolved dims before the training thread spawns. |
+| `model_source` | `pipelines.model_build.build_model` | `{"builder": "my_module:build_net", "builder_kwargs": {...}, "source_files": [...], "task": "detection", "in_chans": 3}` — your `nn.Module`. `preflight_config(smoke=True)` (run by `launch_training`) builds + smokes it at the resolved dims before the training subprocess spawns. |
 | `training_source` | `pipelines.training.envelope` | a dotted `train(ctx)` — your loop, handed the `TrainContext` craft library below. |
 | `dataset_source` | `pipelines.data.datasets.build_from_dataset_source` | `{"builder": "my_module:build_ds", "builder_kwargs": {...}, "source_files": [...], "task": "..."}` — a bespoke `Dataset` for a task the known loaders don't cover. Mirrors `model_source`; the known loaders stay the default. |
 
@@ -113,8 +113,20 @@ space, and budget — no method is welded in. Match them to the problem; the def
 
 Trials run under the base config's regime (same augmentation / imbalance handling) so the winning
 hyperparameters transfer to `launch_training`. `warm_start` seeds a known-good point;
-`max_concurrent` bounds parallel trials (default 1 — safe for single-GPU training). Ray persists
-trials under `output_dir` (also the TensorBoard logdir).
+`max_concurrent` bounds parallel trials (default 1 — safe for single-GPU training); each trial
+already runs in its own Ray-managed process, and `resources_per_trial` (omit to derive a fractional
+GPU share from the host's real device count and `max_concurrent`) tells Ray how much of the host
+each one may actually use. Ray persists trials under `output_dir` (also the TensorBoard logdir).
+
+## Concurrent runs — `inspect_compute_resources`
+
+Every `launch_training`/`run_hpo` call already trains in its own OS process (crash/OOM isolation
+between concurrent runs), but nothing caps how many you launch at once or how much of the host each
+one claims — that's a judgment call, not a platform-enforced number (a pinned memory/CPU ceiling
+would be right on one host and wrong on the next). Before launching another concurrent candidate,
+`inspect_compute_resources()` gives you the actual facts to reason from: free VRAM per GPU, host
+CPU/RAM headroom (`None` if `psutil` isn't installed — everything else still works), and how many
+runs this process's own registry currently reports running.
 
 ## Auto-labeling — the proposal-engine registry (`pipelines.proposal`)
 
