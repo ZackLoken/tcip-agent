@@ -194,3 +194,29 @@ def test_export_import_roundtrip(tmp_path: Path):
 
     restored_id = json.loads((dest / "dataset.json").read_text())
     assert restored_id == {"crop": "hazelnut", "id": reg["id"], "fingerprint": reg["fingerprint"]}
+
+
+def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
+    """A bespoke run's snapshotted .py source (model_src/, written by snapshot_model_source) must
+    travel with the archive, or a published/archived project bundles the provenance manifest
+    without the code it describes and can't rerun its own pipeline from the archive alone."""
+    src = tmp_path / "src_project"
+    init_project(str(src))
+
+    model_src = src / ".tcip" / "experiments" / "exp_001" / "model_src" / "abcd1234"
+    model_src.mkdir(parents=True)
+    (model_src / "my_model.py").write_text("def build(): ...\n", encoding="utf-8")
+    manifest_dir = src / ".tcip" / "experiments" / "exp_001" / "model_src"
+    (manifest_dir / "manifest.json").write_text("{}", encoding="utf-8")
+
+    zip_path = tmp_path / "export.zip"
+    exported = archive_project(str(src), str(zip_path), include_models=True)
+    assert "error" not in exported
+
+    import zipfile
+
+    with zipfile.ZipFile(str(zip_path)) as zf:
+        names = zf.namelist()
+    py_entries = [n for n in names if n.endswith("my_model.py")]
+    assert py_entries, f"model_src's .py source is missing from the archive: {names}"
+    assert any(n.endswith("manifest.json") for n in names)
