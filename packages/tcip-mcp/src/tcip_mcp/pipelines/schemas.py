@@ -1,4 +1,4 @@
-"""Pydantic v2 config schemas for structural/type validation (W7).
+"""Pydantic v2 config schemas for structural/type validation.
 
 Used by ``training_tools.preflight_config`` to surface type/structure errors. The
 runtime trainer still reads the raw config dict; these schemas are validation-only.
@@ -36,11 +36,11 @@ def normalize_train_config(config: dict) -> dict:
 
     Hoist the ``training.*`` section onto the top level. The validated/GUI schema nests
     ``stages`` / ``mixed_precision`` / ``batch_size`` / … under ``training``, but ``train()``
-    reads them from the top level of ``run.config`` — so without this a GUI-launched run
+    reads them from the top level of ``run.config``, so without this a GUI-launched run
     silently trains the default single stage instead of the configured schedule.
 
-    **Top-level wins**: a key already present at the top level is never overwritten by the
-    nested value — the HPO objective writes tuned params (lr, schedule) flat, and those must
+    Top-level wins: a key already present at the top level is never overwritten by the
+    nested value: the HPO objective writes tuned params (lr, schedule) flat, and those must
     survive. The ``training`` section is left in
     place for the validated schema and the experiment-record snapshot. Shallow copy: nested
     dicts are shared, so callers must not mutate them in place after normalizing.
