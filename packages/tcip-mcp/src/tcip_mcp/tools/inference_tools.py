@@ -1,4 +1,4 @@
-"""Inference MCP tools — run models on images, export results."""
+"""Inference MCP tools: run models on images, export results."""
 
 from __future__ import annotations
 
@@ -24,30 +24,27 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_decode_id_map(predictor, images_dir: str | None) -> dict | None:
-    """This run's name->id map for recording + decoding predictions (K25/K13.5-2c).
+    """This run's name->id map for recording + decoding predictions.
 
-    The ONE resolution every door that writes predictions to disk calls — this tool's own
-    ``run_inference`` and the web GUI's inference worker (``tcip_web.routes.inference``) — never a
+    The one resolution every door that writes predictions to disk calls, this tool's own
+    ``run_inference`` and the web GUI's inference worker (``tcip_web.routes.inference``), never a
     second implementation (CLAUDE.md: "when two code paths must agree, call one from the other").
-    An earlier version of the GUI worker re-derived this locally and its own comment claimed parity
-    with this function while doing something different once this function started preferring the
-    training-recorded map — exactly the drift that rule exists to prevent.
 
     Prefers the *training* run's own recorded map (stamped onto ``config["data"]["id_map"]`` by
     ``subprocess_worker.py::run`` right after the dataset is built, so it travels on the checkpoint
-    the SAME way ``subject``/``attribute`` already do) over re-deriving one from the inference
-    dataset's live registry — the model can only speak the vocabulary it was trained on, so the
+    the same way ``subject``/``attribute`` already do) over re-deriving one from the inference
+    dataset's live registry, the model can only speak the vocabulary it was trained on, so the
     training map is the correct decode map by definition, and it is immune to a ``classes.json``
     whose declared attribute-value order was edited after training. A checkpoint with no recorded
     map (a bespoke ``dataset_source`` with no registry scope, or a run trained from a pre-built COCO
-    source whose id space isn't registry-derived — ``_resolve_run_id_map`` deliberately does not
-    record one for either) falls through to the live-registry derivation — the same honest,
+    source whose id space isn't registry-derived, ``_resolve_run_id_map`` deliberately does not
+    record one for either) falls through to the live-registry derivation, the same honest,
     order-invariant-for-single-class degraded path this already was.
 
-    A registry read that fails for a REAL reason (corrupted file, an id-space mismatch) propagates
-    loudly from here — but ``run_inference`` lets that reach its own caller, while the GUI worker
+    A registry read that fails for a real reason (corrupted file, an id-space mismatch) propagates
+    loudly from here, but ``run_inference`` lets that reach its own caller, while the GUI worker
     (``routes/inference.py``) wraps this whole call in a broad except and degrades to ``id_map=None``
-    on ANY failure; the two doors share this one resolution but choose different failure postures on
+    on any failure; the two doors share this one resolution but choose different failure postures on
     top of it, not two different resolutions.
     """
     data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
@@ -61,21 +58,20 @@ def resolve_decode_id_map(predictor, images_dir: str | None) -> dict | None:
 
     from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, resolved_classes_path
 
-    # Precondition check, not a broad except (K18 B2 stage-6 review, round 2): attribute-scoped
-    # decode with no classes.json for this dataset is a legitimate, honest degraded case
-    # write_predictions_json already documents and accepts ("the raw 0-indexed id is used as
-    # the name... never a re-derivation") — id_map stays None rather than crashing on already-
-    # completed, valid prediction work. Reuses resolved_classes_path — the SAME "does a
-    # registry exist" check _resolve_registry_id_map's own refusal is built on, not a second
-    # independent re-derivation of that fact (round-1 review found the first version of this
-    # fix duplicated it locally). A registry that IS present but fails to read/resolve for a
-    # real reason (corrupted file, an id-space mismatch) still propagates loudly — this
-    # precondition only short-circuits the one case that's supposed to degrade honestly, the
-    # same case _resolve_registry_id_map's own attribute-without-registry ValueError names.
-    # Not the same shape as model_build.py's resolve_contract_dims precondition (that one
-    # gates on subject alone and lets the attribute-without-registry refusal reach the
-    # caller); this site's downstream consumer has its own documented accepted-degradation
-    # contract that resolve_contract_dims's caller does not.
+    # Precondition check, not a broad except: attribute-scoped decode with no classes.json for
+    # this dataset is a legitimate, honest degraded case write_predictions_json already documents
+    # and accepts ("the raw 0-indexed id is used as the name... never a re-derivation"), id_map
+    # stays None rather than crashing on already-completed, valid prediction work. Reuses
+    # resolved_classes_path, the same "does a registry exist" check _resolve_registry_id_map's
+    # own refusal is built on, not a second independent re-derivation of that fact. A registry
+    # that is present but fails to read/resolve for a real reason (corrupted file, an id-space
+    # mismatch) still propagates loudly, this precondition only short-circuits the one case
+    # that's supposed to degrade honestly, the same case _resolve_registry_id_map's own
+    # attribute-without-registry ValueError names. Not the same shape as model_build.py's
+    # resolve_contract_dims precondition (that one gates on subject alone and lets the
+    # attribute-without-registry refusal reach the caller); this site's downstream consumer has
+    # its own documented accepted-degradation contract that resolve_contract_dims's caller does
+    # not.
     if attribute is not None and resolved_classes_path(images_dir) is None:
         return None
     _reg, id_map = _resolve_registry_id_map(images_dir, subject, attribute)
@@ -88,32 +84,31 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                                tile_size_source="default", tiled_source="default",
                                group_by="tile_prefix", group_key_map=None, experiment_id=None,
                                seed=0, holdout_ratio=0.5):
-    """Resolve a per-dataset operating point from a labeled split (CV0).
+    """Resolve a per-dataset operating point from a labeled split.
 
-    Returns ``(bundle, hash, n_excluded_incomplete_attribute)`` — the third value is the count of
+    Returns ``(bundle, hash, n_excluded_incomplete_attribute)``, the third value is the count of
     cal/holdout stems dropped whole because an instance was unlabeled for ``attribute`` (see
     ``_records`` below); returned to the caller rather than silently filtered, matching
     ``evaluation.py``'s ``n_excluded_incomplete_attribute`` for the same exclusion. It is a separate
-    return value, NOT a field on the bundle: ``run_inference`` surfaces it on its own response dict,
+    return value, not a field on the bundle: ``run_inference`` surfaces it on its own response dict,
     and it does not travel into the persisted ``operating_point.json`` sidecar that
-    ``export_predictions`` writes (round-4 review — an earlier version of this line said "disclosed
-    on the returned bundle", which would have implied a persistence this has never had).
+    ``export_predictions`` writes.
 
-    The count-unbiased center-match sweep + held-out bias check run the SAME predictor path the
-    delivery will use (same tile/tile_size/overlap/nms/postprocess) over a disjoint, LOCKED
-    cal/holdout split of the labeled dir (K1 — ``resolve_locked_cal_holdout_split``: group-coherent,
+    The count-unbiased center-match sweep + held-out bias check run the same predictor path the
+    delivery will use (same tile/tile_size/overlap/nms/postprocess) over a disjoint, locked
+    cal/holdout split of the labeled dir (``resolve_locked_cal_holdout_split``: group-coherent,
     seeded, and stable across calls, not a fresh lexicographic cut every time), at a floor conf so
-    hesitant detections survive to be swept — so the resolved conf is validated in the regime it
+    hesitant detections survive to be swept, so the resolved conf is validated in the regime it
     ships through, not an untiled full-frame model pass. ``seed``/``holdout_ratio`` only take effect
-    on the FIRST (locking) draw for this labeled dir's identity hash.
+    on the first (locking) draw for this labeled dir's identity hash.
 
     Raises ``ValueError`` (propagated from ``resolve_locked_cal_holdout_split``) when the lock
-    references a stem whose image/label no longer exists, or its lock file is corrupt (K1 finding
-    4) — the caller (``run_inference``) turns this into a clean ``{"error": ...}`` rather than
-    letting a bare ``KeyError`` surface from a stale ``stem_to_image`` lookup.
+    references a stem whose image/label no longer exists, or its lock file is corrupt, the caller
+    (``run_inference``) turns this into a clean ``{"error": ...}`` rather than letting a bare
+    ``KeyError`` surface from a stale ``stem_to_image`` lookup.
 
-    ``tile_size_source``/``tiled_source`` (K10 finding 3) are the caller's already-resolved
-    provenance for ``tile_size``/``tile`` — forwarded into ``resolve_operating_point`` so the
+    ``tile_size_source``/``tiled_source`` are the caller's already-resolved
+    provenance for ``tile_size``/``tile``, forwarded into ``resolve_operating_point`` so the
     calibrated bundle doesn't stamp a fabricated tile_size as ``"derived"``, and so it records
     whether calibration itself actually tiled rather than always asserting ``tiled=True``.
     """
@@ -140,7 +135,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     _cal_id_map = None
     if _subject:
         _reg, _cal_id_map = _resolve_registry_id_map(labels_dir, _subject, _attribute)
-    # Labels-intersect-images-on-disk (K1 finding 4): the shared scan force_redraw_cal_holdout_split
+    # Labels-intersect-images-on-disk: the shared scan force_redraw_cal_holdout_split
     # now also uses, so the two paths can't disagree about which stems exist. A stem whose image was
     # deleted/renamed never even enters the split universe here.
     stems, stem_to_image = label_image_stems(labels_dir, images_dir)
@@ -159,7 +154,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
 
     # Floor the in-model + predictor conf so hesitant detections survive to be swept. The applied
     # value (not a re-typed 0.01 literal) is threaded into resolve_operating_point as the reference's
-    # staged_conf_floor (Fix D) — the SAME value this call actually applied, per CLAUDE.md's "when
+    # staged_conf_floor, the same value this call actually applied, per CLAUDE.md's "when
     # two paths must agree, call one from the other."
     applied = set_detector_operating_point(predictor.model, score_thresh=0.01)
     predictor.score_threshold = applied.get("score_thresh", 0.01)
@@ -184,8 +179,8 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
             gt_path = str(labels_p / f"{s}.json")
             if _subject and _cal_id_map is not None:
                 gboxes, glabels, n_unlabeled = _json_det_targets(gt_path, _subject, _attribute, _cal_id_map)
-                # Stage-6 review N2: an image with any instance unlabeled for `attribute` has
-                # incomplete GT for this scope — excluded from the calibration/holdout record set
+                # An image with any instance unlabeled for `attribute` has
+                # incomplete GT for this scope, excluded from the calibration/holdout record set
                 # entirely (whole-image, the missing-label-file precedent), never scored against
                 # its labeled subset alone. Counted and disclosed on the returned bundle (matching
                 # evaluation.py's n_excluded_incomplete_attribute), not a silent filter.
@@ -223,21 +218,18 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
 def _sweep_summary(conf_param) -> dict:
     """Compact, response-safe view of a calibration sweep (the full curve is written to disk).
 
-    Includes ``disjoint``/``content_overlap_frac``/``train_disjointness`` (K1 finding 3) so the
-    calling agent sees the real reason a calibration refused validation, not only the pass/fail
-    booleans — a refusal from train-provenance or content-overlap looked identical to a plain
-    holdout-bias failure before this. Also includes ``split_policy_divergence``/
-    ``split_unlocked_stems`` (K1 finding 5, via ``attach_split_policy_provenance``) so a caller
-    whose declared ``seed``/``holdout_ratio``/``group_by`` didn't take effect against an existing
-    lock sees that here, in the tool's own response, rather than only in the persisted sweep
-    artifact or a server log line.
+    Includes ``disjoint``/``content_overlap_frac``/``train_disjointness`` so the calling agent
+    sees the real reason a calibration refused validation, not only the pass/fail booleans, a
+    refusal from train-provenance or content-overlap would otherwise look identical to a plain
+    holdout-bias failure. Also includes ``split_policy_divergence``/``split_unlocked_stems`` (via
+    ``attach_split_policy_provenance``) so a caller whose declared ``seed``/``holdout_ratio``/
+    ``group_by`` didn't take effect against an existing lock sees that here, in the tool's own
+    response, rather than only in the persisted sweep artifact or a server log line.
 
-    ``failures`` (K2, stage-6 review) is the SAME named-failure list ``describe_review_validation``
-    reads for the breeder-facing message — surfaced here too, plus the individual new gate fields
-    (``conf_floor_mismatch``, dispersion/localization terms), so an agent hitting one of K2's new
-    refusal conditions on the GT path sees a real reason instead of every other field reading
-    "fine" (the same defect K1 finding 3 fixed for the train-provenance/content-overlap terms,
-    reintroduced one level up by K2's new conjuncts until now).
+    ``failures`` is the same named-failure list ``describe_review_validation`` reads for the
+    breeder-facing message, surfaced here too, plus the individual gate fields
+    (``conf_floor_mismatch``, dispersion/localization terms), so an agent hitting a refusal
+    condition on the GT path sees a real reason instead of every other field reading "fine".
     """
     sweep = conf_param.sweep or {}
     hb = sweep.get("holdout_bias") or {}
@@ -246,7 +238,7 @@ def _sweep_summary(conf_param) -> dict:
         "f1_max_conf": sweep.get("f1_max_conf"),
         "holdout_bias": hb.get("count_bias_mean") if isinstance(hb, dict) else None,
         # The pooled bias above is the one number a class-compensating refusal reads "fine" on, so
-        # the per-class biases the gate actually judged travel beside it (K4 #4).
+        # the per-class biases the gate actually judged travel beside it.
         "per_class_holdout_bias": {cid: s["count_bias_mean"]
                                    for cid, s in (hb.get("per_class") or {}).items()},
         "per_class_count_bias_failures": sweep.get("per_class_count_bias_failures"),
@@ -258,9 +250,9 @@ def _sweep_summary(conf_param) -> dict:
         "conf_floor_mismatch": sweep.get("conf_floor_mismatch"),
         "count_bias_tolerance_frac": sweep.get("count_bias_tolerance_frac"),
         "pooled_count_bias_tolerance": sweep.get("pooled_count_bias_tolerance"),
-        # K4 residual, stage-6 review Finding F8: a per-class refusal is unexplainable from this
-        # compact view without the actual bar each class was held to — the pooled tolerance alone
-        # (above) is not it, since each class scales against its OWN typical count.
+        # A per-class refusal is unexplainable from this compact view without the actual bar each
+        # class was held to, the pooled tolerance alone (above) is not it, since each class
+        # scales against its own typical count.
         "per_class_count_bias_tolerance": sweep.get("per_class_count_bias_tolerance"),
         "pooled_typical_count": sweep.get("pooled_typical_count"),
         "per_class_typical_count": sweep.get("per_class_typical_count"),
@@ -287,40 +279,40 @@ def force_redraw_cal_holdout_split(
     holdout_ratio: float = 0.5,
     reason: str = "",
 ) -> dict:
-    """Deliberately redraw a LOCKED calibration/holdout split (K1 admin action).
+    """Deliberately redraw a locked calibration/holdout split.
 
     A cal/holdout split locks on its first draw (``resolve_locked_cal_holdout_split``) so the
     "held-out validation" gate can never silently pass on a different, weaker holdout drawn
-    after the fact. Redrawing one is a real, audited decision — never automatic, never a hidden
-    kwarg on a high-traffic tool like ``run_inference`` — so it is its own small tool. ``reason``
+    after the fact. Redrawing one is a real, audited decision, never automatic, never a hidden
+    kwarg on a high-traffic tool like ``run_inference``, so it is its own small tool. ``reason``
     is required and non-empty, and every redraw (this one included) is appended to the lock's
-    ``redraw_history`` with its policy, timestamp, and the OLD split's membership captured before
-    it is overwritten — so a redraw-until-it-passes pattern is visible on review even though
+    ``redraw_history`` with its policy, timestamp, and the old split's membership captured before
+    it is overwritten, so a redraw-until-it-passes pattern is visible on review even though
     nothing here enforces that a reason differ from a prior one; the defense is a reviewable
     audit trail, not an automatic block.
 
     Provide either ``labels_dir`` (the identity is derived as ``dataset_hash(labels_dir)``, and
-    its stems are re-scanned) or ``identity_hash`` directly (e.g. a review-reference hash — in
+    its stems are re-scanned) or ``identity_hash`` directly (e.g. a review-reference hash, in
     that case the existing lock's own calibration+holdout stems are reused as the redraw's stem
     universe, since a review reference has no labels directory to re-scan).
 
     Args:
         labels_dir: Labeled dir whose GT identity locked the split (mutually exclusive with
-            ``identity_hash`` — if both are omitted, or ``identity_hash`` is given with no
+            ``identity_hash``, if both are omitted, or ``identity_hash`` is given with no
             existing lock and no ``labels_dir``, this refuses).
         images_dir: Images for ``labels_dir``. When given, stems are the same labels-intersect-
-            images-on-disk universe ``run_inference``'s calibration uses (K1 finding 4) — a stem
+            images-on-disk universe ``run_inference``'s calibration uses, a stem
             whose image was deleted/renamed never enters the redraw's stem universe. Omitted ->
-            every labeled stem is used regardless of whether an image still exists for it
-            (the pre-K1 behavior), for a caller that has no images directory to check against.
+            every labeled stem is used regardless of whether an image still exists for it,
+            for a caller that has no images directory to check against.
         identity_hash: The locked split's identity hash directly.
-        group_by: New grouping policy — ``"tile_prefix"`` / ``"stem"`` (ignored if
+        group_by: New grouping policy, ``"tile_prefix"`` / ``"stem"`` (ignored if
             ``group_key_map`` is given).
         group_key_map: Explicit ``{stem: group_key}`` map covering every stem, overriding
             ``group_by``.
         seed: New split seed.
         holdout_ratio: New calibration/holdout fraction.
-        reason: Required, non-empty justification for this redraw — recorded in the audit log
+        reason: Required, non-empty justification for this redraw, recorded in the audit log
             alongside the old and new split membership.
     """
     if not reason or not reason.strip():
@@ -346,8 +338,8 @@ def force_redraw_cal_holdout_split(
                        "holdout": old_lock.get("holdout", [])} if old_lock else None)
 
     if labels_dir:
-        # The SAME labels-intersect-images scan _calibrate_operating_point uses (K1 finding 4),
-        # not a second independent glob — with images_dir omitted this degrades to the prior
+        # The same labels-intersect-images scan _calibrate_operating_point uses,
+        # not a second independent glob, with images_dir omitted this degrades to the prior
         # labels-only scan (stem_to_image unused here either way).
         stems, _ = label_image_stems(labels_dir, images_dir)
         annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
@@ -365,11 +357,11 @@ def force_redraw_cal_holdout_split(
     )
     new_membership = {"calibration": new_lock["calibration"], "holdout": new_lock["holdout"]}
 
-    # @audited (the decorator on this tool) logs only the call's kwargs, never the RETURN value —
+    # @audited (the decorator on this tool) logs only the call's kwargs, never the return value,
     # and the auditable fact here is what the redraw actually produced, not just that one was
     # requested. record_event brackets that the same way envelope.py's training loop closes the
     # "no audit record for what happened inside the call" hole. A distinct tool name (not this
-    # function's own) so the two log entries — @audited's call-args line and this result line —
+    # function's own) so the two log entries, @audited's call-args line and this result line,
     # don't collide under one ambiguous schema.
     record_event(
         "force_redraw_cal_holdout_split_result",
@@ -420,11 +412,11 @@ def run_inference(
         conf_threshold: Minimum confidence score.
         device: Device to use ('cuda' or 'cpu').
         tile: Enable tiled (SAHI-style) detection inference. ``None`` (default) is a documented
-            default (K10 finding 3), not silently ``False``/``True`` — its provenance is stamped
+            default, not silently ``False``/``True``, its provenance is stamped
             ``"default"`` vs ``"explicit"`` so a caller who deliberately chose one way is
             distinguishable from one who left it unset. For an ``instance_seg`` checkpoint tiling
             is not available at all (the cross-tile merge cannot yet carry masks, and masks are
-            that task's measurement): an unset ``tile`` runs UNTILED so the masks survive, and an
+            that task's measurement): an unset ``tile`` runs untiled so the masks survive, and an
             explicit ``tile=True`` is refused rather than dropping them.
         tile_size: Sliding-window tile edge (px). ``None`` (default) derives it from the
             checkpoint's training tile geometry so inference matches the trained scale; a value
@@ -434,39 +426,39 @@ def run_inference(
         tile_batch_size: Tiles per forward batch.
         global_nms_iou: Cross-tile global NMS IoU threshold.
         max_dets: Full-frame detection cap (after any tiled merge).
-        postprocess: Cross-tile merge — "nms" suppresses overlaps, "nmm" unions boxes split
+        postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split
             across a tile seam (better for an object straddling a boundary).
-        trait: Trait name (with ``calibration_labels_dir``) to DERIVE the confidence operating point
-            per dataset instead of pinning a default — the count is the phenotype, so conf must be
-            calibrated (CV0). Absent -> the byte-identical raw path (conf=score_threshold, unvalidated).
+        trait: Trait name (with ``calibration_labels_dir``) to derive the confidence operating point
+            per dataset instead of pinning a default, the count is the phenotype, so conf must be
+            calibrated. Absent -> the byte-identical raw path (conf=score_threshold, unvalidated).
         calibration_labels_dir: Labeled dir for a disjoint cal/holdout split to calibrate + held-out
             validate the operating point. Its GT identity scopes the resolved conf (dataset firewall).
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
         experiment_id: The run that produced the checkpoint, for provenance. Best-effort resolved
             (checkpoint's own stamp, then the registry) when omitted; a raw/foreign checkpoint
-            legitimately has none. Also gates calibration's train-disjointness check (K1): a
+            legitimately has none. Also gates calibration's train-disjointness check: a
             *known* run whose training split can't be read/reconstructed fails that check closed.
-        group_by: Grouping policy for the LOCKED calibration/holdout split (K1) — ``"tile_prefix"``
-            (default) or ``"stem"``. Ignored when ``group_key_map`` is given. Only the FIRST
+        group_by: Grouping policy for the locked calibration/holdout split, ``"tile_prefix"``
+            (default) or ``"stem"``. Ignored when ``group_key_map`` is given. Only the first
             calibration call for a given calibration-labels identity draws the split; later calls
             return the same locked split regardless of this argument (see
             ``force_redraw_cal_holdout_split`` to redraw deliberately).
         group_key_map: An agent-derived ``{stem: group_key}`` map overriding ``group_by`` for the
-            locked calibration/holdout split — must cover every stem in ``calibration_labels_dir``.
-        split_seed: Split seed for the LOCKED calibration/holdout split (K1 finding 5) — like
-            ``group_by``, only takes effect on the FIRST calibration call for a given
+            locked calibration/holdout split, must cover every stem in ``calibration_labels_dir``.
+        split_seed: Split seed for the locked calibration/holdout split, like
+            ``group_by``, only takes effect on the first calibration call for a given
             calibration-labels identity; a later call's declared value is compared to the lock and
             any divergence is reported in ``sweep_summary``/the resolved bundle rather than
             silently ignored.
-        split_holdout_ratio: Calibration/holdout fraction for the LOCKED split (K1 finding 5) —
-            same first-call-only semantics as ``split_seed``.
+        split_holdout_ratio: Calibration/holdout fraction for the locked split, same
+            first-call-only semantics as ``split_seed``.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
 
-    # K10 finding 3: resolve the tiled bool ONCE, here, so every behavioral and provenance site
-    # below reads the same resolved value — a caller who left ``tile`` unset gets DEFAULT_TILED
-    # behavior everywhere, and the ORIGINAL None-or-bool is never passed further as a live value
+    # Resolve the tiled bool once, here, so every behavioral and provenance site
+    # below reads the same resolved value, a caller who left ``tile`` unset gets DEFAULT_TILED
+    # behavior everywhere, and the original None-or-bool is never passed further as a live value
     # (that would make e.g. predict_batch dispatch on falsy None and silently run untiled).
     tiled_source = "explicit" if tile is not None else "default"
     resolved_tile_bool = DEFAULT_TILED if tile is None else tile
@@ -482,9 +474,9 @@ def run_inference(
                 "cross_tile_nms": global_nms_iou if resolved_tile_bool else None,
                 "tiled": resolved_tile_bool,
                 "tiled_source": tiled_source,
-                # Stage-6 review: the checkpoint isn't loaded in a dry run, so neither value is
-                # actually "derived" yet — an explicit value is known; an unset one is only a
-                # PENDING derivation (or the fabricated default, if the checkpoint has none).
+                # The checkpoint isn't loaded in a dry run, so neither value is
+                # actually "derived" yet, an explicit value is known; an unset one is only a
+                # pending derivation (or the fabricated default, if the checkpoint has none).
                 "tile_size": tile_size if tile_size is not None else "pending-checkpoint-derivation",
                 "overlap": overlap if overlap is not None else "pending-checkpoint-derivation",
                 "max_dets": max_dets,
@@ -504,7 +496,7 @@ def run_inference(
     from tcip_mcp.pipelines.resolution import dataset_hash, raw_operating_point
 
     # Thread NMS IoU + the full-frame detection cap into the model so they govern which boxes exist
-    # (torchvision's own in-model thresholds), not just cross-tile merge — else nms_iou has no
+    # (torchvision's own in-model thresholds), not just cross-tile merge, else nms_iou has no
     # effect on an untiled run and dense scenes truncate at the framework default.
     predictor = build_predictor(
         checkpoint_path=checkpoint_path,
@@ -514,9 +506,9 @@ def run_inference(
         max_dets=max_dets,
     )
 
-    # K20: the cross-tile merge is boxes-only, and masks ARE instance_seg's measurement, so this
+    # The cross-tile merge is boxes-only, and masks are instance_seg's measurement, so this
     # door never sends an instance_seg checkpoint down the tiled path. Unset ``tile`` resolves to
-    # UNTILED (masks intact) instead of blindly applying DEFAULT_TILED; an explicit tile=True is a
+    # untiled (masks intact) instead of blindly applying DEFAULT_TILED; an explicit tile=True is a
     # clean refusal naming this tool's own parameter, not predict_tiled's NotImplementedError
     # surfacing as a raw traceback through the MCP call.
     instance_seg_warning = None
@@ -524,29 +516,29 @@ def run_inference(
         if tiled_source == "explicit":
             return {"error": (
                 "instance_seg checkpoint: tiled inference cannot carry masks through the cross-tile "
-                "reconstruction/merge yet, and masks are this task's measurement — so tile=True is "
+                "reconstruction/merge yet, and masks are this task's measurement, so tile=True is "
                 "refused rather than silently dropping them. Re-run with tile=False for untiled "
                 "inference (masks carried); run_inference, export_predictions and tabulate_counts "
                 "all take the same tile parameter.")}
         resolved_tile_bool = False
         instance_seg_warning = (
-            "instance_seg checkpoint with tile unset: running UNTILED so the masks survive (tiled "
+            "instance_seg checkpoint with tile unset: running untiled so the masks survive (tiled "
             "inference cannot carry masks through the cross-tile merge yet). Small dense objects "
             "may be under-detected at full resolution; pass tile=False to state this explicitly."
         )
         logger.warning(instance_seg_warning)
 
-    # Producing-model identity resolved BEFORE calibration (K1), not after: the calibration's
+    # Producing-model identity resolved before calibration, not after: the calibration's
     # train-disjointness gate needs the checkpoint's own experiment_id to check the cal/holdout
     # images against that run's training split. sha is cached (never re-hashed per call).
     from tcip_mcp.model_registry import resolve_model_identity
 
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
 
-    # CV2/K10: derive the tile geometry from the checkpoint's training geometry unless the caller
+    # Derive the tile geometry from the checkpoint's training geometry unless the caller
     # pinned it, so a tiled run doesn't silently infer at a different scale than it trained at
-    # (which shifts the object count — the phenotype). The shared resolver (K10) is a pure
-    # fact-return — it never refuses — so the warn-and-proceed policy for this exploratory path
+    # (which shifts the object count, the phenotype). The shared resolver is a pure
+    # fact-return, it never refuses, so the warn-and-proceed policy for this exploratory path
     # lives here, distinct from the delivery-gating path's refuse policy in
     # ``run_full_frame_evaluation``.
     from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
@@ -561,26 +553,26 @@ def run_inference(
     elif tile_size_source == "default" and resolved_tile_bool:
         geometry_warning = (
             "checkpoint carries no training tile geometry; using default "
-            f"{DEFAULT_TILE_SIZE} — counts may not match training scale. Retrain (geometry now "
+            f"{DEFAULT_TILE_SIZE}, counts may not match training scale. Retrain (geometry now "
             "persisted) or pass tile_size explicitly."
         )
         logger.warning(geometry_warning)
     # overlap_source == "default" is expected and unremarkable for a model with no persisted
-    # overlap analog — only tile_size's absence changes the object count's scale, so only
+    # overlap analog, only tile_size's absence changes the object count's scale, so only
     # tile_size's default fallback is worth a warning.
 
     if image_paths is None:
         if images_dir is None:
             return {"error": "Provide either image_paths or images_dir"}
-        # Fold a `.bandgroup`-grouped capture into its one logical entry (list_logical_images) —
-        # the same enumeration every other reader in this platform shares — instead of this door's
+        # Fold a `.bandgroup`-grouped capture into its one logical entry (list_logical_images),
+        # the same enumeration every other reader in this platform shares, instead of this door's
         # own raw sibling-file listing enumerating each band file as its own (spurious) image.
         from tcip_mcp.pipelines.image_utils import list_logical_images
 
         logical = list_logical_images(images_dir)
         image_paths = [logical[stem] for stem in sorted(logical)]
 
-    # Resolve the confidence operating point. CV0: with a trait + labeled calibration dir, DERIVE it
+    # Resolve the confidence operating point: with a trait + labeled calibration dir, derive it
     # per dataset (count-unbiased + held-out validated); otherwise the byte-identical raw path.
     extra: dict = {}
     if trait and calibration_labels_dir:
@@ -598,7 +590,7 @@ def run_inference(
                 seed=split_seed, holdout_ratio=split_holdout_ratio,
             )
         except ValueError as exc:
-            # A locked cal/holdout split refusing this call (K1 finding 4): a calibration stem's
+            # A locked cal/holdout split refusing this call: a calibration stem's
             # image/label was deleted/renamed since the split locked, or the lock file is corrupt.
             # Clean refusal here, not a bare KeyError from a stale stem_to_image lookup downstream.
             return {"error": str(exc)}
@@ -612,8 +604,8 @@ def run_inference(
         set_detector_operating_point(predictor.model, score_thresh=conf, detections_per_img=max_dets)
         op_bundle = bundle
         # Dataset-scope firewall: the conf is scoped to the calibration GT. The inference target is
-        # usually UNLABELED, so its GT identity (a content hash) is undefined — pass None and record
-        # 'not-comparable-unlabeled-target'. Only when inferencing the SAME labeled set it calibrated
+        # usually unlabeled, so its GT identity (a content hash) is undefined, pass None and record
+        # 'not-comparable-unlabeled-target'. Only when inferencing the same labeled set it calibrated
         # on can we compare real hashes and flag cross-dataset inheritance.
         from tcip_mcp.pipelines.image_utils import stem_of
 
@@ -626,7 +618,7 @@ def run_inference(
         else:
             target_hash, cross_dataset_check = None, "not-comparable-unlabeled-target"
         issues = bundle.shippable_issues(target_dataset_hash=target_hash)
-        # Channel firewall (T6-3): probe ONE target raster and check its band count against the
+        # Channel firewall: probe one target raster and check its band count against the
         # checkpoint's in_chans via validate_resolved_bundle, so a channel-wrong inference surfaces in
         # the provenance rather than being silently coerced by the loader.
         if image_paths:
@@ -643,7 +635,7 @@ def run_inference(
                     "in_chans": _resolved_default(
                         "in_chans", int(getattr(predictor, "in_chans", 3)))})
                 issues = issues + validate_resolved_bundle(chan_bundle, probed_channels=probed)
-        # validated only when held-out passed AND nothing is un-shippable under the target actually used.
+        # validated only when held-out passed and nothing is un-shippable under the target actually used.
         extra = {
             "validated": bool(bundle.is_shippable and not issues),
             "shippable_issues": issues,
@@ -653,11 +645,11 @@ def run_inference(
             "sweep_summary": _sweep_summary(conf_param),
             "n_excluded_incomplete_attribute": n_excluded_incomplete_attribute,
         }
-        # The full sweep can be large — persist it and return the path (provenance emits has_sweep).
-        # K12 finding 5: keyed on cal_hash alone, a second checkpoint (or the same checkpoint under
-        # different tile/postprocess settings) calibrated on the same labels silently overwrote the
+        # The full sweep can be large, persist it and return the path (provenance emits has_sweep).
+        # Keyed on cal_hash alone, a second checkpoint (or the same checkpoint under
+        # different tile/postprocess settings) calibrated on the same labels would silently overwrite the
         # prior curve. Content-address the filename by every dimension the sweep actually depends
-        # on — checkpoint identity + the full predictor path, not just the labels — so it can't be
+        # on, checkpoint identity + the full predictor path, not just the labels, so it can't be
         # under-keyed again the next time a dimension is added; identical inputs harmlessly reuse
         # the same file, different inputs never collide.
         try:
@@ -698,7 +690,7 @@ def run_inference(
         extra = {"validated": False, "conf_source": "default"}
 
     # Preflight: warn (don't fail) when a slow workload will run on CPU because CUDA isn't
-    # available — full tiled inference over thousands of images is hours on CPU vs minutes on
+    # available, full tiled inference over thousands of images is hours on CPU vs minutes on
     # a GPU. Install a CUDA torch build (see environment.yml) to use the card.
     cpu_warning = None
     if device != "cpu" and (resolved_tile_bool or len(image_paths) > 8):
@@ -706,7 +698,7 @@ def run_inference(
 
         if not torch.cuda.is_available():
             cpu_warning = (
-                f"CUDA not available — running {len(image_paths)} image(s)"
+                f"CUDA not available, running {len(image_paths)} image(s)"
                 f"{' tiled' if resolved_tile_bool else ''} on CPU, which is much slower. Install a "
                 "CUDA torch build (see environment.yml) to use the GPU."
             )
@@ -723,9 +715,9 @@ def run_inference(
     from datetime import datetime, timezone
 
     # This run's name→id map, reused for both recording and decode, so export records it in
-    # operating_point.json and decodes predictions to names through this one map — consistent
-    # within the run. The ONE resolution both doors that write predictions to disk use (this tool
-    # and the web GUI's own inference worker, routes/inference.py) — never a second implementation.
+    # operating_point.json and decodes predictions to names through this one map, consistent
+    # within the run. The one resolution both doors that write predictions to disk use (this tool
+    # and the web GUI's own inference worker, routes/inference.py), never a second implementation.
     id_map = resolve_decode_id_map(predictor, images_dir)
     out = {
         "checkpoint": checkpoint_path,
@@ -737,7 +729,7 @@ def run_inference(
         "total_detections": total_detections,
         "tiled": resolved_tile_bool,
         # Stage-6 review: overlap has no home in the ResolvedBundle's tracked params (only conf/
-        # cross_tile_nms/tiled/tile_size/max_dets are) — surface the value this specific call
+        # cross_tile_nms/tiled/tile_size/max_dets are), surface the value this specific call
         # actually ran at directly, rather than silently drop it after resolving it.
         "overlap": resolved_overlap,
         "overlap_source": overlap_source,
@@ -776,12 +768,12 @@ def export_predictions(
     """Run inference and save predictions as per-image COCO/JSON files.
 
     Routes through ``run_inference`` so this delivery door resolves the same firewalled
-    operating point (conf/NMS/tiling/max_dets) — earlier it built its own bare predictor and
+    operating point (conf/NMS/tiling/max_dets), earlier it built its own bare predictor and
     so truncated the count at the framework default and shipped labels with no provenance.
     Writes ``<stem>.json`` per image plus an ``operating_point.json`` stamp beside them.
 
     A prediction bucket (``output_dir``) that already carries review verdicts is immutable: by
-    default the export is redirected to a fresh run-scoped bucket (``<dir>@r2``, ``@r3`` — next
+    default the export is redirected to a fresh run-scoped bucket (``<dir>@r2``, ``@r3``, next
     free) and the dir actually written is returned as ``output_dir``. Pass ``overwrite=True`` to
     write in place only when the bucket has zero verdicts; with verdicts present it is refused
     (error names the count and a suggested dir) so a re-run never orphans recorded verdicts.
@@ -793,7 +785,7 @@ def export_predictions(
         conf_threshold: Minimum confidence score.
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
-            ``run_inference`` unresolved — see its own ``tile`` doc: a documented default distinct
+            ``run_inference`` unresolved, see its own ``tile`` doc: a documented default distinct
             from an explicit choice, not silently ``False``. An ``instance_seg`` checkpoint cannot
             tile (the cross-tile merge cannot yet carry masks, and this export is the door masks
             ship through): unset runs untiled with masks, ``tile=True`` is refused with an error
@@ -803,7 +795,7 @@ def export_predictions(
         tile_batch_size: Tiles per forward batch.
         global_nms_iou: Cross-tile NMS IoU.
         max_dets: Full-frame detection cap.
-        postprocess: Cross-tile merge — "nms" or "nmm".
+        postprocess: Cross-tile merge, "nms" or "nmm".
         trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``).
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
@@ -854,7 +846,7 @@ def export_predictions(
         has_masks = has_masks or bool(r.get("masks"))
 
     # Stamp the operating point + producing-model identity beside the delivered labels. ``validated``
-    # is derived from the run's resolved bundle (true only when a held-out calibration passed) —
+    # is derived from the run's resolved bundle (true only when a held-out calibration passed),
     # never hardcoded, or a passing calibration would be recorded as unvalidated (and vice versa).
     op_stamp = {"operating_point": result.get("operating_point"),
                "id_map": id_map,
@@ -865,20 +857,20 @@ def export_predictions(
                "experiment_id": result.get("experiment_id"),
                "images_dir": images_dir,
                "produced_at": result.get("produced_at"),
-               # K12 finding 5: the sweep artifact (the evidence a conf was DERIVED, not chosen) had
-               # no pointer in the delivered sidecar — a reviewer could see "validated" but not the
+               # The sweep artifact (the evidence a conf was derived, not chosen) needs a pointer
+               # in the delivered sidecar, or a reviewer could see "validated" but not the
                # curve that justified it without re-deriving it themselves.
                "sweep_path": result.get("sweep_path"),
                "sweep_summary": result.get("sweep_summary")}
     if has_masks:
         # The unvalidated mask-binarize threshold write_predictions_json used for every mask in this
-        # run — a run constant, so it travels once here rather than per-annotation (see
+        # run, a run constant, so it travels once here rather than per-annotation (see
         # export.py's mask_binarize_provenance docstring).
         op_stamp["mask_binarize"] = mask_binarize_provenance()
     atomic_write_json(out / "operating_point.json", op_stamp)
 
     # Close the data→model→predictions chain: link this bucket into the producing run's lineage.
-    # Additive first-write — the terminal-state lock permits it into a still-empty predictions field.
+    # Additive first-write, the terminal-state lock permits it into a still-empty predictions field.
     exp_id = result.get("experiment_id")
     if exp_id:
         try:
@@ -897,7 +889,7 @@ def export_predictions(
                 "checkpoint_sha256": sha,
                 "experiment_id": exp_id}
     # The run's warnings (an instance_seg run forced untiled, a fabricated tile scale, a CPU-bound
-    # workload) belong on this door's own response too — otherwise the reason a delivered bucket ran
+    # workload) belong on this door's own response too, otherwise the reason a delivered bucket ran
     # in the regime it did is visible only in the server log.
     if result.get("warning"):
         response["warning"] = result["warning"]
@@ -928,17 +920,15 @@ def tabulate_counts(
     """Run inference and export a CSV summary of detection counts per image.
 
     Routes through ``run_inference`` so the per-image counts resolve the same firewalled
-    operating point (conf/NMS/tiling/max_dets) as ``run_inference``/``export_predictions`` —
+    operating point (conf/NMS/tiling/max_dets) as ``run_inference``/``export_predictions``,
     the CSV is a count-bearing deliverable (the count is the phenotype for count traits), so it
-    must not be produced at a different, untiled, truncating operating point. Earlier this door
-    hardcoded ``conf=0.5`` and passed no tiling/max_dets, under-reporting dense
-    small-object counts relative to the other two doors.
+    must not be produced at a different, untiled, truncating operating point.
 
     Delivery gate: the count is a phenotype, so the CSV is not written unless every gating dimension
-    of the run's own resolved bundle is validated (not a caller string) — or
+    of the run's own resolved bundle is validated (not a caller string), or
     ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional CSV stamped
     ``measurement_validated=false``. Calibrate per dataset (``trait`` + ``calibration_labels_dir``)
-    to reach a validated conf. K10: a tiled run's ``tile_size`` gates the same way — a fabricated
+    to reach a validated conf. A tiled run's ``tile_size`` gates the same way, a fabricated
     640 fallback with no persisted training geometry and no explicit caller override refuses here
     too (closing the asymmetry with ``run_full_frame_evaluation``, which already refuses outright
     for that same case); pass an explicit ``tile_size`` or retrain with tile geometry persisted to
@@ -951,7 +941,7 @@ def tabulate_counts(
         conf_threshold: Minimum confidence score.
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
-            ``run_inference`` unresolved — see its own ``tile`` doc: a documented default distinct
+            ``run_inference`` unresolved, see its own ``tile`` doc: a documented default distinct
             from an explicit choice, not silently ``False``. An ``instance_seg`` checkpoint runs
             untiled when unset and refuses an explicit ``tile=True`` (tiling cannot carry masks).
         tile_size: Sliding-window tile edge (px).
@@ -959,7 +949,7 @@ def tabulate_counts(
         tile_batch_size: Tiles per forward batch.
         global_nms_iou: Cross-tile NMS IoU.
         max_dets: Full-frame detection cap.
-        postprocess: Cross-tile merge — "nms" or "nmm".
+        postprocess: Cross-tile merge, "nms" or "nmm".
         trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``).
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
@@ -995,7 +985,7 @@ def tabulate_counts(
     op = result.get("operating_point") or {}
     conf_prov = op.get("conf") or {}
     # The count operating point's validity is the reference the run's own conf param recorded, judged
-    # against the references accepted for conf's OWN validation kind (annotations) — never the bare
+    # against the references accepted for conf's own validation kind (annotations), never the bare
     # `validated` bool promoted to a reference the run never earned. That upgrade laundered a
     # missing/unrecognized/wrong-kind value into a shippable one (the same hole
     # resolution._sidecar_reference closed).
@@ -1004,11 +994,11 @@ def tabulate_counts(
         op_ref = VALIDATED_FALSE
     flags = {"operating_point": op_ref}
 
-    # K10: tile_size gates the same way, closing the asymmetry with run_full_frame_evaluation (which
-    # already refuses outright for a checkpoint with no persisted tile geometry) — a fabricated 640
+    # tile_size gates the same way, closing the asymmetry with run_full_frame_evaluation (which
+    # already refuses outright for a checkpoint with no persisted tile geometry), a fabricated 640
     # fallback is exactly as untrustworthy for a delivered count as an uncalibrated conf. Only added
-    # to the gate when tile_size is actually a gating dimension for THIS run (requires_validation is
-    # only set when tiled=True — see resolve_tile_size_param), so an untiled run's tile_size, never
+    # to the gate when tile_size is actually a gating dimension for this run (requires_validation is
+    # only set when tiled=True, see resolve_tile_size_param), so an untiled run's tile_size, never
     # operative, can't manufacture a spurious refusal.
     tile_prov = op.get("tile_size") or {}
     tile_ref: str | None = None
@@ -1036,8 +1026,8 @@ def tabulate_counts(
         "operating_point_conf": op.get("conf"),
         "produced_at": result.get("produced_at"),
     }
-    # gate.ok already means every gated dimension cleared (or was explicitly acknowledged) — but the
-    # CSV's single measurement_validated column must reflect the WHOLE gate, not just conf's own
+    # gate.ok already means every gated dimension cleared (or was explicitly acknowledged), but the
+    # CSV's single measurement_validated column must reflect the whole gate, not just conf's own
     # reference: with acknowledge_unvalidated=True a genuinely-unvalidated tile_size can still reach
     # here, and stamping conf's (possibly real) reference alone would misreport a partially
     # acknowledged-provisional delivery as fully validated.
@@ -1051,7 +1041,7 @@ def tabulate_counts(
         "csv_path": csv_path,
         "image_count": result["image_count"],
         "total_detections": result["total_detections"],
-        # Carry the operating point + producing model that produced these counts — the CSV is a
+        # Carry the operating point + producing model that produced these counts, the CSV is a
         # count-bearing deliverable; the numbers are only as trustworthy as what stands behind them.
         "operating_point": result.get("operating_point"),
         "validated": bool(result.get("validated", False)),
@@ -1061,9 +1051,9 @@ def tabulate_counts(
         "checkpoint_sha256": result.get("checkpoint_sha256"),
         "experiment_id": result.get("experiment_id"),
     }
-    # Round-2 stage-6 finding: an instance_seg run forced untiled (run_inference's own warning) used
-    # to be visible only in export_predictions' response, not here — so a count CSV (the count IS the
-    # phenotype for a count trait) could ship with the regime change disclosed only in the server log.
+    # An instance_seg run forced untiled (run_inference's own warning) is surfaced here too, so a
+    # count CSV (the count is the phenotype for a count trait) never ships with the regime change
+    # disclosed only in the server log.
     if result.get("warning"):
         out["warning"] = result["warning"]
     return out
