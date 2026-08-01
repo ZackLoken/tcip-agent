@@ -17,7 +17,12 @@ is the phenotype).
 from __future__ import annotations
 
 import logging
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +54,12 @@ class Predictor(Protocol):
     task: str
     in_chans: int
 
-    def predict(self, image_path: str) -> dict: ...
-    def predict_batch(self, image_paths: list[str], **kwargs: Any) -> list[dict]: ...
-    def predict_tiled(self, image_path: str, **kwargs: Any) -> dict: ...
+    # Each image argument may be a plain path/string or a BandGroupRef (a band-grouped capture —
+    # see pipelines.data.band_groups) — the SAME image sources image_utils.list_logical_images/
+    # resolve_image_source hand every other reader in this platform.
+    def predict(self, image_path: str | Path | BandGroupRef) -> dict: ...
+    def predict_batch(self, image_paths: list[str | Path | BandGroupRef], **kwargs: Any) -> list[dict]: ...
+    def predict_tiled(self, image_path: str | Path | BandGroupRef, **kwargs: Any) -> dict: ...
 
 
 def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:
