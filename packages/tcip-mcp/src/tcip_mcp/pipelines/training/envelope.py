@@ -300,7 +300,7 @@ class TrainContext:
             logger.warning("record_artifact failed (%s/%s): %s", self.experiment_id, name, exc)
 
     def should_cancel(self) -> bool:
-        return self.run.cancel_event.is_set()
+        return self.run.should_cancel()
 
     @property
     def tb(self) -> Any:
@@ -366,7 +366,7 @@ def dispatch_train_body(ctx: TrainContext) -> None:
         if run.status not in ("completed", "failed", "cancelled"):
             # A custom loop that never set a terminal status is treated as completed
             # (it returned without cancelling or raising).
-            run.status = "cancelled" if run.cancel_event.is_set() else "completed"
+            run.status = "cancelled" if run.should_cancel() else "completed"
     else:
         ctx.default_train()  # today's trainer
 
