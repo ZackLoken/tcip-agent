@@ -3,13 +3,13 @@ name: crop-science
 description: "Cross-cutting domain context for TCIP's six perennial tree-crop breeding crops (hazelnut, chestnut, currant, elderberry, persimmon, black locust): their identity and growth form, the phenophase framing that schedules image capture, and the physical sensing reality that bounds what drone RGB / multispectral / LiDAR, ground and proximal RGB, and lab RGB / NIRS can and cannot observe. Load before phenotyping any crop, choosing a sensing modality, scoping whether a trait is measurable from imagery, reasoning about field-imageable versus lab/destructive traits, or planning the collect-at-phenophase then automate-measurement then per-genotype-selection workflow. Frames sensing as physical constraints on per-trait derivation, never a fixed sensor-to-trait or task-to-trait map. Defers per-crop trait lists to the per-crop skills and crops.yml, and bloom-milestone math to the phenology skill."
 ---
 
-# Crop science — cross-cutting domain context
+# Crop science: cross-cutting domain context
 
 General ground for phenotyping the Savanna Institute's six perennial tree crops. This is
 the shared context; per-crop detail lives in the per-crop skills, the trait vocabulary in
 `.github/skills/crops/crops.yml` (the authority), and bloom-milestone math in the
 `phenology` skill. This skill exists to answer one recurring question honestly: **given the
-physics of the sensor, can this trait even be observed — and if so, at what perspective?**
+physics of the sensor, can this trait even be observed, and if so, at what perspective?**
 
 ## The six crops at a glance
 
@@ -20,49 +20,49 @@ identity, phenology detail, and the field-imageable-versus-lab partition.
 
 | Crop | Latin / growth form | crops.yml traits | Per-crop skill |
 |------|---------------------|------------------|----------------|
-| Hazelnut | *Corylus americana* × *C. avellana* hybrids — multi-stemmed, clump/thicket-forming shrub (~2–5 m), grown as hedgerow rows | 58 | `.github/skills/crops/hazelnut/SKILL.md` |
-| Chestnut | *Castanea* spp. — Chinese chestnut *C. mollissima* and American/hybrid (*C. dentata*) material; single-stem deciduous nut tree, rounded spreading crown | 21 | `.github/skills/crops/chestnut/SKILL.md` |
-| Currant | *Ribes* spp. (currants — black currant *R. nigrum* and others) — multi-stem deciduous shrub/bush (~1–2 m) | 86 | `.github/skills/crops/currant/SKILL.md` |
-| Elderberry | *Sambucus nigra* subsp. *canadensis* — suckering, multi-stemmed deciduous shrub (~2–4 m, to ~6 m), hedgerow rows | 69 | `.github/skills/crops/elderberry/SKILL.md` |
-| Persimmon | *Diospyros virginiana* — single-trunked, dioecious (occasionally polygamous) deciduous orchard tree | 20 | `.github/skills/crops/persimmon/SKILL.md` |
-| Black locust | *Robinia pseudoacacia* (Fabaceae) — fast-growing, clonal, N-fixing deciduous hardwood; thorns, suckers | 10 | `.github/skills/crops/black-locust/SKILL.md` |
+| Hazelnut | *Corylus americana* × *C. avellana* hybrids, multi-stemmed, clump/thicket-forming shrub (~2–5 m), grown as hedgerow rows | 58 | `.github/skills/crops/hazelnut/SKILL.md` |
+| Chestnut | *Castanea* spp., Chinese chestnut *C. mollissima* and American/hybrid (*C. dentata*) material; single-stem deciduous nut tree, rounded spreading crown | 21 | `.github/skills/crops/chestnut/SKILL.md` |
+| Currant | *Ribes* spp. (currants, black currant *R. nigrum* and others), multi-stem deciduous shrub/bush (~1–2 m) | 86 | `.github/skills/crops/currant/SKILL.md` |
+| Elderberry | *Sambucus nigra* subsp. *canadensis*, suckering, multi-stemmed deciduous shrub (~2–4 m, to ~6 m), hedgerow rows | 69 | `.github/skills/crops/elderberry/SKILL.md` |
+| Persimmon | *Diospyros virginiana*, single-trunked, dioecious (occasionally polygamous) deciduous orchard tree | 20 | `.github/skills/crops/persimmon/SKILL.md` |
+| Black locust | *Robinia pseudoacacia* (Fabaceae), fast-growing, clonal, N-fixing deciduous hardwood; thorns, suckers | 10 | `.github/skills/crops/black-locust/SKILL.md` |
 
 The per-crop counts sum above the file's 180 unique trait names because many traits (for
 example `plant_height`, `flavor_rating`, `bloom_50per_date`) are shared across crops and
 counted once per crop that carries them. crops.yml is the source of truth for which crop
-carries which trait — verify there, never assert from memory.
+carries which trait; verify there, never assert from memory.
 
 ## Phenophase framing (schedule; the math lives elsewhere)
 
-Reproductive and vegetative events run in a genotype- and site-specific sequence —
+Reproductive and vegetative events run in a genotype- and site-specific sequence:
 dormancy → budbreak → bloom → fruit/nut set → ripening → harvest → senescence. Timing is
 commonly framed with **Growing Degree Days (GDD)**: thermal accumulation above a base
-temperature predicts transitions such as bloom onset. GDD is a *scheduling* aid — it tells
-you roughly when to fly or walk a row — and it transfers poorly across sites and cultivars
+temperature predicts transitions such as bloom onset. GDD is a *scheduling* aid: it tells
+you roughly when to fly or walk a row, and it transfers poorly across sites and cultivars
 (a Northern-Hemisphere synthesis found GDD explained on average only ~67% of
 growing-season-onset variance). It does not read a phenophase from an image.
 
 The consequence for capture: a milestone trait is a **crossing between two visit dates,
-not a single-image reading**. Date traits — `catkin_05per_date`, `catkin_50per_date`,
+not a single-image reading**. Date traits (`catkin_05per_date`, `catkin_50per_date`,
 `catkin_95per_date`, `catkin_elongation_date`, `pistillate_05per_date`, `bloom_05per_date`,
 `bloom_95per_date`, `fruit_ripe_50per_date`, `burr_drop_date`, `catkin_bloom_date`,
-`leaf_out_05per_date`, `leaf_senescence_95per_date` — require **repeated captures
+`leaf_out_05per_date`, `leaf_senescence_95per_date`) require **repeated captures
 bracketing the transition**. One flight yields no date. The milestone definition and the
 crossing math (elongated-fraction, linear interpolation between visits, per-plant delivery)
-belong to the `phenology` skill — compose it, do not re-derive it here.
+belong to the `phenology` skill; compose it, do not re-derive it here.
 
 Each phenophase also *exposes* different structure. Leaf-off winter exposes bare
 architecture (best window for structural capture: `plant_height`, `plant_volume`,
 `stem_count`). Bloom exposes reproductive organs. Ripening exposes color and yield.
 Senescence is a change-detection signal across the temporal series.
 
-## Sensing reality — physics that bounds observability
+## Sensing reality: physics that bounds observability
 
 **Read this as physical constraints, not a pipeline.** A modality's ground sampling
 distance (GSD), spectral range/resolution, and standoff/perspective set a *hard bound* on
 what is physically observable. That bound is a constraint, not a prescription: it says a
 2–3 mm pistillate flower cannot be measured at 2 cm GSD by any model, and that kernel oil
-content is unreachable from an RGB photo — it does **not** say "sensor X is the pipeline for
+content is unreachable from an RGB photo; it does **not** say "sensor X is the pipeline for
 trait Y." crops.yml deliberately omits sensor/task/perspective assignments; do not
 reintroduce a fixed sensor→trait or task→trait map. Within the feasible set a modality
 permits, the CV approach for each trait is still **derived and validated per trait** against
@@ -72,15 +72,15 @@ Two rules of thumb recur across the literature:
 
 1. **Resolution gate.** To detect a structure, effective resolution (GSD or standoff)
    should be roughly **2–3× smaller than the structure**. Below that it is physically
-   unresolvable — report "not observable by this modality," do not manufacture a value.
+   unresolvable; report "not observable by this modality," do not manufacture a value.
    (This ratio, and the GSD/altitude figures below, are literature rules of thumb from
-   other crops — confirm the threshold empirically on TCIP structures; see the last
+   other crops; confirm the threshold empirically on TCIP structures; see the last
    section.)
 2. **No modality covers all trait classes.** Geometry/color needs calibrated imaging; 3D
    structure needs LiDAR or multi-view SfM; internal chemistry needs spectroscopy. Aerial
    and ground/lab are complementary, not interchangeable.
 
-### Aerial (UAV / airborne) — whole-population, top-of-canopy
+### Aerial (UAV / airborne): whole-population, top-of-canopy
 
 - **Drone RGB** (nadir orthomosaic + SfM point cloud; typically ~0.6–1.6 cm/px at orchard
   survey altitude): captures top-of-canopy color, texture, geometry, plant footprint, and
@@ -89,7 +89,7 @@ Two rules of thumb recur across the literature:
   and all chemistry.
 - **Multispectral** (few discrete bands: blue/green/red/red-edge/NIR): yields vegetation
   indices (NDVI, red-edge) that **proxy** canopy vigor/biomass/stress. An index is a proxy,
-  never the biological trait — it must be validated against ground truth and never delivered
+  never the biological trait; it must be validated against ground truth and never delivered
   as the quantity itself. Broad, spaced bands cannot resolve narrow disease spectral
   signatures.
 - **LiDAR / SfM 3D**: can measure canopy height, crown area/volume, and cover of the outer
@@ -97,10 +97,10 @@ Two rules of thumb recur across the literature:
   `plant_volume`, `plant_surface_area`, `plant_width_inrow`, `plant_width_betweenrow`, and
   biomass estimated allometrically from volume, `plant_biomass`). Top-of-canopy only:
   internal branch geometry and under-canopy organs are largely unrecoverable from above.
-  **Note:** 3D point-cloud LiDAR/SfM traits are *not built* in the TCIP pipeline today —
+  **Note:** 3D point-cloud LiDAR/SfM traits are *not built* in the TCIP pipeline today;
   treat them as not-yet-in-pipeline, not available, when scoping.
 
-### Ground / proximal (handheld, tripod, UGV) — fine morphology at low throughput
+### Ground / proximal (handheld, tripod, UGV): fine morphology at low throughput
 
 The modality for small structures, fine morphology, and visible disease: hazelnut catkins,
 2–3 mm pistillate flowers, on-plant nut clusters (`cluster_nut_count`), burrs (`n_burrs`,
@@ -108,24 +108,24 @@ The modality for small structures, fine morphology, and visible disease: hazelnu
 `efb_presence`, `efb_damage`, `big_bud_mite_damage`, `weevil_damage`, `borer_damage`).
 Enables tiled sliding-window detection of many small objects (compose
 `run_inference(tile=True)`; see `phenology`). Constraints: occlusion, variable field
-lighting, low area throughput, no chemistry. **Frame order is not plant identity** —
+lighting, low area throughput, no chemistry. **Frame order is not plant identity**:
 hedgerow frames span multiple or partial plants, so per-plant attribution needs the spatial
 plant mapping (see `phenology`), never an every-Nth-frame rule.
 
-### Lab / harvested-sample — dimensions and chemistry, destructively
+### Lab / harvested-sample: dimensions and chemistry, destructively
 
 - **Lab RGB** (controlled lighting **with a scale reference**): precise linear dimensions,
-  counts, color, and morphometrics on harvested samples — `inshell_length`, `kernel_weight`,
+  counts, color, and morphometrics on harvested samples: `inshell_length`, `kernel_weight`,
   `fruit_diameter`, `fruit_color_rgb`. A photo without a scale reference cannot yield an
   absolute dimension; mass is not recoverable from an image.
 - **NIRS / spectroscopy** (point spectrum, typically no image): the **only** optical route
-  to internal chemistry — `kernel_perc_oil`, `kernel_oleic_acid_content`,
+  to internal chemistry: `kernel_perc_oil`, `kernel_oleic_acid_content`,
   `kernel_dry_matter_perc`, `fruit_anthocyanin_content`, `soluble_tannins`, `total_tannins`.
   Requires a crop- and state-specific calibration model; chemistry cannot be inferred from
   RGB pixels.
 - **Out of built scope:** thermal IR (a water-stress proxy) and ground-penetrating radar
   (below-ground `root_crown_inrow_width` geometry) are edge-of-scope and not in the TCIP
-  pipeline today — flag, do not assume.
+  pipeline today; flag, do not assume.
 
 ## The field-imageable vs lab/destructive principle
 
@@ -135,27 +135,27 @@ ground imagery, non-destructively, across the whole population) to **lab/destruc
 the trait, not a modeling preference: canopy geometry and visible disease are
 field-imageable; internal chemistry (`kernel_perc_oil`) and precise mass are not, and
 force- or sensory-based traits (`cluster_detachment_force`, `flavor_rating`) and destructive
-sample counts (`nut_perc_blanks`) are not imaging traits at all — do not force them into a
+sample counts (`nut_perc_blanks`) are not imaging traits at all; do not force them into a
 pixel pipeline. The exact per-crop partition lives in each per-crop skill; this skill only
 fixes the principle. When a trait can't be validly measured from the available pixels, **say
-so** — an honest "not observable by this modality" beats a confident, wrong number.
+so**: an honest "not observable by this modality" beats a confident, wrong number.
 
 ## The breeding-program workflow this serves
 
 The sensing exists to produce trustworthy per-plant phenotypes that breeders select on:
 
-1. **Collect at the right phenophase** — GDD-informed scheduling, repeated visits bracketing
+1. **Collect at the right phenophase**: GDD-informed scheduling, repeated visits bracketing
    any milestone, matched to the modality that can physically resolve the target structure.
-2. **Automate the measurement** — derive and *validate* a CV measurement per trait within its
-   modality's physical limits, against a reference sized to the trait — GT annotations, or a
+2. **Automate the measurement**: derive and *validate* a CV measurement per trait within its
+   modality's physical limits, against a reference sized to the trait: GT annotations, or a
    breeder-confirmed sample of the model's own outputs (review-confirmation), not dense GT for
    every trait (either reference passes the identical disjoint-split + count-bias gate). Operating
    points (conf, IoU-for-a-hit, NMS, tile size, thresholds) are derived from the data in hand at
    runtime, not pinned.
-3. **Deliver per-genotype / per-plant values** — carry accession/genotype through so breeders
+3. **Deliver per-genotype / per-plant values**: carry accession/genotype through so breeders
    select on genotype, not `plant_id`. Genomic/phenomic selection depends on trustworthy
    per-plant phenotypes, which is exactly why a confident-but-wrong measurement is the worst
-   output — it corrupts selection across long perennial cycles.
+   output; it corrupts selection across long perennial cycles.
 
 ## Measurement-integrity guards specific to sensing
 
@@ -166,12 +166,12 @@ The sensing exists to produce trustworthy per-plant phenotypes that breeders sel
 - **A vegetation index is a proxy, not the trait.** Validate NDVI/red-edge against expert
   ground truth; never deliver the index as the biological quantity.
 - **Chemistry is not in RGB pixels.** Any RGB-derived oil/protein/moisture/tannin number is
-  fabricated — it needs NIRS/hyperspectral with a crop/state-specific calibration.
+  fabricated; it needs NIRS/hyperspectral with a crop/state-specific calibration.
 - **Resolution gates feasibility.** If standoff/GSD cannot resolve a structure at ~2–3×
-  smaller than its size, no model recovers it — report not observable.
+  smaller than its size, no model recovers it; report not observable.
 - **Aerial 3D is top-of-canopy.** Do not report internal-structure metrics from a DSM/SfM
   surface.
-- **Frame order is not plant identity** in ground hedgerow imagery — use the spatial plant
+- **Frame order is not plant identity** in ground hedgerow imagery; use the spatial plant
   mapping.
 - **Sensor choice bounds but does not define the measurement.** The trait's semantics come
   from the breeder; the operating points come from the data. Do not re-impose a fixed
@@ -179,7 +179,7 @@ The sensing exists to produce trustworthy per-plant phenotypes that breeders sel
 
 ## Needs expert confirmation
 
-Literature-derived or program-specific — confirm before any of these drives a delivery;
+Literature-derived or program-specific; confirm before any of these drives a delivery;
 they are not settled facts:
 
 - **The 2–3× resolution rule and specific GSD/altitude figures** are rules of thumb from
@@ -188,7 +188,7 @@ they are not settled facts:
   established empirically on this program's own imagery and sensors.
 - **Ordinal disease/pest damage scales** (`efb_damage`, `big_bud_mite_damage`,
   `weevil_damage`, `borer_damage`) are defined by the breeder's scoring rubric grounded in
-  the imagery, not by any pixel measurement — confirm the rubric before operationalizing.
+  the imagery, not by any pixel measurement; confirm the rubric before operationalizing.
 - **GDD base/upper thresholds and phenophase calendars** are genotype- and site-specific for
   the Savanna Institute plantings; confirm with the breeding team rather than porting generic
   tree-crop models.
