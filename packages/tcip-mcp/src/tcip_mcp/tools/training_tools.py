@@ -1,4 +1,4 @@
-"""Training MCP tools — config validation, launch training, HPO, status."""
+"""Training MCP tools, config validation, launch training, HPO, status."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_NMS_IOU
 
 logger = logging.getLogger(__name__)
 
-# K24: round-robins unpinned concurrent launches across available GPUs (no-op with 0-1 devices).
+# Round-robins unpinned concurrent launches across available GPUs (no-op with 0-1 devices).
 _gpu_round_robin = itertools.count()
 
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
@@ -35,21 +35,21 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
               # (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/
               # lr_scaling/stage_warmup_epochs/enforce_monotonic_unfreeze/
               # gradient_accumulation_steps/checkpoint_every_n_epochs/early_stopping/evaluation)
-              # is documented on train()'s own docstring, not repeated here — read that for the
+              # is documented on train()'s own docstring, not repeated here, read that for the
               # canonical, always-current list. training_source: optional custom train(ctx) loop.
 
     Args:
         config: Full training configuration dict.
         smoke: When True, actually build the model and run ``check_model_contract`` (a train+eval
             forward at the resolved in_chans/num_classes/img_size). A contract failure is a
-            guaranteed real-run failure, so it is appended to ``issues`` and blocks the launch —
+            guaranteed real-run failure, so it is appended to ``issues`` and blocks the launch,
             ``launch_training`` runs this before spawning the training thread. For a task the
             contract has no synthetic batch schema for, one real batch is built from ``data`` and
             used instead; if no batch can be built either, the boundary is unproven and that also
             blocks. Default False keeps the always-on web ``/validate`` path to structural checks
-            plus a builder import — no model construction and no forward pass.
+            plus a builder import, no model construction and no forward pass.
         overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic and
-            report it under ``overfit_check`` — never gating (a noisy-but-valid model can fail it).
+            report it under ``overfit_check``, never gating (a noisy-but-valid model can fail it).
     """
     from tcip_mcp.pipelines.schemas import validate_train_config_schema
 
@@ -70,8 +70,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         except Exception as exc:
             issues.append(f"model_source.builder not importable: {exc}")
 
-    # training_source seam (mirrors model_source/dataset_source above) — a bare "module:function"
-    # string, not a dict (K9: the skill's own example previously showed the wrong shape).
+    # training_source seam (mirrors model_source/dataset_source above), a bare "module:function"
+    # string, not a dict.
     training_source = config.get("training_source")
     if training_source is not None:
         if not isinstance(training_source, str) or not training_source:
@@ -89,7 +89,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         issues.append("Missing 'data' section")
     elif data_cfg.get("dataset_source") is not None:
         # Bespoke dataset seam (mirrors model_source): the agent's builder owns loading, so the
-        # known-loader images_dir/labels_dir aren't required — only the builder must import.
+        # known-loader images_dir/labels_dir aren't required, only the builder must import.
         dataset_source = data_cfg["dataset_source"]
         if not isinstance(dataset_source, dict) or not dataset_source.get("builder"):
             issues.append("data.dataset_source must be a dict with a 'builder' (module:function)")
@@ -107,9 +107,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             elif not Path(path).is_dir():
                 issues.append(f"Directory not found: data.{key} = '{path}'")
 
-    # Channel firewall (T6-3): probe one sample raster and check its band count against the declared
+    # Channel firewall: probe one sample raster and check its band count against the declared
     # in_chans, so a channel-wrong train is caught here rather than deep in the training subprocess.
-    # Only fires when a raster is actually readable — never a false-fail on an empty/absent dir.
+    # Only fires when a raster is actually readable, never a false-fail on an empty/absent dir.
     if isinstance(model_source, dict) and model_source.get("in_chans") is not None and data_cfg:
         images_dir = data_cfg.get("images_dir")
         if images_dir and Path(images_dir).is_dir():
@@ -131,11 +131,11 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                             "in_chans", int(model_source["in_chans"]))})
                     issues.extend(validate_resolved_bundle(b, probed_channels=probed))
 
-    # Split-policy validation (K1): mirrors the channel firewall above — only fires when a
+    # Split-policy validation: mirrors the channel firewall above, only fires when a
     # grouping policy is actually declared, probes the dataset's stems the same way the channel
     # check probes a sample image, and never false-fails on an empty/absent/unreadable dir. Catches
     # an unrecognized ``group_by`` or an incomplete ``group_key_map`` here, at preflight, rather
-    # than deep in ``_auto_train_val`` where it would now raise (T7).
+    # than deep in ``_auto_train_val`` where it would otherwise raise.
     split_cfg = data_cfg.get("split") if isinstance(data_cfg, dict) else None
     if isinstance(split_cfg, dict) and (split_cfg.get("group_by") or split_cfg.get("group_key_map")):
         images_dir = data_cfg.get("images_dir")
@@ -151,12 +151,12 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 except ValueError as exc:
                     issues.append(f"data.split: {exc}")
 
-    # Trainable-sample coverage (round 12, 2026-07-29): trainable_stems' own partition was computed
-    # by DetectionDataset/InstanceSegDataset and then thrown away — a run whose label store admits
+    # Trainable-sample coverage: trainable_stems' own partition was computed
+    # by DetectionDataset/InstanceSegDataset and then thrown away, a run whose label store admits
     # only a fraction of its annotated images (an unconfirmed-empty backlog, a stale-schema
     # quarantine, incomplete attribute coverage) reported "valid, no warnings" with no visibility
-    # into what would silently train on far fewer images than the operator expects. Never gating —
-    # a real project legitimately has unconfirmed/unannotated images — and only fires for the known
+    # into what would silently train on far fewer images than the operator expects. Never gating,
+    # a real project legitimately has unconfirmed/unannotated images, and only fires for the known
     # loaders (a dataset_source's own admission logic is the agent's to report, not this rail's).
     task_for_coverage = (model_source.get("task") if isinstance(model_source, dict) else None) \
         or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
@@ -178,7 +178,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 if n_dropped and total:
                     warnings.append(
                         f"data: {n_dropped}/{total} candidate images ({n_dropped / total:.0%}) will "
-                        f"not train — {dict(sorted(dropped.items()))}. {len(stems)} stem(s) admitted.")
+                        f"not train, {dict(sorted(dropped.items()))}. {len(stems)} stem(s) admitted.")
 
     # Training config validation
     train_cfg = config.get("training", {})
@@ -188,19 +188,19 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # Per-stage 'epochs' is required; 'lr' is optional (StageSpec) and the trainer
     # reads learning rates from config['optimizer'], never from a stage. Absent
-    # stages are fine — launch_training supplies its own default schedule.
+    # stages are fine, launch_training supplies its own default schedule.
     for i, stage in enumerate(train_cfg.get("stages") or []):
         if "epochs" not in stage:
             issues.append(f"Stage {i} missing 'epochs'")
         if "lr" in stage:
             warnings.append(
-                f"training.stages[{i}].lr is set but ignored — the trainer reads learning rate "
+                f"training.stages[{i}].lr is set but ignored, the trainer reads learning rate "
                 "only from the top-level 'optimizer' block (backbone_lr/head_lr), applied "
                 "uniformly across every stage. Move the value into 'optimizer' if you meant to "
                 "change it."
             )
 
-    # K9: fail fast on an incoherent explicit selection_metric (a metric a center-match trait's
+    # Fail fast on an incoherent explicit selection_metric (a metric a center-match trait's
     # own criterion demotes to comparability-only) at validation time, not mid-run.
     eval_cfg = train_cfg.get("evaluation") or config.get("evaluation") or {}
     sel_metric = eval_cfg.get("selection_metric")
@@ -217,9 +217,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     result: dict = {"valid": False, "issues": issues, "warnings": warnings}
 
-    # Smoke: build the model and run the correctness contract at the RESOLVED dims, so a broken
+    # Smoke: build the model and run the correctness contract at the resolved dims, so a broken
     # bespoke builder is caught here (before the training subprocess spawns) rather than surfacing
-    # only as run.status='failed'. Only attempt once the structural checks pass — otherwise the
+    # only as run.status='failed'. Only attempt once the structural checks pass, otherwise the
     # config can't build and the contract would just re-report the same failure. Overfit stays a
     # voluntary, non-gating diagnostic (a valid model can fail 20 steps on noise).
     if smoke and not issues:
@@ -236,13 +236,13 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             if report.get("not_smokeable"):
                 # The contract has no synthetic batch schema for this task. Rather than enumerate
                 # tasks (a taxonomy) or skip the check (a rail made optional), smoke it against a
-                # real batch from the run's own dataset — a better reference than a synthetic one
+                # real batch from the run's own dataset, a better reference than a synthetic one
                 # for every task, and the only one for a task the platform does not enumerate.
                 batch, why_no_batch = _one_real_batch(task, config)
                 if batch is not None:
                     report = check_model_contract(model, task, sample_batch=batch, **dims)
             # ``dims`` shape the synthetic batch only, so they describe nothing once a real batch
-            # is used — record which reference actually proved the contract.
+            # is used, record which reference actually proved the contract.
             result["smoke"] = {**report, "task": task,
                                "batch_source": "dataset" if batch is not None else "synthetic",
                                "dims": None if batch is not None else dims}
@@ -254,10 +254,10 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             elif not report["ok"]:
                 issues.extend(f"model contract: {msg}" for msg in report["issues"])
             if overfit:
-                # Same batch the contract used — otherwise this re-synthesizes and reports a false
+                # Same batch the contract used, otherwise this re-synthesizes and reports a false
                 # "does not learn" for exactly the bespoke tasks the real-batch path exists for.
                 result["overfit_check"] = overfit_check(model, task, sample_batch=batch, **dims)
-        except Exception as exc:  # noqa: BLE001 — a build/contract crash is itself a blocking issue
+        except Exception as exc:  # noqa: BLE001, a build/contract crash is itself a blocking issue
             issues.append(f"model smoke build failed: {exc}")
 
     result["valid"] = len(issues) == 0
@@ -273,7 +273,7 @@ def launch_training(
     """Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder.
 
     The run's actual training body (dataset build, model forward/backward, checkpointing) executes
-    in a separate OS process, not this one (K24) — a bug/OOM/hang in one run can't take down this
+    in a separate OS process, not this one, a bug/OOM/hang in one run can't take down this
     process or any other concurrent run's process. Use check_training_status to monitor progress;
     it reads the run's own status/metrics from disk, not shared memory.
 
@@ -283,9 +283,9 @@ def launch_training(
         resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
             (restores model + optimizer + scheduler + scaler and continues).
         max_wall_clock_seconds: Optional hard timeout. If the training process hasn't exited on its
-            own by then, it is terminated and the run marked failed with that reason — no
+            own by then, it is terminated and the run marked failed with that reason, no
             cooperative grace period is attempted (a hung process isn't responding to cooperative
-            signals). Omit for no timeout (the default — no behavior change from before this param
+            signals). Omit for no timeout (the default, no behavior change from before this param
             existed).
     """
     # smoke=True: build the model and run the correctness contract before spawning the training
@@ -295,7 +295,7 @@ def launch_training(
         return {"error": "Invalid config", "issues": validation["issues"]}
 
     # Canonicalize the shape: the GUI/validated schema nests stages/mixed_precision/batch_size
-    # under ``training``, but the trainer reads them from the top level of run.config — without
+    # under ``training``, but the trainer reads them from the top level of run.config, without
     # this hoist a GUI-launched run silently trains the default single stage. (run_hpo already
     # normalizes inside _apply_hpo_params.)
     from tcip_mcp.pipelines.schemas import normalize_train_config
@@ -309,7 +309,7 @@ def launch_training(
     # Nest each run's artifacts under its run_id. The GUI (and typical callers) pass a
     # shared base such as ``<project>/.tcip/experiments``; without nesting, sequential
     # runs write ``metrics.jsonl`` / ``model_best.pt`` to the *same* flat directory and
-    # clobber each other — violating experiment immutability. Nesting also makes the
+    # clobber each other, violating experiment immutability. Nesting also makes the
     # trainer write exactly where the web metrics stream reads (``<base>/<run_id>/``), and gives
     # the subprocess a single directory to write into and the cancel sentinel to live in.
     run.output_dir = str(Path(output_dir) / run.run_id)
@@ -322,9 +322,9 @@ def launch_training(
     try:
         from tcip_mcp.experiments import update_status
 
-        # The dataset identity this run trains on — computed ONCE and passed to the immutable
+        # The dataset identity this run trains on, computed once and passed to the immutable
         # lineage record. The child recomputes the identical fingerprint independently for
-        # split.json — cheap, and "recompute-on-read" is this fact's own stated authority, so
+        # split.json, cheap, and "recompute-on-read" is this fact's own stated authority, so
         # there's no need to thread it across the process boundary.
         ds_id, ds_fp = _dataset_identity(data_cfg)
         experiment_id = _ensure_experiment(
@@ -339,11 +339,11 @@ def launch_training(
         logger.warning("Experiment tracking failed for %s: %s", experiment_id, exc)
 
     # The child reads its own bootstrap config from here, independent of whether experiment
-    # tracking above succeeded — a filesystem hiccup in .tcip/experiments degrades tracking (as it
+    # tracking above succeeded, a filesystem hiccup in .tcip/experiments degrades tracking (as it
     # always has) without also preventing the run from training at all. experiment_id is never
-    # read from here (see subprocess_worker.py) — only passed as the explicit CLI arg below,
+    # read from here (see subprocess_worker.py), only passed as the explicit CLI arg below,
     # because this file is written before config["experiment_id"] is guaranteed resolved in the
-    # K12 fresh-id-relaunch branch.
+    # fresh-id-relaunch branch.
     from tcip_mcp.utils.atomic_io import atomic_write_json
     launch_config_path = Path(run.output_dir) / "launch_config.json"
     atomic_write_json(launch_config_path, config)
@@ -386,18 +386,18 @@ def launch_training(
 
 
 def _child_env_for_launch(config: dict) -> dict[str, str]:
-    """Subprocess env for a launch (K24): round-robin GPU pinning when the config names no
+    """Subprocess env for a launch: round-robin GPU pinning when the config names no
     explicit device, left untouched when it does. ``CUDA_VISIBLE_DEVICES`` remaps device
-    *indices* inside the child — pinning it would ask an explicit ``device: "cuda:1"`` config for
+    *indices* inside the child, pinning it would ask an explicit ``device: "cuda:1"`` config for
     an ordinal invalid in the child's own remapped view, so pinning applies only to the unpinned
     case it's meant to spread out.
 
-    Also propagates this process's own import search path via ``PYTHONPATH`` — the child is a
+    Also propagates this process's own import search path via ``PYTHONPATH``, the child is a
     fresh interpreter with only sys.path's own defaults, not whatever got this process's bespoke
     ``model_source``/``training_source``/``dataset_source`` module importable in the first place
     (an editable install's extra path entries, a test runner's rootdir insertion, an agent's own
     working-directory convention). Without this, a bespoke module importable to the caller can
-    become unimportable to the child purely because of the process boundary — a correctness gap,
+    become unimportable to the child purely because of the process boundary, a correctness gap,
     not just a convenience.
     """
     import os
@@ -428,8 +428,8 @@ def _child_env_for_launch(config: dict) -> dict[str, str]:
 
 def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
                       timeout_seconds: float) -> None:
-    """Daemon watcher (K24): hard-terminates ``proc`` if it outlives ``timeout_seconds`` and
-    records the reason through the same status channel every other terminal state uses — never an
+    """Daemon watcher: hard-terminates ``proc`` if it outlives ``timeout_seconds`` and
+    records the reason through the same status channel every other terminal state uses, never an
     in-memory-only mark, since ``check_training_status`` always defers to disk for a pid-bearing
     run and would otherwise never surface it. No cooperative grace period: a hung process isn't
     responding to cooperative signals, so this is a hard kill, not the cancel path."""
@@ -456,9 +456,9 @@ def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
 def check_training_status(run_id: str) -> dict:
     """Check the status of a training run.
 
-    Reads the run's own status/metrics from disk (K24) whenever its training body runs in a
-    subprocess — the in-memory record for a subprocess-delegated run is a launch-time placeholder
-    only, since the subprocess mutates its own separate copy in its own process memory — or when
+    Reads the run's own status/metrics from disk whenever its training body runs in a
+    subprocess, the in-memory record for a subprocess-delegated run is a launch-time placeholder
+    only, since the subprocess mutates its own separate copy in its own process memory, or when
     this process never held the run in memory at all (a different process launched it).
 
     Args:
@@ -510,7 +510,7 @@ def check_training_status(run_id: str) -> dict:
 def list_training_runs() -> dict:
     """List all training runs in this session.
 
-    Overlays disk-reconstructed status onto any subprocess-delegated run (K24, ``pid`` set) whose
+    Overlays disk-reconstructed status onto any subprocess-delegated run (``pid`` set) whose
     in-memory record is a stale launch-time placeholder; a run whose training body never left this
     process (every existing synchronous test, and any future non-subprocess caller) is reported
     from the live in-memory record exactly as before, untouched.
@@ -551,7 +551,7 @@ def cancel_training(run_id: str) -> dict:
     if run is not None:
         status = run.status
     else:
-        # Cancelled via the disk fallback (K24) — this process never held the run locally, so
+        # Cancelled via the disk fallback, this process never held the run locally, so
         # there's no in-memory status to read; reflect the same disk record cancel_run itself
         # resolved to write the sentinel, if it's still discoverable.
         from tcip_mcp.experiments import reconstruct_run_status
@@ -563,19 +563,19 @@ def cancel_training(run_id: str) -> dict:
 @mcp.tool()
 @audited
 def inspect_compute_resources() -> dict:
-    """Report the host's current compute headroom (K24) — a fact to reason with before launching
+    """Report the host's current compute headroom, a fact to reason with before launching
     another concurrent training/HPO run, not an enforced cap. This platform doesn't cap memory/CPU
     per run (no portable, non-pinned way to do that across POSIX/Windows without guessing a number
     that's wrong on the next host); it gives you the real numbers and trusts you to judge whether
     another candidate run fits, the same way you'd judge any other CV-scientist tradeoff.
 
     Returns:
-        ``cpu``: ``{logical_count, percent_used}`` — ``percent_used`` is ``None`` without
+        ``cpu``: ``{logical_count, percent_used}``, ``percent_used`` is ``None`` without
             ``psutil`` installed.
-        ``memory``: ``{total_bytes, available_bytes}`` — both ``None`` without ``psutil``.
-        ``gpus``: ``[{index, free_bytes, total_bytes}, ...]`` — always populated when CUDA is
+        ``memory``: ``{total_bytes, available_bytes}``, both ``None`` without ``psutil``.
+        ``gpus``: ``[{index, free_bytes, total_bytes}, ...]``, always populated when CUDA is
             available (``torch.cuda.mem_get_info``, no extra dependency); ``[]`` otherwise.
-        ``active_training_runs``: count of runs currently reporting ``"running"`` — reads through
+        ``active_training_runs``: count of runs currently reporting ``"running"``, reads through
             ``list_training_runs``'s own disk overlay, since a subprocess-delegated run's parent-
             side in-memory record never mutates past its launch-time placeholder.
     """
@@ -603,7 +603,7 @@ def inspect_compute_resources() -> dict:
     except Exception:
         logger.info("GPU visibility unavailable", exc_info=True)
 
-    # list_training_runs (not the raw generic_trainer.list_runs) — its disk overlay is what makes
+    # list_training_runs (not the raw generic_trainer.list_runs), its disk overlay is what makes
     # a subprocess-delegated run's real status visible; the parent's own in-memory copy never
     # leaves its launch-time placeholder once the child starts mutating its own separate copy.
     active = sum(1 for r in list_training_runs()["runs"] if r.get("status") == "running")
@@ -611,21 +611,21 @@ def inspect_compute_resources() -> dict:
     return {"cpu": cpu, "memory": memory, "gpus": gpus, "active_training_runs": active}
 
 
-# K11: keys _apply_hpo_params gives purpose-built handling (routed into nested optimizer/
-# training structures train() reads unconditionally) — tracking THEM by their own top-level
-# name would be meaningless. Only the "else"-routed passthrough keys (F1's actual risk case:
+# Keys _apply_hpo_params gives purpose-built handling (routed into nested optimizer/
+# training structures train() reads unconditionally), tracking them by their own top-level
+# name would be meaningless. Only the "else"-routed passthrough keys (the actual risk case:
 # a swept axis that lands somewhere no consumer reads) are checked against consumption.
 _HPO_KNOWN_KEYS = {"lr", "batch_size", "weight_decay"}
 
 
 class _AccessTrackingConfig(dict):
     """Dict subclass recording which top-level keys are ever read via ``__getitem__``/``get``/
-    ``__contains__`` (K11) — installed on ``run.config`` for one HPO trial's dispatch, so
-    ``unconsumed_params`` reflects genuine RUNTIME access (did anything read this key during
-    THIS trial), not a static comparison against ``train()``'s known key list, which would
+    ``__contains__``, installed on ``run.config`` for one HPO trial's dispatch, so
+    ``unconsumed_params`` reflects genuine runtime access (did anything read this key during
+    this trial), not a static comparison against ``train()``'s known key list, which would
     falsely flag a bespoke ``training_source``'s own legitimate custom sweep key.
 
-    Real, stated limitations (never gates the run — warn-only, so a false positive costs a log
+    Real, stated limitations (never gates the run, warn-only, so a false positive costs a log
     line, not a failed trial): top-level only (a nested read like
     ``ctx.config["optimizer"]["custom_key"]`` isn't seen); ``dict(cfg)``/``**cfg`` copies bypass
     the overrides entirely (CPython copies at the C level); whole-dict iteration
@@ -654,9 +654,9 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
 
     ``report(value)`` feeds the Ray Tune searcher/scheduler; call it each epoch (so a
     scheduler can prune) and once at the end. Failures report ``+inf`` so a dead trial can
-    never win a minimize sweep. Trials train under the final run's regime — same augmentation,
-    imbalance handling, AND dispatch (K11): a ``training_source`` in ``base_config`` actually
-    runs under that loop here too, not always the stock trainer — or the selected
+    never win a minimize sweep. Trials train under the final run's regime, same augmentation,
+    imbalance handling, and dispatch: a ``training_source`` in ``base_config`` actually
+    runs under that loop here too, not always the stock trainer, or the selected
     hyperparameters won't transfer.
     """
     merged = _apply_hpo_params(base_config, config)
@@ -677,8 +677,8 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     train_cfg = merged.get("training", {})
     task = model_source.get("task") or data_cfg.get("task", "detection")
 
-    # K11: track which top-level keys the trial actually reads, so a swept param that never
-    # reaches any consumer is caught by OBSERVATION rather than gated by a whitelist that would
+    # Track which top-level keys the trial actually reads, so a swept param that never
+    # reaches any consumer is caught by observation rather than gated by a whitelist that would
     # forbid a bespoke training_source from sweeping its own custom axes.
     tracked_config = _AccessTrackingConfig(merged)
     # Tag as an HPO trial so it stays out of the Training-tab run list.
@@ -691,12 +691,12 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
             from tcip_mcp.pipelines.data.augmentations import build_augmentation
             transforms = build_augmentation(aug_cfg)
 
-        # W4 auto-val gives the val_loader that W1's composite / the scheduler need.
+        # Auto-val gives the val_loader that the composite objective / the scheduler need.
         train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
         sampler = build_sampler(merged.get("sampler", "random"), train_ds)
         batch_size = train_cfg.get("batch_size", config.get("batch_size", 4))
         num_workers = train_cfg.get("num_workers", 0)
-        # run.config's seed is create_run-resolved (auto-drawn if base_config left it unset) —
+        # run.config's seed is create_run-resolved (auto-drawn if base_config left it unset),
         # read it off run.config, not merged, so the loader is seeded with the value actually used.
         loader_kwargs = seeded_loader_kwargs(run.config.get("seed"))
         train_loader = DataLoader(
@@ -713,15 +713,15 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
             )
 
         def epoch_cb(epoch: int, metrics: dict) -> None:
-            # K9's resolve_selection_metric governs which key actually decides checkpoint
-            # choice once evaluation.trait/evaluation.selection_metric are set — prefer it over
+            # resolve_selection_metric governs which key actually decides checkpoint
+            # choice once evaluation.trait/evaluation.selection_metric are set, prefer it over
             # the raw composite so pruning ranks trials on the same criterion selection uses.
             value = metrics.get("selection", metrics.get("val_objective", metrics.get("val_loss")))
             if value is not None:
                 report(value)  # composite lower=better; mode='min' keeps improving trials
 
-        # K11: dispatch through the SAME training_source-or-default_train() decision the full
-        # audited envelope uses. experiment_id=None is deliberate — dispatch_train_body never
+        # Dispatch through the same training_source-or-default_train() decision the full
+        # audited envelope uses. experiment_id=None is deliberate, dispatch_train_body never
         # reaches _finalize_run/register_model_from_experiment, so a trial stays isolated from
         # the registry (origin="hpo_trial") while still actually training under a bespoke loop
         # when base_config carries one, instead of silently falling back to the stock trainer.
@@ -735,7 +735,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         logger.warning("HPO trial failed: %s", e)
         report(float("inf"))
     finally:
-        # K11: surface any swept param no consumer touched. Warn-only — never gates the trial.
+        # Surface any swept param no consumer touched. Warn-only, never gates the trial.
         unconsumed = sorted((set(config.keys()) - _HPO_KNOWN_KEYS) - tracked_config.accessed)
         try:
             from tcip_mcp.utils.atomic_io import atomic_write_json
@@ -746,7 +746,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
             logger.warning("could not persist resolved_config.json for %s", trial_dir, exc_info=True)
         if unconsumed:
             logger.warning(
-                "HPO trial %s: swept params %s were never read by the training body — check "
+                "HPO trial %s: swept params %s were never read by the training body, check "
                 "_apply_hpo_params' routing, or (for a bespoke training_source) confirm the "
                 "loop actually reads them from ctx.config.", trial_dir, unconsumed)
 
@@ -769,11 +769,11 @@ def run_hpo(
 ) -> dict:
     """Run hyperparameter optimization on Ray Tune, training each trial for real.
 
-    The search *algorithm* and trial *scheduler* are yours to choose per task/data — pick
+    The search *algorithm* and trial *scheduler* are yours to choose per task/data, pick
     from what is installed on this machine (call the ``hpo`` module's ``available_search_algs``
     / ``available_schedulers`` for the live list); the defaults below are a sane starting
     point, not a recipe:
-      - ``search_alg``: ``random``/``grid`` (native), or a backend — ``optuna``, ``bayesopt``,
+      - ``search_alg``: ``random``/``grid`` (native), or a backend, ``optuna``, ``bayesopt``,
         ``hyperopt``, ``nevergrad``, ``ax``, ``hebo``, ``zoopt``, ``bohb``.
       - ``scheduler``: ``asha`` (async HyperBand), ``hyperband``, ``bohb`` (pair with the bohb
         searcher), ``pbt``, ``median``, or ``none`` to run every trial to completion.
@@ -788,8 +788,8 @@ def run_hpo(
         param_space: Param-space dict (see ``hpo.get_default_space``); default when omitted.
         n_trials: Number of trials.
         output_dir: Base output directory for trial results (defaults under ``.tcip/hpo``).
-        max_concurrent: Trials to run at once (default 1 — safe for single-GPU training).
-        resources_per_trial: Ray resource request per trial (K24) — omit to derive one from the
+        max_concurrent: Trials to run at once (default 1, safe for single-GPU training).
+        resources_per_trial: Ray resource request per trial, omit to derive one from the
             host's real GPU count and ``max_concurrent`` (see ``hpo._default_trial_resources``);
             an explicit value always wins over the derivation.
     """
@@ -843,7 +843,7 @@ def run_hpo(
             pass
 
     result["tensorboard"] = tb_info
-    # Durable result file (best-effort — a write hiccup must not sink a completed sweep).
+    # Durable result file (best-effort, a write hiccup must not sink a completed sweep).
     try:
         from tcip_mcp.utils.atomic_io import atomic_write_json
         atomic_write_json(hpo_dir / f"{study_name}.json", result)
@@ -857,18 +857,18 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
 
     Architecture is owned by the bespoke ``model_source`` builder (unknown to the sweep), so
     only optimizer/batch axes get purpose-built handling here; ``base_config``'s own progressive-
-    unfreeze schedule is left untouched (K11 — it used to be silently overwritten with a hardcoded
+    unfreeze schedule is left untouched (it used to be silently overwritten with a hardcoded
     3-stage recipe, discarding whatever schedule the agent configured):
 
       - ``lr``           -> ``optimizer["head_lr"]``, plus ``optimizer["backbone_lr"]`` scaled by
                             whatever backbone/head ratio ``base_config`` already expressed
-                            (derived, not pinned — a frozen ``lr*0.1`` would discard an agent's
+                            (derived, not pinned, a frozen ``lr*0.1`` would discard an agent's
                             own deliberate ratio)
       - ``weight_decay`` -> ``optimizer["weight_decay"]``
       - ``batch_size``   -> ``training["batch_size"]``
-      - anything else    -> the TOP LEVEL of ``cfg`` (not nested under ``training``, which runs
-                            AFTER ``normalize_train_config``'s hoist and would never reach
-                            ``train()``'s top-level config reads) — free for a bespoke
+      - anything else    -> the top level of ``cfg`` (not nested under ``training``, which runs
+                            after ``normalize_train_config``'s hoist and would never reach
+                            ``train()``'s top-level config reads), free for a bespoke
                             ``training_source`` to sweep its own axes; no whitelist, no reject.
     """
     import copy
@@ -878,7 +878,7 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     cfg = normalize_train_config(copy.deepcopy(base_config))
     training = cfg.setdefault("training", {})
 
-    # K11: the ratio the agent already configured, read from base_config's OWN optimizer block
+    # The ratio the agent already configured, read from base_config's own optimizer block
     # before this loop overwrites head_lr. Default to 1.0 (not a frozen 0.1) only when the agent
     # expressed no explicit backbone/head split at all.
     base_optimizer = base_config.get("optimizer") or {}
@@ -904,7 +904,7 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
 
 
 def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
-    """``(dataset_id, dataset_fingerprint)`` for the run's dataset — the content end of the
+    """``(dataset_id, dataset_fingerprint)`` for the run's dataset, the content end of the
     reproduce-a-number chain. The fingerprint is recomputed here (recompute-on-read is authority); the
     id comes from the dataset's ``dataset.json`` if it was registered. ``(None, None)`` for a bespoke /
     imageless run (no dataset_root), matching ``dataset_hash=None`` rather than fabricating identity.
@@ -924,7 +924,7 @@ def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
         fp = dataset_fingerprint(root)
     except OSError as exc:
         # A fingerprint read failure must not sink the whole experiment record (lineage,
-        # split.json, status) for a run that otherwise trains fine — degrade to an honest
+        # split.json, status) for a run that otherwise trains fine, degrade to an honest
         # None, matching the bespoke/imageless case, rather than fabricating or propagating.
         logger.warning("dataset_fingerprint failed for %s: %s", root, exc)
         fp = None
@@ -945,17 +945,17 @@ def _ensure_experiment(
     """Create or attach the experiment for a run, enforcing experiment immutability.
 
     Returns the experiment id actually used. An existing id may be reused only when the experiment
-    is pristine (agent pre-created it: state 'created', no metrics) — in which case its
+    is pristine (agent pre-created it: state 'created', no metrics), in which case its
     ``config.json`` (written before tiling/seed resolution) is refreshed with the config this run
-    is actually launching (K12 finding 3). Anything else — including a ``resume_from`` that targets
-    an id which already has recorded history — mints a fresh ``<id>_<run_id>`` (with the old id as
+    is actually launching. Anything else, including a ``resume_from`` that targets
+    an id which already has recorded history, mints a fresh ``<id>_<run_id>`` (with the old id as
     parent lineage) so the prior run's status, metrics, lineage, and registry entry stay intact
-    (K12 finding 4: resuming into a non-pristine id used to silently reuse it, discarding the
+    (resuming into a non-pristine id used to silently reuse it, discarding the
     resumed run's own metrics/lineage writes behind the terminal-state lock and letting the model
     registry replace the original's entry by name with no record of what was superseded).
 
     Every branch below stamps ``run_id``/``output_dir`` into the resolved experiment's
-    ``status.json`` before returning (K24) — unconditionally, once, regardless of which branch
+    ``status.json`` before returning, unconditionally, once, regardless of which branch
     resolved the id, so a different process can later discover this run's real artifact directory
     from ``experiment_id`` alone (``resolve_experiment_dir_for_run``/``reconstruct_run_status``/the
     disk-based ``cancel_run`` fallback all depend on this). Deliberately not a ``create_experiment``
@@ -984,7 +984,7 @@ def _ensure_experiment(
 
     fresh_id = f"{experiment_id}_{run_id}"
     logger.warning(
-        "experiment_id %s already has a run; experiments are immutable — tracking "
+        "experiment_id %s already has a run; experiments are immutable, tracking "
         "this run as %s instead.", experiment_id, fresh_id,
     )
     create_experiment(fresh_id, config, parent_experiment=experiment_id, data_source=data_source,
@@ -996,12 +996,12 @@ def _ensure_experiment(
 def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict, *,
                             dataset_id: str | None = None,
                             dataset_fingerprint: str | None = None) -> None:
-    """Persist which stems (+ seed + dataset_hash + dataset identity) produced this run's metrics (R5).
+    """Persist which stems (+ seed + dataset_hash + dataset identity) produced this run's metrics.
 
     The same seed yields a different split if the label set changes, so a metric is only reproducible
     with the exact train/val membership recorded beside it. The whole-dataset ``dataset_fingerprint``
-    (+ id) records the content identity too, so this artifact is literally "fingerprint + split" —
-    content identity + membership + seed in one immutable record. Best-effort — a provenance write must
+    (+ id) records the content identity too, so this artifact is literally "fingerprint + split",
+    content identity + membership + seed in one immutable record. Best-effort, a provenance write must
     never sink a launch.
     """
     def _stems(ds) -> list[str]:
@@ -1025,16 +1025,16 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
             "dataset_hash": dh,
             "dataset_id": dataset_id,
             "dataset_fingerprint": dataset_fingerprint,
-            # The actually resolved grouping (not the requested string) — "explicit_map" when
+            # The actually resolved grouping (not the requested string), "explicit_map" when
             # ``_auto_train_val`` resolved a caller group_key_map, "external" for the two-directory
             # explicit-val path (no computed grouping at all), the named strategy otherwise, or None
-            # when no split manifest logic ran. K1's train-disjointness gate (operating_point.py)
-            # reads this to recompute the training run's own group keys — a missing/None value here
+            # when no split manifest logic ran. The train-disjointness gate (operating_point.py)
+            # reads this to recompute the training run's own group keys, a missing/None value here
             # fails that check closed rather than guessing a policy.
             "group_by": resolved_group_by,
         }
         if resolved_group_by == "explicit_map" and split.get("group_key_map"):
-            # The map itself (K1 finding 1.1) — without it, _train_disjointness has a policy NAME
+            # The map itself, without it, _train_disjointness has a policy name
             # but no way to actually compute group keys for stems outside this run, which is what
             # made the group_key_map capability effectively unusable (exercising it permanently
             # blocked that model's later calibration).
@@ -1084,12 +1084,12 @@ def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
 
 
 def _one_real_batch(task: str, config: dict, n: int = 2):
-    """``(batch, reason_it_failed)`` — one collated ``(images, targets)`` from the run's dataset.
+    """``(batch, reason_it_failed)``, one collated ``(images, targets)`` from the run's dataset.
 
     Lets the model contract smoke a task it has no synthetic schema for, without the platform
     enumerating tasks. Built through the same source kwargs and augmentation the run itself uses,
     so a batch that smokes here is the batch that trains. Best-effort by design: a config that
-    cannot yield a batch returns ``(None, reason)`` and the caller decides what that means — this
+    cannot yield a batch returns ``(None, reason)`` and the caller decides what that means, this
     function never decides whether a run proceeds. The reason is returned rather than only logged,
     so a caller that blocks can say what actually failed.
     """
@@ -1109,7 +1109,7 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
         if not items:
             return None, "the dataset built but is empty"
         return task_collate(task)(items), None
-    except Exception as exc:  # noqa: BLE001 — an unbuildable batch is a caller decision, not a crash
+    except Exception as exc:  # noqa: BLE001, an unbuildable batch is a caller decision, not a crash
         logger.info("could not build a real batch to smoke task %r: %s", task, exc)
         return None, f"{type(exc).__name__}: {exc}"
 
@@ -1127,7 +1127,7 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
          most failures -> ``(full_train_ds, None)``. ``resolve_group_key_fn`` (an
          unrecognized ``split.group_by`` or a ``split.group_key_map`` missing stem
          coverage) is called outside any handler here and its ``ValueError`` propagates
-         to the caller — silently training without validation on a policy error the
+         to the caller, silently training without validation on a policy error the
          caller could have fixed is worse than surfacing it. Every other failure in this
          function (dataset build errors, a malformed ``val_ratio``/``seed``, a
          ``group_balanced_split`` failure) still degrades to ``(full_train_ds, None)``.
@@ -1142,13 +1142,13 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
     STEM_TASKS = {"detection", "instance_seg", "semantic_seg", "classification"}
 
     src = _dataset_source_kwargs(task, data_cfg)
-    tiling = data_cfg.get("tiling")  # W3: detection tiling (None for other tasks/configs)
+    tiling = data_cfg.get("tiling")  # detection tiling (None for other tasks/configs)
 
     # 1. Explicit validation source.
     val_images = data_cfg.get("val_images_dir")
     if val_images:
-        # This path builds train/val from two SEPARATE directories with no computed grouping —
-        # there is no group policy to persist. Record that shape explicitly (K1 finding 1.2) so
+        # This path builds train/val from two separate directories with no computed grouping,
+        # there is no group policy to persist. Record that shape explicitly so
         # _persist_split_manifest writes a distinct "external" marker rather than leaving the field
         # unset, which _train_disjointness would otherwise be unable to tell apart from "no split
         # manifest was ever written" (a split.json this old, from before this check existed).
@@ -1171,7 +1171,7 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
 
     # 2. Auto group-aware train/val split.
     try:
-        # Backend#3: assemble the dataset-level COCO ONCE (JSON detection labels) and thread it into
+        # Assemble the dataset-level COCO once (JSON detection labels) and thread it into
         # the full + train + val builds below, instead of re-assembling the same COCO three times.
         # Annotations are matched by image file name, so the full COCO is correct for any stem subset.
         build_src = dict(src)
@@ -1201,7 +1201,7 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
 
     # setdefault (not get): the resolved grouping is written back into data_cfg["split"] below
     # so _persist_split_manifest (called separately, after this returns) can record what was
-    # actually used — the same "write the effective value back" pattern the tiling geometry
+    # actually used, the same "write the effective value back" pattern the tiling geometry
     # above uses.
     split_cfg = data_cfg.setdefault("split", {})
     group_by = split_cfg.get("group_by", "tile_prefix")
@@ -1257,7 +1257,7 @@ def get_worst_predictions(
     """Return the ``top_k`` images ranked worst by a count-mismatch + low-confidence triage heuristic.
 
     This is a cheap triage signal, not a quality metric: it does no IoU matching and computes
-    no loss. The score is ``2·|n_gt−n_pred as a shortfall| + |surplus| + (1−avg_conf)`` — purely
+    no loss. The score is ``2·|n_gt−n_pred as a shortfall| + |surplus| + (1−avg_conf)``, purely
     the difference in box *counts* plus mean confidence, so an image with the right count but
     every box mislocated scores as good. Use it to surface likely-bad frames for a human to look
     at; for true TP/FP/FN ranking use ``score_predictions`` (``detail=True``, IoU-matched).
@@ -1280,7 +1280,7 @@ def get_worst_predictions(
     from tcip_annotation.state import Point
 
     def _boxes(path) -> list:
-        """The annotations this count heuristic counts — a geometry-less label and a ``Point`` are
+        """The annotations this count heuristic counts, a geometry-less label and a ``Point`` are
         not detections, so neither belongs in a box count on either side of the comparison."""
         return [a for a in read_annotations(str(path))
                 if a.geometry is not None and not isinstance(a.geometry, Point)]
@@ -1346,25 +1346,25 @@ def evaluate_model(
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
-    Computes the same per-task metrics as validation — detection/instance_seg get
+    Computes the same per-task metrics as validation, detection/instance_seg get
     pycocotools mAP + precision/recall/F1; classification/ordinal/regression get the
-    in-house scalar metrics — and writes ``test_results.json`` beside the checkpoint.
+    in-house scalar metrics, and writes ``test_results.json`` beside the checkpoint.
 
-    Three detection eval regimes (CV1/K10):
+    Three detection eval regimes:
       * Untiled default (no ``tiling``, checkpoint trained without tiling) -> single full-res
-        forward pass, ``eval_regime="full-frame-single-pass"``. For a checkpoint that was NEVER
-        tile-trained, this IS the correct delivery gate — untiled training, untiled eval, untiled
+        forward pass, ``eval_regime="full-frame-single-pass"``. For a checkpoint that was never
+        tile-trained, this is the correct delivery gate, untiled training, untiled eval, untiled
         inference are all the same regime, so there is nothing to reconcile. Do not reach for
         ``use_tiled_inference`` for such a checkpoint; it has no persisted tile geometry to gate
         against and will refuse (see below).
-      * ``tiling`` set (or a run id whose training WAS tiled, reused automatically) -> tile-level
-        DIAGNOSTIC that matches the training-run val mAP. This is NOT the delivery metric — it
+      * ``tiling`` set (or a run id whose training was tiled, reused automatically) -> tile-level
+        diagnostic that matches the training-run val mAP. This is not the delivery metric, it
         scores fragmented tiles against fragmented GT, not the shipped full-frame count.
-      * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric for a TILE-TRAINED
+      * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric for a tile-trained
         checkpoint (tiled inference reconstructed to full frame, matched to full-frame GT). Report
-        THIS to gate a delivery for such a checkpoint. Tile geometry is resolved from the
+        this to gate a delivery for such a checkpoint. Tile geometry is resolved from the
         checkpoint's own persisted training geometry (or an explicit override); a checkpoint with
-        neither refuses rather than silently fabricating a scale — see
+        neither refuses rather than silently fabricating a scale, see
         ``run_full_frame_evaluation``'s docstring for the full precedence and the escape hatch.
 
     Args:
@@ -1374,22 +1374,22 @@ def evaluate_model(
         task: Task type.
         conf_threshold: Operating confidence for P/R/F1.
         iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
-        iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task — 'segm' for
-            instance_seg, 'bbox' otherwise — so a mask model isn't silently scored as boxes.
-        max_dets: Full-frame/COCOeval detection cap. ``None`` (default, K10 finding 2) resolves
-            per-regime — 100 (the COCOeval ``maxDets`` convention) on the tile-level diagnostic
-            path, 1000 (``DEFAULT_MAX_DETS`` — dense full-frame scenes aren't truncated) on the
+        iou_type: 'bbox' or 'segm'. Default (None) auto-resolves from the task, 'segm' for
+            instance_seg, 'bbox' otherwise, so a mask model isn't silently scored as boxes.
+        max_dets: Full-frame/COCOeval detection cap. ``None`` (default) resolves
+            per-regime, 100 (the COCOeval ``maxDets`` convention) on the tile-level diagnostic
+            path, 1000 (``DEFAULT_MAX_DETS``, dense full-frame scenes aren't truncated) on the
             delivery-grade ``use_tiled_inference`` path. An explicit value is always honored
-            verbatim on both paths (no rescuing substitution) — the delivery-grade path stamps a
+            verbatim on both paths (no rescuing substitution), the delivery-grade path stamps a
             per-image ``cap_hit``/``max_dets_cap_saturated_frac`` so an explicit cap that actually
             truncates real detections is visible rather than silently assumed safe.
         tiling: Optional detection tiling dict ({enabled, tile_size, overlap, ...}) for a
             tile-level eval. None + a run id reuses the run's training tiling; None + a
             checkpoint path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
-        trait: When set, the trait's DERIVED localization criterion (traits.py — catkin's
-            center-match) governs the reported count and the selection f1; AP@0.5 (``iou_threshold``)
-            is kept as a labeled comparability metric (D9). Absent -> the IoU convention governs.
+        trait: When set, the trait's derived localization criterion (traits.py, e.g. a count
+            trait's center-match) governs the reported count and the selection f1; AP@0.5 (``iou_threshold``)
+            is kept as a labeled comparability metric. Absent -> the IoU convention governs.
     """
     import torch
     from torch.utils.data import DataLoader
@@ -1423,12 +1423,12 @@ def evaluate_model(
     # Delivery-grade full-frame path (tiled inference + full-frame GT matching).
     if use_tiled_inference and task == "detection":
         tcfg = tiling or run_tiling or {}
-        # K10 finding 2: an explicit caller max_dets is honored verbatim (no rescuing sentinel);
+        # An explicit caller max_dets is honored verbatim (no rescuing sentinel);
         # None resolves to the delivery-grade default (dense full-frame scenes aren't truncated).
         resolved_max_dets = DEFAULT_MAX_DETS if max_dets is None else max_dets
-        # K10 finding 1: tile_size/overlap pass through as None-if-absent — run_full_frame_evaluation
+        # tile_size/overlap pass through as None-if-absent, run_full_frame_evaluation
         # itself resolves them from the checkpoint's persisted training geometry (or refuses) rather
-        # than this wrapper silently defaulting to 640/0.2. Thread the merge settings through too —
+        # than this wrapper silently defaulting to 640/0.2. Thread the merge settings through too,
         # evaluating at a derived (non-default) NMS is exactly the point of this path; dropping them
         # silently re-pins 0.3.
         try:
@@ -1463,8 +1463,8 @@ def evaluate_model(
 
     loader = DataLoader(dataset, batch_size=4, collate_fn=task_collate(task))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # K10 finding 2: 100 is the COCOeval maxDets convention for this tile-level/diagnostic
-    # regime — distinct from the delivery-grade path's 1000 above, resolved here (not via a
+    # 100 is the COCOeval maxDets convention for this tile-level/diagnostic
+    # regime, distinct from the delivery-grade path's 1000 above, resolved here (not via a
     # shared sentinel value) so an explicit caller max_dets<=100 is never silently substituted.
     resolved_max_dets = 100 if max_dets is None else max_dets
     return run_test_evaluation(
