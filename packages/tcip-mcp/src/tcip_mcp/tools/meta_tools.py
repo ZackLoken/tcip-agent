@@ -63,7 +63,7 @@ def claude_reports(
     Surfacing friction is how the system gets smarter. Do not wait until the
     end of the session; report while the context is fresh.
 
-    The free-text `detail` is more load-bearing than the `category` tag —
+    The free-text `detail` is more load-bearing than the `category` tag:
     categorical labels are easy to get wrong, but a clear written description
     of what went wrong survives mis-labeling.
 
@@ -78,7 +78,7 @@ def claude_reports(
             crop, session_id, error messages). Preserves raw signal for later
             review.
         user_disagreement: True when this report is capturing the user pushing
-            back on or disagreeing with your approach, independent of category —
+            back on or disagreeing with your approach, independent of category;
             lets a later distill pass pull every disagreement out of the pile on
             its own, rather than mixed into general friction.
     """
@@ -131,20 +131,20 @@ def load_project_memory(
     """Read one project-memory corpus into context so context isn't lost between sessions.
 
     The read side of the session-start ritual. ``kind`` selects a single corpus (a
-    selector, not an aggregator — one honest read of the chosen store):
+    selector, not an aggregator: one honest read of the chosen store):
     ``'reports'`` reads ``.tcip/reports/`` (the counterpart to ``claude_reports``);
     ``'retrospectives'`` reads ``.tcip/retrospectives/`` (the counterpart to
-    ``project_retrospective``). Call it early — once per kind — to pick up problems and
+    ``project_retrospective``). Call it early, once per kind, to pick up problems and
     context a previous session surfaced but did not resolve. Returns the most recently
     written entries first.
 
     Args:
-        kind: Which corpus to read — 'reports' or 'retrospectives'.
+        kind: Which corpus to read: 'reports' or 'retrospectives'.
         project_path: Root directory of the project. Empty defaults to the active
             project (matching ``inspect_project``) so the CLAUDE.md session-start
-            flow — load_project_memory + inspect_project — needs no path.
+            flow (load_project_memory + inspect_project) needs no path.
         limit: Maximum number of entries to return (default 5).
-        category: Reports only — optional exact category filter (e.g. 'missing_tool'),
+        category: Reports only, optional exact category filter (e.g. 'missing_tool'),
             one of the ``claude_reports`` categories; empty means all. Ignored for
             retrospectives.
         filter_substring: Optional case-insensitive substring matched against each
@@ -169,7 +169,7 @@ def _load_reports(
         return {
             "reports": [],
             "count": 0,
-            "note": f"{reports_dir} does not exist yet — no friction reports.",
+            "note": f"{reports_dir} does not exist yet, no friction reports.",
         }
 
     files = sorted(
@@ -231,7 +231,7 @@ def project_retrospective(
 
     Call this when you finish a substantial piece of work, even if incomplete.
     The retrospective is how future sessions learn from this one. Be honest
-    about what did not work — that is the most valuable part.
+    about what did not work: that is the most valuable part.
 
     Writes to .tcip/retrospectives/<project_id>.md. If the file exists, a new
     dated section is appended rather than overwriting.
@@ -255,7 +255,7 @@ def project_retrospective(
     retros = _retrospectives_dir(project_path)
     retro_path = retros / f"{project_id}.md"
 
-    section_header = f"## Retrospective — {now.isoformat()}"
+    section_header = f"## Retrospective: {now.isoformat()}"
     body = f"""{section_header}
 
 **Task**
@@ -315,10 +315,10 @@ def project_retrospective(
 @audited
 def record_distillation_pass(project_path: str) -> dict:
     """Record that you reviewed this project's friction/retrospectives (e.g. via
-    ``scripts/distill_learnings.py``) — resets its distillation-backlog counters.
+    ``scripts/distill_learnings.py``); resets its distillation-backlog counters.
 
     Call this after actually reading a distillation worksheet, not before. It only records that a
-    review happened; it never applies, promotes, or writes anything from the worksheet itself —
+    review happened; it never applies, promotes, or writes anything from the worksheet itself:
     turning a recurring theme into a skill line, a CLAUDE.md rule, or a tool change stays your own,
     separate, explicit edit. ``distill_learnings.py`` itself stays read-only; this is the one
     audited write in the loop, kept out of the script on purpose.
@@ -340,7 +340,7 @@ def _load_retrospectives(
         return {
             "retrospectives": [],
             "count": 0,
-            "note": f"{retros_dir} does not exist yet — no prior retrospectives.",
+            "note": f"{retros_dir} does not exist yet, no prior retrospectives.",
         }
 
     files = sorted(
