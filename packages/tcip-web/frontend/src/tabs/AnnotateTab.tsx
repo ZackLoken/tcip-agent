@@ -7,9 +7,11 @@ import { classesApi, subjectColor, type AttributeDef } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
+import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
+import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import {
   buildAnnotateShapes,
   computeViewport,
@@ -323,6 +325,19 @@ export function AnnotateTab() {
   const currentStatus = currentImageName ? imageStatus.byImage[currentImageName] : undefined;
   const isLocked = currentStatus === "complete" || currentStatus === "negative";
   const saveDisabled = !imgPath || isLocked || saveBlocked;
+
+  // Band-composite picker (multispectral only). bandsInfo drives conditional visibility
+  // (band_count > 3); the selection is seeded from the reported bands and otherwise left to
+  // the breeder, carried across image navigation until the dataset's own band set changes.
+  const bandsInfo = useImageBands(imgPath);
+  const [bandSelection, setBandSelection] = useState<BandSelection | null>(null);
+  useEffect(() => {
+    if (bandsInfo && bandsInfo.band_count > 3) {
+      setBandSelection((prev) => prev ?? defaultBandSelection(bandsInfo.bands));
+    } else {
+      setBandSelection(null);
+    }
+  }, [bandsInfo]);
 
   // Image navigation (shared with TopBar + Review; honors the status filter).
   const nav = useImageNav();
@@ -1311,7 +1326,19 @@ export function AnnotateTab() {
     );
   }
 
-  const imageUrl = imgPath ? api.images.url(imgPath, IMAGE_MAX_WIDTH) : null;
+  const bandsParam =
+    bandsInfo && bandsInfo.band_count > 3 && bandSelection
+      ? `${bandSelection.r},${bandSelection.g},${bandSelection.b}`
+      : undefined;
+  const imageUrl = imgPath
+    ? api.images.url(
+        imgPath,
+        IMAGE_MAX_WIDTH,
+        undefined,
+        bandsParam,
+        bandsParam ? bandSelection?.stretch : undefined,
+      )
+    : null;
 
   const renderLabels = annotateUi.visible;
   const hoveredIdx = annotateUi.hoveredPolygonIdx;
@@ -1323,6 +1350,9 @@ export function AnnotateTab() {
         onSave={() => void save()}
         saveDisabled={saveDisabled}
         dirty={canvas.dirty}
+        bandsInfo={bandsInfo}
+        bandSelection={bandSelection}
+        onBandSelectionChange={setBandSelection}
       />
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
