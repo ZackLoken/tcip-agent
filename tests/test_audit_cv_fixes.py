@@ -691,9 +691,11 @@ def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_dense_cal_holdout()
+    # tiled=False: this test's real run_inference call below is tile=False (K10 — tile_size only
+    # gates a bundle when tiled, so the mocked bundle must match the real regime it stands in for).
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=cal, holdout_records=hold,
-                                     staged_conf_floor=0.01)
+                                     tiled=False, staged_conf_floor=0.01)
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
     stub = _CalStub()
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
@@ -824,9 +826,10 @@ def test_cv0_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypa
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_dense_cal_holdout()
+    # tiled=False: matches the real run_inference call below (tile=False) — see K10 note above.
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=cal, holdout_records=hold,
-                                     staged_conf_floor=0.01)
+                                     tiled=False, staged_conf_floor=0.01)
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
     monkeypatch.chdir(tmp_path)
