@@ -50,8 +50,21 @@ def _historical_training_runs() -> list[dict]:
     ``model_source`` in the config); review-feedback / ad-hoc experiments are skipped, and
     HPO trials never create experiments so they can't appear here. A non-terminal state
     on a run that isn't live means the process died -> surfaced as ``interrupted``.
+
+    Delegates the actual state/current_epoch reconstruction to
+    ``tcip_mcp.experiments.reconstruct_run_status`` (K24) — this used to duplicate that logic (and,
+    pre-K24, assumed the experiment directory name always equaled the real ``run_id``, which the
+    K12 fresh-id-relaunch format already violated). A directory whose ``status.json`` never
+    stamped ``run_id`` (a pre-K24 experiment) still resolves correctly through the shared
+    resolver's exact-match strategy — defaulting to ``d.name`` here means the lookup is for the
+    directory's own name, which trivially matches itself — and now additionally gets
+    ``current_epoch`` populated from ``metrics.jsonl`` (the old inline classification here never
+    did). The inline fallback below is reached only when ``reconstruct_run_status`` itself returns
+    ``None`` or resolves to a *different* directory than the one being iterated (a malformed/
+    unreadable ``status.json``, or a genuine identity anomaly) — a narrower, degenerate case, not
+    "any pre-K24 experiment."
     """
-    from tcip_mcp.experiments import experiments_dir
+    from tcip_mcp.experiments import experiments_dir, reconstruct_run_status
     from tcip_mcp.utils.atomic_io import read_json
 
     exp_root = experiments_dir()
@@ -65,17 +78,30 @@ def _historical_training_runs() -> list[dict]:
         if not isinstance(config, dict) or not config.get("model_source"):
             continue  # not a training experiment (e.g. review-feedback lineage)
         status = read_json(d / "status.json", default={})
+        run_id = status.get("run_id", d.name)  # K24: the real run_id when stamped; the
+                                                # experiment_id itself as the pre-K24 fallback
+        reconstructed = reconstruct_run_status(run_id, stale_seconds=_HEARTBEAT_STALE_SECONDS)
+        if reconstructed is not None and reconstructed["experiment_id"] == d.name:
+            runs.append({
+                "run_id": run_id,
+                "status": reconstructed["status"],
+                "current_epoch": reconstructed["current_epoch"],
+                "best_metric": reconstructed["best_metric"],
+                "external": True,  # reconstructed → not managed by this web process
+            })
+            continue
+        # Fallback: reconstruct_run_status found nothing (or something else) for this directory's
+        # own run_id — a malformed/unreadable status.json, not the common pre-K24 case (that one
+        # resolves correctly above via the exact-match strategy on the defaulted d.name).
         state = status.get("state", "unknown")
         if state not in _TERMINAL_STATES:
-            # Not live in THIS process: either still training elsewhere (fresh heartbeat,
-            # e.g. an agent-launched run) or genuinely dead (stale/no heartbeat).
             state = "running" if _heartbeat_fresh(status.get("heartbeat")) else "interrupted"
         runs.append({
-            "run_id": d.name,
+            "run_id": run_id,
             "status": state,
             "current_epoch": None,
             "best_metric": None,
-            "external": True,  # reconstructed → not managed by this web process
+            "external": True,
         })
     return runs
 
