@@ -3,7 +3,7 @@ image's ground-truth labels and model predictions live on disk.
 
 Canonical layout (the label tree mirrors ``images/<date>/`` so stem-pairing is trivial and capture
 dates never collide). Labels are **one file per image**, holding every subject's annotations by name;
-the on-disk path no longer carries a subject or task segment: those are properties of the records
+the on-disk path carries no subject or task segment: those are properties of the records
 inside the file, resolved through the dataset's single class registry::
 
     <dataset_root>/
@@ -30,7 +30,7 @@ from typing import Optional
 LABEL_EXT = {"json": ".json", "coco": ".json"}
 _ANY_EXTS = (".json",)
 DEFAULT_MODEL = "live"
-#: Geometry kinds a task authors, kept as a selector, no longer a label-path segment.
+#: Geometry kinds a task authors, kept as a selector, not a label-path segment.
 TASKS = ("detect", "segment")
 #: Split names ``make_splits(materialize=True)`` emits.
 SPLIT_NAMES = ("train", "val", "test")
@@ -88,7 +88,8 @@ def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
 
 def annotation_date(path: str | Path) -> Optional[str]:
     """The ``<date>`` an annotations dir/file lives under, or ``None`` (declared inverse of the
-    ``annotations/<date>/`` layout, the only recoverable path fact now that subject/task are gone).
+    ``annotations/<date>/`` layout; the only recoverable path fact, since subject/task live in the
+    record, not the path).
 
     ``<root>/annotations`` and non-canonical trees (a split's ``labels/``) yield ``None``.
     """
@@ -176,7 +177,7 @@ def image_status_digest_path(dataset_root: str | Path) -> Path:
 def status_bucket(subject: str, date: Optional[str]) -> str:
     """The ``image_status.json`` key a confirmation belongs under.
 
-    Scoped by subject and date but **not** task: a Complete covers detect and segment together,
+    Scoped by subject and date but not task: a Complete covers detect and segment together,
     which is how ``derive_image_status`` already evaluates them. A store keyed by image name alone
     re-applies one subject's confirmations to every other subject. ``subject`` must be a real subject
     (callers supply it); there is no catch-all default; a bush image confirmed empty of one
@@ -288,7 +289,7 @@ def _dir_has_label_file(d: Path) -> bool:
     """True if ``d`` holds at least one label file (any supported extension).
 
     An *empty* label file counts here: this answers "was anything written on this date", which is
-    what the GUI's selectors need. It does **not** mean the image is a confirmed negative: that
+    what the GUI's selectors need. It does not mean the image is a confirmed negative: that
     requires a human Complete recorded in ``.tcip/state/image_status.json``, and training reads only
     that (``confirmed_negative_names``).
     """
@@ -316,7 +317,7 @@ def find_gt_label(
 ) -> Optional[Path]:
     """Find the existing ground-truth label file for an image (read-time resolver).
 
-    One file per image now, so this resolves ``annotations/<date>/<stem>.json`` directly. Returns
+    One file per image, so this resolves ``annotations/<date>/<stem>.json`` directly. Returns
     the file, or ``None``. If ``fmt`` is given only that extension is considered, else any supported.
     """
     root, img_date, stem = parse_image_path(image_path)
