@@ -127,9 +127,9 @@ the derivations, the `ctx` craft library, and the proposal-engine and scorer reg
   sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`, `ctx.should_cancel`. Route
   your loop's metrics and checkpoints through those sinks and the run stays audited, immutably
   versioned, and provenance-snapshotted no matter what your loop does. `ctx.default_train()` is
-  **one convenience**, not a requirement: call it, extend it, or replace it entirely.
+  one convenience, not a requirement: call it, extend it, or replace it entirely.
 
-  **Registration needs one more fact your loop states explicitly.** A checkpoint saved via
+  Registration needs one more fact your loop states explicitly. A checkpoint saved via
   `ctx.save_checkpoint(state, "model_best")` or `"model_final"` is found automatically after your
   loop returns; any other tag (or the default, untagged `ctx.save_checkpoint(state)`) is not
   registered as the run's deliverable unless you call `ctx.set_final_weights(path)` yourself. A
@@ -145,7 +145,7 @@ literature for a technique that fits; see the `cv-research` skill for the resear
 loop (and the rule that a new method must beat the baseline on the *measured phenotype* before you
 trust it).
 
-**Dimensional traits: mask geometry is a supported measurement.** `pipelines.measurement.mask_geometry`
+Dimensional traits: mask geometry is a supported measurement. `pipelines.measurement.mask_geometry`
 (also `ctx.mask_geometry`) computes area, perimeter, centroid and the extents along the mask's own PCA
 principal/secondary axes on a *validated* mask, in pixels and in the caller's stated unit when given a
 scale. Geometry on a validated mask is a valid measurement, subject to the same
