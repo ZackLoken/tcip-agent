@@ -858,8 +858,9 @@ def overlay_reference_grid(
 
     Creates a grid with letter columns (A-H) and number rows (1-6).
     The agent can reference grid cells like 'B3' to indicate regions
-    of interest, which can be converted to SAM point prompts via
-    sam_predict with grid cell references.
+    of interest, which can be converted to point prompts via
+    segment_prompt's own grid_cells parameter (pass the same cols/rows
+    this overlay was rendered with).
 
     Args:
         image_path: Absolute path to the image file.
