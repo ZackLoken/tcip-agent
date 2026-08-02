@@ -16,7 +16,7 @@ def test_project_root_defaults_to_cwd(monkeypatch, tmp_path: Path) -> None:
 
 def test_project_root_honors_env(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(pp.ENV_VAR, str(tmp_path))
-    # Even from a different cwd, the pinned root wins — the whole point (no fragmentation).
+    # Even from a different cwd, the pinned root wins: the whole point (no fragmentation).
     other = tmp_path / "sub"
     other.mkdir()
     monkeypatch.chdir(other)
@@ -26,14 +26,14 @@ def test_project_root_honors_env(monkeypatch, tmp_path: Path) -> None:
 def test_repo_root_finds_the_marker() -> None:
     root = pp.repo_root_from_here()
     # .mcp.json is the specific repo-root marker (unlike CLAUDE.md, which every package under
-    # packages/ also carries) — assert the real root, not just "some ancestor with a marker",
+    # packages/ also carries): assert the real root, not just "some ancestor with a marker",
     # which a package-level CLAUDE.md would satisfy too.
     assert (root / ".mcp.json").is_file()
 
 
 def test_repo_root_climbs_past_a_package_level_claude_md(tmp_path: Path, monkeypatch) -> None:
     """A package subdir with its own CLAUDE.md (every packages/* dir now has one) must not stop
-    the climb before the true repo root's .mcp.json — regression for the packages/tcip-mcp
+    the climb before the true repo root's .mcp.json: regression for the packages/tcip-mcp
     CLAUDE.md landing and shadowing the real root for any module under that package."""
     root = tmp_path / "repo"
     pkg_src = root / "packages" / "pkg" / "src" / "pkg_module"
@@ -42,7 +42,7 @@ def test_repo_root_climbs_past_a_package_level_claude_md(tmp_path: Path, monkeyp
     (root / "CLAUDE.md").write_text("root")
     (root / "packages" / "pkg" / "CLAUDE.md").write_text("package-level")
 
-    # repo_root_from_here() resolves Path(__file__) — patch __file__ in the module under test to
+    # repo_root_from_here() resolves Path(__file__): patch __file__ in the module under test to
     # a path under the fake package tree (need not exist; Path.resolve() only normalizes).
     monkeypatch.setattr(pp, "__file__", str(pkg_src / "somewhere.py"))
     assert pp.repo_root_from_here() == root
