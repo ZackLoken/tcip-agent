@@ -42,10 +42,11 @@ def select_batch(
 def _confidence_values(pred: dict) -> list[float]:
     """Flat image-level confidences from a GenericPredictor prediction dict.
 
-    Classification/ordinal heads emit per-image confidences under
-    ``head{i}_confidences`` (via ComposedModel -> ``_format_other``); matching
-    the suffix covers multi-head specs. ``*_probabilities`` is deliberately
-    not matched: SemanticSegHead emits it as a 4-D nested list.
+    Classification/ordinal heads emit per-image confidences under ``head{i}_confidences``
+    (an agent's multi-head ``nn.Module`` forward-output dict, passed through as-is by
+    ``GenericPredictor._format_other``); matching the suffix covers a model with any number of
+    heads. ``*_probabilities`` is deliberately not matched: SemanticSegHead emits it as a 4-D
+    nested list.
     """
     values: list[float] = []
     for key, val in pred.items():
