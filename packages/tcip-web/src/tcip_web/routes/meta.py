@@ -1,4 +1,4 @@
-"""Meta-loop routes — surface Claude's friction reports and retrospectives.
+"""Meta-loop routes: surface Claude's friction reports and retrospectives.
 
 Read-only views over ``<project_root>/.tcip/reports/*.jsonl`` (written by the
 ``claude_reports`` MCP tool) and ``<project_root>/.tcip/retrospectives/*.md``
@@ -6,7 +6,7 @@ Read-only views over ``<project_root>/.tcip/reports/*.jsonl`` (written by the
 the agent writes friction/retrospectives, the human can read them in the GUI.
 
 Endpoints are intentionally on-demand reads (not part of the live GUI state /
-WebSocket broadcast) — this data is occasional and long-form.
+WebSocket broadcast): this data is occasional and long-form.
 """
 
 from __future__ import annotations
