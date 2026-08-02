@@ -1,7 +1,7 @@
 """``state.Polygon`` is multi-ring, and ``bbox_of`` reads the whole instance.
 
 A polygon annotation holds one or more simple closed contours. Most are one ring (a person draws one
-contour); an occlusion-split instance — a catkin behind a branch, a leaf crossed by a stem — is
+contour); an occlusion-split instance (a catkin behind a branch, a leaf crossed by a stem) is
 genuinely more than one region, and every consumer that derives a box from a polygon must see all of
 it. ``bbox_of`` is that derivation, so it is where a first-ring-only read would quietly shrink every
 downstream box, area, crop and spatial-index entry.
@@ -34,7 +34,7 @@ def test_bbox_of_multi_ring_polygon_spans_every_ring() -> None:
 
 
 def test_bbox_of_multi_ring_polygon_is_independent_of_ring_order() -> None:
-    """Either ring order yields the SAME box spanning BOTH lobes.
+    """Either ring order yields the same box spanning both lobes.
 
     Asserting only that the two agree passes trivially for a first-ring-only read too (both orders
     would just return their own first lobe's box), so the value is what discriminates.
@@ -46,7 +46,7 @@ def test_bbox_of_multi_ring_polygon_is_independent_of_ring_order() -> None:
 
 
 def test_bbox_of_grows_with_each_added_ring() -> None:
-    """Every ring contributes — adding one can only widen the enclosing box, never be ignored."""
+    """Every ring contributes: adding one can only widen the enclosing box, never be ignored."""
     one = bbox_of(Polygon([LOBE_A]))
     two = bbox_of(Polygon([LOBE_A, LOBE_B]))
     three = bbox_of(Polygon([LOBE_A, LOBE_B, [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0)]]))
