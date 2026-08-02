@@ -1,4 +1,4 @@
-"""Phase 1.1 — atomic_io: atomicity + concurrency (no corruption, no lost updates)."""
+"""atomic_io: atomicity + concurrency (no corruption, no lost updates)."""
 
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -15,7 +15,7 @@ def test_atomic_write_json_roundtrip_and_no_temp_leftovers(tmp_path):
     p = tmp_path / "sub" / "x.json"  # parent dir is created automatically
     atomic_write_json(p, {"a": 1, "b": [1, 2]})
     assert json.loads(p.read_text()) == {"a": 1, "b": [1, 2]}
-    # The temp file must have been renamed away — only the target remains.
+    # The temp file must have been renamed away; only the target remains.
     assert [q.name for q in p.parent.iterdir()] == ["x.json"]
 
 
