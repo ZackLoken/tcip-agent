@@ -23,10 +23,7 @@ src/tcip_annotation/
   standalone. If a change here starts requiring an import from either, that's a design smell, not a
   detail to route around.
 - **Label formats: `{json, coco}` only.** VOC, LabelMe, and YOLO annotation label formats are not
-  supported, nor is the old `_getexif` fallback; don't reintroduce a format branch without checking
-  `format_io.py` first. (Model-side ultralytics/YOLO checkpoint support, `YoloPredictor` and
-  `KIND_ULTRALYTICS`, was a separate thing entirely and isn't present either: this package has no
-  YOLO label-format or checkpoint support.)
+  supported; don't reintroduce a format branch without checking `format_io.py` first.
 - A negative is empty labels **plus** an explicit human Complete (see root `CLAUDE.md`'s
   measurement-integrity invariants); this package's read/write paths must not treat an empty label
   file alone as a negative.
