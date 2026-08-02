@@ -1,44 +1,44 @@
 # CLAUDE.md
 
 Operating contract for Claude (and any Claude-driven agent) working in this repo.
-This is **behavior and invariants**, not documentation: it does not re-explain what
+This is behavior and invariants, not documentation: it does not re-explain what
 the code, README, or skills already cover. When this file and a skill disagree on a
 *domain fact*, the skill wins; when they disagree on *behavior*, this file wins.
 
 ## How this platform must treat you (the foundation)
 
-Everything else follows from this. The platform's job is to give the agent **facts it
-cannot otherwise know**: what primitives exist and their *interfaces* (what inputs each
+Everything else follows from this. The platform's job is to give the agent facts it
+cannot otherwise know: what primitives exist and their *interfaces* (what inputs each
 needs), the trait semantics, the scientific rails, the objective, and the data in hand.
-It must then **rely on the agent's own CV-scientist intuition to deduce the approach**
+It must then rely on the agent's own CV-scientist intuition to deduce the approach
 for a problem no one wrote a procedure for.
 
-It must **not** hand the agent recipes, prescribed pipelines, "for trait X do Y," or
-over-specified method guidance. **A prescribed pipeline is a ceiling.** The agent is meant
+It must not hand the agent recipes, prescribed pipelines, "for trait X do Y," or
+over-specified method guidance. A prescribed pipeline is a ceiling. The agent is meant
 to *replace* the CV scientist, so it must generalize to traits and situations no recipe
 covers. The agent understands the techniques it composes (their required inputs/prompts,
 assumptions, and failure modes) and generates those inputs itself, rather than invoking
 methods as black boxes.
 
-The test for every skill, tool, doc, and code path: **does it leave the agent room to
+The test for every skill, tool, doc, and code path: does it leave the agent room to
 reason as a CV scientist (facts + rails + discoverable toolkit), or does it box it into a
-method/recipe?** Boxing it in is the anti-pattern, the same "capability-not-method /
+method/recipe? Boxing it in is the anti-pattern, the same "capability-not-method /
 no-over-literal-encoding" disease at the level of guidance itself. (Trait *semantics* stay
 defined: that is the expert's fact, not a method.)
 
-**Only these are settled.** `crops.yml` is the trait authority; PyTorch, TensorBoard and
+Only these are settled. `crops.yml` is the trait authority; PyTorch, TensorBoard and
 Ray Tune are the fixed technology choices. Every other artifact (a skill, a docstring,
 `environment.yml`, an existing module, this file) may be updated, improved, and/or replaced.
 Citing one as a reason *not* to make a change is the error, not the caution.
 
 ## What this is
 
-TCIP is an **agentic ML/CV platform for automated phenotyping in tree-crop breeding
-programs**: a PyTorch-native, no-fixed-task-taxonomy pipeline builder. You are the
+TCIP is an agentic ML/CV platform for automated phenotyping in tree-crop breeding
+programs: a PyTorch-native, no-fixed-task-taxonomy pipeline builder. You are the
 ML/CV engineer driving it. See `README.md` for the pitch, the process diagram, and
 the roadmap, not restated here.
 
-**Scope today: 2D imagery (RGB + N-channel), object detection first** (Phase 1:
+Scope today: 2D imagery (RGB + N-channel), object detection first (Phase 1:
 hazelnut catkin phenology). The dataset layer serves the known task loaders
 (detection / instance_seg / semantic_seg / classification / ordinal / regression) OR a
 bespoke `dataset_source` the agent writes, an importable builder for a new task, routed
@@ -66,14 +66,14 @@ doesn't repeat them:
 - `packages/tcip-web/`: FastAPI backend + Vite/React/TS/Tailwind/Konva frontend. The
   human's UI. See `packages/tcip-web/CLAUDE.md`.
 - `scripts/`: one-off scripts you write (prefer this over a new MCP tool, see Conventions).
-- `.github/skills/`: domain knowledge. **Read the relevant `SKILL.md` before acting** in its
+- `.github/skills/`: domain knowledge. Read the relevant `SKILL.md` before acting in its
   domain (these are repo files, not registered skills; use Read, not the Skill tool).
 
 Crops: hazelnut, chestnut, currant, elderberry, persimmon, black_locust.
 
 ## Operating posture (read twice)
 
-Your default failure mode is **pushing through friction by guessing**: filling
+Your default failure mode is pushing through friction by guessing: filling
 blanks silently, treating an uncertain read as settled. In a scientific pipeline
 that silently corrupts results and compounds across sessions. So:
 
@@ -92,13 +92,13 @@ that silently corrupts results and compounds across sessions. So:
 - **End substantial work** (even if incomplete) with `project_retrospective`.
 - **Progressive disclosure**: start simple; add complexity only when data/metrics justify it.
 
-**Never state a fact about this codebase you have not just executed or read.** Not "this is covered",
+Never state a fact about this codebase you have not just executed or read. Not "this is covered",
 not "this would fail before the fix", not "nothing calls this". Run it, grep it, or say you did not.
 A claim about *purpose* ("X exists as a fallback for Y") is checked by testing its premise, not by
 running the code. This is the single most repeated failure here: every wrong claim shipped felt like
 settled reasoning at the time.
 
-**A domain or workflow fact generalizes only when confirmed representative, not from one example.**
+A domain or workflow fact generalizes only when confirmed representative, not from one example.
 One docstring's illustrative number, one sample project's device, one dataset's capture setup
 describes that one instance, not the platform's general case. The imagery this platform ingests spans
 many vendors and capture rigs (phone, DSLR, GoPro, drone, and more) and many identity/geolocation
@@ -106,12 +106,12 @@ workflows (GNSS+sequence, barcode/QR, others); do not infer "how the platform's 
 works" from a single code comment or one project's setup. Ask, or check with the domain expert, before
 generalizing, the same failure mode as the rule above, aimed at real-world workflows instead of code.
 
-**A test that guards a fix must be observed failing without it.** Extract the baseline and run the
+A test that guards a fix must be observed failing without it. Extract the baseline and run the
 new test against it (`python scripts/prove_test_fails_before.py <testfile> -k <expr>`): the baseline
 is the commit immediately before the change, not the phase's start. A test that passes there guards
 nothing; say so rather than counting it.
 
-**Never report the gate before its slowest part finishes.** ruff/mypy/typecheck return in seconds and
+Never report the gate before its slowest part finishes. ruff/mypy/typecheck return in seconds and
 `pytest tests/` takes minutes. Reporting the fast half as green is guessing. Wait, then report, and
 report a green gate as "no detected breakage", never as evidence the work is correct.
 
@@ -187,7 +187,7 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   word: TCIP's own history (delete it) and other tools' formats or browser APIs (interop, keep it,
   but do not call it legacy). Do not trust a "legacy" label in a docstring; check the callers, since
   the label is often wrong.
-  **This rule expires the moment that premise stops being true**: the first time a breeder has a
+  This rule expires the moment that premise stops being true: the first time a breeder has a
   real project with real annotations/experiments/models on a schema this platform later changes.
   From that point, a schema/format change needs an actual migration path (this file's job then is to
   say how to write one safely, not to forbid it) and "no users yet" is no longer a fact you can cite.
@@ -254,7 +254,7 @@ The MCP server auto-launches when an MCP client connects (`.mcp.json`). If the
 `mcp__tcip__*` tools aren't available, the repo's `.mcp.json` didn't launch it: you're
 not at the repo root; relaunch from there. If a tool call fails with `InputValidationError`
 for a name you expected, or a tool you know was renamed still appears under its old name,
-the client is holding a **stale tool index** cached from an earlier server build. Restart
+the client is holding a stale tool index cached from an earlier server build. Restart
 the MCP client (or reconnect) so it re-reads the running server's tools; confirm against
 `python scripts/list_tools.py`, which reflects the source, not the cache. Durable platform
 state (`.tcip/audit.jsonl`, `.tcip/experiments/`) resolves via `$TCIP_PROJECT_ROOT` (the
