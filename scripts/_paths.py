@@ -1,15 +1,15 @@
-"""Shared path resolution for the one-off analysis scripts — no machine-specific hardcoding.
+"""Shared path resolution for the one-off analysis scripts: no machine-specific hardcoding.
 
 These scripts were originally written on a GPU workstation with the dataset under the repo's
 ``data/`` dir and an absolute ``c:/Users/<name>/...`` root baked in. That doesn't port. Resolve
 locations here instead:
 
-- ``vf_root()`` — the Valley_Farm catkin project dir, from ``$TCIP_VF_ROOT`` (override), else the
+- ``vf_root()``: the Valley_Farm catkin project dir, from ``$TCIP_VF_ROOT`` (override), else the
   standard sample-project location under the user's home. Never an absolute machine path in source.
-- ``repo_root()`` — the repository root, derived from this file's location.
+- ``repo_root()``: the repository root, derived from this file's location.
 
 Dates use the canonical ``YYYY-MM-DD`` folder convention (matching ``dataset_layout``), e.g.
-``2026-02-11`` — not the legacy ``2-11-26`` the original scripts hardcoded.
+``2026-02-11``, not the old ``2-11-26`` format the original scripts hardcoded.
 """
 from __future__ import annotations
 
