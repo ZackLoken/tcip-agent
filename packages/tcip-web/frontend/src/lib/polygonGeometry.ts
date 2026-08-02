@@ -1,6 +1,6 @@
 /**
  * Pure hit-testing helpers for the annotate canvas' geometry (polygons and points). Extracted so
- * the per-mouse-move hover scan (the hot path under dense catkin workloads) can be unit tested and
+ * the per-mouse-move hover scan (the hot path under dense annotation workloads) can be unit tested and
  * micro-benchmarked, and so an axis-aligned bounding-box pre-filter can skip the expensive ray-cast
  * for the vast majority of polygons.
  */
@@ -35,7 +35,7 @@ export function polygonBbox(points: [number, number][]): Bbox {
   return [minX, minY, maxX, maxY];
 }
 
-/** The extent of every ring of one polygon combined — its whole footprint, not just ring 0. */
+/** The extent of every ring of one polygon combined: its whole footprint, not just ring 0. */
 export function ringsBbox(rings: [number, number][][]): Bbox {
   let out: Bbox = [Infinity, Infinity, -Infinity, -Infinity];
   for (const ring of rings) {
@@ -65,7 +65,7 @@ export function computePolygonBboxes(polygons: { rings: [number, number][][] }[]
  * Index of the point annotation nearest `pt` within `radius`, or null. A point has no interior to
  * fall inside, so its whole hit test is this proximity check: the caller passes the radius in image
  * units (screen px / view scale), which keeps the grab target the same size on screen at every zoom.
- * Nearest — not first within radius — so two points a few px apart hand you the one you aimed at
+ * Nearest, not first within radius, so two points a few px apart hand you the one you aimed at
  * (the same rule as hitTestEdit's handles).
  */
 export function findHitPoint(
@@ -89,7 +89,7 @@ export function findHitPoint(
 /**
  * Index of the first polygon (in list order) containing `pt`, or null. The bbox
  * pre-filter rejects most polygons with four comparisons before the O(vertices) ray-cast
- * runs — the win that keeps hover responsive when hundreds–thousands of polygons are on
+ * runs: the win that keeps hover responsive when hundreds–thousands of polygons are on
  * screen. `bboxes[i]` must correspond to `polygons[i]` (see computePolygonBboxes).
  */
 export function findHoveredPolygon(
