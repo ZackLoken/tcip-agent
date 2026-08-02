@@ -257,21 +257,23 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     statistics easier to pass by silently diluting the variance denominator; wired here with a
     synthetic adjudication-coverage predicate standing in for a real one.
 
-    Without a coverage predicate, ``resolve_operating_point`` has no way to know the padding is
-    illegitimate, so it dilutes n and the same real n=2 disagreement (see
-    ``test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degeneracy``) passes.
-    With the seam wired to a real predicate, the check is a gate, never a filter that recomputes on
-    a shrunk sample (a filter is itself fail-open: the excluded set correlates with the very
-    quantity being measured, per ``resolve_operating_point``'s own docstring): the padding is never
-    dropped before the statistics are computed (``n_images`` stays 10, the full unfiltered set), but
-    the reference is refused outright because the coverage requirement itself failed.
+    The statistics themselves are immune to it: the equivalence test measures over the images that
+    carry something, so eight empty records cannot shrink the standard error of a bias measured on
+    two, and the same real n=2 disagreement (see
+    ``test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degeneracy``) is refused
+    with the padding exactly as it is without it. The coverage predicate is what names *why* such a
+    reference is illegitimate rather than leaving it to be caught by its numbers, and it is a gate,
+    never a filter that recomputes on a shrunk sample (a filter is itself fail-open: the excluded set
+    correlates with the very quantity being measured, per ``resolve_operating_point``'s own
+    docstring). The padding is never dropped before the statistics are computed (``n_images`` stays
+    10, the full unfiltered set); the reference is refused outright because the coverage requirement
+    failed.
 
     This fixture's own GT is sparse (typical count 1.5/image), so at the default 1% relative
-    tolerance the derived tolerance (~0.1, floor-dominated) is tighter than the diluted SE even
-    before the coverage predicate is involved, an unrelated tightening this test doesn't exist to
-    demonstrate. The trait's fraction is loosened for this test only (mirrors
+    tolerance the derived tolerance is floor-dominated, an unrelated magnitude effect this test does
+    not exist to demonstrate. The trait's fraction is loosened for this test only (mirrors
     ``test_dispersion_gate_skipped_when_unauthored_gates_when_authored``'s own pattern) so the
-    dilution mechanism under test is isolated from that unrelated magnitude effect.
+    padding's effect on the population is isolated from it.
     """
     import dataclasses
 
@@ -284,17 +286,22 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     padding = [{"width": 400, "height": 400, "image_id": f"h_pad_{i}", "gt": [], "dt": [],
                "padded": True} for i in range(8)]
 
-    # Without a coverage predicate, the zero-verdict padding dilutes the variance denominator
-    # (larger n -> smaller SE) and the same real disagreement now passes.
-    b_diluted = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
-                                        holdout_records=hold_real + padding, staged_conf_floor=0.3)
-    assert b_diluted.get("conf").sweep["holdout_bias"]["n_images"] == 10
-    assert b_diluted.get("conf").validated_against == "held_out_annotations"
+    # Padded or not, the same real disagreement gets the same verdict: the padding carries no
+    # evidence about count bias and so cannot buy any statistical confidence.
+    b_padded = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
+                                       holdout_records=hold_real + padding, staged_conf_floor=0.3)
+    b_bare = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
+                                     holdout_records=hold_real, staged_conf_floor=0.3)
+    assert b_padded.get("conf").sweep["holdout_bias"]["n_images"] == 10
+    assert b_padded.get("conf").sweep["holdout_bias"]["n_present"] == 2
+    assert b_padded.get("conf").validated_against == "false"
+    assert b_padded.get("conf").sweep["failures"] == b_bare.get("conf").sweep["failures"]
+    assert "count_bias_exceeds_tolerance" in b_padded.get("conf").sweep["failures"]
 
     # With the seam wired to a predicate that flags the padding as uncovered, the whole reference is
     # refused: statistics are still computed over the full, unfiltered 10-image set (never a
-    # filter-then-recompute on a shrunk sample), but validated_against is false because the coverage
-    # requirement itself failed.
+    # filter-then-recompute on a shrunk sample), and the failure now names the coverage requirement
+    # rather than leaving the illegitimacy to be inferred from the numbers.
     covered = lambda r: not r.get("padded")  # noqa: E731
     b_covered = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
                                         holdout_records=hold_real + padding, staged_conf_floor=0.3,
@@ -555,3 +562,123 @@ def test_integration_dense_realistic_reference_reaches_held_out_validation():
     assert conf.validated_against == "held_out_annotations"
     assert b.is_shippable is True
     assert conf.sweep["failures"] == []
+
+
+# ── The gate's population: images that carry the thing being counted ────────
+#
+# A reference legitimately holds confirmed negatives (empty labels plus a human Complete), and a
+# detector that finds nothing on one is right, not unbiased-by-evidence. Such an image contributes a
+# certain zero to the per-image count bias and nothing to the density the relative tolerance is
+# scaled by (``mean_of_present_counts`` counts only images that carry something). Averaging the bias
+# over the wider population while scaling the tolerance to the narrower one divides the measured
+# bias, shrinks its dispersion and inflates the equivalence test's sample size all at once, so the
+# fraction the breeder authored gets enforced ``n_images / n_present`` times looser than it reads.
+
+def _mixed_reference(id_prefix: str, *, n_loaded: int, n_negative: int, objects_per_image: int,
+                     fp_per_loaded: int, shift: float = 0.0) -> list[dict]:
+    """``n_loaded`` dense images plus ``n_negative`` confirmed negatives (no GT, no detections).
+
+    Every loaded image carries the same systematic over-count, so the bias measured over the images
+    that actually carry catkins is exactly ``fp_per_loaded`` with no dispersion at all: whatever the
+    gate concludes here is a statement about the population it measured, not about noise.
+    """
+    loaded = dense_records(n_images=n_loaded, objects_per_image=objects_per_image,
+                           id_prefix=f"{id_prefix}L", shift=shift,
+                           miss_pattern=[0] * n_loaded, fp_pattern=[fp_per_loaded] * n_loaded,
+                           score=0.9, fp_score=0.9)
+    negatives = dense_records(n_images=n_negative, objects_per_image=0,
+                              id_prefix=f"{id_prefix}N")
+    return loaded + negatives
+
+
+def test_a_systematic_overcount_is_not_excused_by_the_negatives_beside_it():
+    """A detector that finds two catkins that are not there on every image that carries catkins is
+    over the trait's tolerance, and a holdout padded with correctly-empty images does not make it
+    less so. The tolerance is 1.0 (0.01 of this reference's 100-objects-per-image typical count) and
+    the measured over-count is 2.0 per loaded image."""
+    cal = _mixed_reference("c", n_loaded=10, n_negative=40, objects_per_image=100, fp_per_loaded=2)
+    hold = _mixed_reference("h", n_loaded=10, n_negative=40, objects_per_image=100,
+                            fp_per_loaded=2, shift=5.0)
+
+    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                holdout_records=hold, tiled=False, staged_conf_floor=0.01)
+    conf = b.get("conf")
+    hb = conf.sweep["holdout_bias"]
+    assert hb["n_images"] == 50 and hb["n_present"] == 10
+    assert hb["count_bias_mean_present"] == pytest.approx(2.0)
+    assert conf.sweep["pooled_typical_count"] == pytest.approx(100.0)
+    assert conf.sweep["pooled_count_bias_tolerance"] == pytest.approx(1.0)
+    assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]
+    assert conf.validated_against == "false"
+
+
+def test_the_same_overcount_without_the_negatives_fails_identically():
+    """The negatives are not what the refusal rests on: the identical loaded images alone, with no
+    negatives beside them, reach the same verdict. Without this, the refusal above could be an
+    artifact of the negatives rather than the over-count they were hiding."""
+    cal = _mixed_reference("c", n_loaded=10, n_negative=0, objects_per_image=100, fp_per_loaded=2)
+    hold = _mixed_reference("h", n_loaded=10, n_negative=0, objects_per_image=100,
+                            fp_per_loaded=2, shift=5.0)
+
+    conf = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                   holdout_records=hold, tiled=False,
+                                   staged_conf_floor=0.01).get("conf")
+    assert conf.sweep["holdout_bias"]["count_bias_mean_present"] == pytest.approx(2.0)
+    assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]
+    assert conf.validated_against == "false"
+
+
+def test_a_clean_detector_still_validates_on_a_reference_full_of_negatives():
+    """The rail must admit valid work: the same mixed reference, with a detector that is genuinely
+    unbiased on the images that carry catkins, validates. A reference holding four times as many
+    confirmed negatives as loaded images is ordinary, not a reason to refuse."""
+    cal = _mixed_reference("c", n_loaded=10, n_negative=40, objects_per_image=100, fp_per_loaded=0)
+    hold = _mixed_reference("h", n_loaded=10, n_negative=40, objects_per_image=100,
+                            fp_per_loaded=0, shift=5.0)
+
+    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                holdout_records=hold, tiled=False, staged_conf_floor=0.01)
+    conf = b.get("conf")
+    assert conf.sweep["holdout_bias"]["n_present"] == 10
+    assert conf.sweep["failures"] == []
+    assert conf.validated_against == "held_out_annotations"
+    assert b.is_shippable is True
+
+
+def test_a_negative_the_detector_hallucinates_on_is_evidence_not_a_discard():
+    """Presence is "carries GT or a surviving detection", so a confirmed negative the detector fires
+    on is counted: its false positives are exactly the kind of miscount this gate exists to catch,
+    and dropping it would let a hallucinating detector shed the evidence against it."""
+    def _hallucinating(id_prefix, shift=0.0):
+        loaded = dense_records(n_images=10, objects_per_image=100, id_prefix=f"{id_prefix}L",
+                               shift=shift, miss_pattern=[0] * 10, fp_pattern=[0] * 10,
+                               score=0.9, fp_score=0.9)
+        # Zero GT, but three surviving detections on each, so each negative carries a +3 bias.
+        noisy = dense_records(n_images=10, objects_per_image=0, id_prefix=f"{id_prefix}N",
+                              miss_pattern=[0] * 10, fp_pattern=[3] * 10, score=0.9, fp_score=0.9)
+        return loaded + noisy
+
+    conf = resolve_operating_point("catkin", dataset_hash="h1",
+                                   calibration_records=_hallucinating("c"),
+                                   holdout_records=_hallucinating("h", shift=5.0),
+                                   tiled=False, staged_conf_floor=0.01).get("conf")
+    hb = conf.sweep["holdout_bias"]
+    assert hb["n_present"] == 20  # the hallucinated-on negatives count as evidence
+    assert hb["count_bias_mean_present"] == pytest.approx(1.5)  # (10 * 0 + 10 * 3) / 20
+    assert "count_bias_exceeds_tolerance" in conf.sweep["failures"]
+
+
+def test_a_holdout_carrying_one_loaded_image_is_not_enough_evidence():
+    """Reference sufficiency counts the images that carry something, not the reference's total size:
+    ninety-nine correctly-empty images beside one loaded image are one image worth of evidence about
+    count bias."""
+    cal = _mixed_reference("c", n_loaded=4, n_negative=0, objects_per_image=100, fp_per_loaded=0)
+    hold = _mixed_reference("h", n_loaded=1, n_negative=99, objects_per_image=100,
+                            fp_per_loaded=0, shift=5.0)
+
+    conf = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                   holdout_records=hold, tiled=False,
+                                   staged_conf_floor=0.01).get("conf")
+    assert conf.sweep["holdout_bias"]["n_images"] == 100
+    assert "insufficient_holdout_images" in conf.sweep["failures"]
+    assert conf.validated_against == "false"
