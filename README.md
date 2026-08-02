@@ -113,12 +113,14 @@ that imports the plain building blocks (necks, heads, losses, backbone wrappers,
 GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`, and an `in_chans != 3`
 detector takes per-band `image_mean`/`image_std` from `derivations.band_normalization_stats`), with
 training that loads the native per-image JSON labels directly, experiment tracking,
-annotation/review, SAM-assisted labeling, and per-plant CSV export, including the
-Phase 1 **catkin bloom phenology** deliverable (per-plant `catkin_05/50/95per_date` = the
-dates a plant's *elongated fraction* of detected catkins crosses 5/50/95%; elongation is a
-validated per-catkin call, never a geometric proxy). The agent composes it end to end via
-`build_plant_mapping` → tiled inference → `compute_phenology`, and the same milestone code
-backs the Results tab, so a bloom date means one thing on both surfaces.
+annotation/review, SAM-assisted labeling, and per-plant CSV export, including a
+percentile-crossing phenology-milestone deliverable (per-plant `<trait>_05/50/95per_date` = the
+dates a plant's classified positive-state fraction of detected objects crosses 5/50/95%; the
+positive state is a validated per-object classifier call, never a geometric proxy). The agent
+composes it end to end via `build_plant_mapping` → tiled inference → `compute_phenology`, and the
+same milestone code backs the Results tab, so a milestone date means one thing on both surfaces.
+Phase 1's own shipped example is hazelnut catkin bloom phenology (`catkin_05/50/95per_date`,
+elongation as the positive state).
 
 The detection training pipeline mirrors a production drone-phenotyping workflow:
 
@@ -145,11 +147,21 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
 - 3D point clouds (LiDAR / SfM). There is no point-cloud dataset/loader or task type,
   so this is new work rather than a config flag. (Multispectral / hyperspectral / depth
   as additional 2D channels *is* now supported via the N-channel path above.)
-- Temporal / relational pipeline patterns in general. The one temporal trait built today is
-  **catkin bloom phenology** (per-plant elongated-fraction 05/50/95-per-date milestones, see
-  "Working now"); broader phenology-sequence and relational patterns beyond the per-image case
-  remain future work.
-- Fully automated active learning loop without human-in-the-loop. 
+- Temporal / relational pipeline patterns in general. The one temporal trait built today is the
+  percentile-crossing phenology milestone described above (see "Working now"; Phase 1's shipped
+  example is hazelnut catkin bloom, per-plant elongated-fraction 05/50/95-per-date milestones);
+  broader phenology-sequence and relational patterns beyond the per-image case remain future work.
+- Fully automated active learning loop without human-in-the-loop.
+- **Provider/LLM-agnostic support.** The platform is built against Claude specifically today (the MCP
+  server plus Claude Code as the driving agent); supporting other providers/agents (Gemini, Codex,
+  open models) alongside it is future work, not a config flag.
+- **Cloud storage for centralized data.** Project state and imagery live in a local `.tcip/`
+  directory and local project folders today; centralized or cloud-backed storage for multi-machine
+  or multi-user access is future work.
+- **Web deployment.** The GUI binds to loopback (`127.0.0.1`) by default and is built as a
+  single-operator local desktop tool (see `packages/tcip-web/README.md`'s trust-boundary note);
+  deploying it as a hosted, multi-user web service — including the token auth already noted there
+  as a planned follow-on — is future work.
 
 ## License
 
