@@ -1065,7 +1065,7 @@ class TestGridCellToSamPrompt:
             )
 
         assert mock_predict.called
-        # Verify the coordinates are reasonable for C4 on 640Ã—480
+        # Verify the coordinates are reasonable for C4 on 640x480
         call_args = mock_predict.call_args
         x = call_args[0][1]  # positional: image_path, x, y
         y = call_args[0][2]
