@@ -1,20 +1,20 @@
 """Live canvas-state bridge: the GUI pushes what it is rendering; the agent reads it back.
 
-The frontend posts here on a hybrid cadence — a tiny heartbeat (image, viewport, classes,
+The frontend posts here on a hybrid cadence: a tiny heartbeat (image, viewport, classes,
 counts; ``shapes`` omitted) on view/meta changes, and the full display-resolved geometry only
 when shapes actually change. State is split across two files under
 ``<project_root>/.tcip/state/`` so the cadences never contend:
 
-  - ``canvas_live.json``   — the small meta document; overwritten atomically by every push.
-  - ``canvas_shapes.json`` — the geometry blob; written only by full pushes.
+  - ``canvas_live.json``: the small meta document; overwritten atomically by every push.
+  - ``canvas_shapes.json``: the geometry blob; written only by full pushes.
 
 There is no read-modify-write merge (so no lock and no interleaving that can resurrect stale
 geometry): each file is written atomically, and the reader (``capture_live_canvas``) treats the
-geometry as valid only when its ``(image_path, tab)`` identity matches the meta document —
+geometry as valid only when its ``(image_path, tab)`` identity matches the meta document:
 a heartbeat for a different image/tab implicitly invalidates stale shapes.
 
 Both writes skip ``fsync``: this is ephemeral live-view state re-pushed every heartbeat (as
-often as every debounce cycle), not durable review/annotation history — a crash losing the
+often as every debounce cycle), not durable review/annotation history, and a crash losing the
 last push costs nothing, the next push repaints it.
 """
 
@@ -77,7 +77,7 @@ def _guard_project_root(project_root: str) -> None:
 
 
 def _write_json_no_fsync(path: Path, obj: dict) -> None:
-    """Atomic replace (temp file + ``os.replace``) without ``fsync`` — see module docstring."""
+    """Atomic replace (temp file + ``os.replace``) without ``fsync``: see module docstring."""
     path.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(obj, indent=2, default=str)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
@@ -94,7 +94,7 @@ def _write_json_no_fsync(path: Path, obj: dict) -> None:
 
 
 def _replace_with_retry(src: str, dst: Path, *, attempts: int = 5, delay: float = 0.05) -> None:
-    """``os.replace`` with a short retry — a Windows virus scanner / indexer can momentarily
+    """``os.replace`` with a short retry: a Windows virus scanner / indexer can momentarily
     hold the destination. Mirrors ``tcip_mcp.utils.atomic_io._replace_with_retry``."""
     for attempt in range(attempts):
         try:
