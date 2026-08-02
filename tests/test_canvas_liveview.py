@@ -103,7 +103,7 @@ def test_push_state_allows_project_root_inside_image_roots(client, tmp_path, mon
 
 
 def test_push_state_does_not_fsync(client, tmp_path, monkeypatch):
-    """canvas_live/canvas_shapes are ephemeral — a push must not depend on fsync."""
+    """canvas_live/canvas_shapes are ephemeral: a push must not depend on fsync."""
     import os as _os
 
     def _boom(*_a, **_kw):
@@ -118,7 +118,7 @@ def test_push_state_does_not_fsync(client, tmp_path, monkeypatch):
 def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, tmp_path):
     client.post("/api/canvas/state", json=_payload(tmp_path, "C:/img/a.jpg", shapes=SHAPES))
     client.post("/api/canvas/state", json=_payload(tmp_path, "C:/img/b.jpg", shapes=None))
-    # The geometry file still holds a.jpg's shapes, but its identity no longer matches the meta —
+    # The geometry file still holds a.jpg's shapes, but its identity no longer matches the meta:
     # the reader must treat it as stale (a.jpg's polygons never render under b.jpg).
     assert _shapes_doc(tmp_path)["image_path"] == "C:/img/a.jpg"
     assert _meta(tmp_path)["image_path"] == "C:/img/b.jpg"
@@ -162,7 +162,7 @@ def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
 
 
 def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
-    """A pushed point must reach the agent's view as a mark — not be dropped, not become a box.
+    """A pushed point must reach the agent's view as a mark: not be dropped, not become a box.
 
     The GUI can now author point annotations, so a shape kind the renderer skips would show the
     agent a canvas with fewer annotations than the annotator sees. Widening it into a box is the
