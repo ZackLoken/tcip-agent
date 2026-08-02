@@ -56,13 +56,17 @@ def _confidence_values(pred: dict) -> list[float]:
 
 def auto_accept(
     predictions: list[dict],
-    threshold: float = 0.8,
+    *,
+    threshold: float,
 ) -> list[dict]:
     """Filter predictions confident enough for automatic labeling.
 
     Args:
         predictions: List of prediction dicts (from GenericPredictor).
-        threshold: Minimum confidence score for auto-acceptance.
+        threshold: Minimum confidence score for auto-acceptance. Required: turning a
+            prediction into ground truth at an unconfirmed threshold fabricates a label the
+            model was never confirmed to get right, so callers must derive and pass it
+            explicitly rather than accept a pinned default.
 
     Returns:
         Predictions where every detection/classification exceeds threshold.
