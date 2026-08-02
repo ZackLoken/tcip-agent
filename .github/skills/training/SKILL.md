@@ -97,6 +97,7 @@ config = {
 | `launch_training` | Start async training run (smokes the builder first, auto-launches TensorBoard) |
 | `check_training_status` | Check run progress, metrics, and TensorBoard URL |
 | `list_training_runs` | List all runs in session |
+| `cancel_training` | Request graceful cancellation of a running run; stops at the next batch/epoch boundary, still saves `model_final.pt` |
 | `run_hpo` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
 | `render_failure_cases` | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
 | `create_experiment` | Track training run with full lineage |
@@ -135,7 +136,8 @@ Use `make_splits` to create train/val/test splits:
 - Default: 70/20/10, leakage-free (sibling tiles of one source image stay in the same split)
 - `stratify_foreground=True` (default) balances splits by each source's foreground annotation
   count, not per-class distribution
-- `materialize=True` also lays out a YOLO `{train,val,test}/{images,labels}/` tree
+- `materialize=True` also lays out a `{train,val,test}/{images,labels}/` tree; the labels
+  inside are the platform's own per-image JSON, not YOLO's `.txt` format
 - Reproducible with random seed
 
 Feeding review-corrected labels back into training? `materialize_review_dataset` (see the
