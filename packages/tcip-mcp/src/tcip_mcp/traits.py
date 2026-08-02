@@ -115,34 +115,30 @@ class TraitSpec:
     # Max acceptable mean per-image count bias on the held-out split, relative to the class's (or,
     # for the pooled gate, the whole reference's) own typical per-image count, for the operating
     # point to count as validated (a measurement decision, how much relative count error is
-    # trustworthy). A fraction (e.g. 0.1 == 10% relative error), breeder-set per trait; the breeder
-    # authors the fraction, and the platform derives what it is relative to (each scope's own
-    # typical per-image count, from the same holdout reference the equivalence test itself measures,
-    # never calibration, which would let a caller buy a looser holdout tolerance by padding
-    # calibration's own density) at runtime, never invented and never breeder-guessed. Applied
+    # trustworthy). A fraction (e.g. 0.1 == 10% relative error). How much relative count error is
+    # "enough" for a trait's own phenotype is measurement semantics, the same shape as
+    # `count_error_tolerance`/`classifier_agreement_floor` above: `None` means "not yet authored for
+    # this trait", it needs the domain expert, not a value picked by the agent. Unlike
+    # `count_error_tolerance`'s dispersion term, an unauthored fraction here does not skip the check:
+    # `operating_point.py`'s `_PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC` (0.01, platform-chosen, not
+    # domain-authored) applies as the real operative fraction until a trait sets its own. Applied
     # identically wherever `operating_point._bias_equivalence_ok` is called, the pooled and
     # per-class detector gates and the classifier path's positive-class gate, one field, one unit,
-    # everywhere it is read (deliberately not two different units at two call sites). A
-    # near-zero-typical-count scope is protected by a floor that is itself derived (`1 / n`, the
-    # same evidence count the equivalence test's own standard error already uses, see
-    # `operating_point._effective_count_bias_tolerance`), not by a second authored or
-    # platform-invented number. That floor can raise the effective tolerance above what the
+    # everywhere it is read (deliberately not two different units at two call sites). The platform
+    # derives what the fraction is relative to (each scope's own typical per-image count, from the
+    # same holdout reference the equivalence test itself measures, never calibration, which would let
+    # a caller buy a looser holdout tolerance by padding calibration's own density) at runtime, never
+    # invented and never breeder-guessed. A near-zero-typical-count scope is protected by a floor that
+    # is itself derived (`1 / n`, the same evidence count the equivalence test's own standard error
+    # already uses, see `operating_point._effective_count_bias_tolerance`), not by a second authored
+    # or platform-invented number. That floor can raise the effective tolerance above what the
     # fraction term alone would give (it is a `max()`), it is bounded, never a runaway number: at
     # n >= 2 (the reference-sufficiency minimum every scope using this floor is independently gated
     # on, see `insufficient_holdout_images`/`insufficient_holdout_images_per_class`) the floor
-    # itself never exceeds 0.5. 0.01 is an interim platform default (same "not yet authored for this
-    # trait" shape as `classifier_agreement_floor`'s `_PROVISIONAL_KAPPA_FLOOR`), awaiting the domain
-    # expert's real per-trait value; it is a platform placeholder, not a measurement bar anyone has
-    # confirmed. What it resolves to depends entirely on the reference's density, and real dense
-    # imagery is far denser than the test suite's own fixtures: on the one real labeled hazelnut
-    # catkin reference this platform has measured, per-image counts run from 2 to 289 and a holdout
-    # half of it carries a typical per-image count near 133, so 0.01 resolves to an absolute
-    # tolerance near 1.3 objects per image, an order of magnitude above the 1/n floor. On sparse
-    # imagery the floor is what binds instead. Read the per-scope
-    # `pooled_count_bias_tolerance`/`per_class_count_bias_tolerance` in a run's own sweep record for
-    # what a given calibration was actually held to, rather than inferring it from this fraction
-    # alone.
-    count_bias_tolerance_frac: float = 0.01
+    # itself never exceeds 0.5. What a given calibration was actually held to (both terms combined) is
+    # read from the per-scope `pooled_count_bias_tolerance`/`per_class_count_bias_tolerance` in a
+    # run's own sweep record, rather than inferred from this fraction alone.
+    count_bias_tolerance_frac: float | None = None
     # Max acceptable p90 |per-image count error| (a tail statistic, not a mean, a population mean
     # can hide one badly-off image among many) on the held-out split. No default: an invented number
     # here would be platform-picked measurement semantics masquerading as a domain-expert one. `None`
