@@ -1,9 +1,9 @@
-"""The nested class registry and its deterministic name→id assignment (K13.5 slice 2b).
+"""The nested class registry and its deterministic name→id assignment.
 
 The assignment is the measurement apex: a non-deterministic or reordered map ships predictions that
-decode to the wrong class — a confident-wrong phenotype that passes every downstream test. These
+decode to the wrong class: a confident-wrong phenotype that passes every downstream test. These
 pin the two properties that prevent it: assignment follows the registry's *declared* order (never
-sorted — which would corrupt ordinal rank), and it is stable across calls and a file round-trip.
+sorted, which would corrupt ordinal rank), and it is stable across calls and a file round-trip.
 """
 
 from __future__ import annotations
@@ -142,7 +142,7 @@ def test_ordinal_file_roundtrip_preserves_type_and_rank(tmp_path):
 
 def test_attribute_refuses_bad_values_at_construction():
     # The invariant travels with the type, so assign_class_ids can never silently collapse a class,
-    # however the Attribute was built — not only via the JSON parser.
+    # however the Attribute was built, not only via the JSON parser.
     with pytest.raises(ValueError):
         Attribute(name="elongation", type="categorical", values=("dormant", "dormant"))  # duplicate
     with pytest.raises(ValueError):
