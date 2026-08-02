@@ -467,6 +467,64 @@ def test_k18_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path)
 
 
 # ===========================================================================
+# Calibration's GT-side id-map resolution must prefer the training-recorded map over a fresh
+# registry read, the same preference resolve_decode_id_map already applies to decode: a
+# classes.json whose declared attribute-value order was edited since training must not silently
+# relabel the calibration GT.
+# ===========================================================================
+
+def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_registry_read(
+    tmp_path, monkeypatch,
+):
+    import tcip_mcp.tools.inference_tools as itools
+
+    stems = ["a_0_0", "a_0_1"]
+    images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
+    for s in stems:
+        _save_png(images_dir / f"{s}.png")
+        json_io.write_annotations(str(labels_dir / f"{s}.json"), [
+            Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10), attributes={"state": "elongated"}),
+        ], IMG, IMG)
+
+    stub = _CalStub()
+    # A recorded map present: the registry read must never even be attempted, regardless of what
+    # a fresh classes.json (absent here) would derive.
+    stub.config = {"data": {"subject": "catkin", "attribute": "state",
+                            "id_map": {"elongated": 0, "dormant": 1}}}
+
+    def _boom(*a, **kw):
+        raise AssertionError(
+            "_resolve_registry_id_map must not be called when the checkpoint carries its own "
+            "recorded id_map")
+
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets._resolve_registry_id_map", _boom)
+
+    # No classes.json exists for this dataset, so the pre-fix code (which always re-derived from
+    # the registry when `subject` was set) would have raised the ValueError
+    # test_k18_calibration_attribute_registry_refusal_reaches_the_caller pins -- this must instead
+    # succeed, using only the recorded map.
+    bundle, _dh, n_excluded = itools._calibrate_operating_point(
+        stub, "catkin", str(labels_dir), str(images_dir),
+        tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
+        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        group_by="stem", seed=0, holdout_ratio=0.5,
+    )
+    assert n_excluded == 0
+    assert bundle is not None
+
+
+def test_recorded_training_id_map_helper_is_none_when_config_carries_no_map():
+    import tcip_mcp.tools.inference_tools as itools
+
+    stub = _CalStub()
+    stub.config = {"data": {"subject": "catkin", "attribute": "state"}}
+    assert itools._recorded_training_id_map(stub) is None
+
+    stub.config["data"]["id_map"] = {"elongated": 0, "dormant": 1}
+    assert itools._recorded_training_id_map(stub) == {"elongated": 0, "dormant": 1}
+
+
+# ===========================================================================
 # Minor: resolve_model_identity's checkpoint deserialization.
 # ===========================================================================
 
