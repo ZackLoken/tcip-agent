@@ -1,4 +1,4 @@
-"""Phase 4.5 — GPU-batched detection inference + paginated experiment metrics."""
+"""GPU-batched detection inference + paginated experiment metrics."""
 
 import pytest
 
