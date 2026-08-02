@@ -85,7 +85,7 @@ class TestAuditLogging:
         assert redacted["api_key"] == "***REDACTED***"
         assert redacted["token"] == "***REDACTED***"
 
-    # -- K12 finding 6: positional args are bound to their parameter names --------------
+    # -- positional args are bound to their parameter names --------------
 
     def test_audited_binds_positional_args_to_names(self):
         from tcip_mcp.audit import audited
@@ -124,8 +124,8 @@ class TestAuditLogging:
         audit_mod.AUDIT_PATH = original
 
     def test_audited_call_arity_error_still_logs_and_raises(self):
-        """A real call-site bug (wrong arity) must still be logged before it propagates — the
-        decorator's own exception handling isn't disturbed by the new binding step."""
+        """A real call-site bug (wrong arity) must still be logged before it propagates: the
+        decorator's own exception handling isn't disturbed by the binding step."""
         from tcip_mcp.audit import audited
 
         import tcip_mcp.audit as audit_mod
@@ -137,7 +137,7 @@ class TestAuditLogging:
             return {"result": x}
 
         with pytest.raises(TypeError):
-            my_tool(1, 2, 3)  # too many positional args — the real call itself fails, not just binding
+            my_tool(1, 2, 3)  # too many positional args: the real call itself fails, not just binding
 
         lines = self.audit_path.read_text().strip().splitlines()
         assert len(lines) == 1
@@ -150,7 +150,7 @@ class TestAuditLogging:
         self, monkeypatch,
     ):
         """Isolates the sig.bind() failure from the underlying call: even when parameter binding
-        itself raises (simulated here — for every real @audited tool the two happen to fail
+        itself raises (simulated here; for every real @audited tool the two happen to fail
         together, since none take *args/**kwargs), the real call must still run and be logged,
         just with a degraded (kwargs-only) argument record instead of aborting or losing the
         entry entirely."""
@@ -176,7 +176,7 @@ class TestAuditLogging:
 
         entry = json.loads(self.audit_path.read_text().strip().splitlines()[0])
         assert entry["status"] == "ok"
-        # Degraded fallback: the positional x is lost (pre-K12 behavior), y survives via kwargs.
+        # Degraded fallback: the positional x is lost, y survives via kwargs.
         assert entry["arguments"] == {"y": "explicit"}
 
         audit_mod.AUDIT_PATH = original
@@ -331,7 +331,7 @@ class TestExperiments:
 
         exp.EXPERIMENTS_DIR = original
 
-    # -- K12 finding 3: overwrite_config_if_pristine --------------------------
+    # -- overwrite_config_if_pristine --------------------------
 
     def test_overwrite_config_if_pristine_rewrites_when_pristine(self):
         import tcip_mcp.experiments as exp
@@ -392,7 +392,7 @@ class TestExperiments:
         exp.EXPERIMENTS_DIR = original
 
 
-# ── K12 finding 4: model registry replace-by-name is now audited ──
+# ── model registry replace-by-name is audited ──
 
 
 class TestModelRegistryReplaceAudit:
