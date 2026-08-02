@@ -1,4 +1,4 @@
-"""Integration tests for the Slice 2 Training routes."""
+"""Integration tests for the Training routes."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def test_metrics_route_reads_jsonl(client: TestClient, tmp_path: Path) -> None:
 
 def test_read_metrics_after_resumes_from_byte_offset(tmp_path: Path) -> None:
     # The websocket poll must remember a byte offset and seek there, not re-parse the file
-    # from the start every tick — a resumed read only returns rows written since that offset.
+    # from the start every tick: a resumed read only returns rows written since that offset.
     from tcip_web.routes.training import _read_metrics_after
 
     path = tmp_path / "metrics.jsonl"
