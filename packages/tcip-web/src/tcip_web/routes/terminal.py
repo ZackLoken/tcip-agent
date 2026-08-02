@@ -1,4 +1,4 @@
-"""Agent terminal routes — the HTTP/WS surface over :mod:`tcip_web.terminal`.
+"""Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`.
 
 One live terminal session (the co-pilot rail) is the norm; the API is session-plural so
 multiples need no redesign. The WebSocket carries raw PTY output as text frames
@@ -9,7 +9,7 @@ multiples need no redesign. The WebSocket carries raw PTY output as text frames
 
 Delivery model: the PTY reader thread appends output to a capped scrollback and pushes
 it to one queue per connected WebSocket via ``loop.call_soon_threadsafe`` (FIFO), and a
-single pump task per socket drains that queue — byte ORDER is load-bearing for a
+single pump task per socket drains that queue: byte order is load-bearing for a
 terminal stream, so exactly one writer task per socket. On (re)connect the scrollback
 snapshot and queue registration happen under the writer's lock, so the replay is
 gap-free and duplicate-free. All endpoints sit behind the loopback + Origin trust
@@ -45,10 +45,10 @@ MAX_DIM = 500  # sanity bound on client-supplied rows/cols
 
 # Per-subscriber delivery queue cap. A stalled browser (frozen tab, suspended laptop)
 # stops draining while the TUI keeps painting; past this we drop the backlog and close
-# that socket — the client reconnects and repaints from the scrollback replay.
+# that socket: the client reconnects and repaints from the scrollback replay.
 QUEUE_MAX_CHUNKS = 2048
 
-_EXIT_NOTE = "\r\n\x1b[2m[Claude Code exited — use Restart in the rail header]\x1b[22m\r\n"
+_EXIT_NOTE = "\r\n\x1b[2m[Claude Code exited, use Restart in the rail header]\x1b[22m\r\n"
 
 
 def _offer(queue: asyncio.Queue, data: str) -> None:
@@ -143,7 +143,7 @@ class TerminalSession:
             return True
         except Exception:
             # pywinpty raises EOFError / WinptyError (not OSError) when the process
-            # dies under the write — any failure here means the same thing: not sent.
+            # dies under the write; any failure here means the same thing: not sent.
             return False
 
     def resize(self, rows: int, cols: int) -> None:
@@ -162,7 +162,7 @@ class TerminalSession:
     def _on_output(self, data: str, gen: Optional[int] = None) -> None:
         with self._lock:
             if gen is not None and gen != self._gen:
-                return  # stale reader from a restarted PTY — drop, don't pollute
+                return  # stale reader from a restarted PTY: drop, don't pollute
             self._scrollback.append(data)
             self._scrollback_len += len(data)
             while self._scrollback_len > SCROLLBACK_MAX_CHARS and len(self._scrollback) > 1:
@@ -182,7 +182,7 @@ class TerminalSession:
                 self._subs.pop(sub_id, None)
 
     def _on_exit(self, gen: Optional[int] = None) -> None:
-        # Visible in the terminal itself — the surface must never just go quiet.
+        # Visible in the terminal itself: the surface must never just go quiet.
         self._on_output(_EXIT_NOTE, gen)
 
     # ── subscriber registration (called from each websocket's loop) ─────
