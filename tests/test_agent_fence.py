@@ -31,6 +31,10 @@ def test_fence_settings_valid_json_denies_internals_allows_toolkit():
     assert "Edit(CLAUDE.md)" in deny
     # The audited toolkit is the sanctioned mutation path: allowed.
     assert "mcp__tcip__*" in allow
+    # find has no legitimate-usage evidence anywhere in this repo (no transcript, skill, or doc
+    # exercises it) and its own write actions (-fprint/-fprintf/-fls) aren't expressible as a
+    # narrower prefix rule, so it is not blanket-allowed: an approval prompt gates it instead.
+    assert "Bash(find:*)" not in allow
     # PreToolUse guards are wired for both shells: PowerShell was the fence bypass.
     hooks = {h["matcher"]: h["hooks"][0]["command"] for h in data["hooks"]["PreToolUse"]}
     assert "agent_bash_guard.py" in hooks["Bash"]
@@ -221,6 +225,9 @@ def _run_guard(command: str) -> subprocess.CompletedProcess:
         "python scripts/foo.py > packages/out.txt",  # exec arg scripts/, real write to packages/
         "echo x > packages/y.py 2>&1",  # fd-dup present, but the > target is protected
         "python scripts/doctor.py /c/p 2>&1 | tee packages/x",  # tee target protected
+        # find's own write actions carry no >/tee at all: caught by target, not by shape.
+        "find . -maxdepth 1 -fprintf packages/tcip-mcp/evil.py '%p'",
+        "find . -maxdepth 1 -fls packages/tcip-mcp/evil.txt",
     ],
 )
 def test_guard_denies_shell_writes_to_internals(cmd):
@@ -254,12 +261,47 @@ def test_both_guards_deny_a_write_to_the_same_protected_path():
         "python scripts/list_tools.py > /tmp/tools.txt",  # real redirect, non-protected target
         "python scripts/doctor.py /c/proj 2>&1 | tee /tmp/doctor.log",
         "ls packages 2>&1",  # fd-dup while reading a protected dir
+        "find . -printf '%p\\n'",  # -printf (no leading f) writes to stdout, not a file
     ],
 )
 def test_guard_allows_reads_and_non_internal_writes(cmd):
     r = _run_guard(cmd)
     assert r.returncode == 0, r.stdout
     assert r.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "mv /c/proj/labels/a.json /tmp/out/a.json",
+        "mv /tmp/out/a.json /c/proj/labels/a.json",
+        "find /c/proj/annotations -exec mv {} /tmp/exfil \\;",
+    ],
+)
+def test_guard_denies_moving_breeder_data(cmd):
+    # mv relocates the tracked file exactly as rm would remove it from where it belongs, whether
+    # the breeder-data path is named as mv's source, its destination, or (for the find form) the
+    # search root the exec action walks; all three read the same way to this stateless check.
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "cp /c/proj/labels/a.json /tmp/backup/a.json",
+        "cp /tmp/backup/a.json /c/proj/labels/a.json",
+        "find /c/proj/annotations -exec cp {} /tmp/backup \\;",
+    ],
+)
+def test_guard_allows_copying_breeder_data(cmd):
+    # Deliberately not denied, mirroring the PowerShell guard's own Copy-Item exemption: this guard
+    # is stateless and can't tell a two-argument command's source from its destination, so denying
+    # cp here would also deny a legitimate backup/copy of a breeder file to elsewhere, not just a
+    # copy into one. The rail must admit valid work, not only reject invalid work.
+    r = _run_guard(cmd)
+    assert r.returncode == 0, r.stdout
 
 
 def test_guard_fails_open_on_garbage_stdin():
@@ -286,6 +328,11 @@ def test_guard_fails_open_on_garbage_stdin():
         # find, the sharpest hole: Bash(find:*) is allow-listed, so only the guard stops this
         "find /c/proj/annotations -name '*.json' -delete",
         "find /c/proj/annotations -name '*.json' -exec rm {} \\;",
+        # every other verb _DELETE_OP treats as unconditionally destructive, reached the same way
+        "find /c/proj/annotations -exec rmdir {} \\;",
+        "find /c/proj/annotations -exec unlink {} \\;",
+        "find /c/proj/annotations -exec shred {} \\;",
+        "find /c/proj/annotations -exec truncate -s 0 {} \\;",
         # statement-position variants (after ; | & ( { } and at line start)
         "cd /c/proj && rm labels/a.txt",
         "echo hi; rm labels/a.txt",
@@ -324,6 +371,7 @@ def test_guard_allows_reads_that_merely_mention_delete_words(cmd):
         "echo '{}' > /c/proj/labels/a.json",
         "echo '{}' > /c/proj/predictions/live/2026-01-01/a.json",
         "> /c/proj/annotations/a.json",
+        "find /c/proj -maxdepth 1 -fprint /c/proj/labels/a.json",
     ],
 )
 def test_guard_denies_writing_into_breeder_data_paths(cmd):
