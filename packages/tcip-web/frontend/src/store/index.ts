@@ -51,7 +51,7 @@ const DEFAULT_STATE: GuiState = {
 };
 
 /**
- * Local canvas state — per-image draft annotations shown on the canvas.
+ * Local canvas state: per-image draft annotations shown on the canvas.
  * These are not synced to the backend until the user hits save.
  */
 export interface CanvasState {
@@ -68,7 +68,7 @@ export interface CanvasState {
   undoStack: CanvasSnapshot[];
   redoStack: CanvasSnapshot[];
   dirty: boolean;
-  // Which image's labels the canvas holds — status writes must not read shapes that
+  // Which image's labels the canvas holds: status writes must not read shapes that
   // still belong to the previous image (or a failed load) mid-flip.
   loadedImagePath: string | null;
 }
@@ -119,7 +119,7 @@ interface ReviewTabState {
 
 interface RegistryState {
   /** The dataset's nested subject registry (subject -> {description?, attributes?}). No integer
-   *  ids, no colours — colour is GUI-local (see subjectColor). Source of truth for the subject
+   *  ids, no colours: colour is GUI-local (see subjectColor). Source of truth for the subject
    *  picker and per-instance attribute editing. */
   subjects: Registry;
   /** Set after the first successful load for the current dataset. */
@@ -135,7 +135,7 @@ interface AnnotateUiState {
   stream: boolean;
   /** Currently hovered polygon index (for vertex-handle rendering). */
   hoveredPolygonIdx: number | null;
-  /** Active vertex drag: [polygonIdx, ringIdx, vertexIdx] — a vertex belongs to one ring of one
+  /** Active vertex drag: [polygonIdx, ringIdx, vertexIdx]; a vertex belongs to one ring of one
    *  polygon, so a multi-ring shape's second ring is addressable rather than uneditable. */
   draggingVertex: [number, number, number] | null;
 }
@@ -190,7 +190,7 @@ export interface AppState {
   /** Server-synchronized state (mirrors backend GuiState). */
   gui: GuiState;
   wsStatus: "disconnected" | "connecting" | "connected" | "error";
-  /** Highest backend state version applied — used to drop stale snapshot replays. */
+  /** Highest backend state version applied; used to drop stale snapshot replays. */
   wsVersion: number;
 
   /** Canvas-local draft state (not persisted until save). */
@@ -293,13 +293,13 @@ export interface AppState {
   redo: () => void;
   addBox: (box: Box) => void;
   updateBox: (idx: number, box: Box) => void;
-  /** No-undo box mutation for a live resize/move drag — undo is captured once at drag
+  /** No-undo box mutation for a live resize/move drag; undo is captured once at drag
    *  start (see updateBox for the undo-pushing variant). */
   dragBox: (idx: number, box: Box) => void;
   deleteBox: (idx: number) => void;
   addPolygon: (polygon: PolygonShape) => void;
   updatePolygon: (idx: number, polygon: PolygonShape) => void;
-  /** Move a single polygon vertex (of one ring) WITHOUT pushing an undo snapshot. Used during a
+  /** Move a single polygon vertex (of one ring) without pushing an undo snapshot. Used during a
    *  live vertex drag (undo is captured once at drag start) so a 50px drag doesn't
    *  push dozens of snapshots and evict the whole 30-entry undo history. */
   dragVertex: (
@@ -311,7 +311,7 @@ export interface AppState {
   deletePolygon: (idx: number) => void;
   selectPolygon: (idx: number | null) => void;
   /** Point helpers. A point is one coordinate, so it has no vertex/ring variants: it is placed,
-   *  dragged (no-undo, like dragBox/dragVertex — one snapshot per drag, taken at drag start),
+   *  dragged (no-undo, like dragBox/dragVertex: one snapshot per drag, taken at drag start),
    *  attribute-edited via updatePoint, and deleted whole. */
   addPoint: (point: PointShape) => void;
   updatePoint: (idx: number, point: PointShape) => void;
@@ -380,7 +380,7 @@ export const useStore = create<AppState>()((set, get) => ({
     }),
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
-  // Default open — the rail is the breeder's front door to the agent. Guarded:
+  // Default open: the rail is the breeder's front door to the agent. Guarded:
   // this runs at module init, and blocked-storage browsers throw on access.
   terminalOpen: (() => {
     try {
@@ -452,7 +452,7 @@ export const useStore = create<AppState>()((set, get) => ({
 
   mergeSnapshot: (incoming, version) =>
     set((s) => {
-      // Drop a stale replay (older backend version than one already applied) —
+      // Drop a stale replay (older backend version than one already applied),
       // e.g. a reconnecting socket resending an old snapshot.
       if (version != null && version < s.wsVersion) return s;
       const nextVersion = version != null ? Math.max(s.wsVersion, version) : s.wsVersion;
@@ -472,7 +472,7 @@ export const useStore = create<AppState>()((set, get) => ({
         inDs.subject !== local.dataset.subject;
 
       // Boot hydration: the browser has no dataset yet (fresh load / project open), so
-      // there is no local state to protect — adopt the persisted tab/mode/filters too,
+      // there is no local state to protect; adopt the persisted tab/mode/filters too,
       // so a refresh resumes where the session left off instead of resetting to Annotate.
       // active_subject is client-owned and absent from the backend snapshot; default it null.
       if (!local.dataset.dataset_root) {
@@ -492,11 +492,11 @@ export const useStore = create<AppState>()((set, get) => ({
         return { gui: { ...local, dataset: inDs, pred_reference: null }, wsVersion: nextVersion };
       }
       // Same dataset: accept backend-owned dataset fields (e.g. a changed model's
-      // prediction dir) but keep the user's navigation position AND the local
+      // prediction dir) but keep the user's navigation position and the local
       // image_list reference (same identity => same list; reusing the ref avoids
       // spuriously re-firing effects keyed on it, like registry/status hydration).
       // Everything else (active_tab / mode / active_subject / view / review /
-      // pred_reference) is client-owned — keep local.
+      // pred_reference) is client-owned; keep local.
       return {
         gui: {
           ...local,
@@ -813,7 +813,7 @@ export const useStore = create<AppState>()((set, get) => ({
       canvas: {
         ...s.canvas,
         currentPolygon: [],
-        // A hand-drawn shape is one contour — one ring (the canvas never draws a second by hand).
+        // A hand-drawn shape is one contour: one ring (the canvas never draws a second by hand).
         polygons: [...s.canvas.polygons, { rings: [clamped], subject, attributes: {} }],
         dirty: true,
       },
