@@ -4,7 +4,7 @@ fabricating 640/0.2 when nothing is resolvable), honors ``max_dets`` verbatim on
 a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path, and records
 ``tiled``'s provenance (``raw_operating_point``/``resolve_operating_point``) to distinguish an
 explicit caller choice from a documented default, mirroring the existing
-``tile_size``/``tile_size_source`` pattern. See ``test_audit_cv_fixes.py`` for the
+``tile_size``/``tile_size_source`` pattern. See ``test_detection_measurement_integrity.py`` for the
 geometry-resolution and calibrated-bundle integration tests; this file covers the
 ``evaluate_model`` wrapper's passthrough + refusal handling.
 """
