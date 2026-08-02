@@ -1,4 +1,4 @@
-"""Integration test — spawn the real Python MCP server and talk JSON-RPC over stdio.
+"""Integration test: spawn the real Python MCP server and talk JSON-RPC over stdio.
 
 Validates the full path: subprocess → stdin JSON-RPC → MCPServer → tool call → response.
 """
