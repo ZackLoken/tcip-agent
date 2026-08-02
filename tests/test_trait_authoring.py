@@ -232,7 +232,7 @@ def test_catkin_config_semantics_match_reference_fixture():
     assert t.sliver_frac == 0.5
     assert t.majority_milestone == "95per"
     assert t.majority_provisional is True
-    assert t.count_bias_tolerance_frac == 0.01  # relative fraction, breeder-set
+    assert t.count_bias_tolerance_frac is None  # not yet authored by the domain expert
     assert set(t.delivers) == {
         "catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"}
 
