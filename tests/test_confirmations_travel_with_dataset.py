@@ -1,10 +1,10 @@
-"""K13.5 slice 4 — confirmations travel with the dataset, quarantined on subject-definition mismatch.
+"""Confirmations travel with the dataset, quarantined on subject-definition mismatch.
 
 Confirmed negatives now live dataset-native (``<dataset_root>/.tcip/state/image_status.json``, a
 sibling of ``classes.json``) rather than in whichever project's private ``.tcip/`` happened to be an
 ancestor of the labels dir. ``dataset_fingerprint`` folds this store in as a 4th term (it previously
 could not detect confirming/un-confirming a negative at all). A confirmation is quarantined only when
-a stamped attribute-schema digest positively disagrees with the subject's current schema — an
+a stamped attribute-schema digest positively disagrees with the subject's current schema: an
 unstamped confirmation is admitted, never punished for predating the mechanism.
 """
 
@@ -61,7 +61,7 @@ def _dataset(tmp_path: Path, *, negative: bool = False, subjects=(Subject(name="
     return tmp_path
 
 
-# (a) fail-before: the carried-in finding — the fingerprint was blind to confirmed-negative membership.
+# (a) fail-before: the fingerprint was blind to confirmed-negative membership.
 def test_dataset_fingerprint_changes_with_confirmed_negatives(tmp_path):
     from tcip_mcp.pipelines.resolution import dataset_fingerprint
 
@@ -73,29 +73,30 @@ def test_dataset_fingerprint_changes_with_confirmed_negatives(tmp_path):
     after = dataset_fingerprint(root)
     assert after is not None
     assert after != before, (
-        "confirming a negative must change dataset_fingerprint — otherwise compare_experiments / "
+        "confirming a negative must change dataset_fingerprint, otherwise compare_experiments / "
         "check_dataset_identity.py can read two runs with different trainable membership as identical"
     )
 
 
 def test_dataset_fingerprint_stable_with_no_confirmations_store(tmp_path):
     """The confirmations term must not null the whole fingerprint (matches the registry term's
-    optional/additive convention) — a dataset with zero confirmed negatives is still valid content."""
+    optional/additive convention); a dataset with zero confirmed negatives is still valid content."""
     from tcip_mcp.pipelines.resolution import dataset_fingerprint
 
     root = _dataset(tmp_path, negative=False)
     assert dataset_fingerprint(root) is not None
 
 
-# (b) confirmations are dataset-native — an unrelated ancestor's store is never consulted, even
-# when the dataset itself has none of its own (the case that actually discriminates old ancestor-
-# walking behavior from the fix — a dataset-root-local store would make old code find the right
-# answer anyway without ever needing the ancestor, which would make this test pass either way).
+# (b) confirmations are dataset-native: an unrelated ancestor's store is never consulted, even
+# when the dataset itself has none of its own (this is the case that actually discriminates
+# ancestor-walking from dataset-local resolution; a dataset-root-local store would find the
+# right answer either way without ever consulting the ancestor, so a naive fixture could pass for
+# the wrong reason).
 def test_confirmed_negative_names_ignores_an_unrelated_ancestor_store(tmp_path):
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
-    # A project ancestor that happens to sit above the dataset, with its OWN negatives — simulates
-    # the K13.5 slice-3 case: a project referencing a dataset that lives elsewhere.
+    # A project ancestor that happens to sit above the dataset, with its own negatives: simulates
+    # a project referencing a dataset that lives elsewhere.
     unrelated_ancestor = tmp_path
     dataset_root = tmp_path / "shared_dataset"
     dataset_root.mkdir()
@@ -161,9 +162,10 @@ def test_quarantine_does_not_fire_when_schema_is_unchanged(tmp_path):
 
 # (d) a rail must admit valid work: absence of a stamp is not evidence of staleness.
 def test_unstamped_confirmation_is_admitted_not_quarantined(tmp_path):
-    """Every pre-slice-4 image_status.json (real projects, every existing test fixture) has no
-    digest sidecar at all. Punishing that by quarantine-by-default would silently empty every one
-    of them — exactly the 'strengthened rail rejects legitimate work' failure to avoid."""
+    """Every image_status.json predating the digest-stamp mechanism (real projects, every existing
+    test fixture) has no digest sidecar at all. Punishing that by quarantine-by-default would
+    silently empty every one of them, exactly the 'strengthened rail rejects legitimate work'
+    failure to avoid."""
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
     root = _dataset(tmp_path, negative=False)
@@ -200,8 +202,8 @@ def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
     assert counts["skipped_unconfirmed_empty"] == 0
 
 
-# (f) quarantine is per-image, not per-bucket: a later, unrelated write to the SAME bucket must
-# never resurrect a DIFFERENT image's stale, never-re-reviewed confirmation (stage-6 review finding).
+# (f) quarantine is per-image, not per-bucket: a later, unrelated write to the same bucket must
+# never resurrect a different image's stale, never-re-reviewed confirmation.
 def test_quarantine_is_per_image_not_per_bucket(tmp_path):
     from tcip_mcp.class_registry import attribute_schema_digest
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
@@ -223,8 +225,8 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
     new_digest = attribute_schema_digest(
         class_registry.read_registry(root / "classes.json"), "catkin")
 
-    # An unrelated image is confirmed under the NEW (current) schema, into the SAME bucket. Before
-    # the per-image fix, this re-stamp would have silently un-quarantined img_001 too.
+    # An unrelated image is confirmed under the new (current) schema, into the same bucket; the
+    # re-stamp must not silently un-quarantine img_001 too.
     _confirm_negative(root, "catkin", "img_002.jpg", digest=new_digest)
 
     quarantined: set[str] = set()
@@ -237,7 +239,7 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
 
 
 # (g) materialize_dataset's review-harvested negatives must be quarantine-capable, not a permanent
-# no-op for lack of any classes.json to compare against (stage-6 review finding).
+# no-op for lack of any classes.json to compare against.
 def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
     from tcip_mcp.dataset_layout import image_status_digest_path
     from tcip_mcp.pipelines.feedback.materialize import materialize_dataset
