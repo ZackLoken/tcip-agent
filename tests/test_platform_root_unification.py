@@ -1,4 +1,4 @@
-"""P2.5 — adopting a project unifies platform state under one ``<project>/.tcip/``.
+"""Adopting a project unifies platform state under one ``<project>/.tcip/``.
 
 ``set_active_project`` repins ``TCIP_PROJECT_ROOT`` so the audit log, the experiment store,
 and the model registry all resolve under the adopted project (self-contained + portable).
@@ -48,12 +48,12 @@ def test_experiment_and_registry_co_locate_under_adopted_project(tmp_path, monke
     result = experiments.register_model_from_experiment("exp_unify", str(ckpt))
     assert "error" not in result
     assert (proj / ".tcip" / "models" / "registry.json").is_file()
-    # A different project's registry is untouched — nothing leaked to the repo root / cwd.
+    # A different project's registry is untouched: nothing leaked to the repo root / cwd.
     assert not (Path.cwd() / ".tcip" / "models" / "registry.json").is_file()
 
 
 def test_no_adoption_keeps_cwd_default(tmp_path, monkeypatch):
-    # Without adoption (env unset), the platform root stays the cwd — the historical default
+    # Without adoption (env unset), the platform root stays the cwd, the default
     # that keeps tests and un-pinned runs hermetic.
     monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
     monkeypatch.chdir(tmp_path)
