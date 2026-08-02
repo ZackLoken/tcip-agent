@@ -58,16 +58,16 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `compute_phenology` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction; see `annotation` skill |
 
-`tabulate_counts` produces a **different**, per-image `image, detection_count,
+`tabulate_counts` produces a different, per-image `image, detection_count,
 avg_confidence` CSV, not the per-plant schema above. Don't reach for it when the
 per-plant schema is what's wanted.
 
 ## The delivery gate (measurement integrity)
 
-Every phenotype-delivery door refuses a **bare write**: an unvalidated measurement number with no
+Every phenotype-delivery door refuses a bare write: an unvalidated measurement number with no
 acknowledgement. The count/date/value is the phenotype, so each door runs one shared
 `check_delivery_gate`: it ships only when each measurement dimension the deliverable rests on is
-validated against a reference sized to the trait (held-out GT **or** a breeder-confirmed output
+validated against a reference sized to the trait (held-out GT or a breeder-confirmed output
 sample, see the `evaluation` and `cv-research` skills), read from the predictions' own
 `operating_point.json` sidecar, not a caller-asserted string.
 
@@ -87,7 +87,7 @@ sample, see the `evaluation` and `cv-research` skills), read from the prediction
   conf does. Reach a validated tile scale by passing an explicit `tile_size`, or by producing the
   predictions from a checkpoint whose training tile geometry was persisted. An untiled run is never
   gated on it.
-- To ship a **provisional** result, pass `acknowledge_unvalidated=True`: the door writes but stamps
+- To ship a provisional result, pass `acknowledge_unvalidated=True`: the door writes but stamps
   `measurement_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
   provisional delivery, never for silently shipping a bare number.
 
@@ -104,5 +104,5 @@ Before delivery, verify:
 1. **Completeness**: Every plant has values for all expected traits
 2. **Range**: Values within biological plausibility (e.g., fruit diameter 1-15cm)
 3. **Outliers**: Flag statistical outliers for manual review
-4. **Confidence**: Reject predictions below a confidence operating point **derived from the data in hand** (per the "derive, don't pin" rule), not a frozen constant; the right cutoff varies by dataset, model, and trait
+4. **Confidence**: Reject predictions below a confidence operating point derived from the data in hand (per the "derive, don't pin" rule), not a frozen constant; the right cutoff varies by dataset, model, and trait
 5. **No duplicates**: One value per plant per trait per date
