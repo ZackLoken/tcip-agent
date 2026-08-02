@@ -36,7 +36,7 @@ def pytest_collection_modifyitems(config, items):
     if floor and len(items) < int(floor):
         raise pytest.UsageError(
             f"Collected only {len(items)} tests (< TCIP_MIN_TESTS={floor}). A core "
-            "dependency is likely missing — module-level importorskip silently skipped files."
+            "dependency is likely missing: module-level importorskip silently skipped files."
         )
 
 
@@ -62,7 +62,7 @@ def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Pin every test's platform-state root to its own unique ``tmp_path``.
 
     Without this, any unpinned write (audit, experiments, jobstore, the vision candidates
-    cache) resolves relative to the process CWD and lands in the repo's real ``.tcip/`` —
+    cache) resolves relative to the process CWD and lands in the repo's real ``.tcip/``,
     shared across tests and, under xdist, across worker processes. Uses monkeypatch so it
     auto-restores; a test that manages the var itself (setenv/delenv in its body) overrides
     this and is unaffected.
@@ -72,14 +72,14 @@ def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def seed_catkin_trait_spec(tmp_path: Path, _pin_platform_root):
-    """Seed a real catkin.yml into this test's pinned project root (round 10, 2026-07-29).
+    """Seed a real catkin.yml into this test's pinned project root.
 
-    There are no built-in traits anymore — ``get_trait("catkin")`` only resolves where a config
+    There are no built-in traits anymore: ``get_trait("catkin")`` only resolves where a config
     file actually exists (``traits.py``). Writing the same values ``tests/_trait_fixtures.CATKIN``
     holds keeps a test that calls ``get_trait("catkin")``/``registered_traits()`` without authoring
-    its own config working, the same as when a builtin was unconditionally present. NOT autouse: an
-    unrelated test's project root should stay exactly as empty as it would without this cluster's
-    change — request this explicitly in a test that actually needs catkin registered.
+    its own config working, the same as when a builtin was unconditionally present. Not autouse:
+    an unrelated test's project root should stay empty by default; request this explicitly in a
+    test that actually needs catkin registered.
     """
     import dataclasses
 
@@ -99,7 +99,7 @@ DATA_DIR_SUBJECT = "catkin"
 
 @pytest.fixture
 def data_dir(tmp_path: Path) -> Path:
-    """A minimal dataset in the canonical (K13.5) layout: name-based per-image labels + a registry.
+    """A minimal dataset in the canonical layout: name-based per-image labels + a registry.
 
     One file per image under ``annotations/<date>/`` holding every subject (here one detection
     subject, ``catkin``), predictions under ``predictions/<model>/<date>/``, and one nested
