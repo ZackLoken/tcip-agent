@@ -1,8 +1,8 @@
-"""Active learning selector — auto_accept / review_queue partitioning.
+"""Active learning selector: auto_accept / review_queue partitioning.
 
 Covers the GenericPredictor output contract: detection dicts carry ``scores``;
 classification/ordinal checkpoints (ComposedModel -> ``_format_other``) carry
-``head{i}_confidences`` — never an ``output`` key.
+``head{i}_confidences``, never an ``output`` key.
 """
 
 from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue
