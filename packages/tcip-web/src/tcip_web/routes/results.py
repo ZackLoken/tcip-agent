@@ -222,11 +222,11 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     """Compute a trait's phenology measurement and reconcile the evidence behind it: one producer.
 
     Every Results door routes through here, so the numbers and the validity that qualifies them are
-    read in one place from the buckets' own sidecars. Before this, only the CSV door reconciled
-    anything: the curve and milestone doors returned the same phenotype with no gate at all, so the
-    breeder read unvalidated phenology dates on screen and met the refusal only on clicking Download.
-    Rows come from the canonical ``per_plant_phenology`` (the same function ``compute_phenology``
-    delivers from) rather than a second aggregation loop, so the two surfaces cannot diverge.
+    read in one place from the buckets' own sidecars: the curve and milestone doors share the same
+    gate as CSV, so a breeder never sees an unvalidated phenology date on screen only to have the
+    refusal surface later on Download. Rows come from the canonical ``per_plant_phenology`` (the same
+    function ``compute_phenology`` delivers from) rather than a second aggregation loop, so the two
+    surfaces cannot diverge.
     """
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity,
@@ -352,10 +352,9 @@ def per_plant_curves(payload: PhenologyPayload) -> dict:
 def onset_dates(payload: PhenologyPayload) -> dict:
     """Each plant's phenology milestones, computed from the buckets rather than from caller rows.
 
-    Takes the same inputs as ``per_plant_curves`` (it used to accept the curve rows a client handed
-    back, which made the milestone dates a function of a caller-supplied table). Both doors now
-    project one ``per_plant_phenology`` result, so a milestone date and the curve it was read off
-    can never come from different numbers.
+    Takes the same inputs as ``per_plant_curves``: both doors project one ``per_plant_phenology``
+    result rather than accepting a caller-composed table, so a milestone date and the curve it was
+    read off can never come from different numbers.
     """
     measurement = _measure_phenology(payload)
     if not measurement.gate.ok:
@@ -375,14 +374,14 @@ class ExportCsvPayload(PhenologyPayload):
 def export_csv(payload: ExportCsvPayload) -> Response:
     """Write the CSV for a phenology measurement this route computes itself.
 
-    The gate is unconditional because there is no longer anything to branch on: this door computes
+    The gate is unconditional because there is nothing else to branch on: this door computes
     the rows from the buckets (``_measure_phenology``) instead of accepting a caller-composed table, so the only
     question left is whether the evidence on disk supports delivering them. ``acknowledge_unvalidated``
     is deliberately ignored here: it lets the breeder look at provisional numbers on screen, never
     write them to a file that leaves the platform without its evidence.
 
     Milestone rows are written in the canonical ``phenology_csv_columns`` schema, so a web-delivered
-    CSV and the MCP door's ``write_phenology_csv`` no longer disagree about what a phenology
+    CSV and the MCP door's ``write_phenology_csv`` cannot disagree about what a phenology
     delivery's columns are.
     """
     measurement = _measure_phenology(payload)
