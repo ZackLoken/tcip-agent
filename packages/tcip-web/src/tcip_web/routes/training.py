@@ -28,7 +28,7 @@ _HEARTBEAT_STALE_SECONDS = float(os.environ.get("TCIP_HEARTBEAT_STALE_SECONDS", 
 
 
 def _heartbeat_fresh(hb_iso: str | None) -> bool:
-    """True if ``hb_iso`` (ISO-8601) is within the staleness window — i.e. a process is
+    """True if ``hb_iso`` (ISO-8601) is within the staleness window: i.e. a process is
     still actively updating this run. Missing/unparseable → not fresh (treat as dead)."""
     if not hb_iso:
         return False
@@ -45,24 +45,24 @@ def _historical_training_runs() -> list[dict]:
     """Reconstruct past training runs from the immutable ``.tcip/experiments/`` records.
 
     Every ``launch_training`` (standalone drift-retrain, GUI, or agent) writes an
-    experiment, so this recovers runs the in-memory registry lost on restart — with no
+    experiment, so this recovers runs the in-memory registry lost on restart, with no
     second persistence file. Only genuine *training* experiments are included (a
     ``model_source`` in the config); review-feedback / ad-hoc experiments are skipped, and
     HPO trials never create experiments so they can't appear here. A non-terminal state
     on a run that isn't live means the process died -> surfaced as ``interrupted``.
 
     Delegates the actual state/current_epoch reconstruction to
-    ``tcip_mcp.experiments.reconstruct_run_status`` (K24) — this used to duplicate that logic (and,
-    pre-K24, assumed the experiment directory name always equaled the real ``run_id``, which the
-    K12 fresh-id-relaunch format already violated). A directory whose ``status.json`` never
-    stamped ``run_id`` (a pre-K24 experiment) still resolves correctly through the shared
-    resolver's exact-match strategy — defaulting to ``d.name`` here means the lookup is for the
-    directory's own name, which trivially matches itself — and now additionally gets
-    ``current_epoch`` populated from ``metrics.jsonl`` (the old inline classification here never
-    did). The inline fallback below is reached only when ``reconstruct_run_status`` itself returns
-    ``None`` or resolves to a *different* directory than the one being iterated (a malformed/
-    unreadable ``status.json``, or a genuine identity anomaly) — a narrower, degenerate case, not
-    "any pre-K24 experiment."
+    ``tcip_mcp.experiments.reconstruct_run_status``: this used to duplicate that logic and
+    assumed the experiment directory name always equaled the real ``run_id``, which a fresh-id
+    relaunch format violates. A directory whose ``status.json`` never stamped ``run_id`` still
+    resolves correctly through the shared resolver's exact-match strategy: defaulting to
+    ``d.name`` here means the lookup is for the directory's own name, which trivially matches
+    itself, and now additionally gets ``current_epoch`` populated from ``metrics.jsonl`` (the old
+    inline classification here never did). The inline fallback below is reached only when
+    ``reconstruct_run_status`` itself returns ``None`` or resolves to a *different* directory than
+    the one being iterated (a malformed/unreadable ``status.json``, or a genuine identity
+    anomaly), a narrower, degenerate case, not the common case of a directory whose ``status.json``
+    never stamped ``run_id``.
     """
     from tcip_mcp.experiments import experiments_dir, reconstruct_run_status
     from tcip_mcp.utils.atomic_io import read_json
@@ -78,8 +78,8 @@ def _historical_training_runs() -> list[dict]:
         if not isinstance(config, dict) or not config.get("model_source"):
             continue  # not a training experiment (e.g. review-feedback lineage)
         status = read_json(d / "status.json", default={})
-        run_id = status.get("run_id", d.name)  # K24: the real run_id when stamped; the
-                                                # experiment_id itself as the pre-K24 fallback
+        run_id = status.get("run_id", d.name)  # the real run_id when stamped, else the
+                                                # experiment_id itself as the fallback
         reconstructed = reconstruct_run_status(run_id, stale_seconds=_HEARTBEAT_STALE_SECONDS)
         if reconstructed is not None and reconstructed["experiment_id"] == d.name:
             runs.append({
@@ -91,8 +91,9 @@ def _historical_training_runs() -> list[dict]:
             })
             continue
         # Fallback: reconstruct_run_status found nothing (or something else) for this directory's
-        # own run_id — a malformed/unreadable status.json, not the common pre-K24 case (that one
-        # resolves correctly above via the exact-match strategy on the defaulted d.name).
+        # own run_id: a malformed/unreadable status.json, not the common case of a status.json
+        # that never stamped run_id (that one resolves correctly above via the exact-match
+        # strategy on the defaulted d.name).
         state = status.get("state", "unknown")
         if state not in _TERMINAL_STATES:
             state = "running" if _heartbeat_fresh(status.get("heartbeat")) else "interrupted"
@@ -110,7 +111,7 @@ def _metrics_path(project_root: str, run_id: str) -> Path:
     """``<project_root>/.tcip/experiments/<run_id>/metrics.jsonl`` with traversal guarded.
 
     ``run_id`` is an untrusted path component, so it is joined via ``safe_join`` (which
-    rejects ``..`` / absolute paths) — raises ``ValueError`` on an attempted escape.
+    rejects ``..`` / absolute paths), raises ``ValueError`` on an attempted escape.
     """
     return safe_join(Path(project_root) / ".tcip" / "experiments", run_id, "metrics.jsonl")
 
@@ -135,9 +136,9 @@ class LaunchPayload(BaseModel):
 def launch_training_route(payload: LaunchPayload) -> dict:
     from tcip_mcp.tools.training_tools import launch_training
 
-    # Confine the client-supplied output dir when the server is locked down (no-op otherwise) —
+    # Confine the client-supplied output dir when the server is locked down (no-op otherwise):
     # mirrors tuning.py's launch_hpo. This does not confine config.model_source.builder, which this
-    # same route importlib-imports and calls (model_build.py) — that is a separate code-execution
+    # same route importlib-imports and calls (model_build.py): that is a separate code-execution
     # trust boundary path confinement can't close; don't read this guard as closing it.
     if payload.output_dir:
         try:
@@ -178,7 +179,7 @@ def get_run(run_id: str) -> dict:
 def cancel_run_route(run_id: str) -> dict:
     """Request graceful cancellation of a running run (stops at the next batch boundary).
 
-    Wraps the ``cancel_training`` MCP tool — the trainer still writes ``model_final.pt``
+    Wraps the ``cancel_training`` MCP tool: the trainer still writes ``model_final.pt``
     so partial progress is recoverable. Status flips to 'cancelled' asynchronously.
     """
     from tcip_mcp.tools.training_tools import cancel_training
@@ -277,7 +278,7 @@ async def _stream_metrics(
 
             status = check_training_status(run_id)
             # ``error`` => unknown run (e.g. streamed after a restart); a cancelled run
-            # never reaches completed/failed. Either way, terminate — the prior check
+            # never reaches completed/failed. Either way, terminate: the prior check
             # keyed only on completed/failed/"not_found" and spun forever on both.
             if status.get("error") or status.get("status") in jobstore.TERMINAL_STATUSES:
                 await ws.send_json({"type": "status", "run_id": run_id, "status": status})
