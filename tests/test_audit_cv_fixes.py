@@ -76,7 +76,7 @@ def _det_batch(box_counts: list[int]):
     return images, targets
 
 
-def test_cv9_val_loss_forwards_all_negative_images():
+def test_val_loss_forwards_all_negative_images():
     stub = _StubDetector()
     model = _StubModel(stub)
     loader = [_det_batch([1, 0]), _det_batch([0])]  # mixed batch, then all-negative batch
@@ -85,7 +85,7 @@ def test_cv9_val_loss_forwards_all_negative_images():
     assert stub.calls == [(2, 4), (1, 0)]
 
 
-def test_cv9_all_negative_only_loader_is_not_skipped():
+def test_all_negative_only_loader_is_not_skipped():
     stub = _StubDetector()
     model = _StubModel(stub)
     loader = [_det_batch([0, 0])]  # nothing but negatives
@@ -108,7 +108,7 @@ def _perfect_records(n=1):
     return [_rec(gt, dt) for _ in range(n)]
 
 
-def test_cv10_map_nonzero_at_high_maxdets():
+def test_map_nonzero_at_high_maxdets():
     m = coco_detection_metrics(_perfect_records(), max_dets=1000)
     assert m["map"] == pytest.approx(1.0)      # standard map@100 no longer collapses to 0.0
     assert m["map50"] == pytest.approx(1.0)
@@ -116,7 +116,7 @@ def test_cv10_map_nonzero_at_high_maxdets():
     assert m["map50_at_maxdets"] == pytest.approx(1.0)
 
 
-def test_cv10_map_invariant_across_maxdets():
+def test_map_invariant_across_maxdets():
     recs = _perfect_records(3)
     maps = {md: coco_detection_metrics(recs, max_dets=md) for md in (100, 300, 1000)}
     base = maps[100]
@@ -126,7 +126,7 @@ def test_cv10_map_invariant_across_maxdets():
         assert maps[md]["map75"] == pytest.approx(base["map75"])
 
 
-def test_cv10_standard_keys_unchanged_at_100():
+def test_standard_keys_unchanged_at_100():
     m = coco_detection_metrics(_perfect_records(), max_dets=100)
     assert m["map"] == pytest.approx(1.0)
     assert m["map50"] == pytest.approx(1.0)
@@ -170,7 +170,7 @@ def _capture_run_test_evaluation(monkeypatch):
     return captured
 
 
-def test_cv1_run_id_reuses_training_tiling(tmp_path, monkeypatch):
+def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
     from tcip_mcp.pipelines.training.generic_trainer import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
@@ -188,7 +188,7 @@ def test_cv1_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     assert captured["tiling"] == {"enabled": True, "tile_size": 64}
 
 
-def test_cv1_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
+def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -203,7 +203,7 @@ def test_cv1_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     assert captured["tiling"] is None
 
 
-def test_cv1_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
+def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -217,7 +217,7 @@ def test_cv1_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
 
-def test_cv1_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
+def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
 
@@ -317,7 +317,7 @@ def _one_image(tmp_path):
     return str(img)
 
 
-def test_cv2_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
+def test_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt = tmp_path / "m.pt"
@@ -335,7 +335,7 @@ def test_cv2_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
     assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
 
 
-def test_cv2_foreign_checkpoint_falls_back_to_default_with_warning(tmp_path, monkeypatch):
+def test_foreign_checkpoint_falls_back_to_default_with_warning(tmp_path, monkeypatch):
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.pipelines.resolution import DEFAULT_TILE_SIZE
 
@@ -489,7 +489,7 @@ def test_k18_run_inference_corrupted_registry_still_propagates(tmp_path, monkeyp
         run_inference(str(ckpt), images_dir=str(images_dir), device="cpu")
 
 
-def test_cv2_explicit_tile_size_wins(tmp_path, monkeypatch):
+def test_explicit_tile_size_wins(tmp_path, monkeypatch):
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt = tmp_path / "m.pt"
@@ -501,7 +501,7 @@ def test_cv2_explicit_tile_size_wins(tmp_path, monkeypatch):
     assert r["operating_point"]["tile_size"]["source"] == "explicit"
 
 
-def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch):
+def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch):
     """launch_training runs the training body in a real subprocess, so the effective
     tiling geometry can only be known (and patched into the durable experiment record) once that
     child builds the dataset, after launch_training has already returned. Polls for it instead of
@@ -668,7 +668,7 @@ class _CalStub:
                  "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
 
 
-def test_cv0_default_path_unchanged(tmp_path, monkeypatch):
+def test_default_path_unchanged(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.pipelines.resolution import DEFAULT_CONF
@@ -685,7 +685,7 @@ def test_cv0_default_path_unchanged(tmp_path, monkeypatch):
     assert "sweep_summary" not in r  # provenance shape unchanged on the default path
 
 
-def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
+def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -716,7 +716,7 @@ def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     assert Path(r["sweep_path"]).is_file()
 
 
-def test_cv0_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monkeypatch):
+def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monkeypatch):
     """Two calibrations on the same checkpoint+labels but different predictor-path
     settings must not collide on the sweep artifact filename."""
     import json
@@ -787,7 +787,7 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
     assert sidecar["sweep_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
 
 
-def test_cv0_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
+def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     """Inferencing the same labeled set with a bundle scoped to a different hash flags inheritance and
     refuses to stamp validated=True (validated and shippable_issues stay consistent)."""
     import tcip_mcp.tools.inference_tools as itools
@@ -818,7 +818,7 @@ def test_cv0_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     assert r["validated"] is False  # not shippable under the target actually used
 
 
-def test_cv0_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch):
+def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch):
     """An unlabeled inference target has no GT hash to compare: record it as such and still ship when
     the held-out calibration passed (no validated/shippable_issues contradiction)."""
     import tcip_mcp.tools.inference_tools as itools
@@ -844,7 +844,7 @@ def test_cv0_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypa
     assert r["validated"] is True
 
 
-def test_cv0_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
+def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
     """Regime lock: calibration must run the same tiled predictor path the delivery uses, not an
     untiled model forward, else the conf is validated in a different regime than it ships through."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
@@ -952,7 +952,7 @@ def test_k10_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_der
     assert ts["source"] == "default"  # honestly labeled, not "derived" despite being truthy
 
 
-def test_cv0_export_predictions_validated_from_bundle(tmp_path, monkeypatch):
+def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch):
     import json
     import tcip_mcp.tools.inference_tools as itools
 
@@ -1000,7 +1000,7 @@ def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None
                                   trait="catkin", calibration_labels_dir=str(tmp_path))
 
 
-def test_cv0_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
+def test_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
     captured: dict = {}
     op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
     r = _tabulate_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured)
