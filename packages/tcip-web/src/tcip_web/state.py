@@ -29,7 +29,7 @@ class DatasetSelection(BaseModel):
 
     project_root: Optional[str] = None
     dataset_root: Optional[str] = None
-    subject: Optional[str] = None          # e.g. "catkin"
+    subject: Optional[str] = None          # e.g. "bush"
     date: Optional[str] = None             # e.g. "2-11-26"
     image_list: list[str] = Field(default_factory=list)
     current_image_index: int = 0
@@ -67,13 +67,13 @@ class ReviewFilters(BaseModel):
 
 
 class GuiState(BaseModel):
-    """Complete GUI state — persisted to gui.json and broadcast to browsers.
+    """Complete GUI state, persisted to gui.json and broadcast to browsers.
 
     Only the *backend-authoritative* slice (``dataset``) meaningfully round-trips:
     the browser owns navigation / view / mode / class / review-filter state and
     keeps its own copy (the FE merges snapshots rather than replacing), so those
     fields here are advisory. Training-run / inference-job / class-registry state
-    that used to live here was removed — the corresponding tabs own it directly.
+    that used to live here was removed: the corresponding tabs own it directly.
     """
 
     active_tab: str = "annotate"  # annotate|review|training|tuning|inference|results|meta
@@ -170,7 +170,7 @@ class StateStore:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            # Not in an event loop (e.g. called from a sync test) — flush now
+            # Not in an event loop (e.g. called from a sync test): flush now
             self._flush_sync()
             return
         self._save_task = loop.create_task(self._save_after_debounce())
