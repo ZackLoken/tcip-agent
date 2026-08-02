@@ -4,11 +4,11 @@ A prediction is a candidate FN if its center lies outside all GT bbox expansions
 (no GT within 1.0 * max(w,h) radius of any prediction center). Using center-based
 matching rather than IoU because catkin bboxes are small and thin (this sample
 project's own annotations: characteristic size sqrt(w*h) median ~34px, but width
-and height differ a lot — median width ~17px, median height ~64px) and IoU is
+and height differ a lot (median width ~17px, median height ~64px) and IoU is
 noisy at that scale and aspect ratio.
 
 A GT is a candidate FP if its center is not covered by any low-conf prediction
-expansion — i.e., the model didn't even consider this region a catkin.
+expansion, i.e., the model didn't even consider this region a catkin.
 """
 from __future__ import annotations
 
