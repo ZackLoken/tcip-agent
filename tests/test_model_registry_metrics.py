@@ -1,9 +1,8 @@
-"""L9 — registry metric default (``val_map50``, not the never-present ``mAP``), a clear
-"no model has metric X" vs "no models" distinction, lower-is-better ranking, and registered
-metrics sourced from the checkpoint's own epoch rather than the last training epoch.
-
-K9: ``select_best_model`` no longer defaults to ``val_map50`` (a labeled comparability metric,
-not necessarily what governs a trait's phenotype) — an explicit ``metric`` is required."""
+"""Registry metric default (``val_map50``, not the never-present ``mAP``) is not silently applied:
+``select_best_model`` requires an explicit ``metric``, since ``val_map50`` is a labeled
+comparability metric, not necessarily what governs a trait's phenotype. Also covers the "no model
+has metric X" vs "no models" distinction, lower-is-better ranking, and registered metrics sourced
+from the checkpoint's own epoch rather than the last training epoch."""
 
 
 def test_select_best_model_requires_explicit_metric(tmp_path, monkeypatch):
@@ -26,12 +25,12 @@ def test_select_best_model_requires_explicit_metric(tmp_path, monkeypatch):
     assert res["available_metrics"] == [{"metric": "val_map50", "role": "comparability_only"}]
     assert res["n_models"] == 2
 
-    # An explicit, legitimate metric still succeeds — a rail must admit valid work.
+    # An explicit, legitimate metric still succeeds: a rail must admit valid work.
     res = select_best_model(".", metric="val_map50")
     assert res["name"] == "b"
     assert res["ranking_basis"] == "val_map50"
 
-    # A metric no model carries → a DISTINCT error that lists what's actually available.
+    # A metric no model carries → a distinct error that lists what's actually available.
     res = select_best_model(".", metric="val_map99")
     assert "No registered model has metric" in res["error"]
     assert res["available_metrics"] == [{"metric": "val_map50", "role": "comparability_only"}]
@@ -39,8 +38,8 @@ def test_select_best_model_requires_explicit_metric(tmp_path, monkeypatch):
 
 
 def test_register_model_refuses_nonexistent_checkpoint(tmp_path, monkeypatch):
-    """K11 (F6): register_model must refuse a phantom deliverable, not silently store a
-    null-checksum entry — the shared chokepoint both register_model_from_experiment and
+    """register_model must refuse a phantom deliverable, not silently store a null-checksum
+    entry: the shared chokepoint both register_model_from_experiment and
     model_tools.register_model's explicit mode route through."""
     import pytest as _pytest
     monkeypatch.chdir(tmp_path)
@@ -80,9 +79,9 @@ def test_register_model_sources_metrics_from_checkpoint(tmp_path, monkeypatch):
 
     create_experiment("exp", {"model_source": {"builder": "x:y"}}, data_source="imgs")
     log_metrics("exp", 1, {"val_map50": 0.60})
-    log_metrics("exp", 2, {"val_map50": 0.40})  # last epoch is WORSE (overfit)
+    log_metrics("exp", 2, {"val_map50": 0.40})  # last epoch is worse (overfit)
 
-    # model_best.pt carries the BEST epoch's metrics (epoch 1), not the last row (epoch 2).
+    # model_best.pt carries the best epoch's metrics (epoch 1), not the last row (epoch 2).
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_state_dict": {}, "epoch": 1, "metrics": {"val_map50": 0.60}}, ckpt)
 
