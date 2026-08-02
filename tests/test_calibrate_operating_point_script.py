@@ -1,14 +1,12 @@
-"""Fix J (calibration-pass detection cap) + Fix D (conf-floor threading) in
-``scripts/calibrate_operating_point.py``.
+"""``scripts/calibrate_operating_point.py``'s calibration-pass detection cap and conf-floor threading.
 
-Fix J: the script previously left the in-model detection cap at torchvision's raw default while
-flooring conf to 0.01 for the sweep — a dense calibration image's low-conf tail could be truncated
-before the sweep ever saw it. It now matches the already-safe MCP path (``run_inference`` ->
+The script's in-model detection cap must match the already-safe MCP path (``run_inference`` ->
 ``_calibrate_operating_point``, which passes ``max_dets=DEFAULT_MAX_DETS`` to ``build_predictor``
 before the floor call) exactly: same constant, both entry doors, not two independently-typed caps
-that could silently drift apart.
+that could silently drift apart, since flooring conf to 0.01 for the sweep without also raising the
+cap would truncate a dense calibration image's low-conf tail before the sweep ever saw it.
 
-Fix D: the script threads the floor ``set_detector_operating_point`` actually applied into
+The script also threads the floor ``set_detector_operating_point`` actually applied into
 ``resolve_operating_point`` as ``staged_conf_floor``, not a re-typed ``0.01`` literal.
 """
 
@@ -22,16 +20,15 @@ pytest.importorskip("torch")
 
 
 def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
-    """Behavioral parity, not source-text matching (stage-6 review finding): the original version of
-    this test did ``inspect.getsource`` substring matching (``'max_dets=DEFAULT_MAX_DETS' in
-    script_src``, etc.) — it would stay green on a cosmetic rename of an unrelated variable that
-    happened to share the substring, and would NOT catch two entry doors that independently compute
-    the SAME numeric value through different code (the exact divergent-defaults bug this module's own
-    docstring says the whole ``operating_point`` module exists to prevent). This exercises BOTH real
-    code paths — the script's ``main()`` (via the same monkeypatch approach
+    """Behavioral parity, not source-text matching: substring-matching the script's source
+    (``'max_dets=DEFAULT_MAX_DETS' in script_src``) would stay green on a cosmetic rename of an
+    unrelated variable that happened to share the substring, and would not catch two entry doors
+    that independently compute the same numeric value through different code (the exact
+    divergent-defaults bug this module exists to prevent). This exercises both real
+    code paths: the script's ``main()`` (via the same monkeypatch approach
     ``test_script_threads_applied_floor_and_shared_cap`` above uses) and the MCP door's
     ``run_inference`` (via the same ``build_predictor`` monkeypatch
-    ``test_audit_cv_fixes.py``'s CV0 tests use) — and asserts the ``max_dets`` each one ACTUALLY
+    ``test_audit_cv_fixes.py``'s CV0 tests use), asserting the ``max_dets`` each one actually
     passed to ``build_predictor`` is the identical value, at runtime.
     """
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
@@ -55,7 +52,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
         max_dets_calls.append(max_dets)
         return _Predictor()
 
-    # ONE patch target for BOTH doors — script and inference_tools each do
+    # One patch target for both doors: script and inference_tools each do
     # ``from tcip_mcp.pipelines.inference.predictor import build_predictor`` (a lazy import inside
     # the function body), so patching the defining module's attribute intercepts both calls.
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor", _build_predictor)
@@ -102,7 +99,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
 
     assert len(max_dets_calls) == 2
     script_cap, mcp_cap = max_dets_calls
-    assert script_cap == mcp_cap == DEFAULT_MAX_DETS  # the SAME effective cap, not two literals
+    assert script_cap == mcp_cap == DEFAULT_MAX_DETS  # the same effective cap, not two literals
 
 
 def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
@@ -154,24 +151,24 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images")])
     assert rc == 0
-    # Fix J: the script's build_predictor call carries the shared cap constant, not the framework
+    # The script's build_predictor call carries the shared cap constant, not the framework
     # default (100/300) that would otherwise truncate the 0.01-floored calibration pass.
     assert calls["build_predictor_max_dets"] == DEFAULT_MAX_DETS
-    # Fix D: the applied score_thresh (0.01) is threaded through as staged_conf_floor, not a bare
+    # The applied score_thresh (0.01) is threaded through as staged_conf_floor, not a bare
     # literal re-typed a third time.
     assert calls["resolve_operating_point_kwargs"]["staged_conf_floor"] == pytest.approx(0.01)
-    # K10: this script's own pass (_records) is always untiled (a plain DataLoader, never
-    # predict_tiled) — tiled=False must be stated explicitly, or resolve_operating_point's
+    # This script's own pass (_records) is always untiled (a plain DataLoader, never
+    # predict_tiled); tiled=False must be stated explicitly, or resolve_operating_point's
     # tiled=True default would wrongly gate (or falsely validate) a tile_size dimension that was
     # never actually operative for this untiled calibration pass.
     assert calls["resolve_operating_point_kwargs"]["tiled"] is False
 
 
 def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypatch, tmp_path):
-    """K7 residual (detector-cap censoring): the cap that actually governs the collection pass is
-    set_detector_operating_point's detections_per_img call, which executes AFTER build_predictor's
+    """The cap that actually governs the collection pass is
+    set_detector_operating_point's detections_per_img call, which executes after build_predictor's
     construction-time DEFAULT_MAX_DETS and overrides it. This split's labels are sparse (2 objects
-    per stem) so the density-derived cap floors at 100 — well below DEFAULT_MAX_DETS (1000) — proving
+    per stem) so the density-derived cap floors at 100, well below DEFAULT_MAX_DETS (1000), proving
     the collection pass is no longer capped at the flat constant."""
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
 
@@ -193,7 +190,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
     # Sparse split: 2 objects/stem -> derive_max_dets_from_counts floors at 100, well under
-    # DEFAULT_MAX_DETS (1000) — a real, visible difference from the flat constant.
+    # DEFAULT_MAX_DETS (1000), a real, visible difference from the flat constant.
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s: 2)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
