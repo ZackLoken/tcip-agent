@@ -32,7 +32,7 @@ def _write_registry(root: Path, *subjects: Subject) -> ClassRegistry:
     return registry
 
 
-# (a) a registry decodes its OWN labels after the flip.
+# (a) a registry decodes its own labels after the flip.
 def test_registry_decodes_its_own_labels(tmp_path):
     from tcip_mcp.pipelines.data.datasets import assemble_coco
 
@@ -48,15 +48,15 @@ def test_registry_decodes_its_own_labels(tmp_path):
     id_map = class_registry.assign_class_ids(registry, "catkin")
     coco = assemble_coco(labels_dir, images_dir, subject="catkin", id_map=id_map)
 
-    # The COCO categories ARE the assign_class_ids map, and every emitted annotation decodes back to
-    # the name its label carried — the registry reads its own labels without guessing.
+    # The COCO categories are the assign_class_ids map, and every emitted annotation decodes back to
+    # the name its label carried: the registry reads its own labels without guessing.
     assert {c["name"]: c["id"] for c in coco["categories"]} == id_map
     inv = class_registry.decode_class_ids(id_map)
     assert coco["annotations"], "the labeled image produced no COCO annotation"
     assert all(inv[a["category_id"]] == "catkin" for a in coco["annotations"])
 
 
-# (b) a geometry-less annotation round-trips and its image is NOT collapsed to empty/negative.
+# (b) a geometry-less annotation round-trips and its image is not collapsed to empty/negative.
 def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
     from tcip_mcp.pipelines.data.datasets import assemble_coco
 
@@ -75,7 +75,7 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
     id_map = class_registry.assign_class_ids(registry, "catkin")
     coco = assemble_coco(labels_dir, images_dir, subject="catkin", id_map=id_map)
     # The image is annotated (it carries a subject annotation), so it is present as an image and is
-    # NOT collapsed to an empty negative; the geometry-less label just has no detection target.
+    # not collapsed to an empty negative; the geometry-less label just has no detection target.
     assert [im["file_name"] for im in coco["images"]] == ["img_001.jpg"]
     assert coco["annotations"] == []
 
@@ -104,7 +104,7 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
     assert len(id_map) == ds.num_classes == 1
 
 
-# (d) confirmed_negative_names recovers negatives, AND refuses (not silent-empty) with no subject.
+# (d) confirmed_negative_names recovers negatives and refuses (not silent-empty) with no subject.
 def test_confirmed_negatives_thread_subject_and_refuse_when_unthreaded(tmp_path):
     import json
 
@@ -123,7 +123,7 @@ def test_confirmed_negatives_thread_subject_and_refuse_when_unthreaded(tmp_path)
     # A different subject's bucket is not this subject's negative (scoping holds).
     assert confirmed_negative_names(labels_dir, subject="bush", date="2-11-26") == set()
 
-    # Unthreaded subject with negatives present: REFUSE loudly rather than drop the human's work.
+    # Unthreaded subject with negatives present: refuse loudly rather than drop the human's work.
     with pytest.raises(ValueError):
         confirmed_negative_names(labels_dir, subject=None, date="2-11-26")
 
@@ -164,7 +164,7 @@ def test_decode_inverts_the_recorded_map(tmp_path):
     registry = _write_registry(tmp_path, Subject(name="catkin"))
     id_map = class_registry.assign_class_ids(registry, "catkin")  # the run's single map
 
-    # A prediction with a 1-indexed detector label decodes to its NAME through the RECORDED map.
+    # A prediction with a 1-indexed detector label decodes to its name through the recorded map.
     out = tmp_path / "pred.json"
     write_predictions_json(
         out, {"boxes": [[10, 10, 40, 40]], "scores": [0.9], "labels": [1], "width": 640, "height": 480},
@@ -176,7 +176,7 @@ def test_decode_inverts_the_recorded_map(tmp_path):
     assert preds[0].subject == inv[0] == "catkin"
 
 
-# (g) save_annotations REFUSES a missing subject.
+# (g) save_annotations refuses a missing subject.
 def test_save_annotations_refuses_missing_subject(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -195,7 +195,7 @@ def test_save_annotations_refuses_missing_subject(tmp_path):
 
 
 # (g2) save_annotations prefers points over bbox (aligned with the web converters), so a payload
-# carrying BOTH geometries writes the polygon — never collapsing it to a box-only record (which
+# carrying both geometries writes the polygon, never collapsing it to a box-only record (which
 # would double-count against the polygon's own derived box on the next load).
 def test_save_annotations_prefers_points_over_bbox(tmp_path):
     import json
@@ -220,15 +220,14 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
 
     (ann,) = json_io.read_annotations(str(out))
     assert isinstance(ann.geometry, Polygon)  # the polygon won; not collapsed to a box
-    # "points" is the single-ring input key, wrapped as the one ring it is — a caller with more
+    # "points" is the single-ring input key, wrapped as the one ring it is. A caller with more
     # than one ring (occlusion-split) uses "rings" instead (see test_save_annotations_accepts_rings).
     assert ann.geometry.rings == [[(10.0, 20.0), (110.0, 20.0), (110.0, 220.0)]]
     obj = json.loads(out.read_text())["annotations"][0]
     assert "segmentation" in obj  # written as a polygon (its derived bbox rides along)
 
-    # An EMPTY points list must fall through to bbox (truthy check, matching the web converters), so
-    # a box payload is not silently lost to a degenerate Polygon(rings=[[]]) while the tool reports
-    # success.
+    # An empty points list falls through to bbox (truthy check, matching the web converters) rather
+    # than saving a degenerate Polygon(rings=[[]]) while the tool reports success.
     box_out = tmp_path / "emptypts.json"
     res2 = save_annotations(
         img,
@@ -240,11 +239,10 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path):
     assert isinstance(box_ann.geometry, BBox)  # empty points -> saved as the box, not dropped
 
 
-# (g3) Round-2 stage-6 finding: segment_prompt's own output is multi-ring ({x,y} dict vertices),
-# and save_annotations had no "rings" key at all — an occlusion-split mask accepted from
-# segment_prompt silently saved as a geometry-less annotation. Both ring-vertex shapes this module
-# actually produces ({x,y} dicts from segment_prompt, [x,y] pairs from _ann_dict's read side) must
-# round-trip through the write door.
+# (g3) segment_prompt's own output is multi-ring ({x,y} dict vertices); an occlusion-split mask
+# accepted from it must not silently save as a geometry-less annotation. Both ring-vertex shapes
+# this module produces ({x,y} dicts from segment_prompt, [x,y] pairs from _ann_dict's read side)
+# must round-trip through the write door.
 def test_save_annotations_accepts_rings(tmp_path):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -324,8 +322,8 @@ def test_geometryless_only_image_is_not_a_trainable_stem_on_either_path(tmp_path
     assert stems_direct == stems_coco == ["boxed"]  # the two paths agree; geomless-only is dropped
 
 
-# (i) eval accumulates every per-image record into one COCOeval, so a subject must carry the SAME
-# category id across images — records_from_annotation must honor a passed global name_id, not a
+# (i) eval accumulates every per-image record into one COCOeval, so a subject must carry the same
+# category id across images: records_from_annotation must honor a passed global name_id, not a
 # per-image-local one (a local map pools distinct subjects into one class and corrupts per-class AP).
 def test_records_from_annotation_honors_a_global_name_id():
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
@@ -343,8 +341,8 @@ def test_records_from_annotation_honors_a_global_name_id():
     assert {r["category_id"] for r in rec["dt"]} == {2}
 
 
-# (j) the COCO-assembled loader must match images by their REAL on-disk name, not a case-normalized
-# one — real drone frames use an uppercase .JPG, and matching against a fabricated ".jpg" silently
+# (j) the COCO-assembled loader must match images by their real on-disk name, not a case-normalized
+# one: real drone frames use an uppercase .JPG, and matching against a fabricated ".jpg" silently
 # yields zero boxes (an all-empty training set). (Fails pre-fix only on a case-insensitive FS, where
 # the miscased probe "succeeds"; the real-name match is correct on every platform.)
 def test_uppercase_extension_image_still_yields_boxes(tmp_path):
