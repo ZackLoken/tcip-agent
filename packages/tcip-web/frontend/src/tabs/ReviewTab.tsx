@@ -630,6 +630,17 @@ export function ReviewTab() {
 
   const current = matches?.detections[detectionIdx] ?? null;
 
+  // The class filter's own options: every subject actually present on this image, from the
+  // unfiltered gt/pred lists (matches.detections is already narrowed by the active filters, so it
+  // can't be the source, or picking a class would collapse the list that offers the others).
+  const availableClasses = useMemo(() => {
+    if (!matches) return [];
+    const names = new Set<string>();
+    for (const a of matches.gt) names.add(a.subject);
+    for (const a of matches.preds) names.add(a.subject);
+    return Array.from(names).sort();
+  }, [matches]);
+
   async function recordAction(
     action: "accepted" | "rejected" | "edited",
     edited?: { box?: [number, number, number, number]; polygon?: number[][] },
@@ -763,6 +774,54 @@ export function ReviewTab() {
         .pushToast(
           `Could not record the missed object: ${e instanceof Error ? e.message : String(e)}`,
         );
+      return false;
+    } finally {
+      actionPending.current = false;
+    }
+  }
+
+  // Record an explicit "I checked this image for missed objects and found none" attestation: no
+  // geometry, no gt/pred index, so record_action's _apply_gt_mutation no-ops on GT. Distinct from
+  // recordMissedObject (which always writes a new GT box): this is the case where the sweep itself
+  // is the whole verdict. Backs adjudication coverage the same way a genuine missed-object find
+  // already does (record_detection_action stamps missed_object_attested from having neither index
+  // set, review_calibration.review_to_records folds it into the image's adjudication-covered fact).
+  async function recordSweepAttested(): Promise<boolean> {
+    if (actionPending.current) return false;
+    if (reviewLocked) return false;
+    if (!dataset.project_root || !imgPath || !imgName) return false;
+    actionPending.current = true;
+    try {
+      const res = await api.review.action({
+        project_root: dataset.project_root,
+        image_name: imgName,
+        image_path: imgPath,
+        gt_path: paths.gt,
+        pred_path: paths.pred,
+        det_type: "sweep",
+        class_name: "",
+        conf: null,
+        iou: null,
+        gt_idx: null,
+        pred_idx: null,
+        bbox: [0, 0, matches?.img_width ?? 0, matches?.img_height ?? 0],
+        action: "swept",
+        edited_box: null,
+        edited_points: null,
+        iou_threshold: filters.iou_threshold,
+        conf_threshold: filters.conf_threshold,
+        filter_type: filters.filter_type,
+        filter_class: filters.filter_class,
+        user: useStore.getState().user,
+      });
+      setImageStatus(res.image_status);
+      if (imgName) setReviewImageStatus(imgName, res.image_status);
+      useStore.getState().pushToast("Recorded: no missed objects found on this image.", "info");
+      return true;
+    } catch (e) {
+      useStore
+        .getState()
+        .pushToast(`Could not record the sweep: ${e instanceof Error ? e.message : String(e)}`);
       return false;
     } finally {
       actionPending.current = false;
@@ -1093,6 +1152,9 @@ export function ReviewTab() {
               {filters.filter_type === "all" ? "All types" : filters.filter_type.toUpperCase()}
             </FilterChip>
             <FilterChip>
+              {filters.filter_class === "all" ? "All classes" : filters.filter_class}
+            </FilterChip>
+            <FilterChip>
               {reviewStatus.activeFilter === "all"
                 ? "All images"
                 : reviewStatus.activeFilter === "reviewed"
@@ -1136,7 +1198,7 @@ export function ReviewTab() {
               {/* The reason was tooltip-only, with no visible next step: a breeder who hits
                   "Not yet" needs to see why without hovering, and what to try. */}
               {!validationResult.validated && (
-                <span className="text-[11px] text-tcip-muted max-w-[360px]">
+                <span className="text-[11px] text-tcip-muted max-w-[360px] whitespace-pre-wrap">
                   {validationResult.reason}
                 </span>
               )}
@@ -1157,6 +1219,17 @@ export function ReviewTab() {
             }
           >
             {drawingMiss ? "Cancel drawing" : "＋ Mark missed object"}
+          </button>
+
+          {/* Record the sweep itself as the verdict, for an image where nothing was missed: no box
+              to draw, so "Mark missed object" has nothing to submit. */}
+          <button
+            className="tcip-btn"
+            onClick={() => void recordSweepAttested()}
+            disabled={!imgName || reviewLocked || !!edit || drawingMiss}
+            title="Record that you checked this image for missed objects and found none"
+          >
+            ✓ Confirm: nothing missed
           </button>
 
           <span className="flex-1" />
@@ -1273,6 +1346,21 @@ export function ReviewTab() {
               <option value="tp">TP</option>
               <option value="fp">FP</option>
               <option value="fn">FN</option>
+            </select>
+            <select
+              className="tcip-select"
+              aria-label="Class filter"
+              value={filters.filter_class}
+              disabled={!!edit}
+              title="Show only detections of one class, or all classes"
+              onChange={(e) => patchGui({ review: { ...filters, filter_class: e.target.value } })}
+            >
+              <option value="all">All classes</option>
+              {availableClasses.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
             </select>
             <select
               className="tcip-select"
