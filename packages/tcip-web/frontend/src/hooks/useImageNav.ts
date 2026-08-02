@@ -1,7 +1,7 @@
 /**
  * Single source of truth for image navigation. Arrow keys, the TopBar Prev/Next +
- * jump counter, and the Review tab's image nav all go through this so they share ONE
- * traversal order that honors the status filter — previously arrows walked the filtered
+ * jump counter, and the Review tab's image nav all go through this so they share one
+ * traversal order that honors the status filter: previously arrows walked the filtered
  * list while TopBar/jump walked raw indices with an unfiltered denominator (three
  * controls, three orders). The pure helpers are exported for unit testing.
  */
@@ -13,7 +13,7 @@ import { useStore } from "@/store";
 
 // Debounce the backend nav sync: rapid arrow-key traversal patches local state on every
 // step but only persists the settled position (which view_gui_state reads). Fire-and-
-// forget — a dropped sync just leaves gui.json one image stale until the next move.
+// forget: a dropped sync just leaves gui.json one image stale until the next move.
 let navSyncTimer: ReturnType<typeof setTimeout> | null = null;
 function syncNavIndex(index: number): void {
   if (navSyncTimer !== null) clearTimeout(navSyncTimer);
@@ -25,8 +25,8 @@ function syncNavIndex(index: number): void {
 
 /** Indices of images that match the active status filter (all indices when "all"), further
  *  narrowed by `isNavigable` when supplied (the Review tab skips images with zero detections).
- *  `order` (K23), when supplied, replaces `imageList`'s own positional order as the traversal
- *  order — e.g. an active-learning priority ranking — while the same filter/isNavigable
+ *  `order`, when supplied, replaces `imageList`'s own positional order as the traversal
+ *  order (e.g. an active-learning priority ranking) while the same filter/isNavigable
  *  predicates still apply on top of it. Omitted, traversal is positional exactly as before. */
 export function computeFilteredIndices(
   imageList: string[],
@@ -76,8 +76,8 @@ export function jumpTarget(indices: number[], oneBased: number): number | null {
 
 /** Per-tab overrides. The Annotate tab (default) filters by annotation status from the store;
  *  the Review tab passes its own image-level review-status map + filter and an `isNavigable`
- *  predicate that skips images with nothing to review. `order` (K23) is an explicit traversal
- *  order (indices into `image_list`) — e.g. an active-learning priority ranking — in place of
+ *  predicate that skips images with nothing to review. `order` is an explicit traversal
+ *  order (indices into `image_list`, e.g. an active-learning priority ranking) in place of
  *  positional order. */
 export interface ImageNavOptions {
   byImage?: Record<string, string>;
@@ -140,7 +140,7 @@ export function useImageNav(options?: ImageNavOptions) {
 
   const total = filteredIndices.length;
   // 1-based position of the current image within the filtered list; 0 if it isn't a
-  // member (transient — e.g. right after changing the filter; stepping re-enters).
+  // member (transient, e.g. right after changing the filter; stepping re-enters).
   const position = filteredIndices.indexOf(currentIndex) + 1;
 
   return {
