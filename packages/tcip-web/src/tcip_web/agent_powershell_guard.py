@@ -1,20 +1,20 @@
-"""PreToolUse PowerShell guard for the FENCED in-app agent terminal.
+"""PreToolUse PowerShell guard for the fenced in-app agent terminal.
 
 The sibling ``agent_bash_guard.py`` guards the Bash tool, but on Windows the fenced agent
-also has a **PowerShell** tool — and it was entirely ungoverned (no deny rule, no hook), so
+also has a PowerShell tool, and it was entirely ungoverned (no deny rule, no hook), so
 an agent could sidestep the whole fence with ``Set-Content packages\\...`` or ``Remove-Item``.
-A real in-app session did exactly that ("switch to PowerShell — no such hook"). This hook
+A real in-app session did exactly that ("switch to PowerShell, no such hook"). This hook
 closes that bypass by mirroring the Bash guard for PowerShell.
 
-Honest scope (unchanged): a guardrail, not a sandbox. It closes the *direct* bypasses —
-full cmdlets AND their aliases (``sc``/``ri``/…), inline/encoded execution, and writing the
-fence's own files — but a determined agent can still evade a string matcher, most notably by
+Honest scope (unchanged): a guardrail, not a sandbox. It closes the *direct* bypasses:
+full cmdlets and their aliases (``sc``/``ri``/…), inline/encoded execution, and writing the
+fence's own files, but a determined agent can still evade a string matcher, most notably by
 ``cd``-ing into a protected directory and writing a *relative* path (the guard is stateless
 and cwd-blind), or by assembling a path from fragments. Those residuals are accepted; real
 isolation is a sandbox (the platform's stated next step). The point here is to stop
 accidental/casual mutation and every *trivial* deliberate bypass.
 
-Stdlib only. It only ever DENIES; anything it can't classify falls through to the normal
+Stdlib only. It only ever denies; anything it can't classify falls through to the normal
 permission flow (a bug here fails open to prompting, never to a broken terminal).
 """
 
@@ -26,8 +26,8 @@ import sys
 
 # Repo-internal paths the fenced agent must never write to. Mirrors the Bash guard's
 # ``_PROTECTED`` (kept in sync by ``test_agent_fence.py``), accepting a leading backslash too
-# since PowerShell paths use ``\``. The fence's OWN files are included by basename so that
-# writing/deleting them is blocked even via a relative path after a ``cd`` — that is the
+# since PowerShell paths use ``\``. The fence's own files are included by basename so that
+# writing/deleting them is blocked even via a relative path after a ``cd``, the
 # self-modification chain that would otherwise permanently disable the guard. Case-insensitive.
 _PROTECTED = re.compile(
     r"(?:^|[\s/\\'\"])(?:packages|tests|scripts|\.github|\.claude)\b"
@@ -37,12 +37,12 @@ _PROTECTED = re.compile(
     re.IGNORECASE,
 )
 
-# Start of a statement / pipeline segment — where an invoked verb (or its alias) appears.
+# Start of a statement / pipeline segment: where an invoked verb (or its alias) appears.
 # Anchoring the short aliases here stops them false-matching a bareword buried in an argument
 # (e.g. ``Get-Content del-notes.txt`` must not read as the ``del`` alias).
 _STMT = r"(?:^|[\n;|&(){}]\s*)"
 
-# Write / create cmdlets and .NET writers — matched anywhere (the full names are unambiguous).
+# Write / create cmdlets and .NET writers, matched anywhere (the full names are unambiguous).
 # Only bites when paired with a protected path (see main()).
 _WRITE_OP = re.compile(
     r"\bTee-Object\b"
@@ -54,13 +54,13 @@ _WRITE_OP = re.compile(
     r"|\bStreamWriter\b",
     re.IGNORECASE,
 )
-# Write / create cmdlet ALIASES — anchored to statement position (see _STMT).
+# Write / create cmdlet aliases, anchored to statement position (see _STMT).
 _WRITE_ALIAS = re.compile(
     _STMT + r"(?:sc|ac|clc|ni|cpi|cp|copy|mi|mv|move|rni|ren|sp|spi)\b",
     re.IGNORECASE,
 )
 
-# Deletes — blocked unconditionally, mirroring the Bash fence's blanket ``Bash(rm:*)`` /
+# Deletes: blocked unconditionally, mirroring the Bash fence's blanket ``Bash(rm:*)`` /
 # ``Bash(rmdir:*)`` deny: the agent mutates data through audited MCP tools, not raw shell
 # deletion (of platform code OR of a breeder's labels).
 _DELETE_OP = re.compile(
@@ -69,7 +69,7 @@ _DELETE_OP = re.compile(
 )
 _DELETE_ALIAS = re.compile(_STMT + r"(?:ri|rm|rmdir|rd|del|erase)\b", re.IGNORECASE)
 
-# Inline / arbitrary code execution — blocked unconditionally. Covers Invoke-Expression, a
+# Inline / arbitrary code execution: blocked unconditionally. Covers Invoke-Expression, a
 # spawned interpreter (``python -c``…), and a nested shell (``powershell -EncodedCommand``,
 # ``pwsh -Command``, ``cmd /c``) whose payload the guard can't see through.
 _INLINE_INTERP = re.compile(
@@ -80,7 +80,7 @@ _INLINE_INTERP = re.compile(
     re.IGNORECASE,
 )
 
-# Dangerous git — blocked unconditionally, mirroring the Bash fence deny of
+# Dangerous git: blocked unconditionally, mirroring the Bash fence deny of
 # ``git push/commit/reset/checkout/clean``. Anchored to the subcommand right after ``git`` so
 # a benign ``git log --grep="reset"`` isn't caught (same scope as the Bash prefix deny).
 _GIT_DANGER = re.compile(
@@ -90,14 +90,14 @@ _GIT_DANGER = re.compile(
 
 
 # PowerShell file redirect (``>``, ``>>``, ``2>``, ``*>``…). ``2>&1`` / ``*>&1`` merge streams
-# (no file) and are excluded by ``(?!&)`` — so ``… 2>&1`` / ``… 2>$null`` on a read-only command
+# (no file) and are excluded by ``(?!&)``, so ``… 2>&1`` / ``… 2>$null`` on a read-only command
 # no longer counts as a write into a protected token the line merely names.
 _REDIRECT = re.compile(r"\d*>>?(?!&)\s*(?P<target>[^\s;|&<>()]+)")
 
-# A write target that names a breeder's annotation/label/prediction state — denied regardless of
+# A write target that names a breeder's annotation/label/prediction state, denied regardless of
 # whether the file exists yet, mirroring the Bash guard's ``_BREEDER_DATA_TARGET``. This guard was
 # unconditional on delete (see ``_DELETE_OP``/``_DELETE_ALIAS`` above) but had no equivalent for
-# truncate/overwrite (``Clear-Content``, ``Set-Content``, a redirect) into the same paths — a
+# truncate/overwrite (``Clear-Content``, ``Set-Content``, a redirect) into the same paths: a
 # zero-byte label is not a negative without an explicit Complete, so silently emptying one is the
 # same harm as deleting it. Stateless/cwd-blind like the rest of this guard, so this is a path-shape
 # check, not an existence check.
@@ -105,7 +105,7 @@ _BREEDER_DATA_TARGET = re.compile(
     r"(?:^|[/\\])(?:annotations|labels|predictions)[/\\]|image_status\.json\b",
     re.IGNORECASE,
 )
-# Write ops for the breeder-data check specifically — deliberately excludes Copy-Item/cpi/cp/copy
+# Write ops for the breeder-data check specifically: deliberately excludes Copy-Item/cpi/cp/copy
 # and [IO.File]::Copy: this guard is stateless and can't tell a two-argument cmdlet's source from
 # its destination, so "_WRITE_OP and _BREEDER_DATA_TARGET anywhere in the command" would deny a
 # legitimate copy/backup of a breeder file to elsewhere, not just a copy into one. Move/Rename still
@@ -132,15 +132,15 @@ def _redirect_targets(cmd: str) -> list[str]:
 
 
 _PROTECTED_WRITE_MSG = (
-    "Writing into platform internals via PowerShell is blocked — the agent edits projects, not "
+    "Writing into platform internals via PowerShell is blocked, the agent edits projects, not "
     "platform code. If this was a read-only diagnostic that got mis-flagged (e.g. "
     "`python scripts/doctor.py <root>`), that's a fence false-positive: file it with the "
     "claude_reports tool (category unexpected_behavior; include the exact command) so the fence "
-    "can be fixed — do not route around it by editing platform files."
+    "can be fixed, do not route around it by editing platform files."
 )
 _BREEDER_DATA_WRITE_MSG = (
     "Writing or truncating a breeder's annotation, label, or prediction data via the shell is "
-    "blocked — the agent mutates data through the audited TCIP tools."
+    "blocked, the agent mutates data through the audited TCIP tools."
 )
 
 
@@ -157,7 +157,7 @@ def _deny(reason: str) -> None:
         )
     )
     # Exit 2 as well: some Claude Code versions gate on the exit code, others on the JSON
-    # decision — emitting both makes the block robust across versions.
+    # decision, emitting both makes the block robust across versions.
     sys.exit(2)
 
 
@@ -171,11 +171,11 @@ def main() -> None:
         sys.exit(0)
 
     if _INLINE_INTERP.search(cmd):
-        _deny("Inline / nested / arbitrary code execution is blocked in the agent terminal — use the TCIP tools.")
+        _deny("Inline / nested / arbitrary code execution is blocked in the agent terminal, use the TCIP tools.")
     if _GIT_DANGER.search(cmd):
         _deny("Dangerous git (push/commit/reset/checkout/clean) is blocked in the agent terminal.")
     if _DELETE_OP.search(cmd) or _DELETE_ALIAS.search(cmd):
-        _deny("File deletion via the shell is blocked — the agent mutates data through the audited TCIP tools.")
+        _deny("File deletion via the shell is blocked, the agent mutates data through the audited TCIP tools.")
     if any(_BREEDER_DATA_TARGET.search(t) for t in _redirect_targets(cmd)):
         _deny(_BREEDER_DATA_WRITE_MSG)
     if (_BREEDER_DATA_WRITE_OP.search(cmd) or _BREEDER_DATA_WRITE_ALIAS.search(cmd)) \
