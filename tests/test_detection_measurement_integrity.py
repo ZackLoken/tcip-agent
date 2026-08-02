@@ -242,7 +242,7 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
     # This stub carries no persisted training tile geometry, so the delivery-grade
     # gate now refuses unless the caller states the geometry explicitly (the affordance a rail must
-    # admit; see test_k10_gate_refuses_unresolvable_tile_geometry for the refusal itself).
+    # admit; see test_gate_refuses_unresolvable_tile_geometry for the refusal itself).
     r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"),
                                   subject="catkin", tile_size=64, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
@@ -251,7 +251,7 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     assert Path(r["results_path"]).is_file()
 
 
-def test_k18_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
+def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
     """run_full_frame_evaluation must not let a bare `except Exception` around
     _resolve_registry_id_map swallow an attribute-classification registry refusal and silently
     score against zero ground truth instead of refusing. An attribute needs a real classes.json
@@ -356,7 +356,7 @@ def test_foreign_checkpoint_falls_back_to_default_with_warning(tmp_path, monkeyp
 # rather than silently defaulting when nothing can be resolved.
 # ======================================================================
 
-def test_k10_gate_refuses_unresolvable_tile_geometry(tmp_path):
+def test_gate_refuses_unresolvable_tile_geometry(tmp_path):
     """A checkpoint with no persisted tiling and no explicit override must refuse the delivery
     gate rather than silently score it at a fabricated 640/0.2, on the path the docstring calls
     "the number that gates a phenotype delivery"."""
@@ -386,7 +386,7 @@ def test_k10_gate_refuses_unresolvable_tile_geometry(tmp_path):
         predictor_mod.build_predictor = predictor_mod_build
 
 
-def test_k10_gate_derives_tile_geometry_from_checkpoint(tmp_path):
+def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     """The checkpoint's own persisted training geometry (already sitting on the predictor object)
     governs the gate instead of a pinned 640/0.2, avoiding a scale mismatch (~2.9x for this
     checkpoint) between the geometry the gate assumes and the geometry the model was trained at."""
@@ -428,7 +428,7 @@ def test_k10_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
 
 
-def test_k18_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, monkeypatch):
+def test_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, monkeypatch):
     """An attribute-scoped run against a dataset with no classes.json
     must not crash: write_predictions_json already documents id_map=None as an accepted, honest
     degraded fallback ("the raw 0-indexed id is used as the name... never a re-derivation"). The
@@ -459,7 +459,7 @@ def test_k18_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, m
     assert r["image_count"] == 1  # the completed detection work was not discarded
 
 
-def test_k18_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch):
+def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch):
     """The precondition check (resolved_classes_path) only short-circuits the legitimate
     no-registry case: a classes.json that exists but is corrupted is a real, unexpected failure
     and must still raise loudly, not be silently absorbed by the same precondition that admits
@@ -903,7 +903,7 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
     assert len({c["overlap"] for c in calls}) == 1
 
 
-def test_k10_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_derived(
+def test_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_derived(
         tmp_path, monkeypatch):
     """resolve_operating_point must not infer
     "derived" from mere truthiness of tile_size: a checkpoint with no persisted geometry, whose
