@@ -1,4 +1,4 @@
-"""generic_trainer unit tests — run-id uniqueness, seed defaulting, terminal
+"""generic_trainer unit tests: run-id uniqueness, seed defaulting, terminal
 status on setup failure, and atomic checkpoint writes."""
 
 import threading
@@ -16,7 +16,7 @@ from tcip_mcp.pipelines.training.generic_trainer import (
 
 
 # ====================================================================
-# create_run — run-id uniqueness (same-second and cross-thread)
+# create_run: run-id uniqueness (same-second and cross-thread)
 # ====================================================================
 
 def test_create_run_ids_unique_within_one_second():
@@ -50,7 +50,7 @@ def test_create_run_ids_unique_across_threads():
 
 
 # ====================================================================
-# create_run — reproducibility: every run gets a recorded seed
+# create_run: reproducibility, every run gets a recorded seed
 # ====================================================================
 
 def test_create_run_draws_and_records_seed_when_unset():
@@ -97,7 +97,7 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
 
 
 # ====================================================================
-# train — setup failures must reach a terminal status, never strand "running"
+# train: setup failures must reach a terminal status, never strand "running"
 # ====================================================================
 
 def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
@@ -114,7 +114,7 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
 
 
 # ====================================================================
-# _atomic_torch_save — durable, torn-read-free checkpoint writes
+# _atomic_torch_save: durable, torn-read-free checkpoint writes
 # ====================================================================
 
 def test_atomic_torch_save_roundtrips_and_leaves_no_tmp(tmp_path):
