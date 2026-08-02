@@ -1,9 +1,9 @@
 """Sensor-agnostic band-group correlation (``pipelines.data.band_groups``).
 
 Real DJI sample data (16 captures x G/NIR/R/RE single-band GeoTIFFs, embedded XMP) is used
-directly for the detection tests — grounded against real data, never mutated in place, always
+directly for the detection tests, grounded against real data, never mutated in place, always
 copied into ``tmp_path`` first. The synthetic fixtures below build minimal TIFFs with the same
-real XMP tag shape (attribute AND nested-element forms, both present in the real files) to
+real XMP tag shape (attribute and nested-element forms, both present in the real files) to
 exercise the strategies' edge cases the 16-capture sample doesn't happen to hit (a duplicate band
 identity, a sensor with no embedded metadata at all).
 """
@@ -28,7 +28,7 @@ requires_real_dji_data = pytest.mark.skipif(
 
 def _xmp(capture_uuid: str, band_name: str, wavelength: float) -> bytes:
     """A minimal XMP packet in the real DJI shape: ``drone-dji:CaptureUUID`` as an XML
-    attribute, ``Camera:BandName``/``Camera:CentralWavelength`` as nested elements — both shapes
+    attribute, ``Camera:BandName``/``Camera:CentralWavelength`` as nested elements: both shapes
     are present in the real files, so the reader has to understand both."""
     xmp = (
         '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
@@ -59,7 +59,7 @@ def _write_band_file(path: Path, capture_uuid: str, band_name: str, wavelength: 
 def _xmp_with_identity(capture_uuid: str, band_name: str, wavelength: float, *,
                       utc: str, lat: float, lon: float) -> bytes:
     """As :func:`_xmp`, plus the secondary identity tags (timestamp + GPS fix) real DJI files
-    carry — needed to exercise the identity-disagreement guard, which the bare :func:`_xmp` shape
+    carry, needed to exercise the identity-disagreement guard, which the bare :func:`_xmp` shape
     (no identity tags at all) can never trigger (every check is skipped when its tag is absent)."""
     xmp = (
         '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
@@ -152,7 +152,7 @@ def test_real_data_detection_is_idempotent(dji_copy):
 @requires_real_dji_data
 def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
     """Deleting a stem's .bandgroup is the one recovery path for a manifest whose sibling was
-    since deleted — the next detection pass sees the survivors as ungrouped again."""
+    since deleted; the next detection pass sees the survivors as ungrouped again."""
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, detect_and_write_band_groups
     from tcip_mcp.pipelines.image_utils import resolve_image_source
 
@@ -166,8 +166,8 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
 
     manifest_path.unlink()
     redo = detect_and_write_band_groups(dji_copy)
-    # The 3 surviving siblings still share a CaptureUUID, so they re-form under the SAME
-    # canonical stem — now a 3-band group, since the deleted G file is gone for good.
+    # The 3 surviving siblings still share a CaptureUUID, so they re-form under the same
+    # canonical stem, now a 3-band group, since the deleted G file is gone for good.
     reformed = {g["stem"]: g for g in redo["formed"]}
     assert stem in reformed
     assert sorted(reformed[stem]["bands"]) == ["NIR", "Red", "RedEdge"]
@@ -175,12 +175,12 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
     assert sorted(ref.bands) == ["NIR", "Red", "RedEdge"]
 
 
-# ── duplicate-band-identity guard (synthetic — the real sample never hits this case) ──────
+# ── duplicate-band-identity guard (synthetic, the real sample never hits this case) ──────
 
 
 def test_duplicate_band_identity_is_refused_not_silently_overwritten(tmp_path):
     """Uses agreeing identity tags on all three files so this isolates the duplicate-band-name
-    guard specifically — without them, the newer "no secondary signal at all" guard would refuse
+    guard specifically; without them, the newer "no secondary signal at all" guard would refuse
     the group first, for a different reason than the one this test pins."""
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
@@ -206,13 +206,13 @@ def test_duplicate_band_identity_is_refused_not_silently_overwritten(tmp_path):
     assert not list(d.glob("*.bandgroup"))
 
 
-# ── identity-disagreement guard (stage-6 review finding 2) ─────────────────────────────
+# ── identity-disagreement guard ─────────────────────────────
 
 
 def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(tmp_path):
-    """The reviewer's own live reproduction: two disjoint-band-name captures (A_G/A_NIR,
-    B_R/B_RE) sharing one fabricated group id, with disagreeing timestamp+GPS, must be refused —
-    not silently merged into one confident, wrong 4-band composite."""
+    """Two disjoint-band-name captures (A_G/A_NIR, B_R/B_RE) sharing one fabricated group id,
+    with disagreeing timestamp+GPS, must be refused, not silently merged into one confident,
+    wrong 4-band composite."""
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
     d = tmp_path / "images"
@@ -227,7 +227,7 @@ def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(tmp_p
         d / "A_NIR.tif", same_gid, "NIR", 860,
         utc="2023-05-23T17:06:28.931804", lat=43.196946275, lon=-90.058003629,
     )
-    # Capture B: a different place and time entirely, but the SAME (colliding/reused) group id.
+    # Capture B: a different place and time entirely, but the same (colliding/reused) group id.
     _write_band_file_with_identity(
         d / "B_R.tif", same_gid, "Red", 650,
         utc="2023-05-23T17:08:17.691590", lat=43.197026713, lon=-90.051619588,
@@ -250,9 +250,9 @@ def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(tmp_p
 
 
 def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(tmp_path):
-    """Round-2 stage-6 review finding: a group id match with every identity-check tag simply
-    ABSENT (not disagreeing — never recorded) must refuse too, not silently accept. An unconfirmed
-    match is exactly as unproven as a disagreeing one."""
+    """A group id match with every identity-check tag absent (not disagreeing, never recorded)
+    must refuse too, not silently accept: an unconfirmed match is exactly as unproven as a
+    disagreeing one."""
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
     d = tmp_path / "images"
@@ -273,7 +273,7 @@ def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(tmp_path
 
 
 def test_a_genuine_capture_with_identity_tags_still_forms_normally(tmp_path):
-    """A rail must admit valid work: 4 files sharing a group id AND agreeing timestamp/GPS (a
+    """A rail must admit valid work: 4 files sharing a group id and agreeing timestamp/GPS (a
     real single capture) must still form, not be caught by the new guard."""
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
@@ -297,7 +297,7 @@ def test_a_genuine_capture_with_identity_tags_still_forms_normally(tmp_path):
 
 def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):
     """Refuse, don't guess: a file with no embedded correlation metadata and no explicit
-    manifest stays exactly as independent as it is today — no filename-pattern fallback."""
+    manifest stays exactly as independent as it is today; no filename-pattern fallback."""
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
     d = tmp_path / "images"
@@ -375,7 +375,7 @@ def test_manifest_round_trip(tmp_path):
         central_wavelength_nm={"Red": 650.0, "Blue": 470.0}, source="explicit-manifest",
     )
     assert manifest_path == d / "cap42.bandgroup"
-    # Path.stem recovers the canonical stem directly — the whole reason .bandgroup was chosen
+    # Path.stem recovers the canonical stem directly: the whole reason .bandgroup was chosen
     # over a compound ".bandset.json"-style suffix.
     assert manifest_path.stem == "cap42"
 
