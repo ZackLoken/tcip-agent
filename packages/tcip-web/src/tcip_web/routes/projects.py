@@ -3,7 +3,7 @@
 The front door: instead of browsing the filesystem for a project root and a dataset
 root, the GUI lists the projects the agent built under the workspace
 (``TCIP_WORKSPACE``, default ``~/tcip-projects/``) and opens one. The workspace and the
-active-project marker are resolved through :mod:`tcip_mcp.workspace` — the single source
+active-project marker are resolved through :mod:`tcip_mcp.workspace`: the single source
 of truth shared with the ``ingest_images`` tool and the ``set_active_project`` tool, so a
 project the agent creates is exactly the project this route lists.
 
@@ -36,7 +36,7 @@ class ProjectSummary(BaseModel):
     models: list[str]
     # Per-date availability: which subjects actually have labels / which models actually
     # have predictions on each date. The subject/model pickers filter to these so a date
-    # with no catkin labels doesn't offer "catkin" (which would open an empty canvas).
+    # with no labels for a subject doesn't offer it (which would open an empty canvas).
     subjects_by_date: dict[str, list[str]]
     models_by_date: dict[str, list[str]]
     image_count: int
@@ -104,7 +104,7 @@ def get_active_project() -> ActiveProject:
     except ValueError:
         return ActiveProject()
     if not (path / ".tcip").is_dir():
-        # Marker points at a project that no longer exists — report unset.
+        # Marker points at a project that no longer exists: report unset.
         return ActiveProject()
     return ActiveProject(name=name, path=str(path))
 
