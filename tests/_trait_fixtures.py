@@ -1,11 +1,11 @@
-"""Shared test-only trait fixture (K5/K6/round-10).
+"""Shared test-only trait fixture.
 
 ``CATKIN`` used to be a hardcoded builtin in ``tcip_mcp.traits`` that every trait-consuming test
-imported directly. There are no built-ins anymore (2026-07-29) — every trait, including the real
+imported directly. There are no built-ins anymore; every trait, including the real
 catkin, is authored as a per-project ``.tcip/state/trait_specs/*.yml`` file, so it is registered
 only where that file actually exists. This module is that same value, reconstructed locally so the
 existing test suite keeps exercising trait-consuming code paths without depending on any specific
-project's config being present. It is a plain local ``TraitSpec`` literal, not a registered trait —
+project's config being present. It is a plain local ``TraitSpec`` literal, not a registered trait:
 config-loaded specs are rebuilt fresh on every ``get_trait()`` call, never module-load singletons
 (see ``traits.py``), so nothing here should ever be compared by identity against one.
 """
