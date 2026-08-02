@@ -79,7 +79,7 @@ def _assert_trained(run, output_dir: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# Box-style tasks (detection, instance_seg) — torchvision detector path
+# Box-style tasks (detection, instance_seg): torchvision detector path
 # --------------------------------------------------------------------------
 
 def test_detection_e2e(tmp_path: Path):
@@ -141,7 +141,7 @@ def test_instance_seg_e2e(tmp_path: Path):
 
 
 # --------------------------------------------------------------------------
-# Dense / scalar tasks (semantic_seg, ordinal, regression) — stack-collate path
+# Dense / scalar tasks (semantic_seg, ordinal, regression): stack-collate path
 # --------------------------------------------------------------------------
 
 def test_semantic_seg_e2e(tmp_path: Path):
