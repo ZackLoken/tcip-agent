@@ -1,9 +1,9 @@
-"""Dedicated coverage for the gate conditions in ``resolve_operating_point``:
-Fix B (dispersion + localization-quality floor), Fix C (reference-sufficiency + equivalence
-criterion), Fix E (pick-then-label + registry-driven objective), Fix F (exact-conf holdout
-evaluation, not a nearest-neighbor snap), Fix K (cap-saturation provenance, non-gating), and the
-named-failure architecture. Plus the mandatory end-to-end integration fixture (a realistic dense
-catkin reference reaching ``VALIDATED_HELD_OUT`` with every fix applied together).
+"""Coverage for the gate conditions in ``resolve_operating_point``: dispersion and
+localization-quality floors, reference-sufficiency and equivalence criteria, pick-then-label plus
+registry-driven objective, exact-conf holdout evaluation (not a nearest-neighbor snap),
+cap-saturation provenance (non-gating), and the named-failure architecture. Plus an end-to-end
+integration fixture: a realistic dense catkin reference reaching ``VALIDATED_HELD_OUT`` with every
+gate applied together.
 """
 
 from __future__ import annotations
@@ -22,9 +22,8 @@ from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED  # noqa: E4
 from tcip_mcp.traits import COUNT_UNBIASED, DETECTION_F1, PRESENCE, TraitSpec  # noqa: E402
 from tests._trait_fixtures import CATKIN  # noqa: E402
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so resolve_operating_point("catkin", ...) keeps
-# resolving by default.
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
+# test's pinned project root so resolve_operating_point("catkin", ...) keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
@@ -36,10 +35,11 @@ def _ann(cx, cy, cid=0, score=None):
 
 
 def _records(idp="c", *, shift: float = 0.0):
-    """The small (2-image) sparse fixture — count-unbiased conf 0.6, real per-image variance
-    ([+1, -1] bias at that conf). Deliberately reused here, NOT as a "must validate" fixture (Fix C
-    now correctly refuses it — see test_n_equals_2 below) but to exercise the reference-sufficiency
-    checks precisely, where its small size and known bias distribution are exactly the point.
+    """The small (2-image) sparse fixture: count-unbiased conf 0.6, real per-image variance
+    ([+1, -1] bias at that conf). Reused here, not as a fixture that must validate (the equivalence
+    criterion correctly refuses it, see test_n_equals_2 below), but to exercise the
+    reference-sufficiency checks precisely, where its small size and known bias distribution are
+    exactly the point.
     """
     a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
          "gt": [_ann(100 + shift, 100)],
@@ -50,31 +50,31 @@ def _records(idp="c", *, shift: float = 0.0):
     return [a, b]
 
 
-# ── Fix F: exact-conf holdout evaluation, not a nearest-neighbor snap ──────
+# ── Exact-conf holdout evaluation, not a nearest-neighbor snap ─────────────
 #
-# Every OTHER holdout fixture in this cluster gives the holdout its own detection scores drawn from
+# Every other holdout fixture in this module gives the holdout its own detection scores drawn from
 # the same set calibration used, so the holdout's own auto-built conf grid (``sweep_operating_point``
-# with no explicit ``conf_grid``) already CONTAINS the calibration-picked conf exactly — meaning the
+# with no explicit ``conf_grid``) already contains the calibration-picked conf exactly, meaning the
 # deleted nearest-neighbor snap (``count_bias_at``, no longer a symbol anywhere; reconstructed below
 # as ``_old_nearest_neighbor_bias`` to prove the two approaches differ) and the current exact-conf
 # call (``sweep_operating_point(holdout_records, conf_grid=[conf])``) would land on the identical
-# curve point in every one of those tests. These two fixtures instead give the holdout a SPARSE
+# curve point in every one of those tests. These two fixtures instead give the holdout a sparse
 # detection-score set that deliberately excludes the calibration-picked conf (0.9), so the nearest
-# grid point the OLD snap would have found is a genuinely different threshold with genuinely
-# different tp/fp/fn — the exact scenario Fix F's redesign exists to close.
+# grid point the old snap would have found is a genuinely different threshold with genuinely
+# different tp/fp/fn: the scenario this exact-conf evaluation exists to catch.
 
 def _cal_picks_conf_point_nine():
     """20-image dense calibration reference whose count-unbiased pick is exactly 0.9 (one low-conf
-    spurious detection per image, filtered out once conf crosses its 0.05 score) — the same
-    established pattern ``test_operating_point.py``'s ``_good_cal_holdout`` uses."""
+    spurious detection per image, filtered out once conf crosses its 0.05 score), the same
+    pattern ``test_operating_point.py``'s ``_good_cal_holdout`` uses."""
     n, obj = 20, 80
     return dense_records(n_images=n, objects_per_image=obj, id_prefix="c",
                          miss_pattern=[0] * n, fp_pattern=[1] * n, score=0.9, fp_score=0.05)
 
 
 def _old_nearest_neighbor_bias(holdout_records, tolerance, conf):
-    """Reconstruction of the deleted ``count_bias_at`` — the curve entry NEAREST ``conf`` on the
-    holdout's OWN auto-built grid, not an exact evaluation at ``conf`` itself."""
+    """Reconstruction of the deleted ``count_bias_at``: the curve entry nearest ``conf`` on the
+    holdout's own auto-built grid, not an exact evaluation at ``conf`` itself."""
     from tcip_mcp.pipelines.training.evaluation import sweep_operating_point
 
     sweep = sweep_operating_point(holdout_records, tolerance=tolerance)
@@ -82,13 +82,13 @@ def _old_nearest_neighbor_bias(holdout_records, tolerance, conf):
 
 
 def test_exact_conf_eval_catches_a_catastrophic_bias_the_old_snap_would_have_missed():
-    """Direction 1: the old snap would have MISLED — reading a validated-looking zero bias off a
+    """Direction 1: the old snap would have misled, reading a validated-looking zero bias off a
     holdout whose true bias, at the conf that will actually ship, is catastrophic.
 
     Holdout detections all score 0.05 (well below the calibration-picked 0.9) with zero false
-    positives. Evaluated EXACTLY at 0.9, every detection is filtered out -> total miss, bias -80/image
+    positives. Evaluated exactly at 0.9, every detection is filtered out -> total miss, bias -80/image
     (80 objects/image). The old snap, with no holdout score anywhere near 0.9, would find its own
-    grid's NEAREST point at 0.05 (closer to 0.9 than the grid's other point, 0.0) -- at which every
+    grid's nearest point at 0.05 (closer to 0.9 than the grid's other point, 0.0) -- at which every
     detection survives and the bias reads as a perfect 0.0.
     """
     from tcip_mcp.pipelines.training.evaluation import gt_class_avg_size
@@ -116,13 +116,13 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_the_old_snap_would_have_mis
 
 
 def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_failed():
-    """Direction 2 (the design's other required case): the old snap would have unfairly REFUSED a
-    reference the exact evaluation correctly admits.
+    """Direction 2: the old snap would have unfairly refused a reference the exact evaluation
+    correctly admits.
 
     Holdout true-match detections score 0.99 (above 0.9); its false positives score 0.89 (just below
-    0.9). Evaluated EXACTLY at 0.9, the false positives are filtered out and the true matches survive
+    0.9). Evaluated exactly at 0.9, the false positives are filtered out and the true matches survive
     -> zero bias, clean pass. The old snap's nearest grid point to 0.9 is 0.89 (closer than 0.99) --
-    at which the false positives ALSO survive, reading as a +2.0/image overcount that exceeds
+    at which the false positives also survive, reading as a +2.0/image overcount that exceeds
     catkin's count-bias tolerance regardless of the exact value.
     """
     from tcip_mcp.pipelines.training.evaluation import gt_class_avg_size
@@ -149,11 +149,11 @@ def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_fai
     assert conf.sweep["failures"] == []                  # ...what the old snap would have refused
 
 
-# ── Fix B: dispersion + localization-quality floor ─────────────────────────
+# ── Dispersion and localization-quality floor ──────────────────────────────
 
 def _tp_zero_bias_zero_records(id_prefix: str, *, n_images: int = 10, objects_per_image: int = 50):
-    """Every image: N GT, N detections, but every detection sits FAR outside the center-match
-    tolerance — count bias is exactly 0 (fp == fn == N) while NOT ONE detection actually matches
+    """Every image: N GT, N detections, but every detection sits far outside the center-match
+    tolerance, so count bias is exactly 0 (fp == fn == N) while not one detection actually matches
     (tp=0). The degenerate case a naive count-bias-only gate cannot catch."""
     records = []
     cols = int(objects_per_image**0.5) + 2
@@ -186,7 +186,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     import tcip_mcp.pipelines.operating_point as OP
 
     n_images, objects_per_image = 10, 50
-    # One image drops 10 objects, none elsewhere -> mean bias -1.0, but the p90 TAIL is 1.0 (driven
+    # One image drops 10 objects, none elsewhere -> mean bias -1.0, but the p90 tail is 1.0 (driven
     # by that single bad image among many good ones) -- exactly the "one bad plant among many"
     # scenario a population mean/SE alone can hide.
     miss = [0] * (n_images - 1) + [10]
@@ -205,7 +205,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     assert strict_sweep["holdout_bias"]["count_error_p90"] == pytest.approx(1.0)
     assert "count_error_dispersion_too_high" in strict_sweep["failures"]
 
-    # The SAME fixture, under a trait that has never authored count_error_tolerance (CATKIN) — the
+    # The same fixture, under a trait that has never authored count_error_tolerance (CATKIN), the
     # dispersion term is skipped entirely, not gated on a platform-invented number.
     monkeypatch.setattr(OP, "get_trait", lambda name: CATKIN)
     b_default = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
@@ -215,7 +215,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     assert "count_error_dispersion_too_high" not in default_sweep["failures"]
 
 
-# ── Fix C: reference-sufficiency + equivalence criterion ───────────────────
+# ── Reference-sufficiency and equivalence criterion ─────────────────────────
 
 def test_all_negative_calibration_or_holdout_refused():
     real = _records("c")
@@ -241,9 +241,9 @@ def test_single_image_holdout_fails_the_non_degeneracy_floor_alone():
 
 
 def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degeneracy():
-    # n=2 clears the non-degeneracy floor (item 2) but the mean+SE equivalence criterion (item 4)
-    # still correctly refuses it — a bare mean check (the old behavior) would have passed this,
-    # since the per-image biases [+1, -1] cancel exactly in the mean.
+    # n=2 clears the non-degeneracy floor but the mean+SE equivalence criterion still correctly
+    # refuses it: a bare mean check would have passed this, since the per-image biases [+1, -1]
+    # cancel exactly in the mean.
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=_records("h", shift=3.0), staged_conf_floor=0.3)
     sweep = b.get("conf").sweep
@@ -253,24 +253,23 @@ def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degene
 
 
 def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_refuses_it(monkeypatch):
-    """Fix C item 5 / Fix H seam: padding a reference with zero-verdict, unadjudicated records must
-    not make its own statistics EASIER to pass by silently diluting the variance denominator — the
-    exact hole this seam exists to close, wired here with a synthetic predicate standing in for Fix
-    H's real one.
+    """Padding a reference with zero-verdict, unadjudicated records must not make its own
+    statistics easier to pass by silently diluting the variance denominator; wired here with a
+    synthetic adjudication-coverage predicate standing in for a real one.
 
     Without a coverage predicate, ``resolve_operating_point`` has no way to know the padding is
-    illegitimate, so it dilutes n and the SAME real n=2 disagreement (see
+    illegitimate, so it dilutes n and the same real n=2 disagreement (see
     ``test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degeneracy``) passes.
-    With the seam wired to a real predicate, the fix is a GATE, never a filter that recomputes on a
-    shrunk sample (a filter is itself a fail-open — the excluded set correlates with the very
+    With the seam wired to a real predicate, the check is a gate, never a filter that recomputes on
+    a shrunk sample (a filter is itself fail-open: the excluded set correlates with the very
     quantity being measured, per ``resolve_operating_point``'s own docstring): the padding is never
     dropped before the statistics are computed (``n_images`` stays 10, the full unfiltered set), but
     the reference is refused outright because the coverage requirement itself failed.
 
-    K4 residual (2026-07-31): this fixture's own GT is sparse (typical count 1.5/image), so at the
-    new default 1% relative tolerance the derived tolerance (~0.1, floor-dominated) is tighter than
-    the diluted SE even before the coverage predicate is involved — a real, unrelated tightening this
-    test doesn't exist to demonstrate. Loosen the trait's fraction for this test only (mirrors
+    This fixture's own GT is sparse (typical count 1.5/image), so at the default 1% relative
+    tolerance the derived tolerance (~0.1, floor-dominated) is tighter than the diluted SE even
+    before the coverage predicate is involved, an unrelated tightening this test doesn't exist to
+    demonstrate. The trait's fraction is loosened for this test only (mirrors
     ``test_dispersion_gate_skipped_when_unauthored_gates_when_authored``'s own pattern) so the
     dilution mechanism under test is isolated from that unrelated magnitude effect.
     """
@@ -286,14 +285,14 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
                "padded": True} for i in range(8)]
 
     # Without a coverage predicate, the zero-verdict padding dilutes the variance denominator
-    # (larger n -> smaller SE) and the SAME real disagreement now passes.
+    # (larger n -> smaller SE) and the same real disagreement now passes.
     b_diluted = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
                                         holdout_records=hold_real + padding, staged_conf_floor=0.3)
     assert b_diluted.get("conf").sweep["holdout_bias"]["n_images"] == 10
     assert b_diluted.get("conf").validated_against == "held_out_annotations"
 
-    # With the seam wired to a predicate that flags the padding as uncovered, the WHOLE reference is
-    # refused — statistics are still computed over the full, unfiltered 10-image set (never a
+    # With the seam wired to a predicate that flags the padding as uncovered, the whole reference is
+    # refused: statistics are still computed over the full, unfiltered 10-image set (never a
     # filter-then-recompute on a shrunk sample), but validated_against is false because the coverage
     # requirement itself failed.
     covered = lambda r: not r.get("padded")  # noqa: E731
@@ -301,13 +300,13 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
                                         holdout_records=hold_real + padding, staged_conf_floor=0.3,
                                         adjudication_covered=covered)
     sweep = b_covered.get("conf").sweep
-    assert sweep["holdout_bias"]["n_images"] == 10  # unfiltered — a gate, not a filter
+    assert sweep["holdout_bias"]["n_images"] == 10  # unfiltered, a gate, not a filter
     assert sweep["adjudication_covered"] is False
     assert b_covered.get("conf").validated_against == "false"
     assert "insufficient_adjudication_coverage" in sweep["failures"]
 
 
-# ── Fix E: pick-then-label + registry-driven objective ─────────────────────
+# ── Pick-then-label and registry-driven objective ───────────────────────────
 
 def test_detection_f1_objective_picks_f1_max_and_labels_it_accordingly(monkeypatch):
     import tcip_mcp.pipelines.operating_point as OP
@@ -344,7 +343,7 @@ def test_f1_max_label_gets_the_review_suffix_when_review_confirmed(monkeypatch):
     assert b.get("conf").derived_from == "F1-max center-match sweep over review verdicts"
 
 
-# ── Fix K: cap-saturation provenance (non-gating) ───────────────────────────
+# ── Cap-saturation provenance (non-gating) ───────────────────────────────────
 
 def test_current_detections_cap_reads_the_in_model_value():
     from types import SimpleNamespace
@@ -395,45 +394,42 @@ def test_passed_holdout_is_exactly_the_absence_of_named_failures():
     assert sweep["failures"]  # this fixture is a known-failing one (see test_n_equals_2 above)
 
 
-# ── Rule 17 (must-still-pass) with genuine per-image dispersion (stage-6 finding) ───
+# ── Genuine per-image dispersion in the admitting direction ─────────────────
 #
-# Every prior "good detector, should validate" fixture in this cluster (here and in
+# Every prior "good detector, should validate" fixture in this module (here and in
 # test_operating_point.py / test_conf_censoring_guard.py / test_audit_cv_fixes.py /
 # test_char_goldens_measurement.py / test_calibration_holdout_disjointness.py / test_review_calibration.py /
-# this file's own integration fixture above) has EXACTLY ZERO per-image
-# count-bias variance AT THE PICKED CONF — a uniform miss/fp pattern, or a varying one whose
-# spurious detections get filtered out identically on every image — so Fix C's
+# this file's own integration fixture above) has exactly zero per-image
+# count-bias variance at the picked conf: a uniform miss/fp pattern, or a varying one whose
+# spurious detections get filtered out identically on every image, so the
 # ``abs(mean) + 1.645*SE <= tolerance`` equivalence criterion collapses to the bare mean check it
-# replaced and was never actually exercised with real noise in the admitting direction.
+# replaced and is never actually exercised with real noise in the admitting direction.
 #
-# This fixture is different: every image gets a genuinely DIFFERENT miss count (1-5, cycling
-# deterministically — not random, not uniform) representing a realistic ~97% recall detector, and a
-# DIFFERENT false-positive count too, at the SAME high score as the true detections (0.9) so the
-# false positives survive whatever conf gets picked, same as the true detections — spurious
+# This fixture is different: every image gets a genuinely different miss count (1-5, cycling
+# deterministically, not random, not uniform) representing a realistic ~97% recall detector, and a
+# different false-positive count too, at the same high score as the true detections (0.9) so the
+# false positives survive whatever conf gets picked, same as the true detections: spurious
 # detections here are genuinely confusable, not filtered-out noise. The false-positive pattern is a
-# rotation of the SAME miss values (same population, so the two means match exactly), which zeroes
+# rotation of the same miss values (same population, so the two means match exactly), which zeroes
 # the systematic mean bias while leaving real, hand-traceable per-image dispersion behind (bias =
 # fp[i] - miss[i] varies image-by-image even though sum(fp) == sum(miss)).
 #
-# Verified empirically against the ACTUAL code (with the fixes in this cluster applied, not assumed):
-# at n=40 images / 100 objects/image this reaches count_bias_std ~= 2.03 and count_error_p90 = 4.0
-# (recall/precision ~0.97) — in the ballpark of the stage-6 reviewers' cited ~1.6-1.7 std at n=40 for
-# a ~97%+ recall detector against catkin's count-bias tolerance of 1.0 (K4 residual, 2026-07-31: now
-# the DERIVED value at this reference's density — count_bias_tolerance_frac's 0.01 default times this
-# fixture's 100-objects/image typical count is exactly 1.0, matching D12's old absolute default at
-# this density by the new default's own design) — and correctly reaches VALIDATED_HELD_OUT. The
-# IDENTICAL per-image pattern at n=10 (fewer images, nothing else different)
-# is correctly REFUSED: the SE term grows enough that the equivalence criterion no longer clears the
-# tolerance. Reference size is a real constraint the gate imposes on a genuinely noisy detector, not
-# a formality — this is the accepted, known consequence of closing the vacuous-gate defect, not
-# every size validating the same detector.
+# Verified empirically against the actual code: at n=40 images / 100 objects/image this reaches
+# count_bias_std ~= 2.03 and count_error_p90 = 4.0 (recall/precision ~0.97) against catkin's
+# count-bias tolerance of 1.0 (the derived value at this reference's density:
+# count_bias_tolerance_frac's 0.01 default times this fixture's 100-objects/image typical count),
+# and correctly reaches VALIDATED_HELD_OUT. The identical per-image pattern at n=10 (fewer images,
+# nothing else different) is correctly refused: the SE term grows enough that the equivalence
+# criterion no longer clears the tolerance. Reference size is a real constraint the gate imposes on
+# a genuinely noisy detector, not a formality: this is the accepted, known consequence of the gate,
+# not every size validating the same detector.
 
 def _rotating_noise_pattern(n: int, *, low: int = 1, high: int = 5, offset: int = 13
                             ) -> tuple[list[int], list[int]]:
     """``n`` per-image miss counts cycling deterministically through ``[low, high]`` (mean
-    ``(low+high)/2``), and a false-positive pattern that is a ROTATION of the same values (the same
+    ``(low+high)/2``), and a false-positive pattern that is a rotation of the same values (the same
     population, so the two means match exactly and mean bias is exactly 0) offset by an amount that
-    does not evenly divide ``n`` — so it does not track the miss pattern image-by-image. Genuine,
+    does not evenly divide ``n``, so it does not track the miss pattern image-by-image. Genuine,
     hand-traceable per-image variance (bias[i] = fp[i] - miss[i] differs per image), not randomness
     and not a uniform toy pattern.
     """
@@ -451,7 +447,7 @@ def test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at
     hold = dense_records(n_images=n, objects_per_image=obj, id_prefix="h", shift=5.0,
                          miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
 
-    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=False, staged_conf_floor=0.01)
@@ -467,8 +463,8 @@ def test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at
 
 
 def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equivalence():
-    """The IDENTICAL per-image miss/fp pattern as the n=40 fixture above, truncated to its first 10
-    images — same detector, same per-image behavior, just fewer held-out images. The SE term grows
+    """The identical per-image miss/fp pattern as the n=40 fixture above, truncated to its first 10
+    images: same detector, same per-image behavior, just fewer held-out images. The SE term grows
     enough that abs(mean) + 1.645*SE no longer clears catkin's tolerance, so this correctly refuses:
     reference size is a real constraint, not every size validates the same noisy-but-good detector.
     """
@@ -490,17 +486,16 @@ def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equival
 
 
 def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_admit_refuse():
-    """K4 residual (2026-07-31), stage-6 review Finding F5: the tests above vary IMAGE COUNT at a
-    fixed density (100 objects/image); this fixes n=40 (already proven sufficient above) and varies
-    DENSITY instead — the axis the new relative tolerance actually introduces. The IDENTICAL
-    per-image noise pattern (mean bias exactly 0.0, std ~2.0255, unaffected by density) is refused at
-    30 objects/image (tolerance 0.30, comfortably under the ~0.527 the equivalence test needs) and
-    admitted at 100 (tolerance 1.00) — the true crossover (round-2 review's own independent
-    derivation) is ~52.68 objects/image, so both chosen densities sit with real margin (43% below,
-    90% above), not on a fragile boundary.
-    Not a defect — the explicit, disclosed consequence of "relative, not absolute": a trait whose
-    real density sits below where this default's tolerance would exceed its own noise floor needs a
-    domain-authored (larger) fraction or more holdout images, not a platform-picked one.
+    """The tests above vary image count at a fixed density (100 objects/image); this fixes n=40
+    (already proven sufficient above) and varies density instead, the axis the relative tolerance
+    actually introduces. The identical per-image noise pattern (mean bias exactly 0.0, std ~2.0255,
+    unaffected by density) is refused at 30 objects/image (tolerance 0.30, comfortably under the
+    ~0.527 the equivalence test needs) and admitted at 100 (tolerance 1.00); the true crossover is
+    ~52.68 objects/image, so both chosen densities sit with real margin (43% below, 90% above), not
+    on a fragile boundary.
+    Not a defect: the explicit, disclosed consequence of "relative, not absolute" tolerance, a trait
+    whose real density sits below where this default's tolerance would exceed its own noise floor
+    needs a domain-authored (larger) fraction or more holdout images, not a platform-picked one.
     """
     n = 40
     miss, fp = _rotating_noise_pattern(n)
@@ -529,17 +524,17 @@ def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_adm
 
 def test_integration_dense_realistic_reference_reaches_held_out_validation():
     """A realistic dense catkin reference (perfect recall, a varying handful of low-conf spurious
-    detections per image) must reach VALIDATED_HELD_OUT with every fix in this cluster (B, C, D, E,
-    F, K) applied together: the spurious detections are filtered out at the count-unbiased operating
-    point, leaving zero bias and full recall/precision on the holdout.
+    detections per image) must reach VALIDATED_HELD_OUT with every gate in this module applied
+    together: the spurious detections are filtered out at the count-unbiased operating point,
+    leaving zero bias and full recall/precision on the holdout.
 
-    Stage-6 review finding: despite the fp_pattern varying per image, ALL of that variation is
-    filtered out uniformly at the picked conf (fp_score=0.05 never survives conf=0.9), so this
-    fixture's MEASURED count_bias_std at the operating point is exactly 0.0 (verified empirically) —
-    it does not exercise Fix C's equivalence criterion with genuine dispersion in the admitting
-    direction, despite the varying input pattern suggesting otherwise. See
+    Despite the fp_pattern varying per image, all of that variation is filtered out uniformly at
+    the picked conf (fp_score=0.05 never survives conf=0.9), so this fixture's measured
+    count_bias_std at the operating point is exactly 0.0 (verified empirically): it does not
+    exercise the equivalence criterion with genuine dispersion in the admitting direction, despite
+    the varying input pattern suggesting otherwise. See
     ``test_realistic_dense_detector_with_genuine_per_image_dispersion_validates_at_n_equals_40``
-    below for a fixture whose false positives survive at the SAME score as true detections and so
+    below for a fixture whose false positives survive at the same score as true detections and so
     leave real, nonzero dispersion behind at the picked conf.
     """
     n_images, objects_per_image = 24, 100
@@ -552,7 +547,7 @@ def test_integration_dense_realistic_reference_reaches_held_out_validation():
     hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
                          shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
 
-    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=False, staged_conf_floor=0.01)
