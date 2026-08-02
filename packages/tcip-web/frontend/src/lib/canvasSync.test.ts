@@ -115,7 +115,7 @@ describe("buildAnnotateShapes", () => {
 
   it("an in-progress drawing rides along as a dashed polyline in the active subject's colour", () => {
     // Regression: the mirror used to hardcode amber here while the real canvas's
-    // InProgressPolygon stroke already used the active subject's colour — a divergence the
+    // InProgressPolygon stroke already used the active subject's colour, a divergence the
     // agent's capture_live_canvas view would show that the breeder's own screen never did.
     const shapes = buildAnnotateShapes({
       ...base,
@@ -166,8 +166,8 @@ describe("buildAnnotateShapes", () => {
 
   it("box mode adds one read-only derived box per active-subject polygon, dashed, === ringsBbox", () => {
     // Mirrors the canvas overlay: a polygon's detection footprint shows while boxing, and its coords
-    // are exactly ringsBbox — never a stored box. Dashed distinguishes it from a real editable box
-    // (solid) — the same convention in-progress/under-review shapes already use.
+    // are exactly ringsBbox, never a stored box. Dashed distinguishes it from a real editable box
+    // (solid), the same convention in-progress/under-review shapes already use.
     const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [] });
     const derived = shapes.filter((s) => s.kind === "box");
     expect(derived).toHaveLength(1); // only the active "catkin" polygon; "other" is filtered out
@@ -200,7 +200,7 @@ describe("buildAnnotateShapes", () => {
     expect(shapes).toHaveLength(2);
     expect(shapes.map((s) => s.points)).toEqual(multi.rings);
     expect(shapes.every((s) => s.color === "#FF0000" && s.tag === "gt")).toBe(true);
-    // Labelled once — a two-part catkin is one catkin, not two.
+    // Labelled once: a two-part catkin is one catkin, not two.
     expect(shapes.filter((s) => s.label === "catkin")).toHaveLength(1);
   });
 
@@ -263,7 +263,7 @@ describe("buildAnnotateShapes", () => {
     expect(selected).toHaveLength(1); // included despite the subject filter, like a selected polygon
     expect(selected[0].color).toBe("#00BFFF");
 
-    // Box mode: only the selection survives — the shape being inspected stays on screen.
+    // Box mode: only the selection survives, the shape being inspected stays on screen.
     const inBoxMode = buildAnnotateShapes({
       ...base,
       mode: "box",
@@ -394,9 +394,9 @@ describe("buildReviewShapes", () => {
     ).toBe(false);
   });
 
-  it("renders BOTH geometry kinds — a box and a polygon annotation each draw (no kind hidden)", () => {
+  it("renders both geometry kinds, a box and a polygon annotation each draw (no kind hidden)", () => {
     // Measurement-critical: a unified file may mix a bbox annotation and a polygon annotation.
-    // Both must render by their OWN geometry; hiding a kind is an unreviewed false-negative.
+    // Both must render by their own geometry; hiding a kind is an unreviewed false-negative.
     const mixed = {
       img_width: 100,
       img_height: 80,
@@ -451,7 +451,7 @@ describe("buildReviewShapes", () => {
 
   it("an occlusion-split prediction pushes every ring, in the same outcome colour", () => {
     // A verdict on a two-part prediction is a verdict on both parts, so the agent's mirror of the
-    // review canvas has to show both — one shape entry per ring, not just the first.
+    // review canvas has to show both: one shape entry per ring, not just the first.
     const split = {
       img_width: 100,
       img_height: 80,
@@ -517,7 +517,7 @@ describe("buildReviewShapes", () => {
     expect(shapes.at(-1)!.tag).toBe("pred"); // the focused TP's overlay is on top
   });
 
-  it("a point-carrying GT pushes a point shape — not a box, and not nothing", () => {
+  it("a point-carrying GT pushes a point shape, not a box, and not nothing", () => {
     // Review load responses can carry {point: [x, y]} on a GT/prediction. Dropping it would hide a
     // real annotation from the agent's mirror; boxing it would invent an extent.
     const withPoint = {
