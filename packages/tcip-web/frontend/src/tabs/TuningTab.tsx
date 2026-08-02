@@ -123,7 +123,7 @@ export function TuningTab() {
         />
 
         {/* Structured search space (fed to Ray Tune) */}
-        <label className="tcip-label mb-1">Search space — each trial trains for real</label>
+        <label className="tcip-label mb-1">Search space: each trial trains for real</label>
         <div className="tcip-panel p-2 mb-3">
           {params.map((p) => (
             <div key={p.key} className="py-1 border-b border-tcip-border last:border-0">
@@ -265,7 +265,7 @@ export function TuningTab() {
           </div>
         )}
         <div className="mt-1 text-[10px] text-tcip-muted">
-          Note: a running sweep can’t be cancelled — trials run to completion. Keep the trial count
+          Note: a running sweep can’t be cancelled, trials run to completion. Keep the trial count
           modest.
         </div>
 
@@ -288,7 +288,7 @@ export function TuningTab() {
                   <div className="font-mono text-[11px]">{s.sweep_id}</div>
                   <div className="text-[10px] text-tcip-muted">
                     {s.status}
-                    {s.error ? ` — ${s.error}` : ""}
+                    {s.error ? `: ${s.error}` : ""}
                   </div>
                 </li>
               ))}
