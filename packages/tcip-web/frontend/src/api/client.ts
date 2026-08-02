@@ -22,7 +22,7 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   // One error-surfacing path shared with getJson/postJson: throw the backend's clean `detail`
-  // (or "<status> <statusText>"), not a raw JSON blob — so toasts are consistent everywhere.
+  // (or "<status> <statusText>"), not a raw JSON blob, so toasts are consistent everywhere.
   return asJson<T>(resp);
 }
 
@@ -50,7 +50,7 @@ export interface FsListing {
 }
 
 /** The unified per-image label version token (stringified mtime ns), echoed back opaquely on save.
- *  A string because the ns value exceeds 2**53 — as a number, JSON.parse would round it and every
+ *  A string because the ns value exceeds 2**53: as a number, JSON.parse would round it and every
  *  save would 409. */
 export type LoadedLabels = ImageLabels & { base_mtime: string | null };
 
@@ -70,12 +70,12 @@ export type SaveResult = { status: "ok"; base_mtime: string | null } | { status:
 /**
  * Cap the width of the image served to the canvas. A 20MP drone frame is ~5500px wide;
  * capping bounds GPU texture memory + decode time while staying oversampled at fit-zoom
- * (narrower images are served untouched). It IS a quality/perf tradeoff — at extreme
+ * (narrower images are served untouched). It is a quality/perf tradeoff: at extreme
  * zoom the image softens. Raise it, or set it undefined (full-res), to tune.
  */
 export const IMAGE_MAX_WIDTH = 4096;
 
-/** One band's symbology, as `GET /api/images/bands` reports it — a declared name where the
+/** One band's symbology, as `GET /api/images/bands` reports it: a declared name where the
  *  source has one (else its 0-index as a string), the sensor's own wavelength when known. */
 export interface ImageBandInfo {
   name: string;
@@ -99,8 +99,8 @@ export interface ProjectSummary {
   subjects: string[];
   models: string[];
   // Per-date availability: subjects with labels / models with predictions on each date.
-  // The subject/model pickers filter to these so a date with no catkin labels doesn't
-  // offer "catkin" (which would open an empty canvas).
+  // The subject/model pickers filter to these so a date with no bush labels doesn't
+  // offer "bush" (which would open an empty canvas).
   subjects_by_date: Record<string, string[]>;
   models_by_date: Record<string, string[]>;
   image_count: number;
@@ -171,7 +171,7 @@ export const api = {
   },
 
   canvas: {
-    // Live canvas-state push (heartbeat or full geometry) — fire-and-forget from the tabs.
+    // Live canvas-state push (heartbeat or full geometry): fire-and-forget from the tabs.
     pushState: (body: CanvasStateBody) =>
       call<{ status: string; shapes_stored: boolean }>("/api/canvas/state", {
         method: "POST",
@@ -184,7 +184,7 @@ export const api = {
       `/api/images?${q({ path, max_width, quality, bands, stretch })}`,
 
     // Per-band symbology plus the one fact that gates the band picker's visibility
-    // (band_count > 3) — never shown for a standard RGB dataset.
+    // (band_count > 3), never shown for a standard RGB dataset.
     bands: (path: string) => call<ImageBandsResponse>(`/api/images/bands?${q({ path })}`),
   },
 
@@ -299,7 +299,7 @@ export const api = {
         image_status: MatchesResponse["image_status"];
         // Per-image annotation status after the GT write (null when unchanged), for the client to sync.
         annotation_status: "complete" | "partial" | "negative" | "unannotated" | null;
-        // Fresh matches recomputed against the written GT — install these instead of re-fetching.
+        // Fresh matches recomputed against the written GT; install these instead of re-fetching.
         matches: MatchesResponse;
       }>("/api/review/action", {
         method: "POST",
@@ -310,7 +310,7 @@ export const api = {
       project_root: string;
       image_name: string;
       gt_path?: string | null;
-      // The prediction bucket loaded for this image — a confirmed negative carries zero verdicts,
+      // The prediction bucket loaded for this image: a confirmed negative carries zero verdicts,
       // so it has nowhere else to record which model it was reviewed against.
       pred_dir?: string | null;
       completed?: boolean;
@@ -318,7 +318,7 @@ export const api = {
       call<{
         status: string;
         image_status: MatchesResponse["image_status"];
-        // Derived server-side from the GT file — never from a stale client snapshot.
+        // Derived server-side from the GT file, never from a stale client snapshot.
         annotation_status: "complete" | "partial" | "negative" | "unannotated";
       }>("/api/review/mark_complete", {
         method: "POST",
@@ -346,8 +346,8 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    // The prediction bucket's own generation confidence — read-only, no gate run, no stamp. Lets
-    // the Review tab warn as soon as the "Conf >=" filter is raised above it (K15), rather than
+    // The prediction bucket's own generation confidence: read-only, no gate run, no stamp. Lets
+    // the Review tab warn as soon as the "Conf >=" filter is raised above it, rather than
     // only after clicking "Use review as validation reference".
     generationConf: (pred_dir: string) =>
       call<{ generation_conf: number | null }>(
@@ -369,7 +369,7 @@ export const api = {
       );
     },
 
-    // K23: launch the active-learning priority queue (informativeness ranking only — never the
+    // Launch the active-learning priority queue (informativeness ranking only, never the
     // confidence_triage/auto-accept-as-GT strategy, which stays agent-only) as a background job;
     // poll launchPriorityQueue's job_id via priorityQueueJob until status is a terminal value.
     launchPriorityQueue: (body: {
