@@ -1,12 +1,12 @@
-"""EXIF-orientation regression — the training loader must read the same upright frame the
+"""EXIF-orientation regression: the training loader must read the same upright frame the
 labels are authored in (and that ``get_image_dimensions`` / the GUI / eval already use).
 
 Every Valley_Farm JPEG is EXIF Orientation 6 (raw 5712×4284 stored, 4284×5712 upright).
-Labels are normalized in the *upright* frame. Before the fix, ``load_image`` returned the
-raw sensor frame while ``get_image_dimensions`` returned the upright one, so the loader
-denormalized upright coords against raw ``(w, h)`` and scattered every box — with in-loop
+Labels are normalized in the *upright* frame. If ``load_image`` ever returns the raw
+sensor frame while ``get_image_dimensions`` returns the upright one, the loader
+denormalizes upright coords against raw ``(w, h)`` and scatters every box, with in-loop
 mAP blind to it (raw-vs-raw). These tests assert the frames are one, by construction and
-spatially, through the real dataset classes. The missing assertion (throughline C).
+spatially, through the real dataset classes.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ torch = pytest.importorskip("torch")
 # plus a YOLO label normalized in that upright frame.
 # --------------------------------------------------------------------------
 
-UP_W, UP_H = 80, 120  # upright is portrait (taller than wide) — like a rotated catkin bush
+UP_W, UP_H = 80, 120  # upright is portrait (taller than wide), like a rotated catkin bush
 MARKER = (20, 30, 55, 60)  # red rectangle in upright pixel coords (x1, y1, x2, y2)
 
 
@@ -33,7 +33,7 @@ def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, Path, tuple[int, int, i
     """Write ``images/m.jpg`` (Orientation 6) + ``labels/m.json`` (upright-frame pixel box).
 
     The on-disk pixels are the upright image rotated 90° so that auto-orient's rotate(270)
-    restores the upright frame — mirroring a real orientation-6 capture.
+    restores the upright frame, mirroring a real orientation-6 capture.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -58,7 +58,7 @@ def _make_orient6_dataset(tmp_path: Path) -> tuple[Path, Path, tuple[int, int, i
 
 
 def _red_fraction(rchan: "np.ndarray | torch.Tensor", g: "np.ndarray | torch.Tensor") -> float:
-    """Fraction of pixels that are strongly red (R high, G low) — marker detector, JPEG-robust."""
+    """Fraction of pixels that are strongly red (R high, G low): marker detector, JPEG-robust."""
     r = rchan.numpy() if isinstance(rchan, torch.Tensor) else rchan
     gg = g.numpy() if isinstance(g, torch.Tensor) else g
     if r.size == 0:
@@ -78,7 +78,7 @@ def test_orientation6_fixture_is_real(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 2. THE invariant: load_image returns the exact frame get_image_dimensions does.
+# 2. The invariant: load_image returns the exact frame get_image_dimensions does.
 # --------------------------------------------------------------------------
 
 def test_load_image_frame_matches_get_image_dimensions(tmp_path: Path) -> None:
@@ -101,7 +101,7 @@ def test_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
     ds = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
     img_t, target = ds[0]
 
-    assert img_t.shape[1:] == (UP_H, UP_W)  # [C, H, W] upright — not the raw sensor frame
+    assert img_t.shape[1:] == (UP_H, UP_W)  # [C, H, W] upright, not the raw sensor frame
     box = target["boxes"][0]
     x1, y1, x2, y2 = (int(v) for v in box.tolist())
     # The denormalized box must bound the red marker in the frame the model actually sees.
@@ -126,8 +126,8 @@ def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
     assert tiled.num_samples > 0
 
     # The marker (20,30,55,60) lies fully inside the origin tile [0:64, 0:64] in the upright
-    # frame. Assert on THAT specific tile so the test discriminates a raw revert at either
-    # seam — __init__ dims (get_image_dimensions) or __getitem__ pixels (load_image).
+    # frame. Assert on that specific tile so the test discriminates a raw revert at either
+    # seam: __init__ dims (get_image_dimensions) or __getitem__ pixels (load_image).
     origin_idx = next(i for i, e in enumerate(tiled._index) if e["tile_x"] == 0 and e["tile_y"] == 0)
     tile_t, target = tiled[origin_idx]
     assert tile_t.shape[1:] == (64, 64)  # padded tile
@@ -139,11 +139,11 @@ def test_tiled_detection_dataset_box_lands_on_object(tmp_path: Path) -> None:
             continue
         if _red_fraction(tile_t[0, y1:y2, x1:x2], tile_t[1, y1:y2, x1:x2]) > 0.5:
             hit = True
-    assert hit, "origin tile's label box does not cover the marker — tile pixels/labels frame split"
+    assert hit, "origin tile's label box does not cover the marker: tile pixels/labels frame split"
 
 
 # --------------------------------------------------------------------------
-# 5. Train and eval/viz read one frame — the whole point (no split-brain).
+# 5. Train and eval/viz read one frame: the whole point (no split-brain).
 # --------------------------------------------------------------------------
 
 def test_train_and_eval_read_paths_share_one_frame(tmp_path: Path) -> None:
