@@ -55,7 +55,7 @@ ingest_images(source="<raw folder or glob>", name="{crop}_{trait}_{site}")
   `{total, buckets, undated, skipped_collisions}`, especially any collisions or a large
   `undated` count (a sign the photos lack EXIF and dates may need `date_from`).
 
-`ingest_images` does **not** annotate, split, choose a task, or write `classes.json`; the
+`ingest_images` does not annotate, split, choose a task, or write `classes.json`; the
 next steps do. After it, `inspect_project` reports the capture dates and image count.
 
 `ingest_images` scaffolds `.tcip/` (`config.toml`, `artifacts/`, `models/`) as a side effect of
@@ -99,7 +99,7 @@ There must be something to train on. Two paths (see `.github/skills/annotation`)
   built-in reference; the agent can bring another) → review the candidates visually (`visualize`,
   then your client's image-capable read tool on the returned `image_path`) → `accept_proposals`
   the good ones. Trial engines and keep the one whose high-conf
-  proposals survive review. An empty label file is **not** a negative on its own; it trains as one
+  proposals survive review. An empty label file is not a negative on its own; it trains as one
   only once the breeder marks that image Complete (`.tcip/state/image_status.json`), so an empty
   file you write reads as unannotated until then. Never delete or skip them.
 - **Human path**: hand off to the GUI Annotate tab for the breeder to label a seed set.
