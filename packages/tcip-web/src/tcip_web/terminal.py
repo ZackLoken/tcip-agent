@@ -49,7 +49,7 @@ DEFAULT_COLS = 100
 
 # The committed permission fence for the in-app (breeder-lane) agent. Passed via
 # --settings, which merges at CLI precedence, so the developer's own `claude`
-# sessions (no --settings) stay unrestricted. See AGENT_GOVERNANCE_PLAN.md.
+# sessions (no --settings) stay unrestricted.
 _FENCE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
 
 _UNAVAILABLE_REASON = (
