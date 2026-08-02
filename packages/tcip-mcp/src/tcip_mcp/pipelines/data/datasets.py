@@ -1110,11 +1110,10 @@ class ClassificationDataset(BaseImageDataset):
         stems: list[str] | None = None,
         labels: list[int] | None = None,
         transforms: Any = None,
-        num_classes: int = 2,
+        num_classes: int | None = None,
     ) -> None:
         self.images_dir = Path(images_dir)
         self.transforms = transforms
-        self._num_classes = num_classes
         if csv_path is not None:
             self._stems, self._labels = self._load_csv(csv_path)
         elif stems is not None and labels is not None:
@@ -1123,6 +1122,17 @@ class ClassificationDataset(BaseImageDataset):
         else:
             # Folder-based: images_dir/<class_name>/<image>
             self._stems, self._labels = self._load_folder_structure()
+        # Derived from the labels actually loaded, the same way build_dataset derives
+        # detection's num_classes from the label registry: a class id the loaded labels reach
+        # but the configured num_classes doesn't cover would index past the head's logits.
+        derived_classes = (max(self._labels) + 1) if self._labels else 0
+        if num_classes is not None and derived_classes > num_classes:
+            raise ValueError(
+                f"the loaded labels reach class {derived_classes - 1}, which needs "
+                f"num_classes >= {derived_classes}, but num_classes={num_classes} was "
+                f"configured; fix num_classes or the data."
+            )
+        self._num_classes = num_classes if num_classes is not None else max(derived_classes, 1)
 
     def _load_csv(self, path: str) -> tuple[list[str], list[int]]:
         stems, labels = [], []
@@ -1178,11 +1188,10 @@ class OrdinalDataset(BaseImageDataset):
         images_dir: str,
         csv_path: str,
         transforms: Any = None,
-        num_ranks: int = 5,
+        num_ranks: int | None = None,
     ) -> None:
         self.images_dir = Path(images_dir)
         self.transforms = transforms
-        self._num_ranks = num_ranks
         self._stems: list[str] = []
         self._ranks: list[int] = []
         with open(csv_path, newline="") as f:
@@ -1192,6 +1201,20 @@ class OrdinalDataset(BaseImageDataset):
                 if len(row) >= 2:
                     self._stems.append(row[0].strip())
                     self._ranks.append(int(row[1].strip()))
+        # Derived from the ranks actually loaded, the same way build_dataset derives
+        # detection's num_classes from the label registry: the OrdinalHead's CORN loss and
+        # decode() both loop over range(num_ranks - 1) using this count with no check against
+        # the data, so a rank the head was never told about silently folds into the top rank
+        # instead of raising.
+        derived_ranks = (max(self._ranks) + 1) if self._ranks else 0
+        if num_ranks is not None and derived_ranks > num_ranks:
+            raise ValueError(
+                f"{csv_path} carries ranks up to {derived_ranks - 1}, which needs "
+                f"num_ranks >= {derived_ranks}, but num_ranks={num_ranks} was configured. "
+                f"The CORN head/loss would silently train every rank >= num_ranks - 1 as the "
+                f"same top rank rather than raising; fix num_ranks or the data."
+            )
+        self._num_ranks = num_ranks if num_ranks is not None else max(derived_ranks, 1)
 
     @property
     def num_classes(self) -> int:
