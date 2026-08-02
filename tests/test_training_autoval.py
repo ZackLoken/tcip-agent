@@ -1,8 +1,8 @@
-"""Auto train/val wiring (W4): _auto_train_val + detection val-loss pass.
+"""Auto train/val wiring: _auto_train_val plus the detection val-loss pass.
 
-These exercise the helper that derives a group-aware val split and the
-generic_trainer ``_validate`` detection path (which W4 makes correct so a real
-val loader can be wired without crashing the run).
+These exercise the helper that derives a group-aware val split and the generic_trainer
+``_validate`` detection path, which must be correct so a real val loader can be wired without
+crashing the run.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
 
 
 def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
-    """K1: an unrecognized split.group_by is a caller-config error and must propagate,
+    """An unrecognized split.group_by is a caller-config error and must propagate,
     not degrade silently to (full_train_ds, None) like other failures in this function."""
     images_dir, labels_dir, _all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
@@ -89,9 +89,9 @@ def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
 
 
 def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
-    """K1's narrowed except ValueError scope must not widen to a malformed val_ratio/seed —
-    those still degrade to (full_train_ds, None) exactly as every other non-grouping failure
-    in this function does, matching pre-K1 behavior."""
+    """The narrowed except ValueError scope must not widen to a malformed val_ratio/seed: those
+    still degrade to (full_train_ds, None) exactly as every other non-grouping failure in this
+    function does."""
     images_dir, labels_dir, all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
         "images_dir": str(images_dir),
