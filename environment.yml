@@ -9,7 +9,7 @@
 #
 # GPU note: this installs the default CPU/-or-platform torch wheel from PyPI,
 # which works everywhere. For a CUDA build, install torch/torchvision separately from a
-# CUDA index — the wheel bundles its own CUDA runtime, so only a recent NVIDIA driver is
+# CUDA index - the wheel bundles its own CUDA runtime, so only a recent NVIDIA driver is
 # needed (no system CUDA toolkit). Pick the index by desired torch version, not vice-versa:
 #   cu126 carries the newest torch (recommended):
 #     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
@@ -39,7 +39,7 @@ dependencies:
       - opencv-python>=4.5
       - scikit-image>=0.22
       - pycocotools>=2.0.7
-      - psutil>=5.9  # read-only host CPU/RAM visibility for inspect_compute_resources (K24)
+      - psutil>=5.9  # read-only host CPU/RAM visibility for inspect_compute_resources
       # --- web backend ---
       - fastapi>=0.115.0
       - uvicorn[standard]>=0.30.0
