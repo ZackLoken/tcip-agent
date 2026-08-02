@@ -7,10 +7,10 @@ project (keyed by project_root). Review state is persisted via the engine to per
 Ground truth and predictions are each one JSON file per image holding every subject's annotations by
 name (a prediction is an :class:`~tcip_annotation.state.Annotation` whose ``score`` is set); a class
 is named by its ``subject``, never an integer id, so the recorded verdict carries the real subject
-name. K25: the verdict ALSO carries a resolved ``class_id`` — the producing bucket's own recorded
-name->id map, read once at record time (``_resolve_verdict_class_id``), never a registry
-re-derivation — so a class-aware reference (``review_calibration.review_to_records``) can be built
-from these verdicts without guessing.
+name and a resolved ``class_id``: the producing bucket's own recorded name->id map, read once at
+record time (``_resolve_verdict_class_id``), never a registry re-derivation, so a class-aware
+reference (``review_calibration.review_to_records``) can be built from these verdicts without
+guessing.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ _engines: dict[str, ReviewEngine] = {}
 
 
 def _current_user() -> str:
-    """Reviewer fallback when the GUI request omits ``user`` — env override else the OS login."""
+    """Reviewer fallback when the GUI request omits ``user``: env override else the OS login."""
     from tcip_web.identity import current_user
 
     return current_user()
@@ -71,8 +71,8 @@ def _get_engine(project_root: str) -> ReviewEngine:
 def _audit(project_root: str, tool: str, arguments: dict) -> None:
     """Append a GUI review mutation to ``<project_root>/.tcip/audit.jsonl`` (best-effort).
 
-    Review verdicts + GT writes change tracked state, so — like @audited MCP tools and
-    the annotate save path — they belong in the append-only log. Never fails the request.
+    Review verdicts + GT writes change tracked state, so (like @audited MCP tools and
+    the annotate save path) they belong in the append-only log. Never fails the request.
     """
     if not project_root:
         return
@@ -92,9 +92,9 @@ def _audit(project_root: str, tool: str, arguments: dict) -> None:
 
 
 def _resolve_producer_identity_for_dir(pred_dir: Optional[str]) -> Optional[dict]:
-    """The producing model's identity for prediction bucket ``pred_dir`` (Fix G).
+    """The producing model's identity for prediction bucket ``pred_dir``.
 
-    Resolved from the bucket's own ``operating_point.json`` sidecar — ``checkpoint_sha256`` and
+    Resolved from the bucket's own ``operating_point.json`` sidecar: ``checkpoint_sha256`` and
     ``experiment_id``, the same facts ``validate_reference`` already reads for its own scoping.
     ``None`` when there is no dir or no sidecar to read; callers store this as a plain fact on the
     verdict/image record rather than looking it up again at validation time.
@@ -114,9 +114,9 @@ def _resolve_producer_identity_for_dir(pred_dir: Optional[str]) -> Optional[dict
 
 
 def _resolve_producer_identity(pred_path: Optional[str]) -> Optional[dict]:
-    """Same as :func:`_resolve_producer_identity_for_dir`, from a per-image PREDICTION FILE path
-    (``ActionPayload.pred_path``) — the bucket dir is its parent, used only as the LOOKUP key to
-    find the sidecar, never as the identity itself (Fix G)."""
+    """Same as :func:`_resolve_producer_identity_for_dir`, from a per-image prediction file path
+    (``ActionPayload.pred_path``): the bucket dir is its parent, used only as the lookup key to
+    find the sidecar, never as the identity itself."""
     if not pred_path:
         return None
     return _resolve_producer_identity_for_dir(str(Path(pred_path).parent))
@@ -124,16 +124,15 @@ def _resolve_producer_identity(pred_path: Optional[str]) -> Optional[dict]:
 
 def _resolve_verdict_class_id(pred_path: Optional[str], class_name: str) -> Optional[int]:
     """The 0-indexed class identity ``class_name`` resolves to under the producing bucket's own
-    recorded name->id map (K25) — resolved HERE, at verdict-record time, from the SAME
-    ``operating_point.json`` ``id_map`` field ``phenology.resolve_positive_class_id`` reads for a
-    prediction bucket, never a fresh registry re-derivation (the recorded map is what the bucket's
-    predictions were actually decoded through; the registry could have changed since).
-
-    ``None`` when there is no bucket, no recorded ``id_map`` on it, or ``class_name`` is not one of
-    its keys (e.g. a GT annotation's raw ``subject`` on an attribute-scoped bucket, whose id_map is
-    keyed by attribute VALUES, not the subject name — class-aware admission does not yet reach that
-    case; see ``review_calibration.review_to_records``, which refuses rather than guesses when this
-    is ``None``). Never defaults to 0 — an unresolved identity is an honest fact, not a class.
+    recorded name->id map: resolved at verdict-record time, from the same ``operating_point.json``
+    ``id_map`` field ``phenology.resolve_positive_class_id`` reads for a prediction bucket, never a
+    fresh registry re-derivation (the recorded map is what the bucket's predictions were actually
+    decoded through; the registry could have changed since). ``None`` when there is no bucket, no
+    recorded ``id_map`` on it, or ``class_name`` is not one of its keys (e.g. a GT annotation's raw
+    ``subject`` on an attribute-scoped bucket, whose id_map is keyed by attribute values, not the
+    subject name, since class-aware admission does not yet reach that case; see
+    ``review_calibration.review_to_records``, which refuses rather than guesses when this is
+    ``None``). Never defaults to 0: an unresolved identity is an honest fact, not a class.
     """
     if not pred_path:
         return None
@@ -147,7 +146,7 @@ def _resolve_verdict_class_id(pred_path: Optional[str], class_name: str) -> Opti
         return None
     try:
         # Guards the same malformed-value case phenology.resolve_positive_class_id already guards
-        # (a corrupt/hand-edited sidecar whose id_map value isn't actually numeric) — a bad sidecar
+        # (a corrupt/hand-edited sidecar whose id_map value isn't actually numeric): a bad sidecar
         # must not 500 the breeder's accept/reject/edit click; it degrades to "unresolved" instead.
         return int(cid)
     except (TypeError, ValueError):
@@ -183,7 +182,7 @@ def _guard_path(path: Optional[str]) -> None:
 
 def _ensure_original_backup(label_path: Optional[str]) -> None:
     """Snapshot a label file to ``<dir>/.original/<name>`` before its first mutation, if no baseline
-    exists yet — a per-file, O(1) safety net so a verdict never overwrites the pristine original
+    exists yet: a per-file, O(1) safety net so a verdict never overwrites the pristine original
     without a copy, independent of (and closing any gap in) the client's dir-level backup. New GT
     files a verdict is creating have no original to preserve, so they're skipped. Best-effort."""
     if not label_path:
@@ -204,11 +203,11 @@ def _ensure_original_backup(label_path: Optional[str]) -> None:
 def _ann_dict(a: Annotation) -> dict:
     """Serialize an :class:`Annotation` for the canvas (pixel coords + attributes + provenance).
 
-    ``rings`` (not ``points``) for a polygon — a prediction awaiting review can be a genuine
+    ``rings`` (not ``points``) for a polygon: a prediction awaiting review can be a genuine
     multi-ring occlusion-split instance_seg output, and accepting it as-is must not silently keep
     only the first ring. The canvas itself still only ever *draws*/*edits* a single ring by hand
     (see ``edited_points`` below). ``point`` is the singular ``[x, y]`` of a placed prompt / keypoint,
-    the same key the on-disk schema uses — a Point GT annotation on the frame is shown as itself
+    the same key the on-disk schema uses: a Point GT annotation on the frame is shown as itself
     rather than arriving geometry-less and being written back without its location.
     """
     out: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
@@ -289,7 +288,7 @@ def _matches_response(
 ) -> MatchesResponse:
     """Build the canvas payload (filtered + review-decorated detections, GT/pred annotations, status)
     from an already-computed match set. Shared by /matches and /action so both surfaces return the
-    identical shape — letting a verdict return its fresh matches instead of forcing a second fetch."""
+    identical shape, letting a verdict return its fresh matches instead of forcing a second fetch."""
     dets = engine.build_detection_list(
         ctx, matches, filter_type=filter_type, filter_class=filter_class
     )
@@ -354,7 +353,7 @@ class ActionPayload(BaseModel):
     # ("user:<name>"). Omitted by non-GUI callers -> backend falls back to the OS/env user.
     user: Optional[str] = None
     # Edited shape committed from the Review canvas (only for action="edited"): a box, or a
-    # polygon's points. Accept/Reject don't carry these — they act on the loaded pred/gt by index.
+    # polygon's points. Accept/Reject don't carry these: they act on the loaded pred/gt by index.
     edited_box: Optional[tuple[float, float, float, float]] = None
     edited_points: Optional[list[list[float]]] = None
     # Review thresholds so the route can decide (at the same op point as the GUI) whether
@@ -371,7 +370,7 @@ def _apply_gt_mutation(
     ctx: ReviewContext, payload: "ActionPayload", reviewer: str, now_iso: str
 ) -> tuple[bool, Optional[int]]:
     """Author GT from a verdict; return ``(gt_changed, index the written annotation landed at in
-    ctx.gt)`` — the index is set only for edited/accepted writes. Accept an FP adds the prediction;
+    ctx.gt)``: the index is set only for edited/accepted writes. Accept an FP adds the prediction;
     accept a TP/FN keeps GT; reject a TP/FN deletes that GT; reject an FP is a no-op; edit writes
     the edited shape (replacing the matched GT, or adding it).
 
@@ -386,7 +385,7 @@ def _apply_gt_mutation(
         if payload.edited_box is not None:
             geom = BBox(*payload.edited_box)
         elif payload.edited_points is not None:
-            # The reviewer edits one contour by hand on the canvas — single-ring input.
+            # The reviewer edits one contour by hand on the canvas: single-ring input.
             geom = Polygon(rings=[[(float(p[0]), float(p[1])) for p in payload.edited_points]])
         if geom is None:
             return False, None
@@ -443,7 +442,7 @@ def record_action(payload: ActionPayload) -> dict:
         raise HTTPException(
             400, "this verdict writes ground truth, but no annotations path was provided")
 
-    # An edited verdict rewrites the GT geometry, so key the entry to the post-edit geometry —
+    # An edited verdict rewrites the GT geometry, so key the entry to the post-edit geometry;
     # otherwise the next reload's spatial lookup misses it and the detection reads unreviewed.
     norm_det = norm_ctx = None
     if payload.action == "edited" and changed and landed_idx is not None:
@@ -465,12 +464,12 @@ def record_action(payload: ActionPayload) -> dict:
         engine.save_gt(work, path=payload.gt_path)
 
     # Annotation status to sync client-side (only when GT changed); an emptied GT reads as
-    # "unannotated" — a negative needs an explicit Complete, not just an empty file.
+    # "unannotated": a negative needs an explicit Complete, not just an empty file.
     annotation_status: Optional[str] = None
     if changed:
         annotation_status = "partial" if work.gt else "unannotated"
 
-    # Promote to 'completed' once every detection at these thresholds is reviewed — the only path
+    # Promote to 'completed' once every detection at these thresholds is reviewed, the only path
     # by which a GUI review reaches 'completed'. Recompute against the (now-authored) GT.
     matches = compute_matches(
         work.gt, ctx.preds,
@@ -502,7 +501,7 @@ class MarkCompletePayload(BaseModel):
     project_root: str
     image_name: str
     gt_path: Optional[str] = None
-    # The prediction bucket loaded for this image (Fix G) — a confirmed negative carries zero
+    # The prediction bucket loaded for this image: a confirmed negative carries zero
     # verdict entries, so it has nowhere else to record which model it was reviewed against; this
     # stamps that producer-identity fact on the image-level record instead.
     pred_dir: Optional[str] = None
@@ -517,13 +516,13 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     engine = _get_engine(payload.project_root)
     if payload.completed:
         producer_identity = _resolve_producer_identity_for_dir(payload.pred_dir)
-        # Fix H (stage-6 review): a zero-verdict Complete is FN-adjudication-covered ONLY when it is
-        # a genuine negative — the bucket held ZERO predictions for this image, so there was nothing
-        # to individually walk and Complete is itself the confirming act. A bulk-accept of an image
-        # the bucket DID predict on, with no individual verdicts recorded, is NOT covered — the
-        # breeder never actually looked, and treating it as covered would let exactly that padding
-        # dilute a real reference's statistics (the stage-6 fail-open this distinction exists to
-        # close). No prediction file for this stem reads as "nothing to check" -> also covered.
+        # A zero-verdict Complete is FN-adjudication-covered only when it is a genuine negative:
+        # the bucket held zero predictions for this image, so there was nothing to individually walk
+        # and Complete is itself the confirming act. A bulk-accept of an image the bucket did
+        # predict on, with no individual verdicts recorded, is not covered: the breeder never
+        # actually looked, and treating it as covered would let exactly that padding dilute a real
+        # reference's statistics. No prediction file for this stem reads as "nothing to check" ->
+        # also covered.
         is_negative = True
         if payload.pred_dir:
             pred_file = Path(payload.pred_dir) / f"{Path(payload.image_name).stem}.json"
@@ -532,7 +531,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
                                    adjudication_covered=is_negative)
     else:
         engine.unmark_image_reviewed(payload.image_name)
-    # Derive the annotation status from the GT file on disk — the client's matches snapshot can be
+    # Derive the annotation status from the GT file on disk: the client's matches snapshot can be
     # stale or null mid-navigation and once wrote negatives for annotated frames. A present file
     # with no annotations of any subject is an empty (negative) record.
     has_content = bool(payload.gt_path and os.path.isfile(payload.gt_path)
@@ -560,7 +559,7 @@ class BackupPayload(BaseModel):
 
 @router.post("/backup_labels")
 def backup_labels(payload: BackupPayload) -> dict:
-    """Top up ``<dir>/.original/`` — capture any label file that has no baseline yet."""
+    """Top up ``<dir>/.original/``: capture any label file that has no baseline yet."""
     for d in payload.label_dirs:
         _guard_path(d)
     engine = _get_engine(payload.project_root)
@@ -607,7 +606,7 @@ def save_gt(payload: SaveGtPayload) -> dict:
             attributes=dict(d.get("attributes") or {}),
             created_by=d.get("created_by") or author,
             created_at=d.get("created_at") or now_iso,
-            # accepted_* only on round-tripped shapes — a new shape must not mint sign-off.
+            # accepted_* only on round-tripped shapes: a new shape must not mint sign-off.
             accepted_by=d.get("accepted_by") if round_tripped else None,
             accepted_at=d.get("accepted_at") if round_tripped else None,
         )
@@ -625,13 +624,13 @@ def save_gt(payload: SaveGtPayload) -> dict:
     return {"status": "ok" if ok else "partial"}
 
 
-# ── Promote a completed review into a validation reference (D17) ───────────
+# ── Promote a completed review into a validation reference ─────────────────
 
 
 class ValidateReferenceRequest(BaseModel):
     project_root: str
     trait: str
-    # The prediction bucket whose review is being promoted — the per-image prediction dir the
+    # The prediction bucket whose review is being promoted: the per-image prediction dir the
     # delivery gate reads an ``operating_point.json`` from.
     pred_dir: Optional[str] = None
 
@@ -643,7 +642,7 @@ class ValidateReferenceResponse(BaseModel):
     reference: Optional[str]  # a resolution.py validated_against value ("false" when unvalidated)
     reviewed_image_count: int
     conf: Optional[float]  # the derived count operating point (for transparency)
-    reason: str  # plain-language, breeder-facing — always present
+    reason: str  # plain-language, breeder-facing, always present
     buckets_stamped: list[str]
 
 
@@ -651,12 +650,12 @@ class ValidateReferenceResponse(BaseModel):
 def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceResponse:
     """Promote a completed review session into a validation reference for its (model, trait, date-set).
 
-    Reconstructs the review verdicts into the COCO records ``resolve_operating_point`` consumes (W1's
-    ``review_calibration`` adapter) and runs them through the IDENTICAL disjoint-split + count-bias gate
-    and conf-censoring guard the held-out-GT path uses — no shortcut to "validated". On success the
-    bucket's ``operating_point.json`` is stamped ``VALIDATED_REVIEW_CONFIRMED`` (so the delivery gate reads it);
-    on refusal an honest ``validated=false`` placeholder is written and the reason is returned. An
-    already-validated bucket is never downgraded.
+    Reconstructs the review verdicts into the COCO records ``resolve_operating_point`` consumes (the
+    ``review_calibration`` adapter) and runs them through the identical disjoint-split + count-bias
+    gate and conf-censoring guard the held-out-GT path uses: no shortcut to "validated". On success
+    the bucket's ``operating_point.json`` is stamped ``VALIDATED_REVIEW_CONFIRMED`` (so the delivery
+    gate reads it); on refusal an honest ``validated=false`` placeholder is written and the reason is
+    returned. An already-validated bucket is never downgraded.
     """
     bucket_dirs = [req.pred_dir] if req.pred_dir else []
     for d in bucket_dirs:
@@ -680,7 +679,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     }
     n = len(completed)
 
-    # Never downgrade: predictions already validated (e.g. against held-out GT) stay validated — a
+    # Never downgrade: predictions already validated (e.g. against held-out GT) stay validated: a
     # review reference isn't needed there, and this action must not be able to lower them.
     sidecars = {d: (read_operating_point_sidecar(d) or {}) for d in bucket_dirs}
     if all(sc.get("validated") for sc in sidecars.values()):
@@ -708,25 +707,25 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     from tcip_mcp.traits import TraitUnknownError
 
     review_state = {"image": completed}
-    # K1: thread the producing run's experiment_id through so the calibration's train-disjointness
+    # Thread the producing run's experiment_id through so the calibration's train-disjointness
     # gate can check the reviewed images against that run's training split. Sourced from the
-    # buckets' own operating_point.json sidecars (stamped by export_predictions), never asserted —
+    # buckets' own operating_point.json sidecars (stamped by export_predictions), never asserted:
     # when multiple buckets disagree on which run produced them, pass None (mixed-provenance
     # shouldn't silently vouch for one run's disjointness) rather than raising, so this route keeps
     # working for a legitimate multi-bucket review call.
     bucket_exp_ids = {sc.get("experiment_id") for sc in sidecars.values() if sc.get("experiment_id")}
     review_experiment_id = next(iter(bucket_exp_ids)) if len(bucket_exp_ids) == 1 else None
 
-    # Fix G: scope every verdict/negative record to the bucket(s) actually being validated, at the
+    # Scope every verdict/negative record to the bucket(s) actually being validated, at the
     # deepest choke point (resolve_operating_point_from_review), not just here.
     bucket_identities = [
         {"checkpoint_sha256": sc.get("checkpoint_sha256"), "experiment_id": sc.get("experiment_id")}
         for sc in sidecars.values()
     ]
-    # Fix D item 4: the review path's effective staging floor is max(generation_conf,
-    # review_conf_threshold) — the generation half read off the same sidecars already loaded above,
-    # the review half read off the verdicts' own recorded conf_threshold (scoped identically to the
-    # bucket(s) above). Either half unknown makes the combined floor None (fails closed).
+    # The review path's effective staging floor is max(generation_conf, review_conf_threshold):
+    # the generation half read off the same sidecars already loaded above, the review half read
+    # off the verdicts' own recorded conf_threshold (scoped identically to the bucket(s) above).
+    # Either half unknown makes the combined floor None (fails closed).
     gen_confs = [
         v for sc in sidecars.values()
         if isinstance(v := ((sc.get("operating_point") or {}).get("conf") or {}).get("value"),
@@ -741,11 +740,11 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         else None
     )
 
-    # K10-deferred item, closed here (K6): thread tile_size/tiled + their sources off the same
-    # sidecars already loaded above, so a review-confirmed bundle honestly reports "derived"/
-    # "explicit" instead of always falling back to "default" regardless of what the buckets
-    # actually carry. A single bucket's own stamp is used; a mixed set of sources across buckets
-    # is not resolvable to one fact, so it falls back to the honest default.
+    # Thread tile_size/tiled + their sources off the same sidecars already loaded above, so a
+    # review-confirmed bundle honestly reports "derived"/"explicit" instead of always falling
+    # back to "default" regardless of what the buckets actually carry. A single bucket's own
+    # stamp is used; a mixed set of sources across buckets is not resolvable to one fact, so it
+    # falls back to the honest default.
     tile_sizes = {((sc.get("operating_point") or {}).get("tile_size") or {}).get("value")
                   for sc in sidecars.values()}
     tile_size_sources = {((sc.get("operating_point") or {}).get("tile_size") or {}).get("source")
@@ -770,13 +769,13 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     except TraitUnknownError:
         raise HTTPException(
             400,
-            f"a validation reference is not defined for trait {req.trait!r} yet — this action is "
+            f"a validation reference is not defined for trait {req.trait!r} yet. This action is "
             "available for traits the platform can calibrate a count operating point for.",
         ) from None
     except ValueError as exc:
-        # A locked cal/holdout split refusing this call (K1 finding 4): a reviewed image was
-        # deleted/renamed since the split locked, or the lock file itself is corrupt. Either way
-        # this is an honest refusal, not a 500 — surface it as such.
+        # A locked cal/holdout split refusing this call: a reviewed image was deleted/renamed
+        # since the split locked, or the lock file itself is corrupt. Either way
+        # this is an honest refusal, not a 500: surface it as such.
         raise HTTPException(400, str(exc)) from None
 
     result = describe_review_validation(bundle, reviewed_image_count=n)
@@ -834,8 +833,8 @@ class ImageStatusesResponse(BaseModel):
     # image_name -> "not_started" | "started" | "completed"; images the engine has never
     # touched are absent (the client defaults them to "not_started").
     statuses: dict[str, str]
-    # Stems (filename without extension) whose GT or prediction file holds at least one annotation
-    # — i.e. the image has something to review. Images whose stem is absent contribute no TP/FP/FN,
+    # Stems (filename without extension) whose GT or prediction file holds at least one annotation,
+    # i.e. the image has something to review. Images whose stem is absent contribute no TP/FP/FN,
     # so Review navigation skips them.
     detection_stems: list[str]
 
@@ -870,7 +869,7 @@ def image_statuses(
     gt_dir: Optional[str] = None,
     pred_dir: Optional[str] = None,
 ) -> ImageStatusesResponse:
-    """Batch review status + detection presence for a whole (date) — one call the Review tab makes
+    """Batch review status + detection presence for a whole (date): one call the Review tab makes
     on dataset entry to drive the image-level Reviewed/Unreviewed filter and to skip images with
     nothing to review. ``gt_dir``/``pred_dir`` are the per-image label dirs (annotations / a model's
     predictions on the date)."""
@@ -885,16 +884,16 @@ def image_statuses(
 
 class GenerationConfResponse(BaseModel):
     # The bucket's own recorded generation confidence (the Conf floor predictions were exported
-    # at), or None when the bucket has no sidecar / no recorded value. Read-only — this is the
+    # at), or None when the bucket has no sidecar / no recorded value. Read-only: this is the
     # same fact validate_reference reads to derive staged_conf_floor, exposed here without the
     # gate run or the sidecar stamp validate_reference performs, so the Review tab can warn as
-    # soon as the breeder raises the filter (K15) instead of only after a review is complete.
+    # soon as the breeder raises the filter instead of only after a review is complete.
     generation_conf: Optional[float]
 
 
 @router.get("/generation_conf")
 def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
-    """The prediction bucket's own generation confidence, for the Conf >= filter warning (K15).
+    """The prediction bucket's own generation confidence, for the Conf >= filter warning.
 
     Raising the review's own "Conf >=" filter above this value hides low-confidence detections
     from review; any verdict then recorded raises review_conf_threshold above it, which
@@ -910,16 +909,16 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
         generation_conf=float(conf) if isinstance(conf, (int, float)) else None)
 
 
-# ── Active-learning priority queue for review (K23) ─────────────────────────
+# ── Active-learning priority queue for review ───────────────────────────────
 #
 # prioritize_review_queue's own ranking (packages/tcip-mcp .../tools/feedback_tools.py) never
-# reached the breeder-facing Review tab — the only path was the agent manually calling
-# focus(tab='review', ...) once per ranked image, which doesn't scale. This surfaces the SAME
+# reached the breeder-facing Review tab: the only path was the agent manually calling
+# focus(tab='review', ...) once per ranked image, which doesn't scale. This surfaces the same
 # tool (never a second implementation of its scoring/filtering) as a browsable queue: launch on a
 # background thread (checkpoint loading + a forward pass per candidate image can be slow), poll
-# for the result. Scoped to strategy="informativeness" only — the tool's other strategy,
-# confidence_triage, can auto-accept predictions as GT above a breeder-confirmed threshold (D11);
-# that is a different, more consequential capability deliberately left agent-only for now.
+# for the result. Scoped to strategy="informativeness" only: the tool's other strategy,
+# confidence_triage, can auto-accept predictions as GT above a breeder-confirmed threshold; that
+# is a different, more consequential capability deliberately left agent-only for now.
 
 
 @dataclass
@@ -974,11 +973,11 @@ def _pq_worker(job: PriorityQueueJob) -> None:
     try:
         job.status = "running"
         _pq_persist()
-        # The SAME MCP tool the agent calls — its scoring/filtering (build_predictor ->
+        # The same MCP tool the agent calls: its scoring/filtering (build_predictor ->
         # require_composed_detector -> build_scorer -> score -> budget slice -> response shape) is
         # not re-derived here. It returns soft {"error": ...} dicts rather than raising, for every
         # failure mode (missing checkpoint, unknown scorer, non-composed detector, torch
-        # unavailable) — mapped onto this job's own status/error below rather than reimplemented.
+        # unavailable), mapped onto this job's own status/error below rather than reimplemented.
         from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
         result = prioritize_review_queue(
@@ -1016,7 +1015,7 @@ class LaunchPriorityQueuePayload(BaseModel):
 @router.post("/queue/launch")
 def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     # checkpoint_path reaches torch.load via build_predictor (the same arbitrary-pickle sink the
-    # Inference tab's own launch route confines) — same guard, same treatment.
+    # Inference tab's own launch route confines): same guard, same treatment.
     for p in (payload.project_root, payload.checkpoint_path, payload.images_dir):
         _guard_path(p)
     if not Path(payload.checkpoint_path).is_file():
@@ -1024,7 +1023,7 @@ def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     if not Path(payload.images_dir).is_dir():
         raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
 
-    # Same review-state location _get_engine resolves from project_root — the caller supplies the
+    # Same review-state location _get_engine resolves from project_root: the caller supplies the
     # project, not the platform's own internal state layout.
     review_state_dir = str(Path(payload.project_root) / ".tcip" / "state")
 
