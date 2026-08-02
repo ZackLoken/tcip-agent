@@ -14,7 +14,7 @@ const VALIDATED = {
   validated: { operating_point: "validated_held_out", classifier: "validated_held_out" },
   provisional: false,
   validity_detail: {},
-  elongation_classified: true,
+  positive_class_assessed: true,
 };
 
 function setupDataset() {
@@ -33,6 +33,9 @@ function setupDataset() {
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   setupDataset();
+  // ResultsTab resolves its trait from the project's own registered traits before it will
+  // compute anything; every test fixture here is written against a single-trait project.
+  vi.spyOn(resultsApi, "traits").mockResolvedValue({ traits: ["catkin"] });
 });
 
 afterEach(() => {
@@ -40,7 +43,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("ResultsTab structured predictions-by-date picker (K15 #10)", () => {
+describe("ResultsTab structured predictions-by-date picker", () => {
   it("defaults each date to its first model with predictions, and skips a date with none", async () => {
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
@@ -60,6 +63,9 @@ describe("ResultsTab structured predictions-by-date picker (K15 #10)", () => {
 
     render(<ResultsTab />);
     await waitFor(() => expect(api.dataset.tree).toHaveBeenCalledWith("C:/data"));
+    // The trait resolves from the project's registered traits asynchronously; wait for it before
+    // computing, or the compute click races the fetch and refuses (no trait resolved yet).
+    await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
 
     // The classified date defaults to "baseline" (first with predictions); the empty date shows
     // its own disabled "no predictions" option, never silently reusing the other date's model.
@@ -78,7 +84,7 @@ describe("ResultsTab structured predictions-by-date picker (K15 #10)", () => {
     });
   });
 
-  it("dropping a date to '— skip —' excludes it from the computed predictions map", async () => {
+  it("dropping a date to '(skip)' excludes it from the computed predictions map", async () => {
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
       dates_with_images: ["2026-01-01"],
@@ -96,6 +102,9 @@ describe("ResultsTab structured predictions-by-date picker (K15 #10)", () => {
     vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [], ...VALIDATED });
 
     render(<ResultsTab />);
+    // The trait resolves from the project's registered traits asynchronously; wait for it before
+    // computing, or the compute click races the fetch and refuses (no trait resolved yet).
+    await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
 
     fireEvent.change(screen.getByTitle("Model whose predictions to use for this date"), {
@@ -140,6 +149,9 @@ describe("ResultsTab onset table validity marker", () => {
     vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows, ...VALIDATED });
 
     render(<ResultsTab />);
+    // The trait resolves from the project's registered traits asynchronously; wait for it before
+    // computing, or the compute click races the fetch and refuses (no trait resolved yet).
+    await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
     await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
@@ -179,7 +191,7 @@ describe("ResultsTab onset table validity marker", () => {
     expect(screen.queryByText("no observations")).not.toBeInTheDocument();
   });
 
-  it("marks a fully-classified, fully-observed plant with zero detections as 'no observations', not 'valid' (stage-6 review N6)", async () => {
+  it("marks a fully-classified, fully-observed plant with zero detections as 'no observations', not 'valid'", async () => {
     await computeWithOnsetRows([
       {
         plant_id: "P1",
@@ -196,7 +208,7 @@ describe("ResultsTab onset table validity marker", () => {
     expect(screen.queryByText("incomplete")).not.toBeInTheDocument();
   });
 
-  it("renders a right-censored milestone with its own marker, not the interpolated one (round 12)", async () => {
+  it("renders a right-censored milestone with its own marker, not the interpolated one", async () => {
     await computeWithOnsetRows([
       {
         plant_id: "P1",
