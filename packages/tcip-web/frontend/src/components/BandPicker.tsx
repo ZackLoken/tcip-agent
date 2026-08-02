@@ -2,7 +2,7 @@ import type { ImageBandInfo } from "@/api/client";
 import type { BandSelection, Stretch } from "@/lib/bandSelection";
 
 /**
- * An R/G/B band-composite picker plus a stretch select — collapses to a single dropdown (every
+ * An R/G/B band-composite picker plus a stretch select, collapses to a single dropdown (every
  * channel set together) when the source is single-band. The mount-level gate (band_count > 3,
  * never shown for a standard RGB dataset) lives with each caller; this component only renders
  * whatever bandCount/bands it's given.
