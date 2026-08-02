@@ -21,7 +21,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
 
 
 # --------------------------------------------------------------------------
-# semantic_seg_metrics — exact values on tiny synthetic maps
+# semantic_seg_metrics: exact values on tiny synthetic maps
 # --------------------------------------------------------------------------
 
 def test_perfect_overlap_is_one():
