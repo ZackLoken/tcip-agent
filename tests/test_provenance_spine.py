@@ -3,7 +3,7 @@
 Locks the additive provenance stamping across the spine: checkpoint experiment_id + a
 computed-once sha256, the terminal-state lock (additive-only), the enriched capture_env,
 the split manifest, and the producing-model stamps on the delivery CSV/manifest surfaces.
-These are provenance additions — no measurement changes.
+These are provenance additions, no measurement changes.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def test_stamp_model_ref_stamps_experiment_id():
     assert "experiment_id" not in payload3
 
 
-# ── R2/G7: sha256 computed once (cached) + identity resolved from the registry ─
+# ── R2: sha256 computed once (cached) + identity resolved from the registry ─
 
 def test_checkpoint_sha256_is_cached(tmp_path, monkeypatch):
     import tcip_mcp.model_registry as reg
@@ -92,11 +92,11 @@ def test_resolve_model_identity_foreign_checkpoint(tmp_path):
 
 
 def test_resolve_model_identity_reads_checkpoint_own_experiment_id(tmp_path):
-    """K1: the ordinary train-then-calibrate workflow saves a checkpoint stamped with its own
-    ``experiment_id`` (via ``stamp_model_ref``) but never registers it before calibration runs —
+    """The ordinary train-then-calibrate workflow saves a checkpoint stamped with its own
+    ``experiment_id`` (via ``stamp_model_ref``) but never registers it before calibration runs;
     ``resolve_model_identity`` must read that stamp directly rather than resolving None just
-    because no registry entry exists yet (which used to silently bypass the train-disjointness
-    gate for every checkpoint that hadn't been explicitly registered)."""
+    because no registry entry exists yet, which would otherwise silently bypass the
+    train-disjointness gate for every checkpoint that hadn't been explicitly registered."""
     torch = pytest.importorskip("torch")
     from tcip_mcp.model_registry import resolve_model_identity
 
@@ -119,7 +119,7 @@ def test_resolve_model_identity_caller_experiment_id_wins_over_stamp(tmp_path):
     assert ident["experiment_id"] == "expCaller"
 
 
-# ── R3/D6: terminal-state lock is additive-only ───────────────────────────────
+# ── R3: terminal-state lock is additive-only ───────────────────────────────
 
 @pytest.fixture()
 def exp_store(tmp_path, monkeypatch):
@@ -212,8 +212,8 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     out = tmp_path / "agg.csv"
-    # K3: no on-disk measurement-validity source for a bare trait_name="count" call with no
-    # pred_dirs — acknowledge the provisional delivery explicitly (the provenance stamp itself is
+    # No on-disk measurement-validity source for a bare trait_name="count" call with no
+    # pred_dirs: acknowledge the provisional delivery explicitly (the provenance stamp itself is
     # unaffected by that).
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2}], str(out), trait_name="count",
