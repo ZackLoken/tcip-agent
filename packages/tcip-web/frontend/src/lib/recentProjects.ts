@@ -1,6 +1,6 @@
 /**
  * The last few projects the user opened, for the status-bar "project name" fast-track. Stored
- * in localStorage (UI convenience, not authoritative — the workspace list is). Most-recent first.
+ * in localStorage (UI convenience, not authoritative; the workspace list is). Most-recent first.
  */
 
 export interface RecentProject {
@@ -29,6 +29,6 @@ export function recordRecentProject(name: string, path: string): void {
     list.unshift({ name, path });
     localStorage.setItem(KEY, JSON.stringify(list.slice(0, MAX)));
   } catch {
-    /* private mode / disabled storage — the fast-track just won't remember */
+    /* private mode / disabled storage: the fast-track just won't remember */
   }
 }
