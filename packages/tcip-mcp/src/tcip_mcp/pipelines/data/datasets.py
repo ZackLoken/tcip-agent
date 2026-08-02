@@ -149,11 +149,12 @@ def _json_det_targets(path, subject, attribute, id_map):
     Returning the count, not just silently dropping it, matters because an image with any
     unlabeled instance has incomplete ground truth for this scope, and a caller scoring/training
     only the labeled subset turns its real, unlabeled objects into silent false positives or
-    background noise. Callers that build per-image records fresh each call (delivery
-    evaluation, operating-point calibration) must exclude the whole image when ``n_unlabeled > 0``
-   , the same precedent already applied to a missing label file, rather than partially trusting
-    it; a caller bound to a fixed per-image dataset length (a `Dataset.__getitem__`) cannot do that
-    without a deeper stems-selection change, and currently only surfaces the count.
+    background noise. Every caller therefore excludes the whole image on ``n_unlabeled > 0``, the
+    same precedent a missing label file already gets, never partial trust in its labeled subset.
+    A caller that builds per-image records fresh each call (delivery evaluation, operating-point
+    calibration) drops the record as it builds it; a caller bound to a fixed per-image dataset
+    length (a ``Dataset.__getitem__``, which cannot drop a sample per call) applies the same
+    verdict once, up front, in ``trainable_stems``' ``skipped_incomplete_attribute`` partition.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import Point, bbox_of
