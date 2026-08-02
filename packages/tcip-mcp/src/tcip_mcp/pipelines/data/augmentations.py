@@ -12,15 +12,12 @@ Usage:
 
 from __future__ import annotations
 
-import logging
 import random
 
 import torch
 from PIL import Image, ImageEnhance, ImageFilter
 
 from tcip_mcp.pipelines.image_utils import pil_to_tensor
-
-logger = logging.getLogger(__name__)
 
 
 class Compose:
@@ -332,7 +329,7 @@ def get_augmentation_preset(name: str, image_size: tuple[int, int] = (640, 640))
     return presets[name]
 
 
-def build_augmentation(config: dict | str, backend: str = "pil") -> Compose:
+def build_augmentation(config: dict | str) -> Compose:
     """Build an augmentation pipeline from a config dict or a preset name.
 
     ``config`` may be a dict (as below) or a preset-name string
@@ -355,20 +352,10 @@ def build_augmentation(config: dict | str, backend: str = "pil") -> Compose:
       - dict: passed as kwargs to the transform constructor
       - bool: True → use defaults
 
-    ``backend="albumentations"`` is accepted for forward-compatibility but currently
-    falls back to the PIL pipeline (with a warning); the PIL transforms preserve the
-    ``(PIL, target) -> (tensor, target)`` contract.
-
     Returns a Compose([..., ToTensor()]) pipeline.
     """
     if isinstance(config, str):
         config = get_augmentation_preset(config)
-    if backend == "albumentations":
-        try:
-            import albumentations  # noqa: F401
-            logger.warning("albumentations backend not yet wired; using the PIL pipeline.")
-        except ImportError:
-            logger.warning("albumentations requested but not installed; using the PIL pipeline.")
 
     transforms = []
 
