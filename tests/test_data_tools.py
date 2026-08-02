@@ -105,8 +105,8 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
 
 
 def test_make_splits_group_key_map_never_straddles(tmp_path: Path):
-    """K1 (Finding 5): an agent-derived group_key_map (3 stems, 2 groups) is honored — the two
-    same-group stems never land in different splits."""
+    """An agent-derived group_key_map (3 stems, 2 groups) is honored: the two same-group stems
+    never land in different splits."""
     import json
 
     root = _multi_source_dataset(tmp_path / "ds", prefixes=("x", "y", "z"), tiles=1)
@@ -128,8 +128,8 @@ def test_make_splits_group_key_map_never_straddles(tmp_path: Path):
 
 
 def test_make_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Path):
-    """K1 (Finding 6): a silent ``GROUP_KEY_FNS.get(group_by, default_group_key)`` fallback used to
-    mis-group a dataset without anyone noticing. It must now refuse loudly and write nothing."""
+    """A silent ``GROUP_KEY_FNS.get(group_by, default_group_key)`` fallback used to mis-group a
+    dataset without anyone noticing; it must refuse loudly and write nothing instead."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = make_splits(str(root), output_path=str(out), group_by="not_a_real_key")
