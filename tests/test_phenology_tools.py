@@ -1,10 +1,10 @@
 """Tests for the phenology MCP tools (build_plant_mapping + compute_phenology).
 
-The tools are the agent-facing surface for the per-plant bloom pipeline. These tests pin:
+The tools are the agent-facing surface for the per-plant phenology pipeline. These tests pin:
 (1) build_plant_mapping wraps build + persist and reports a compact summary + error paths;
 (2) compute_phenology writes the canonical column schema from classified predictions + a
 persisted plant mapping, resolving the positive class id from the prediction buckets' own
-recorded id_map (K4/K5) and gating both the classifier (K3, reconciled from
+recorded id_map and gating both the classifier (reconciled from
 classifier_operating_point.json) and the count operating point; and (3) its measurement-
 integrity guard refuses to deliver a CSV when no bucket ever classified along the trait's
 positive-class axis.
@@ -28,7 +28,7 @@ from tcip_mcp.tools.phenology_tools import (
     compute_phenology,
 )
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real
 # catkin.yml into this test's pinned project root so get_trait("catkin") keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
@@ -116,7 +116,7 @@ def _write_op_sidecar(dir_path: Path, *, validated: bool, conf: float = 0.4,
 
 def _write_classifier_sidecar(dir_path: Path, *, validated: bool, trait: str | None = None,
                               experiment_id: str | None = None) -> None:
-    """The classifier_operating_point.json calibrate_classifier_operating_point writes (K3)."""
+    """The classifier_operating_point.json calibrate_classifier_operating_point writes."""
     ref = "held_out_annotations" if validated else "false"
     dir_path.mkdir(parents=True, exist_ok=True)
     (dir_path / "classifier_operating_point.json").write_text(json.dumps({
@@ -155,13 +155,13 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
     )
 
     assert "error" not in res, res
-    assert res["elongation_classified"] is True
+    assert res["positive_class_assessed"] is True
     assert out_csv.exists()
 
 
 def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path: Path) -> None:
-    """Stage-6 review N3: a genuinely-validated classifier_operating_point.json calibrated for a
-    DIFFERENT trait/experiment must not validate an unrelated delivery -- classifier_pred_dirs is a
+    """A genuinely-validated classifier_operating_point.json calibrated for a
+    different trait/experiment must not validate an unrelated delivery -- classifier_pred_dirs is a
     separate, caller-supplied list, so reconcile_classifier_validity's own on-disk check alone can't
     see this; the stamp's own recorded trait/experiment_id must agree with what's being delivered."""
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
@@ -169,7 +169,7 @@ def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path:
     _write_preds(d2, "P1_b", ["elongated"])
     _write_op_sidecar(d1, validated=True, id_map=ID_MAP, experiment_id="run-B")
     _write_op_sidecar(d2, validated=True, id_map=ID_MAP, experiment_id="run-B")
-    # Genuinely validated (validated=True), but calibrated for a DIFFERENT trait and a DIFFERENT
+    # Genuinely validated (validated=True), but calibrated for a different trait and a different
     # producing run than the one being delivered here.
     other_trait_dir = tmp_path / "unrelated_calibration"
     _write_classifier_sidecar(other_trait_dir, validated=True,
@@ -197,17 +197,17 @@ def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path:
 
 
 def test_compute_phenology_rejects_classifier_stamp_with_no_trait_recorded(tmp_path: Path) -> None:
-    """Stage-6 review NEW-7, round 4: the real writer (calibrate_classifier_operating_point) always
+    """The real writer (calibrate_classifier_operating_point) always
     records a real trait name -- unlike experiment_id, there is no legitimate producer path that
     omits it. A sidecar with trait=None (a hand-edited or foreign file, not one the real writer could
     produce) must not be trusted just because neither the trait-mismatch nor the experiment-mismatch
-    branch fires against a null -- both being null used to bypass the binding check entirely."""
+    branch fires against a null -- both being null would otherwise bypass the binding check entirely."""
     d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
     _write_preds(d1, "P1_a", ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"])
     _write_op_sidecar(d1, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, validated=True, id_map=ID_MAP)
-    # Genuinely "validated", but with NEITHER trait NOR experiment_id recorded -- the shape a
+    # Genuinely "validated", but with neither trait nor experiment_id recorded -- the shape a
     # hand-edited/foreign sidecar could carry, never one calibrate_classifier_operating_point writes.
     _write_classifier_sidecar(d1, validated=True, trait=None, experiment_id=None)
     mapping_path = tmp_path / "state" / "plant_mapping.json"
@@ -333,8 +333,8 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
 
 
 def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> None:
-    # Predictions from a bare detector (no elongation axis at all) — the round-3/4/5 canonical
-    # case: this must refuse, never report full coverage.
+    # Predictions from a bare detector (no elongation axis at all) must refuse,
+    # never report full coverage.
     d1 = tmp_path / "2026-02-11"
     _write_preds(d1, "P1_a", ["catkin"])
     _write_op_sidecar(d1, validated=True, id_map={"catkin": 0})
@@ -376,19 +376,19 @@ def test_compute_phenology_unknown_trait_refuses(tmp_path: Path) -> None:
     assert "error" in res
 
 
-# ── calibrate_classifier_operating_point (K3) — the classifier-validity producer ────────────
+# ── calibrate_classifier_operating_point: the classifier-validity producer ────────────
 
 def _write_calibration_image(
     gt_dir: Path, pred_dir: Path, stem: str, calls: list[tuple[bool | None, bool]], *,
     image_offset: float,
 ) -> None:
     """One (GT, pred) file pair with several classified instances, GT and pred boxes at the
-    SAME position per instance (spaced far apart from each other) so they match regardless of
+    same position per instance (spaced far apart from each other) so they match regardless of
     the exact derived center-match tolerance. ``calls`` is
-    ``[(is_true_positive, is_pred_positive), ...]`` — ``is_true_positive=None`` writes a GT
-    instance with NO ``elongation`` attribute at all (never assessed), instead of a real value.
+    ``[(is_true_positive, is_pred_positive), ...]``; ``is_true_positive=None`` writes a GT
+    instance with no ``elongation`` attribute at all (never assessed), instead of a real value.
     ``image_offset`` shifts every box in this image by a unique amount so distinct images never
-    collide on content hash — two images with the same classification PATTERN must still carry
+    collide on content hash: two images with the same classification pattern must still carry
     different geometry, the same way two different real photos would.
     """
     gt_anns, pred_anns = [], []
@@ -409,10 +409,10 @@ def _write_calibration_image(
 def _write_split(gt_dir: Path, pred_dir: Path, *, prefix: str, n_images: int,
                  per_image_calls, offset: int = 0, offset_stride: float = 1000.0) -> None:
     """``per_image_calls(image_index) -> list[(is_tp, is_pred_pos)]`` builds one split of
-    ``n_images`` files, each named ``f"{prefix}_{offset+i}"`` — a distinct stem per split so
+    ``n_images`` files, each named ``f"{prefix}_{offset+i}"``, a distinct stem per split so
     calibration and holdout are disjoint by construction unless a test deliberately reuses one.
     Each image also gets a unique geometry offset (``offset_stride`` apart), so two splits built
-    with the SAME ``offset``/``prefix`` sequence (as a genuine-duplication test wants) land on
+    with the same ``offset``/``prefix`` sequence (as a genuine-duplication test wants) land on
     identical geometry, while two splits meant to be independent don't collide by accident.
     """
     for i in range(n_images):
@@ -450,7 +450,7 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
     assert res["failures"] == []
     sidecar = json.loads((tmp_path / "out" / "classifier_operating_point.json").read_text())
     assert sidecar["validated"] is True
-    # The writer's field name must be the one the shared reader reads — checked by running the real
+    # The writer's field name must be the one the shared reader reads, checked by running the real
     # reader over the real output, not by re-asserting a key name in two places.
     from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT, reconcile_classifier_validity
 
@@ -460,8 +460,8 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
 
 def test_calibrate_classifier_operating_point_refuses_genuinely_duplicated_holdout(tmp_path: Path) -> None:
     """A holdout whose GT content is cloned from calibration (same classification calls, same
-    geometry) must refuse content_duplicated even under DIFFERENT image ids — the whole point of
-    a content hash, not an image-id check (stage-6 review, K3's critical finding)."""
+    geometry) must refuse content_duplicated even under different image ids: the whole point of
+    a content hash, not an image-id check."""
     cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
     hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
     calls = _alternating_calls
@@ -485,8 +485,8 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
     tmp_path: Path,
 ) -> None:
     """A classifier that flips a substantial, symmetric fraction of calls (net count-bias ~0)
-    must still fail — the compensating-error floor's whole reason to exist (stage-6 review: the
-    prior kappa>0 floor let a 40%-wrong classifier through)."""
+    must still fail: a bare kappa>0 floor alone would let a 40%-wrong classifier through, since
+    symmetric flips cancel out in the net bias."""
     cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
     hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
     good = _one_positive_one_negative
@@ -517,7 +517,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
 
 
 def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> None:
-    """Stage-6 review Finding C/N4: a single-image holdout has no images to vary the count-bias
+    """A single-image holdout has no images to vary the count-bias
     across, so its std is trivially 0 -- the SE penalty the equivalence test relies on vanishes.
     Must refuse (insufficient_holdout_images), the same minimum the detection path requires,
     rather than pass at exactly the tolerance with zero uncertainty discount."""
@@ -527,7 +527,7 @@ def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> No
         {"image_id": "c0", "is_true_positive": True, "is_pred_positive": True, "bbox": [0.0, 0.0, 10.0, 10.0]},
         {"image_id": "c1", "is_true_positive": False, "is_pred_positive": False, "bbox": [20.0, 0.0, 30.0, 10.0]},
     ]
-    # 20 instances, ALL on one image -- a real net bias of +1, which the equivalence test's SE=0
+    # 20 instances, all on one image -- a real net bias of +1, which the equivalence test's SE=0
     # (n_images=1) would let through regardless of tolerance.
     hold = [
         {"image_id": "h0", "is_true_positive": i < 10, "is_pred_positive": i < 11,
@@ -543,8 +543,8 @@ def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> No
 
 def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
     """``pos_per_image`` correctly-called positives per image, plus one token negative per image (so
-    kappa stays defined). On ``miscall_images`` (indices), one EXTRA false-positive-called instance
-    is added -- the SAME absolute miscall, regardless of density."""
+    kappa stays defined). On ``miscall_images`` (indices), one extra false-positive-called instance
+    is added -- the same absolute miscall, regardless of density."""
     items = []
     for i in range(n_images):
         for k in range(pos_per_image):
@@ -559,12 +559,11 @@ def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
 
 
 def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_class_the_dense_admits():
-    """K4 residual (2026-07-31), stage-6 review Finding F4: the classifier path's count-bias
-    tolerance is relative too (same field, same `_bias_equivalence_ok`), and nothing exercised its
-    MAGNITUDE before this — the one passing classifier fixture in this file has bias exactly 0.0,
-    true at any tolerance. This pins both directions with the IDENTICAL absolute miscall (one extra
+    """The classifier path's count-bias tolerance is relative too (same field, same
+    `_bias_equivalence_ok`); the one passing classifier fixture in this file has bias exactly 0.0,
+    true at any tolerance, so this pins both directions with the identical absolute miscall (one extra
     false-positive-called instance, on one holdout image out of 20): sparse (1 real positive/image)
-    refuses; dense (150 real positives/image) admits the SAME miscall as a small relative fraction.
+    refuses; dense (150 real positives/image) admits the same miscall as a small relative fraction.
     """
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
 
@@ -580,7 +579,7 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
         holdout_items=_classifier_items("h", 20, 150, miscall_images=[0]), experiment_id=None)
     assert dense["sweep_data"]["typical_positive_count"] == pytest.approx(150.0)
     # Same count_bias/count_bias_std as the sparse case (the miscall pattern is identical) -- only
-    # the DERIVED tolerance differs, proving density is what changed the outcome.
+    # the derived tolerance differs, proving density is what changed the outcome.
     assert dense["sweep_data"]["count_bias"] == pytest.approx(sparse["sweep_data"]["count_bias"])
     assert dense["sweep_data"]["count_bias_std"] == pytest.approx(sparse["sweep_data"]["count_bias_std"])
     assert dense["sweep_data"]["count_bias_tolerance_absolute"] > sparse["sweep_data"]["count_bias_tolerance_absolute"]
@@ -590,7 +589,7 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
 def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floor(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """Stage-6 review Finding B: TraitSpec.classifier_agreement_floor, when a trait authors one,
+    """TraitSpec.classifier_agreement_floor, when a trait authors one,
     must be the floor actually applied -- not the platform's provisional default."""
     from dataclasses import replace
 
@@ -628,7 +627,7 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
 ) -> None:
     """experiment_id=None (a foreign/unregistered checkpoint) skips train-disjointness rather than
     failing closed -- the classifier-validity stamp is still reachable for an otherwise clean
-    reference (K3's foreign-checkpoint case)."""
+    reference."""
     cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
     hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
     calls = _one_positive_one_negative
@@ -650,9 +649,9 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
 def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_negative(
     tmp_path: Path,
 ) -> None:
-    """Stage-6 review N1: a GT instance never assessed for `attribute` (no elongation key at all)
+    """A GT instance never assessed for `attribute` (no elongation key at all)
     must be excluded from the reference, never coerced into "not positive". A perfect classifier
-    scored against a reference where every image ALSO carries unassessed instances must still pass
+    scored against a reference where every image also carries unassessed instances must still pass
     cleanly -- the unassessed instances contribute no fabricated disagreement."""
     cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
     hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
@@ -686,20 +685,20 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
 def test_classification_items_derives_center_match_tolerance_across_the_whole_split(
     tmp_path: Path,
 ) -> None:
-    """Stage-6 review Finding A/N5: the center-match tolerance must be derived from the WHOLE
+    """The center-match tolerance must be derived from the whole
     split's GT, not one image at a time. A small-object image's real pair, offset by more than
     that image's own (too-tight) per-image tolerance but less than the split-wide tolerance
     (pulled up by a large-object image elsewhere in the same split), must still match."""
     gt_dir, pred_dir = tmp_path / "gt", tmp_path / "pred"
     gt_dir.mkdir()
     pred_dir.mkdir()
-    # Precondition guard, corrected (K18 B3 stage-6 review round 2): this test's math depends on
-    # the RECORDED kind (CATKIN's localization=CENTER_MATCH, seeded by seed_catkin_trait_spec)
-    # governing, not a live derivation — verified this is NOT redundant with derivation: this
+    # Precondition guard: this test's math depends on
+    # the recorded kind (CATKIN's localization=CENTER_MATCH, seeded by seed_catkin_trait_spec)
+    # governing, not a live derivation; this is not redundant with derivation: this
     # split's average characteristic size (sqrt(200*200)=200 and sqrt(20*20)=20, mean 110px)
     # exceeds derive_localization_kind's ~45px crossover and would derive to iou_match if
     # unrecorded. resolve_match_criterion uses a recorded kind as-is (only warns on divergence,
-    # never overrides it — see test_evaluation_metrics.py's dedicated coverage of that behavior),
+    # never overrides it (see test_evaluation_metrics.py's dedicated coverage of that behavior),
     # so this assertion is what actually fails fast, with a clear message, if the CATKIN fixture's
     # localization value ever changes and silently stops exercising the center-match code path
     # this test exists to cover.
@@ -717,7 +716,7 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
     ], 400, 400)
 
     # "small": a 20x20 GT box -> char_size=20 -> per-image tolerance would be only 10px; the
-    # prediction is offset 15px, which the OLD per-image derivation would drop as unmatched.
+    # prediction is offset 15px, which a per-image derivation would drop as unmatched.
     small_box = BBox(1000.0, 0.0, 1020.0, 20.0)
     json_io.write_annotations(gt_dir / "small.json", [
         Annotation(subject="catkin", geometry=small_box, attributes={"elongation": "dormant"}),
@@ -743,10 +742,10 @@ def test_classification_items_derives_center_match_tolerance_across_the_whole_sp
 
 
 def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> None:
-    """Stage-6 review NEW-5, round 4: a labels dir isn't guaranteed to hold only one kind of
+    """A labels dir isn't guaranteed to hold only one kind of
     annotation -- a dataset that also isolates an enabling subject (e.g. "bush", root CLAUDE.md's
     "a subject is not a trait") must not let that unrelated box enter the match pool. Here a "bush"
-    annotation sits EXACTLY on the prediction's center (distance 0) while the real "catkin" GT is a
+    annotation sits exactly on the prediction's center (distance 0) while the real "catkin" GT is a
     few px off -- if subject weren't scoped, greedy center-match (closest first) would steal the
     match for "bush" and either drop the real catkin pair or attribute it to the wrong box/attribute
     entirely."""
@@ -755,7 +754,7 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
     pred_dir.mkdir()
 
     # catkin center (125, 125), offset ~7px from the prediction -- comfortably inside tolerance.
-    # bush center (120, 120), an EXACT match to the prediction -- if it entered the pool, greedy
+    # bush center (120, 120), an exact match to the prediction -- if it entered the pool, greedy
     # center-match (ascending distance) would steal the match for bush (distance 0 beats ~7px)
     # ahead of the real catkin pair, regardless of list order.
     catkin_box = BBox(105.0, 105.0, 145.0, 145.0)
