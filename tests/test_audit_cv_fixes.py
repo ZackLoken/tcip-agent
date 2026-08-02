@@ -20,13 +20,13 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     evaluate,
 )
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real
 # catkin.yml into this test's pinned project root so trait="catkin" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
 # ======================================================================
-# CV9 — detection val-loss must include all-negative images
+# CV9: detection val-loss must include all-negative images
 # ======================================================================
 
 class _StubDetector:
@@ -91,11 +91,11 @@ def test_cv9_all_negative_only_loader_is_not_skipped():
     loader = [_det_batch([0, 0])]  # nothing but negatives
     result = evaluate(model, loader, torch.device("cpu"), "detection")
     assert stub.calls == [(2, 0)]  # forwarded, not skipped
-    assert result["loss"] == pytest.approx(2.5)  # finite, non-zero — negatives contribute loss
+    assert result["loss"] == pytest.approx(2.5)  # finite, non-zero: negatives contribute loss
 
 
 # ======================================================================
-# CV10 — report standard map@100 AND map@max_dets
+# CV10: report standard map@100 and map@max_dets
 # ======================================================================
 
 def _rec(gt, dt, w=100, h=100):
@@ -135,7 +135,7 @@ def test_cv10_standard_keys_unchanged_at_100():
 
 
 # ======================================================================
-# CV1 — tiled evaluation regimes
+# CV1: tiled evaluation regimes
 # ======================================================================
 
 def _det_dataset(tmp_path, n=3, size=128):
@@ -240,9 +240,9 @@ def test_cv1_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
                     "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
-    # K10 finding 1: this stub carries no persisted training tile geometry, so the delivery-grade
+    # This stub carries no persisted training tile geometry, so the delivery-grade
     # gate now refuses unless the caller states the geometry explicitly (the affordance a rail must
-    # admit — see test_k10_gate_refuses_unresolvable_tile_geometry for the refusal itself).
+    # admit; see test_k10_gate_refuses_unresolvable_tile_geometry for the refusal itself).
     r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"),
                                   subject="catkin", tile_size=64, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
@@ -252,11 +252,11 @@ def test_cv1_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
 
 
 def test_k18_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
-    """K18 B2: before this fix, run_full_frame_evaluation's bare `except Exception` around
-    _resolve_registry_id_map swallowed an attribute-classification registry refusal and silently
-    scored against zero ground truth instead of refusing. An attribute needs a real classes.json
-    to order its values (_resolve_registry_id_map's own deliberate ValueError) — no classes.json
-    exists here, so this must now propagate as a real refusal, not a quietly-empty GT read."""
+    """run_full_frame_evaluation must not let a bare `except Exception` around
+    _resolve_registry_id_map swallow an attribute-classification registry refusal and silently
+    score against zero ground truth instead of refusing. An attribute needs a real classes.json
+    to order its values (_resolve_registry_id_map's own deliberate ValueError); no classes.json
+    exists here, so this must propagate as a real refusal, not a quietly-empty GT read."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
 
@@ -284,7 +284,7 @@ def test_k18_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch
 
 
 # ======================================================================
-# CV2 — inference tile geometry derived from the checkpoint
+# CV2: inference tile geometry derived from the checkpoint
 # ======================================================================
 
 def _stub_inference(monkeypatch, *, train_tile_size=None, train_overlap=None):
@@ -330,7 +330,7 @@ def test_cv2_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
     ts = r["operating_point"]["tile_size"]
     assert ts["value"] == 224 and ts["source"] == "derived"
     assert "warning" not in r  # geometry was recoverable
-    # Stage-6 review: overlap has no home in the ResolvedBundle's tracked params — surfaced
+    # overlap has no home in the ResolvedBundle's tracked params; surfaced
     # directly on the result instead of silently dropped after being resolved.
     assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
 
@@ -351,15 +351,15 @@ def test_cv2_foreign_checkpoint_falls_back_to_default_with_warning(tmp_path, mon
 
 
 # ======================================================================
-# K10 finding 1 — the delivery-gating path resolves tile geometry the SAME
-# way run_inference does (via the shared resolve_tile_geometry), and REFUSES
+# The delivery-gating path resolves tile geometry the same
+# way run_inference does (via the shared resolve_tile_geometry), and refuses
 # rather than silently defaulting when nothing can be resolved.
 # ======================================================================
 
 def test_k10_gate_refuses_unresolvable_tile_geometry(tmp_path):
-    """Before this fix: a checkpoint with no persisted tiling and no explicit override silently
-    scored the delivery gate at a pinned 640/0.2. Now it refuses rather than fabricate a number
-    on the path the docstring calls "the number that gates a phenotype delivery"."""
+    """A checkpoint with no persisted tiling and no explicit override must refuse the delivery
+    gate rather than silently score it at a fabricated 640/0.2, on the path the docstring calls
+    "the number that gates a phenotype delivery"."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
 
@@ -388,7 +388,8 @@ def test_k10_gate_refuses_unresolvable_tile_geometry(tmp_path):
 
 def test_k10_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     """The checkpoint's own persisted training geometry (already sitting on the predictor object)
-    governs the gate instead of the old pinned 640/0.2 — the ~2.9x scale mismatch K10 found."""
+    governs the gate instead of a pinned 640/0.2, avoiding a scale mismatch (~2.9x for this
+    checkpoint) between the geometry the gate assumes and the geometry the model was trained at."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
 
@@ -428,11 +429,11 @@ def test_k10_gate_derives_tile_geometry_from_checkpoint(tmp_path):
 
 
 def test_k18_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, monkeypatch):
-    """K18 B2 (stage-6 review fix): an attribute-scoped run against a dataset with no classes.json
-    must NOT crash — write_predictions_json already documents id_map=None as an accepted, honest
+    """An attribute-scoped run against a dataset with no classes.json
+    must not crash: write_predictions_json already documents id_map=None as an accepted, honest
     degraded fallback ("the raw 0-indexed id is used as the name... never a re-derivation"). The
-    original bare except swallowed this case too broadly; the fix (a precondition check) must still
-    admit it, not turn it into a hard failure that discards completed prediction work."""
+    precondition check guarding this path must admit it, not turn it into a hard failure that
+    discards completed prediction work."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -459,8 +460,8 @@ def test_k18_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, m
 
 
 def test_k18_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch):
-    """The precondition check (resolved_classes_path) only short-circuits the LEGITIMATE
-    no-registry case — a classes.json that exists but is corrupted is a real, unexpected failure
+    """The precondition check (resolved_classes_path) only short-circuits the legitimate
+    no-registry case: a classes.json that exists but is corrupted is a real, unexpected failure
     and must still raise loudly, not be silently absorbed by the same precondition that admits
     the honest degraded case."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
@@ -484,7 +485,7 @@ def test_k18_run_inference_corrupted_registry_still_propagates(tmp_path, monkeyp
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
 
-    with pytest.raises(Exception):  # json.JSONDecodeError (a ValueError subclass) — not swallowed
+    with pytest.raises(Exception):  # json.JSONDecodeError (a ValueError subclass), not swallowed
         run_inference(str(ckpt), images_dir=str(images_dir), device="cpu")
 
 
@@ -501,19 +502,18 @@ def test_cv2_explicit_tile_size_wins(tmp_path, monkeypatch):
 
 
 def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch):
-    """K24: launch_training now runs the training body in a real subprocess, so the effective
+    """launch_training runs the training body in a real subprocess, so the effective
     tiling geometry can only be known (and patched into the durable experiment record) once that
-    child builds the dataset — after launch_training has already returned. Polls for it instead of
+    child builds the dataset, after launch_training has already returned. Polls for it instead of
     asserting synchronously.
 
     Also pins the isolation itself, not just the timing change: this monkeypatches
-    ``generic_trainer.train`` in THIS process to raise if ever called. Before K24 (a background
-    thread in the same interpreter) that monkeypatch would have reached the run and failed it —
-    against that baseline this test's "status == completed" assertion below would fail, since the
-    poisoned ``train`` would be the one actually invoked. After K24 (a real subprocess, which
-    re-imports fresh) the monkeypatch has no effect at all, so the run completes normally despite
-    it — proving the training body genuinely executes outside this process, not merely that the
-    API still returns the right shape."""
+    ``generic_trainer.train`` in this process to raise if ever called. If the run executed in this
+    same interpreter, that monkeypatch would poison it and the "status == completed" assertion
+    below would fail, since the poisoned ``train`` would be the one actually invoked. Because the
+    real subprocess re-imports fresh, the monkeypatch here has no effect and the run completes
+    normally, proving the training body genuinely executes outside this process, not merely that
+    the API still returns the right shape."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
     import json
@@ -528,7 +528,7 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
 
     def _poison_train(*a, **k):
         raise AssertionError(
-            "generic_trainer.train ran inside the launching process — subprocess isolation broken")
+            "generic_trainer.train ran inside the launching process: subprocess isolation broken")
 
     monkeypatch.setattr(gt, "train", _poison_train)
 
@@ -582,7 +582,7 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
     assert tiling["tile_size"] == 224  # TiledDetectionDataset default
     assert tiling["overlap"] == pytest.approx(0.2)
 
-    # Let the subprocess actually finish rather than leaking it — it keeps writing to this test's
+    # Let the subprocess actually finish rather than leaking it: it keeps writing to this test's
     # pinned TCIP_PROJECT_ROOT, and a late write after the test moves on would resolve against
     # whoever is running then (tests repin TCIP_PROJECT_ROOT per test, they don't isolate the OS
     # process tree). Asserting specifically on "completed" (not just any terminal state) is what
@@ -601,7 +601,7 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
 
 
 # ======================================================================
-# CV0 — calibrated operating point wired into the delivery doors
+# CV0: calibrated operating point wired into the delivery doors
 # ======================================================================
 
 def _op_box(cx, cy, s=20.0):
@@ -618,10 +618,10 @@ def _op_ann(cx, cy, cid=0, score=None):
 def _op_records(idp, *, shift=0.0):
     """Records where count-unbiased conf (0.6) is well-defined and the holdout passes (validated).
 
-    ``shift`` (K1): offsets every GT box's center by that many px (well inside the ~10px
+    ``shift`` offsets every GT box's center by that many px (well inside the ~10px
     center-match tolerance) so a holdout fixture's GT content genuinely differs from
-    calibration's — a holdout identical in content to calibration (differing only by
-    ``image_id``) now trips the content-overlap gate.
+    calibration's: a holdout identical in content to calibration (differing only by
+    ``image_id``) trips the content-overlap gate.
     """
     a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
          "gt": [_op_ann(100 + shift, 100)],
@@ -633,9 +633,9 @@ def _op_records(idp, *, shift=0.0):
 
 
 def _good_dense_cal_holdout():
-    """K2 rule 17: resolve_operating_point's holdout gate (Fix B/C) needs a REALISTIC dense
-    reference, not the 2-image ``_op_records`` toy (its per-image variance now trips Fix C's
-    equivalence criterion at n=2). A good detector with one low-conf spurious detection per image —
+    """resolve_operating_point's holdout gate needs a realistic dense
+    reference, not the 2-image ``_op_records`` toy (its per-image variance trips the
+    equivalence criterion at n=2). A good detector with one low-conf spurious detection per image:
     the count-unbiased pick lands at the high, correct-match score (0.9) once that FP is filtered
     out, with zero bias/dispersion and full recall/precision on the holdout.
     """
@@ -691,7 +691,7 @@ def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_dense_cal_holdout()
-    # tiled=False: this test's real run_inference call below is tile=False (K10 — tile_size only
+    # tiled=False: this test's real run_inference call below is tile=False (tile_size only
     # gates a bundle when tiled, so the mocked bundle must match the real regime it stands in for).
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=cal, holdout_records=hold,
@@ -717,7 +717,7 @@ def test_cv0_calibration_wires_resolved_conf(tmp_path, monkeypatch):
 
 
 def test_cv0_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monkeypatch):
-    """K12 finding 5: two calibrations on the SAME checkpoint+labels but different predictor-path
+    """Two calibrations on the same checkpoint+labels but different predictor-path
     settings must not collide on the sweep artifact filename."""
     import json
 
@@ -756,7 +756,7 @@ def test_cv0_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, m
 
 
 def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch):
-    """K12 finding 5: the delivered operating_point.json sidecar must record the sweep artifact
+    """The delivered operating_point.json sidecar must record the sweep artifact
     that justified the shipped conf, not omit it entirely."""
     import json
 
@@ -788,7 +788,7 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
 
 
 def test_cv0_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
-    """Inferencing the SAME labeled set with a bundle scoped to a DIFFERENT hash flags inheritance and
+    """Inferencing the same labeled set with a bundle scoped to a different hash flags inheritance and
     refuses to stamp validated=True (validated and shippable_issues stay consistent)."""
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
@@ -819,14 +819,14 @@ def test_cv0_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
 
 
 def test_cv0_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch):
-    """An unlabeled inference target has no GT hash to compare — record it as such and still ship when
+    """An unlabeled inference target has no GT hash to compare: record it as such and still ship when
     the held-out calibration passed (no validated/shippable_issues contradiction)."""
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_dense_cal_holdout()
-    # tiled=False: matches the real run_inference call below (tile=False) — see K10 note above.
+    # tiled=False: matches the real run_inference call below (tile=False).
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=cal, holdout_records=hold,
                                      tiled=False, staged_conf_floor=0.01)
@@ -845,8 +845,8 @@ def test_cv0_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypa
 
 
 def test_cv0_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
-    """Regime lock: calibration must run the SAME tiled predictor path the delivery uses, not an
-    untiled model forward — else the conf is validated in a different regime than it ships through."""
+    """Regime lock: calibration must run the same tiled predictor path the delivery uses, not an
+    untiled model forward, else the conf is validated in a different regime than it ships through."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -877,7 +877,7 @@ def test_cv0_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
         def predict_batch(self, paths, tile=False, tile_size=None, overlap=None,
                           tile_batch_size=96, global_nms_iou=None, postprocess="nms"):
             calls.append({"tile": tile, "tile_size": tile_size, "overlap": overlap})
-            # tiled finds two boxes/img; untiled finds none — so a sweep over untiled records differs.
+            # tiled finds two boxes/img; untiled finds none, so a sweep over untiled records differs.
             boxes = [[10, 10, 40, 40], [100, 100, 130, 130]] if tile else []
             scores = [0.9, 0.6] if tile else []
             labels = [1, 1] if tile else []
@@ -891,8 +891,8 @@ def test_cv0_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
 
     run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
                   trait="catkin", calibration_labels_dir=str(labels_dir))
-    # Every predictor pass — both calibration splits AND the delivery pass — ran tiled at the same
-    # geometry. Under the old untiled-sweep code there was no tiled calibration pass at all.
+    # Every predictor pass, both calibration splits and the delivery pass, ran tiled at the same
+    # geometry, not an untiled calibration sweep.
     assert len(calls) >= 3
     assert all(c["tile"] is True for c in calls)
     assert all(c["tile_size"] == 64 for c in calls)
@@ -901,11 +901,11 @@ def test_cv0_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
 
 def test_k10_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_derived(
         tmp_path, monkeypatch):
-    """K10 finding 3 residual (ceiling-check): before this fix, resolve_operating_point inferred
-    "derived" from mere truthiness of tile_size — so a checkpoint with NO persisted geometry, whose
-    tile_size silently fell back to the fabricated DEFAULT_TILE_SIZE, still got stamped "derived
+    """resolve_operating_point must not infer
+    "derived" from mere truthiness of tile_size: a checkpoint with no persisted geometry, whose
+    tile_size falls back to the fabricated DEFAULT_TILE_SIZE, must not get stamped "derived
     from persisted training geometry" on the calibrated (potentially held-out-validated) bundle.
-    Now the real source computed by resolve_tile_geometry travels through _calibrate_operating_point
+    The real source computed by resolve_tile_geometry travels through _calibrate_operating_point
     into resolve_operating_point, so a fabricated fallback is honestly stamped "default"."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.tools.inference_tools import run_inference
@@ -948,8 +948,8 @@ def test_k10_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_der
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
                       trait="catkin", calibration_labels_dir=str(labels_dir))
     ts = r["operating_point"]["tile_size"]
-    assert ts["value"] == 640  # the fabricated fallback (DEFAULT_TILE_SIZE) — real value, unchanged
-    assert ts["source"] == "default"  # honestly labeled — NOT "derived" despite being truthy
+    assert ts["value"] == 640  # the fabricated fallback (DEFAULT_TILE_SIZE), real value, unchanged
+    assert ts["source"] == "default"  # honestly labeled, not "derived" despite being truthy
 
 
 def test_cv0_export_predictions_validated_from_bundle(tmp_path, monkeypatch):
@@ -1013,9 +1013,10 @@ def test_cv0_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
 def test_tabulate_counts_never_launders_a_bare_validated_bool_into_a_reference(tmp_path, monkeypatch):
     """The count CSV door reads the reference conf itself recorded, never the run's bare bool.
 
-    A run whose conf param records no (or a wrong-kind) reference is unvalidated for THIS dimension
-    even when the run's overall ``validated`` flag is true — promoting the bool to
-    ``held_out_annotations`` was a laundering path (the same one resolution._sidecar_reference closed).
+    A run whose conf param records no (or a wrong-kind) reference is unvalidated for this dimension
+    even when the run's overall ``validated`` flag is true: promoting the bool to
+    ``held_out_annotations`` would be a laundering path (the same shape resolution._sidecar_reference
+    guards against).
     """
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_PHYSICAL_MEASUREMENT
 
