@@ -1,7 +1,7 @@
 /** Dataset class-registry + per-image-status API helpers.
  *
  * The registry is one nested mapping per dataset: subject -> {description?, attributes?}. It
- * carries no integer ids and no colors — a label references names, an id is a per-training-run
+ * carries no integer ids and no colors: a label references names, an id is a per-training-run
  * artifact, and a color is GUI-local (see subjectColor). It travels with the image set: a
  * name-based label is undecodable without it.
  */
@@ -27,8 +27,8 @@ export interface SubjectDef {
 /** The nested registry: subject name -> its definition. Top-level keys are the subjects. */
 export type Registry = Record<string, SubjectDef>;
 
-// "negative" = the breeder marked the image Complete with no objects — a confirmed negative,
-// recorded in image_status.json. An empty label file alone is NOT this: it reads as
+// "negative" = the breeder marked the image Complete with no objects: a confirmed negative,
+// recorded in image_status.json. An empty label file alone is not this: it reads as
 // "unannotated" until that Complete, which is the whole negative-sample rail.
 export type ImageStatus = "complete" | "partial" | "negative" | "unannotated";
 
@@ -57,9 +57,9 @@ export const classesApi = {
     }),
 
   // A Complete is a statement about one subject on one date. Every read and write is scoped to it,
-  // so confirming an image while annotating catkins cannot mark it negative for a disease subject
+  // so confirming an image while annotating leaf cannot mark it negative for a disease subject
   // nobody has looked at yet. Confirmations are dataset-native (like the registry) rather than
-  // project-private, so dataset_root/annotations_dir resolve where the store actually lives —
+  // project-private, so dataset_root/annotations_dir resolve where the store actually lives,
   // same as classesApi.load/save above.
   loadImageStatus: (
     project_root: string,
@@ -125,7 +125,7 @@ export const classesApi = {
 };
 
 // High-contrast palette the GUI derives subject/value colours from. Colour is GUI-local (the
-// registry stores none), so it is a pure function of the name — the same subject renders the same
+// registry stores none), so it is a pure function of the name: the same subject renders the same
 // colour every session with nothing persisted.
 export const SUBJECT_COLORS = [
   "#FF0000",
