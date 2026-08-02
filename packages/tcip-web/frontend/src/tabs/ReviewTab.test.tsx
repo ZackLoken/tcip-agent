@@ -36,7 +36,7 @@ vi.mock("react-konva", () => ({
   Text: (props: { text?: string }) => <div data-testid="k-text" data-text={props.text} />,
 }));
 vi.mock("@/components/Canvas/CanvasStage", () => ({
-  // Forward pixel handlers as plain mouse events (clientX/Y stand in for image-pixel coords — the
+  // Forward pixel handlers as plain mouse events (clientX/Y stand in for image-pixel coords; the
   // real screen<->image conversion is CanvasStage's own concern, exercised elsewhere) so tests can
   // simulate a canvas drag (e.g. the "mark missed object" draw) without a real Konva stage.
   CanvasStage: (props: {
@@ -129,12 +129,12 @@ beforeEach(() => {
     .spyOn(api.review, "imageStatuses")
     .mockResolvedValue({ statuses: {}, detection_stems: ["img1", "img2"] });
   // Default: no recorded generation confidence -> no Conf >= censoring warning. Tests exercising
-  // K15's warning override this per-case.
+  // the warning override this per-case.
   vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: null });
-  // K23: the priority-queue model picker fetches this on every render with a project open. Default
+  // The priority-queue model picker fetches this on every render with a project open. Default
   // empty; the priority-queue describe block below overrides per-case.
   vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({ models: [] });
-  // Default: a standard 3-band RGB image — the band picker's own describe block overrides this
+  // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
   vi.spyOn(api.images, "bands").mockResolvedValue({
     band_count: 3,
@@ -236,7 +236,7 @@ describe("ReviewTab validation-reference affordance", () => {
   });
 });
 
-describe("ReviewTab Conf >= filter censoring warning (K15)", () => {
+describe("ReviewTab Conf >= filter censoring warning", () => {
   it("shows no warning today when the filter sits at or below generation confidence (fail-before baseline)", async () => {
     vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: 0.5 });
     render(<ReviewTab />);
@@ -390,7 +390,7 @@ describe("ReviewTab mark-missed-object affordance", () => {
   const markBtn = () => screen.getByTitle(/Draw a box around an object the model missed/i);
 
   beforeEach(() => {
-    // No existing detections at all — the exact case startEdit can't handle (nothing to seed from).
+    // No existing detections at all: the exact case startEdit can't handle (nothing to seed from).
     matchesSpy.mockResolvedValue(matchesRes([]));
     actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
       status: "ok",
@@ -469,7 +469,7 @@ describe("ReviewTab matches-recompute effect", () => {
     expect(matchesSpy.mock.calls[0][0].pred_path).toBe(`${PRED_DIR_A}/img1.json`);
 
     // mergeSnapshot's same-identity branch adopts the backend-changed prediction dir
-    // without changing imgPath — the tab must not keep showing the old model's matches.
+    // without changing imgPath; the tab must not keep showing the old model's matches.
     act(() => {
       const s = useStore.getState();
       s.patchGui({ dataset: { ...s.gui.dataset, predictions_dir: PRED_DIR_B } });
@@ -485,7 +485,7 @@ describe("ReviewTab matches-recompute effect", () => {
     // Same dataset identity + same image index => api.dataset.select is not called and every
     // label/prediction path is unchanged (the field case: stage_proposals overwrote the file
     // in place). Without the refetch nonce the recompute effect's identical-path skip leaves
-    // stale cached matches on the canvas — the focus must force a refetch anyway.
+    // stale cached matches on the canvas; the focus must force a refetch anyway.
     const selectSpy = vi.spyOn(api.dataset, "select").mockResolvedValue({} as never);
     vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok", current_image_index: 0 });
 
@@ -506,7 +506,7 @@ describe("ReviewTab matches-recompute effect", () => {
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalledTimes(1));
 
-    // Same strings, new object identity — the effect keys on the path strings, so a
+    // Same strings, new object identity; the effect keys on the path strings, so a
     // routine WS broadcast must not reset the detection index/zoom via a reload.
     act(() => {
       const s = useStore.getState();
@@ -606,7 +606,7 @@ describe("ReviewTab symbology", () => {
 
   it("renders both a box and a polygon annotation on one image (no geometry kind hidden)", async () => {
     // Measurement-critical: a unified file may mix bbox and polygon annotations; the overlay must
-    // draw BOTH by their own geometry — hiding a kind is an unreviewed false-negative.
+    // draw both by their own geometry: hiding a kind is an unreviewed false-negative.
     matchesSpy.mockResolvedValue(
       matchesRes(
         [
@@ -640,14 +640,14 @@ describe("ReviewTab symbology", () => {
     render(<ReviewTab />);
     await waitFor(() => expect(screen.getByText("1 / 2")).toBeInTheDocument());
 
-    // The box GT draws as a k-rect and the polygon GT as a k-line — both present.
+    // The box GT draws as a k-rect and the polygon GT as a k-line: both present.
     expect(screen.getAllByTestId("k-rect").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByTestId("k-line").length).toBeGreaterThanOrEqual(1);
   });
 
   it("draws a point-carrying ground truth as the point mark, with no box around it", async () => {
     // A review file can hold a point annotation ({point: [x, y]} on the wire). compute_matches
-    // ignores points today (no area, so no IoU), so no detection references one yet — this pins the
+    // ignores points today (no area, so no IoU), so no detection references one yet; this pins the
     // render contract for when one does: the mark it was placed as, never a box around it (a
     // fabricated extent) and never nothing (a real annotation silently absent from review).
     matchesSpy.mockResolvedValue(
@@ -666,7 +666,7 @@ describe("ReviewTab symbology", () => {
   });
 
   it("draws every ring of an occlusion-split prediction under review", async () => {
-    // Accepting a two-part prediction accepts both parts, so both have to be on screen — a render
+    // Accepting a two-part prediction accepts both parts, so both have to be on screen; a render
     // of ring 0 alone asks for a verdict on something the reviewer never saw.
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [0, 0, 60, 60] })], {
@@ -700,7 +700,7 @@ describe("ReviewTab symbology", () => {
       "0,0,10,0,10,10",
       "40,40,60,40,60,60",
     ]);
-    // Both parts share the under-review symbology — one shape, one verdict.
+    // Both parts share the under-review symbology: one shape, one verdict.
     expect(lines.every((l) => l.getAttribute("data-dashed") === "true")).toBe(true);
   });
 });
@@ -726,7 +726,7 @@ describe("ReviewTab in-place edit scope", () => {
 
   it("refuses to hand-edit a multi-part shape instead of silently saving one part as the whole", async () => {
     // /review/action carries one edited contour (edited_points), so seeding part 1 and saving would
-    // write half the object to ground truth — a precise, confident, wrong measurement.
+    // write half the object to ground truth: a precise, confident, wrong measurement.
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [0, 0, 60, 60] })], {
         preds: [multiRingPred],
@@ -785,11 +785,11 @@ describe("ReviewTab in-place edit scope", () => {
   });
 });
 
-describe("ReviewTab priority queue (K23)", () => {
+describe("ReviewTab priority queue", () => {
   // Idempotent, not a blind toggle: filtersOpen's initial state is read from localStorage
   // ("tcip.review.filtersOpen"), which persists across tests within this file (one jsdom
-  // environment per file, not per test) — a prior test in this block leaving it open would make
-  // a bare toggle click CLOSE it here instead.
+  // environment per file, not per test), a prior test in this block leaving it open would make
+  // a bare toggle click close it here instead.
   function openFilters() {
     const btn = screen.getByTitle("Show or hide the review filters");
     if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
@@ -834,7 +834,7 @@ describe("ReviewTab priority queue (K23)", () => {
       }),
     );
     expect(await screen.findByText(/Browse in priority order \(2 ranked\)/)).toBeInTheDocument();
-    // Auto-enabled once a queue completes — that's clearly what computing one was for.
+    // Auto-enabled once a queue completes: that's clearly what computing one was for.
     expect((screen.getByLabelText(/Browse in priority order/) as HTMLInputElement).checked).toBe(
       true,
     );
@@ -918,7 +918,7 @@ describe("ReviewTab band picker (progressive disclosure)", () => {
 
   it("collapses to one Band dropdown for a single-band source", async () => {
     // Never reached through the app's own >3 gate (a 1-band source never shows the picker at
-    // all) — this exercises the component's own collapsing behavior directly, independent of
+    // all); this exercises the component's own collapsing behavior directly, independent of
     // that mount-level gate, by forcing band_count to 1 while still >3 is what the real gate
     // checks. Kept honest: assert the gate itself stays closed here too.
     vi.spyOn(api.images, "bands").mockResolvedValue({
