@@ -80,6 +80,12 @@ sample, see the `evaluation` and `cv-research` skills), read from the prediction
   no `pred_dirs`, is never trusted as a bare caller string**: a continuous/ordinal trait has no
   on-disk measurement-validity producer today, so without `pred_dirs` the only route to delivery is
   the explicit acknowledge below.
+- A tiled run's `tile_size` is a second gating dimension of the same count operating point, at
+  every one of those doors: the tile edge scales the per-image counts, so a fabricated fallback with
+  no persisted training geometry and no explicit caller override refuses exactly as an uncalibrated
+  conf does. Reach a validated tile scale by passing an explicit `tile_size`, or by producing the
+  predictions from a checkpoint whose training tile geometry was persisted. An untiled run is never
+  gated on it.
 - To ship a **provisional** result, pass `acknowledge_unvalidated=True`: the door writes but stamps
   `measurement_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
   provisional delivery, never for silently shipping a bare number.
