@@ -241,6 +241,16 @@ def _bucket(subject: str | None, date: str | None) -> str:
     return status_bucket(subject or "", date)
 
 
+def _require_bucket(subject: str | None, date: str | None) -> str:
+    """``_bucket``, but a deliberate single-image status write must be scoped to a real subject
+    or fail loudly (mirrors ``_require_dataset_root``): the "" bucket a missing subject silently
+    falls back to is one ``get_image_status`` never returns anything meaningful for, so the write
+    would land nowhere anyone reads it back from."""
+    if not subject:
+        raise HTTPException(400, "cannot record image status with no subject; pass a subject")
+    return _bucket(subject, date)
+
+
 def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
                   image_names: Iterable[str]) -> None:
     """Best-effort: record the subject's current attribute-schema digest against each of
@@ -308,7 +318,7 @@ def set_image_status(payload: ImageStatusPayload) -> dict:
 
     root = _require_dataset_root(payload.dataset_root, payload.annotations_dir)
     path = image_status_path(root)
-    bucket = _bucket(payload.subject, payload.date)
+    bucket = _require_bucket(payload.subject, payload.date)
     with file_transaction(path):
         store = _load_status_store(path)
         store.setdefault(bucket, {})[payload.image_name] = payload.status
