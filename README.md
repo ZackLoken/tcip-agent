@@ -2,7 +2,9 @@
 
 Prototype (in progress) of an agentic ML/CV system for automated phenotyping in tree crop breeding programs. A Claude agent (ML/CV engineer persona) drives annotation, model training, inference, and per-plant result delivery through an MCP tool server, while a browser-based GUI supports human annotation, review, and training oversight. The system is freestanding: the MCP server is a transport-neutral stdio server (any MCP client) and the GUI is a standalone browser app; no editor required.
 
-**Current scope: 2D imagery (RGB + N-channel), object detection first.** The data layer reads RGB and multi-band 2D rasters (GeoTIFF / NPZ / grayscale); 3D point-cloud (LiDAR / SfM) support is not built yet (see [Roadmap](#roadmap)).
+**Who it's for:** plant breeders, not CV engineers. They know their crops and traits; they don't write PyTorch or make CV decisions. The objective is to replace the CV scientist in the loop, an agent that guides a breeder end-to-end, from imagery plus a trait to a validated per-plant phenotype, maintaining scientific rigor on the breeder's behalf. There are two distinct users and two UX surfaces: the agent's UX is the tools/skills/code/docs/MCP API surface it reasons through (see `CLAUDE.md`), and the breeder's UX is the browser GUI, the only surface they experience the platform through (label a few examples, confirm/correct the model, receive the result).
+
+**Current scope: 2D imagery (RGB + N-channel) from any capture modality (aerial/drone, ground-based, rover-mounted, lab/benchtop), object detection first.** The data layer reads RGB and multi-band 2D rasters (GeoTIFF / NPZ / grayscale); 3D point-cloud (LiDAR / SfM) support is not built yet (see [Roadmap](#roadmap)).
 
 Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology from ground imagery.
 
@@ -122,6 +124,12 @@ same milestone code backs the Results tab, so a milestone date means one thing o
 Phase 1's own shipped example is hazelnut catkin bloom phenology (`catkin_05/50/95per_date`,
 elongation as the positive state).
 
+Trained ML models are the deliverable; classical image analysis (OpenCV, scikit-image) is
+available for the agent to compose as a situational bootstrapping assist, cheaply producing soft
+labels or seeding training data when it fits, never the end product itself. High-throughput
+phenotyping doesn't scale on classical analysis alone, and its output is always reviewed and
+validated before it's trusted as ground truth.
+
 The detection training pipeline mirrors a production drone-phenotyping workflow:
 
 - **Metrics & selection**: real per-task validation metrics (detection/instance-seg
@@ -160,8 +168,8 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   or multi-user access is future work.
 - **Web deployment.** The GUI binds to loopback (`127.0.0.1`) by default and is built as a
   single-operator local desktop tool (see `packages/tcip-web/README.md`'s trust-boundary note);
-  deploying it as a hosted, multi-user web service — including the token auth already noted there
-  as a planned follow-on — is future work.
+  deploying it as a hosted, multi-user web service (including the token auth already noted there
+  as a planned follow-on) is future work.
 
 ## License
 
