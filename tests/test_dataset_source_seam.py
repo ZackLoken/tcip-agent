@@ -1,7 +1,7 @@
-"""D4 — the ``dataset_source`` bespoke seam, mirroring ``model_source``.
+"""The ``dataset_source`` bespoke seam, mirroring ``model_source``.
 
 Proves the dataset layer is no longer a closed task registry: an agent-supplied importable
-builder produces a torch ``Dataset`` for a NEW task, ``build_dataset`` routes to it, the known
+builder produces a torch ``Dataset`` for a new task, ``build_dataset`` routes to it, the known
 loaders stay the default, and the builder source is snapshotted for provenance.
 """
 
@@ -47,7 +47,7 @@ DATASET_SOURCE = {
 def test_build_dataset_routes_to_dataset_source():
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
-    # A NEW task the known loaders don't cover — routes to the bespoke builder, not the registry.
+    # A new task the known loaders don't cover: routes to the bespoke builder, not the registry.
     ds = build_dataset("grape_bunch_count", dataset_source=DATASET_SOURCE,
                         stems=["s0", "s1"])
     assert isinstance(ds, _CountingDataset)
@@ -59,7 +59,7 @@ def test_build_dataset_routes_to_dataset_source():
 def test_known_task_registry_stays_the_default():
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
-    # No dataset_source -> the closed-registry KeyError stays the honest signal for a bad NAME.
+    # No dataset_source -> the closed-registry KeyError stays the honest signal for a bad name.
     with pytest.raises(ValueError, match="Unknown task"):
         build_dataset("grape_bunch_count")
 
@@ -89,7 +89,7 @@ def test_preflight_accepts_dataset_source_without_image_dirs(tmp_path: Path):
         "data": {"dataset_source": DATASET_SOURCE, "task": "grape_bunch_count"},
         "training": {"batch_size": 1},
     }
-    # No images_dir/labels_dir — the bespoke builder owns loading, so those are not required.
+    # No images_dir/labels_dir: the bespoke builder owns loading, so those are not required.
     result = preflight_config(config, smoke=False)
     assert result["valid"], result["issues"]
 
