@@ -1,8 +1,8 @@
-"""P4 — the agent→GUI review channel: focus(tab='review') + stage_proposals.
+"""The agent to GUI review channel: focus(tab='review') + stage_proposals.
 
 focus(tab='review') resolves a model's predictions on a frame and posts a ``review_focus`` event (a
 soft miss with no GUI, but the resolution must be right). stage_proposals writes agent-proposed
-detections to the PREDICTIONS tree (never GT) for canvas sign-off.
+detections to the predictions tree (never GT) for canvas sign-off.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from tcip_mcp.tools.annotation_tools import focus, stage_proposals
 
 @pytest.fixture(autouse=True)
 def _stub_gui(monkeypatch):
-    # No GUI backend in tests — make delivery a deterministic soft miss (else a 2s socket timeout).
+    # No GUI backend in tests: make delivery a deterministic soft miss (else a 2s socket timeout).
     import tcip_mcp.web_client as web_client
     monkeypatch.setattr(web_client, "post_panel_event",
                         lambda *a, **k: {"delivered": False, "status": "no_subscribers"})
@@ -72,7 +72,7 @@ def test_focus_review_empty_prediction_file_is_not_a_target(tmp_path: Path) -> N
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
-    _pred(root, "baseline", date, "IMG_0000", [])  # empty (no detections) — skip
+    _pred(root, "baseline", date, "IMG_0000", [])  # empty (no detections), skip
     _pred(root, "baseline", date, "IMG_0002", [("catkin", 0.9)])
 
     res = focus("review", str(root), str(root), "catkin", date, model_name="baseline")
@@ -147,7 +147,7 @@ def test_stage_proposals_rejects_path_traversal_into_gt(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     good = [{"subject": "catkin", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
     # A malformed model_name/date/stem must never escape predictions/ into the GT tree. Include a
-    # backslash segment (a Windows separator — "predictions\..\annotations" would escape) and a
+    # backslash segment (a Windows separator: "predictions\..\annotations" would escape) and a
     # whitespace/empty segment, both of which is_valid_name rejects.
     for bad_model in ("../annotations/catkin", "..", "a/b", "D:/evil", "a\\b", " ", ""):
         res = stage_proposals(str(root), bad_model, "2026-02-11", "IMG_0001", good)
@@ -162,7 +162,7 @@ def test_focus_review_rejects_path_traversal(tmp_path: Path) -> None:
     date = "2026-02-11"
     _images(root, date, ["IMG_0000.JPG"])
     # focus(tab='review') is read-only, but a traversal model_name/date must still be rejected (it becomes
-    # a path segment in prediction_dir/image_dir) — the guard mirrors stage_proposals.
+    # a path segment in prediction_dir/image_dir), the guard mirrors stage_proposals.
     for bad_model in ("../../annotations", "a\\b", ".."):
         res = focus("review", str(root), str(root), "catkin", date, model_name=bad_model)
         assert "error" in res
@@ -208,7 +208,7 @@ def test_stage_proposals_writes_polygon_prediction(tmp_path: Path) -> None:
     assert data["annotations"][0]["created_by"] == "sam"
     assert data["annotations"][0]["created_at"]
     # It must not touch GT; the polygon is stored as a polygon (segmentation) that also carries its
-    # derived box on disk — not collapsed to a box-only record (segmentation stays the truth).
+    # derived box on disk, not collapsed to a box-only record (segmentation stays the truth).
     assert not (root / "annotations").exists()
     assert "segmentation" in data["annotations"][0] and "bbox" in data["annotations"][0]
 
@@ -294,7 +294,7 @@ def test_stage_proposals_redirects_when_bucket_has_verdicts(tmp_path: Path) -> N
 
     _record_verdict(root, "IMG_0001.jpg")  # a human reviews claude's prediction
 
-    # The reviewed bucket is now immutable — a re-stage lands in a fresh @r2 bucket and says so.
+    # The reviewed bucket is now immutable: a re-stage lands in a fresh @r2 bucket and says so.
     second = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
     assert second["bucket"] == "claude@r2"
     assert second["bucket_redirected"] is True
