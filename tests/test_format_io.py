@@ -206,7 +206,7 @@ def test_detect_format_refuses_an_unrecognized_store(tmp_path):
         detect_format(str(tmp_path / "nothing_here"))
 
 
-def test_detect_format_refuses_pre_k13_objects_schema(tmp_path):
+def test_detect_format_refuses_older_objects_keyed_schema(tmp_path):
     """An older 'objects'-keyed schema is not sniffed: it raises rather than reading as zero
     annotations (which would train on fabricated empty negatives)."""
     old = tmp_path / "old.json"
