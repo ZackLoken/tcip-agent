@@ -1,4 +1,4 @@
-"""W1 — evaluation metrics + composite selection objective.
+"""Evaluation metrics + composite selection objective.
 
 Unit tests for the pycocotools metrics engine, the ported composite objective,
 the in-house scalar metrics, and ``_selection_value``; plus light integration
@@ -38,8 +38,8 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     resolve_selection_metric,
 )
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so trait="catkin" call sites keep resolving.
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
+# test's pinned project root so trait="catkin" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
@@ -133,7 +133,7 @@ def test_coco_empty():
 
 
 # --------------------------------------------------------------------------
-# S0 GOLDEN — count-unbiased sweep numerics on fixed synthetic records.
+# count-unbiased sweep numerics on fixed synthetic records.
 # Pins the center-match sweep + operating-point pickers the calibration relies on.
 # --------------------------------------------------------------------------
 
@@ -188,12 +188,12 @@ def test_golden_operating_point_pickers():
 
 
 # --------------------------------------------------------------------------
-# K18 B3 — resolve_match_criterion derives/records the localization kind once, reuses it,
-# and warns (never silently switches) on divergence.
+# resolve_match_criterion derives/records the localization kind once, reuses it, and warns
+# (never silently switches) on divergence.
 # --------------------------------------------------------------------------
 
 def _write_bare_trait(tmp_path: Path, name: str, **extra) -> None:
-    """A minimal trait spec with NO localization recorded (unlike seed_catkin_trait_spec's
+    """A minimal trait spec with no localization recorded (unlike seed_catkin_trait_spec's
     CATKIN, which already carries localization="center_match")."""
     import yaml
 
@@ -217,7 +217,7 @@ def test_resolve_match_criterion_derives_and_persists_when_unrecorded(tmp_path: 
     assert result["kind"] == "center_match"
     assert result["kind_source"] == "data_derived_at_runtime"
     assert result["kind_diverged"] is False
-    # persisted — a fresh read sees the derived value, not the original empty one.
+    # persisted: a fresh read sees the derived value, not the original empty one.
     assert get_trait("leaf").localization == "center_match"
 
 
@@ -232,7 +232,7 @@ def test_resolve_match_criterion_reuses_recorded_kind_without_rederiving(tmp_pat
 
 def test_resolve_match_criterion_flags_divergence_without_switching(tmp_path: Path):
     _write_bare_trait(tmp_path, "leaf", localization="iou_match")
-    # Small boxes: derive_localization_kind would say center_match — diverges from the recorded
+    # Small boxes: derive_localization_kind would say center_match, diverging from the recorded
     # iou_match. Must warn (kind_diverged=True), never silently switch what governs this call.
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
     result = resolve_match_criterion("leaf", _per_image(small_boxes))
@@ -260,9 +260,8 @@ def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
 
 
 def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5(tmp_path: Path):
-    """K18 B3 companion fix: iou_match's threshold must be genuinely derived from the GT in hand
-    (derive_iou_match_threshold), not the old pinned-0.5 literal — the dormant bug B3 was flagged
-    as making live for the first time by auto-selecting iou_match."""
+    """iou_match's threshold must be genuinely derived from the GT in hand
+    (derive_iou_match_threshold), not pinned to 0.5."""
     _write_bare_trait(tmp_path, "leaf", localization="iou_match")
     # char size 300 -> derived threshold well above 0.5 (see test_derive_iou_match_threshold_*).
     large_boxes = [(0, 0, 300, 300), (500, 0, 300, 300)]
@@ -281,7 +280,7 @@ def test_resolve_match_criterion_iou_match_falls_back_honestly_when_underivable(
 
 
 # --------------------------------------------------------------------------
-# S0 GOLDEN — COCO box AND mask mAP exact values on fixed synthetic records.
+# COCO box and mask mAP exact values on fixed synthetic records.
 # --------------------------------------------------------------------------
 
 def test_golden_coco_box_and_mask_map():
@@ -357,7 +356,7 @@ def test_resolve_selection_metric_rejects_incoherent_explicit_choice():
 
 
 def test_resolve_selection_metric_allows_coherent_explicit_choice():
-    # A legitimate explicit choice must still succeed — a rail must admit valid work, not
+    # A legitimate explicit choice must still succeed: a rail must admit valid work, not
     # only reject invalid work.
     assert resolve_selection_metric("detection", "catkin", "f1") == "f1"
     assert resolve_selection_metric("detection", "catkin", "recall") == "recall"
@@ -365,7 +364,7 @@ def test_resolve_selection_metric_allows_coherent_explicit_choice():
 
 
 # --------------------------------------------------------------------------
-# Effective iou_type — evaluate() scoring and run_test_evaluation metadata
+# Effective iou_type: evaluate() scoring and run_test_evaluation metadata
 # --------------------------------------------------------------------------
 
 def test_effective_iou_type_resolution():
@@ -378,7 +377,7 @@ def test_effective_iou_type_resolution():
 
 def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     """test_results.json must record the iou_type evaluate() actually scored with
-    (instance_seg defaults to segm AP — recording 'bbox' would misreport mask AP)."""
+    (instance_seg defaults to segm AP; recording 'bbox' would misreport mask AP)."""
     import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
 
@@ -408,7 +407,7 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# Light integration — _validate via train()
+# Light integration: _validate via train()
 # --------------------------------------------------------------------------
 
 torchvision = pytest.importorskip("torchvision")
@@ -465,8 +464,8 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
 
 
 def test_train_center_match_trait_records_governing_criterion(tmp_path):
-    """K9 F1: threading `trait` into _validate surfaces val_governing_criterion (a dict) and
-    val_map50_role (a str) in val_metrics — the TensorBoard scalar loop must skip these
+    """Threading `trait` into _validate surfaces val_governing_criterion (a dict) and
+    val_map50_role (a str) in val_metrics; the TensorBoard scalar loop must skip these
     non-numeric values rather than crash `add_scalar` on them."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -525,7 +524,7 @@ def test_validate_classification_metrics(tmp_path):
 
 @pytest.fixture
 def json_data_dir(tmp_path: Path) -> Path:
-    """Minimal dataset with per-image JSON labels/predictions in the canonical (K13.5) layout.
+    """Minimal dataset with per-image JSON labels/predictions in the canonical layout.
 
     score_predictions reads GT and predictions through the canonical json_io per-image schema
     (name-based, one file per image, pixel COCO xywh + native ``score``).
