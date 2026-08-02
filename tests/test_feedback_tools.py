@@ -1,4 +1,4 @@
-"""W5 — review->retrain MCP tools (materialize + queue + lineage + registration)."""
+"""Review->retrain MCP tools (materialize + queue + lineage + registration)."""
 
 from __future__ import annotations
 
@@ -85,10 +85,8 @@ def test_prioritize_review_queue_checkpoint_missing(tmp_path):
 
 def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch):
     """Active-learning uncertainty scoring reads model logits, which a non-composed predictor
-    kind (a bespoke tcip model was never built for) doesn't expose — so it must fail LOUD with a
-    clear error, not crash on ``.model``. (Relocated from the K21-removed test_yolo_predictor.py,
-    which exercised this via a stubbed ultralytics kind — genericized since the guard itself has
-    nothing to do with any specific foreign kind, only with "not the composed tcip kind".)
+    kind (a bespoke tcip model was never built for) doesn't expose, so it must fail with a
+    clear error, not crash on ``.model``.
     """
     from types import SimpleNamespace
 
