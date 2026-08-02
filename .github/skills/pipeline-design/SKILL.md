@@ -101,8 +101,15 @@ the derivations, the `ctx` craft library, and the proposal-engine and scorer reg
   statistics are unreliable; prefer `GroupNorm` (or another batch-independent norm).
 - **Activations / layers where the data warrants** it: this is engineering judgment, not a menu.
 
-**Two seams make bespoke work first-class, and the platform guarantees integrity around it:**
+**Three seams make bespoke work first-class, and the platform guarantees integrity around it:**
 
+- `pipelines.data.datasets.build_dataset(task, dataset_source, **kwargs)` builds from a
+  `dataset_source` when the task string isn't one of the known loaders: an *importable* builder you
+  wrote (`{"builder": "my_module:build_ds", "builder_kwargs": {...}, "source_files": [...],
+  "task": "..."}`, mirroring `model_source`). It receives the run's data context (`images_dir` /
+  `labels_dir` / `stems` / `transforms` / `task`) merged with `builder_kwargs` (which win on
+  conflict) and must return a torch `Dataset`. Registry-free, imported like any module, never
+  `exec`'d.
 - `pipelines.model_build.build_model(config)` builds from a `model_source`: an *importable*
   builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs": {...},
   "source_files": [...], "task": "detection", "in_chans": 3}`). It is imported, never `exec`'d,
@@ -162,7 +169,7 @@ tiling persistence) against a `model_source` builder; run each stage's model wit
 # through the audited envelope, so provenance and immutability hold across the whole run.
 stage_a = launch_training(config={"model_source": {...}, "data": {...}})
 stage_b = launch_training(config={"model_source": {...}, "data": {...}})
-run_inference(model_path=stage_b_best, images_dir=images_dir, output_dir="stage_b_preds")
+export_predictions(checkpoint_path=stage_b_best, images_dir=images_dir, output_dir="stage_b_preds")
 
 # aggregate_per_plant never guesses plant identity from a filename; supply a real plant_id_fn.
 # build_plant_mapping (a GNSS + capture-sequence resolver) is the real mechanism; load its
