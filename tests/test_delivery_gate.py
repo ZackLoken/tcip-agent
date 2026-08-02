@@ -100,9 +100,9 @@ def test_export_aggregated_csv_reconciles_sidecar_floor(tmp_path):
 
 
 def test_export_aggregated_csv_continuous_trait_bare_string_never_trusted(tmp_path):
-    # K3 finding #3: a continuous/ordinal trait has no on-disk measurement-validity producer today —
-    # a bare caller-asserted measurement_validated string, with no pred_dirs to reconcile against,
-    # must never be trusted directly. Refuses without an explicit acknowledge.
+    # A continuous/ordinal trait has no on-disk measurement-validity producer, so a bare
+    # caller-asserted measurement_validated string, with no pred_dirs to reconcile against, is
+    # never trusted directly: it refuses without an explicit acknowledge.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     out = tmp_path / "o.csv"
@@ -112,8 +112,8 @@ def test_export_aggregated_csv_continuous_trait_bare_string_never_trusted(tmp_pa
 
 
 def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowledged(tmp_path):
-    # rails-admit-valid-work: the honest provisional path still ships (stamped false), it just
-    # can't masquerade as validated on a bare string.
+    # The honest provisional path still ships (stamped false); it just can't masquerade as
+    # validated on a bare string.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     out = tmp_path / "o.csv"
@@ -166,7 +166,7 @@ def test_tabulate_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
     assert captured["acknowledge_unvalidated"] is True
 
 
-# ── K10: tile_size gates the same way, closing the asymmetry with conf ─────
+# ── tile_size gates the same way, closing the asymmetry with conf ─────
 
 def _fake_run_inference_with(*, conf_ref, tile_size_prov=None):
     def _fake(**kw):
@@ -180,10 +180,10 @@ def _fake_run_inference_with(*, conf_ref, tile_size_prov=None):
 
 
 def test_tabulate_counts_refuses_fabricated_tile_size_even_with_validated_conf(tmp_path, monkeypatch):
-    """The exact asymmetry K10 closes: before this fix, a fabricated 640 tile_size never
-    participated in the gate at all — a checkpoint with no persisted training geometry still
-    shipped a real count here while run_full_frame_evaluation refuses to even measure that regime.
-    A cleanly-validated conf must not paper over an ungrounded tile scale."""
+    """A fabricated tile_size must gate the same way an unvalidated conf does: a checkpoint with
+    no persisted training geometry must not ship a real count here while run_full_frame_evaluation
+    refuses to even measure that regime. A cleanly-validated conf must not paper over an
+    ungrounded tile scale."""
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "run_inference", _fake_run_inference_with(
@@ -223,7 +223,7 @@ def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeyp
 
 
 def test_tabulate_counts_never_gates_tile_size_when_untiled(tmp_path, monkeypatch):
-    """An untiled run's tile_size is never operative — it must not manufacture a refusal just
+    """An untiled run's tile_size is never operative: it must not manufacture a refusal just
     because the run's own bundle happens to carry a non-gating tile_size entry."""
     import tcip_mcp.tools.inference_tools as itools
 
@@ -241,8 +241,8 @@ def test_tabulate_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_desp
     tmp_path, monkeypatch,
 ):
     """A CSV whose conf is genuinely validated but whose tile_size only shipped via
-    acknowledge_unvalidated must not stamp measurement_validated as if the WHOLE delivery were
-    trustworthy — the single CSV column must reflect the floor across every gated dimension, not
+    acknowledge_unvalidated must not stamp measurement_validated as if the whole delivery were
+    trustworthy: the single CSV column must reflect the floor across every gated dimension, not
     just conf's own (possibly-real) reference."""
     import tcip_mcp.tools.inference_tools as itools
 
