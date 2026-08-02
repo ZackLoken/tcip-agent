@@ -31,12 +31,11 @@ export function InferenceTab() {
   const [outputDir, setOutputDir] = useState<string>("");
   const [tile, setTile] = useState<boolean>(true);
   const [postprocess, setPostprocess] = useState<"nms" | "nmm">("nms");
-  // TRAP 4 step 1 (K6): these start UNSET, not frozen literals — a value is sent only once the
-  // breeder explicitly overrides it. Left unset, the backend derives conf/iou from resolution.py's
-  // own defaults and tile_size/overlap from the checkpoint's persisted training geometry
-  // (resolve_tile_geometry), instead of a GUI run silently diverging from the MCP door's count on
-  // the same checkpoint. Demoted behind "Advanced (override)" below (TRAP 4 step 4) — hiding these
-  // only makes sense now that step 1 is actually closed.
+  // These start unset, not frozen literals: a value is sent only once the breeder explicitly
+  // overrides it. Left unset, the backend derives conf/iou from resolution.py's own defaults and
+  // tile_size/overlap from the checkpoint's persisted training geometry (resolve_tile_geometry),
+  // instead of a GUI run silently diverging from the MCP door's count on the same checkpoint.
+  // Kept behind "Advanced (override)" below so surfacing them doesn't invite overriding by default.
   const [conf, setConf] = useState<number | undefined>(undefined);
   const [iou, setIou] = useState<number | undefined>(undefined);
   const [sliceH, setSliceH] = useState<number | undefined>(undefined);
@@ -162,7 +161,7 @@ export function InferenceTab() {
             <option value="">Select a registered model…</option>
             {models.map((m) => (
               <option key={m.checkpoint_path} value={m.checkpoint_path}>
-                {m.name} {m.tags?.length ? `(${m.tags.join(", ")})` : ""} —{" "}
+                {m.name} {m.tags?.length ? `(${m.tags.join(", ")})` : ""} -{" "}
                 {m.checkpoint_path.split(/[/\\]/).slice(-3).join("/")}
               </option>
             ))}
@@ -221,11 +220,11 @@ export function InferenceTab() {
             className="text-[11px] text-tcip-muted underline"
             onClick={() => setShowAdvanced((v) => !v)}
           >
-            {showAdvanced ? "Hide" : "Show"} advanced (override — unvalidated)
+            {showAdvanced ? "Hide" : "Show"} advanced (override, unvalidated)
           </button>
           <p className="text-[11px] text-tcip-muted mt-1">
             Left blank, conf/IoU come from the platform&apos;s own defaults and tile size/overlap
-            are derived from this checkpoint&apos;s own training geometry — the same operating point
+            are derived from this checkpoint&apos;s own training geometry; the same operating point
             the agent-facing door resolves. Setting a value here overrides that derivation and is
             not a validated operating point.
           </p>
