@@ -37,7 +37,7 @@ class FakeWebSocket {
     this.onclose?.();
   }
 
-  /** Client-initiated close — the browser still fires the close event. */
+  /** Client-initiated close: the browser still fires the close event. */
   close() {
     this.readyState = FakeWebSocket.CLOSED;
     this.onclose?.();
