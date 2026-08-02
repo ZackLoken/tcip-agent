@@ -311,9 +311,7 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
             if gt_value is None:
                 # Never assessed for `attribute` yet -- a soft, expected gap,
                 # not a confirmed negative. Coercing an unassessed instance into "not positive"
-                # fabricates a disagreement against a perfect classifier -- the exact
-                # unlabeled-vs-undecodable distinction json_io.UNLABELED exists for elsewhere in
-                # this diff, not previously applied to this reference builder.
+                # fabricates a disagreement against a perfect classifier.
                 continue
             box = gt_a.geometry
             items.append({
@@ -465,6 +463,11 @@ def compute_phenology(
             operating point is unvalidated, stamping the un-validated dimension as ``false`` so
             the un-trustworthiness travels with the delivery.
 
+    A bucket produced by a tiled run also gates on its ``tile_size``: the tile edge scales the
+    per-image counts the positive fraction is built from, so a fabricated fallback with no persisted
+    training geometry and no explicit caller override refuses here, the same way an uncalibrated conf
+    does. Buckets from untiled runs are never gated on it.
+
     Returns a summary. Measurement-integrity guard: if no bucket, anywhere in the delivery, ever
     classified along the trait's positive-class axis, the positive fraction is not a valid measurement
     anywhere, the tool refuses to write the CSV and returns ``error`` with
@@ -519,10 +522,12 @@ def compute_phenology(
     # held-out GT, presence of the class is not enough. Refuse unless explicitly acknowledged,
     # and in that case stamp the CSV validated=false so the un-trustworthiness travels downstream.
     from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
         bind_classifier_validity,
         check_delivery_gate,
         reconcile_classifier_validity,
         reconcile_operating_point_validity,
+        reconcile_tile_size_validity,
     )
 
     # The count operating point's validity is read from each prediction bucket's operating_point.json
@@ -533,6 +538,12 @@ def compute_phenology(
     op_state = recon["validated"]
     if operating_point_conf is None and recon["conf"] is not None:
         operating_point_conf = recon["conf"]  # prefer the on-disk conf over a caller string
+
+    # The tile scale the counts were produced at is the second gating dimension of the same count
+    # operating point: a phenology fraction is built from per-image counts, and a tile edge with no
+    # persisted or caller-stated basis moves those counts as surely as an uncalibrated conf does.
+    # Read from the same sidecars, and only operative for buckets that actually ran tiled.
+    tile_recon = reconcile_tile_size_validity(list(predictions_by_date.values()))
 
     # The classifier's validity is read the same way, from classifier_operating_point.json, never a
     # caller-asserted string. No producer stamp anywhere -> floors to unvalidated, same as
@@ -553,16 +564,22 @@ def compute_phenology(
 
     # A delivered phenotype needs both the classifier and the count operating point validated against a
     # reference sized to the trait, the one shared refuse-or-stamp gate, or an explicit acknowledge.
-    gate = check_delivery_gate(
-        {"classifier": classifier_state, "operating_point": op_state},
-        acknowledge_unvalidated=acknowledge_unvalidated,
-    )
+    flags = {"classifier": classifier_state, "operating_point": op_state}
+    if tile_recon["operative"]:
+        flags["tile_size"] = tile_recon["validated"]
+    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         floor_note = ""
         if recon["missing_sidecars"] or recon["unvalidated_buckets"]:
             floor_note = (f" On-disk operating-point reconciliation floored the count to invalid "
                           f"(missing sidecars: {recon['missing_sidecars']}; unvalidated buckets: "
                           f"{recon['unvalidated_buckets']}).")
+        if tile_recon["unvalidated_buckets"]:
+            floor_note += (
+                f" Tiled bucket(s) {tile_recon['unvalidated_buckets']} carry a tile_size with no "
+                "persisted training geometry and no explicit caller override, so the scale the "
+                "counts were produced at has no basis. Re-export with an explicit tile_size, or "
+                "from a checkpoint whose training tile geometry was persisted.")
         if classifier_recon["missing_sidecars"]:
             floor_note += (f" No classifier_operating_point.json found in "
                            f"{classifier_recon['missing_sidecars']}, calibrate the classifier via "
@@ -581,6 +598,7 @@ def compute_phenology(
             ),
             "positive_state_classifier_validated": gate.stamp["classifier"],
             "operating_point_validated": op_state,
+            "tile_size_validated": tile_recon["validated"],
             "operating_point_missing_sidecars": recon["missing_sidecars"],
             "n_plants": len(rows),
         }
@@ -593,9 +611,15 @@ def compute_phenology(
     # Carry the majority-date read-semantics marker with the delivery: whether the trait's "most in
     # state" mapping to a milestone crossing is still provisional (breeders to confirm), read from the
     # spec. The column name derives from the spec too, matching phenology_csv_columns.
+    # operating_point_validated is the count operating point's own column, and the tile scale is a
+    # dimension of that same operating point with no column of its own. A tile scale that only
+    # reached delivery through acknowledge_unvalidated therefore floors it: otherwise a CSV whose
+    # counts were produced at a fabricated tile edge would read fully validated on its only
+    # count-side stamp.
     stamp = {
         "operating_point_conf": operating_point_conf,
-        "operating_point_validated": gate.stamp["operating_point"],
+        "operating_point_validated": (VALIDATED_FALSE if "tile_size" in gate.unvalidated
+                                      else gate.stamp["operating_point"]),
         "positive_state_classifier_validated": gate.stamp["classifier"],
         "producer_model_sha256": producer.get("sha256"),
         "producer_experiment_id": producer.get("experiment_id"),
@@ -621,5 +645,6 @@ def compute_phenology(
         "positive_class_assessed": True,
         "positive_state_classifier_validated": stamp["positive_state_classifier_validated"],
         "operating_point_validated": stamp["operating_point_validated"],
+        "tile_size_validated": gate.stamp.get("tile_size"),
         "columns": phenology.phenology_csv_columns(spec),
     }
