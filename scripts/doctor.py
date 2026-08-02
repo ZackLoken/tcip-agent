@@ -1,6 +1,6 @@
 """Data-state doctor: scan a live project for state inconsistencies code audits can't see.
 
-Checks the bug family found in field sessions (2026-07-16): status-store vs disk disagreements
+Checks the bug family found in field sessions: status-store vs disk disagreements
 on negatives, registry entries pointing at missing/test-fixture checkpoints, provenance smells,
 and orphaned labels. Read-only. Run at session start:
 
@@ -44,7 +44,7 @@ def _bucket_subject_date(key: str) -> tuple[str, str | None]:
 
 
 def check_negatives(root: Path, findings: list) -> None:
-    """A negative is empty labels + human Complete, per subject — flag every disk/status disagreement.
+    """A negative is empty labels + human Complete, per subject: flag every disk/status disagreement.
 
     Labels are one name-based file per image (all subjects); a confirmed negative is scoped to a
     subject and date, so the disagreement is checked per subject present in the file.
@@ -53,8 +53,8 @@ def check_negatives(root: Path, findings: list) -> None:
     from tcip_mcp.dataset_layout import annotation_date, image_status_path, normalize_status_store
 
     # Through the same normalizer the web layer reads with, so the two can never disagree about
-    # what the store says. Confirmations are dataset-native (K13.5 slice 4); this check already
-    # assumes root == dataset_root (it reads root/images and root/annotations directly).
+    # what the store says. Confirmations are dataset-native; this check already assumes
+    # root == dataset_root (it reads root/images and root/annotations directly).
     by_bucket = normalize_status_store(_load(image_status_path(root)))
     stems = _image_stems(root)
     ann_root = root / "annotations"
@@ -75,7 +75,7 @@ def check_negatives(root: Path, findings: list) -> None:
                 continue
             if subj in subjects_here:
                 findings.append(("error", f"{label.relative_to(root)}: has {subj!r} annotations but "
-                                f"the status store says 'negative' for {subj!r} — contradictory; re-review"))
+                                f"the status store says 'negative' for {subj!r}, contradictory; re-review"))
         if not anns and name not in neg_names:
             findings.append(("warn", f"{label.relative_to(root)}: empty label but not a confirmed "
                             "negative for any subject; excluded from training (delete the file, or "
@@ -84,7 +84,7 @@ def check_negatives(root: Path, findings: list) -> None:
             findings.append(("warn", f"{label.relative_to(root)}: label has no matching image"))
 
     # The dominant case under "label a few examples": images with no label record at all. They are
-    # excluded from training, so a breeder who labelled 30 of 400 trains on 30 — worth seeing at a
+    # excluded from training, so a breeder who labelled 30 of 400 trains on 30; worth seeing at a
     # glance. Reported as one line, not one per image.
     labelled = {p.stem for p in ann_root.rglob("*.json")
                 if ".original" not in p.parts} if ann_root.is_dir() else set()
@@ -134,7 +134,7 @@ def check_provenance(root: Path, findings: list) -> None:
         findings.append(("info", f"{unstamped} GT annotations carry no created_by (pre-provenance "
                         "data; fine, but new writes should always stamp)"))
 
-    # Bespoke-run source snapshots (K12 finding 1): a manifest that failed to capture a declared
+    # Bespoke-run source snapshots: a manifest that failed to capture a declared
     # file is now self-describing rather than silently indistinguishable from a complete one.
     experiments_dir = root / ".tcip" / "experiments"
     if experiments_dir.is_dir():
@@ -149,7 +149,7 @@ def check_provenance(root: Path, findings: list) -> None:
             errors = manifest.get("snapshot_errors") or []
             if missing or errors:
                 findings.append(("warn", f"{manifest_path.relative_to(root)}: source snapshot "
-                                f"incomplete — {len(missing)} missing file(s), "
+                                f"incomplete: {len(missing)} missing file(s), "
                                 f"{len(errors)} import error(s)"))
 
 
