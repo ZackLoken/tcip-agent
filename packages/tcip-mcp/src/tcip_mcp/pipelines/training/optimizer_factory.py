@@ -26,12 +26,16 @@ def _build_adamw(params, lr: float = 1e-3, weight_decay: float = 1e-2, **kw):
 
 
 def _build_lamb(params, lr: float = 1e-3, weight_decay: float = 1e-2, **kw):
-    """LAMB optimizer, falls back to AdamW if torch_optimizer not installed."""
+    """LAMB optimizer, requires the optional ``torch_optimizer`` package."""
     try:
         from torch_optimizer import Lamb
-        return Lamb(params, lr=lr, weight_decay=weight_decay)
-    except ImportError:
-        return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+    except ImportError as exc:
+        raise ImportError(
+            "optimizer: lamb requires the 'torch_optimizer' package, which is not "
+            "installed. Install it with `pip install torch_optimizer`, or choose a "
+            "different optimizer (sgd, adam, adamw)."
+        ) from exc
+    return Lamb(params, lr=lr, weight_decay=weight_decay)
 
 
 _OPTIMIZER_BUILDERS = {
