@@ -157,7 +157,7 @@ export function CanvasStage(props: CanvasStageProps) {
     return [(sx - v.offset_x) / s, (sy - v.offset_y) / s];
   };
 
-  // Line-mode wheel deltas (legacy mice / some drivers) arrive in lines, not pixels.
+  // Line-mode wheel deltas (some mice/drivers) arrive in lines, not pixels.
   const normDelta = (d: number, mode: number) => (mode === 1 ? d * 16 : d);
 
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
