@@ -112,39 +112,70 @@ def export_detection_csv(
     provenance: dict | None = None,
     *,
     measurement_validated: str | None = None,
+    pred_dirs: list[str] | None = None,
     acknowledge_unvalidated: bool = False,
 ) -> str:
     """Export per-image detection counts to CSV.
 
     The count is the phenotype for count traits, so this is a delivery door: it refuses a *bare*
     write (an unvalidated count with no acknowledgement) via the shared ``check_delivery_gate`` and
-    stamps the reconciled validity into every row. Pass ``measurement_validated`` = the count
-    operating point's reconciled state (a shippable reference), or ``acknowledge_unvalidated=True``
-    to write a clearly-flagged provisional CSV stamped ``validated=false``. The ``provenance`` stamp
-    (producing checkpoint sha, experiment id, operating-point conf, timestamp) travels alongside; the
-    number is only as trustworthy as the operating point + model behind it.
+    stamps the reconciled validity into every row. Pass ``pred_dirs`` (the prediction buckets the
+    counts came from) so the count operating point's validity is read from each
+    ``operating_point.json`` sidecar and floored against ``measurement_validated`` (never trusted
+    from the string alone). A bucket produced by a tiled run gates on its ``tile_size`` too, the same
+    operating point's other gating dimension: the tile edge scales the per-image counts this CSV
+    reports, so a fabricated fallback with no persisted training geometry and no explicit caller
+    override refuses here. Untiled buckets are never gated on it. Without ``pred_dirs`` (no buckets
+    to reconcile from, e.g. a caller that already resolved the gate against a live run's own bundle),
+    ``measurement_validated`` is taken as a bare caller-asserted reference with no on-disk
+    reconciliation. Either way, ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional
+    CSV stamped ``validated=false``. The ``provenance`` stamp (producing checkpoint sha, experiment
+    id, operating-point conf, timestamp) travels alongside; the number is only as trustworthy as the
+    operating point + model behind it.
 
     Args:
         image_results: List of dicts with 'image', 'count', 'boxes', etc.
         output_path: Path for the output CSV file.
         provenance: Optional producing-model / operating-point stamp added as trailing columns.
-        measurement_validated: The count operating point's reconciled validity reference.
+        measurement_validated: The count operating point's reconciled validity reference. Floored
+            against each bucket's on-disk sidecar when ``pred_dirs`` is given; taken as-is otherwise.
+        pred_dirs: Prediction buckets to reconcile the count operating point's (and, if tiled, the
+            tile-geometry) validity from.
         acknowledge_unvalidated: Write an unvalidated count as a flagged provisional CSV.
 
     Returns:
         Path to the written CSV file.
     """
-    from tcip_mcp.pipelines.resolution import check_delivery_gate
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
+        check_delivery_gate,
+        reconcile_operating_point_validity,
+        reconcile_tile_size_validity,
+    )
 
-    gate = check_delivery_gate({"measurement": measurement_validated},
-                               acknowledge_unvalidated=acknowledge_unvalidated)
+    flags: dict[str, str | None] = {"measurement": measurement_validated}
+    if pred_dirs:
+        # Reconciled from the buckets' own sidecars, floored against the caller assertion, never
+        # trusted from the string alone (mirrors export_aggregated_csv's count-trait gating).
+        flags["measurement"] = reconcile_operating_point_validity(
+            pred_dirs, asserted=measurement_validated,
+        )["validated"]
+        tile_recon = reconcile_tile_size_validity(pred_dirs)
+        if tile_recon["operative"]:
+            flags["tile_size"] = tile_recon["validated"]
+
+    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         raise ValueError(gate.reason)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
-    stamp["measurement_validated"] = gate.stamp["measurement"]
+    # The single measurement_validated column must reflect the floor across every gated dimension:
+    # with acknowledge_unvalidated a fabricated tile scale can still reach here, and stamping the
+    # count operating point's own (possibly real) reference alone would report a partially
+    # acknowledged-provisional delivery as fully validated.
+    stamp["measurement_validated"] = VALIDATED_FALSE if gate.unvalidated else gate.stamp["measurement"]
     fieldnames = ["image", "detection_count", "avg_confidence"] + _PROVENANCE_COLUMNS
 
     with open(output_path, "w", newline="") as f:
