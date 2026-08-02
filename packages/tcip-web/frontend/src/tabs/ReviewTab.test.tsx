@@ -134,6 +134,9 @@ beforeEach(() => {
   // The priority-queue model picker fetches this on every render with a project open. Default
   // empty; the priority-queue describe block below overrides per-case.
   vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({ models: [] });
+  // The validation-reference promotion resolves its trait from the project's own registered
+  // traits (mirrors ResultsTab); one registered trait auto-selects with no picker shown.
+  vi.spyOn(resultsApi, "traits").mockResolvedValue({ traits: ["catkin"] });
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
   vi.spyOn(api.images, "bands").mockResolvedValue({
@@ -206,6 +209,7 @@ describe("ReviewTab validation-reference affordance", () => {
     });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    await waitFor(() => expect(refBtn()).not.toBeDisabled());
 
     fireEvent.click(refBtn());
     await waitFor(() =>
@@ -229,6 +233,7 @@ describe("ReviewTab validation-reference affordance", () => {
     });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    await waitFor(() => expect(refBtn()).not.toBeDisabled());
 
     fireEvent.click(refBtn());
     expect(await screen.findByText("Not yet")).toBeInTheDocument();
@@ -247,6 +252,7 @@ describe("ReviewTab validation-reference affordance", () => {
     });
     const { container } = render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    await waitFor(() => expect(refBtn()).not.toBeDisabled());
 
     fireEvent.click(refBtn());
     await screen.findByText("Not yet");
