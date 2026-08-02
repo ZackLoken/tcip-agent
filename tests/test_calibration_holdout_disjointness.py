@@ -75,7 +75,7 @@ class _CalStub:
 # ("external") and group_key_map training routes.
 # ===========================================================================
 
-def test_finding1_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeypatch):
+def test_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeypatch):
     """group_by="external" (the explicit-val_images_dir route) falls back to the exact-stem check
     and validates when genuinely disjoint, rather than mapping to unresolvable=True forever."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -98,7 +98,7 @@ def test_finding1_external_marker_not_permanently_blocked_when_disjoint(tmp_path
     assert td["leaked_stems"] == []
 
 
-def test_finding1_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
+def test_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
     """The exact-stem fallback must still refuse a genuine leak, not just always pass."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
@@ -121,7 +121,7 @@ def test_finding1_external_marker_still_catches_a_real_leak(tmp_path, monkeypatc
     assert td["leaked_stems"] == ["c_a"]  # caught even with no group policy at all
 
 
-def test_finding1_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
+def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
     """group_key_map, exercised through _auto_train_val -> _persist_split_manifest ->
     _train_disjointness, must not permanently block the model, and the persisted map must
     actually be used for a real group-level leak check, not just declared unresolvable."""
@@ -173,7 +173,7 @@ def test_finding1_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
 _IDENTITY = {"checkpoint_sha256": "deadbeef", "experiment_id": None}
 
 
-def test_finding2_review_to_records_stems_the_image_id():
+def test_review_to_records_stems_the_image_id():
     from tcip_mcp.pipelines.feedback.review_calibration import review_to_records
 
     review_state = {"image": {"srcA_0_0.jpg": {"img_status": "completed", "detections": [
@@ -185,7 +185,7 @@ def test_finding2_review_to_records_stems_the_image_id():
     assert recs[0]["image_id"] == "srcA_0_0"  # stemmed, not "srcA_0_0.jpg"
 
 
-def test_finding2_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
+def test_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
     """Extensioned review ids in the same tile group as training stems must be caught, not
     silently reported clean."""
     from tcip_mcp.pipelines.feedback.review_calibration import resolve_operating_point_from_review
@@ -233,7 +233,7 @@ def _review_bundle(sweep: dict):
     return ResolvedBundle(trait="catkin", dataset_hash="abc", params={"conf": conf})
 
 
-def test_finding3_describe_review_validation_unresolvable_message():
+def test_describe_review_validation_unresolvable_message():
     from tcip_mcp.pipelines.feedback import describe_review_validation
 
     b = _review_bundle({"conf_censored": False, "disjoint": True, "passed_holdout": False,
@@ -244,7 +244,7 @@ def test_finding3_describe_review_validation_unresolvable_message():
     assert "training record" in out["reason"]
 
 
-def test_finding3_describe_review_validation_leaked_message():
+def test_describe_review_validation_leaked_message():
     from tcip_mcp.pipelines.feedback import describe_review_validation
 
     b = _review_bundle({"conf_censored": False, "disjoint": True, "passed_holdout": False,
@@ -256,7 +256,7 @@ def test_finding3_describe_review_validation_leaked_message():
     assert "also used to train" in out["reason"]
 
 
-def test_finding3_describe_review_validation_content_duplicated_message():
+def test_describe_review_validation_content_duplicated_message():
     from tcip_mcp.pipelines.feedback import describe_review_validation
 
     b = _review_bundle({"conf_censored": False, "disjoint": True, "passed_holdout": False,
@@ -266,7 +266,7 @@ def test_finding3_describe_review_validation_content_duplicated_message():
     assert "duplicate" in out["reason"]
 
 
-def test_finding3_sweep_summary_surfaces_disjointness_fields():
+def test_sweep_summary_surfaces_disjointness_fields():
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, derived
     from tcip_mcp.tools.inference_tools import _sweep_summary
 
@@ -287,7 +287,7 @@ def test_finding3_sweep_summary_surfaces_disjointness_fields():
     assert out["pooled_count_bias_tolerance"] == 4.0
 
 
-def test_finding5_sweep_summary_surfaces_split_policy_divergence():
+def test_sweep_summary_surfaces_split_policy_divergence():
     """attach_split_policy_provenance writes into conf.sweep; _sweep_summary must forward those
     keys too, or run_inference's actual response never shows a caller their declared seed/ratio
     didn't take effect against an existing lock -- only the persisted sweep artifact would."""
@@ -308,7 +308,7 @@ def test_finding5_sweep_summary_surfaces_split_policy_divergence():
 # a locked split can't go stale silently, and a corrupt lock refuses.
 # ===========================================================================
 
-def test_finding4_stale_locked_stem_refuses_cleanly():
+def test_stale_locked_stem_refuses_cleanly():
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
 
     stems_full = ["a_0_0", "a_0_1", "b_0_0", "b_0_1"]
@@ -320,7 +320,7 @@ def test_finding4_stale_locked_stem_refuses_cleanly():
         resolve_locked_cal_holdout_split(stems_now, identity_hash="stale-test", seed=1)
 
 
-def test_finding4_corrupt_lock_file_refuses_instead_of_silent_redraw():
+def test_corrupt_lock_file_refuses_instead_of_silent_redraw():
     from tcip_mcp.pipelines.data.splits import cal_holdout_lock_path, resolve_locked_cal_holdout_split
 
     lock_path = cal_holdout_lock_path("corrupt-test")
@@ -339,7 +339,7 @@ def test_finding4_corrupt_lock_file_refuses_instead_of_silent_redraw():
     assert redrawn["redraw_history"][0]["old_content_hash"] is None
 
 
-def test_finding4_missing_image_refuses_cleanly_not_keyerror(tmp_path):
+def test_missing_image_refuses_cleanly_not_keyerror(tmp_path):
     """At the tool level: a locked stem whose image was later deleted must produce a clean
     ValueError through _calibrate_operating_point, never a bare KeyError from a stale
     stem_to_image lookup."""
@@ -359,7 +359,7 @@ def test_finding4_missing_image_refuses_cleanly_not_keyerror(tmp_path):
         itools._calibrate_operating_point(_CalStub(), "catkin", str(labels_dir), str(images_dir), **kwargs)
 
 
-def test_finding4_force_redraw_shares_the_labels_intersect_images_scan(tmp_path):
+def test_force_redraw_shares_the_labels_intersect_images_scan(tmp_path):
     """force_redraw_cal_holdout_split(images_dir=...) must use the same labels-intersect-images
     scan _calibrate_operating_point uses, not a second independent labels-only glob: a stem
     with no image on disk must not enter the redraw's stem universe."""
@@ -371,7 +371,7 @@ def test_finding4_force_redraw_shares_the_labels_intersect_images_scan(tmp_path)
 
     result = force_redraw_cal_holdout_split(
         labels_dir=str(labels_dir), images_dir=str(images_dir), seed=1,
-        reason="finding 4 coverage test")
+        reason="labels-intersect-images coverage test")
     assert "error" not in result
     all_new = result["new_membership"]["calibration"] + result["new_membership"]["holdout"]
     assert "b_0_1" not in all_new
@@ -381,7 +381,7 @@ def test_finding4_force_redraw_shares_the_labels_intersect_images_scan(tmp_path)
 # a declared seed/holdout_ratio reaches the first (locking) draw.
 # ===========================================================================
 
-def test_finding5_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path):
+def test_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path):
     import tcip_mcp.tools.inference_tools as itools
 
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
@@ -443,7 +443,7 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     assert n_excluded == 2  # partial_a + partial_b, wherever the split put them
 
 
-def test_k18_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
+def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
     """_calibrate_operating_point's bare `except Exception` around _resolve_registry_id_map must
     not silently degrade an attribute-classification calibration to a single-class GT read when
     the registry read fails for a real reason, sitting directly on the calibration/
@@ -501,7 +501,7 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
 
     # No classes.json exists for this dataset, so the pre-fix code (which always re-derived from
     # the registry when `subject` was set) would have raised the ValueError
-    # test_k18_calibration_attribute_registry_refusal_reaches_the_caller pins -- this must instead
+    # test_calibration_attribute_registry_refusal_reaches_the_caller pins -- this must instead
     # succeed, using only the recorded map.
     bundle, _dh, n_excluded = itools._calibrate_operating_point(
         stub, "catkin", str(labels_dir), str(images_dir),
