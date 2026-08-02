@@ -1,4 +1,4 @@
-"""Distill worksheet — gather one project's learning record in one place.
+"""Distill worksheet: gather one project's learning record in one place.
 
 Learning lands with the project (see the `self-improvement` skill): friction goes to
 `.tcip/reports/` via ``claude_reports``, and end-of-work findings to `.tcip/retrospectives/` via
@@ -10,13 +10,13 @@ cheap and nothing is dropped.
     python scripts/distill_learnings.py --workspace
 
 Output is a Markdown worksheet: recurring themes across the project's reports and retrospectives,
-then the records themselves. It *gathers* — nothing is written, applied, or promoted anywhere; this
+then the records themselves. It *gathers*: nothing is written, applied, or promoted anywhere; this
 stays true in ``--workspace`` mode too. ``--workspace`` gathers across every project under the TCIP
-workspace instead of one project root, and surfaces themes recurring across multiple DISTINCT
-projects — a stronger "candidate for a platform change" signal than one project's own recurrence,
+workspace instead of one project root, and surfaces themes recurring across multiple distinct
+projects, a stronger "candidate for a platform change" signal than one project's own recurrence,
 which a single project's own accumulated friction/retrospectives could produce on its own. After
 reviewing a worksheet (either mode), call the ``record_distillation_pass`` MCP tool per project
-covered so its distillation-backlog counters reset — that's the one write in this loop, and it's
+covered so its distillation-backlog counters reset; that's the one write in this loop, and it's
 audited, kept out of this script on purpose.
 """
 
@@ -30,7 +30,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Generic English function words — filtered out so recurrence-counting surfaces whatever
+# Generic English function words, filtered out so recurrence-counting surfaces whatever
 # actually recurs in a project's own reports/retrospectives, not a fixed, maintained,
 # domain-specific vocabulary that goes stale the moment this project's vocabulary shifts.
 _STOPWORDS = frozenset("""
@@ -46,11 +46,11 @@ _WORD = re.compile(r"[a-z][a-z0-9']{2,}")
 
 
 def _themes(*texts: str, top: int = 12, min_count: int = 2) -> list[tuple[str, int]]:
-    """Recurring words/phrases across free text — generic, no fixed vocabulary to maintain.
+    """Recurring words/phrases across free text: generic, no fixed vocabulary to maintain.
 
     Unigrams and bigrams built from a stopword-filtered token stream (bigrams keep both
     words so a real recurring phrase like "operating point" survives, not just single words).
-    Recurrence is the signal, so anything mentioned only once is dropped here — it's still
+    Recurrence is the signal, so anything mentioned only once is dropped here; it's still
     printed in full further down in the friction-reports/retrospectives sections either way.
     """
     raw = [w for t in texts for w in _WORD.findall(t.lower())]
@@ -63,9 +63,9 @@ def _themes(*texts: str, top: int = 12, min_count: int = 2) -> list[tuple[str, i
 
 
 def _project_token_set(*texts: str) -> set[str]:
-    """Distinct unigrams/bigrams present in one project's text — membership, not frequency. The
+    """Distinct unigrams/bigrams present in one project's text: membership, not frequency. The
     building block for cross-project recurrence (_cross_project_themes), which asks "how many
-    DISTINCT projects", not "how many times in one project" (that's _themes' own job)."""
+    distinct projects", not "how many times in one project" (that's _themes' own job)."""
     raw = [w for t in texts for w in _WORD.findall(t.lower())]
     tokens = {w for w in raw if w not in _STOPWORDS}
     tokens.update(
@@ -78,9 +78,9 @@ def _project_token_set(*texts: str) -> set[str]:
 def _cross_project_themes(
     per_project_tokens: dict[str, set[str]], top: int = 12, min_projects: int = 2
 ) -> list[tuple[str, int]]:
-    """Themes appearing in >= min_projects DISTINCT projects' token sets.
+    """Themes appearing in >= min_projects distinct projects' token sets.
 
-    Built from each project's own SET (one project can only ever contribute 1 to a token's count,
+    Built from each project's own set (one project can only ever contribute 1 to a token's count,
     no matter how many times it repeats that token internally), so a single verbose project can
     never clear the bar alone the way a pooled frequency count over concatenated text would let it.
     """
@@ -91,11 +91,11 @@ def _cross_project_themes(
 
 
 def build_workspace_worksheet(workspace_root: Path) -> str:
-    """Cross-project distill worksheet — gathers across every project under the workspace.
+    """Cross-project distill worksheet: gathers across every project under the workspace.
 
     Still pure gather, same as :func:`build_worksheet`: nothing is written, applied, or promoted.
     """
-    lines: list[str] = [f"# Cross-project learning-review worksheet — {workspace_root}", ""]
+    lines: list[str] = [f"# Cross-project learning-review worksheet: {workspace_root}", ""]
 
     projects = sorted(
         p for p in workspace_root.iterdir() if p.is_dir() and (p / ".tcip").is_dir()
@@ -123,11 +123,11 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
             "\n## Cross-project recurring themes (candidates for a skill line or a CLAUDE.md rule)"
         )
         lines.append(
-            "A theme here appeared in reports/retrospectives from multiple DISTINCT projects — a "
+            "A theme here appeared in reports/retrospectives from multiple distinct projects, a "
             "stronger platform-change signal than one project's own recurrence."
         )
         for word, n_projects in cross_themes:
-            lines.append(f"- **{word}** — {n_projects} projects")
+            lines.append(f"- **{word}**: {n_projects} projects")
     else:
         lines.append(
             "\n## Cross-project recurring themes\nNone found (or only one project has data)."
@@ -136,7 +136,7 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
     lines.append(f"\n## Projects covered ({len(projects)})")
     for proj in projects:
         lines.append(
-            f"- {proj.name} — {per_project_report_count[proj.name]} report(s), "
+            f"- {proj.name}: {per_project_report_count[proj.name]} report(s), "
             f"{per_project_retro_count[proj.name]} retrospective(s)"
         )
 
@@ -165,8 +165,8 @@ def _read_jsonl_dir(d: Path) -> list[dict]:
 
 
 def build_worksheet(project_root: Path) -> str:
-    """Assemble the Markdown distill worksheet (pure — no writes)."""
-    lines: list[str] = [f"# Learning-review worksheet — {project_root}", ""]
+    """Assemble the Markdown distill worksheet (pure: no writes)."""
+    lines: list[str] = [f"# Learning-review worksheet: {project_root}", ""]
 
     reports = _read_jsonl_dir(project_root / ".tcip" / "reports")
     retros_dir = project_root / ".tcip" / "retrospectives"
@@ -182,14 +182,14 @@ def build_worksheet(project_root: Path) -> str:
 
     disagreements = [r for r in reports if r.get("user_disagreement")]
     if disagreements:
-        lines.append(f"\n## Disagreements ({len(disagreements)}) — the owner pushed back or disagreed")
+        lines.append(f"\n## Disagreements ({len(disagreements)}): the owner pushed back or disagreed")
         for r in disagreements[-15:]:
             cat = r.get("category", "?")
             detail = str(r.get("detail", "")).replace("\n", " ")[:200]
             lines.append(f"- [{cat}] {detail}")
 
     if reports:
-        lines.append(f"\n## Friction reports ({len(reports)}) — machine-local, won't reach the repo alone")
+        lines.append(f"\n## Friction reports ({len(reports)}): machine-local, won't reach the repo alone")
         for r in reports[-15:]:
             cat = r.get("category", "?")
             detail = str(r.get("detail", "")).replace("\n", " ")[:160]
@@ -211,13 +211,13 @@ def build_worksheet(project_root: Path) -> str:
                 except json.JSONDecodeError:
                     continue
     if captures:
-        lines.append(f"\n## Session captures ({len(captures)}) — SessionEnd backstop")
+        lines.append(f"\n## Session captures ({len(captures)}): SessionEnd backstop")
         for c in captures[-10:]:
             lines.append(f"- {c.get('ts', '?')}  session {c.get('session_id', '?')}")
 
     lines.append(
-        "\n---\nNow (per the self-improvement skill) draft the concrete artifacts — new/updated "
-        "`.github/skills/<name>/SKILL.md`, a proposed CLAUDE.md diff, or a tool proposal — for the "
+        "\n---\nNow (per the self-improvement skill) draft the concrete artifacts, new/updated "
+        "`.github/skills/<name>/SKILL.md`, a proposed CLAUDE.md diff, or a tool proposal, for the "
         "owner to approve. This script gathers; the judgment is yours. Nothing here is applied."
     )
     return "\n".join(lines) + "\n"
