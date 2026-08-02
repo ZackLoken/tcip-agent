@@ -21,7 +21,7 @@ export default defineConfig({
   build: {
     outDir: "../static",
     emptyOutDir: true,
-    // No sourcemaps in the shipped bundle — keeps static/ (and any wheel) lean. Use
+    // No sourcemaps in the shipped bundle: keeps static/ (and any wheel) lean. Use
     // `npm run dev` (HMR + sourcemaps) for debugging instead.
     sourcemap: false,
   },
