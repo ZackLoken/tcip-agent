@@ -1,4 +1,4 @@
-"""Embedded agent terminal — run the real Claude Code CLI in a PTY.
+"""Embedded agent terminal: run the real Claude Code CLI in a PTY.
 
 The in-app agent surface is the *actual* ``claude`` interactive TUI, not a chat
 re-implementation: we spawn the fenced CLI inside an interactive shell (PowerShell on
@@ -8,7 +8,7 @@ stdlib ``pty`` on POSIX) with cwd = the repo root, so it loads ``CLAUDE.md`` /
 exactly like a terminal session. The shell (not claude) is the PTY's top process, so an
 in-TUI ``/exit`` drops back to a live prompt where the ``claude --resume <id>`` hint stays
 usable. Raw PTY bytes stream to xterm.js in the browser over a WebSocket; keystrokes
-stream back. No translation layer — fidelity is the point, and the translation layer is
+stream back. No translation layer: fidelity is the point, and the translation layer is
 where the old chat's silent failures lived.
 
 This module owns the process/PTY concerns; the HTTP/WS surface is
@@ -17,7 +17,7 @@ tests drive a scripted fake program at the process boundary, and CI (no ``claude
 installed) cleanly reports unavailable.
 
 Trust boundary: same as every GUI surface (loopback bind + TrustedHost + WS Origin
-check). The terminal gives keyboard access to Claude Code — equivalent power to the
+check). The terminal gives keyboard access to Claude Code, equivalent power to the
 terminal the operator already has on this machine; it must never be exposed beyond the
 loopback trust boundary without adding auth.
 """
@@ -48,7 +48,7 @@ DEFAULT_ROWS = 30
 DEFAULT_COLS = 100
 
 # The committed permission fence for the in-app (breeder-lane) agent. Passed via
-# --settings, which merges at CLI precedence — so the developer's own `claude`
+# --settings, which merges at CLI precedence, so the developer's own `claude`
 # sessions (no --settings) stay unrestricted. See AGENT_GOVERNANCE_PLAN.md.
 _FENCE_SETTINGS = Path(__file__).resolve().parent / "agent_terminal.settings.json"
 
@@ -59,7 +59,7 @@ _UNAVAILABLE_REASON = (
 
 
 def _repo_root() -> Path:
-    """The repo root — the ancestor of this file that holds ``.mcp.json`` / ``CLAUDE.md``.
+    """The repo root: the ancestor of this file that holds ``.mcp.json`` / ``CLAUDE.md``.
 
     Resolved from ``__file__`` (not the launch cwd) so the fence's cwd-relative deny
     paths and hook command bind to the repo reliably, however tcip-web was started.
@@ -87,16 +87,16 @@ def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
 
 
 def _materialize_fence_settings() -> Optional[Path]:
-    """Write a spawn-time copy of the fence settings with ABSOLUTE hook commands.
+    """Write a spawn-time copy of the fence settings with absolute hook commands.
 
     The committed template stores each PreToolUse guard command repo-relative
     (``python packages/tcip-web/src/tcip_web/agent_bash_guard.py``) for readability, but a
-    PreToolUse hook runs from an unpredictable cwd — the Bash/PowerShell tool's persistent
-    ``cd`` moves it — so a relative path fails to even *locate* the script: the interpreter
+    PreToolUse hook runs from an unpredictable cwd: the Bash/PowerShell tool's persistent
+    ``cd`` moves it, so a relative path fails to even *locate* the script: the interpreter
     exits 2, which Claude Code reads as a *block*, denying every command after a ``cd`` (the
     reported "guard blocks all listings after cd"). We rewrite each guard command to an
     absolute ``"<python>" "<guard_dir>/agent_*_guard.py"`` (this process's ``sys.executable``
-    + the guard directory) and hand that file to ``--settings``. Python — not the shell —
+    + the guard directory) and hand that file to ``--settings``. Python, not the shell,
     resolves the path, so there is no cwd dependency and no ``$VAR`` cross-platform hazard.
 
     Returns the materialized file, or ``None`` if the template is missing/unreadable (the
@@ -111,7 +111,7 @@ def _materialize_fence_settings() -> Optional[Path]:
     guard_dir = _FENCE_SETTINGS.parent.as_posix()
     python = Path(sys.executable).as_posix()
     # Absolutize every agent_*.py hook across all events (PreToolUse guards + SessionEnd capture),
-    # so none depends on cwd — the same reason the guards must be absolute.
+    # so none depends on cwd: the same reason the guards must be absolute.
     for event_groups in cfg.get("hooks", {}).values():
         for group in event_groups:
             for hook in group.get("hooks", []):
@@ -140,7 +140,7 @@ def _resolve_fence() -> tuple[Optional[str], Optional[str]]:
         logger.warning(
             "Could not materialize absolute fence hook paths; falling back to the committed "
             "template. Its relative hook paths over-deny after a shell cd (fail-safe, but "
-            "friction) — check temp-dir writability."
+            "friction), check temp-dir writability."
         )
     settings_path = materialized or _FENCE_SETTINGS
     return str(settings_path), str(workspace_root())
@@ -195,7 +195,7 @@ def _prewarm_blocking() -> None:
 def prewarm() -> None:
     """Kick off best-effort cold-cache warming on a daemon thread; never blocks web startup.
 
-    The first ``claude`` spawn is ~4-5s vs ~1s on restart — cold cache, not structure: cold
+    The first ``claude`` spawn is ~4-5s vs ~1s on restart, cold cache, not structure: cold
     ``tcip_mcp`` import (the MCP server loads it at launch) plus, on Windows, cold PowerShell +
     .NET. Warm both here so the operator's first terminal open pays only claude/node's own cold
     cost. All failures are swallowed; the terminal still works if warming does nothing.
@@ -318,7 +318,7 @@ class _PosixPty:
         import signal
 
         # Liveness guard: once poll() has reaped the child, its pid (and pgid) may have
-        # been recycled — killpg would then hit an innocent process group.
+        # been recycled; killpg would then hit an innocent process group.
         if self._proc.poll() is not None:
             return
         try:
@@ -333,11 +333,11 @@ class _PosixPty:
             except (ProcessLookupError, PermissionError):
                 pass
             try:
-                self._proc.wait(timeout=5)  # reap — a permanent zombie pins the pid
+                self._proc.wait(timeout=5)  # reap: a permanent zombie pins the pid
             except subprocess.TimeoutExpired:  # pragma: no cover
                 pass
         # The master fd is closed by the reader thread (see close()) after it drains to
-        # EOF — closing it here would let a concurrent openpty() reuse the fd number
+        # EOF; closing it here would let a concurrent openpty() reuse the fd number
         # while the old reader is still blocked in os.read on it.
 
     def close(self) -> None:
@@ -362,7 +362,7 @@ def start_reader(pty, on_output: Callable[[str], None], on_exit: Callable[[], No
     """Pump PTY output on a daemon thread until the process exits.
 
     Catches broadly: pywinpty raises its own exception types (``WinptyError``,
-    ``EOFError``) rather than ``OSError``, and any read failure means the same thing —
+    ``EOFError``) rather than ``OSError``, and any read failure means the same thing:
     this PTY is done. The reader owns closing the PTY's OS resources (``pty.close()``)
     so an fd can never be recycled while a read is still blocked on it.
     """
