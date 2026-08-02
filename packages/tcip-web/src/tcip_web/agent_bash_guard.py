@@ -88,8 +88,13 @@ _BREEDER_DATA_TARGET = re.compile(
 # can't tell a two-argument command's source from its destination, so including ``cp`` would deny a
 # legitimate backup/copy of a breeder file to elsewhere, not just a copy into one; ``mv`` stays
 # included because relocating the tracked file is itself the harm regardless of which argument the
-# breeder path was named in.
-_MOVE_OP = re.compile(r"\bmv\b")
+# breeder path was named in. Anchored with the same ``_STMT`` prefix ``_DELETE_OP`` uses so a
+# read-only command that merely names "mv" in a path or grep pattern (``cat annotations/mv-notes.txt``,
+# ``grep -rn mv annotations``) doesn't trip this.
+_MOVE_OP = re.compile(_STMT + r"mv\b")
+# ``find ... -exec mv``: the same find-approved-prefix-can-hide-a-relocation gap ``_FIND_DELETE``
+# closes for the delete verbs, but for ``mv`` instead of removal.
+_FIND_MOVE = re.compile(r"\bfind\b[\s\S]*?-exec\s+mv\b")
 # Inline / nested / arbitrary code execution: a spawned interpreter (``python -c``…) or a
 # nested shell (``bash -c``, ``sh -c``, ``powershell -EncodedCommand``, ``cmd /c``) whose
 # payload the guard can't see through.
@@ -163,7 +168,7 @@ def main() -> None:
         _deny(_DELETE_DENY_MSG)
     if any(_BREEDER_DATA_TARGET.search(t) for t in _write_targets(cmd)):
         _deny(_BREEDER_DATA_WRITE_MSG)
-    if _MOVE_OP.search(cmd) and _BREEDER_DATA_TARGET.search(cmd):
+    if (_MOVE_OP.search(cmd) or _FIND_MOVE.search(cmd)) and _BREEDER_DATA_TARGET.search(cmd):
         _deny(_BREEDER_DATA_WRITE_MSG)
     if any(_PROTECTED.search(t) for t in _write_targets(cmd)):
         _deny(_PROTECTED_WRITE_MSG)
