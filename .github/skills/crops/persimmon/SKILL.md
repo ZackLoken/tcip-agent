@@ -45,7 +45,7 @@ all is a science fact, not a config choice.
 `fruit_diameter`, `fruit_height`, `sex`, `plant_height`, `dbh`, `overall_disease`,
 `fruit_set`.
 
-- `fruit_diameter` and `fruit_height` are imageable **only** with a real in-frame scale
+- `fruit_diameter` and `fruit_height` are imageable only with a real in-frame scale
   reference and an unoccluded fruit silhouette (typically a lab-bench RGB shot, not a
   canopy photo). `fruit_height` is the axial (apex-to-base) dimension, distinct from the
   equatorial `fruit_diameter`; the exact caliper endpoints are the breeder's protocol.
