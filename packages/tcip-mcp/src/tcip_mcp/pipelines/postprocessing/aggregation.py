@@ -238,7 +238,11 @@ def export_aggregated_csv(
     with no acknowledgement) via the shared ``check_delivery_gate`` and stamps the reconciled validity
     into every row. For a count trait, pass ``pred_dirs`` (the prediction buckets the counts came from)
     so the count operating point's validity is read from each ``operating_point.json`` sidecar and
-    floored against ``measurement_validated``. For a continuous/ordinal trait with no conf op-point
+    floored against ``measurement_validated``. A bucket produced by a tiled run gates on its
+    ``tile_size`` too, the same operating point's other gating dimension: the tile edge scales the
+    per-image counts this per-plant value aggregates, so a fabricated fallback with no persisted
+    training geometry and no explicit caller override refuses here. Untiled buckets are never gated
+    on it. For a continuous/ordinal trait with no conf op-point
     (``pred_dirs`` empty/omitted), ``measurement_validated`` is currently not honored: no on-disk
     source exists yet for that dimension's validity, so the state floors to unvalidated
     unconditionally; the only route to delivery is the explicit acknowledge below.
@@ -265,20 +269,28 @@ def export_aggregated_csv(
         VALIDATED_FALSE,
         check_delivery_gate,
         reconcile_operating_point_validity,
+        reconcile_tile_size_validity,
     )
 
+    tile_recon = {"operative": False, "validated": None}
     if pred_dirs:
         # A count trait: the measurement validity is the count operating point's, read from the
         # buckets' sidecars and floored against any caller assertion (never trusted from the string).
         state = reconcile_operating_point_validity(pred_dirs, asserted=measurement_validated)["validated"]
+        # The tile scale is the same operating point's other gating dimension: it scales the
+        # per-image counts this per-plant value aggregates, so a tiled bucket whose tile edge has no
+        # persisted or caller-stated basis is exactly as untrustworthy here as an uncalibrated conf.
+        tile_recon = reconcile_tile_size_validity(pred_dirs)
     else:
         # No on-disk source exists for a continuous/ordinal trait's measurement validity today, a
         # bare caller-asserted `measurement_validated` string is never trusted on its own. The only
         # route to delivery without a producer is the explicit acknowledge below; this never
         # auto-sets it on the writer's own initiative.
         state = VALIDATED_FALSE
-    gate = check_delivery_gate({"measurement": state},
-                               acknowledge_unvalidated=acknowledge_unvalidated)
+    flags: dict[str, str | None] = {"measurement": state}
+    if tile_recon["operative"]:
+        flags["tile_size"] = tile_recon["validated"]
+    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         raise ValueError(gate.reason)
 
@@ -287,7 +299,12 @@ def export_aggregated_csv(
     units = _resolve_units(trait_name, results)
 
     stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
-    stamp["measurement_validated"] = gate.stamp["measurement"]
+    # The single measurement_validated column must reflect the floor across every gated dimension:
+    # with acknowledge_unvalidated a fabricated tile scale can still reach here, and stamping the
+    # count operating point's own (possibly real) reference alone would report a partially
+    # acknowledged-provisional delivery as fully validated.
+    stamp["measurement_validated"] = (VALIDATED_FALSE if gate.unvalidated
+                                      else gate.stamp["measurement"])
     fieldnames = [
         "plant_id", "crop", "trait_name", "value", "units", "value_key",
         "confidence", "n_images", "pipeline_version",
