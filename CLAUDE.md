@@ -133,8 +133,8 @@ snapshots — is a global rule now; see global `CLAUDE.md`, not restated here.)
     to *stand in for* the model's job of finding/segmenting the object, or to judge a
     biological *state/stage* (elongated vs dormant, diseased vs healthy) that needs a real
     visual call. If a trait can't yet be measured validly from pixels, say so — don't
-    manufacture a number. (A prior session read catkin "elongation" — a state — off bbox
-    height: invalid, shipped fabricated phenology, removed.)
+    manufacture a number. (A prior session read a trait's state off bbox height instead of
+    a classifier call: invalid, shipped fabricated phenology, removed.)
   - **Validate the measurement before producing any downstream result** (curve, milestone,
     CSV, delivery): the expert confirms the model has the trait's measurement straight on a
     *reference sized to the trait* — GT annotations, or a breeder-confirmed sample of the
@@ -146,12 +146,19 @@ snapshots — is a global rule now; see global `CLAUDE.md`, not restated here.)
     is flagged provisional and validated or removed; it must not silently become
     institutional truth that the next session reuses.
 - **A subject is not a trait.** `annotations/<subject>/` names an object class that must be
-  isolated (K13.5 unified the prior `campaign`/`annotation_type`/segment-sense `trait` names to
-  `subject` end to end, backend and web layer — verified current in `dataset_layout.py` and
+  isolated: every prior `campaign`/`annotation_type`/segment-sense `trait` name is unified to
+  `subject` end to end, backend and web layer (verified current in `dataset_layout.py` and
   `packages/tcip-web/src`, no stale references). Sometimes a subject is a trait's own object
-  (catkins, for `catkin_50per_date`); often it is an enabling object no trait names — a *bush*
+  (catkins, for `catkin_50per_date`); often it is an enabling object no trait names: a *bush*
   isolated so anything can be aggregated per plant, a *leaf* isolated before leaf area is measured.
   So subject names are not governed by `crops.yml` and must not be validated against it.
+- **No pilot vocabulary as framing — no trait, crop, or measurement-shape is the exemplar.** A
+  trait's own vocabulary (a name, a positive/negative state, a column prefix) must never become
+  the name of a general mechanism, in comments or in identifiers alike: a type/function/variable/
+  file name that encodes one trait's vocabulary for a concept every registered trait must use is
+  the same failure as a comment that frames it that way. Name the general concept; thread the real
+  trait through as data, resolved from the project's own registry, never hardcoded or assumed. A
+  concrete trait is fine as one clearly-marked `e.g.` example; it is not fine as the thing itself.
 - **A negative is empty labels + an explicit human Complete** (the `image_status.json` store) —
   an empty label file alone is never a negative (it may be emptied mid-work) and never trains
   as one. Don't delete empty label files without asking.
@@ -254,39 +261,25 @@ longer fragments `.tcip/`.
 - Match surrounding code style. (Comment/emphasis style is a global rule — see global `CLAUDE.md`;
   this bullet is this repo's own elaboration of it, not a duplicate — read both.)
 - **Every piece of prose this repo ships is for whoever reads it next, never a changelog of the work
-  session that wrote it.** This is broader than "comments": it covers comments, docstrings, and every
-  string literal meant to be read as prose — log lines, exception/error messages, HTTPException
-  details, toast/UI text, test names and descriptions (`it(...)`/`describe(...)`/docstrings on test
-  functions) — and it applies everywhere prose lives in this repo, not just `packages/*/src` and
-  `tests/`: `scripts/*.py`, `README.md`, `.github/skills/`, and package-level `CLAUDE.md` files are
-  all in scope too. It does **not** apply to data values — a test fixture's date, a legitimate
-  all-caps identifier/constant/env-var/acronym, or a UI's own placeholder glyph for "no value" (e.g.
-  a bare em dash rendered in a table cell) are not prose and are not the target here.
-  Forbidden in that prose, no exceptions:
-  - A cluster/phase/fix citation under **any** prefix scheme — `K<n>` is only the one this repo
-    happened to use; treat `Fix <letter>`, `finding <n>`, `round <n>`, `stage-<n> review`, `W<n>`,
-    `S<n>`, `L<n>`, `D<n>`, `R<n>`, `G<n>`, `Q<n>`, `N<n>-NEW-<n>`, `RC-NEW-<n>`, `TRAP <n>`,
-    `Phase <n>`, `Part <n>`, or any other project/session-tracking label the same way. A brand-new
-    scheme not on this list is still the same failure mode — pattern-match on "does this name a
-    session's own internal tracking artifact," not on this literal list.
-  - An inline date a decision or fix was made.
-  - All-caps words used for emphasis (write "not"/"never", not "NOT"/"NEVER") and markdown bold used
-    for emphasis (`**word**`) — both forbidden by the global rule; restated here because this repo's
-    own history is exactly what made that rule necessary, and both kept recurring even after being
-    told once.
+  session that wrote it.** Covers comments, docstrings, every string literal meant to be read as
+  prose (log/error messages, toast/UI text, test names and descriptions), and file/module names —
+  everywhere in the repo, not just `packages/*/src`/`tests/`: `scripts/*.py`, `README.md`,
+  `.github/skills/`, and package `CLAUDE.md` files are in scope too. Exempt: data values (a test
+  fixture's date, a UI placeholder glyph) and legitimate all-caps identifiers/constants/env-vars.
+  Forbidden, no exceptions:
+  - A session/project-tracking citation under any prefix scheme (`K<n>`, `Fix <letter>`,
+    `finding <n>`, `round <n>`, `Phase <n>`, or any other label naming the session's own internal
+    tracking) — including in file and module names, which a content-only grep will never find.
+  - An inline date a decision was made.
+  - All-caps or markdown-bold used for emphasis (write "not"/"never", not "NOT"/"NEVER" or
+    "**not**") — the global rule, restated here because it kept recurring.
   - Em dashes, anywhere in that prose.
 
-  If a real, non-obvious technical fact survives once the process-pointer/date/emphasis is stripped,
-  state it plainly with no process pointer attached. If nothing survives, write nothing — that process
-  narration belongs in the commit message and `decisions/`, never in the diff or in shipped prose.
-  `decisions/` (and any doc explicitly marked superseded/historical) is the one place this vocabulary
-  belongs; don't launder it out of there by the same instinct that removes it everywhere else.
-
-  **A prior sweep to undo this vocabulary across the whole tree needed three separate
-  scope-corrections mid-flight** — first read as "comments/docstrings only," then widened to string
-  literals, then widened again to the rest of the file surface and to markdown bold — before it
-  actually covered what "every piece of prose" means here. That is exactly the failure mode this
-  bullet exists to close: get the full scope right the first time, not after being told three times.
+  If a real, non-obvious technical fact survives once that framing is stripped, state it plainly
+  with no process pointer. If nothing survives, write nothing. Stripping the flagged token isn't
+  the fix by itself — re-read what remains and ask whether it's still narrating a change rather
+  than stating a standing constraint. That process narrative belongs in the commit message and
+  `decisions/` (or another doc explicitly marked historical/superseded), never in shipped prose.
 
 ## Pointers
 
