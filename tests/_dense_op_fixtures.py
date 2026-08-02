@@ -1,8 +1,8 @@
-"""Shared dense-reference fixture builder for operating-point gate tests (K2).
+"""Shared dense-reference fixture builder for operating-point gate tests.
 
-Several K2 gate conditions (Fix B's dispersion/localization floor, Fix C's reference-sufficiency
-and equivalence criterion) cannot be exercised by a 1-2 object toy fixture — the failure modes are
-specifically about per-image variance and tail behavior across a realistic, dense reference (tens to
+Some gate conditions (a dispersion/localization floor, a reference-sufficiency and equivalence
+criterion) cannot be exercised by a 1-2 object toy fixture: the failure modes are specifically
+about per-image variance and tail behavior across a realistic, dense reference (tens to
 hundreds of objects per image, per the catkin trait). ``dense_records`` builds such a reference with
 an exactly hand-verifiable per-image miss/false-positive pattern (deterministic, not randomized) so
 every derived statistic (count_bias_mean/std/p90, precision/recall) can be reasoned about directly
@@ -34,16 +34,16 @@ def dense_records(
     outside the ~half-class-avg-size center-match tolerance these 20x20 boxes derive, so there is no
     accidental cross-matching between neighboring GT).
 
-    Per image ``i``: the first ``miss_pattern[i]`` GT boxes get NO matching detection (false
+    Per image ``i``: the first ``miss_pattern[i]`` GT boxes get no matching detection (false
     negatives); every other GT gets an exactly-matching detection at ``score``; ``fp_pattern[i]``
-    extra, unmatched detections (at ``fp_score``, defaulting to ``score`` — pass a distinct, lower
+    extra, unmatched detections (at ``fp_score``, defaulting to ``score``; pass a distinct, lower
     value to model a realistic detector whose spurious detections skew low-confidence) are added far
     outside the grid (false positives). Per-image bias is therefore exactly ``fp_pattern[i] -
     miss_pattern[i]``, tp = ``objects_per_image - miss_pattern[i]``, fn = ``miss_pattern[i]``,
-    fp = ``fp_pattern[i]`` — hand-verifiable without re-running the sweep. ``shift`` offsets every GT
-    box's center by that many px — the matching detection's center is NOT shifted, so it stays put at
-    the ORIGINAL (unshifted) grid position — leaving miss/FP placement geometry unaffected; used to
-    give a holdout fixture content genuinely distinct from calibration's (K1's content-overlap gate).
+    fp = ``fp_pattern[i]``, hand-verifiable without re-running the sweep. ``shift`` offsets every GT
+    box's center by that many px; the matching detection's center is not shifted, so it stays put at
+    the original (unshifted) grid position, leaving miss/FP placement geometry unaffected; used to
+    give a holdout fixture content genuinely distinct from calibration's, for a content-overlap gate.
     A caller must not raise ``shift`` past the center-match tolerance without also shifting the
     paired detection to match: past that point every "match" becomes a miss (the shifted GT) plus an
     unmatched detection (the un-shifted one) instead of a true positive, silently turning a clean
