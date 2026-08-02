@@ -633,7 +633,8 @@ def train(
                 # Fail loudly instead of silently restarting from scratch (the old behavior).
                 raise ValueError(
                     f"Cannot resume from {resume_from}: checkpoint is missing {missing} "
-                    "(likely a legacy or non-resumable checkpoint, e.g. model_best.pt). Resume "
+                    "(a non-resumable checkpoint, e.g. model_best.pt, which never carries resume "
+                    "state). Resume "
                     "from a periodic checkpoint_epoch_*.pt, or start a fresh run."
                 )
             model.load_state_dict(ckpt["model_state_dict"])
