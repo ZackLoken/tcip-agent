@@ -19,9 +19,9 @@ export interface CanvasStageProps {
   /** Auto-fit the image to the canvas once per image (default true). The Review tab sets this
    *  false so its zoom-to-detection view is not overridden by the fit. */
   autoFit?: boolean;
-  /** Static shapes — rendered in the content layer (below the overlay). */
+  /** Static shapes, rendered in the content layer (below the overlay). */
   children?: React.ReactNode;
-  /** Cursor-following / transient shapes — rendered in a separate top layer so they
+  /** Cursor-following / transient shapes, rendered in a separate top layer so they
    *  can redraw on every mouse move without re-compositing the image or the shapes. */
   overlay?: React.ReactNode;
   onStageRef?: (stage: Konva.Stage | null) => void;
@@ -37,14 +37,14 @@ export function CanvasStage(props: CanvasStageProps) {
   const wrapper = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   // Start at 0 so the one-shot fit waits for a real measurement (below) instead of fitting
-  // to a placeholder size — a stale-dims fit left the image mis-scaled/off-screen on first open.
+  // to a placeholder size: a stale-dims fit left the image mis-scaled/off-screen on first open.
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const view = useStore((s) => s.gui.view);
   const setView = useStore((s) => s.setView);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [imgError, setImgError] = useState(false);
 
-  // Track wrapper size — measure synchronously on mount too, so the first fit uses the real
+  // Track wrapper size: measure synchronously on mount too, so the first fit uses the real
   // canvas size immediately rather than waiting a frame for the ResizeObserver.
   useEffect(() => {
     if (!wrapper.current) return;
@@ -65,7 +65,7 @@ export function CanvasStage(props: CanvasStageProps) {
       setImgError(false);
       return;
     }
-    // Drop the previous bitmap immediately — otherwise the new image's labels render
+    // Drop the previous bitmap immediately, otherwise the new image's labels render
     // over the old photo for the seconds the fetch takes (misregistered symbology).
     setImg(null);
     setImgError(false);
@@ -76,7 +76,7 @@ export function CanvasStage(props: CanvasStageProps) {
       setImgError(false);
     };
     // Distinguish a failed load (missing / access-denied / server error) from an
-    // empty canvas — otherwise overlays float on a blank stage with no explanation.
+    // empty canvas, otherwise overlays float on a blank stage with no explanation.
     el.onerror = () => {
       setImg(null);
       setImgError(true);
@@ -89,7 +89,7 @@ export function CanvasStage(props: CanvasStageProps) {
     };
   }, [props.imageUrl]);
 
-  // Fit the image to the canvas once per image — not on every container resize. Refitting
+  // Fit the image to the canvas once per image, not on every container resize. Refitting
   // on resize reset the user's zoom/pan, and when a reflow briefly reported a near-zero
   // height (e.g. the Review filter shelf expanding) it collapsed the image to sub-pixel
   // scale so it appeared to vanish. The key omits dims so a later resize can't re-fit;
@@ -120,7 +120,7 @@ export function CanvasStage(props: CanvasStageProps) {
   // Pan/zoom writes coalesce through one requestAnimationFrame per frame (mirrors
   // AnnotateTab's onMove): native wheel/mousemove bursts fire faster than 60/s, and an
   // un-batched setView re-rendered both tabs per event. The pending view holds the
-  // accumulated target so a burst reads its own in-flight math, not the stale store —
+  // accumulated target so a burst reads its own in-flight math, not the stale store,
   // keeping the zoom-about-pointer / pan deltas exact; only the commit is deferred.
   const pendingViewRef = useRef<ViewState | null>(null);
   const pendingBaseRef = useRef<ViewState | null>(null);
@@ -135,7 +135,7 @@ export function CanvasStage(props: CanvasStageProps) {
       const base = pendingBaseRef.current;
       pendingViewRef.current = null;
       pendingBaseRef.current = null;
-      // An external setView (auto-fit, zoom-to-detection) landed mid-burst: it wins — the
+      // An external setView (auto-fit, zoom-to-detection) landed mid-burst: it wins, the
       // queued math was computed against the pre-write view and would silently clobber it.
       if (pending && base === useStore.getState().gui.view) setView(pending);
     });
@@ -146,7 +146,7 @@ export function CanvasStage(props: CanvasStageProps) {
     };
   }, []);
 
-  // Handlers read the live view — the pending in-flight target if a batched write is
+  // Handlers read the live view: the pending in-flight target if a batched write is
   // queued, else the store. A stale read (trackpads burst faster than the canvas
   // re-renders) would drop accumulated deltas mid-burst.
   const liveView = () => pendingViewRef.current ?? useStore.getState().gui.view;
@@ -170,7 +170,7 @@ export function CanvasStage(props: CanvasStageProps) {
         // Shift+scroll: horizontal pan. Chromium pre-swaps the delta into deltaX.
         scheduleView({ ...v, offset_x: v.offset_x - (dx || dy) });
       } else {
-        // Plain scroll pans both axes — two-finger trackpad panning in any direction.
+        // Plain scroll pans both axes: two-finger trackpad panning in any direction.
         scheduleView({ ...v, offset_x: v.offset_x - dx, offset_y: v.offset_y - dy });
       }
       return;
@@ -184,7 +184,7 @@ export function CanvasStage(props: CanvasStageProps) {
     const iy = (pointer.y - v.offset_y) / s;
     // Ctrl+wheel (and precision-touchpad pinch, which browsers deliver as ctrl+wheel):
     // continuous magnitude-proportional zoom about the pointer. A touchpad pinch arrives as
-    // many small deltas, a mouse notch as one large (~100) delta — so give the small deltas a
+    // many small deltas, a mouse notch as one large (~100) delta, so give the small deltas a
     // higher gain (pinch-zoom felt sluggish) while the mouse wheel keeps its tuned feel.
     const zoomGain = Math.abs(dy) < 40 ? 0.005 : 0.002;
     const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * Math.exp(-dy * zoomGain)));
@@ -254,7 +254,7 @@ export function CanvasStage(props: CanvasStageProps) {
   const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (panning.current) {
       if ((e.evt.buttons & panning.current.buttonsBit) === 0) {
-        panning.current = null; // button released outside the canvas — end the pan
+        panning.current = null; // button released outside the canvas: end the pan
       } else {
         const dx = e.evt.clientX - panning.current.x;
         const dy = e.evt.clientY - panning.current.y;
@@ -342,8 +342,8 @@ export function CanvasStage(props: CanvasStageProps) {
         onContextMenu={handleContextMenu}
       >
         {/* Three layers share the pan/zoom transform but redraw independently. All are
-            listening={false} — every interaction goes through the Stage-level pixel
-            handlers (getPointerPosition + toPixel), never per-shape Konva hit-testing —
+            listening={false}: every interaction goes through the Stage-level pixel
+            handlers (getPointerPosition + toPixel), never per-shape Konva hit-testing,
             so Konva skips building a hit graph for hundreds/thousands of shapes.
             Isolating the image means a cursor move (overlay only) never re-composites
             the 20MP bitmap. */}
@@ -382,7 +382,7 @@ export function CanvasStage(props: CanvasStageProps) {
       {imgError && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
           <div className="max-w-sm rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-4 py-3 text-center text-[12px] text-tcip-fp">
-            Could not load this image — it may be missing, or access was denied (check the path and,
+            Could not load this image; it may be missing, or access was denied (check the path and,
             on a locked-down server, TCIP_IMAGE_ROOTS).
           </div>
         </div>
