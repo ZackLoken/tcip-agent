@@ -1,4 +1,4 @@
-"""W5 — review-verdict materialization (pure, torch-free)."""
+"""Review-verdict materialization (pure, torch-free)."""
 
 from __future__ import annotations
 
