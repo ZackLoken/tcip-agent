@@ -60,7 +60,7 @@ describe("openProjectByName", () => {
     expect(arg.model_name).toBe("baseline");
   });
 
-  it("falls back to the newest date when NOTHING is labelled yet (empty project)", async () => {
+  it("falls back to the newest date when nothing is labelled yet (empty project)", async () => {
     const p = project({
       name: "fresh",
       dates: ["2026-02-11", "2026-03-24"],
