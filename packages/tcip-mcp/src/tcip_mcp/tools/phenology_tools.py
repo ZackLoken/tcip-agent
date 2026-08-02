@@ -357,9 +357,9 @@ def calibrate_classifier_operating_point(
     Args:
         trait_name: The registered trait whose positive class is being calibrated.
         subject: The GT annotation subject naming this trait's object type, a per-run fact the
-            caller supplies, per Zack's decision that the (subject, attribute)
-            axis threads from the run's own config, never from ``TraitSpec`` (pinning it here would
-            reintroduce a trait-vocabulary leak at the public surface). Scopes the GT side of
+            caller supplies: the (subject, attribute) axis threads from the run's own config, never
+            from ``TraitSpec`` (pinning it here would reintroduce a trait-vocabulary leak at the
+            public surface). Scopes the GT side of
             matching so an unrelated subject sharing the same labels dir (e.g. an enabling subject
             like ``bush``, root CLAUDE.md's "a subject is not a trait") can't enter the match pool.
         attribute: The GT annotation attribute carrying this trait's positive-class axis, a
