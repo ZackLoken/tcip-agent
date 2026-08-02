@@ -3,10 +3,10 @@
 A test added alongside a fix is only a guard if it fails *before* the fix. Reasoning that it would
 is not evidence: this repo shipped a test whose two assertions both passed against the very
 regression they named, because an unrelated code path failed first and produced the same outcome.
-Nothing in the normal gate can catch that — a vacuous test passes everywhere.
+Nothing in the normal gate can catch that: a vacuous test passes everywhere.
 
 This extracts a baseline revision with ``git archive`` (the working tree is never touched), drops
-the CURRENT test file into that OLD source, and runs it there. A test that PASSES is guarding
+the current test file into that old source, and runs it there. A test that passes is guarding
 nothing; say so rather than counting it.
 
     python scripts/prove_test_fails_before.py tests/test_foo.py
@@ -30,7 +30,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 
 def _extract(rev: str, dest: Path) -> None:
-    """Materialize `rev` into `dest`. Piped as bytes — a text pipe corrupts the archive."""
+    """Materialize `rev` into `dest`. Piped as bytes: a text pipe corrupts the archive."""
     dest.mkdir(parents=True, exist_ok=True)
     archive = subprocess.run(["git", "archive", rev], cwd=REPO, check=True,
                              stdout=subprocess.PIPE).stdout
@@ -63,8 +63,8 @@ def main() -> int:
         shutil.rmtree(tmp, ignore_errors=True)
 
     if proc.returncode == 0:
-        print(f"\nVACUOUS: every selected test PASSED against {args.rev}. "
-              f"It guards nothing — assert on what only the fix produces.")
+        print(f"\nVACUOUS: every selected test passed against {args.rev}. "
+              f"It guards nothing; assert on what only the fix produces.")
         return 1
     print(f"\nOK: the selected tests fail against {args.rev}, so they guard the fix.")
     return 0
