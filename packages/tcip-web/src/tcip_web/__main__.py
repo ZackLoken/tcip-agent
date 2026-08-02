@@ -38,7 +38,7 @@ def _pick_port(host: str, requested: int) -> int:
 
 def _write_port_file(port: int) -> None:
     # Anchored to the platform state root (pinned below) so MCP tools in other processes read
-    # the SAME web_port.txt regardless of cwd, instead of a fragmented cwd-relative one.
+    # the same web_port.txt regardless of cwd, instead of a fragmented cwd-relative one.
     port_file = project_root() / ".tcip" / "state" / "web_port.txt"
     try:
         port_file.parent.mkdir(parents=True, exist_ok=True)
@@ -60,8 +60,8 @@ def _refuse_insecure_bind(host: str) -> None:
     if os.environ.get("TCIP_WEB_ALLOW_INSECURE") == "1":
         return
     raise SystemExit(
-        f"Refusing to bind {host!r} (non-loopback): this exposes the GUI — including "
-        "filesystem browsing and file writes — to the whole network with no login.\n"
+        f"Refusing to bind {host!r} (non-loopback): this exposes the GUI, including "
+        "filesystem browsing and file writes, to the whole network with no login.\n"
         "Set TCIP_WEB_ALLOW_INSECURE=1 to override (only on a trusted network)."
     )
 
