@@ -20,7 +20,7 @@ the next session inherits. Neither is allowed.
 
 ## 1. Research: academic sources only
 
-Your web access is **governed and scoped to academic sources by the fence** (WebSearch to find
+Your web access is governed and scoped to academic sources by the fence (WebSearch to find
 papers; WebFetch allowed only for a fixed set of academic hosts). Treat that as the floor, not the
 ceiling: even where a fetch would technically succeed, prefer primary academic sources and stay out
 of the open web. The allowed/preferred set:
@@ -57,7 +57,7 @@ implementing a half-understood method.
 
 ## 2. Implement: against the platform toolkit
 
-The platform is built so a technique from a paper is a **first-class citizen, not a fork**. You own
+The platform is built so a technique from a paper is a first-class citizen, not a fork. You own
 the model *and* the training loop; see `pipeline-design`'s "You own the model and the training loop"
 for the full contract; the seams you use here are:
 
@@ -92,7 +92,7 @@ for the full contract; the seams you use here are:
   `ctx.report_objective(value)` to report trial progress for pruning if your loop's own metrics
   don't share the stock trainer's key names.
 
-**Fit to the data in hand, don't transplant blind.** A paper's hyperparameters are for its dataset.
+Fit to the data in hand, don't transplant blind. A paper's hyperparameters are for its dataset.
 Derive the operating points from *your* data at runtime (CLAUDE.md: derive, don't pin): anchor sizes
 from your GT box distribution, norm choice from your real batch size, pyramid levels from your object
 scale. A method that assumed 118k images and batch 64 will not behave the same on a few hundred tiles
@@ -100,9 +100,9 @@ at batch 2; adapt the mechanism to that reality or expect it to fail.
 
 ## 3. Validate: beats a baseline on the *measured phenotype*
 
-This is the part that makes it science. **A technique is not adopted because a paper reports a gain,
+This is the part that makes it science. A technique is not adopted because a paper reports a gain,
 because it is elegant, or because it improved a proxy metric. It is adopted only after you measure
-that it beats the current baseline on the phenotype the breeder actually needs.** Implement-and-measure,
+that it beats the current baseline on the phenotype the breeder actually needs. Implement-and-measure,
 never adopt-on-faith.
 
 The discipline:
