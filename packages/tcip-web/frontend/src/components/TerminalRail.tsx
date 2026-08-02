@@ -69,6 +69,15 @@ export function TerminalRail() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<string | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  // The lifecycle effect's `send` closure, exposed so the pending-message effect below can
+  // reach the live socket without a second write path.
+  const sendRef = useRef<((payload: unknown) => void) | null>(null);
+
+  // A request staged via `sendToAgentTerminal` (TuningTab, ResultsTab, ...): sent as terminal
+  // input once the PTY socket is actually open, not before, so a message sent while the rail
+  // is still (re)connecting isn't dropped.
+  const pendingMessage = useStore((s) => s.pendingTerminalMessage);
+  const clearPendingMessage = useStore((s) => s.clearPendingTerminalMessage);
 
   // A first-time breeder's first view of this rail is otherwise a blank cursor in a full
   // developer CLI. Show a starter hint until either a project is open (App.tsx's own signal,
@@ -277,6 +286,7 @@ export function TerminalRail() {
     const send = (payload: unknown) => {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
     };
+    sendRef.current = send;
 
     const connect = async () => {
       if (closedByClient) return;
@@ -350,8 +360,21 @@ export function TerminalRail() {
       ws?.close();
       term.dispose();
       termRef.current = null;
+      sendRef.current = null;
     };
   }, [open, status]);
+
+  // Deliver a request staged via `sendToAgentTerminal`. Depends on `conn` (not just
+  // `pendingMessage`) so a message staged before the socket finished (re)connecting is sent the
+  // moment it opens, rather than being dropped or sent into a closed socket.
+  useEffect(() => {
+    if (!pendingMessage || conn !== "open") return;
+    const send = sendRef.current;
+    if (!send || !termRef.current) return;
+    send({ type: "input", data: `${pendingMessage}\r` });
+    setHasInput(true);
+    clearPendingMessage();
+  }, [pendingMessage, conn, clearPendingMessage]);
 
   async function restart() {
     const id = sessionRef.current;
