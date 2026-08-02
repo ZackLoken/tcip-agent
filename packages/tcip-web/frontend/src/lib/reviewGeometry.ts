@@ -1,7 +1,7 @@
 /**
  * The single source of a review detection's geometry. A unified label file mixes bbox and polygon
  * annotations (possibly of different subjects) in one image, so the review overlay must render each
- * detection by ITS OWN annotation's geometry — never by a per-image "review kind" that would hide a
+ * detection by its own annotation's geometry, never by a per-image "review kind" that would hide a
  * whole geometry kind (an unreviewed false-negative, measurement-critical).
  *
  * Both the on-canvas overlay (ReviewTab) and the agent's shape mirror (canvasSync.buildReviewShapes)
@@ -15,7 +15,7 @@ export type ReviewGeom =
   | { kind: "polygon"; rings: [number, number][][] }
   | { kind: "point"; point: [number, number] };
 
-/** The geometry an annotation draws as — its own polygon if it has one, else its box, else its
+/** The geometry an annotation draws as: its own polygon if it has one, else its box, else its
  *  point. A geometry-less annotation (image/plant-level rating) has nothing to draw. Every drawable
  *  ring travels: a prediction awaiting review can be occlusion-split, and a reviewer accepting it
  *  must have seen all of it. A point stays a point: no enclosing box is derived for it, so nothing
