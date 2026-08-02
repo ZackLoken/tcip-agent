@@ -359,7 +359,7 @@ def test_catkin_trait_semantics():
     assert t.milestone_fractions == (0.05, 0.50, 0.95)
     assert t.milestone_on == "positive_fraction"
     assert t.sliver_policy == "class_avg_size"
-    assert t.count_bias_tolerance_frac == 0.01
+    assert t.count_bias_tolerance_frac is None  # not yet authored by the domain expert
 
 
 def test_unknown_trait_lists_available():
