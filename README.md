@@ -108,21 +108,26 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 The pitch above describes the long-term target. What's actually built today is a
 narrower slice; this section keeps the two honest.
 
-**Working now:** 2D-image tasks end to end (detection, instance/semantic
-segmentation, classification, ordinal, regression) via an agent-written `nn.Module`
-that imports the plain building blocks (necks, heads, losses, backbone wrappers, and
-`build_detector`; `instance_seg` via Mask R-CNN), on **RGB and N-channel imagery** (multi-band
-GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`, and an `in_chans != 3`
-detector takes per-band `image_mean`/`image_std` from `derivations.band_normalization_stats`), with
-training that loads the native per-image JSON labels directly, experiment tracking,
-annotation/review, SAM-assisted labeling, and per-plant CSV export, including a
-percentile-crossing phenology-milestone deliverable (per-plant `<trait>_05/50/95per_date` = the
-dates a plant's classified positive-state fraction of detected objects crosses 5/50/95%; the
-positive state is a validated per-object classifier call, never a geometric proxy). The agent
-composes it end to end via `build_plant_mapping` → tiled inference → `compute_phenology`, and the
-same milestone code backs the Results tab, so a milestone date means one thing on both surfaces.
-Phase 1's own shipped example is hazelnut catkin bloom phenology (`catkin_05/50/95per_date`,
-elongation as the positive state).
+**Working now:** 2D-image detection, instance/semantic segmentation, and classification, end
+to end, via an agent-written `nn.Module` that imports the plain building blocks (necks, heads,
+losses, backbone wrappers, and `build_detector`; `instance_seg` via Mask R-CNN), on **RGB and
+N-channel imagery** (multi-band GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's
+`in_chans`, and an `in_chans != 3` detector takes per-band `image_mean`/`image_std` from
+`derivations.band_normalization_stats`), with training that loads the native per-image JSON
+labels directly, experiment tracking, annotation/review, SAM-assisted labeling, calibration of
+a trait's positive-class operating point (`calibrate_classifier_operating_point`), and per-plant
+CSV export, including a percentile-crossing phenology-milestone deliverable (per-plant
+`<trait>_05/50/95per_date` = the dates a plant's classified positive-state fraction of detected
+objects crosses 5/50/95%; the positive state is a validated per-object classifier call, never a
+geometric proxy). Ordinal and regression are also trainable and evaluable, through the same
+model/training machinery and their own heads, losses, and metrics, but neither has an
+annotation/review or calibration tool built for it: both read labels from a hand-authored
+external CSV of image stem plus rank or value rather than the platform's own annotation/review
+UI, and both are excluded from the platform's automatic train/val split. The agent composes the
+working slice end to end via `build_plant_mapping` → tiled inference → `compute_phenology`, and
+the same milestone code backs the Results tab, so a milestone date means one thing on both
+surfaces. Phase 1's own shipped example is hazelnut catkin bloom phenology
+(`catkin_05/50/95per_date`, elongation as the positive state).
 
 Trained ML models are the deliverable; classical image analysis (OpenCV, scikit-image) is
 available for the agent to compose as a situational bootstrapping assist, cheaply producing soft
