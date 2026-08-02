@@ -1,10 +1,10 @@
 """CI guardrail: crop skills must not assert traits outside crops.yml.
 
-The 2026-07-14 skills rebuild found the per-crop skills had systematically fabricated trait
-names, and the LLM reviewers approved the fabrications — a deterministic check is what caught
-them. It's pinned here as a permanent gate: any crop / crop-science SKILL.md that backticks a
-snake_case token which is neither a crops.yml trait nor an allow-listed platform token fails
-the build, so the drift can't recur.
+Per-crop skills can fabricate plausible-looking trait names that aren't in crops.yml, and review
+(human or LLM) is not guaranteed to catch it; only a deterministic check reliably does. It's
+pinned here as a permanent gate: any crop / crop-science SKILL.md that backticks a snake_case
+token which is neither a crops.yml trait nor an allow-listed platform token fails the build, so
+the drift can't recur.
 """
 
 from __future__ import annotations
@@ -59,8 +59,8 @@ def test_skill_asserts_no_fabricated_traits(rel: str, crop_key: str | None) -> N
 )
 def test_skill_asserts_no_off_crop_traits(rel: str, crop_key: str) -> None:
     """Every real trait a per-crop skill backticks must actually be assigned to that crop in
-    crops.yml — the mis-assignment check `test_skill_asserts_no_fabricated_traits` doesn't cover
-    (that one only checks fabrication, never crop assignment)."""
+    crops.yml: the mis-assignment check `test_skill_asserts_no_fabricated_traits` doesn't cover
+    it (that one only checks fabrication, never crop assignment)."""
     skill = SKILLS / rel / "SKILL.md"
     off_crop = guardrail.off_crop_tokens(skill, crop_key)
     assert not off_crop, (
@@ -70,10 +70,9 @@ def test_skill_asserts_no_off_crop_traits(rel: str, crop_key: str) -> None:
 
 
 def test_backtick_regex_catches_no_underscore_and_mixed_case_names() -> None:
-    """Regression for K18 round 1: the old regex required an underscore, so single-word trait
-    names (`dbh`, `sex`, `ploidy`, ...) and mixed-case segments (`fruit_juice_TA`,
-    `fruit_juice_pH`) never matched at all — invisible to both checks. The widened regex still
-    requires an underscore (deliberately, to avoid flooding on bare code identifiers), so
+    """The backtick regex requires an underscore, so single-word trait names (`dbh`, `sex`,
+    `ploidy`, ...) and mixed-case segments (`fruit_juice_TA`, `fruit_juice_pH`) never match,
+    invisible to both checks. That's deliberate, to avoid flooding on bare code identifiers, so
     single-word names stay a fabrication-detection blind spot by design; the membership-search
     check below is what actually catches them for the off-crop case."""
     text = "See `fruit_juice_TA` and `fruit_juice_pH` and `plant_height` here."
@@ -81,12 +80,12 @@ def test_backtick_regex_catches_no_underscore_and_mixed_case_names() -> None:
     assert "fruit_juice_TA" in toks
     assert "fruit_juice_pH" in toks
     assert "plant_height" in toks
-    # single-word tokens still don't match the token-shaped regex — documented blind spot
+    # single-word tokens still don't match the token-shaped regex: documented blind spot
     assert guardrail.extract_backtick_snake("See `dbh` and `sex` here.") == set()
 
 
 def test_mentioned_trait_names_finds_single_word_traits() -> None:
-    """`mentioned_trait_names` is membership search, not regex extraction — it finds `dbh` even
+    """`mentioned_trait_names` is membership search, not regex extraction: it finds `dbh` even
     though `extract_backtick_snake` (the fabrication-check regex) structurally cannot."""
     allnames, _ = guardrail.load_vocab()
     found = guardrail.mentioned_trait_names("Measure `dbh` on the standing tree.", allnames)
