@@ -1,15 +1,14 @@
-"""Stage-6 review finding 1 — ``inference_tools._calibrate_operating_point`` crashed on a grouped
-image: ``label_image_stems``' ``stem_to_image`` can hold a ``BandGroupRef`` (a band-grouped
-capture — see ``pipelines.data.band_groups``), and ``str()``-ing it produced its dataclass repr
-instead of a path any reader could decode. This file exercises a real ``GenericPredictor`` (a tiny
-real 2-channel detection model, real forward pass) calibrating over a directory of grouped
-captures — the exact call site the review named (``inference_tools.py`` had zero band-group
-coverage before this).
+"""``inference_tools._calibrate_operating_point`` must handle a grouped image without crashing:
+``label_image_stems``' ``stem_to_image`` can hold a ``BandGroupRef`` (a band-grouped
+capture, see ``pipelines.data.band_groups``), and naively ``str()``-ing it produces its
+dataclass repr instead of a path any reader could decode. This file exercises a real
+``GenericPredictor`` (a tiny real 2-channel detection model, real forward pass) calibrating over
+a directory of grouped captures.
 
 The dataset here is two 2-band grouped captures, not a grouped capture mixed with a plain RGB
 photo: a real trained-for channel count is one property of the whole dataset a single checkpoint's
 ``in_chans`` assumes, so a 2-band model has no valid 3-band-photo counterpart in the same
-directory anyway — that mismatch belongs to a different scenario (a truly heterogeneous images/
+directory anyway: that mismatch belongs to a different scenario (a truly heterogeneous images/
 folder), not this crash.
 """
 
@@ -57,7 +56,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
 
 
 def _grouped_dataset(root: Path) -> tuple[Path, Path]:
-    """Two 2-band grouped captures, each with a GT label — a labeled dir every stem of which is a
+    """Two 2-band grouped captures, each with a GT label, a labeled dir every stem of which is a
     ``BandGroupRef``, the shape ``_calibrate_operating_point`` hands to ``predict_batch``."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -79,11 +78,11 @@ def _grouped_dataset(root: Path) -> tuple[Path, Path]:
 
 
 def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path, monkeypatch):
-    """The exact crash the review reproduced: ``stem_to_image[stem]`` is a ``BandGroupRef``;
-    ``str()``-ing it before this fix produced its dataclass repr, which no reader could open. This
+    """A ``BandGroupRef`` (``stem_to_image[stem]``) must decode through the real channel-aware
+    stacking, not silently stringify to its dataclass repr, which no reader could open. This
     predictor is 2-channel, so it can only run at all if the grouped captures actually decoded
-    through the real channel-aware stacking (a 3-channel predictor could silently "work" on a bad
-    path by broadcasting/re-normalizing, masking the bug)."""
+    that way (a 3-channel predictor could silently "work" on a bad path by
+    broadcasting/re-normalizing, masking the bug)."""
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.tools.inference_tools import _calibrate_operating_point
 
@@ -113,8 +112,8 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     assert dataset_hash
 
     # Both grouped captures really were decoded as BandGroupRefs through the channel-aware
-    # loader — never a stringified stand-in the predictor's own Path(...) would silently
-    # mis-resolve — and each stacked to its declared 2 bands.
+    # loader (never a stringified stand-in the predictor's own Path(...) would silently
+    # mis-resolve), and each stacked to its declared 2 bands.
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
     grouped = [s for s in seen_sources if isinstance(s, BandGroupRef)]
@@ -122,10 +121,10 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
 
 
 def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
-    """Stage-6 review finding 3 (inference_tools.py half): run_inference's OWN images_dir listing
-    fallback (~line 576) used a bare image_exts scan, never routed through list_logical_images —
-    so a grouped capture's sibling band files each enumerated as their own (spurious) image
-    instead of folding into one. Real forward pass, no images_dir mixing (see module docstring)."""
+    """run_inference's own images_dir listing fallback (~line 576) must route through
+    list_logical_images rather than a bare image_exts scan, or a grouped capture's sibling band
+    files each enumerate as their own (spurious) image instead of folding into one. Real forward
+    pass, no images_dir mixing (see module docstring)."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     images_dir = tmp_path / "images"
@@ -141,9 +140,8 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
 
 
 def test_calibrate_operating_point_crashes_without_the_fix(tmp_path):
-    """Fail-before proof: stringifying the BandGroupRef the way the pre-fix code did reproduces
-    the exact crash the review found, against the SAME real predictor/dataset this module's other
-    test proves now works."""
+    """Stringifying the BandGroupRef reproduces the crash, against the same real
+    predictor/dataset this module's other test proves now works."""
     from tcip_mcp.pipelines.data.splits import label_image_stems
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
