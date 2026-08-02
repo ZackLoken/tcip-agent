@@ -1,9 +1,9 @@
 /**
  * Annotate-tab context toolbar. Two rows matching the approved mockup:
- *   Row 1  — draw mode (Point/Box/Polygon), the subject picker pill, an Editor toggle, then the
- *            nav filter, image navigation, and the Complete checkbox.
- *   Editor — a second toolbar (collapsed by default, remembered) holding the tools you
- *            flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
+ *   Row 1: draw mode (Point/Box/Polygon), the subject picker pill, an Editor toggle, then the
+ *          nav filter, image navigation, and the Complete checkbox.
+ *   Editor: a second toolbar (collapsed by default, remembered) holding the tools you
+ *           flip constantly (Snap / Stream / Show labels) plus Undo / Redo / Save.
  * Lives directly under the global TopBar; Undo/Redo/Save are wired up from AnnotateTab.
  */
 
@@ -16,7 +16,7 @@ import { useImageNav } from "@/hooks/useImageNav";
 import type { BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
 
-// Progression order (start state first, terminal states last) — matches Review's parallel
+// Progression order (start state first, terminal states last), matches Review's parallel
 // status filter, which already reads Unreviewed before Reviewed.
 const STATUS_FILTERS: { value: "all" | ImageStatus; label: string }[] = [
   { value: "all", label: "All" },
@@ -73,7 +73,7 @@ export function AnnotateToolbar({
   onSave: () => void;
   saveDisabled: boolean;
   dirty: boolean;
-  // Band-composite picker (multispectral only) — omitted/null for a standard RGB dataset.
+  // Band-composite picker (multispectral only): omitted/null for a standard RGB dataset.
   bandsInfo?: ImageBandsResponse | null;
   bandSelection?: BandSelection | null;
   onBandSelectionChange?: (next: BandSelection) => void;
@@ -113,7 +113,7 @@ export function AnnotateToolbar({
     try {
       localStorage.setItem("tcip.annotate.editorOpen", editorOpen ? "1" : "0");
     } catch {
-      /* storage disabled — the shelf just won't persist */
+      /* storage disabled, the shelf just won't persist */
     }
   }, [editorOpen]);
 
@@ -208,7 +208,7 @@ export function AnnotateToolbar({
 
   return (
     <div className="shrink-0 border-b border-tcip-border bg-tcip-panel">
-      {/* Row 1 — mode + subject + Editor toggle, then navigation */}
+      {/* Row 1: mode + subject + Editor toggle, then navigation */}
       <div className="h-topbar flex items-center gap-3 px-3">
         {/* Draw mode */}
         <div
@@ -219,7 +219,7 @@ export function AnnotateToolbar({
           <button
             aria-pressed={mode === "point"}
             onClick={() => setMode("point")}
-            title="Point: click to place one location (a prompt or landmark) — drag it to move, right-click to remove"
+            title="Point: click to place one location (a prompt or landmark), drag it to move, right-click to remove"
             className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2.5 text-[12px] font-semibold transition-colors ${
               mode === "point" ? "bg-tcip-accent text-white" : "text-tcip-muted hover:text-tcip-fg"
             }`}
@@ -347,7 +347,7 @@ export function AnnotateToolbar({
           )}
         </div>
 
-        {/* Editor toggle — drops the second toolbar */}
+        {/* Editor toggle: drops the second toolbar */}
         <button
           type="button"
           onClick={() => setEditorOpen((o) => !o)}
@@ -462,7 +462,7 @@ export function AnnotateToolbar({
         </label>
       </div>
 
-      {/* Editor second toolbar — the tools, plus Undo / Redo / Save */}
+      {/* Editor second toolbar: the tools, plus Undo / Redo / Save */}
       {editorOpen && (
         <div className="flex items-center gap-3 border-t border-tcip-border px-3 py-2">
           <div className="flex items-center gap-2.5">
@@ -514,7 +514,7 @@ export function AnnotateToolbar({
               className={dirty ? "tcip-btn-primary text-[12px]" : "tcip-btn text-[12px]"}
               onClick={onSave}
               disabled={saveDisabled}
-              title="Save (Ctrl+S) — also auto-saves on image change"
+              title="Save (Ctrl+S), also auto-saves on image change"
             >
               {dirty ? "Save" : "Saved"}
             </button>
