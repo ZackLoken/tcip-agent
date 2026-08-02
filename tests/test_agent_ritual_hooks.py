@@ -1,8 +1,9 @@
-"""SessionStart ritual hook — fast, stdlib-only directive injection.
+"""SessionStart ritual hook: fast, stdlib-only directive injection.
 
 Locks the compliant design (Anthropic guidance: SessionStart must be quick, context-loading only):
-it injects an ``additionalContext`` directive with live report/retro counts, and — the standing check
-that guards against the reverted 30s regression — it spawns no subprocess and imports nothing heavy.
+it injects an ``additionalContext`` directive with live report/retro counts, and it spawns no
+subprocess and imports nothing heavy (the standing check that guards against the reverted 30s
+regression).
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ def test_session_start_no_active_project_covers_create_and_resume(tmp_path, monk
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "No active project" in ctx
-    # Both paths must be offered — creating a project is init_project THEN set_active_project.
+    # Both paths must be offered: creating a project is init_project, then set_active_project.
     assert "init_project" in ctx and "set_active_project" in ctx
 
 
@@ -79,7 +80,7 @@ def test_session_start_is_fast_stdlib_only_no_subprocess(tmp_path, monkeypatch, 
             imported.add(node.module.split(".")[0])
     assert "subprocess" not in imported
     assert "tcip_mcp" not in imported
-    # And it emits its directive without touching either — a fresh interpreter would stay fast.
+    # And it emits its directive without touching either: a fresh interpreter would stay fast.
     _workspace(tmp_path, monkeypatch)
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     assert "SessionStart" in out
