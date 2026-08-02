@@ -38,7 +38,7 @@ vi.mock("react-konva", () => ({
     <div data-testid="k-text" data-text={props.text} data-fill={props.fill} />
   ),
 }));
-// Pixel handlers are forwarded as plain mouse events (clientX/Y stand in for image-pixel coords —
+// Pixel handlers are forwarded as plain mouse events (clientX/Y stand in for image-pixel coords;
 // the real screen<->image conversion is CanvasStage's own concern) so tests can drive the drawing
 // tools without a real Konva stage.
 vi.mock("@/components/Canvas/CanvasStage", () => ({
@@ -138,7 +138,7 @@ beforeEach(() => {
   saveSpy = vi.spyOn(api.annotate, "save").mockResolvedValue({ status: "ok", base_mtime: "1" });
   vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
   vi.spyOn(sessionsApi, "imageEvent").mockResolvedValue({});
-  // Default: a standard 3-band RGB image — the band picker's own describe block overrides this
+  // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
   vi.spyOn(api.images, "bands").mockResolvedValue({
     band_count: 3,
@@ -183,7 +183,7 @@ describe("AnnotateTab save/load race", () => {
 
     // Dirty img1, then navigate. flushLeaving() fires the save without awaiting
     // it; hold its response so the img2 load resolves first (slow label write vs
-    // cached read) — the exact interleaving that used to corrupt cross-image GT.
+    // cached read): the exact interleaving that used to corrupt cross-image GT.
     act(addBox);
     let resolveFlushSave!: (r: SaveResult) => void;
     saveSpy.mockImplementationOnce(
@@ -207,7 +207,7 @@ describe("AnnotateTab save/load race", () => {
 
     // The stale result must not markClean() the img2 edits...
     expect(useStore.getState().canvas.dirty).toBe(true);
-    // ...but the per-image status for the image actually saved is still recorded — scoped to the
+    // ...but the per-image status for the image actually saved is still recorded, scoped to the
     // selected subject, so it cannot mark the image negative under another subject.
     expect(classesApi.setImageStatus).toHaveBeenCalledWith(
       "C:/proj",
@@ -219,7 +219,7 @@ describe("AnnotateTab save/load race", () => {
       "C:/data/annotations/2026-01-01",
     );
 
-    // ...and the next save must target img2 with img2's loaded mtime — not
+    // ...and the next save must target img2 with img2's loaded mtime, not
     // img1's file with the stale save's echoed mtime.
     pressSave();
     await flush();
@@ -262,7 +262,7 @@ describe("AnnotateTab subject rendering", () => {
     await flush();
 
     act(addBox);
-    // Colour is GUI-local (name-derived), and the label is the subject name — no integer id.
+    // Colour is GUI-local (name-derived), and the label is the subject name, no integer id.
     expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("catkin"));
     expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "catkin");
   });
@@ -288,8 +288,8 @@ describe("AnnotateTab subject rendering", () => {
     await flush();
 
     // Box mode (setupDataset). The polygon shows only its derived box: a single Rect with no corner
-    // handles (handles are extra Rects), and it never entered canvas.boxes — so unsaveable. Dashed
-    // distinguishes it from a real editable box (solid) — the same convention in-progress/
+    // handles (handles are extra Rects), and it never entered canvas.boxes, so unsaveable. Dashed
+    // distinguishes it from a real editable box (solid), the same convention in-progress/
     // under-review shapes already use, not read-only enforcement (that's structural).
     const rects = screen.getAllByTestId("k-rect");
     expect(rects).toHaveLength(1);
@@ -311,7 +311,7 @@ describe("AnnotateTab subject rendering", () => {
     expect(rects[0]).not.toHaveAttribute("data-dash");
   });
 
-  it("point mode draws a placed point as its reticle mark — never a box or a closed outline", async () => {
+  it("point mode draws a placed point as its reticle mark, never a box or a closed outline", async () => {
     // A point asserts a location and no extent: rendering it as a box (or letting it render as a
     // degenerate polygon) would show the annotator an extent the annotation does not claim.
     useStore.getState().setRegistry({ tip: {} });
@@ -409,7 +409,7 @@ describe("AnnotateTab point tool", () => {
     fireEvent.click(stage(), { clientX: 120, clientY: 340 });
     await flush();
 
-    // One click is the whole gesture — no drag-out, no second click to close.
+    // One click is the whole gesture: no drag-out, no second click to close.
     expect(useStore.getState().canvas.points).toEqual([
       { x: 120, y: 340, subject: "tip", attributes: {} },
     ]);
@@ -440,7 +440,7 @@ describe("AnnotateTab point tool", () => {
     await flush();
 
     expect(useStore.getState().canvas.points[0]).toMatchObject({ x: 310, y: 260 });
-    // One snapshot for the gesture — a per-move push would evict the whole 30-entry history.
+    // One snapshot for the gesture: a per-move push would evict the whole 30-entry history.
     expect(useStore.getState().canvas.undoStack).toHaveLength(1);
     act(() => useStore.getState().undo());
     expect(useStore.getState().canvas.points[0]).toMatchObject({ x: 100, y: 100 });
@@ -587,7 +587,7 @@ describe("AnnotateTab band-composite wiring", () => {
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
     expect(screen.getByTestId("toolbar")).toHaveAttribute("data-band-count", "3");
-    // No bands/stretch param for a plain RGB dataset — the canvas URL is unaffected.
+    // No bands/stretch param for a plain RGB dataset: the canvas URL is unaffected.
     const url = screen.getByTestId("canvas-stage").getAttribute("data-image-url") ?? "";
     expect(url).not.toContain("bands=");
     expect(url).not.toContain("stretch=");
