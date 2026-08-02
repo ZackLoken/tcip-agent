@@ -196,7 +196,7 @@ def instance_seg_ckpt(tmp_path_factory) -> str:
                     "builder_kwargs": {"num_classes": 1, "min_size": TILE, "max_size": TILE * 2},
                     "task": "instance_seg"}
     model = build_model({"model_source": model_source})
-    ckpt = tmp_path_factory.mktemp("k20_instance_seg") / "model_best.pt"
+    ckpt = tmp_path_factory.mktemp("instance_seg_ckpt") / "model_best.pt"
     torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
     return str(ckpt)
 
