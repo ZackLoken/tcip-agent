@@ -1,4 +1,4 @@
-"""Web routes for band-grouped captures — the GUI's own gallery (routes/dataset.py) folding
+"""Web routes for band-grouped captures: the GUI's own gallery (routes/dataset.py) folding
 sibling band files into one grouped entry, ``_image_dims`` (routes/review.py, routes/annotate.py)
 reading a grouped capture's real stacked frame, and the live band-composite serving +
 ``/api/images/bands`` endpoint (routes/images.py).
@@ -23,7 +23,7 @@ def client() -> TestClient:
 
 
 def _write_group(images_dir: Path, stem: str, base=(111, 222, 333)) -> None:
-    """Each band gets a distinct base level PLUS a horizontal gradient (never a flat fill) — a
+    """Each band gets a distinct base level plus a horizontal gradient (never a flat fill): a
     constant array makes min==max, so a min-max stretch would flatten every channel to black and
     a channel reorder would be indistinguishable from the original."""
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -123,8 +123,8 @@ def test_serve_image_composites_a_band_group_by_default(client: TestClient, grou
 
 def test_serve_image_bands_param_changes_the_composite(client: TestClient, grouped_dataset: Path):
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
-    # stretch="none" (absolute, by dtype max) so each band's distinct base level survives —
-    # min-max stretch would remove it entirely (every band shares the same gradient SHAPE),
+    # stretch="none" (absolute, by dtype max) so each band's distinct base level survives:
+    # min-max stretch would remove it entirely (every band shares the same gradient shape),
     # cancelling the very difference this test means to detect.
     r1 = client.get("/api/images", params={
         "path": str(manifest), "bands": "Green,Red,NIR", "stretch": "none"})
@@ -185,10 +185,9 @@ def test_get_bands_endpoint_reports_3_for_a_plain_rgb_photo(client: TestClient, 
 def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
     client: TestClient, grouped_dataset: Path, monkeypatch,
 ):
-    """Stage-6 review finding 6: /api/images/bands used to always do a full pixel decode, even for
-    ordinary RGB — contradicting the design's own progressive-disclosure principle. Spy on
-    load_image (the full-decode call the per-band min/max/dtype loop needs) and assert it's never
-    called for a plain 3-band photo."""
+    """/api/images/bands must not do a full pixel decode for ordinary RGB, only for genuine
+    multi-band sources. Spy on load_image (the full-decode call the per-band min/max/dtype loop
+    needs) and assert it's never called for a plain 3-band photo."""
     from tcip_mcp.pipelines import image_utils
 
     called = []
@@ -215,10 +214,10 @@ def test_serve_image_stale_group_returns_409(client: TestClient, grouped_dataset
 
 
 def test_get_dimensions_route_reads_a_grouped_captures_real_frame(client: TestClient, grouped_dataset: Path):
-    """Stage-6 review finding 8: GET /api/images/dimensions used to call the bare channel-blind
-    get_image_dimensions directly, unlike its sibling routes (review.py/annotate.py's own
-    _image_dims). A bare PIL header read on a .bandgroup manifest (not a real image file) would
-    misread or fail; routed through resolve_image_source + image_dimensions it reads the group's
+    """GET /api/images/dimensions routes through resolve_image_source + image_dimensions rather
+    than the bare channel-blind get_image_dimensions used by its sibling routes
+    (review.py/annotate.py's own _image_dims): a bare PIL header read on a .bandgroup manifest
+    (not a real image file) would misread or fail, whereas routing through reads the group's
     real stacked frame."""
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.get("/api/images/dimensions", params={"path": str(manifest)})
@@ -239,9 +238,9 @@ def test_get_dimensions_route_unchanged_for_a_plain_photo(client: TestClient, gr
 
 
 def test_inference_list_images_folds_a_group_into_one_entry(grouped_dataset: Path):
-    """Stage-6 review finding 3: routes/inference.py's own directory-listing fallback only got
-    its extension tuple widened, never routed through list_logical_images — so a grouped capture's
-    sibling band files each enumerated as their own (spurious) image. This is the SAME bug class
+    """routes/inference.py's own directory-listing fallback must route through
+    list_logical_images, not just widen its extension tuple, or a grouped capture's sibling band
+    files each enumerate as their own (spurious) image, the same bug class
     export_predictions/run_inference had (inference_tools.py; see test_band_group_call_sites /
     test_band_group_inference_calibration)."""
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
