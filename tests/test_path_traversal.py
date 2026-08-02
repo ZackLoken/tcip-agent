@@ -1,7 +1,7 @@
-"""Phase 4.4 — path-traversal validation: allowed-root image guard + route-level run_id/path guards.
+"""Path-traversal validation: allowed-root image guard + route-level run_id/path guards.
 
-(safe_join itself is covered by test_tcip_web_routes.py::TestSafeJoin — under-root, parent-traversal,
-absolute, forward-slashes — so it is not re-tested here.)
+(safe_join itself is covered by test_tcip_web_routes.py::TestSafeJoin: under-root, parent-traversal,
+absolute, forward-slashes; so it is not re-tested here.)
 """
 
 import pytest
@@ -50,8 +50,8 @@ def test_training_metrics_rejects_run_id_traversal(tmp_path):
 
 
 def test_training_metrics_confines_project_root_to_allowed_roots(tmp_path, monkeypatch):
-    # K19: get_run_metrics took project_root off the payload but never confined it, unlike the
-    # identical parameter on meta.py's report routes.
+    # get_run_metrics must confine project_root the same way the identical parameter is confined
+    # on meta.py's report routes.
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
 
@@ -68,8 +68,8 @@ def test_training_metrics_confines_project_root_to_allowed_roots(tmp_path, monke
 
 
 def test_training_launch_confines_output_dir_to_allowed_roots(tmp_path, monkeypatch):
-    # K19: launch_training_route passed output_dir straight to launch_training with no guard,
-    # unlike the sibling tuning.py launch route.
+    # launch_training_route must guard output_dir the same way the sibling tuning.py launch route
+    # does, not pass it straight to launch_training unguarded.
     pytest.importorskip("fastapi")
     from fastapi import HTTPException
 
@@ -87,9 +87,9 @@ def test_training_launch_confines_output_dir_to_allowed_roots(tmp_path, monkeypa
 
 def test_training_launch_output_dir_guard_is_a_no_op_when_unrestricted(tmp_path, monkeypatch):
     # The rail must admit valid work, not only reject invalid work: with TCIP_IMAGE_ROOTS unset
-    # (the default), an unconfined output_dir must reach launch_training as before, not 403 —
+    # (the default), an unconfined output_dir must reach launch_training as before, not 403:
     # launch_training itself then reports an invalid (model_source-less) config as a normal
-    # {"error": ...} result, not an exception, which is exactly the point: the new guard let the
+    # {"error": ...} result, not an exception, which is exactly the point: the guard lets the
     # request past it to reach that existing behavior unchanged.
     from tcip_web.routes.training import LaunchPayload, launch_training_route
 
