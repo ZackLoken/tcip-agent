@@ -32,7 +32,7 @@ def _box(x1, y1, x2, y2, *, subject=CATKIN, score=None, **attrs):
 
 
 def _poly(points, *, subject=CATKIN, **attrs):
-    """A one-ring polygon annotation — the ordinary case, one contour."""
+    """A one-ring polygon annotation: the ordinary case, one contour."""
     return Annotation(subject=subject, geometry=Polygon([points]), attributes=dict(attrs))
 
 
@@ -60,7 +60,7 @@ def test_dir_label_format_detects_json(tmp_path):
 
 
 def test_dir_label_format_ignores_non_canonical_json(tmp_path):
-    """A LabelMe-style .json (``shapes``, no ``annotations``) is not the canonical store — don't claim
+    """A LabelMe-style .json (``shapes``, no ``annotations``) is not the canonical store: don't claim
     it, so it never gets silently assembled as though it were per-image JSON."""
     from tcip_mcp.pipelines.data.datasets import dir_label_format
     d = tmp_path / "labels"
@@ -91,7 +91,7 @@ def test_assemble_coco_pairs_labels_with_images(tmp_path):
     json_io.write_annotations(labels / "img1.json", [], 100, 100, keep_empty=True)  # confirmed negative
 
     coco = assemble_coco(labels, images, subject=CATKIN, attribute="elongation", id_map=id_map)
-    # img1's empty file is NOT human-confirmed negative -> excluded (treated as unannotated)
+    # img1's empty file is not human-confirmed negative -> excluded (treated as unannotated)
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}
     assert len(coco["annotations"]) == 2
     assert {a["category_id"] for a in coco["annotations"]} == {0, 1}
@@ -131,12 +131,12 @@ def test_assemble_coco_skips_stem_without_image(tmp_path):
 
 
 def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
-    """Round 12 (2026-07-29): training_tools.py's auto train/val split assembles the dataset-level
-    COCO ONCE and threads the SAME dict into the full/train/val builds (Backend#3, to avoid
-    re-assembling it three times) — so ``self._coco`` covers the WHOLE dataset for every split, while
-    ``self.stems`` is correctly narrowed per split. ``class_distribution``'s COCO branch used to
-    iterate ``self._coco["annotations"]`` directly, ignoring ``self.stems`` entirely, so train and val
-    reported the identical, unsplit whole-dataset distribution instead of their own."""
+    """training_tools.py's auto train/val split assembles the dataset-level COCO once and threads
+    the same dict into the full/train/val builds, to avoid re-assembling it three times, so
+    ``self._coco`` covers the whole dataset for every split while ``self.stems`` is narrowed per
+    split. ``class_distribution``'s COCO branch must honor ``self.stems`` rather than iterating
+    ``self._coco["annotations"]`` directly, or train and val report the identical, unsplit
+    whole-dataset distribution instead of their own."""
     from tcip_mcp.pipelines.data.datasets import assemble_coco, build_dataset, _resolve_registry_id_map
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
@@ -147,7 +147,7 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
         json_io.write_annotations(labels / f"{stem}.json", [_box(10, 10, 30, 30)] * (i + 1), 100, 100)
 
     _reg, id_map = _resolve_registry_id_map(labels, CATKIN, None)
-    shared_coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)  # over ALL 4 stems
+    shared_coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)  # over all 4 stems
 
     train_ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
                              subject=CATKIN, coco_data=shared_coco, label_format="coco",
@@ -215,13 +215,13 @@ def test_build_dataset_instance_seg_autoresolves_json(tmp_path):
     assert int(target["masks"].sum()) > 0  # polygon rasterized to a non-empty mask
 
 
-# Two disjoint lobes of ONE instance, with a clear gap between them.
+# Two disjoint lobes of one instance, with a clear gap between them.
 LOBE_A = [(10, 10), (30, 10), (30, 30), (10, 30)]
 LOBE_B = [(60, 10), (80, 10), (80, 30), (60, 30)]
 
 
 def _assert_one_mask_over_both_lobes(target) -> None:
-    """A 2-ring instance is ONE mask covering both lobes — not two instances, not one lobe."""
+    """A 2-ring instance is one mask covering both lobes, not two instances, not one lobe."""
     assert target["masks"].shape[0] == 1, "a multi-ring instance must not split into several"
     assert target["labels"].tolist() == [1]
     # The box spans the union of the rings.
@@ -229,7 +229,7 @@ def _assert_one_mask_over_both_lobes(target) -> None:
     mask = target["masks"][0].numpy()
     assert mask[10:31, 10:31].sum() > 0, "the first lobe is missing from the mask"
     assert mask[10:31, 60:81].sum() > 0, "the second lobe is missing from the mask"
-    # The occluded gap between the lobes stays background — the union of rings, not their hull.
+    # The occluded gap between the lobes stays background: the union of rings, not their hull.
     assert mask[:, 35:55].sum() == 0
 
 
@@ -256,8 +256,8 @@ def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path, via
 
 
 def test_instance_seg_two_single_ring_instances_stay_two_masks(tmp_path):
-    """The rail admits the ordinary case too: the same two lobes authored as SEPARATE annotations are
-    two instances with two masks — multi-ring support must not merge distinct objects."""
+    """The rail admits the ordinary case too: the same two lobes authored as separate annotations are
+    two instances with two masks; multi-ring support must not merge distinct objects."""
     from tcip_mcp.pipelines.data.datasets import InstanceSegDataset
 
     images, labels = tmp_path / "images", tmp_path / "annotations"
@@ -345,7 +345,7 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path, label_format):
 
 
 def test_caller_supplied_stems_are_filtered_too(tmp_path):
-    """Split stems go through the same gate — otherwise the split reintroduces the fabrications."""
+    """Split stems go through the same gate, otherwise the split reintroduces the fabrications."""
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images, labels = _rail_fixture(tmp_path)
@@ -384,10 +384,10 @@ def test_instance_seg_applies_the_same_rail(tmp_path):
 
 
 def test_instance_seg_dataset_excludes_partially_labeled_stem_from_training(tmp_path):
-    """Round 12 (2026-07-29): InstanceSegDataset's own trainable_stems call never threaded
-    attribute/id_map through, so the direct-JSON instance_seg path had no attribute-completeness
-    rail at all -- an image with any instance never assessed for `attribute` trained on its labeled
-    subset instead of being held out whole, unlike DetectionDataset's identical call (N2/NEW-1)."""
+    """InstanceSegDataset's trainable_stems call must thread attribute/id_map through, the same as
+    DetectionDataset's identical call, or the direct-JSON instance_seg path has no
+    attribute-completeness rail: an image with any instance never assessed for `attribute` would
+    train on its labeled subset instead of being held out whole."""
     from tcip_mcp.pipelines.data.datasets import InstanceSegDataset
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
@@ -416,7 +416,7 @@ def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
 
     `Path.exists()` is case-insensitive on Windows and macOS, so probing constructed paths returns
     the name that was built, not the one on disk. The status store is keyed on the real filename,
-    so a fabricated name matches nothing and every human-confirmed negative is silently dropped —
+    so a fabricated name matches nothing and every human-confirmed negative is silently dropped,
     including the review loop's hard negatives. `IMG_*.JPG` is this repo's canonical camera name.
     """
     from PIL import Image as _Image
@@ -448,7 +448,7 @@ def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
 
 
 def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path):
-    """Existence is the whole rail for masks — an all-background mask is a real annotation."""
+    """Existence is the whole rail for masks: an all-background mask is a real annotation."""
     import numpy as np
     from PIL import Image as _Image
 
@@ -467,7 +467,7 @@ def test_semantic_seg_requires_a_mask_but_admits_an_all_background_one(tmp_path)
 
 
 def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
-    """"Annotate this" and "confirm this empty one" are different jobs — the count must say which."""
+    """"Annotate this" and "confirm this empty one" are different jobs: the count must say which."""
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images, labels = _rail_fixture(tmp_path)
@@ -479,7 +479,7 @@ def test_sample_counts_distinguish_unannotated_from_unconfirmed_empty(tmp_path):
 
 def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_path):
     """An externally supplied COCO never passed through assemble_coco, so its zero-annotation
-    images are not confirmed negatives — inferring that from the file's shape is the K13 bug."""
+    images are not confirmed negatives: inferring that from the file's shape alone is invalid."""
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     images, labels = _rail_fixture(tmp_path)
@@ -510,7 +510,7 @@ def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
     json_io.write_annotations(labels / "shared.json", [], 100, 100, keep_empty=True)
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
-    # Confirmed negative for catkin only — the breeder never judged it for bush.
+    # Confirmed negative for catkin only; the breeder never judged it for bush.
     (state / "image_status.json").write_text(json.dumps({"catkin": {"shared.jpg": "negative"}}))
 
     assert confirmed_negative_names(labels, subject="catkin") == {"shared.jpg"}
@@ -526,7 +526,7 @@ def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
 
     A flat ``labels/`` dir (the shape ``make_splits(materialize=True)`` emits) can't name its
     subject from its path; the confirmations live dataset-native, a sibling of ``labels/``'s own
-    resolved root — not found by walking arbitrarily far up an ancestor chain (K13.5 slice 4).
+    resolved root, not found by walking arbitrarily far up an ancestor chain.
     """
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
@@ -589,8 +589,8 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
 
 
 def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
-    """A split's carried negatives must get their own classes.json + digest stamp too — without it
-    quarantine can never fire on a split tree (stage-6 review finding, K13.5 slice 4)."""
+    """A split's carried negatives must get their own classes.json + digest stamp too; without it
+    quarantine can never fire on a split tree."""
     from tcip_mcp import class_registry
     from tcip_mcp.class_registry import write_registry
     from tcip_mcp.dataset_layout import image_status_digest_path, status_bucket
@@ -639,12 +639,12 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
 
 
 def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path):
-    """Round 12 (2026-07-29): the COCO-assembly branch of ``trainable_stems`` never checked
-    quarantine for an image ``assemble_coco`` had already dropped from ``images`` — it only asked
-    ``has_record``, so a human-confirmed-but-schema-stale negative read as ``skipped_unconfirmed_empty``
-    ("nobody ever looked") there, while the direct-JSON branch on the identical fixture correctly read
-    ``quarantined_stale_definition`` ("looked, but the schema changed since"). Same image, same real
-    reason, two different label paths disagreeing on which it was."""
+    """The COCO-assembly branch of ``trainable_stems`` must check quarantine for an image
+    ``assemble_coco`` had already dropped from ``images``, not only ``has_record``; otherwise a
+    human-confirmed-but-schema-stale negative reads as ``skipped_unconfirmed_empty``
+    ("nobody ever looked") there, while the direct-JSON branch on the identical fixture correctly
+    reads ``quarantined_stale_definition`` ("looked, but the schema changed since"). Same image,
+    same real reason, two different label paths must not disagree on which it was."""
     from tcip_mcp import class_registry
     from tcip_mcp.class_registry import write_registry
     from tcip_mcp.pipelines.data.datasets import assemble_coco, trainable_stems
@@ -666,7 +666,7 @@ def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
     (state / "image_status.json").write_text(json.dumps({CATKIN: {"a.jpg": "negative"}}))
-    # Stamped with a digest that does NOT match the current schema -> quarantined, not trusted.
+    # Stamped with a digest that does not match the current schema -> quarantined, not trusted.
     assert current_digest != "stale-digest"
     (state / "image_status_digest.json").write_text(
         json.dumps({CATKIN: {"a.jpg": "stale-digest"}}))
@@ -681,9 +681,9 @@ def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path
 
 
 def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
-    """K4/K5, stage-6 review: the loader's own per-image target reader must accept the same
-    partially-attributed data to_coco_dataset does — an unlabeled instance is excluded, not a
-    hard abort, while an undecodable value still raises."""
+    """The loader's own per-image target reader must accept the same partially-attributed data
+    to_coco_dataset does: an unlabeled instance is excluded, not a hard abort, while an
+    undecodable value still raises."""
     from tcip_mcp.pipelines.data.datasets import _json_det_targets
 
     path = tmp_path / "IMG_A.json"
@@ -708,11 +708,11 @@ def test_json_det_targets_skips_unlabeled_instead_of_raising(tmp_path):
 
 
 def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_path):
-    """Stage-6 review N2/NEW-1: DetectionDataset's fixed-length self.stems must not include a stem
-    with any instance unlabeled for `attribute` -- __getitem__ can't act on this per-call (the
-    dataset length is fixed at construction), so the exclusion has to happen here, matching the
-    delivery-gating paths (run_full_frame_evaluation, operating-point calibration) that already
-    exclude the whole image rather than silently training on its labeled subset."""
+    """DetectionDataset's fixed-length self.stems must not include a stem with any instance
+    unlabeled for `attribute` -- __getitem__ can't act on this per-call (the dataset length is
+    fixed at construction), so the exclusion has to happen here, matching the delivery-gating
+    paths (run_full_frame_evaluation, operating-point calibration) that already exclude the whole
+    image rather than silently training on its labeled subset."""
     from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
@@ -731,9 +731,9 @@ def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_pat
                           attribute="elongation", id_map=id_map)
 
     assert ds.stems == ["complete"]
-    # The drop is recorded in the partition's own counts, under its real reason -- round 4's first
-    # attempt tracked it on a separate attribute AND filtered this category-keyed dict with stem
-    # names, which wiped it to {} (and made the all-excluded case die on a bare KeyError).
+    # The drop must be recorded in the partition's own counts, under its real reason: filtering
+    # this category-keyed dict by stem name would wipe it to {} and make the all-excluded case
+    # die on a bare KeyError.
     assert ds.sample_counts["skipped_incomplete_attribute"] == 1
     assert ds.sample_counts["annotated"] == 1
     assert ds.sample_counts["skipped_unconfirmed_empty"] == 0  # not a false reason
@@ -743,11 +743,10 @@ def test_detection_dataset_excludes_partially_labeled_stem_from_training(tmp_pat
 
 
 def test_detection_dataset_excludes_incomplete_attribute_on_the_real_build_dataset_path(tmp_path):
-    """Round-4 review: the exclusion above must also fire on the path build_dataset ACTUALLY takes.
-    build_dataset assembles an in-memory COCO and passes it as coco_data, which forces
-    label_format='coco' -- so round 4's first attempt (guarded by label_format == 'json') was inert
-    exactly where it mattered, and the dropped image was reported under the false reason
-    'skipped_unconfirmed_empty'."""
+    """The exclusion above must also fire on the path build_dataset actually takes: build_dataset
+    assembles an in-memory COCO and passes it as coco_data, which forces label_format='coco'. A
+    check guarded only by label_format == 'json' is inert here, and the dropped image would be
+    reported under the false reason 'skipped_unconfirmed_empty'."""
     from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
@@ -770,7 +769,7 @@ def test_detection_dataset_excludes_incomplete_attribute_on_the_real_build_datas
                           subject=CATKIN, attribute="elongation")
     ds = built.dataset if hasattr(built, "dataset") else built
 
-    assert ds.label_format == "coco"  # the branch round 4's first attempt never entered
+    assert ds.label_format == "coco"  # build_dataset forces the coco path, not the json-guarded one
     assert "partial" not in ds.stems
     assert ds.sample_counts["skipped_incomplete_attribute"] == 1
     assert ds.sample_counts["skipped_unconfirmed_empty"] == 0
