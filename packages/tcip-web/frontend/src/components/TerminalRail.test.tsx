@@ -59,6 +59,7 @@ import { useStore } from "@/store";
 // jsdom lacks WebSocket and ResizeObserver.
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
+  static OPEN = 1;
   readyState = 0;
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: unknown }) => void) | null = null;
@@ -179,6 +180,49 @@ describe("TerminalRail", () => {
     fireEvent.click(screen.getByLabelText("Restart the agent"));
     await waitFor(() => expect(terminalApi.restart).toHaveBeenCalledWith("t1", 30, 100));
     expect(termInstances[0].reset).toHaveBeenCalled();
+  });
+
+  describe("sendToAgentTerminal hand-off", () => {
+    it("sends a staged message as terminal input once the socket is open, then clears it", async () => {
+      render(<TerminalRail />);
+      await screen.findByTestId("terminal-host");
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      const ws = MockWebSocket.instances[0];
+      ws.readyState = MockWebSocket.OPEN;
+      ws.onopen?.();
+
+      useStore.getState().sendToAgentTerminal("run a sweep over lr and batch size");
+      await waitFor(() =>
+        expect(ws.send).toHaveBeenCalledWith(
+          JSON.stringify({ type: "input", data: "run a sweep over lr and batch size\r" }),
+        ),
+      );
+      expect(useStore.getState().pendingTerminalMessage).toBeNull();
+    });
+
+    it("opens a closed rail and delivers the message once it connects, instead of dropping it", async () => {
+      useStore.getState().setTerminalOpen(false);
+      render(<TerminalRail />);
+      expect(screen.queryByTestId("terminal-host")).not.toBeInTheDocument();
+
+      useStore.getState().sendToAgentTerminal("run a sweep");
+      expect(useStore.getState().terminalOpen).toBe(true);
+
+      await screen.findByTestId("terminal-host");
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      const ws = MockWebSocket.instances[0];
+      // Not open yet: the message must still be staged, not silently lost.
+      expect(useStore.getState().pendingTerminalMessage).toBe("run a sweep");
+
+      ws.readyState = MockWebSocket.OPEN;
+      ws.onopen?.();
+      await waitFor(() =>
+        expect(ws.send).toHaveBeenCalledWith(
+          JSON.stringify({ type: "input", data: "run a sweep\r" }),
+        ),
+      );
+      expect(useStore.getState().pendingTerminalMessage).toBeNull();
+    });
   });
 
   describe("starter hint", () => {
