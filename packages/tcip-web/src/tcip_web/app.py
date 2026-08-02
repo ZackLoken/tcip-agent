@@ -236,8 +236,7 @@ def index():
 async def post_panel_event(panel: str, event: PanelEvent):
     """Accept an event pushed from an MCP tool and broadcast to subscribers.
 
-    Replaces the legacy ``.tcip/events/`` file-bridge. The payload schema
-    matches the old file format: ``{panel, event_type, data}``.
+    Payload shape: ``{panel, event_type, data}``.
     """
     if panel not in VALID_PANELS:
         return {"error": f"unknown panel: {panel}", "valid": sorted(VALID_PANELS)}
