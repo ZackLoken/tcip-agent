@@ -420,7 +420,7 @@ def test_golden_consolidated_operating_point_defaults():
     assert EV.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
 
 
-def test_golden_k10_evaluate_model_resolves_max_dets_per_regime_when_unset():
+def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset():
     """A signature-shape golden alone cannot see
     what a no-arg caller's max_dets actually resolves to per regime; without this, the golden set
     would ratify "the default is unspecified" rather than pin the two real behaviors (1000 on the
