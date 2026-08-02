@@ -13,9 +13,8 @@ interface State {
 
 /**
  * Catches render-time errors in a subtree so one crashing tab does not white-screen
- * the entire app shell (the frontend previously had no error boundary anywhere, so a
- * single render-time TypeError took down everything). Shows a minimal fallback and
- * recovers when `resetKey` changes.
+ * the entire app shell: without a boundary, a single render-time TypeError anywhere
+ * takes down everything. Shows a minimal fallback and recovers when `resetKey` changes.
  */
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
