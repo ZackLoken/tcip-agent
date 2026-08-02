@@ -1,4 +1,4 @@
-"""Phase 3.2 — channel-aware image loading + readers + the BaseImageDataset refactor."""
+"""Channel-aware image loading, readers, and the BaseImageDataset refactor."""
 
 import numpy as np
 import pytest
