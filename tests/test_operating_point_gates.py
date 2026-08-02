@@ -215,6 +215,35 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     assert "count_error_dispersion_too_high" not in default_sweep["failures"]
 
 
+def test_count_bias_tolerance_frac_source_platform_default_vs_trait(monkeypatch):
+    """TraitSpec.count_bias_tolerance_frac, when unauthored (None, CATKIN's own state), resolves to
+    the platform's provisional fraction and stamps that provenance; a trait that authors its own
+    value stamps ``"trait"`` instead, mirroring classifier_agreement_floor's own kappa_floor_source."""
+    import tcip_mcp.pipelines.operating_point as OP
+
+    n_images, objects_per_image = 10, 50
+    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+                        miss_pattern=[0] * n_images, fp_pattern=[0] * n_images, score=0.9)
+    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
+                         shift=5.0, miss_pattern=[0] * n_images, fp_pattern=[0] * n_images, score=0.9)
+
+    monkeypatch.setattr(OP, "get_trait", lambda name: CATKIN)
+    b_default = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                        holdout_records=hold, staged_conf_floor=0.01)
+    default_sweep = b_default.get("conf").sweep
+    assert default_sweep["count_bias_tolerance_frac"] == pytest.approx(0.01)
+    assert default_sweep["count_bias_tolerance_frac_source"] == "platform_provisional_default"
+
+    authored = TraitSpec(name="catkin", count_objective=COUNT_UNBIASED,
+                         count_bias_tolerance_frac=0.2, delivers=CATKIN.delivers)
+    monkeypatch.setattr(OP, "get_trait", lambda name: authored)
+    b_trait = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+                                      holdout_records=hold, staged_conf_floor=0.01)
+    trait_sweep = b_trait.get("conf").sweep
+    assert trait_sweep["count_bias_tolerance_frac"] == pytest.approx(0.2)
+    assert trait_sweep["count_bias_tolerance_frac_source"] == "trait"
+
+
 # ── Reference-sufficiency and equivalence criterion ─────────────────────────
 
 def test_all_negative_calibration_or_holdout_refused():
@@ -424,7 +453,8 @@ def test_passed_holdout_is_exactly_the_absence_of_named_failures():
 # Verified empirically against the actual code: at n=40 images / 100 objects/image this reaches
 # count_bias_std ~= 2.03 and count_error_p90 = 4.0 (recall/precision ~0.97) against catkin's
 # count-bias tolerance of 1.0 (the derived value at this reference's density:
-# count_bias_tolerance_frac's 0.01 default times this fixture's 100-objects/image typical count),
+# the platform's provisional 0.01 count_bias_tolerance_frac, catkin has not authored its own,
+# times this fixture's 100-objects/image typical count),
 # and correctly reaches VALIDATED_HELD_OUT. The identical per-image pattern at n=10 (fewer images,
 # nothing else different) is correctly refused: the SE term grows enough that the equivalence
 # criterion no longer clears the tolerance. Reference size is a real constraint the gate imposes on
