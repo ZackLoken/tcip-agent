@@ -1,30 +1,29 @@
 #!/usr/bin/env python
 """Guardrail: flag every trait-like token in a crop/domain SKILL.md that is not in crops.yml.
 
-The crop skills' failure mode (see the 2026-07-14 skills rebuild) was asserting trait names
-that don't exist in the breeder-defined controlled vocabulary. This is the deterministic
-backstop — LLM reviewers approved drafts that still carried fabricated traits; this check did
-not.
+The crop skills' failure mode was asserting trait names that don't exist in the breeder-defined
+controlled vocabulary. This is the deterministic backstop: LLM reviewers approved drafts that
+still carried fabricated traits; this check did not.
 
-Two independent checks, deliberately not sharing one extraction mechanism (K18 round 1: the old
-single regex-extraction path missed 11 of 180 real trait names — `dbh`, `sex`, `ploidy`, and
-others with no underscore — invisible to BOTH checks it fed):
+Two independent checks, deliberately not sharing one extraction mechanism (a single
+regex-extraction path used to miss 11 of 180 real trait names, `dbh`, `sex`, `ploidy`, and
+others with no underscore, invisible to both checks it fed):
 
 - `unknown_trait_tokens` (fabrication detection) extracts backtick-quoted, snake_case-shaped
   tokens via regex and flags any not in crops.yml or the allowlist. Regex-based because finding
-  an unknown/fabricated name has nothing to search FOR — it can only look for "something shaped
-  like a trait reference." Requires an underscore (multi-segment) deliberately, per a stage-3
-  fix-safety review: widening it to match bare single-word tokens floods on ordinary code
-  identifiers (`ctx`, `boxes`, ...) that aren't traits. **Residual gap, stated honestly, not
-  fixed by this file**: a single-word fabricated trait name is lexically undetectable by this
-  check — it looks identical to a legitimate non-trait single-word identifier. Only a real
-  trait-name membership check (below) or human review catches that.
-- `off_crop_tokens` (mis-assignment detection) does exact literal membership search — for every
-  real crops.yml trait name, any shape, does it appear backtick-quoted in this skill's text —
-  rather than regex extraction. Because it searches FOR known names instead of extracting
+  an unknown/fabricated name has nothing to search for: it can only look for "something shaped
+  like a trait reference." Requires an underscore (multi-segment) deliberately: widening it to
+  match bare single-word tokens floods on ordinary code identifiers (`ctx`, `boxes`, ...) that
+  aren't traits. **Residual gap, stated honestly, not fixed by this file**: a single-word
+  fabricated trait name is lexically undetectable by this check, since it looks identical to a
+  legitimate non-trait single-word identifier. Only a real trait-name membership check (below)
+  or human review catches that.
+- `off_crop_tokens` (mis-assignment detection) does exact literal membership search, for every
+  real crops.yml trait name, any shape, does it appear backtick-quoted in this skill's text,
+  rather than regex extraction. Because it searches for known names instead of extracting
   candidates, it cannot miss a single-word trait the way the regex-based check structurally can.
 
-CLI: `python scripts/verify_skill_traits.py <skill.md> [crop_key]` — exit 0 clean, 1 unknown.
+CLI: `python scripts/verify_skill_traits.py <skill.md> [crop_key]`, exit 0 clean, 1 unknown.
 """
 
 from __future__ import annotations
@@ -64,7 +63,7 @@ def load_vocab(path: Path | None = None) -> tuple[set[str], dict[str, set[str]]]
 
 # Snake_case tokens a skill legitimately backticks that are not traits (tool names, dataset
 # fields, config keys, module paths). A new legitimate platform token that trips the check
-# gets added here — the friction is intentional, it forces a human to confirm it isn't a
+# gets added here; the friction is intentional, it forces a human to confirm it isn't a
 # fabricated trait.
 NON_TRAIT_ALLOW = {
     "plant_mapping", "plant_id", "accession_name", "compute_phenology", "build_plant_mapping",
@@ -76,7 +75,7 @@ NON_TRAIT_ALLOW = {
     "boxes_from_polygons", "phenology_tools", "results.py", "aggregation.py",
 }
 
-# Multi-segment only (deliberate — see module docstring): first segment lowercase, later
+# Multi-segment only (deliberate, see module docstring): first segment lowercase, later
 # segments allow mixed case so `fruit_juice_TA`/`fruit_juice_pH`-shaped names still match.
 _BACKTICK_SNAKE = re.compile(r"`([a-z][a-z0-9]*(?:_[A-Za-z0-9]+)+)`")
 
@@ -86,8 +85,8 @@ def extract_backtick_snake(md_text: str) -> set[str]:
 
 
 def mentioned_trait_names(md_text: str, names: set[str]) -> set[str]:
-    """Every crops.yml trait NAME — any shape, single-word or multi-word, whatever casing
-    crops.yml itself uses — that appears backtick-quoted, literally, in this text. Exact
+    """Every crops.yml trait name, any shape, single-word or multi-word, whatever casing
+    crops.yml itself uses, that appears backtick-quoted, literally, in this text. Exact
     membership search, not regex extraction: a name search can never miss a real trait for
     lacking an underscore the way `extract_backtick_snake`'s token-shaped regex can."""
     return {n for n in names if f"`{n}`" in md_text}
@@ -95,8 +94,8 @@ def mentioned_trait_names(md_text: str, names: set[str]) -> set[str]:
 
 def unknown_trait_tokens(skill_path: str | Path, crop_key: str | None = None) -> list[str]:
     """Backticked snake_case tokens that are neither a crops.yml trait nor an allow-listed
-    platform token — the fabrication signal. Cannot catch a single-word fabrication (see module
-    docstring) — that residual gap is inherent to token-shaped extraction, not fixed here."""
+    platform token: the fabrication signal. Cannot catch a single-word fabrication (see module
+    docstring); that residual gap is inherent to token-shaped extraction, not fixed here."""
     allnames, _ = load_vocab()
     md = Path(skill_path).read_text(encoding="utf-8")
     toks = extract_backtick_snake(md)
@@ -106,7 +105,7 @@ def unknown_trait_tokens(skill_path: str | Path, crop_key: str | None = None) ->
 def off_crop_tokens(skill_path: str | Path, crop_key: str) -> list[str]:
     """Real traits referenced in a per-crop skill that crops.yml does not assign to that crop
     (a possible mis-assignment). Exact-membership search over the full vocabulary
-    (`mentioned_trait_names`), not regex extraction — catches single-word trait names a
+    (`mentioned_trait_names`), not regex extraction: catches single-word trait names a
     token-shaped regex would miss entirely."""
     allnames, by_crop = load_vocab()
     md = Path(skill_path).read_text(encoding="utf-8")
