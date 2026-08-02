@@ -1,7 +1,7 @@
 """Calibrate + held-out validate a detection operating point over a labeled split (CV0).
 
-The confidence operating point IS the phenotype for a count trait, so it must be DERIVED per
-dataset and validated against held-out ground truth — never pinned. This script runs one
+The confidence operating point is the phenotype for a count trait, so it must be derived per
+dataset and validated against held-out ground truth, never pinned. This script runs one
 low-threshold model pass over a disjoint calibration/holdout split of a labeled dir, resolves the
 count-unbiased operating point, checks its held-out count bias, and persists the full provenance +
 sweep to ``.tcip/experiments/<id>/operating_point.json`` for inspection and lineage.
@@ -12,7 +12,7 @@ this is the offline producer for inspecting the sweep and recording the bundle.
 
 Usage:
     python scripts/calibrate_operating_point.py \
-        --checkpoint <ckpt.pt> --trait catkin \
+        --checkpoint <ckpt.pt> --trait <trait_name> \
         --labels-dir <labeled_dir> --images-dir <images_dir> \
         [--experiment-id <id>] [--val-ratio 0.5] [--device cpu]
 """
@@ -35,12 +35,12 @@ def main(argv: list[str] | None = None) -> int:
                              "Defaults to a hash-tagged id.")
     parser.add_argument("--val-ratio", type=float, default=0.5,
                         help="Holdout fraction of the labeled split (disjoint by stem). Only takes "
-                             "effect on the FIRST calibration call for this labels_dir's GT identity "
-                             "— a cal/holdout split locks on its first draw, and a later run with a "
+                             "effect on the first calibration call for this labels_dir's GT identity"
+                             ": a cal/holdout split locks on its first draw, and a later run with a "
                              "different --val-ratio/--seed over unchanged labels reuses the locked "
                              "split unchanged (a divergence is printed, not silently ignored).")
     parser.add_argument("--seed", type=int, default=0,
-                        help="Split seed for the LOCKED cal/holdout split. Same first-call-only "
+                        help="Split seed for the locked cal/holdout split. Same first-call-only "
                              "semantics as --val-ratio.")
     parser.add_argument("--device", default=None, help="cuda / cpu (auto if omitted).")
     parser.add_argument("--group-by", default="tile_prefix",
@@ -64,10 +64,10 @@ def main(argv: list[str] | None = None) -> int:
     from tcip_mcp.pipelines.training.generic_trainer import task_collate
     from tcip_mcp.project_paths import project_root
 
-    # Fix J: match the MCP path's own initial predictor construction exactly (DEFAULT_MAX_DETS)
-    # rather than leaving the framework default (torchvision 100/300) in place — this value is
-    # superseded below, once this split's density is known, by the set_detector_operating_point
-    # call that actually governs the collection pass (K7 residual, "detector-cap censoring").
+    # Match the MCP path's own initial predictor construction exactly (DEFAULT_MAX_DETS) rather
+    # than leaving the framework default (torchvision 100/300) in place: this value is superseded
+    # below, once this split's density is known, by the set_detector_operating_point call that
+    # actually governs the collection pass ("detector-cap censoring").
     predictor = build_predictor(checkpoint_path=args.checkpoint, device=args.device,
                                 max_dets=DEFAULT_MAX_DETS)
     tile_size = getattr(predictor, "train_tile_size", None)
@@ -85,14 +85,14 @@ def main(argv: list[str] | None = None) -> int:
 
     dh = dataset_hash(args.labels_dir)
     annotation_counts = {s: count_label_lines(args.labels_dir, s) for s in stems}
-    # Detector-cap censoring (K7 residual): the flat DEFAULT_MAX_DETS below can still truncate a
-    # dense calibration image's raw detections the same way a too-high conf floor censors them —
-    # derive the collection-pass cap from this labeled split's OWN density (same ~1.5x p99 formula
+    # Detector-cap censoring: the flat DEFAULT_MAX_DETS below can still truncate a dense
+    # calibration image's raw detections the same way a too-high conf floor censors them, so
+    # derive the collection-pass cap from this labeled split's own density (same ~1.5x p99 formula
     # resolve_operating_point uses for the shipped max_dets) so the sweep isn't measured against an
     # arbitrary constant that may sit below what a dense scene actually needs.
     density_cap = derive_max_dets_from_counts(list(annotation_counts.values()))
-    # LOCKED split (K1): the first call for this labels_dir's GT identity draws + locks the
-    # cal/holdout split; a later run of this script over unchanged labels returns the SAME split
+    # Locked split: the first call for this labels_dir's GT identity draws and locks the
+    # cal/holdout split; a later run of this script over unchanged labels returns the same split
     # rather than a fresh cut that could happen to draw a weaker holdout.
     locked = resolve_locked_cal_holdout_split(
         stems, identity_hash=dh, annotation_counts=annotation_counts,
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     if locked.get("policy_divergence"):
         div = locked["policy_divergence"]
         print(f"Note: a cal/holdout split for this labels_dir is already locked with a different "
-              f"policy than requested — the locked split is used unchanged.\n"
+              f"policy than requested; the locked split is used unchanged.\n"
               f"  requested: {div['requested']}\n  locked:    {div['locked']}\n"
               f"  Use force_redraw_cal_holdout_split to redraw deliberately.", file=sys.stderr)
     if locked.get("unlocked_stems"):
@@ -112,11 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
     # Floor the in-model conf so hesitant detections survive to be swept, and raise the cap to this
-    # split's own density (derived above) — this call executes after build_predictor's construction-
-    # time DEFAULT_MAX_DETS (Fix J — matching the MCP path's own initial predictor exactly) and wins,
-    # so density_cap is the value that actually governs the collection pass. The applied score_thresh
-    # (not a re-typed 0.01 literal) is threaded into resolve_operating_point as staged_conf_floor
-    # (Fix D).
+    # split's own density (derived above); this call executes after build_predictor's construction-
+    # time DEFAULT_MAX_DETS (matching the MCP path's own initial predictor exactly) and wins, so
+    # density_cap is the value that actually governs the collection pass. The applied score_thresh
+    # (not a re-typed 0.01 literal) is threaded into resolve_operating_point as staged_conf_floor.
     applied = set_detector_operating_point(predictor.model, score_thresh=0.01,
                                            detections_per_img=density_cap)
 
@@ -129,13 +128,13 @@ def main(argv: list[str] | None = None) -> int:
     bundle = resolve_operating_point(
         args.trait, dataset_hash=dh, calibration_records=_records(cal_stems),
         holdout_records=_records(hold_stems), tile_size=tile_size,
-        # K10 stage-6 review: tile_size read above IS the checkpoint's persisted training
-        # geometry when present — say so, or resolve_operating_point now (correctly) stamps
-        # any unclaimed value "default" rather than assuming truthiness means derived.
+        # tile_size read above is the checkpoint's persisted training geometry when present: say
+        # so, or resolve_operating_point now (correctly) stamps any unclaimed value "default"
+        # rather than assuming truthiness means derived.
         tile_size_source=("derived" if tile_size is not None else "default"),
-        # K10: this script's own pass (_records, above) is always untiled — a plain DataLoader
-        # over the whole image, never predict_tiled/predict_batch(tile=...) — so tiled=False is
-        # stated explicitly rather than left to resolve_operating_point's tiled=True default.
+        # This script's own pass (_records, above) is always untiled: a plain DataLoader over the
+        # whole image, never predict_tiled/predict_batch(tile=...), so tiled=False is stated
+        # explicitly rather than left to resolve_operating_point's tiled=True default.
         # Omitting this would have resolve_tile_size_param wrongly gate (or falsely validate) a
         # tile_size dimension that was never actually operative for this untiled pass.
         tiled=False,
