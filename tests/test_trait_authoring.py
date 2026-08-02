@@ -84,13 +84,38 @@ def test_config_spec_unset_count_objective_is_empty_not_defaulted(tmp_path: Path
     assert specs[0].count_objective == ""
 
 
-def test_resolve_operating_point_refuses_unrecorded_count_objective(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_resolve_operating_point_defaults_unrecorded_count_objective_instead_of_refusing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # Nobody, not the agent, not the breeder, can meaningfully answer "does every object need to
+    # be found correctly, or is it fine if errors cancel out" before any result exists to judge it
+    # against. An unset count_objective must not block calibration entirely; it defaults to
+    # COUNT_UNBIASED and proceeds, with the run's provenance stamped as a platform default (not
+    # trait-authored) so the distinction is never silently lost. The real confirmation point is the
+    # delivered result, via the review-confirmation loop, not a blind precondition.
     import tcip_mcp.pipelines.operating_point as OP
+    from tcip_mcp.traits import COUNT_UNBIASED
 
     _write_spec(tmp_path, "undecided", {"delivers": ["leaf_length"]})
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
-    with pytest.raises(ValueError, match="no recorded count_objective"):
-        OP.resolve_operating_point("undecided", dataset_hash="h1", calibration_records=[])
+    bundle = OP.resolve_operating_point("undecided", dataset_hash="h1", calibration_records=[])
+    param = bundle.params["count_objective"]
+    assert param._raw == COUNT_UNBIASED
+    assert param.source == "default"
+    assert "not breeder-confirmed" in param.derived_from
+
+
+def test_resolve_operating_point_stamps_explicit_count_objective_as_trait_authored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    import tcip_mcp.pipelines.operating_point as OP
+
+    _write_spec(tmp_path, "decided", {"delivers": ["leaf_length"], "count_objective": "detection_f1"})
+    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
+    bundle = OP.resolve_operating_point("decided", dataset_hash="h1", calibration_records=[])
+    param = bundle.params["count_objective"]
+    assert param._raw == "detection_f1"
+    assert param.derived_from == "trait-authored"
 
 
 def test_resolve_operating_point_refuses_unregistered_count_objective(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -137,11 +162,11 @@ def test_write_trait_spec_fields_appends_provenance_not_replaces(tmp_path: Path)
         "delivers": ["leaf_length"], "provenance": ["name: vocabulary_derived"],
     })
     updated = traits.write_trait_spec_fields(
-        "leaf", {"count_bias_tolerance_frac": 3.0}, ["count_bias_tolerance_frac: zack_methodology_correction"],
+        "leaf", {"count_bias_tolerance_frac": 3.0}, ["count_bias_tolerance_frac: domain_expert_correction"],
         specs_dir=tmp_path,
     )
     assert updated.provenance == (
-        "name: vocabulary_derived", "count_bias_tolerance_frac: zack_methodology_correction",
+        "name: vocabulary_derived", "count_bias_tolerance_frac: domain_expert_correction",
     )
 
 
