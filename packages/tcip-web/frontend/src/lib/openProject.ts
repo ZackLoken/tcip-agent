@@ -53,7 +53,7 @@ export async function openProjectByName(name: string): Promise<DatasetSelection 
   const p = projects.find((x) => x.name === name);
   if (!p) return null;
   // Open on the most-recent date that actually has labels (not merely the newest date), and
-  // scope subject/model to that date's per-date availability — otherwise an agent that just
+  // scope subject/model to that date's per-date availability; otherwise an agent that just
   // ingested a still-unlabelled newer date would jump the human past their annotations onto a
   // blank canvas (there's no date selector inside the Annotate tab to recover). Falls back to
   // the newest date only when nothing is labelled yet (a genuinely empty project).
