@@ -1,6 +1,6 @@
-"""Tests for WS-A ingestion: the workspace resolver + ``ingest_images`` tool.
+"""Tests for ingestion: the workspace resolver + ``ingest_images`` tool.
 
-All tests use synthetic temp fixtures and an isolated ``TCIP_WORKSPACE`` — they must
+All tests use synthetic temp fixtures and an isolated ``TCIP_WORKSPACE``. They must
 never touch the human's real ``~/tcip-projects/`` (the manual end-to-end target).
 """
 
