@@ -74,12 +74,13 @@ sample, see the `evaluation` and `cv-research` skills), read from the prediction
 - `compute_phenology` gates both the elongation classifier (reconciled from
   `classifier_operating_point.json`, see `calibrate_classifier_operating_point`) and the count
   operating point; the web `/export_csv` phenology branch gates the same, per row.
-- `tabulate_counts` gates the count operating point on the run's resolved bundle. `export_detection_csv`
-  and `export_aggregated_csv` gate at the writer: pass `pred_dirs` for a count trait so the validity is
-  reconciled from each bucket's `operating_point.json` sidecar. **`measurement_validated` alone, with
-  no `pred_dirs`, is never trusted as a bare caller string**: a continuous/ordinal trait has no
-  on-disk measurement-validity producer today, so without `pred_dirs` the only route to delivery is
-  the explicit acknowledge below.
+- `tabulate_counts` gates the count operating point on the run's resolved bundle. `export_aggregated_csv`
+  gates at the writer: pass `pred_dirs` for a count trait so the validity is reconciled from each
+  bucket's `operating_point.json` sidecar rather than trusting a bare caller string. `export_detection_csv`
+  has no `pred_dirs` parameter; it takes `measurement_validated` directly as a caller-asserted string
+  with no on-disk reconciliation against a prediction bucket's sidecar. A continuous/ordinal trait has no
+  on-disk measurement-validity producer today, so without `pred_dirs` the only route to delivery through
+  `export_aggregated_csv` is the explicit acknowledge below.
 - A tiled run's `tile_size` is a second gating dimension of the same count operating point, at
   every one of those doors: the tile edge scales the per-image counts, so a fabricated fallback with
   no persisted training geometry and no explicit caller override refuses exactly as an uncalibrated
@@ -90,9 +91,12 @@ sample, see the `evaluation` and `cv-research` skills), read from the prediction
   `measurement_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
   provisional delivery, never for silently shipping a bare number.
 
-The **prediction-bucket writers stay ungated but honestly stamped** (`export_predictions` /
-`run_inference`): the review loop must be able to produce unvalidated predictions to *reach* a
-validated measurement; the gate lives at the final phenotype door, not on the intermediate labels.
+`run_inference` stays fully ungated but honestly stamped: the review loop must be able to produce
+unvalidated predictions to *reach* a validated measurement, so it never refuses on conf. `export_predictions`,
+the door that actually persists a prediction bucket other doors treat as ground truth, does refuse on
+one dimension: a tiled run whose `tile_size` fell back to the fabricated default (no persisted training
+geometry, no explicit override) is refused unless `acknowledge_unvalidated=True`. Conf itself is never
+gated at either door; the measurement gate lives at the final phenotype door.
 
 ## Quality Control
 
