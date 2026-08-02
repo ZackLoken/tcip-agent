@@ -1,4 +1,4 @@
-"""K13.5 slice 3b — the experiment immutably records the dataset identity it trained on.
+"""The experiment immutably records the dataset identity it trained on.
 
 The content end of the reproduce-a-number chain: id + fingerprint are written into the lineage and
 split.json at creation, are never backfilled/changed via update_lineage (identity, not a mutable
@@ -52,7 +52,7 @@ def test_update_lineage_cannot_change_or_backfill_identity(exp_dir):
     res = update_lineage("e1", dataset_fingerprint="DIFFERENT", model_weights="w.pt")
     assert res["lineage"]["dataset_fingerprint"] == "ff00"
     assert res["lineage"]["model_weights"] == "w.pt"
-    # a run that recorded None identity stays None — never silently backfilled
+    # a run that recorded None identity stays None, never silently backfilled
     create_experiment("e2", {})
     update_lineage("e2", dataset_fingerprint="sneaky")
     assert json.loads((exp_dir / "e2" / "lineage.json").read_text())["dataset_fingerprint"] is None
@@ -68,7 +68,7 @@ def test_compare_experiments_surfaces_shared_fingerprint(exp_dir):
 
 def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(exp_dir):
     """One run with a known fingerprint compared against a bespoke/imageless run (None) must
-    report unknown identity, not a false apples-to-apples True — the two demonstrably did not
+    report unknown identity, not a false apples-to-apples True: the two demonstrably did not
     train on the same (known) data."""
     create_experiment("a", {}, dataset_id="1", dataset_fingerprint="ff")
     create_experiment("b", {})  # bespoke/imageless -> no recorded fingerprint
@@ -89,7 +89,7 @@ def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
 
 def test_dataset_identity_fingerprint_io_error_degrades_to_none(tmp_path, monkeypatch):
     """A fingerprint read failure (a locked/removed image mid-scan) must degrade to an honest
-    None, not raise — raising here propagates out of launch_training's tracking try/except and
+    None, not raise: raising here propagates out of launch_training's tracking try/except and
     silently drops the whole experiment record (lineage/status/split.json) for a run that still
     trains, which is strictly worse than losing only the fingerprint."""
     import tcip_mcp.pipelines.resolution as resolution
