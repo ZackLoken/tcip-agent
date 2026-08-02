@@ -1,4 +1,4 @@
-"""view_gui_state + active-project anchoring — the agent reads the live GUI session (Root A)."""
+"""view_gui_state + active-project anchoring: the agent reads the live GUI session."""
 
 from __future__ import annotations
 
