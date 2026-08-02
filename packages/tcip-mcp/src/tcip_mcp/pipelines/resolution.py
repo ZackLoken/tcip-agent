@@ -703,6 +703,69 @@ def reconcile_classifier_validity(
     )
 
 
+def tile_size_gate_flag(operating_point: dict | None) -> str | None:
+    """The tile-geometry dimension's delivery-gate flag for one resolved operating point.
+
+    ``operating_point`` is a bundle's ``to_provenance()["operating_point"]`` mapping, the same shape
+    a run returns in-memory and ``export_predictions`` persists into ``operating_point.json``.
+    Returns ``None`` when tiling was not operative for that run (``resolve_tile_size_param`` only
+    sets ``requires_validation`` when ``tiled``), so an untiled run's tile_size never manufactures a
+    refusal over a dimension that was never operative. Otherwise it returns the reference the tile
+    scale actually cleared, or ``VALIDATED_FALSE``.
+
+    Reads the tile_size param's own recorded reference and nothing else: the sidecar's top-level
+    ``validated`` bool is the whole bundle's shippability, so consulting it here would report a
+    genuinely persisted tile geometry as fabricated whenever some other dimension (conf) was the
+    thing that failed. Every delivery door that gates on tile geometry resolves it through this one
+    function so the doors cannot drift into disagreeing about when a tile scale is trustworthy.
+    """
+    prov = (operating_point or {}).get("tile_size") or {}
+    if not prov.get("requires_validation"):
+        return None
+    ref = prov.get("validated_against")
+    return ref if ref in accepted_references("geometry") else VALIDATED_FALSE
+
+
+def reconcile_tile_size_validity(pred_dirs: list[str] | tuple[str, ...]) -> dict:
+    """Floor the tile-geometry dimension across every prediction bucket's ``operating_point.json``.
+
+    The sidecar-reading counterpart of :func:`tile_size_gate_flag`, for the delivery doors that
+    assemble a phenotype from already-written prediction buckets rather than from a live run. A
+    delivery spanning several buckets is only as grounded as its least-grounded tiled bucket, so any
+    operative bucket whose tile scale has no real basis floors the whole dimension to
+    ``VALIDATED_FALSE``; when the cleared references differ across buckets the weaker basis
+    (a caller's stated override) is what travels, never the stronger one some other bucket earned.
+
+    Returns ``{operative, validated, per_bucket, unvalidated_buckets}``. ``operative`` is False (and
+    ``validated`` ``None``) when no bucket ran tiled, in which case the caller adds nothing to its
+    gate. A bucket with no readable sidecar contributes nothing here; that bucket's missing stamp
+    already floors the count operating point via :func:`reconcile_operating_point_validity`.
+    """
+    per_bucket: dict[str, str] = {}
+    unvalidated: list[str] = []
+    refs: set[str] = set()
+    accepted = accepted_references("geometry")
+    for d in pred_dirs:
+        flag = tile_size_gate_flag((read_operating_point_sidecar(d) or {}).get("operating_point"))
+        if flag is None:
+            continue
+        per_bucket[str(d)] = flag
+        if flag in accepted:
+            refs.add(flag)
+        else:
+            unvalidated.append(str(d))
+    if not per_bucket:
+        return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": []}
+    if unvalidated:
+        validated = VALIDATED_FALSE
+    elif VALIDATED_EXPLICIT_GEOMETRY in refs:
+        validated = VALIDATED_EXPLICIT_GEOMETRY
+    else:
+        validated = VALIDATED_PERSISTED_GEOMETRY
+    return {"operative": True, "validated": validated, "per_bucket": per_bucket,
+            "unvalidated_buckets": unvalidated}
+
+
 def bind_classifier_validity(
     classifier_state: str | None,
     classifier_dirs: list[str] | tuple[str, ...] | None,
