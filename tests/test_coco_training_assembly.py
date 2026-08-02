@@ -773,3 +773,32 @@ def test_detection_dataset_excludes_incomplete_attribute_on_the_real_build_datas
     assert "partial" not in ds.stems
     assert ds.sample_counts["skipped_incomplete_attribute"] == 1
     assert ds.sample_counts["skipped_unconfirmed_empty"] == 0
+
+
+def test_tiled_detection_indexes_no_tile_from_an_attribute_incomplete_image(tmp_path):
+    """The tiler expands the base dataset's admitted stems into one training sample per tile, so an
+    image the attribute-completeness rail held out must contribute no tile at all. Asserting on the
+    tile index, not on the base's stems, is what pins that: a tile carrying the image's real but
+    unlabeled objects would train them as background, one tile at a time."""
+    from tcip_mcp.class_registry import write_registry
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    root = tmp_path / "ds"
+    images_dir, labels_dir = root / "images", root / "annotations"
+    _make_images(images_dir, ["complete", "partial"])
+    labels_dir.mkdir(parents=True)
+    reg, _id_map = _reg_id_map(attribute="elongation", values=("elongated", "dormant"))
+    write_registry(root / "classes.json", reg)
+    json_io.write_annotations(labels_dir / "complete.json", [
+        _box(10, 10, 30, 30, elongation="elongated")], 100, 100)
+    json_io.write_annotations(labels_dir / "partial.json", [
+        _box(10, 10, 30, 30, elongation="dormant"),
+        _box(40, 40, 60, 60),  # unlabeled
+    ], 100, 100)
+
+    tiled = build_dataset(task="detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
+                          subject=CATKIN, attribute="elongation",
+                          tiling={"enabled": True, "tile_size": 64, "overlap": 0.0})
+
+    assert set(tiled.stems) == {"complete"}  # tiles are per-index, so this is every tile's source
+    assert len(tiled) > 0  # the rail admits the fully-attributed image's tiles
