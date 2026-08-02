@@ -3,7 +3,7 @@
 annotation_tools.py, vision_tools.py, feedback/materialize.py.
 
 A minimal synthetic 2-band group (two tiny single-band TIFFs + a manifest) stands in for a real
-capture in most of these — the mechanism under test is "does the call site fold the group and
+capture in most of these: the mechanism under test is "does the call site fold the group and
 route pixels through image_utils", which the real DJI sample already proves at the band_groups
 layer in test_band_groups.py / test_band_group_image_utils.py.
 """
@@ -30,7 +30,7 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 @pytest.fixture
 def grouped_dataset(tmp_path: Path) -> Path:
     """A minimal dataset root: one grouped capture + one plain photo, each with a detection GT
-    label — the canonical images/ + annotations/ layout ``build_dataset``/``label_image_stems``
+    label, the canonical images/ + annotations/ layout ``build_dataset``/``label_image_stems``
     read.
     """
     from PIL import Image
@@ -103,11 +103,11 @@ def test_probe_num_channels_derives_2_for_the_grouped_sample(grouped_dataset):
 
 
 def test_probe_num_channels_raises_on_a_stale_manifest_instead_of_silently_defaulting(tmp_path):
-    """Stage-6 review finding 7: a broad ``except Exception: return default`` used to swallow
-    ``BandGroupIncomplete`` along with genuinely unexpected errors, silently defaulting to 3
-    channels — a confidently-wrong value on exactly the parameter 'derive, don't pin' exists to
-    fix. No ``stems`` given, so the single-sample fallback (not the per-stem loop) is the path
-    under test."""
+    """A broad ``except Exception: return default`` must not swallow ``BandGroupIncomplete``
+    along with genuinely unexpected errors and silently default to 3 channels: a
+    confidently-wrong value on exactly the parameter 'derive, don't pin' exists to guard against.
+    No ``stems`` given, so the single-sample fallback (not the per-stem loop) is the path under
+    test."""
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, write_band_group_manifest
     from tcip_mcp.pipelines.data.datasets import _probe_num_channels
 
@@ -190,19 +190,18 @@ def test_renderable_path_is_unchanged_for_a_plain_photo(grouped_dataset):
 
 
 def test_materialize_if_needed_unchanged_for_a_plain_3band_rgb_geotiff(tmp_path):
-    """Stage-6 review finding 4: _materialize_if_needed used to route ANY recognized-but-non-
-    jpg/png extension (including an ordinary 3-band RGB .tif, a pre-existing supported format)
-    through a synthetic per-channel min-max stretch before rendering — a real regression, since
-    pre-K26 these got a raw PIL decode (true colors). A plain 3-band RGB GeoTIFF must render
-    exactly as before: unchanged path, and PIL decodes it to the SAME pixel values, not a
-    per-channel-stretched reinterpretation."""
+    """_materialize_if_needed must not route every recognized-but-non-jpg/png extension
+    (including an ordinary 3-band RGB .tif, a pre-existing supported format) through a synthetic
+    per-channel min-max stretch before rendering. A plain 3-band RGB GeoTIFF must render through
+    the unchanged path, with PIL decoding it to the same pixel values, not a per-channel-stretched
+    reinterpretation."""
     from PIL import Image
 
     from tcip_mcp.tools.vision_tools import _materialize_if_needed
 
     d = tmp_path / "images"
     d.mkdir()
-    # Real, non-constant RGB content (never a flat fill — a flat array's min==max would make a
+    # Real, non-constant RGB content (never a flat fill: a flat array's min==max would make a
     # stretch indistinguishable from the original by accident).
     rgb = np.zeros((10, 12, 3), dtype=np.uint8)
     rgb[..., 0] = np.linspace(10, 200, 12, dtype=np.uint8)[None, :]
@@ -212,7 +211,7 @@ def test_materialize_if_needed_unchanged_for_a_plain_3band_rgb_geotiff(tmp_path)
     tifffile.imwrite(str(path), rgb, photometric="rgb")
 
     out = _materialize_if_needed(path)
-    assert out == str(path)  # unchanged path — no synthetic preview materialized
+    assert out == str(path)  # unchanged path, no synthetic preview materialized
 
     decoded = np.asarray(Image.open(path).convert("RGB"))
     assert np.array_equal(decoded, rgb)  # true colors, no per-channel stretch applied
