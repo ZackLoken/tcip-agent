@@ -297,6 +297,7 @@ def derive_sliver_frac(
     ``char_sizes`` is ``sqrt(w*h)`` per GT box (px), already filtered to the trait's own class.
     """
     import numpy as np
+    # char_sizes' caller, TiledDetectionDataset.__init__ (datasets.py), computes it independently of _char_sizes_from_boxes above; known duplication, see there.
     sizes = [float(s) for s in char_sizes if s > 0]
     if len(sizes) < min_samples:
         return None
