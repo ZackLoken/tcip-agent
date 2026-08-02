@@ -1,4 +1,4 @@
-"""HPO / Tuning routes — launch + list + basic trial visibility.
+"""HPO / Tuning routes: launch + list + basic trial visibility.
 
 The underlying ``run_hpo`` MCP tool already returns structured trial results;
 we just wrap it in an HTTP surface for the Tuning tab.
@@ -48,7 +48,7 @@ def _persist() -> None:
 def rehydrate() -> None:
     """Seed the sweep registry from the last persisted summaries after a restart.
 
-    Worker threads are gone, so a persisted non-terminal sweep is dead — surfaced as
+    Worker threads are gone, so a persisted non-terminal sweep is dead: surfaced as
     ``interrupted``. Trial results aren't persisted, so a rehydrated sweep has no result.
     """
     from tcip_web import jobstore
