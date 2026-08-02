@@ -27,7 +27,6 @@
       "Bash(ls:*)",
       "Bash(cat:*)",
       "Bash(pwd)",
-      "Bash(find:*)",
       "Bash(grep:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
