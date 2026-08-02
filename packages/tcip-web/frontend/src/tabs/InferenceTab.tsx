@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   inferenceApi,
@@ -26,6 +26,7 @@ export function InferenceTab() {
   const datasetRoot = dataset.dataset_root;
 
   const [models, setModels] = useState<RegisteredModel[]>([]);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelPath, setModelPath] = useState<string>("");
   const [imagesDir, setImagesDir] = useState<string>("");
   const [outputDir, setOutputDir] = useState<string>("");
@@ -43,27 +44,51 @@ export function InferenceTab() {
   const [overlap, setOverlap] = useState<number | undefined>(undefined);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
+  const [jobsError, setJobsError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<InferenceJob | null>(null);
   const streamRef = useRef<(() => void) | null>(null);
 
-  useEffect(() => {
+  const refreshModels = useCallback(() => {
     if (!projectRoot) return;
     void resultsApi
       .registeredModels(projectRoot)
-      .then((r) => setModels(r.models ?? []))
-      .catch(() => setModels([]));
+      .then((r) => {
+        setModels(r.models ?? []);
+        setModelsError(null);
+      })
+      .catch((e) => {
+        setModels([]);
+        setModelsError(
+          `Could not load registered models: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
   }, [projectRoot]);
 
   useEffect(() => {
-    const refresh = () =>
+    refreshModels();
+  }, [refreshModels]);
+
+  const refreshJobs = useCallback(
+    () =>
       inferenceApi
         .listJobs()
-        .then((r) => setJobs(r.jobs))
-        .catch(() => {});
-    void refresh();
-    const t = setInterval(refresh, 3000);
+        .then((r) => {
+          setJobs(r.jobs);
+          setJobsError(null);
+        })
+        .catch((e) => {
+          setJobsError(
+            `Could not load inference jobs: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }),
+    [],
+  );
+
+  useEffect(() => {
+    void refreshJobs();
+    const t = setInterval(refreshJobs, 3000);
     return () => clearInterval(t);
-  }, []);
+  }, [refreshJobs]);
 
   const activeJobId = activeJob?.job_id;
   useEffect(() => {
@@ -152,6 +177,14 @@ export function InferenceTab() {
         <div className="tcip-heading mb-3">Inference config</div>
 
         <label className="tcip-label mb-1">Model checkpoint</label>
+        {modelsError && (
+          <div className="text-[11px] text-tcip-fp mb-1">
+            {modelsError}{" "}
+            <button className="tcip-btn text-[11px] ml-1" onClick={refreshModels}>
+              Retry
+            </button>
+          </div>
+        )}
         {models.length > 0 ? (
           <select
             className="tcip-select w-full mb-2"
@@ -319,8 +352,16 @@ export function InferenceTab() {
 
       <div className="p-4 overflow-auto">
         <div className="tcip-heading mb-3">Jobs</div>
+        {jobsError && (
+          <div className="text-[11px] text-tcip-fp mb-2">
+            {jobsError}{" "}
+            <button className="tcip-btn text-[11px] ml-1" onClick={() => void refreshJobs()}>
+              Retry
+            </button>
+          </div>
+        )}
         {jobs.length === 0 ? (
-          <div className="text-[11px] text-tcip-muted">No jobs yet.</div>
+          !jobsError && <div className="text-[11px] text-tcip-muted">No jobs yet.</div>
         ) : (
           <table className="w-full text-[11px]">
             <thead>
