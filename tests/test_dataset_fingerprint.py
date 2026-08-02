@@ -1,7 +1,7 @@
-"""K13.5 slice 3 — the whole-dataset content fingerprint (dataset identity).
+"""The whole-dataset content fingerprint (dataset identity).
 
 Pins: the fingerprint reuses ``dataset_hash`` for its label term (no second label-hasher); it is
-pixel-aware (a re-encode under the same filename changes it — the D2 gap ``dataset_hash`` alone leaves
+pixel-aware (a re-encode under the same filename changes it, a gap ``dataset_hash`` alone leaves
 open); registry order matters but whitespace doesn't; it is content-addressed (enumeration-order- and
 path-independent, so a moved dataset keeps its identity); and it is ``None`` for a bespoke dataset.
 """
@@ -43,7 +43,7 @@ def test_fingerprint_reuses_dataset_hash_for_labels(tmp_path, monkeypatch):
     monkeypatch.setattr(resolution, "dataset_hash", lambda *a, **k: calls.append(a) or real(*a, **k))
     fp = dataset_fingerprint(tmp_path)
     assert fp is not None
-    assert calls, "dataset_fingerprint must CALL dataset_hash for its label term, not re-implement it"
+    assert calls, "dataset_fingerprint must call dataset_hash for its label term, not re-implement it"
 
 
 def test_a_label_edit_changes_the_fingerprint(tmp_path):
@@ -57,13 +57,13 @@ def test_a_label_edit_changes_the_fingerprint(tmp_path):
 
 
 def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
-    """The D2 canary: dataset_hash (labels-only) is unchanged, but the fingerprint MUST change when
-    the pixels change under an untouched filename + labels.
+    """dataset_hash (labels-only) is unchanged, but the fingerprint must change when the pixels
+    change under an untouched filename + labels.
 
     Uses BMP (uncompressed) rather than JPEG so the re-encode is guaranteed to preserve the file's
-    byte size regardless of color — a JPEG re-encode's size varies with content too, so a test built
+    byte size regardless of color: a JPEG re-encode's size varies with content too, so a test built
     on it would pass identically for a pixel-blind names+size(+mtime) image term, proving nothing
-    about pixel awareness specifically (that stat-only term is asserted below to NOT detect this
+    about pixel awareness specifically (that stat-only term is asserted below to not detect this
     edit, confirming the size channel really is closed off here).
     """
     _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
@@ -89,7 +89,7 @@ def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
     _make_dataset(tmp_path)  # reset registry to no-attr
     assert dataset_fingerprint(tmp_path) != with_attr
 
-    # a whitespace-only reformat of classes.json must NOT change identity (canonical re-serialization)
+    # a whitespace-only reformat of classes.json must not change identity (canonical re-serialization)
     reg2_again = ClassRegistry(subjects=(Subject(
         name="catkin", description="a hazelnut catkin",
         attributes=(Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),)),))
@@ -110,7 +110,7 @@ def test_fingerprint_is_content_addressed_move_preserves_it(tmp_path):
 
 def test_flat_layout_does_not_collide_with_a_subdir_literally_named_annotations(tmp_path):
     """A flat annotations/*.json dataset must not key its label term identically to a nested
-    dataset whose one subdir happens to be literally named 'annotations' — both would otherwise
+    dataset whose one subdir happens to be literally named 'annotations'; both would otherwise
     hash to the same key bytes (the flat branch keyed by the root dir's own name)."""
     flat = tmp_path / "flat"
     (flat / "annotations").mkdir(parents=True)
