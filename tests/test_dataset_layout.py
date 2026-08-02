@@ -105,7 +105,7 @@ def test_models_with_predictions_is_per_date(tmp_path: Path) -> None:
 def test_classes_path_is_the_single_dataset_registry():
     from tcip_mcp.dataset_layout import classes_path
 
-    # One nested registry at the dataset root — no per-subject classes/<x>.json anymore.
+    # One nested registry at the dataset root: no per-subject classes/<x>.json anymore.
     assert classes_path("/ds") == Path("/ds/classes.json")
 
 
@@ -116,7 +116,7 @@ def test_dataset_root_of_recovers_the_root_from_any_layout_dir():
     assert dataset_root_of("/ds/predictions/live/2026-03-02") == Path("/ds")
     assert dataset_root_of("/ds/images/2026-03-02") == Path("/ds")
     assert dataset_root_of("/some/where/else") is None
-    # Anchors on the LAST dataset segment: a dataset nested under an ancestor named 'annotations'
+    # Anchors on the last dataset segment: a dataset nested under an ancestor named 'annotations'
     # (or any other segment) still resolves to the real root, not the ancestor.
     assert dataset_root_of("/data/annotations/proj/predictions/live") == Path("/data/annotations/proj")
     assert dataset_root_of("/data/images/proj/annotations/2026-03-02") == Path("/data/images/proj")
