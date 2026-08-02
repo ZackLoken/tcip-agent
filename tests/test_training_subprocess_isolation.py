@@ -673,6 +673,7 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
         metric="objective", mode="min", num_samples=4,
         search_alg="random", scheduler="none",
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
+        storage_path=str(tmp_path),
     )
     assert result["n_trials"] == 4
     assert result["best_value"] is not None
