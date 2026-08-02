@@ -1,4 +1,4 @@
-"""Tests for matching.py — known GT+pred → expected TP/FP/FN."""
+"""Tests for matching.py: known GT+pred → expected TP/FP/FN."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def test_point_in_polygon_on_edge():
 
 # ── multi-ring (occlusion-split) instances ───────────────────────────────
 
-# Two disjoint lobes of ONE instance — a catkin split by a branch crossing in front of it.
+# Two disjoint lobes of one instance: a catkin split by a branch crossing in front of it.
 LOBE_A = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]        # area 800
 LOBE_B = [(70.0, 10.0), (120.0, 10.0), (120.0, 60.0), (70.0, 60.0)]     # area 2500
 LOBES_AREA = 800.0 + 2500.0
@@ -98,7 +98,7 @@ def test_compute_matches_multi_ring_iou_spans_every_ring():
     assert result["tp"][0]["iou"] == 1.0
 
     # A prediction that found only the first lobe leaves most of the instance unexplained: its IoU is
-    # 800/3300, so at a 0.5 threshold it is an FP against an unmatched FN — not the perfect match a
+    # 800/3300, so at a 0.5 threshold it is an FP against an unmatched FN, not the perfect match a
     # first-ring-only comparison would report.
     partial = [Annotation(subject="catkin", geometry=Polygon([LOBE_A]), score=0.9)]
     strict = compute_matches(gt, partial, iou_threshold=0.5)
