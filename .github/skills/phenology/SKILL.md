@@ -51,9 +51,9 @@ thought rather than a default.
 
 ## The measurement-integrity guard
 
-Because "elongated" is a learned per-catkin call, predictions that carry **no** elongation
+Because "elongated" is a learned per-catkin call, predictions that carry no elongation
 call cannot yield a valid bloom fraction. Every surface reports `positive_class_assessed`:
-when it is false, the milestones are **not** a measurement; do not deliver them. Train and
+when it is false, the milestones are not a measurement; do not deliver them. Train and
 *validate* whatever model produces the elongation call first, against a reference sized to the
 trait: GT annotations, **or** a breeder-confirmed sample of the model's own outputs
 (review-confirmation), not dense GT for every trait (either passes the identical disjoint-split +
@@ -112,7 +112,7 @@ GIS-rectified plant grid is accurate; the *image* GPS is the fuzzy side. `plant_
 resolves this by ordering each date's images by EXIF capture time (the walker's sequence),
 splitting into row runs on large GPS jumps, and assigning along the row. Each assignment
 records its `source` (`sequence` / `nearest_neighbour` / `unmapped`) and `distance_m`:
-honest, interpretable signals. It deliberately emits **no** fabricated 0–1 "confidence".
+honest, interpretable signals. It deliberately emits no fabricated 0–1 "confidence".
 
 ## Delivery checklist
 
