@@ -80,7 +80,7 @@ describe("pointInRings", () => {
   it("hits any part of a multi-part shape (rings are disjoint parts, never holes)", () => {
     const rings = [SQUARE, FAR_SQUARE];
     expect(pointInRings([5, 5], rings)).toBe(true); // part 1
-    expect(pointInRings([105, 105], rings)).toBe(true); // part 2 — hit-testing ring 0 alone misses
+    expect(pointInRings([105, 105], rings)).toBe(true); // part 2, hit-testing ring 0 alone misses
     expect(pointInRings([50, 50], rings)).toBe(false);
   });
 });
@@ -108,7 +108,7 @@ describe("findHitPoint (point selection, zoom-aware)", () => {
     expect(findHitPoint([100.5, 100.5], points, radiusAt(10))).toBe(0);
   });
 
-  it("returns the NEAREST point in range, not the first (two points a few px apart)", () => {
+  it("returns the nearest point in range, not the first (two points a few px apart)", () => {
     // Both are inside an 11px radius from (107, 100); the one aimed at is index 1.
     expect(findHitPoint([107, 100], points, radiusAt(1))).toBe(1);
     expect(findHitPoint([101, 100], points, radiusAt(1))).toBe(0);
