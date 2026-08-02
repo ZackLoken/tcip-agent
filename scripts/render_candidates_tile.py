@@ -1,4 +1,4 @@
-"""Render a tile showing GT (green) and ONLY the FN candidates (numbered red).
+"""Render a tile showing GT (green) and only the FN candidates (numbered red).
 
 Reads fn_candidates.json from scripts/foreground_fn_candidates.py. Candidates
 outside the requested tile are not drawn. Numbers the candidates so each can be
