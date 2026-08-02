@@ -14,7 +14,7 @@ export const DEFAULT_REVIEW_COLORS: ReviewColors = {
   tp: "#4CAF50", // matched
   fp: "#EF5350", // false positive
   fn: "#FFD54A", // missed (gold)
-  active: "#00BFFF", // the detection under review — highlighter blue
+  active: "#00BFFF", // the detection under review, highlighter blue
 };
 
 const REVIEW_COLORS_KEY = "tcip.review.colors";
@@ -25,7 +25,7 @@ export function loadReviewColors(): ReviewColors {
     const raw = localStorage.getItem(REVIEW_COLORS_KEY);
     if (raw) return { ...DEFAULT_REVIEW_COLORS, ...JSON.parse(raw) };
   } catch {
-    /* storage disabled — fall back to defaults */
+    /* storage disabled, fall back to defaults */
   }
   return DEFAULT_REVIEW_COLORS;
 }
@@ -34,7 +34,7 @@ function saveReviewColors(colors: ReviewColors): void {
   try {
     localStorage.setItem(REVIEW_COLORS_KEY, JSON.stringify(colors));
   } catch {
-    /* storage disabled — colours just won't persist */
+    /* storage disabled, colours just won't persist */
   }
   window.dispatchEvent(new CustomEvent<ReviewColors>(REVIEW_COLORS_EVENT, { detail: colors }));
 }
