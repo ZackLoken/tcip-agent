@@ -290,6 +290,24 @@ def test_guard_denies_moving_breeder_data(cmd):
 @pytest.mark.parametrize(
     "cmd",
     [
+        # a bare "mv" as a substring of a path or grep pattern (not statement position) must not
+        # trip the guard: the false-positive the _STMT anchoring on _MOVE_OP exists to prevent,
+        # mirroring _DELETE_OP's own anchoring.
+        "cat /c/proj/annotations/mv-notes.txt",
+        "grep -rn mv /c/proj/annotations",
+        "ls /c/proj/annotations/mv-backup",
+        "find /c/proj/annotations -name '*mv*'",
+    ],
+)
+def test_guard_allows_reads_that_merely_mention_move_words(cmd):
+    r = _run_guard(cmd)
+    assert r.returncode == 0, r.stdout
+    assert r.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
         "cp /c/proj/labels/a.json /tmp/backup/a.json",
         "cp /tmp/backup/a.json /c/proj/labels/a.json",
         "find /c/proj/annotations -exec cp {} /tmp/backup \\;",
