@@ -420,7 +420,8 @@ def run_inference(
             explicit ``tile=True`` is refused rather than dropping them.
         tile_size: Sliding-window tile edge (px). ``None`` (default) derives it from the
             checkpoint's training tile geometry so inference matches the trained scale; a value
-            overrides. Foreign/legacy checkpoints with no geometry fall back to 640 with a warning.
+            overrides. A checkpoint with no persisted geometry falls back to 640 with a warning,
+            stamped unvalidated so a delivery gate downstream refuses to build a phenotype on it.
         overlap: Fractional tile overlap (stride = tile_size*(1-overlap)). ``None`` derives from the
             checkpoint (else 0.2).
         tile_batch_size: Tiles per forward batch.
