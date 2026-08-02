@@ -456,6 +456,8 @@ def run_inference(
         max_dets: Full-frame detection cap (after any tiled merge).
         postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split
             across a tile seam (better for an object straddling a boundary).
+        dry_run: Report the effective operating point (conf/tiling/max_dets/postprocess) without
+            loading the model or running inference.
         trait: Trait name (with ``calibration_labels_dir``) to derive the confidence operating point
             per dataset instead of pinning a default, the count is the phenotype, so conf must be
             calibrated. Absent -> the byte-identical raw path (conf=score_threshold, unvalidated).
@@ -839,6 +841,8 @@ def export_predictions(
         trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``).
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
+        experiment_id: The run that produced the checkpoint, for provenance (forwarded to
+            ``run_inference``; see its own doc for the best-effort resolution when omitted).
         overwrite: Write into ``output_dir`` even if it exists. Refused if the bucket has review
             verdicts; the default (False) auto-redirects to a fresh bucket instead.
         acknowledge_unvalidated: Write the bucket even when tile_size (a tiled run only) has no
@@ -1011,6 +1015,8 @@ def tabulate_counts(
         trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``).
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
+        experiment_id: The run that produced the checkpoint, for provenance (forwarded to
+            ``run_inference``; see its own doc for the best-effort resolution when omitted).
         acknowledge_unvalidated: Write the count CSV even when the operating point is unvalidated,
             stamping it ``measurement_validated=false`` so the un-trustworthiness travels downstream.
     """
