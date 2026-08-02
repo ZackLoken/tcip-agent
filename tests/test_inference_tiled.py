@@ -1,4 +1,4 @@
-"""W3 — tiled inference: GenericPredictor.predict_tiled + run_inference(tile=True)."""
+"""Tiled inference: GenericPredictor.predict_tiled + run_inference(tile=True)."""
 
 from __future__ import annotations
 
@@ -66,9 +66,9 @@ def test_run_inference_tile_flag(tmp_path):
 
 
 def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path):
-    """K25/K13.5-2c: when the checkpoint's own config carries a recorded id_map (stamped at train
-    time by subprocess_worker.py), run_inference's decode/record map uses THAT — never re-derived
-    from a live registry, and reachable with no images_dir/classes.json at all (proving it is not
+    """When the checkpoint's own config carries a recorded id_map (stamped at train time by
+    subprocess_worker.py), run_inference's decode/record map uses it, never re-derived from a
+    live registry, and reachable with no images_dir/classes.json at all (proving it is not
     falling through to the registry-derivation branch)."""
     import torch as _torch
 
