@@ -300,7 +300,7 @@ def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
 
 
 def test_record_distillation_pass_never_touches_reports_or_retrospectives(tmp_path: Path):
-    # Bookkeeping only — must never write/modify/delete the underlying records it's counting.
+    # Bookkeeping only: must never write/modify/delete the underlying records it's counting.
     claude_reports(str(tmp_path), category="missing_tool", detail="a")
     before = list((tmp_path / ".tcip" / "reports").glob("*.jsonl"))
 
