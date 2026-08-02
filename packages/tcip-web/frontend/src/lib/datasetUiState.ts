@@ -1,13 +1,13 @@
 /**
  * Per-(project, date, subject/model) UI state, so switching dates/projects and returning lands you
- * back where you were. Stored in sessionStorage — deliberately SESSION-scoped: a fresh app load
+ * back where you were. Stored in sessionStorage, deliberately session-scoped: a fresh app load
  * starts clean (matching the backend's fresh-open-at-image-0, which avoids resurrecting a stale
  * cross-session position), while in-session switches resume where you were. Position + review
  * filters live in one blob; Review's GT/Pred visibility (ReviewTab-local) is under its own key.
  *
  * Zoom/pan is deliberately not persisted here: both tabs actively drive the view (Annotate
  * auto-fits each image, Review auto-zooms to each detection), so a restored view would be
- * immediately overridden — restoring it would fight the tab, not help.
+ * immediately overridden; restoring it would fight the tab, not help.
  */
 
 import type { ImageStatus } from "@/api/classes";
@@ -35,7 +35,7 @@ export function saveDatasetUi(key: string, state: DatasetUiState): void {
   try {
     sessionStorage.setItem(UI_PREFIX + key, JSON.stringify(state));
   } catch {
-    /* private mode / disabled storage — just won't restore */
+    /* private mode / disabled storage: just won't restore */
   }
 }
 
