@@ -9,7 +9,7 @@ export interface TrainingRunSummary {
   best_metric?: number;
   output_dir?: string;
   config_summary?: Record<string, unknown>;
-  external?: boolean; // reconstructed from experiment records — running in another process
+  external?: boolean; // reconstructed from experiment records: running in another process
 }
 
 export interface MetricRow {
@@ -54,7 +54,7 @@ export interface TrainingStreamMsg {
  * Open a live metrics stream for a training run, auto-reconnecting with capped backoff.
  * The server replays all rows from the start on each (re)connect, so the consumer must
  * dedupe by epoch/step. A ``status`` (terminal) or ``error`` (unknown run) frame ends
- * the stream — once seen we stop reconnecting.
+ * the stream; once seen we stop reconnecting.
  */
 export function openTrainingStream(
   project_root: string,
