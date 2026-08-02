@@ -1,4 +1,4 @@
-"""Tests for the in-app agent permission fence (AGENT_GOVERNANCE_PLAN Part 1)."""
+"""Tests for the in-app agent permission fence."""
 
 from __future__ import annotations
 
@@ -29,15 +29,15 @@ def test_fence_settings_valid_json_denies_internals_allows_toolkit():
         assert rule in deny
     # Governance files are denied (proposals only, human applies).
     assert "Edit(CLAUDE.md)" in deny
-    # The audited toolkit is the sanctioned mutation path — allowed.
+    # The audited toolkit is the sanctioned mutation path: allowed.
     assert "mcp__tcip__*" in allow
-    # PreToolUse guards are wired for BOTH shells — PowerShell was the fence bypass.
+    # PreToolUse guards are wired for both shells: PowerShell was the fence bypass.
     hooks = {h["matcher"]: h["hooks"][0]["command"] for h in data["hooks"]["PreToolUse"]}
     assert "agent_bash_guard.py" in hooks["Bash"]
     assert "agent_powershell_guard.py" in hooks["PowerShell"]
 
 
-# the exact platform-internal deny set — pinned so the web-research grant can't widen the fence.
+# the exact platform-internal deny set, pinned so the web-research grant can't widen the fence.
 _EXPECTED_DENY = {
     "Edit(packages/**)",
     "Edit(tests/**)",
@@ -60,7 +60,7 @@ _EXPECTED_DENY = {
     "Bash(git clean:*)",
 }
 
-# academic hosts WebFetch is scoped to (cv-research grant) — no open web.
+# academic hosts WebFetch is scoped to (cv-research grant): no open web.
 _ACADEMIC_WEBFETCH = {
     "WebFetch(domain:arxiv.org)",
     "WebFetch(domain:www.arxiv.org)",
@@ -77,7 +77,7 @@ _ACADEMIC_WEBFETCH = {
 
 def test_fence_grants_academic_scoped_web_research_only():
     # The cv-research capability adds WebSearch + WebFetch, but WebFetch is scoped per-domain to
-    # academic sources — never a blanket WebFetch(*) / open web.
+    # academic sources, never a blanket WebFetch(*) / open web.
     data = json.loads(FENCE.read_text(encoding="utf-8"))
     allow = set(data["permissions"]["allow"])
     assert "WebSearch" in allow
@@ -136,7 +136,7 @@ def test_bash_and_powershell_guards_protect_the_same_roots():
 
 
 def test_resolve_command_fences_the_real_cli(monkeypatch, tmp_path):
-    # resolve_terminal_command spawns claude DIRECTLY (no wrapping shell) with the fence flags;
+    # resolve_terminal_command spawns claude directly (no wrapping shell) with the fence flags;
     # --settings points at a materialized profile (valid JSON, still denies internals, guard hooks
     # absolute/cd-proof).
     monkeypatch.delenv("TCIP_TERMINAL_CMD", raising=False)
@@ -215,9 +215,9 @@ def _run_guard(command: str) -> subprocess.CompletedProcess:
         "echo x > agent_bash_guard.py",  # self-modify (even relative, after a cd)
         'bash -c "echo hi > packages/x"',  # nested shell
         "powershell -e U2V0",  # nested encoded shell from Bash
-        # regression pins: a redirect/tee whose RESOLVED target is protected still blocks, even
+        # a redirect/tee whose resolved target is protected still blocks, even
         # when a protected token also appears as a mere exec argument (scripts/) or beside an
-        # fd-dup (2>&1). These must stay DENY after the fence fix.
+        # fd-dup (2>&1); these must stay denied.
         "python scripts/foo.py > packages/out.txt",  # exec arg scripts/, real write to packages/
         "echo x > packages/y.py 2>&1",  # fd-dup present, but the > target is protected
         "python scripts/doctor.py /c/p 2>&1 | tee packages/x",  # tee target protected
@@ -231,7 +231,7 @@ def test_guard_denies_shell_writes_to_internals(cmd):
 
 def test_both_guards_deny_a_write_to_the_same_protected_path():
     # Cross-shell parity: the same mutation intent (write into packages/) is blocked in both
-    # shells — the "switch to the other shell" bypass class must not exist.
+    # shells: the "switch to the other shell" bypass class must not exist.
     assert _run_guard("echo x > packages/tcip-mcp/y.py").returncode == 2
     assert _run_ps_guard('Set-Content packages\\tcip-mcp\\y.py "x"').returncode == 2
     assert _run_guard("cp a.py packages/tcip-mcp/y.py").returncode == 2
@@ -246,8 +246,8 @@ def test_both_guards_deny_a_write_to_the_same_protected_path():
         "git status",
         "grep -r foo packages/tcip-mcp",
         "echo hello > /tmp/scratch.txt",  # a write, but not into repo internals
-        # fd redirects / non-protected targets are not writes into internals — the mandated
-        # diagnostics and their redirect variants must fall through (standing checks for the fix).
+        # fd redirects / non-protected targets are not writes into internals: the mandated
+        # diagnostics and their redirect variants must fall through.
         "python scripts/doctor.py C:/Users/zack/tcip-projects/hazelnut 2>&1",  # mandated command
         "python scripts/doctor.py /c/proj 2>/dev/null",
         "python scripts/list_tools.py",  # no redirect at all
@@ -269,7 +269,7 @@ def test_guard_fails_open_on_garbage_stdin():
     assert r.returncode == 0  # unparseable → fall through to normal permission flow
 
 
-# ── the Bash fence's delete/truncate parity with PowerShell (K19) ────────
+# ── the Bash fence's delete/truncate parity with PowerShell ────────
 
 
 @pytest.mark.parametrize(
@@ -280,10 +280,10 @@ def test_guard_fails_open_on_garbage_stdin():
         "unlink /c/Users/zack/tcip-projects/proj/labels/a.txt",
         "shred /c/Users/zack/tcip-projects/proj/labels/a.txt",
         "truncate -s 0 /c/Users/zack/tcip-projects/proj/annotations/a.json",
-        # xargs — with and without a flag on the trailing verb
+        # xargs, with and without a flag on the trailing verb
         "ls /c/proj/annotations/*.json | xargs rm",
         "ls /c/proj/annotations/*.json | xargs rm -f",
-        # find — the sharpest hole: Bash(find:*) is allow-listed, so only the guard stops this
+        # find, the sharpest hole: Bash(find:*) is allow-listed, so only the guard stops this
         "find /c/proj/annotations -name '*.json' -delete",
         "find /c/proj/annotations -name '*.json' -exec rm {} \\;",
         # statement-position variants (after ; | & ( { } and at line start)
@@ -301,7 +301,7 @@ def test_guard_denies_deletion_and_truncation(cmd):
     "cmd",
     [
         # a delete/truncate verb as a bareword in an argument (not statement position) must not trip
-        # the guard — the false-positive the _STMT anchoring exists to prevent.
+        # the guard: the false-positive the _STMT anchoring exists to prevent.
         "grep -r shred packages/tcip-mcp",
         "grep -rn truncate packages",
         "cat elderberry-rm-notes.txt",
@@ -334,14 +334,14 @@ def test_guard_denies_writing_into_breeder_data_paths(cmd):
 
 def test_guard_allows_a_redirect_into_an_unrelated_path():
     # A redirect target that doesn't name annotations/labels/predictions/image_status.json is not
-    # breeder data — the rail must admit valid work, not only reject invalid work.
+    # breeder data: the rail must admit valid work, not only reject invalid work.
     r = _run_guard("echo done > /tmp/scratch.txt")
     assert r.returncode == 0, r.stdout
 
 
 def test_bash_and_powershell_guards_deny_the_same_breeder_data_operations():
-    # Parity test (K19): both shells must deny the same breeder-data delete/truncate/write
-    # operations — the drift the platform-path-only comparison above
+    # Parity test: both shells must deny the same breeder-data delete/truncate/write
+    # operations, the drift the platform-path-only comparison above
     # (test_bash_and_powershell_guards_protect_the_same_roots) cannot catch, since platform paths
     # and breeder data are orthogonal invariants. Covers all three harm classes (delete, truncate,
     # overwrite-via-redirect-or-cmdlet), not delete alone.
@@ -381,7 +381,7 @@ def _run_ps_guard(command: str) -> subprocess.CompletedProcess:
         '[IO.File]::WriteAllText("packages\\x.py", "y")',
         '[IO.File]::OpenWrite("packages\\tcip-mcp\\x.py")',  # .NET writer beyond WriteAllText
         "New-Item -Path tests/x.py -ItemType File",
-        # writes via cmdlet ALIASES (the verified bypass — sc/ac/ni/cp/mv/clc/spi)
+        # writes via cmdlet aliases (the verified bypass: sc/ac/ni/cp/mv/clc/spi)
         'sc packages\\tcip-mcp\\server.py "hacked"',
         'ac packages\\tcip-mcp\\server.py "more"',
         "ni packages\\tcip-mcp\\evil.py -ItemType File",
@@ -407,8 +407,8 @@ def _run_ps_guard(command: str) -> subprocess.CompletedProcess:
         "git push origin main",
         'git commit -m "x"',
         "git reset --hard HEAD~1",
-        # regression pin: a redirect whose RESOLVED target is protected still blocks, even with
-        # scripts/ present only as an exec argument. Must stay DENY after the fence fix.
+        # a redirect whose resolved target is protected still blocks, even with
+        # scripts/ present only as an exec argument. Must stay denied.
         "python scripts/foo.py > packages\\out.txt",
     ],
 )
@@ -418,7 +418,7 @@ def test_ps_guard_denies_mutations_and_dangerous(cmd):
     assert "deny" in r.stdout
 
 
-# ── the PowerShell fence's breeder-data truncate/write parity with Bash (K19) ──
+# ── the PowerShell fence's breeder-data truncate/write parity with Bash ──
 
 
 @pytest.mark.parametrize(
@@ -449,7 +449,7 @@ def test_ps_guard_denies_writing_into_breeder_data_paths(cmd):
         "Get-ChildItem C:\\proj\\annotations",  # a read, not a write
         "echo 'Set-Content is a cmdlet name'",
         "Get-Content C:\\proj\\annotations\\a.json > $env:TEMP\\scratch.json",  # write target is not breeder data
-        # Copy-Item (and its aliases) can't be told source from destination by a stateless guard —
+        # Copy-Item (and its aliases) can't be told source from destination by a stateless guard:
         # deliberately exempted from the breeder-data check in both directions, mirroring the Bash
         # guard's own exemption of cp, so a legitimate backup/duplicate of a label isn't blocked.
         "Copy-Item C:\\proj\\labels\\a.json -Destination C:\\out\\backup.json",
@@ -466,7 +466,7 @@ def test_ps_guard_allows_reads_that_merely_mention_breeder_data_words(cmd):
 @pytest.mark.parametrize(
     "cmd",
     [
-        # Move/Rename DO relocate the tracked file even when it's named as the "source" — unlike
+        # Move/Rename do relocate the tracked file even when it's named as the "source", unlike
         # Copy-Item, these stay denied.
         "Move-Item C:\\proj\\labels\\a.json -Destination C:\\out\\a.json",
         "mv C:\\proj\\labels\\a.json C:\\out\\a.json",
@@ -490,8 +490,8 @@ def test_ps_guard_still_denies_move_and_rename_of_breeder_data(cmd):
         "Get-NetTCPConnection -State Listen -LocalPort 8765",
         "Test-Path packages/tcip-web",
         "Get-Content CLAUDE.md",
-        # a delete/write ALIAS as a bareword in an ARGUMENT must not trip the guard (the
-        # false-positive the anchoring fixes) — these are pure reads.
+        # a delete/write alias as a bareword in an argument must not trip the guard (the
+        # false-positive the anchoring fixes): these are pure reads.
         "Get-Content elderberry-del.csv",
         "Get-Content .\\del.txt",
         "Get-ChildItem C:\\rm",
@@ -512,7 +512,7 @@ def test_ps_guard_allows_reads(cmd):
 
 
 def test_deny_reason_points_to_claude_reports():
-    # Requirement (c): a blocked protected-write self-documents — it tells the agent to file the
+    # Requirement (c): a blocked protected-write self-documents: it tells the agent to file the
     # false-positive with claude_reports rather than route around the fence.
     r = _run_guard("echo x > packages/tcip-mcp/y.py")
     assert r.returncode == 2 and "claude_reports" in r.stdout
