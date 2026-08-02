@@ -54,10 +54,9 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
 
     The single owner of which milestone columns exist. ``plant_milestones`` iterates it to emit each
     date and its bound; the schema functions map it to names. The majority alias enters only when the
-    spec names a crossing for it, so declared and produced can no longer disagree for any spec shape:
-    each side used to apply that condition independently, and a trait with no ``majority_milestone``
-    declared a majority date/bound/provisional column no producer ever filled (invisible for any
-    trait whose spec does name one).
+    spec names a crossing for it, and declaration and production share this same condition, so a
+    trait with no ``majority_milestone`` never declares a majority date/bound/provisional column that
+    no producer fills.
     """
     cols = [(key, key) for key in _milestone_targets(spec)]
     if spec.majority_milestone:
@@ -69,9 +68,9 @@ def milestone_date_columns(spec) -> list[str]:
     """The milestone/date column names a trait's phenology delivery carries, a proper subset of
     ``phenology_csv_columns`` (no ``plant_id``/provenance columns).
 
-    Consumed by ``phenology_csv_columns``, which pairs each with its ``_bound``. It no longer feeds
-    an export gate: the web door used to trigger on these names appearing in a caller-supplied
-    table; it now computes what it exports instead.
+    Consumed by ``phenology_csv_columns``, which pairs each with its ``_bound``. Not an export gate:
+    the web door computes what it exports directly rather than checking for these names in a
+    caller-supplied table.
     """
     return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
 
@@ -237,7 +236,7 @@ def crossing_date(series: list[tuple[str, float]], target: float) -> Optional[Cr
 
 
 def positive_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
-    """First date any elongation appears (fraction > 0), chronologically. ``None`` if never."""
+    """First date any positive-state observation appears (fraction > 0), chronologically. ``None`` if never."""
     for d, r in _real_points(series):
         if r > 0:
             return iso(d)
@@ -272,11 +271,11 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
 def resolve_positive_class_id(spec, predictions_by_date: dict[str, str]) -> tuple[int | None, str]:
     """Resolve a trait's positive class id from a prediction bucket's own recorded ``id_map``.
 
-    The single resolution both delivery doors' ``elongated_class_id``/``positive_class_id`` surfaces
-    call, not a separate registry re-derivation, which could disagree with the map
-    predictions were actually decoded through. Returns ``(class_id, message)``; ``class_id`` is
-    ``None`` when no bucket's ``id_map`` contains the trait's positive value, so the caller refuses
-    rather than guessing (never a bare default like the historical ``elongated_class_id: int = 1``).
+    The single resolution both delivery doors' ``positive_class_id`` surfaces call, not a separate
+    registry re-derivation, which could disagree with the map predictions were actually decoded
+    through. Returns ``(class_id, message)``; ``class_id`` is ``None`` when no bucket's ``id_map``
+    contains the trait's positive value, so the caller refuses rather than guessing with a bare
+    default.
     """
     name = spec.positive_class_name
     if not name:
@@ -465,9 +464,9 @@ def per_plant_phenology(
         }
         # A plant with any unclassified/missing date earns no milestone dates, but must still carry
         # the same keys as one that does, so both branches go through the producer (an empty series
-        # crosses nothing) rather than one of them rebuilding the key set from the column names. The
-        # rebuild used to omit every ``*_date_bound``, so an excluded plant's row shape differed from
-        # an included one's within a single delivery.
+        # crosses nothing) rather than one of them rebuilding the key set from the column names:
+        # reconstructing the keys directly from column names omits every ``*_date_bound`` key, giving
+        # an excluded plant's row a different shape than an included one's within a single delivery.
         row.update(plant_milestones(frac_series if plant_fully_classified else [], spec))
         rows.append(row)
     return {"rows": rows, "positive_class_assessed": any_classified_date}
