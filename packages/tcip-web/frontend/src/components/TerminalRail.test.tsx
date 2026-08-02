@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-// xterm renders into canvas/DOM measurement APIs jsdom doesn't have — mock the
+// xterm renders into canvas/DOM measurement APIs jsdom doesn't have; mock the
 // emulator and its addons; the rail's own logic (status gate, session wiring,
 // open/close) is what these tests pin. vi.hoisted so the class exists when the
 // hoisted vi.mock factories run.
@@ -162,7 +162,7 @@ describe("TerminalRail", () => {
     const host = await screen.findByTestId("terminal-host");
     await waitFor(() => expect(termInstances[0].focus).toHaveBeenCalled());
     host.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }));
-    // wheel-up encodes SGR button 64 — Claude receives it as a scroll, not a cursor key
+    // wheel-up encodes SGR button 64; Claude receives it as a scroll, not a cursor key
     expect(termInstances[0].input).toHaveBeenCalledWith(expect.stringContaining("<64;"));
   });
 
@@ -181,7 +181,7 @@ describe("TerminalRail", () => {
     expect(termInstances[0].reset).toHaveBeenCalled();
   });
 
-  describe("starter hint (K23)", () => {
+  describe("starter hint", () => {
     it("shows a starter hint when no project is open", async () => {
       render(<TerminalRail />);
       await screen.findByTestId("terminal-host");
