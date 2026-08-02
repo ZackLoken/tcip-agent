@@ -1,4 +1,4 @@
-"""W7 — global seeding + resume-from-checkpoint."""
+"""Global seeding + resume-from-checkpoint."""
 
 from __future__ import annotations
 
@@ -129,14 +129,13 @@ def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
 
 
 def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
-    """K11 (F5): resuming must restore the RNG stream position, not just reseed from scratch —
-    a resumed epoch's loss must match the straight-through run's epoch at the same point, even
-    if the global RNG is deliberately corrupted between save and resume.
-
-    ``shuffle=True`` with no explicit ``generator=`` is deliberate: PyTorch's ``RandomSampler``
-    draws a fresh per-epoch seed from the GLOBAL torch RNG on every ``__iter__`` call when no
-    generator is given, so the resumed epoch's batch order is genuinely sensitive to whatever
-    ``torch.set_rng_state`` last set it to — a sequential (unshuffled) loader would make this
+    """Resuming must restore the RNG stream position, not just reseed from scratch: a resumed
+    epoch's loss must match the straight-through run's epoch at the same point, even if the
+    global RNG is deliberately corrupted between save and resume. ``shuffle=True`` with no
+    explicit ``generator=`` is deliberate, since PyTorch's ``RandomSampler`` draws a fresh
+    per-epoch seed from the global torch RNG on every ``__iter__`` call when no generator is
+    given, so the resumed epoch's batch order is genuinely sensitive to whatever
+    ``torch.set_rng_state`` last set it to; a sequential (unshuffled) loader would make this
     test pass identically whether or not RNG restoration actually ran.
     """
     images_dir, csv_path = _classification_data(tmp_path)
@@ -170,9 +169,9 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
 
 
 def test_resume_from_checkpoint_without_rng_state_degrades_gracefully(tmp_path):
-    """K11 (F5): a checkpoint predating RNG capture must resume via the fresh seed (old
-    behavior), not crash — and must honestly record rng_state_restored=False rather than
-    claiming a restore that didn't happen."""
+    """A checkpoint predating RNG capture must resume via the fresh seed (old behavior), not
+    crash, and must honestly record rng_state_restored=False rather than claiming a restore
+    that didn't happen."""
     images_dir, csv_path = _classification_data(tmp_path)
     ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
     loader = DataLoader(ds, batch_size=2, collate_fn=task_collate("classification"))
@@ -183,7 +182,7 @@ def test_resume_from_checkpoint_without_rng_state_degrades_gracefully(tmp_path):
     ckpt = torch.load(ckpt_path, weights_only=False)
     for key in ("torch_rng_state", "numpy_rng_state", "python_rng_state", "cuda_rng_state"):
         ckpt.pop(key, None)
-    torch.save(ckpt, ckpt_path)  # simulate a pre-K11 checkpoint
+    torch.save(ckpt, ckpt_path)  # simulate a checkpoint saved before RNG state was captured
 
     run2 = create_run(cfg, str(tmp_path / "out2"))
     run2 = train(run2, loader, task="classification", resume_from=str(ckpt_path))
@@ -192,7 +191,7 @@ def test_resume_from_checkpoint_without_rng_state_degrades_gracefully(tmp_path):
 
 
 def test_seeded_loader_kwargs_reproducible_shuffle():
-    """K11 (F5): the platform's own DataLoader construction sites are seeded — two loaders built
+    """The platform's own DataLoader construction sites are seeded: two loaders built
     from the same seed shuffle identically; an unseeded run stays honestly unseeded."""
     from tcip_mcp.pipelines.training.generic_trainer import seeded_loader_kwargs
 
@@ -206,7 +205,7 @@ def test_seeded_loader_kwargs_reproducible_shuffle():
 
 
 def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
-    # 2.3: resuming a checkpoint without optimizer state (e.g. model_best.pt) must fail
+    # Resuming a checkpoint without optimizer state (e.g. model_best.pt) must fail
     # loudly, not silently restart from scratch.
     images_dir, csv_path = _classification_data(tmp_path)
     ds = build_dataset("classification", images_dir=images_dir, csv_path=csv_path, num_classes=2)
