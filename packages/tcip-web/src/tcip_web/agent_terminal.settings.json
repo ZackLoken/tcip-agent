@@ -1,5 +1,5 @@
 {
-  "_comment": "Governed web research for the fenced CV-scientist agent: WebSearch (find papers) + WebFetch scoped per-domain to academic sources only (arXiv/journals/proceedings). No blanket WebFetch(*) — each allowed host is listed explicitly, and the cv-research skill enforces academic-only use. This is a security fence; keep the allowed-domain set minimal.",
+  "_comment": "Governed web research for the fenced CV-scientist agent: WebSearch (find papers) + WebFetch scoped per-domain to academic sources only (arXiv/journals/proceedings). No blanket WebFetch(*): each allowed host is listed explicitly, and the cv-research skill enforces academic-only use. This is a security fence; keep the allowed-domain set minimal.",
   "permissions": {
     "deny": [
       "Edit(packages/**)",
