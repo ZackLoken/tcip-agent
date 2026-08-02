@@ -1,4 +1,4 @@
-"""L21 — a training run reconstructed from experiment records reads as 'running' while its
+"""A training run reconstructed from experiment records reads as 'running' while its
 heartbeat is fresh (still training in another process, e.g. the MCP agent) and only
 'interrupted' once the heartbeat goes stale. Prevents the GUI mislabelling an
 agent-launched run as dead and inviting a duplicate launch."""
