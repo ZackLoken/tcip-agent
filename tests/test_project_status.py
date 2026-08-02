@@ -30,7 +30,7 @@ def test_read_project_status_corrupt_json_is_flagged(tmp_path: Path):
 
 
 def test_read_project_status_non_dict_shape_is_flagged(tmp_path: Path):
-    # Valid JSON, but not a dict — same shape guard as dataset_layout.normalize_status_store.
+    # Valid JSON, but not a dict: same shape guard as dataset_layout.normalize_status_store.
     path = project_status_path(tmp_path)
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
@@ -84,14 +84,14 @@ def test_record_distillation_resets_both_distillation_counters_only(tmp_path: Pa
     assert status["reports_since_last_distillation"] == 0
     assert status["retrospectives_since_last_distillation"] == 0
     assert status["last_distillation_at"]
-    # The retrospective counter (a different concern) is untouched by a distillation pass — it was
+    # The retrospective counter (a different concern) is untouched by a distillation pass: it was
     # already reset to 0 by the record_retrospective call above, then bumped to 1 by the report
     # that followed it, and a distillation pass has no reason to touch it.
     assert status["reports_since_last_retrospective"] == 1
 
 
 def test_record_functions_are_best_effort_on_a_corrupt_file(tmp_path: Path):
-    # A pre-existing corrupt status file must not crash a record_* call — it's best-effort and
+    # A pre-existing corrupt status file must not crash a record_* call: it's best-effort and
     # attached to a write (claude_reports/project_retrospective) that must not fail because of it.
     path = project_status_path(tmp_path)
     path.parent.mkdir(parents=True)
@@ -104,19 +104,19 @@ def test_record_functions_are_best_effort_on_a_corrupt_file(tmp_path: Path):
 
 
 def test_read_project_status_non_utf8_bytes_are_flagged_not_raised(tmp_path: Path):
-    # UnicodeDecodeError is not a subclass of json.JSONDecodeError — a narrower except clause than
+    # UnicodeDecodeError is not a subclass of json.JSONDecodeError: a narrower except clause than
     # (OSError, ValueError) would let this raise straight through read_project_status.
     path = project_status_path(tmp_path)
     path.parent.mkdir(parents=True)
     path.write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
 
     assert read_project_status(tmp_path) == {"_corrupt": True}
-    record_report(tmp_path)  # must not raise past this either — same best-effort invariant
+    record_report(tmp_path)  # must not raise past this either, same best-effort invariant
 
 
 def test_concurrent_record_report_does_not_lose_updates(tmp_path: Path):
-    # The increment must happen entirely inside the file_transaction lock — computing "old + 1"
-    # from a read taken BEFORE the lock, then writing that absolute value, would let concurrent
+    # The increment must happen entirely inside the file_transaction lock: computing "old + 1"
+    # from a read taken before the lock, then writing that absolute value, would let concurrent
     # callers race: all read the same old value, all write the same new one, updates lost.
     import threading
 
