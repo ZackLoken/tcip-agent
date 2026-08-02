@@ -3,13 +3,13 @@
 ``state.Polygon`` is multi-ring because an occlusion-split object (a catkin behind a branch) is
 genuinely more than one region. The prediction-export path honored that; the human-in-the-loop
 bootstrapping path (SAM proposal -> ``accept_proposals``) had its own contour extractor that kept only
-the largest contour, so the same object was whole as a prediction and truncated as SAM-assisted GT —
+the largest contour, so the same object was whole as a prediction and truncated as SAM-assisted GT,
 and that GT is what a dataset rasterizes and a model learns from. Both paths now call
 ``tcip_annotation.mask_contours.mask_to_polygon_rings``.
 
 The round-trip tests drive the real ``auto_mask`` / ``predict_from_point`` code with a fake SAM2 (the
-pattern ``tests/test_vision.py::TestSamPredictorCache`` uses), so every hop the fix touches —
-mask -> candidate dict -> staged ``Annotation`` — is exercised, not just the extractor in isolation.
+pattern ``tests/test_vision.py::TestSamPredictorCache`` uses), so every hop this touches
+(mask -> candidate dict -> staged ``Annotation``) is exercised, not just the extractor in isolation.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ pytest.importorskip("torch")
 IMG_SIZE = 128
 #: One object split into two disjoint lobes by an occluder. Each lobe alone yields a strictly smaller
 #: enclosing box than the pair, so an assertion on the pair cannot pass on the largest lobe alone.
-LOBE_A = (slice(20, 60), slice(20, 50))   # y 20:60, x 20:50 — the larger lobe
+LOBE_A = (slice(20, 60), slice(20, 50))   # y 20:60, x 20:50: the larger lobe
 LOBE_B = (slice(30, 50), slice(80, 100))  # y 30:50, x 80:100
 
 
@@ -44,7 +44,7 @@ def sam_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A one-image project whose fake SAM2 always segments the two-lobe mask above.
 
     Fakes only the ``sam2`` package (build + predictor + auto-mask generator) and the checkpoint
-    file, so ``auto_mask`` / ``predict_from_point`` themselves — including their contour extraction —
+    file, so ``auto_mask`` / ``predict_from_point`` themselves (including their contour extraction)
     are the real code under test.
     """
     mask = _split_mask()
@@ -131,7 +131,7 @@ def test_shared_extractor_orders_rings_largest_first() -> None:
 
     rings = mask_to_polygon_rings(_split_mask())
     xs_first = [x for x, _ in rings[0]]
-    assert max(xs_first) < 80  # lobe A (the larger) — lobe B lives at x >= 80
+    assert max(xs_first) < 80  # lobe A (the larger); lobe B lives at x >= 80
 
 
 def test_shared_extractor_honors_a_soft_mask_threshold() -> None:
@@ -147,8 +147,8 @@ def test_shared_extractor_honors_a_soft_mask_threshold() -> None:
 def test_measurement_entry_point_delegates_to_the_shared_extractor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``mask_to_polygon_points`` must CALL the shared extractor, not re-implement agreement with it:
-    a second implementation that merely agrees today is the defect this fix removes."""
+    """``mask_to_polygon_points`` must call the shared extractor, not re-implement agreement with it:
+    a second implementation that merely agrees today is a latent defect."""
     from tcip_annotation import mask_contours
     from tcip_mcp.pipelines.measurement.mask_geometry import mask_to_polygon_points
 
@@ -188,7 +188,7 @@ def test_neutral_candidate_keeps_every_ring(sam_project: Path) -> None:
 
 
 def test_split_sam_proposal_is_accepted_as_a_multi_ring_annotation(sam_project: Path) -> None:
-    """The whole point: a two-lobe SAM proposal reaches disk as ONE annotation with BOTH lobes.
+    """The whole point: a two-lobe SAM proposal reaches disk as one annotation with both lobes.
 
     The SAM path used to drop every region but the largest while extracting the contour, before
     ``accept_proposals`` ever saw the candidate, so the staged shape was silently a fragment of the
