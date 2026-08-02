@@ -52,7 +52,7 @@ packages/
     src/tcip_web/
       routes/                  # annotate, review, training, tuning, inference, results, ...
     frontend/src/              # Vite + React 18 + TypeScript + Tailwind + Konva
-scripts/                       # agent one-off scripts + end-to-end smokes (smoke_*_e2e.py)
+scripts/                       # agent one-off scripts + end-to-end smokes (smoke_*_e2e.py); see scripts/README.md
 tests/                         # pytest suite
 data/                          # sample hazelnut dataset (gitignored)
 ```
