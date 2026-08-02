@@ -15,8 +15,8 @@ description: "Model evaluation methods, metrics interpretation, failure triage, 
 | Regression | RMSE | R², MAE, residual distribution |
 | Ordinal | Quadratic weighted κ | Adjacent accuracy, confusion matrix |
 
-These are **labeled comparability metrics**: a fixed-convention number (mAP@50 = AP at IoU 0.5) that
-lets runs be compared on the same ruler. They do **not** govern the phenotype. The criterion that
+These are labeled comparability metrics: a fixed-convention number (mAP@50 = AP at IoU 0.5) that
+lets runs be compared on the same ruler. They do not govern the phenotype. The criterion that
 governs the delivered measurement (which detections are a hit, what the count is) is the *trait's*
 localization criterion with a tolerance derived from the data in hand, e.g. a center-match with
 `half_class_avg_size` tolerance for small, thin objects like catkins, not a frozen IoU@0.5. Choose the governing
@@ -48,7 +48,7 @@ delivery metric (see `evaluate_model`'s own docstring for the full precedence).
 
 ## Calibration/Holdout Split
 
-A validated operating point calibrates against a **locked** calibration/holdout split
+A validated operating point calibrates against a locked calibration/holdout split
 (`resolve_locked_cal_holdout_split`): the split draws once, on first use, and every later call
 reuses it, so the delivery gate can't silently pass by drawing a different, weaker holdout after
 the fact. Redrawing a locked split is a real, audited decision, never automatic:
