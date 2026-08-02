@@ -73,10 +73,8 @@ npm run build      # emits into ../static/
 
 ## Agent ↔ GUI integration
 
-MCP tools that previously wrote to `.tcip/events/*.json` now HTTP POST to
-`POST /api/events/{panel}` on the backend. The backend broadcasts those
-events to any browser subscribed to `/ws/panel/{panel}`. There is no longer
-a VS Code file-watcher in the loop.
+MCP tools HTTP POST to `POST /api/events/{panel}` on the backend, which broadcasts those
+events to any browser subscribed to `/ws/panel/{panel}`.
 
 Port discovery inside MCP tools: `TCIP_WEB_PORT` env > `.tcip/state/web_port.txt`
 > 8765. Host defaults to `127.0.0.1` unless `TCIP_WEB_HOST` is set.
@@ -84,11 +82,6 @@ Port discovery inside MCP tools: `TCIP_WEB_PORT` env > `.tcip/state/web_port.txt
 ## Keyboard map
 
 `?` opens the full help overlay in the browser.
-
-## VS Code extension
-
-The legacy `packages/tcip-vscode/` extension was retired in favour of this web
-GUI. See git history for the old webview-panel implementation if needed.
 
 ## Design & deployment decisions
 
