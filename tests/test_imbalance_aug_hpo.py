@@ -1,4 +1,4 @@
-"""W8 — imbalance losses + augmentation presets + HPO upgrades."""
+"""Imbalance losses + augmentation presets + HPO upgrades."""
 
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ def test_semantic_seg_head_advertises_no_loss_choice():
     """The head welds CE + multi-class Dice; it must not accept a loss name it cannot honor.
 
     Previously `loss=` was accepted and silently discarded. There is no registry loss to route
-    to — `build_loss("cross_entropy+dice")` raises at forward, because the registry's DiceLoss is
+    to: `build_loss("cross_entropy+dice")` raises at forward, because the registry's DiceLoss is
     binary while this head emits multi-class logits.
     """
     import pytest as _pytest
@@ -254,7 +254,7 @@ def test_random_rotation_rotates_semantic_mask():
 
 
 # --------------------------------------------------------------------------
-# HPO — Ray Tune: search algorithms + schedulers are agent-selectable
+# HPO: Ray Tune search algorithms + schedulers are agent-selectable
 # --------------------------------------------------------------------------
 
 def test_get_default_baseline_params_subset_of_space():
