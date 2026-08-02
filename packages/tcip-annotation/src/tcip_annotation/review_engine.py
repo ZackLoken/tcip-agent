@@ -588,7 +588,14 @@ class ReviewEngine:
         if not img_data:
             return False
 
-        reviewed_count = len(img_data.get("detections", []))
+        # A coverage-only attestation ("swept this image, found nothing more": neither gt_bbox_norm
+        # nor pred_bbox_norm set, see record_detection_action) doesn't walk any of `matches`' TP/FP/FN
+        # entries, so it must not count toward "every detection reviewed" -- counting it would let a
+        # sweep on an image with real, still-unreviewed detections flip img_status to completed early.
+        reviewed_count = sum(
+            1 for d in img_data.get("detections", [])
+            if d.get("gt_bbox_norm") is not None or d.get("pred_bbox_norm") is not None
+        )
         if reviewed_count >= total:
             img_data["img_status"] = "completed"
             self._save_image(img_name)
