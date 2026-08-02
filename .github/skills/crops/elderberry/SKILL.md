@@ -8,7 +8,7 @@ description: "Botany, phenology, disease, and imaging reference for American eld
 > **Grounding note (measurement integrity).** The field/lab partition, phenophase timing, and
 > disease agents below are grounded in cited elderberry literature (Prenger et al. 2026;
 > University of Missouri / MU Extension; Alabama Extension; MU multi-site phenology) plus
-> general *Sambucus* botany, **not** in the Savanna Institute program's own block records.
+> general *Sambucus* botany, not in the Savanna Institute program's own block records.
 > Phenology dates lean on Missouri data and are region- and year-dependent; treat everything
 > here as an informed default to confirm against the breeding block and derive from data before
 > delivery (see **Needs expert confirmation**).
@@ -43,7 +43,7 @@ its degree with the breeder for any pollination-window modeling.
 
 **crops.yml is the trait authority (69 elderberry traits). Verify every trait there; never
 assert one it does not list.** This skill partitions and contextualizes that catalog; it does
-not reproduce it. Note some documented elderberry problems have **no** matching crops.yml trait
+not reproduce it. Note some documented elderberry problems have no matching crops.yml trait
 (elderberry rust, bacterial/fungal leaf spot, Phomopsis-type cane cankers, leaf-footed bug);
 do not assume a trait exists for them (see expert flags).
 
@@ -84,7 +84,7 @@ in each trait's crops.yml definition. Trait names are verbatim.
 
 - **Chemistry & instrument (bench, not pixels):** `fruit_anthocyanin_content` (spectrophotometer),
   `fruit_juice_brix` (refractometer), `fruit_juice_pH` (pH meter), `fruit_juice_TA` (titration),
-  `fruit_cyanide_content` (cyanogenic-glycoside assay), `fruit_firmness`. Do **not** infer any of
+  `fruit_cyanide_content` (cyanogenic-glycoside assay), `fruit_firmness`. Do not infer any of
   these from berry color or darkness; they are not imageable quantities.
 - **Mass / yield (kg or g on a scale):** `plant_yield`, `cyme_weight`, `fruit_averageweight`,
   `fruit_batch_weight`, `leaf_25weight_fresh`, `leaf_25weight_dry`, `leaf_aveweight_fresh`,
@@ -192,7 +192,7 @@ the catkin-elongation cautionary tale there). Elderberry-specific traps:
   `plant_width_betweenrow`) are pixel quantities until an in-frame scale / photogrammetric
   calibration makes them metric. Pixels are not millimeters.
 - The fruit-ripening dates (`fruit_ripe_50per_date` and its siblings), "ripened to eating stage,"
-  are a **breeder-defined threshold** (color **plus** soluble solids), not "the berry looks dark";
+  are a **breeder-defined threshold** (color plus soluble solids), not "the berry looks dark";
   a pixel-color threshold is a proxy that must be validated against expert scoring before any
   milestone or curve.
 - Bloom / leaf-out / senescence dates require an **expert-defined** opened/unfurled/senesced state;
@@ -236,7 +236,7 @@ the catkin-elongation cautionary tale there). Elderberry-specific traps:
    seeds, or processed pulp (cyanogenic glycosides concentrate in seeds/unripe tissue).
 10. **Non-phenotype traits**: `parent_pollen` and `parent_seed` are pedigree **metadata**
     (recorded crosses), placed on the non-imageable side only to complete the partition.
-11. **Vocabulary gaps**: documented elderberry problems with **no** matching crops.yml trait
+11. **Vocabulary gaps**: documented elderberry problems with no matching crops.yml trait
     (elderberry rust *Puccinia sambuci/bolleyana*, bacterial/fungal leaf spot, leaf-footed bug,
     Phomopsis-type cane cankers); confirm whether any should map to overall damage tracking rather
     than assuming a trait exists.
