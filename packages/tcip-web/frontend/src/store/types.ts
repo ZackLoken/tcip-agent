@@ -27,7 +27,7 @@ export interface ViewState {
   offset_y: number;
 }
 
-/** Dashed reference overlay shown in the Annotate tab (Review→Edit flow). Display-only —
+/** Dashed reference overlay shown in the Annotate tab (Review→Edit flow). Display-only:
  *  a name-based label carries its subject, but the reference itself just needs geometry. */
 export interface PredictionReference {
   type: "box" | "polygon";
@@ -68,10 +68,10 @@ export interface GuiState {
 export interface Annotation {
   subject: string;
   bbox?: [number, number, number, number] | null; // [x1, y1, x2, y2], pixel
-  // Every ring of a polygon, pixel — an occlusion-split instance_seg shape is genuinely more than
+  // Every ring of a polygon, pixel: an occlusion-split instance_seg shape is genuinely more than
   // one region, and both load routes (_ann_dict in annotate.py / review.py) always send them all.
   rings?: [number, number][][] | null;
-  // A single labelled location, pixel — a placed prompt or a keypoint/landmark. Geometry is a union
+  // A single labelled location, pixel: a placed prompt or a keypoint/landmark. Geometry is a union
   // server-side (tcip_annotation.state.Annotation), so this never arrives alongside bbox/rings, and
   // a point carries no extent: never derive a box from it (see bbox_of, which refuses one).
   point?: [number, number] | null;
@@ -86,7 +86,7 @@ export interface Annotation {
 /** The wire shape the Annotate save route accepts (mirrors AnnotationPayload in annotate.py):
  *  ``points`` for one hand-drawn/edited contour, ``rings`` for a multi-ring shape round-tripping
  *  through save. Send one or the other, never both (the backend prefers ``rings``). ``point`` is a
- *  third, separate geometry — one coordinate pair, no ring/multi-part concept. */
+ *  third, separate geometry: one coordinate pair, no ring/multi-part concept. */
 export interface AnnotationPayload {
   subject: string;
   bbox?: number[] | null;
@@ -131,7 +131,7 @@ export interface PolygonShape {
 }
 
 /** A point on the canvas: one labelled location, the whole annotation. No extent, so no derived
- *  box and no vertices — it is placed, moved and deleted as a single coordinate. */
+ *  box and no vertices; it is placed, moved and deleted as a single coordinate. */
 export interface PointShape {
   x: number;
   y: number;
@@ -179,6 +179,6 @@ export interface ImageLabels {
   boxes: Box[];
   polygons: PolygonShape[];
   points: PointShape[];
-  // Geometry-less (image/plant-level) ratings — kept so they round-trip losslessly on save.
+  // Geometry-less (image/plant-level) ratings, kept so they round-trip losslessly on save.
   imageAnnotations: Annotation[];
 }
