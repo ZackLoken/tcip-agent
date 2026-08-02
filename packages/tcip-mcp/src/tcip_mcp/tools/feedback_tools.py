@@ -1,8 +1,8 @@
 """Review -> retrain feedback MCP tools.
 
-``materialize_review_dataset`` turns human review verdicts into a curated YOLO
-detection training set (with experiment lineage); ``prioritize_review_queue`` ranks
-un-reviewed images by active-learning informativeness for the next review batch.
+``materialize_review_dataset`` turns human review verdicts into a curated detection training set
+(with experiment lineage); ``prioritize_review_queue`` ranks un-reviewed images by
+active-learning informativeness for the next review batch.
 """
 
 from __future__ import annotations
@@ -53,6 +53,11 @@ def materialize_review_dataset(
         include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
         copy_files: Copy images (True) or symlink (False).
+        subject: The object the review was about; confirmed negatives are keyed under it. When
+            omitted it is derived from the verdicts' own class names, but only when the verdicts
+            name exactly one subject; a review touching more than one subject with no explicit
+            ``subject`` can't attribute its negatives, and they are silently dropped rather than
+            carried into the curated set.
     """
     if not _review_state_exists(review_state_dir):
         return {"error": f"no review state (review/ shards) in {review_state_dir}"}
