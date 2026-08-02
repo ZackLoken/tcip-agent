@@ -205,8 +205,8 @@ def test_record_overrides_existing(engine: ReviewEngine, ctx: ReviewContext) -> 
 def test_record_stamps_missed_object_attested_for_a_genuine_new_attestation(
     engine: ReviewEngine, ctx: ReviewContext
 ) -> None:
-    # Fix H: the "mark missed object" tool's exact call shape (ReviewTab.tsx's recordMissedObject)
-    # — neither an existing GT nor an existing prediction to key off of. missed_object_attested is
+    # The "mark missed object" tool's exact call shape (ReviewTab.tsx's recordMissedObject) has
+    # neither an existing GT nor an existing prediction to key off of. missed_object_attested is
     # stamped from that call-site fact directly, not reconstructed later from bbox geometry.
     det = ReviewDetection(det_type="fn", class_name="catkin", conf=None, iou=None,
                           gt_idx=None, pred_idx=None, bbox=(10, 10, 20, 20))
@@ -218,9 +218,9 @@ def test_record_stamps_missed_object_attested_for_a_genuine_new_attestation(
 def test_record_does_not_mistake_an_existing_fn_rejection_for_a_missed_object_attestation(
     engine: ReviewEngine, ctx: ReviewContext
 ) -> None:
-    # A REJECTED pre-existing FN (an existing, already-indexed GT box the breeder decided was wrong,
-    # not a newly-attested miss) ends up with the SAME persisted bbox shape as a genuine attestation
-    # once written (pred_bbox_norm=None, gt_bbox_norm=<box>) — geometry alone can't tell them apart.
+    # A rejected pre-existing FN (an existing, already-indexed GT box the breeder decided was wrong,
+    # not a newly-attested miss) ends up with the same persisted bbox shape as a genuine attestation
+    # once written (pred_bbox_norm=None, gt_bbox_norm=<box>): geometry alone can't tell them apart.
     # missed_object_attested must read False here, since the call site supplied a real gt_idx.
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
@@ -294,7 +294,7 @@ def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -
 def test_save_gt_writes_merged_file(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
     from tcip_annotation.json_io import read_annotations
 
-    # One merged per-image file holds every subject — a box and a polygon together.
+    # One merged per-image file holds every subject: a box and a polygon together.
     ctx.gt = [
         Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200)),
         Annotation(subject="leaf", geometry=Polygon([[(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]])),
