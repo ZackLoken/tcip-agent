@@ -104,6 +104,17 @@ class TestOptimizerFactory:
         assert "adamw" in _OPTIMIZER_BUILDERS
         assert "sgd" in _OPTIMIZER_BUILDERS
 
+    def test_lamb_raises_when_torch_optimizer_missing(self):
+        """lamb must never silently fall back to AdamW when torch_optimizer isn't installed."""
+        from importlib.util import find_spec
+        from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
+
+        if find_spec("torch_optimizer") is not None:
+            pytest.skip("torch_optimizer is importable in this environment")
+        model = nn.Linear(10, 5)
+        with pytest.raises(ImportError, match="torch_optimizer"):
+            build_optimizer("lamb", model, head_lr=1e-3)
+
 
 class TestTrainConfig:
     def test_dataclass_defaults(self):
