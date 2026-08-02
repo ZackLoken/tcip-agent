@@ -62,7 +62,7 @@ Senescence is a change-detection signal across the temporal series.
 distance (GSD), spectral range/resolution, and standoff/perspective set a *hard bound* on
 what is physically observable. That bound is a constraint, not a prescription: it says a
 2–3 mm pistillate flower cannot be measured at 2 cm GSD by any model, and that kernel oil
-content is unreachable from an RGB photo; it does **not** say "sensor X is the pipeline for
+content is unreachable from an RGB photo; it does not say "sensor X is the pipeline for
 trait Y." crops.yml deliberately omits sensor/task/perspective assignments; do not
 reintroduce a fixed sensor→trait or task→trait map. Within the feasible set a modality
 permits, the CV approach for each trait is still **derived and validated per trait** against
@@ -118,7 +118,7 @@ plant mapping (see `phenology`), never an every-Nth-frame rule.
   counts, color, and morphometrics on harvested samples: `inshell_length`, `kernel_weight`,
   `fruit_diameter`, `fruit_color_rgb`. A photo without a scale reference cannot yield an
   absolute dimension; mass is not recoverable from an image.
-- **NIRS / spectroscopy** (point spectrum, typically no image): the **only** optical route
+- **NIRS / spectroscopy** (point spectrum, typically no image): the only optical route
   to internal chemistry: `kernel_perc_oil`, `kernel_oleic_acid_content`,
   `kernel_dry_matter_perc`, `fruit_anthocyanin_content`, `soluble_tannins`, `total_tannins`.
   Requires a crop- and state-specific calibration model; chemistry cannot be inferred from
