@@ -1,18 +1,19 @@
-"""A hand-written bespoke detector + custom training loop — the S7 proof fixture.
+"""A hand-written bespoke detector and custom training loop, used as a proof fixture for the
+platform's audited envelope.
 
 This is *agent-authored* model code the platform runs through its audited envelope. It exercises
 two things the CV-scientist boundary must support:
 
-  (a) **modified architecture internals** — a from-scratch backbone + tiny FPN that use ``GroupNorm``
+  (a) **modified architecture internals**: a from-scratch backbone + tiny FPN that use ``GroupNorm``
       (detector batches are tiny, so BatchNorm statistics are unreliable), fed into a torchvision
       Faster R-CNN whose ``AnchorGenerator`` is built from *this dataset's* GT box shapes
       (aspect ratios via ``pipelines.derivations.gt_aspect_ratios``, sizes from the GT size
       distribution) rather than torchvision's fixed defaults; and
 
-  (b) a **custom ``train(ctx)`` loop** (``train_bespoke``) — not ``ctx.default_train()`` — that drives
+  (b) a **custom ``train(ctx)`` loop** (``train_bespoke``), not ``ctx.default_train()``, that drives
       training through the envelope's ``ctx`` sinks so it stays audited, immutable, and provenanced.
 
-Importable-builder only (the envelope re-imports it, never ``exec``). Not a ``test_*`` module — it is
+Importable-builder only (the envelope re-imports it, never ``exec``). Not a ``test_*`` module: it is
 imported by ``test_bespoke_model_e2e.py`` via its dotted name.
 """
 
@@ -26,7 +27,7 @@ from tcip_mcp.pipelines.derivations import gt_aspect_ratios
 
 
 # ---------------------------------------------------------------------------
-# (a) architecture with modified internals — GroupNorm backbone/FPN + GT anchors
+# (a) architecture with modified internals: GroupNorm backbone/FPN + GT anchors
 # ---------------------------------------------------------------------------
 
 class _GNBlock(nn.Module):
@@ -90,7 +91,7 @@ class BespokeGNDetector(nn.Module):
 def gt_anchor_sizes(gt_boxes_wh) -> tuple[int, ...]:
     """Anchor scales from the GT object-size distribution (p10/p50/p90 of sqrt(area)).
 
-    Derived from the data in hand, not torchvision's fixed (32,64,128,256,512) — the anchors cover
+    Derived from the data in hand, not torchvision's fixed (32,64,128,256,512): the anchors cover
     the sizes objects actually take in this dataset.
     """
     import numpy as np
@@ -107,7 +108,7 @@ def build_bespoke_detector(*, gt_boxes_wh, num_classes: int = 1, in_chans: int =
                            min_size: int = 64, max_size: int = 128) -> BespokeGNDetector:
     """Build the bespoke detector with GT-derived anchors and a GroupNorm backbone/FPN.
 
-    ``gt_boxes_wh`` is a list of ``(w, h)`` in pixels — the dataset's GT box shapes that drive the
+    ``gt_boxes_wh`` is a list of ``(w, h)`` in pixels: the dataset's GT box shapes that drive the
     anchor derivation. Deterministic in its inputs, so re-importing the builder at inference rebuilds
     the identical architecture and the trained ``state_dict`` loads cleanly.
     """
@@ -130,7 +131,7 @@ def build_bespoke_detector(*, gt_boxes_wh, num_classes: int = 1, in_chans: int =
 
 
 # ---------------------------------------------------------------------------
-# (b) a custom train(ctx) loop — hand-written, drives training through ctx sinks
+# (b) a custom train(ctx) loop: hand-written, drives training through ctx sinks
 # ---------------------------------------------------------------------------
 
 def train_bespoke(ctx) -> None:
@@ -191,7 +192,7 @@ def train_bespoke(ctx) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Sibling builders — agent-authored modules that wire the kept nn.Module blocks
+# Sibling builders: agent-authored modules that wire the kept nn.Module blocks
 # for the non-detector tasks. Same forward contract the trainer/eval expect:
 # a loss dict in train mode (``head{i}_{k}``), decoded predictions in eval mode.
 # ---------------------------------------------------------------------------
@@ -216,7 +217,7 @@ def _resnet18(in_chans: int = 3):
 
 
 class BespokeComposed(nn.Module):
-    """Backbone + neck + task head — the sibling of the removed ``ComposedModel``."""
+    """Backbone + neck + task head: the sibling of the removed ``ComposedModel``."""
 
     def __init__(self, backbone: nn.Module, neck: nn.Module, head: nn.Module) -> None:
         super().__init__()
@@ -252,7 +253,7 @@ class BespokeComposed(nn.Module):
 
 
 class BespokeDetection(nn.Module):
-    """Real backbone + FPN fed into a torchvision detector via ``BackboneNeckAdapter`` —
+    """Real backbone + FPN fed into a torchvision detector via ``BackboneNeckAdapter``:
     the detection / instance-seg sibling of the removed ``DetectionModel``."""
 
     def __init__(self, num_classes: int, *, in_chans: int = 3, detector: str = "faster_rcnn",
