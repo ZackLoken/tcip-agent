@@ -85,7 +85,7 @@ npm run build      # rebuild production bundle → ../static/
 
 # Tests
 pytest tests/ -v --tb=short
-npm run typecheck  # from packages/tcip-web/frontend
+cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
 
 # End-to-end smokes (scripts/smoke_*_e2e.py)
 python scripts/smoke_phenology_e2e.py   # phenology pipeline: mapping -> milestones (offline)
@@ -144,7 +144,8 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   (no source-image leakage) with automatic validation loaders.
 - **Imbalance & augmentation**: class-weighted / focal losses and a nadir-imagery
   augmentation preset (free rotation + flips; mosaic/copy-paste intentionally off).
-- **HPO**: Optuna search with ASHA pruning + known-good warm start on the composite.
+- **HPO**: Ray Tune search over the composite, with a pluggable searcher/scheduler
+  (ASHA-style pruning and known-good warm start available, not mandatory).
 - **Reproducibility**: global seeding, checkpoint resume (model + optimizer +
   scheduler), and pydantic + neck/head channel-compatibility config validation.
 - **Review → retrain**: turn human review verdicts into a curated training set
