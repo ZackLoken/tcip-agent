@@ -234,6 +234,26 @@ describe("ReviewTab validation-reference affordance", () => {
     expect(await screen.findByText("Not yet")).toBeInTheDocument();
     expect(screen.queryByText("Validated")).not.toBeInTheDocument();
   });
+
+  it("renders a joined multi-failure reason with its line breaks preserved", async () => {
+    const joined = "Not yet. First blocker.\n\nNot yet. Second blocker.";
+    vi.spyOn(api.review, "validateReference").mockResolvedValue({
+      validated: false,
+      reference: "false",
+      reviewed_image_count: 2,
+      conf: 0.5,
+      reason: joined,
+      buckets_stamped: [PRED_DIR_A],
+    });
+    const { container } = render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(refBtn());
+    await screen.findByText("Not yet");
+    const span = container.querySelector("span.whitespace-pre-wrap");
+    expect(span).not.toBeNull();
+    expect(span?.textContent).toBe(joined);
+  });
 });
 
 describe("ReviewTab Conf >= filter censoring warning", () => {
@@ -459,6 +479,93 @@ describe("ReviewTab mark-missed-object affordance", () => {
 
     expect(screen.queryByText("Marking missed object")).not.toBeInTheDocument();
     expect(actionSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReviewTab sweep-attested affordance", () => {
+  const sweepBtn = () =>
+    screen.getByTitle("Record that you checked this image for missed objects and found none");
+
+  it("records an explicit no-geometry attestation, distinct from a missed-object edit", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([]));
+    const actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
+      status: "ok",
+      image_status: "started",
+      annotation_status: null,
+      matches: matchesRes([]),
+    });
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(sweepBtn());
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    expect(actionSpy.mock.calls[0][0]).toMatchObject({
+      det_type: "sweep",
+      action: "swept",
+      gt_idx: null,
+      pred_idx: null,
+      edited_box: null,
+      edited_points: null,
+    });
+    // Toasts render from a component mounted in App.tsx, not ReviewTab itself; assert the pushed
+    // toast directly.
+    await waitFor(() =>
+      expect(useStore.getState().toasts.map((t) => t.message)).toContain(
+        "Recorded: no missed objects found on this image.",
+      ),
+    );
+  });
+
+  it("is disabled while drawing a missed object", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([]));
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTitle(/Draw a box around an object the model missed/i));
+    expect(sweepBtn()).toBeDisabled();
+  });
+});
+
+describe("ReviewTab class filter", () => {
+  function openFilters() {
+    const btn = screen.getByTitle("Show or hide the review filters");
+    if (btn.getAttribute("aria-expanded") !== "true") fireEvent.click(btn);
+  }
+
+  it("offers every subject present on the image, from the unfiltered gt/pred lists", async () => {
+    matchesSpy.mockResolvedValue(
+      matchesRes([det()], {
+        gt: [{ subject: "catkin", bbox: [10, 10, 50, 50], attributes: {} }],
+        preds: [{ subject: "leaf", bbox: [60, 60, 90, 90], attributes: {}, score: 0.5 }],
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    openFilters();
+
+    const select = screen.getByLabelText("Class filter") as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual(["all", "catkin", "leaf"]);
+  });
+
+  it("re-fetches matches scoped to the picked class", async () => {
+    matchesSpy.mockResolvedValue(
+      matchesRes([det()], {
+        gt: [{ subject: "catkin", bbox: [10, 10, 50, 50], attributes: {} }],
+        preds: [{ subject: "leaf", bbox: [60, 60, 90, 90], attributes: {}, score: 0.5 }],
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    openFilters();
+
+    fireEvent.change(screen.getByLabelText("Class filter"), { target: { value: "leaf" } });
+    await waitFor(() =>
+      expect(matchesSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ filter_class: "leaf" }),
+        expect.anything(),
+      ),
+    );
   });
 });
 
