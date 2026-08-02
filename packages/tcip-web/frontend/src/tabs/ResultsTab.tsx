@@ -13,7 +13,7 @@ import {
 import { api } from "@/api/client";
 import {
   resultsApi,
-  type BloomRequest,
+  type PhenologyRequest,
   type OnsetRow,
   type PerPlantRow,
   type PlantMappingSummary,
@@ -40,11 +40,6 @@ function dateKey(date: string): number {
   return y * 10000 + m * 100 + d;
 }
 
-// K4/K5: the trait a delivery is computed for is now a required, threaded parameter everywhere —
-// hardcoded to catkin here since a second trait's own UI affordance (a picker) is separate,
-// deferred GUI-design work, not this fix's scope (see Group A's design doc, Commit 3).
-const TRAIT = "catkin";
-
 export function ResultsTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const projectRoot = dataset.project_root;
@@ -53,12 +48,12 @@ export function ResultsTab() {
   const [mappingPath, setMappingPath] = useState(
     projectRoot ? `${projectRoot}/.tcip/state/plant_mapping.json` : "",
   );
-  // True unless a computed run reported that its predictions carried no elongation class.
-  const [elongationUnclassified, setElongationUnclassified] = useState(false);
+  // True unless a computed run reported that its predictions carried no positive-state class.
+  const [positiveClassUnassessed, setPositiveClassUnassessed] = useState(false);
 
   // Dataset tree (dates + which models actually have predictions per date) drives the structured
-  // per-date picker below — never a hand-edited JSON blob (K15 #10: models_with_predictions is
-  // the same primitive the backend already computes this from, via api.dataset.tree).
+  // per-date picker below, never a hand-edited JSON blob; models_with_predictions is the same
+  // primitive the backend already computes this from, via api.dataset.tree.
   const [dates, setDates] = useState<string[]>([]);
   const [modelsByDate, setModelsByDate] = useState<Record<string, string[]>>({});
   // The model picked per date; "" means "skip this date" (dropped before compute()).
@@ -75,14 +70,41 @@ export function ResultsTab() {
   const [onset, setOnset] = useState<OnsetRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  // The exact request the displayed numbers came from — the CSV door recomputes from these inputs
+  // The exact request the displayed numbers came from: the CSV door recomputes from these inputs
   // rather than being handed the rows, so export and screen share one producer.
-  const [lastRequest, setLastRequest] = useState<BloomRequest | null>(null);
+  const [lastRequest, setLastRequest] = useState<PhenologyRequest | null>(null);
   // Reconciled evidence for what is currently displayed. `provisional` is true whenever a dimension
-  // lacked on-disk backing, so the tables can say so instead of rendering a bloom date as "valid".
+  // lacked on-disk backing, so the tables can say so instead of rendering a phenology date as "valid".
   const [provisional, setProvisional] = useState(false);
   const [validity, setValidity] = useState<Record<string, string>>({});
   const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<string | null>(null);
+
+  // The trait a delivery is computed for, resolved from this project's own registered traits
+  // (never assumed): auto-selected when there is exactly one, left blank (with an explicit
+  // error, not a silent guess) when there are zero, offered as a choice when there are several.
+  const [availableTraits, setAvailableTraits] = useState<string[]>([]);
+  const [trait, setTrait] = useState("");
+  const [traitError, setTraitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectRoot) return;
+    setTrait("");
+    setTraitError(null);
+    void resultsApi
+      .traits(projectRoot)
+      .then((res) => {
+        setAvailableTraits(res.traits);
+        if (res.traits.length === 0) {
+          setTraitError("No trait is registered for this project yet.");
+        } else if (res.traits.length === 1) {
+          setTrait(res.traits[0]);
+        }
+      })
+      .catch((e) => {
+        setAvailableTraits([]);
+        setTraitError(`Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`);
+      });
+  }, [projectRoot]);
 
   useEffect(() => {
     if (!datasetRoot) return;
@@ -99,7 +121,7 @@ export function ResultsTab() {
       .catch(() => {});
   }, [datasetRoot]);
 
-  // Same prediction-dir convention prefillPreds always used — kept as one place, now fed by the
+  // Same prediction-dir convention prefillPreds always used, kept as one place, now fed by the
   // structured picker's selections instead of a hand-typed date -> path JSON object.
   function predDirFor(date: string, model: string): string {
     return model ? `${datasetRoot}/predictions/${model}/${date}/detect` : "";
@@ -139,6 +161,10 @@ export function ResultsTab() {
 
   async function compute(acknowledgeUnvalidated = false) {
     if (!projectRoot) return;
+    if (!trait) {
+      setError(traitError ?? "Pick a trait before computing.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -151,21 +177,21 @@ export function ResultsTab() {
         project_root: projectRoot,
         mapping_path: mappingPath,
         predictions_by_date: predsMap,
-        trait: TRAIT,
+        trait,
         acknowledge_unvalidated: acknowledgeUnvalidated,
       };
       setLastRequest(request);
       const curveRes = await resultsApi.perPlantCurves(request);
       // The numbers and the evidence that qualifies them arrive together, so the tables below can
-      // never render an unvalidated bloom measurement as though it were a delivery.
+      // never render an unvalidated phenology measurement as though it were a delivery.
       setProvisional(curveRes.provisional);
       setValidity(curveRes.validated);
       setUnvalidatedRefusal(null);
-      const unclassified = curveRes.elongation_classified === false;
-      setElongationUnclassified(unclassified);
+      const unclassified = curveRes.positive_class_assessed === false;
+      setPositiveClassUnassessed(unclassified);
       setCurves(curveRes.rows ?? []);
       if (unclassified) {
-        // No elongation class → the fraction is not a bloom measurement. Don't derive
+        // No positive-state class → the fraction is not a phenology measurement. Don't derive
         // milestones from it at all, so there is nothing to export (belt-and-braces with the
         // disabled export buttons + the compute_phenology MCP tool's hard refusal).
         setOnset([]);
@@ -176,7 +202,7 @@ export function ResultsTab() {
         setOnset(onsetRes.rows ?? []);
       }
     } catch (e) {
-      // The server refuses unvalidated evidence by default. Surface WHY, plus the one-click way to
+      // The server refuses unvalidated evidence by default. Surface why, plus the one-click way to
       // see the numbers anyway (clearly marked provisional), so an uncalibrated operating point is
       // a signposted next step rather than a dead end.
       const detail = e instanceof Error ? e.message : String(e);
@@ -209,20 +235,21 @@ export function ResultsTab() {
     }
   }
 
-  // Measurement-integrity guard: never export a bloom CSV built on predictions that carry no
-  // elongation class, or on provisional evidence. Mirrors compute_phenology, which hard-refuses
-  // both, so the GUI and the agent surface behave identically (see CLAUDE.md invariant). The
-  // server refuses either case regardless; these keep the button from promising what it can't do.
-  const exportBlocked = elongationUnclassified || provisional;
+  // Measurement-integrity guard: never export a phenology CSV built on predictions that carry no
+  // positive-state class, or on provisional evidence. Mirrors compute_phenology, which
+  // hard-refuses both, so the GUI and the agent surface behave identically (see CLAUDE.md
+  // invariant). The server refuses either case regardless; these keep the button from promising
+  // what it can't do.
+  const exportBlocked = positiveClassUnassessed || provisional;
   const downloadOnsetCsv = () => {
     if (exportBlocked) return;
-    void downloadCsv("milestones", "catkin_phenology.csv");
+    void downloadCsv("milestones", `${trait}_phenology.csv`);
   };
   const downloadCurvesCsv = () => {
     if (exportBlocked) return;
-    // A curve export is the same delivered bloom measurement as the milestone one, just
-    // un-summarised — same producer, same gate.
-    void downloadCsv("curves", "catkin_curves.csv");
+    // A curve export is the same delivered phenology measurement as the milestone one, just
+    // un-summarised: same producer, same gate.
+    void downloadCsv("curves", `${trait}_curves.csv`);
   };
 
   const chartData: DateRow[] = useMemo(() => {
@@ -240,9 +267,9 @@ export function ResultsTab() {
     return Array.from(set);
   }, [curves]);
 
-  // K4/K5: milestone columns are read generically off whatever the (threaded) trait's spec
-  // returned — never hardcoded to catkin's own column names, so a second trait's rows render
-  // instead of showing empty (round-2 finding RC-NEW-3's frontend half).
+  // Milestone columns are read generically off whatever the (threaded) trait's spec returned,
+  // never hardcoded to one trait's own column names, so a different trait's rows render instead
+  // of showing empty.
   const milestoneColumns = useMemo(() => {
     const known = new Set([
       "plant_id",
@@ -265,7 +292,29 @@ export function ResultsTab() {
 
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
-      {/* Plant mapping — build (from geolocated images + plant CSVs) or point at an existing file */}
+      {traitError && (
+        <div className="tcip-panel p-3 text-[11px] text-tcip-fp">{traitError}</div>
+      )}
+      {availableTraits.length > 1 && (
+        <div className="tcip-panel p-3 flex items-center gap-2">
+          <label className="tcip-label">Trait</label>
+          <select
+            className="tcip-input w-auto"
+            value={trait}
+            onChange={(e) => setTrait(e.target.value)}
+          >
+            <option value="" disabled>
+              Choose a trait…
+            </option>
+            {availableTraits.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {/* Plant mapping: build (from geolocated images + plant CSVs) or point at an existing file */}
       <div className="tcip-panel p-4">
         <div className="tcip-heading mb-3">Plant mapping</div>
         <div className="grid grid-cols-[1fr_1fr] gap-3">
@@ -279,7 +328,7 @@ export function ResultsTab() {
               onChange={(e) => setMappingPath(e.target.value)}
               placeholder="…/.tcip/state/plant_mapping.json"
             />
-            <label className="tcip-label mt-1">Plant CSV path(s) — one per line</label>
+            <label className="tcip-label mt-1">Plant CSV path(s), one per line</label>
             <textarea
               className="tcip-input h-16 font-mono text-[11px] leading-4"
               value={plantCsvText}
@@ -350,7 +399,7 @@ export function ResultsTab() {
                               }
                             >
                               <option value="">
-                                {opts.length === 0 ? "no predictions" : "— skip —"}
+                                {opts.length === 0 ? "no predictions" : "(skip)"}
                               </option>
                               {opts.map((m) => (
                                 <option key={m} value={m}>
@@ -369,21 +418,21 @@ export function ResultsTab() {
           </div>
           <div className="flex flex-col gap-2">
             <p className="text-[11px] text-tcip-muted">
-              Bloom = the fraction of a plant's detected catkins that are elongated. Elongation is a
-              class from the validated classifier, not a bbox measurement — predictions must be
-              elongation-classified.
+              The positive-state fraction is the share of a plant's detected objects that are in
+              the trait's positive state. That state is a class from the validated classifier, not
+              a bbox measurement; predictions must be classified for it.
             </p>
-            {elongationUnclassified && (
+            {positiveClassUnassessed && (
               <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
-                These predictions carry no elongation class — the curves below are not a valid bloom
-                measurement, so CSV export is disabled. Run the elongation classifier first.
+                These predictions carry no positive-state class, so the curves below are not a
+                valid phenology measurement and CSV export is disabled. Run the classifier first.
               </div>
             )}
             {unvalidatedRefusal && (
               <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
                 <div>
                   These predictions have no validated operating point on disk, so this is not yet a
-                  deliverable bloom measurement. Calibrate first — or look at the numbers as
+                  deliverable phenology measurement. Calibrate first, or look at the numbers as
                   provisional, which will not let you export them.
                 </div>
                 <div className="text-tcip-muted">{unvalidatedRefusal}</div>
@@ -398,7 +447,7 @@ export function ResultsTab() {
             )}
             {provisional && (
               <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
-                Provisional — shown for inspection only, not a deliverable phenotype. Unvalidated:{" "}
+                Provisional: shown for inspection only, not a deliverable phenotype. Unvalidated:{" "}
                 {Object.entries(validity)
                   .filter(([, state]) => state === "false")
                   .map(([dim]) => dim)
@@ -434,7 +483,7 @@ export function ResultsTab() {
         <div className="tcip-heading mb-3">
           Elongated / total ratio over time, per plant
           {plantKeys.length > 30
-            ? ` (showing 30 of ${plantKeys.length} plants — the onset table below has all)`
+            ? ` (showing 30 of ${plantKeys.length} plants, the onset table below has all)`
             : ` (${plantKeys.length} plants)`}
         </div>
         {chartData.length > 0 ? (
@@ -475,7 +524,8 @@ export function ResultsTab() {
 
       <div className="tcip-panel p-4">
         <div className="tcip-heading mb-3">
-          Phenology milestones (elongation + catkin_05 / 50 / 95 per plant) — {onset.length} rows
+          Phenology milestones for {trait || "the selected trait"} (onset + percentile crossings
+          per plant): {onset.length} rows
         </div>
         {onset.length > 0 ? (
           <div className="overflow-auto max-h-96">
@@ -495,14 +545,14 @@ export function ResultsTab() {
               </thead>
               <tbody>
                 {onset.map((r) => {
-                  // K15 finding #9: gate the DERIVATION (matching the setOnset([]) pattern used
-                  // above) rather than a banner — a plant with any unclassified/missing date shows
-                  // as such, not silently blank milestone cells with no explanation.
+                  // Gate the derivation itself (matching the setOnset([]) pattern used above)
+                  // rather than a banner, so a plant with any unclassified/missing date shows as
+                  // such, not silently blank milestone cells with no explanation.
                   const rowValid = r.n_dates_unclassified === 0 && r.n_dates_missing_images === 0;
-                  // Stage-6 review N6: "valid" alone doesn't distinguish real bloom data from a
-                  // plant that was fully classified/observed but never had a single detection
-                  // (before emergence, or a genuinely empty scene) — that reads as no observations,
-                  // not blank cells next to a reassuring "valid".
+                  // "Valid" alone doesn't distinguish real detection data from a plant that was fully
+                  // classified/observed but never had a single detection (before emergence, or a
+                  // genuinely empty scene): that reads as no observations, not blank cells next
+                  // to a reassuring "valid".
                   const neverObserved = rowValid && r.n_observed_dates === 0;
                   return (
                     <tr key={r.plant_id} className="border-t border-tcip-border first:border-t-0">
@@ -513,19 +563,18 @@ export function ResultsTab() {
                         {neverObserved ? (
                           <span
                             className="text-tcip-muted"
-                            title="Fully classified and fully observed, but no detections on any date — nothing to derive milestones from."
+                            title="Fully classified and fully observed, but no detections on any date, so there is nothing to derive milestones from."
                           >
                             no observations
                           </span>
                         ) : rowValid && provisional ? (
                           // Coverage is complete, but the measurement behind these dates has no
                           // validated operating point. The banner announcing that sits two panels
-                          // up and scrolls out of view, so the row must say so where it is read —
-                          // a bloom date beside a plain "valid" is exactly the unearned precision
-                          // claim this round exists to prevent.
+                          // up and scrolls out of view, so the row must say so where it is read:
+                          // a phenology date beside a plain "valid" would be an unearned precision claim.
                           <span
                             className="text-tcip-fp"
-                            title="Coverage is complete, but the operating point behind these dates is not validated on disk — provisional, not a deliverable phenotype."
+                            title="Coverage is complete, but the operating point behind these dates is not validated on disk: provisional, not a deliverable phenotype."
                           >
                             provisional
                           </span>
@@ -543,12 +592,11 @@ export function ResultsTab() {
                       {milestoneColumns.map((c) => {
                         const date = r[c] as string | null;
                         const bound = r[`${c}_bound`] as string | null;
-                        // A left-censored crossing means the FIRST observation already met the
+                        // A left-censored crossing means the first observation already met the
                         // target, so the true date is only an upper bound; a right-censored one
-                        // (round 12) means the LAST observation still hadn't, so the true date (if
-                        // any) is after this one, a lower bound — rendering either as a plain date is
-                        // a precision claim the data does not support. The bound column was dropped
-                        // entirely here until now, while the CSV has carried it since round 5.
+                        // means the last observation still hadn't, so the true date (if any) is
+                        // after this one, a lower bound. Rendering either as a plain date is a
+                        // precision claim the data does not support.
                         const marker =
                           bound === "left_censored"
                             ? {
