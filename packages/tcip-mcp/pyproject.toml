@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-hpo = ["optuna>=3.0"]
+hpo = ["ray[tune]>=2.9", "optuna>=3.0"]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "pytest-timeout>=2.0", "pytest-xdist>=3.0"]
 
 [build-system]
