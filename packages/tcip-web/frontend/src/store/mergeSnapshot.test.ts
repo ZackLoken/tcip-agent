@@ -102,7 +102,7 @@ describe("mergeSnapshot ownership model", () => {
   });
 
   it("adopts the whole persisted state on boot (fresh page load resumes the session)", () => {
-    // Fresh browser: no dataset yet — there is no local state to protect, so the first
+    // Fresh browser: no dataset yet, there is no local state to protect, so the first
     // snapshot restores tab/mode/filters instead of leaving the Annotate defaults.
     useStore.setState({
       gui: snapshot({
