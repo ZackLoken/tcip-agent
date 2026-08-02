@@ -16,9 +16,8 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     sweep_operating_point,
 )
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so resolve_operating_point("catkin", ...) keeps
-# resolving by default.
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
+# test's pinned project root so resolve_operating_point("catkin", ...) keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 N_IMAGES = 20
@@ -45,8 +44,8 @@ def _records(idp="c", *, shift: float = 0.0):
     conf 0.9 -> A unbiased, B under-counts (-1) => net bias -0.5 but higher F1 (no spurious FP).
 
     ``shift`` offsets every GT box's center by that many px (well inside the ~10px center-match
-    tolerance derived from these boxes) while leaving the detections in place — used to give a
-    holdout fixture genuinely different GT content from calibration's (K1's content-overlap gate
+    tolerance derived from these boxes) while leaving the detections in place, used to give a
+    holdout fixture genuinely different GT content from calibration's (the content-overlap gate
     would otherwise flag a byte-identical-content holdout, differing only by ``image_id``, as a
     clone unable to function as an independent check).
     """
@@ -60,10 +59,10 @@ def _records(idp="c", *, shift: float = 0.0):
 
 
 def _good_cal_holdout(*, shift: float = 5.0):
-    """A dense, realistic (rule 17) reference: a good detector with one low-conf spurious detection
-    per image (a realistic false-positive profile) that vanishes once conf crosses it — the
-    count-unbiased pick lands at the high, correct-match score (0.9), comfortably above a real
-    calibration floor, with zero bias/dispersion and full recall/precision on the holdout.
+    """A dense, realistic reference: a good detector with one low-conf spurious detection per image
+    (a realistic false-positive profile) that vanishes once conf crosses it, so the count-unbiased
+    pick lands at the high, correct-match score (0.9), comfortably above a real calibration floor,
+    with zero bias/dispersion and full recall/precision on the holdout.
     """
     miss = [0] * N_IMAGES
     fp = [1] * N_IMAGES
@@ -107,8 +106,8 @@ def test_center_match_respects_tolerance():
 
 
 def test_sweep_curve_carries_dispersion_and_reference_size_fields():
-    # Fix B/C: every curve entry now also carries count_error_p90 / count_bias_std / n_images,
-    # computed from the SAME per-image biases list, not a second pass over the data.
+    # Every curve entry now also carries count_error_p90 / count_bias_std / n_images, computed
+    # from the same per-image biases list, not a second pass over the data.
     recs = dense_records(n_images=4, objects_per_image=10,
                          miss_pattern=[0, 1, 0, 2], fp_pattern=[0, 0, 1, 0])
     sweep = sweep_operating_point(recs, tolerance=0.5 * gt_class_avg_size(recs))
@@ -165,10 +164,10 @@ def test_max_dets_from_density_floors_sparse_scenes():
 
 
 def test_derive_max_dets_from_counts_is_the_shared_formula_records_delegate_to():
-    # K7 residual (detector-cap censoring): scripts/calibrate_operating_point.py derives its
-    # collection-pass cap from raw label counts (known before any model pass), not from already-
-    # collected records — this is the same ~1.5x p99 formula _max_dets_from_density applies over
-    # per-record GT counts, exposed directly so the two callers share one implementation.
+    # scripts/calibrate_operating_point.py derives its collection-pass cap from raw label counts
+    # (known before any model pass), not from already-collected records: this is the same ~1.5x
+    # p99 formula _max_dets_from_density applies over per-record GT counts, exposed directly so the
+    # two callers share one implementation.
     from tcip_mcp.pipelines.operating_point import _max_dets_from_density, derive_max_dets_from_counts
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
     counts = [80] * 20
@@ -183,7 +182,7 @@ def test_derive_max_dets_from_counts_is_the_shared_formula_records_delegate_to()
 def test_resolve_operating_point_validated_with_holdout():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     cal, hold = _good_cal_holdout()
-    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
@@ -215,9 +214,9 @@ def test_resolve_operating_point_overlapping_holdout_not_validated():
 
 def test_resolve_operating_point_missing_image_ids_fails_closed():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    # Records with no image_id: identity is unverifiable, so a held-out claim can't be proven —
-    # the same records as cal+holdout must not be stamped validated (the firewall fails closed).
-    # Before, empty id-sets made `disjoint` True, so an in-sample "holdout" passed as validated.
+    # Records with no image_id: identity is unverifiable, so a held-out claim can't be proven, and
+    # the same records used as cal+holdout must not be stamped validated (the firewall fails
+    # closed) merely because empty id-sets make `disjoint` trivially True.
     recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
              "dt": [_ann(100, 100, score=0.9)]}]  # no image_id key
     b = resolve_operating_point("catkin", dataset_hash="h1",
@@ -229,15 +228,15 @@ def test_resolve_operating_point_missing_image_ids_fails_closed():
 def test_resolve_operating_point_biased_holdout_is_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     cal, _ = _good_cal_holdout()
-    # a dense holdout with a REAL, consistent per-image miss (not just a sparse fixture's one-off
-    # spread) — count bias -3/image, well beyond tolerance regardless of dispersion/SE.
+    # a dense holdout with a real, consistent per-image miss (not just a sparse fixture's one-off
+    # spread), count bias -3/image, well beyond tolerance regardless of dispersion/SE.
     biased_hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
                                 shift=5.0, miss_pattern=[3] * N_IMAGES, fp_pattern=[0] * N_IMAGES,
                                 score=0.9)
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=biased_hold,
                                 staged_conf_floor=0.01)
-    # measured on the disjoint split but FAILED (bias > tolerance) -> not validated, firewall holds
+    # measured on the disjoint split but failed (bias > tolerance) -> not validated, firewall holds
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
     assert "count_bias_exceeds_tolerance" in b.get("conf").sweep["failures"]
@@ -250,7 +249,7 @@ def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable():
     assert not b.is_shippable
 
 
-# --- K1: content-overlap + train-disjointness gates ---
+# --- Content-overlap and train-disjointness gates ---
 
 def test_resolve_operating_point_content_clone_holdout_is_false():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -289,8 +288,8 @@ def test_resolve_operating_point_train_disjointness_unresolvable_when_split_miss
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    # A KNOWN experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
-    # experiment_id=None case (a foreign/unregistered checkpoint), per the owner decision.
+    # A known experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
+    # experiment_id=None case (a foreign/unregistered checkpoint).
     cal, hold = _good_cal_holdout()
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
@@ -312,9 +311,9 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
     (exp_dir / "split.json").write_text(
         json.dumps({"train": ["z_0_0", "z_0_1"], "group_by": "tile_prefix"}), encoding="utf-8")
 
-    # Calibration/holdout use id prefixes "c"/"h" — disjoint from training's "z" group.
+    # Calibration/holdout use id prefixes "c"/"h", disjoint from training's "z" group.
     cal, hold = _good_cal_holdout()
-    # tiled=False: this test is about conf-calibration shippability, not tiling (K10 — tile_size
+    # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold, tiled=False,
@@ -327,11 +326,11 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
                                                  "group_check": "performed"}
 
 
-# --- K10: tile_size gates the calibrated path too, not just raw_operating_point -----------------
+# --- tile_size gates the calibrated path too, not just raw_operating_point -----------------
 
 def test_resolve_operating_point_fabricated_tile_size_floors_shippability_even_with_valid_conf():
     """The calibrated door (operating_point.py) shares resolve_tile_size_param with the raw door
-    (resolution.py) — not a second, divergent implementation — so a tiled run with no persisted
+    (resolution.py), not a second, divergent implementation, so a tiled run with no persisted
     training geometry and no explicit override is caught here too, not only on the uncalibrated
     path. A cleanly-validated conf must not paper over a fabricated tile scale."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -352,8 +351,8 @@ def test_resolve_operating_point_fabricated_tile_size_floors_shippability_even_w
 
 def test_resolve_operating_point_derived_tile_size_is_shippable():
     """The mirror case: a tile_size genuinely derived from the checkpoint's persisted training
-    geometry has a real basis and must not be penalized alongside the fabricated-default case —
-    the rail must admit this legitimate call, not only reject the fabricated one."""
+    geometry has a real basis and must not be penalized alongside the fabricated-default case: the
+    rail must admit this legitimate call, not only reject the fabricated one."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
@@ -421,20 +420,20 @@ def test_resolve_operating_point_cross_tile_nms_honest_default_when_underivable(
 
 
 def test_resolve_operating_point_tile_size_derived():
-    """K10 finding 3 residual: a bare truthy tile_size with no source claim used to be inferred as
-    "derived" unconditionally (`if tile_size: derived(...)`) — so a fabricated fallback value (e.g.
-    the checkpoint had no persisted geometry, and 640 was substituted one layer up) could be
+    """A bare truthy tile_size with no source claim must not be inferred as "derived"
+    unconditionally (`if tile_size: derived(...)`): a fabricated fallback value (e.g. the
+    checkpoint had no persisted geometry, and 640 was substituted one layer up) could otherwise be
     stamped "derived from persisted training geometry" when nothing was actually derived. The
-    caller must now say which it was via ``tile_size_source``; omitting it is honestly "default"."""
+    caller must say which it was via ``tile_size_source``; omitting it is honestly "default"."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
 
     b_no_claim = resolve_operating_point("catkin", dataset_hash="h1", tile_size=640)
     assert b_no_claim.get("tile_size").source == "default"
-    # K10: a "default"-sourced tile_size, when tiled (the default here — tiled wasn't specified),
-    # is now a real, firewalled unvalidated dimension — ._raw still carries the stored 640, but
-    # .value correctly refuses it (the same firewall conf's own uncalibrated default already
-    # enforces), since "no source claim" is exactly the fabricated-fallback case this cluster closes.
+    # A "default"-sourced tile_size, when tiled (the default here, tiled wasn't specified), is a
+    # real, firewalled unvalidated dimension: ._raw still carries the stored 640, but .value
+    # correctly refuses it (the same firewall conf's own uncalibrated default already enforces),
+    # since "no source claim" is exactly the fabricated-fallback case this check exists to close.
     assert b_no_claim.get("tile_size")._raw == 640
     assert b_no_claim.get("tile_size").is_shippable is False
     with pytest.raises(UnvalidatedOperatingPointError):
