@@ -1,4 +1,4 @@
-"""P3 integrity fold-ins: cross-tile NMM merge + channel-generic tiled crop/pad."""
+"""Cross-tile NMM merge + channel-generic tiled crop/pad."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def test_global_merge_absorbs_low_iou_fragment_via_ios():
     from tcip_mcp.pipelines.data.tiling import global_merge
 
     # A small partial fragment mostly inside a fuller detection: IoU ≈ 0.04 (NMS would keep both),
-    # IoS = 1.0 (fully contained). NMM must merge it — the seam-split case merging exists for.
+    # IoS = 1.0 (fully contained). NMM must merge it: the seam-split case merging exists for.
     boxes = np.array([[0, 0, 10, 10], [4, 4, 6, 6]], dtype=np.float32)
     scores = np.array([0.9, 0.6], dtype=np.float32)
     labels = np.array([1, 1], dtype=np.int64)
@@ -129,11 +129,11 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(tmp_pat
             region = tile[:, int(y1):int(torch.ceil(torch.tensor(y2))),
                           int(x1):int(torch.ceil(torch.tensor(x2)))]
             assert region.numel() and float(region.max()) > 0.5, (
-                "the box does not sit on the bright patch — tile and labels are in different frames")
+                "the box does not sit on the bright patch: tile and labels are in different frames")
 
 
 def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
-    """Refuse when the labels' own frame disagrees with the decode — the real scramble case.
+    """Refuse when the labels' own frame disagrees with the decode: the real scramble case.
 
     The annotation stack measures with PIL, which reports a 40x24x5 GeoTIFF as 5x40, so labels
     authored through it genuinely disagree with the multi-band decode. Comparing two decoders
@@ -167,7 +167,7 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
 
 
 def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
-    """ctx.tiled_dataset constructs the tiler directly — it must not fall back to 3 channels."""
+    """ctx.tiled_dataset constructs the tiler directly: it must not fall back to 3 channels."""
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset, build_dataset
 
     images_dir, labels_dir = _multiband_detection_fixture(tmp_path)
@@ -177,7 +177,7 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
 
 
 def test_tiled_detection_handles_channel_first_rasters(tmp_path):
-    """The other common GeoTIFF layout — where the axis-order heuristic is observable."""
+    """The other common GeoTIFF layout, where the axis-order heuristic is observable."""
     import tifffile
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
