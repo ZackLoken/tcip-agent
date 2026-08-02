@@ -246,9 +246,9 @@ export interface AppState {
    *  same-identity backend snapshot keeps the restored index instead of resetting it to 0. */
   applyRestoredDataset: (sel: DatasetSelection) => void;
   /**
-   * Apply a backend state snapshot with ownership-aware merge (not a wholesale
-   * replace, which used to clobber unsaved edits, the active tab, and the scroll
-   * position). Backend owns the dataset selection; the browser owns
+   * Apply a backend state snapshot with ownership-aware merge, not a wholesale
+   * replace: a wholesale replace would clobber unsaved edits, the active tab, and
+   * the scroll position. Backend owns the dataset selection; the browser owns
    * navigation/view/mode/subject/review-filter state and keeps its own copy.
    */
   mergeSnapshot: (state: GuiState, version: number | null) => void;
