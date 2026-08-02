@@ -219,6 +219,15 @@ export interface AppState {
   terminalOpen: boolean;
   setTerminalOpen: (open: boolean) => void;
 
+  /** A request staged for the agent terminal: any component that would otherwise make the
+   *  breeder hand-author a CV/ML decision (a training config, a search space, a calibration
+   *  trigger) calls `sendToAgentTerminal` instead of exposing the raw control. Opens the rail
+   *  and stages the text here; TerminalRail sends it as terminal input once its socket is
+   *  open, then clears it so it never resends. */
+  pendingTerminalMessage: string | null;
+  sendToAgentTerminal: (text: string) => void;
+  clearPendingTerminalMessage: () => void;
+
   /** Current annotator/reviewer identity (persisted). Stamped as created_by/accepted_by on
    * everything this person authors; set on the workspace page, shown in the status bar. */
   user: string;
@@ -397,6 +406,13 @@ export const useStore = create<AppState>()((set, get) => ({
     }
     set({ terminalOpen });
   },
+
+  pendingTerminalMessage: null,
+  sendToAgentTerminal: (text) => {
+    get().setTerminalOpen(true);
+    set({ pendingTerminalMessage: text });
+  },
+  clearPendingTerminalMessage: () => set({ pendingTerminalMessage: null }),
 
   user: (() => {
     try {
