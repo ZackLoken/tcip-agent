@@ -64,7 +64,7 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
 
 def test_save_refuses_malformed_registry(client: TestClient, tmp_path: Path) -> None:
     """A malformed registry (here: an attribute with no ``values``) is refused, not silently
-    written — a bad registry would assign ids over garbage."""
+    written: a bad registry would assign ids over garbage."""
     r = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
@@ -130,7 +130,7 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
 
 
 def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
-    # Confirmations are dataset-native (K13.5 slice 4): a write must locate dataset_root.
+    # Confirmations are dataset-native: a write must locate dataset_root.
     post = client.post(
         "/api/classes/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
@@ -171,8 +171,8 @@ def test_image_status_write_refuses_without_a_locatable_dataset(
 def test_image_status_lands_at_dataset_root_not_an_unrelated_project(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """A project referencing a dataset elsewhere must confirm negatives INTO the dataset, not into
-    the project's own private state — the cross-root case K13.5 slice 4 exists to fix."""
+    """A project referencing a dataset elsewhere must confirm negatives into the dataset, not into
+    the project's own private state."""
     project_root = tmp_path / "project"
     dataset_root = tmp_path / "shared_dataset"
     project_root.mkdir()
@@ -188,7 +188,7 @@ def test_image_status_lands_at_dataset_root_not_an_unrelated_project(
 
 
 def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path: Path) -> None:
-    # A negative is intentional (completed + empty), never inferred from an empty file alone —
+    # A negative is intentional (completed + empty), never inferred from an empty file alone:
     # so an accidental empty file, or flipping through an image, doesn't become a training negative.
     ann = tmp_path / "annotations"
     ann.mkdir()
@@ -209,7 +209,7 @@ def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path:
     )
     assert resp.json()["statuses"] == {
         "IMG_A.JPG": "partial",  # has objects, not completed
-        "IMG_B.JPG": "unannotated",  # empty file alone is not a negative — needs review
+        "IMG_B.JPG": "unannotated",  # empty file alone is not a negative, needs review
         "IMG_C.JPG": "unannotated",  # no file
         "IMG_D.JPG": "negative",  # completed + empty → confirmed negative (intentional)
         "IMG_E.JPG": "complete",  # completed + has objects
@@ -217,7 +217,7 @@ def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path:
 
 
 def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tmp_path: Path) -> None:
-    # The per-file label-JSON memo is keyed on mtime_ns — a write after a prior derive() call
+    # The per-file label-JSON memo is keyed on mtime_ns: a write after a prior derive() call
     # must not serve the stale (pre-write) parse of the same path.
     ann = tmp_path / "annotations"
     ann.mkdir()
@@ -347,7 +347,7 @@ def test_derive_image_status_confines_annotations_dir_to_allowed_roots(
 def test_unrestricted_deployment_is_unaffected_by_the_confinement_guard(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """TCIP_IMAGE_ROOTS unset (the default) must stay a no-op — the rail must admit valid work,
+    """TCIP_IMAGE_ROOTS unset (the default) must stay a no-op: the rail must admit valid work,
     not only reject invalid work."""
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
     resp = client.post(
@@ -368,9 +368,9 @@ def _read_audit_entries(dataset_root: Path) -> list[dict]:
 def test_set_image_status_writes_a_dataset_scoped_audit_entry(
     client: TestClient, tmp_path: Path
 ) -> None:
-    # image_status.json is dataset-native (K13.5 slice 4), so its audit trail is colocated with the
-    # dataset rather than guessed into a project's own audit.jsonl — distinct roots here so the
-    # assertion actually pins which root the entry followed, not just that one was written.
+    # image_status.json is dataset-native, so its audit trail is colocated with the dataset rather
+    # than guessed into a project's own audit.jsonl: distinct roots here so the assertion actually
+    # pins which root the entry followed, not just that one was written.
     project_root = tmp_path / "project"
     dataset_root = tmp_path / "shared_dataset"
     project_root.mkdir()
@@ -406,7 +406,7 @@ def test_set_image_status_bulk_audit_entry_records_only_what_was_applied(
     entries = _read_audit_entries(dataset_root)
     assert len(entries) == 1
     assert entries[0]["tool"] == "gui_set_image_status_bulk"
-    # B.JPG's status was invalid and never written — the audit entry must not claim it was.
+    # B.JPG's status was invalid and never written: the audit entry must not claim it was.
     assert entries[0]["arguments"]["statuses"] == {"A.JPG": "complete"}
     assert _read_audit_entries(project_root) == []
 
