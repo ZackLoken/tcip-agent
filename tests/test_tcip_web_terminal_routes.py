@@ -2,7 +2,7 @@
 scripted fake program (``tests/fake_terminal_app.py`` via ``TCIP_TERMINAL_CMD``).
 
 These exercise the actual platform PTY backend (ConPTY on Windows, stdlib pty on
-POSIX/CI) — the seam whose failure mode is "the panel goes silent".
+POSIX/CI): the seam whose failure mode is "the panel goes silent".
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def test_scrollback_replays_on_reconnect(client):
         _read_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "input", "data": "before reconnect\r"})
         _read_until(ws, "echo:before reconnect")
-    # New socket: the banner AND the echoed line replay from scrollback.
+    # New socket: the banner and the echoed line replay from scrollback.
     with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws2:
         acc = _read_until(ws2, "echo:before reconnect")
         assert "FAKE_TERMINAL_READY" in acc
@@ -164,7 +164,7 @@ def test_create_503_when_unavailable(client, monkeypatch):
 
 
 def _os_pid_alive(pid: int) -> bool:
-    """OS-level liveness (not the session's own bookkeeping — that's what's under test)."""
+    """OS-level liveness (not the session's own bookkeeping, which is what's under test)."""
     if pty_host.os.name == "nt":
         out = __import__("subprocess").run(
             ["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True
@@ -185,7 +185,7 @@ def test_shutdown_all_terminates_process(client):
     assert session.alive()
     pid = session._pty.pid  # capture before shutdown nulls the pty
     terminal_routes.shutdown_all()
-    # Assert at the OS level — session.alive() flips False the moment _pty is nulled,
+    # Assert at the OS level: session.alive() flips False the moment _pty is nulled,
     # which would pass even if the kill itself were a no-op.
     deadline = time.time() + 15
     while time.time() < deadline and _os_pid_alive(pid):
@@ -195,7 +195,7 @@ def test_shutdown_all_terminates_process(client):
 
 
 def test_write_and_resize_after_process_death_do_not_raise(client):
-    # pywinpty raises EOFError/WinptyError (not OSError) on a dead PTY — a keystroke or
+    # pywinpty raises EOFError/WinptyError (not OSError) on a dead PTY: a keystroke or
     # resize racing process exit must degrade, never crash the WS handler.
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
     session = terminal_routes._SESSIONS[sid]
