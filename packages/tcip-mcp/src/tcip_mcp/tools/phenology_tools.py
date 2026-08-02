@@ -117,6 +117,13 @@ def update_trait_spec_fields(trait_name: str, fields: dict, provenance_entries: 
     breeder-answered count objective gets recorded through, never a silent default and never
     copied from another trait's values, both durable, audited facts instead of living only in a
     session's memory.
+
+    Args:
+        trait_name: Name of the already-registered trait whose spec file to update.
+        fields: `TraitSpec` field names to new values, merged into the existing spec (unknown
+            fields, off-vocab `delivers` entries, or an invalid value refuse the whole write).
+        provenance_entries: Free-text entries appended to the spec's existing `provenance` tuple,
+            recording who asserted the change and how firmly.
     """
     import dataclasses
 
