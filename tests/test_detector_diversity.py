@@ -1,4 +1,4 @@
-"""W6 — detector & architecture diversity: add_p2 necks, FCOS end-to-end.
+"""Detector & architecture diversity: add_p2 necks, FCOS end-to-end.
 
 Uses ``resnet18`` (FPN normalizes the channel difference); CPU, tiny inputs, 1 epoch.
 """
@@ -26,7 +26,7 @@ def _features():
 
 
 # --------------------------------------------------------------------------
-# Necks — add_p2
+# Necks: add_p2
 # --------------------------------------------------------------------------
 
 def test_fpn_add_p2_adds_finer_level():
