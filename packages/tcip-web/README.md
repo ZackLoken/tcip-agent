@@ -1,12 +1,7 @@
 # tcip-web
 
-Browser-based GUI for TCIP. Replaces the partial VS Code extension panels with
-a FastAPI backend + React frontend that both human operators and the Claude
-agent drive through the same state store.
-
-See [docs/gui_design.md](../../docs/gui_design.md) for architecture and
-[docs/gui_implementation_plan.md](../../docs/gui_implementation_plan.md) for
-the slice-by-slice plan.
+Browser-based GUI for TCIP: a FastAPI backend + React frontend that both human
+operators and the Claude agent drive through the same state store.
 
 ## Layout
 
@@ -16,15 +11,24 @@ packages/tcip-web/
     app.py              # FastAPI app
     state.py            # in-memory GuiState + debounced .tcip/state/gui.json
     paths.py            # safe_join + image-root allow-list (traversal/LFI guards)
-    plant_mapping.py    # EXIF GPS + sequence → plant_locations.csv matching
+    identity.py         # current-user identity for created_by/accepted_by provenance stamping
+    jobstore.py         # background job tracking (training/inference/tuning)
+    terminal.py         # in-app agent terminal (spawns a hardened `claude` process)
     routes/
       annotate.py       # label CRUD, Annotate-tab commands
+      canvas.py         # live canvas capture for the agent's visual-analysis loop
+      classes.py        # subject/class CRUD
       dataset.py        # tree + list + select + state snapshot
+      fs.py             # filesystem browsing for path pickers
       images.py         # EXIF-oriented JPEG serving (+ downsample)
-      review.py         # compute_matches, action, backup, save_gt
-      training.py       # validate / launch / list / metrics / WS stream
       inference.py      # SAHI-style tiled background jobs + progress WS
+      meta.py           # crop/project metadata
+      projects.py       # project open/create/list
       results.py        # plant mapping + per-plant curves + onset dates + CSV
+      review.py         # compute_matches, action, backup, save_gt
+      sessions.py       # GUI session state
+      terminal.py       # in-app agent terminal endpoints
+      training.py       # validate / launch / list / metrics / WS stream
       tuning.py         # HPO launch + sweep listing
   frontend/             # Vite + React + TS + Tailwind + Zustand + Konva
   static/               # vite build output (served at /)
