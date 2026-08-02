@@ -382,8 +382,9 @@ export function CanvasStage(props: CanvasStageProps) {
       {imgError && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
           <div className="max-w-sm rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-4 py-3 text-center text-[12px] text-tcip-fp">
-            Could not load this image; it may be missing, or access was denied (check the path and,
-            on a locked-down server, TCIP_IMAGE_ROOTS).
+            Could not load this image: it may be missing, or its path is outside the location(s)
+            this server is configured to serve images from. Check the path, or ask whoever set up
+            this project where its images should live.
           </div>
         </div>
       )}
