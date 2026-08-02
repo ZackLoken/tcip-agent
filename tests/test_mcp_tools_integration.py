@@ -18,7 +18,7 @@ from PIL import Image
 
 @pytest.fixture
 def json_dataset(tmp_path: Path) -> Path:
-    """A minimal dataset in the canonical (K13.5) name-based per-image JSON layout."""
+    """A minimal dataset in the canonical name-based per-image JSON layout."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
@@ -184,7 +184,7 @@ class TestAugmentations:
 class TestReadAnnotationsUnknownFormat:
     def test_unrecognized_store_returns_error_not_raise(self, tmp_path):
         """detect_format refuses an unknown store; read_annotations must surface that as an error
-        dict, matching its own convention and the docs — not propagate an uncaught ValueError."""
+        dict, matching its own convention and the docs, not propagate an uncaught ValueError."""
         from PIL import Image
 
         from tcip_mcp.tools.annotation_tools import read_annotations
