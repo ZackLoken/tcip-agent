@@ -4,7 +4,7 @@ The GUI is the source of truth: the annotator/reviewer sets their name in the ap
 along on each save/review request (``user`` field). When a request omits it (non-GUI callers,
 older clients), we fall back to an env override then the OS login. ``user_id`` applies the
 platform convention that humans are ``user:<name>`` while tool producers stay bare (``sam``,
-``baseline``) — so a stamped GT object always says whether a person or a model authored it.
+``baseline``), so a stamped GT object always says whether a person or a model authored it.
 """
 
 from __future__ import annotations
