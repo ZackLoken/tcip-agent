@@ -342,10 +342,11 @@ def test_per_plant_series_accepts_dict_assignments(tmp_path):
     _sidecar(d1, {"dormant": 0, "elongated": 1})
     mapping = {"2024-05-01": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}]}
     preds = {"2024-05-01": str(d1)}
-    per_plant = phenology.per_plant_series(mapping, preds, positive_class_name="elongated")
+    per_plant, n_unmapped = phenology.per_plant_series(mapping, preds, positive_class_name="elongated")
     assert "P1" in per_plant
     assert per_plant["P1"]["accession"] == "acc-9"
     assert per_plant["P1"]["series"][0][:3] == ("2024-05-01", 1, 1)  # total=1, positive=1
+    assert n_unmapped == 0
 
 
 # ── resolve_positive_class_id ─────────────────────────────────────────────
@@ -472,13 +473,45 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
         _preds(d, f"IMG{i}", ["elongated", "dormant"])
     mapping = {"2026-02-11": [_Assignment(f"IMG{i}", "P1", "a") for i in range(3)]
                + [_Assignment("GONE", "P1", "a")]}  # named, no prediction file
-    series = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
-                                        positive_class_name="elongated")["P1"]["series"]
+    per_plant, _n_unmapped = phenology.per_plant_series(mapping, {"2026-02-11": str(d)},
+                                                         positive_class_name="elongated")
+    series = per_plant["P1"]["series"]
     (_date, total, positive, unclassified, missing, n_images) = series[0]
     assert (total, positive, unclassified, missing) == (6, 3, 0, 1)
     # 4 images named for this (plant, date), the coverage the entry summarises, of which one is
     # missing, not 3 (the files that happened to exist).
     assert n_images == 4
+
+
+def test_per_plant_series_discloses_unmapped_assignments(tmp_path):
+    """An assignment with no ``plot_name`` (an image the plant-mapping step could not assign) is
+    silently dropped from every plant's coverage; the count of how often that happens must still be
+    disclosed, the same way ``build_plant_mapping`` discloses its own ``n_unmapped``."""
+    d = tmp_path / "2026-02-11"
+    _sidecar(d, {"dormant": 0, "elongated": 1})
+    _preds(d, "P1_a", ["elongated"])
+    mapping = {"2026-02-11": [
+        _Assignment("P1_a", "P1", "acc-9"),
+        _Assignment("STRAY", None, None),  # no plot_name: never assigned to any plant
+    ]}
+    per_plant, n_unmapped = phenology.per_plant_series(
+        mapping, {"2026-02-11": str(d)}, positive_class_name="elongated")
+    assert "P1" in per_plant
+    assert n_unmapped == 1
+
+
+def test_per_plant_phenology_surfaces_n_images_unmapped(tmp_path):
+    d = tmp_path / "2026-02-11"
+    _sidecar(d, {"dormant": 0, "elongated": 1})
+    _preds(d, "P1_a", ["elongated"])
+    mapping = {"2026-02-11": [
+        _Assignment("P1_a", "P1", "acc-9"),
+        _Assignment("STRAY1", None, None),
+        _Assignment("STRAY2", "", None),
+    ]}
+    out = phenology.per_plant_phenology(
+        mapping, {"2026-02-11": str(d)}, positive_class_name="elongated", spec=CATKIN)
+    assert out["n_images_unmapped"] == 2
 
 
 def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
