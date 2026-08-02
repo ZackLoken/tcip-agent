@@ -1,18 +1,18 @@
 """Class registry routes.
 
 The dataset's class registry is a single nested ``<dataset_root>/classes.json`` describing every
-subject, its attributes, and their value names — never integer ids or colors (a label references
+subject, its attributes, and their value names: never integer ids or colors (a label references
 these names; an id is a per-training-run artifact and a color is GUI-local). Shape::
 
     {
-      "bush":   {"description": "one hazelnut bush crown"},
-      "catkin": {"description": "a hazelnut catkin",
-                 "attributes": {"elongation": {"type": "categorical",
-                                               "values": ["dormant", "elongated"]}}}
+      "bush":      {"description": "one plant crown"},
+      "<subject>": {"description": "...",
+                    "attributes": {"<attribute>": {"type": "categorical",
+                                                    "values": ["<value1>", "<value2>"]}}}
     }
 
 Read/written through :mod:`tcip_mcp.class_registry` (the one registry authority), so the GUI and the
-agent tools agree by construction. The registry travels with the image set — a name-based label is
+agent tools agree by construction. The registry travels with the image set: a name-based label is
 undecodable without it.
 """
 
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/classes", tags=["classes"])
 
 
 # ── Label-JSON memo (mtime-keyed, bounded) ────────────────────────────────
-# derive_image_status and the label-derived subject list both re-parse label JSONs on every call —
+# derive_image_status and the label-derived subject list both re-parse label JSONs on every call:
 # a dataset-selection change or a /load with no saved registry re-scans the same files repeatedly.
 # Memoize per (path, mtime_ns) so an unchanged file is parsed once; a write bumps mtime_ns and the
 # next read re-parses it.
@@ -68,7 +68,7 @@ def _cached_label_json(path: Path) -> object:
 
 def _guard_dataset_root(root: str) -> str:
     """Confine a resolved dataset root to the allowed image roots (no-op unless ``TCIP_IMAGE_ROOTS``
-    is set) — the same lockdown the rest of the backend applies to absolute reads. The single choke
+    is set): the same lockdown the rest of the backend applies to absolute reads. The single choke
     point every ``classes.py`` route resolves through, so a new caller can't forget it the way a
     route-local guard could."""
     from tcip_web.paths import assert_path_allowed
@@ -94,9 +94,9 @@ def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
     """Append a dataset-native GUI mutation to ``<dataset_root>/.tcip/audit.jsonl`` (best-effort).
 
     ``image_status.json`` and ``classes.json`` are dataset-native, not project-private (a dataset can
-    be opened by more than one project — see ``dataset_layout.image_status_path``), so there is no
+    be opened by more than one project, see ``dataset_layout.image_status_path``), so there is no
     single project's audit log a write here unambiguously belongs to. Colocating the trail with the
-    state it describes, rather than guessing a project, is deliberate — mirrors
+    state it describes, rather than guessing a project, is deliberate: mirrors
     ``annotate._audit_gui_write`` / ``review._audit`` in shape, diverges from them only in root.
     """
     if not dataset_root:
@@ -220,7 +220,7 @@ class ImageStatusPayload(BaseModel):
 
 def _require_dataset_root(dataset_root: str | None, annotations_dir: str | None) -> str:
     """``_resolve_dataset_root``, but a write must locate the dataset or fail loudly (mirrors
-    ``save_classes``) — a silent fallback would write a human's Complete nowhere anyone reads it."""
+    ``save_classes``): a silent fallback would write a human's Complete nowhere anyone reads it."""
     root = _resolve_dataset_root(dataset_root, annotations_dir)
     if not root:
         raise HTTPException(400, "cannot locate the dataset to record image status against; "
@@ -245,10 +245,10 @@ def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
                   image_names: Iterable[str]) -> None:
     """Best-effort: record the subject's current attribute-schema digest against each of
     ``image_names``, so a later read can tell a confirmation made under a since-changed schema from
-    one still valid. Stamped **per image**, not per bucket — a bucket holds every image ever touched
-    under this subject/date, so a bucket-wide stamp would be silently overwritten by the NEXT
-    unrelated write to the bucket, un-quarantining a DIFFERENT image's stale confirmation nobody
-    re-reviewed. Never blocks the status write — an unreadable/absent registry just leaves these
+    one still valid. Stamped **per image**, not per bucket: a bucket holds every image ever touched
+    under this subject/date, so a bucket-wide stamp would be silently overwritten by the next
+    unrelated write to the bucket, un-quarantining a different image's stale confirmation nobody
+    re-reviewed. Never blocks the status write: an unreadable/absent registry just leaves these
     images unstamped (admitted, not quarantined, on read; see ``confirmed_negative_names``)."""
     if not subject:
         return
@@ -261,7 +261,7 @@ def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
     try:
         digest = attribute_schema_digest(read_registry(cp), subject)
     except (OSError, ValueError):
-        # ValueError covers json.JSONDecodeError and class_registry.RegistryError (its subclass) —
+        # ValueError covers json.JSONDecodeError and class_registry.RegistryError (its subclass),
         # a malformed/unreadable registry must never turn a status write into a 500.
         return
     if digest is None:
@@ -349,7 +349,7 @@ def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
                 applied.append(name)
         atomic_write_json(path, {k: dict(sorted(store[k].items())) for k in sorted(store)})
     _stamp_digest(root, bucket, payload.subject, applied)
-    # Record what was actually written, not the raw payload — an entry with a name whose status
+    # Record what was actually written, not the raw payload: an entry with a name whose status
     # was skipped (not in VALID_STATUSES) would overstate the change. No entry at all when nothing
     # was applied: a no-op write logged as a mutation is noise, not signal.
     if applied:
@@ -380,7 +380,7 @@ def derive_image_status(payload: DerivePayload) -> dict:
     When a ``subject`` is given, only annotations of that subject count (per-subject scoping).
     """
     # Reads label files directly rather than through _resolve_dataset_root, so it needs its own
-    # confinement call (no-op unless TCIP_IMAGE_ROOTS is set) — an absolute-path read is exactly
+    # confinement call (no-op unless TCIP_IMAGE_ROOTS is set): an absolute-path read is exactly
     # what that lockdown governs.
     if payload.annotations_dir:
         _guard_dataset_root(payload.annotations_dir)
