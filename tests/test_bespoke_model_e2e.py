@@ -1,13 +1,13 @@
-"""S7 — the PROOF golden: an agent-authored detector with modified internals + a custom train(ctx)
-loop, run end to end through the audited envelope.
+"""An agent-authored detector with modified internals and a custom train(ctx) loop, run end to
+end through the audited envelope.
 
 Proves the whole CV-scientist vision at once:
-  * (a) architecture modifications take effect end to end — the ``AnchorGenerator`` uses aspect ratios
-    DERIVED from the synthetic GT (via ``derivations.gt_aspect_ratios``) and sizes from the GT
+  * (a) architecture modifications take effect end to end: the ``AnchorGenerator`` uses aspect ratios
+    derived from the synthetic GT (via ``derivations.gt_aspect_ratios``) and sizes from the GT
     size distribution (not torchvision defaults), and every norm layer is GroupNorm (no BatchNorm);
-  * (b) the CUSTOM ``train(ctx)`` loop (not ``ctx.default_train``) had its metrics, checkpoint, audit
-    bracket, and source/env provenance recorded by the envelope — ``kind=KIND_TCIP_MODULE`` with a
-    source+env snapshot present — and the model registered on completion;
+  * (b) the custom ``train(ctx)`` loop (not ``ctx.default_train``) had its metrics, checkpoint, audit
+    bracket, and source/env provenance recorded by the envelope (``kind=KIND_TCIP_MODULE`` with a
+    source+env snapshot present) and the model registered on completion;
   * the module actually learns (``overfit_check``), and build -> resolve_operating_point -> predict
     close the measurement loop.
 """
@@ -22,9 +22,8 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so resolve_operating_point("catkin", ...) keeps
-# resolving by default.
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
+# test's pinned project root so resolve_operating_point("catkin", ...) keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 # Component registration side-effects (backbones/necks/heads used by build_dataset + eval).
@@ -35,7 +34,7 @@ import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 
 from torch.utils.data import DataLoader  # noqa: E402
 
-from tests import bespoke_models  # noqa: E402  — the agent-authored bespoke model + train loop
+from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 
@@ -68,7 +67,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
     from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate
 
-    # 1. Synthetic detection data — elongated (tall) boxes so GT-derived anchors differ from defaults.
+    # 1. Synthetic detection data: elongated (tall) boxes so GT-derived anchors differ from defaults.
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
