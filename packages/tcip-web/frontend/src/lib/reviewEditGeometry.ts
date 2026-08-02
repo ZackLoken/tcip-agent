@@ -34,7 +34,7 @@ export function clampShapeToImage(shape: EditShape, w: number, h: number): EditS
 }
 
 /** What a mouse-down at (x, y) grabs: the nearest handle within `tol`, else the shape
- *  body (move), else nothing. Nearest — not first within tolerance — so small boxes and
+ *  body (move), else nothing. Nearest, not first within tolerance, so small boxes and
  *  dense polygons hand you the corner you aimed at. */
 export function hitTestEdit(shape: EditShape, x: number, y: number, tol: number): EditDrag | null {
   if (shape.kind === "box") {
