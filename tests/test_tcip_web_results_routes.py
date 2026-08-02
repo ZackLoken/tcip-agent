@@ -262,6 +262,81 @@ def test_acknowledge_reveals_provisional_numbers_on_screen_but_never_in_a_file(
     assert _export(client, body, "curves", acknowledge_unvalidated=True).status_code == 400
 
 
+def _set_tile_provenance(body: dict, tile_size_prov: dict | None) -> dict:
+    """Rewrite each bucket's sidecar tile_size entry, leaving every other dimension untouched."""
+    for bucket in body["predictions_by_date"].values():
+        path = Path(bucket) / "operating_point.json"
+        sidecar = json.loads(path.read_text(encoding="utf-8"))
+        op = sidecar.setdefault("operating_point", {})
+        if tile_size_prov is None:
+            op.pop("tile_size", None)
+        else:
+            op["tile_size"] = tile_size_prov
+        path.write_text(json.dumps(sidecar), encoding="utf-8")
+    return body
+
+
+def _tiled(ref: str, value: int = 640) -> dict:
+    return {"value": value, "requires_validation": True, "validation_kind": "geometry",
+            "validated_against": ref}
+
+
+def test_every_phenology_door_refuses_a_fabricated_tile_size(client: TestClient, tmp_path: Path) -> None:
+    """A curve is the delivered phenology measurement, built from per-image counts that the tile
+    edge scales. A tiled bucket whose tile_size fell back to the fabricated default refuses at every
+    Results door, the same way an uncalibrated conf does, even with the classifier and conf both
+    genuinely validated on disk."""
+    body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True), _tiled("false"))
+    for route in GATE_DOORS:
+        resp = client.post(f"/api/results/{route}", json=body)
+        assert resp.status_code == 400, route
+        assert "tile_size" in resp.json()["detail"], route
+    for payload in ("curves", "milestones"):
+        assert _export(client, body, payload).status_code == 400, payload
+
+
+def test_every_phenology_door_delivers_when_the_tile_scale_has_a_real_basis(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The rail must admit valid work: the identical numbers, produced at a tile edge derived from
+    the checkpoint's own persisted training geometry, ship through every door."""
+    body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True),
+                                _tiled("persisted_training_geometry", 224))
+    for route in GATE_DOORS:
+        resp = client.post(f"/api/results/{route}", json=body)
+        assert resp.status_code == 200, route
+        assert resp.json()["provisional"] is False, route
+        assert resp.json()["validated"]["tile_size"] == "persisted_training_geometry", route
+    for payload in ("curves", "milestones"):
+        assert _export(client, body, payload).status_code == 200, payload
+
+
+def test_an_untiled_delivery_is_never_gated_on_tile_size(client: TestClient, tmp_path: Path) -> None:
+    """Buckets from untiled runs carry a non-gating tile_size entry; the Results doors must not
+    acquire a tile-geometry dimension from it and refuse work that was always fine."""
+    body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True),
+                                {"value": None, "requires_validation": False,
+                                 "validation_kind": None, "validated_against": None})
+    for route in GATE_DOORS:
+        resp = client.post(f"/api/results/{route}", json=body)
+        assert resp.status_code == 200, route
+        assert "tile_size" not in resp.json()["validated"], route
+
+
+def test_acknowledge_shows_a_fabricated_tile_scale_on_screen_but_never_in_a_file(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The same non-stranding escape the other dimensions get: a breeder can look at numbers whose
+    tile scale has no basis, clearly marked provisional, and still cannot download them."""
+    body = _set_tile_provenance(_phenology_fixture(tmp_path, validated=True), _tiled("false"))
+    for route in GATE_DOORS:
+        resp = client.post(f"/api/results/{route}", json={**body, "acknowledge_unvalidated": True})
+        assert resp.status_code == 200, route
+        assert resp.json()["provisional"] is True, route
+        assert resp.json()["validated"]["tile_size"] == "false", route
+    assert _export(client, body, "milestones", acknowledge_unvalidated=True).status_code == 400
+
+
 def test_export_refuses_when_nothing_was_ever_classified(client: TestClient, tmp_path: Path) -> None:
     # The same refusal compute_phenology makes: with no positive-class axis anywhere, the fraction
     # is not a measurement. Previously only the frontend guarded this on the web side.
