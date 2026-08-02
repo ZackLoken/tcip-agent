@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -56,6 +56,7 @@ export function ResultsTab() {
   // primitive the backend already computes this from, via api.dataset.tree.
   const [dates, setDates] = useState<string[]>([]);
   const [modelsByDate, setModelsByDate] = useState<Record<string, string[]>>({});
+  const [datesError, setDatesError] = useState<string | null>(null);
   // The model picked per date; "" means "skip this date" (dropped before compute()).
   const [dateModel, setDateModel] = useState<Record<string, string>>({});
 
@@ -108,7 +109,7 @@ export function ResultsTab() {
       });
   }, [projectRoot]);
 
-  useEffect(() => {
+  const refreshDatasetTree = useCallback(() => {
     if (!datasetRoot) return;
     void api.dataset
       .tree(datasetRoot)
@@ -119,9 +120,18 @@ export function ResultsTab() {
         setDateModel(
           Object.fromEntries(t.dates_with_images.map((d) => [d, t.models_by_date[d]?.[0] ?? ""])),
         );
+        setDatesError(null);
       })
-      .catch(() => {});
+      .catch((e) => {
+        setDatesError(
+          `Could not load this dataset's dates: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
   }, [datasetRoot]);
+
+  useEffect(() => {
+    refreshDatasetTree();
+  }, [refreshDatasetTree]);
 
   // Same prediction-dir convention prefillPreds always used, kept as one place, now fed by the
   // structured picker's selections instead of a hand-typed date -> path JSON object.
@@ -269,6 +279,32 @@ export function ResultsTab() {
     return Array.from(set);
   }, [curves]);
 
+  // Which delivery dimensions the reconciled evidence actually failed on, reused to make the
+  // agent hand-off below specific to what's missing rather than a generic "go calibrate" ask.
+  const unvalidatedDims = useMemo(
+    () =>
+      Object.entries(validity)
+        .filter(([, state]) => state === "false")
+        .map(([dim]) => dim),
+    [validity],
+  );
+
+  // What a breeder can't act on themselves: the backend refuses to deliver phenology until a
+  // calibrated export_predictions + calibrate_classifier_operating_point stand behind it (see
+  // results.py's _refusal). Hand that off to the agent instead of leaving the tool names on
+  // screen with no next step.
+  function calibrationRequest(detail: string | null): string {
+    const dims = unvalidatedDims.length > 0 ? unvalidatedDims.join(", ") : "the operating point";
+    const subject = trait ? `the "${trait}" trait` : "this trait";
+    return (
+      `Phenology delivery for ${subject} is blocked: ${dims} not validated on disk. ` +
+      "Please produce the predictions via a calibrated export_predictions and calibrate the " +
+      "classifier via calibrate_classifier_operating_point so this validates, then let me know " +
+      "when it's ready so I can recompute here." +
+      (detail ? ` Details from the app: ${detail}` : "")
+    );
+  }
+
   // Milestone columns are read generically off whatever the (threaded) trait's spec returned,
   // never hardcoded to one trait's own column names, so a different trait's rows render instead
   // of showing empty.
@@ -373,8 +409,18 @@ export function ResultsTab() {
         <div className="grid grid-cols-[1fr_180px] gap-3">
           <div className="flex flex-col gap-1">
             <label className="tcip-label">Predictions by date</label>
+            {datesError && (
+              <div className="text-[11px] text-tcip-fp mb-1">
+                {datesError}{" "}
+                <button className="tcip-btn text-[11px] ml-1" onClick={refreshDatasetTree}>
+                  Retry
+                </button>
+              </div>
+            )}
             {dates.length === 0 ? (
-              <div className="text-[11px] text-tcip-muted">No dates in this dataset yet.</div>
+              !datesError && (
+                <div className="text-[11px] text-tcip-muted">No dates in this dataset yet.</div>
+              )
             ) : (
               <div className="max-h-40 overflow-auto rounded border border-tcip-border">
                 <table className="w-full text-[11px]">
@@ -436,23 +482,40 @@ export function ResultsTab() {
                   provisional, which will not let you export them.
                 </div>
                 <div className="text-tcip-muted">{unvalidatedRefusal}</div>
-                <button
-                  className="tcip-btn text-[11px] self-start"
-                  onClick={() => void compute(true)}
-                  disabled={loading}
-                >
-                  Show provisional numbers
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    className="tcip-btn text-[11px] self-start"
+                    onClick={() => void compute(true)}
+                    disabled={loading}
+                  >
+                    Show provisional numbers
+                  </button>
+                  <button
+                    className="tcip-btn-primary text-[11px] self-start"
+                    onClick={() =>
+                      useStore
+                        .getState()
+                        .sendToAgentTerminal(calibrationRequest(unvalidatedRefusal))
+                    }
+                  >
+                    Ask the agent to calibrate this
+                  </button>
+                </div>
               </div>
             )}
             {provisional && (
-              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
-                Provisional: shown for inspection only, not a deliverable phenotype. Unvalidated:{" "}
-                {Object.entries(validity)
-                  .filter(([, state]) => state === "false")
-                  .map(([dim]) => dim)
-                  .join(", ") || "unknown"}
-                . CSV export stays disabled until both dimensions are validated on disk.
+              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
+                <div>
+                  Provisional: shown for inspection only, not a deliverable phenotype. Unvalidated:{" "}
+                  {unvalidatedDims.join(", ") || "unknown"}. CSV export stays disabled until both
+                  dimensions are validated on disk.
+                </div>
+                <button
+                  className="tcip-btn-primary text-[11px] self-start"
+                  onClick={() => useStore.getState().sendToAgentTerminal(calibrationRequest(null))}
+                >
+                  Ask the agent to calibrate this
+                </button>
               </div>
             )}
             <button className="tcip-btn-primary" onClick={() => void compute()} disabled={loading}>
