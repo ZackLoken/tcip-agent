@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Print the live MCP tool registry (count + names).
 
-Single source of truth for "how many domain tools are there" — docs reference
+Single source of truth for "how many domain tools are there": docs reference
 this script instead of hard-coding a number that drifts. Run from the repo root:
 
     python scripts/list_tools.py
