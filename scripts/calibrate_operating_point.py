@@ -1,4 +1,4 @@
-"""Calibrate + held-out validate a detection operating point over a labeled split (CV0).
+"""Calibrate + held-out validate a detection operating point over a labeled split.
 
 The confidence operating point is the phenotype for a count trait, so it must be derived per
 dataset and validated against held-out ground truth, never pinned. This script runs one
