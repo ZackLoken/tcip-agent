@@ -1,6 +1,6 @@
-"""S2 — the audited training envelope: audit-around-body + custom train(ctx) dispatch + ctx sinks.
+"""The audited training envelope: audit-around-body, custom train(ctx) dispatch, and ctx sinks.
 
-Proves the envelope guarantees hold around ANY training body (default trainer or a custom
+Proves the envelope guarantees hold around any training body (default trainer or a custom
 ``train(ctx)``): the run is bracketed by audit events, env provenance is snapshotted, checkpoints
 saved through ``ctx`` are stamped, and completion registers the model + lineage + artifact.
 """
@@ -26,7 +26,7 @@ def _audit_events(root, tool="training_run"):
 
 
 # --------------------------------------------------------------------------
-# Custom train(ctx) dispatch — the agent's own loop drives training via ctx.
+# Custom train(ctx) dispatch: the agent's own loop drives training via ctx.
 # --------------------------------------------------------------------------
 
 def _agent_train(ctx):
@@ -82,16 +82,16 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
 
 
 # --------------------------------------------------------------------------
-# Default path — no training_source → ctx.default_train() (today's trainer), still audited.
+# Default path: no training_source, so ctx.default_train() (today's trainer) runs, still audited.
 # --------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------
-# F6 — a phantom deliverable (no discoverable weights) must fail the run, not register a
+# A phantom deliverable (no discoverable weights) must fail the run, not register a
 # nonexistent path. An explicit ctx.set_final_weights() override still works.
 # --------------------------------------------------------------------------
 
 def _agent_train_default_tag_no_override(ctx):
-    """Saves under the DEFAULT tag ("checkpoint") — not model_best/model_final, and never
+    """Saves under the default tag ("checkpoint"), not model_best/model_final, and never
     calls set_final_weights. A loop like this produces no discoverable deliverable."""
     ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}})
 
@@ -152,7 +152,7 @@ def test_envelope_explicit_set_final_weights_overrides_convention(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# F5 — resume provenance: env.json records the resume request + whether RNG state was
+# Resume provenance: env.json records the resume request + whether RNG state was
 # actually restored, refreshed after dispatch (not just the pre-dispatch request).
 # --------------------------------------------------------------------------
 
@@ -193,7 +193,7 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
     ckpt = tmp_path / "out" / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
 
-    # Resume through the FULL audited envelope — env.json must reflect the real outcome.
+    # Resume through the full audited envelope: env.json must reflect the real outcome.
     create_experiment("expH", cfg)
     update_status("expH", "running")
     run = gt_create_run(dict(cfg), str(tmp_path / "out2"))
@@ -208,7 +208,7 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# K11: ctx.report_objective — a bespoke train(ctx)'s explicit primitive for reporting HPO
+# ctx.report_objective: a bespoke train(ctx)'s explicit primitive for reporting HPO
 # trial progress, independent of the automatic epoch_hook/metric-key-guessing path.
 # --------------------------------------------------------------------------
 
@@ -222,7 +222,7 @@ def test_report_objective_calls_trial_report_when_attached(tmp_path):
 
 def test_report_objective_is_noop_outside_hpo(tmp_path):
     run = create_run({"model_source": {"builder": "x:y"}}, str(tmp_path / "out"))
-    ctx = TrainContext(run=run, train_loader=None)  # no trial_report — not an HPO trial
+    ctx = TrainContext(run=run, train_loader=None)  # no trial_report, not an HPO trial
     ctx.report_objective(3.14)  # must not raise
 
 
