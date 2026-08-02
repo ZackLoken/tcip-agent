@@ -66,6 +66,7 @@ export function AnnotateToolbar({
   onSave,
   saveDisabled,
   dirty,
+  isLocked,
   bandsInfo,
   bandSelection,
   onBandSelectionChange,
@@ -73,6 +74,8 @@ export function AnnotateToolbar({
   onSave: () => void;
   saveDisabled: boolean;
   dirty: boolean;
+  // True when the current image's status is Complete/Negative: edits and saves are blocked.
+  isLocked?: boolean;
   // Band-composite picker (multispectral only): omitted/null for a standard RGB dataset.
   bandsInfo?: ImageBandsResponse | null;
   bandSelection?: BandSelection | null;
@@ -500,6 +503,9 @@ export function AnnotateToolbar({
           )}
           <div className="flex-1" />
           <div className="flex items-center gap-2">
+            {isLocked && (
+              <span className="text-[12px] text-tcip-muted">Complete; uncheck to edit</span>
+            )}
             <button className="tcip-btn text-[12px]" onClick={() => undo()} title="Undo (Ctrl+Z)">
               ↶&nbsp;&nbsp;Undo
             </button>
