@@ -46,6 +46,16 @@ run is a diagnostic only (matches training-time val mAP, not the shipped full-fr
 to report for gating. An untiled checkpoint has no regime split; its one run already is the
 delivery metric (see `evaluate_model`'s own docstring for the full precedence).
 
+## Calibration/Holdout Split
+
+A validated operating point calibrates against a **locked** calibration/holdout split
+(`resolve_locked_cal_holdout_split`): the split draws once, on first use, and every later call
+reuses it, so the delivery gate can't silently pass by drawing a different, weaker holdout after
+the fact. Redrawing a locked split is a real, audited decision, never automatic:
+`force_redraw_cal_holdout_split(labels_dir=..., reason=...)` is the tool for it. `reason` is
+required and non-empty; every redraw, including the old split's membership, is appended to the
+lock's `redraw_history` so a redraw-until-it-passes pattern stays visible on review.
+
 ## Failure Triage
 
 When metrics are poor, investigate systematically:
