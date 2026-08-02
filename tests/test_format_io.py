@@ -1,4 +1,4 @@
-"""Tests for annotation I/O — the canonical per-image JSON and the assembled COCO."""
+"""Tests for annotation I/O: the canonical per-image JSON and the assembled COCO."""
 
 import json
 
@@ -78,7 +78,7 @@ def test_write_coco_roundtrip(tmp_path):
     assert len(coco["annotations"]) == 2
     assert coco["images"][0]["file_name"] == "IMG_0001.jpg"
 
-    # Parse back — the categories written by write_coco decode the ids to names.
+    # Parse back: the categories written by write_coco decode the ids to names.
     parsed = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
     assert len(parsed) == 2
     assert {a.subject for a in parsed} == {"tree", "nut"}
@@ -132,13 +132,13 @@ def test_write_coco_polygon_roundtrip(tmp_path):
 
 # ── COCO multi-ring (occlusion-split instance) ───────────────────────────────
 
-# Two disjoint lobes of ONE instance — a leaf crossed by a stem, a catkin behind a branch.
+# Two disjoint lobes of one instance: a leaf crossed by a stem, a catkin behind a branch.
 LOBE_A = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]
 LOBE_B = [(70.0, 12.0), (90.0, 12.0), (90.0, 48.0), (70.0, 48.0)]
 
 
 def test_parse_coco_multi_ring_segmentation_keeps_every_ring():
-    # COCO's segmentation is a LIST of rings and always was; the reader must decode all of them into
+    # COCO's segmentation is a list of rings and always was; the reader must decode all of them into
     # one polygon rather than taking the first and dropping the rest.
     coco = _sample_coco_segment()
     coco["annotations"][0]["segmentation"] = [
@@ -157,7 +157,7 @@ def test_write_coco_multi_ring_polygon_roundtrip(tmp_path):
     with open(path) as f:
         coco = json.load(f)
 
-    # One COCO annotation, two rings, in order — and its box/area span their union.
+    # One COCO annotation, two rings, in order, and its box/area span their union.
     (rec,) = coco["annotations"]
     assert rec["segmentation"] == [
         [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
@@ -207,7 +207,7 @@ def test_detect_format_refuses_an_unrecognized_store(tmp_path):
 
 
 def test_detect_format_refuses_pre_k13_objects_schema(tmp_path):
-    """The pre-K13.5 'objects' schema is not sniffed — it raises rather than reading as zero
+    """An older 'objects'-keyed schema is not sniffed: it raises rather than reading as zero
     annotations (which would train on fabricated empty negatives)."""
     old = tmp_path / "old.json"
     old.write_text(json.dumps({"image": "a", "objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}))
