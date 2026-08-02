@@ -1,21 +1,12 @@
-"""Delivery-grade evaluation runs in a different regime than inference. Dedicated
-coverage for three corrected findings:
-
-Finding 1: the delivery-gating path (``evaluate_model(use_tiled_inference=True)`` /
-``run_full_frame_evaluation``) resolves tile geometry via the SAME shared ``resolve_tile_geometry``
-``run_inference`` uses, and refuses rather than silently fabricating 640/0.2 when nothing is
-resolvable — see ``test_audit_cv_fixes.py``'s CV2 section for the geometry-resolution tests
-themselves; this file covers the ``evaluate_model`` wrapper's passthrough + refusal handling.
-
-Finding 2: ``max_dets`` is honored verbatim on both regimes (no ``if max_dets > 100 else 1000``
-sentinel), with a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path so
-an explicit low cap that truncates real detections is visible rather than silently assumed safe.
-
-Finding 3: ``tiled``'s provenance (``raw_operating_point``/``resolve_operating_point``) now
-distinguishes an explicit caller choice from a documented default, mirroring the existing
-``tile_size``/``tile_size_source`` pattern — see ``test_audit_cv_fixes.py`` for the
-calibrated-bundle integration test (the ceiling-check-found residual: a fabricated tile_size no
-longer falsely stamps "derived").
+"""Delivery-grade evaluation runs in a different regime than inference: it resolves tile geometry
+via the same shared ``resolve_tile_geometry`` ``run_inference`` uses (refusing rather than
+fabricating 640/0.2 when nothing is resolvable), honors ``max_dets`` verbatim on both regimes with
+a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path, and records
+``tiled``'s provenance (``raw_operating_point``/``resolve_operating_point``) to distinguish an
+explicit caller choice from a documented default, mirroring the existing
+``tile_size``/``tile_size_source`` pattern. See ``test_audit_cv_fixes.py`` for the
+geometry-resolution and calibrated-bundle integration tests; this file covers the
+``evaluate_model`` wrapper's passthrough + refusal handling.
 """
 
 from __future__ import annotations
@@ -25,13 +16,13 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so trait/subject="catkin" call sites keep resolving.
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
+# test's pinned project root so trait/subject="catkin" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Finding 2 — max_dets honored verbatim (no rescuing sentinel)
+# max_dets honored verbatim (no rescuing sentinel)
 # ══════════════════════════════════════════════════════════════════════════
 
 def _det_dataset(tmp_path, n=3, size=128):
@@ -51,9 +42,10 @@ def _det_dataset(tmp_path, n=3, size=128):
 
 
 def test_k10_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
-    """Before this fix: training_tools.evaluate_model's use_tiled_inference branch silently
-    substituted 1000 for any caller max_dets <= 100 — the exact value _max_dets_from_density's own
-    floor legitimately derives for a sparse dataset. Now an explicit value is always honored."""
+    """training_tools.evaluate_model's use_tiled_inference branch must honor an explicit max_dets
+    verbatim, even at or below 100: that's the exact value _max_dets_from_density's own floor
+    legitimately derives for a sparse dataset, so silently substituting 1000 would clobber a real
+    value."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -95,7 +87,7 @@ def test_k10_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypa
 
 
 def test_k10_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypatch):
-    """The COCOeval maxDets convention default for the OTHER (tile-level/diagnostic) regime —
+    """The COCOeval maxDets convention default for the other (tile-level/diagnostic) regime,
     distinct from the gating regime's 1000, resolved without the two colliding via a shared
     sentinel value."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
@@ -138,7 +130,7 @@ def test_k10_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
 
 def test_k10_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
     """evaluate_model is an @mcp.tool() surface that returns {"error": ...} for every other
-    failure — a bare raise from run_full_frame_evaluation would surface as an MCP exception
+    failure: a bare raise from run_full_frame_evaluation would surface as an MCP exception
     instead, inconsistent with the rest of this tool's contract."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.tools.training_tools import evaluate_model
@@ -158,9 +150,9 @@ def test_k10_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatc
 
 
 def test_k10_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
-    """K10 finding 2 residual (rail-safety): honoring an explicit low max_dets verbatim reopens a
-    truncation hole unless it's at least DETECTABLE. A caller-explicit cap that actually binds on
-    real detections must be visible in the result, not silently assumed safe."""
+    """Honoring an explicit low max_dets verbatim reopens a truncation hole unless it's at least
+    detectable. A caller-explicit cap that actually binds on real detections must be visible in
+    the result, not silently assumed safe."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
 
@@ -195,11 +187,11 @@ def test_k10_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     finally:
         predictor_mod.build_predictor = build_predictor_orig
     assert r["max_dets"] == 2  # honored verbatim
-    assert r["max_dets_cap_saturated_frac"] == 1.0  # the one image hit the cap — now visible
+    assert r["max_dets_cap_saturated_frac"] == 1.0  # the one image hit the cap, now visible
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Finding 3 — tiled provenance distinguishes explicit from default
+# tiled provenance distinguishes explicit from default
 # ══════════════════════════════════════════════════════════════════════════
 
 def test_k10_raw_operating_point_tiled_source_explicit_vs_default():
@@ -218,12 +210,12 @@ def test_k10_raw_operating_point_tiled_source_explicit_vs_default():
 
 
 def test_k10_resolve_operating_point_tile_size_source_not_inferred_from_truthiness():
-    """Before this fix: `if tile_size:` was the only test — ANY truthy value (including a
-    fabricated fallback the caller never actually derived) was stamped "derived". Now the
+    """`tile_size`'s source is never inferred from truthiness: a truthy value alone, even a
+    fabricated fallback the caller never actually derived, must not be stamped "derived". The
     caller's own resolved source travels through explicitly."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    # A truthy tile_size with NO source claim defaults to "default" — not silently "derived".
+    # A truthy tile_size with no source claim defaults to "default", not silently "derived".
     b_default = resolve_operating_point("catkin", dataset_hash=None, tile_size=640)
     assert b_default.get("tile_size").source == "default"
 
