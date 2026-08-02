@@ -1,6 +1,6 @@
-"""force_redraw_cal_holdout_split — the audited admin path to redraw a LOCKED cal/holdout split
-(K1). A locked split can only be redrawn deliberately, with a recorded reason and an old->new
-membership diff — never silently, never automatically.
+"""force_redraw_cal_holdout_split: the audited admin path to redraw a locked cal/holdout split.
+A locked split can only be redrawn deliberately, with a recorded reason and an old->new
+membership diff, never silently, never automatically.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def test_force_redraw_records_old_to_new_membership_diff(tmp_path: Path):
                                         "holdout": first["holdout"]}
     assert result["new_membership"]["calibration"] or result["new_membership"]["holdout"]
 
-    # A later, unrelated call keeps the redraw a deliberate, one-off action — not automatic.
+    # A later, unrelated call keeps the redraw a deliberate, one-off action, not automatic.
     from tcip_mcp.pipelines.data.splits import cal_holdout_lock_path
     from tcip_mcp.utils.atomic_io import read_json
     locked_after = read_json(cal_holdout_lock_path("redraw-tool-test"))
@@ -53,7 +53,7 @@ def test_force_redraw_records_old_to_new_membership_diff(tmp_path: Path):
     assert locked_after["seed"] == 2
 
     # The @audited call-args line and this tool's own explicit result line are both recorded, on
-    # DISTINCT tool names — the audit record captures what the redraw actually produced, not just
+    # distinct tool names: the audit record captures what the redraw actually produced, not just
     # that one was requested (@audited alone only logs kwargs, never the return value).
     call_events = _audit_events(tmp_path, "force_redraw_cal_holdout_split")
     assert len(call_events) == 1
