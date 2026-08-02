@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
@@ -30,6 +32,13 @@ def test_parse_image_path_flat() -> None:
     assert Path(root) == Path("/ds")
     assert date is None
     assert stem == "IMG_1"
+
+
+def test_parse_image_path_refuses_an_unrecognized_shape() -> None:
+    # No "images" segment anywhere in the path: neither canonical shape applies, and a guessed
+    # dataset root would silently misplace a downstream write (a label file, a staged prediction).
+    with pytest.raises(ValueError, match="not under a recognized dataset image tree"):
+        parse_image_path("/somewhere/random/IMG_1.JPG")
 
 
 def test_annotation_dir_with_and_without_date() -> None:
