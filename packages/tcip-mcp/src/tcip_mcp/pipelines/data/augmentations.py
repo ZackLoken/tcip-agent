@@ -375,8 +375,9 @@ def build_augmentation(config: dict | str, backend: str = "pil") -> Compose:
     for name, params in config.items():
         cls = _AUGMENTATION_REGISTRY.get(name)
         if cls is None:
-            logger.warning("Unknown augmentation: %s (skipped)", name)
-            continue
+            raise ValueError(
+                f"Unknown augmentation '{name}'. Available: {sorted(_AUGMENTATION_REGISTRY)}"
+            )
 
         if isinstance(params, bool) and params:
             transforms.append(cls())
