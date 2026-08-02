@@ -2,13 +2,13 @@
 
 A worked example that does not run is worse than no example: the agent follows it, gets a
 TypeError, and learns to distrust the surface it came from. Both a skill table and a source
-docstring can drift from the signature they describe — neither is self-correcting, so this
+docstring can drift from the signature they describe, and neither is self-correcting, so this
 checks them the only way that cannot go stale: against `inspect.signature` at import time.
 
 What it checks, without executing anything:
   1. every example parses;
   2. every symbol it imports actually exists;
-  3. every call to an imported symbol would BIND against the real signature — which is what
+  3. every call to an imported symbol would bind against the real signature, which is what
      catches a documented call that omits a required keyword-only argument.
 
     python scripts/verify_doc_examples.py            # whole repo; non-zero exit on any problem
@@ -56,7 +56,7 @@ def _md_examples(path: Path) -> list[Example]:
     return out
 
 
-# A docstring literal block is only an EXAMPLE if it is code. A return-value shape or a prose
+# A docstring literal block is only an example if it is code. A return-value shape or a prose
 # paragraph is neither runnable nor wrong, and reporting one is a false alarm.
 _CODE_LINE = re.compile(r"^\s*(?:from\s+\w|import\s+\w|\w[\w.]*\s*=\s*\w|\w[\w.]*\()")
 
@@ -66,7 +66,7 @@ def _indent(line: str) -> int:
 
 
 def _docstring_examples(path: Path) -> list[Example]:
-    """reST literal blocks — a line ending in `::` followed by a more-indented run."""
+    """reST literal blocks: a line ending in `::` followed by a more-indented run."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
@@ -118,7 +118,7 @@ def _resolve_imports(tree: ast.AST) -> tuple[dict[str, object], list[str]]:
         if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("tcip"):
             try:
                 mod = importlib.import_module(node.module)
-            except Exception as exc:  # noqa: BLE001 — any import failure is the finding
+            except Exception as exc:  # noqa: BLE001 (any import failure is the finding)
                 missing.append(f"cannot import {node.module}: {type(exc).__name__}: {exc}")
                 continue
             for alias in node.names:
@@ -133,7 +133,7 @@ def _dispatch_target(func: object, node: ast.Call) -> tuple[object, str] | None:
     """Resolve a name-dispatching factory to the builder it would actually call.
 
     ``build_detector("faster_rcnn", ...)`` accepts anything through ``**kwargs``, so binding
-    against the factory proves nothing — the arity error surfaces inside the dispatched builder.
+    against the factory proves nothing: the arity error surfaces inside the dispatched builder.
     Find the registry dict in the factory's module and bind against the real target instead.
     """
     if not node.args or not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, str):
