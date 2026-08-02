@@ -12,7 +12,7 @@ from tcip_annotation.state import Annotation, BBox
 
 from tcip_web.app import app
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real
 # catkin.yml into this test's pinned project root so get_trait("catkin") keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
@@ -23,7 +23,7 @@ def client() -> TestClient:
 
 
 def _write_preds(path: Path, subjects: list[str]) -> None:
-    """Per-image JSON prediction file with the given classified subjects (K4/K5: the classifier's
+    """Per-image JSON prediction file with the given classified subjects (the classifier's
     decoded call, straight into ``.subject``)."""
     anns = [Annotation(subject=s, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9) for s in subjects]
     write_annotations(str(path), anns, 8, 8)
@@ -59,7 +59,7 @@ def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: 
     assert body["mapping"] == {}
 
 
-def _bloom_fixture(
+def _phenology_fixture(
     tmp_path: Path, *, validated: bool, images_per_plant: int = 1,
     fractions: tuple[float, ...] = (0.0, 0.10, 0.60, 1.0), id_map: dict | None = None,
     detections: int = 10,
@@ -118,12 +118,12 @@ def _bloom_fixture(
 
 
 def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: Path) -> None:
-    body = _bloom_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
+    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.75, 1.0), detections=4)
     resp = client.post("/api/results/per_plant_curves", json=body)
     assert resp.status_code == 200
     out = resp.json()
     assert out["n_plants"] == 2
-    assert out["elongation_classified"] is True
+    assert out["positive_class_assessed"] is True
     by_key = {(r["plant_id"], r["date"]): r for r in out["rows"]}
     assert by_key[("PLANT_A", "2026-02-11")]["n_total"] == 4
     assert by_key[("PLANT_A", "2026-02-11")]["ratio"] == 0.75
@@ -134,10 +134,10 @@ def test_per_plant_curves_reports_the_real_image_count_not_a_hardcoded_one(
     client: TestClient, tmp_path: Path,
 ) -> None:
     # The row used to assert `n_images: 1` unconditionally while per_plant_series aggregates every
-    # image the mapping names for that (plant, date) — the one field in a delivered row derived from
+    # image the mapping names for that (plant, date): the one field in a delivered row derived from
     # nothing at all. Three images per plant per date must read as 3, with counts aggregated over
     # all of them.
-    body = _bloom_fixture(tmp_path, validated=True, images_per_plant=3, fractions=(0.5,),
+    body = _phenology_fixture(tmp_path, validated=True, images_per_plant=3, fractions=(0.5,),
                           detections=4)
     rows = client.post("/api/results/per_plant_curves", json=body).json()["rows"]
     row = next(r for r in rows if r["plant_id"] == "PLANT_A")
@@ -146,13 +146,13 @@ def test_per_plant_curves_reports_the_real_image_count_not_a_hardcoded_one(
 
 
 def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp_path: Path) -> None:
-    # Bare single-class detector output — the bucket's id_map has no attribute axis, so the run
-    # never assessed elongation. Must disclose that rather than pass the counts off as a bloom
-    # measurement, and must never report a fabricated ratio.
-    body = _bloom_fixture(tmp_path, validated=True, fractions=(0.0,), id_map={"catkin": 0},
+    # Bare single-class detector output: the bucket's id_map has no attribute axis, so the run
+    # never assessed the positive-state class. Must disclose that rather than pass the counts off
+    # as a phenology measurement, and must never report a fabricated ratio.
+    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0,), id_map={"catkin": 0},
                           detections=2)
     out = client.post("/api/results/per_plant_curves", json=body).json()
-    assert out["elongation_classified"] is False
+    assert out["positive_class_assessed"] is False
     row = out["rows"][0]
     assert row["n_total"] == 2
     assert row["n_unclassified"] == 2
@@ -160,7 +160,7 @@ def test_per_plant_curves_flags_unclassified_predictions(client: TestClient, tmp
 
 
 def test_onset_dates_finds_crossings(client: TestClient, tmp_path: Path) -> None:
-    body = _bloom_fixture(tmp_path, validated=True, detections=100)
+    body = _phenology_fixture(tmp_path, validated=True, detections=100)
     rows = client.post("/api/results/onset_dates", json=body).json()["rows"]
     onset = next(r for r in rows if r["plant_id"] == "PLANT_A")
     assert onset["catkin_05per_date"] is not None
@@ -173,7 +173,7 @@ def test_onset_dates_finds_crossings(client: TestClient, tmp_path: Path) -> None
 def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) -> None:
     # The ingest 'undated/' bucket (and any non-ISO folder) sorts to the (0,0,0) sentinel. It must
     # not crash interpolation or leak '0000-00-00' into a delivered date.
-    body = _bloom_fixture(tmp_path, validated=True, fractions=(0.0, 1.0), detections=10)
+    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 1.0), detections=10)
     mapping_path = Path(body["mapping_path"])
     mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
     mapping["undated"] = mapping["2026-02-11"]
@@ -190,10 +190,10 @@ def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) 
 def test_onset_dates_discloses_zero_observations_distinctly_from_valid(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # A plant fully classified AND fully observed can still have zero real detections on every date
-    # (e.g. before emergence) — n_observed_dates lets the GUI distinguish "no observations" from real
-    # bloom data, which otherwise read identically as "valid" next to blank milestone cells.
-    body = _bloom_fixture(tmp_path, validated=True, fractions=(0.0, 0.0), detections=0)
+    # A plant fully classified and fully observed can still have zero real detections on every date
+    # (e.g. before emergence): n_observed_dates lets the GUI distinguish "no observations" from real
+    # detection data, which otherwise read identically as "valid" next to blank milestone cells.
+    body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 0.0), detections=0)
     row = client.post("/api/results/onset_dates", json=body).json()["rows"][0]
     assert row["n_dates_unclassified"] == 0
     assert row["n_dates_missing_images"] == 0
@@ -201,7 +201,7 @@ def test_onset_dates_discloses_zero_observations_distinctly_from_valid(
     assert row["catkin_95per_date"] is None
 
 
-def test_bloom_doors_reject_a_malformed_payload_with_422_not_500(client: TestClient) -> None:
+def test_phenology_doors_reject_a_malformed_payload_with_422_not_500(client: TestClient) -> None:
     # A payload missing required inputs is a structured 422, never an unhandled KeyError/500.
     for route in ("per_plant_curves", "onset_dates", "export_csv"):
         resp = client.post(f"/api/results/{route}", json={"trait": "catkin"})
@@ -216,11 +216,11 @@ def _export(client: TestClient, body: dict, payload: str = "milestones", **extra
                        json={**body, "payload": payload, "filename": "x.csv", **extra})
 
 
-def test_every_bloom_door_refuses_unvalidated_evidence(client: TestClient, tmp_path: Path) -> None:
-    # The round-7 defect: only the CSV door reconciled anything, so the curve and milestone doors
-    # returned the same phenotype with no gate at all — the breeder read unvalidated bloom dates on
-    # screen and met the refusal only on clicking Download. All three now read the same evidence.
-    body = _bloom_fixture(tmp_path, validated=False)
+def test_every_phenology_door_refuses_unvalidated_evidence(client: TestClient, tmp_path: Path) -> None:
+    # Only the CSV door used to reconcile anything, so the curve and milestone doors returned the
+    # same phenotype with no gate at all: the breeder read unvalidated phenology dates on screen and
+    # met the refusal only on clicking Download. All three now read the same evidence.
+    body = _phenology_fixture(tmp_path, validated=False)
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json=body)
         assert resp.status_code == 400, route
@@ -229,11 +229,11 @@ def test_every_bloom_door_refuses_unvalidated_evidence(client: TestClient, tmp_p
         assert _export(client, body, payload).status_code == 400, payload
 
 
-def test_every_bloom_door_delivers_on_real_bucket_evidence(client: TestClient, tmp_path: Path) -> None:
+def test_every_phenology_door_delivers_on_real_bucket_evidence(client: TestClient, tmp_path: Path) -> None:
     # The rail must admit valid work: the identical numbers, with the evidence on disk, ship
     # through every door. Without this the refusals above are satisfiable by a door that always
     # refuses.
-    body = _bloom_fixture(tmp_path, validated=True)
+    body = _phenology_fixture(tmp_path, validated=True)
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json=body)
         assert resp.status_code == 200, route
@@ -252,7 +252,7 @@ def test_acknowledge_reveals_provisional_numbers_on_screen_but_never_in_a_file(
     # The non-stranding escape, mirroring compute_phenology's acknowledge_unvalidated: a breeder
     # whose operating point is not yet calibrated can LOOK at what they have, clearly marked. A file
     # leaving the platform has no such escape, so the same flag must not open the CSV door.
-    body = _bloom_fixture(tmp_path, validated=False)
+    body = _phenology_fixture(tmp_path, validated=False)
     for route in GATE_DOORS:
         resp = client.post(f"/api/results/{route}", json={**body, "acknowledge_unvalidated": True})
         assert resp.status_code == 200, route
@@ -265,7 +265,7 @@ def test_acknowledge_reveals_provisional_numbers_on_screen_but_never_in_a_file(
 def test_export_refuses_when_nothing_was_ever_classified(client: TestClient, tmp_path: Path) -> None:
     # The same refusal compute_phenology makes: with no positive-class axis anywhere, the fraction
     # is not a measurement. Previously only the frontend guarded this on the web side.
-    body = _bloom_fixture(tmp_path, validated=True, id_map={"catkin": 0})
+    body = _phenology_fixture(tmp_path, validated=True, id_map={"catkin": 0})
     resp = _export(client, body, "milestones")
     assert resp.status_code == 400
     assert "elongated" in resp.json()["detail"]
@@ -274,16 +274,16 @@ def test_export_refuses_when_nothing_was_ever_classified(client: TestClient, tmp
 def test_the_old_declaration_bypass_no_longer_reaches_the_door(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # Round 6's finding, as its own regression: declaring export_kind="diagnostic" and handing over
-    # a table shipped a real per-plant bloom curve with 200 and zero validity evidence, because a
-    # curve row carries no registry milestone column for the retained floor to catch. The same three
-    # payloads that shipped then (a curve, a per-plant count table, milestone dates under renamed
-    # columns) can no longer be handed to this door at all: it computes what it exports.
+    # Declaring export_kind="diagnostic" and handing over a table shipped a real per-plant curve
+    # with 200 and zero validity evidence, because a curve row carries no registry milestone column
+    # for the retained floor to catch. None of these caller-composed shapes (a curve, a per-plant
+    # count table, milestone dates under renamed columns) can be handed to this door at all: it
+    # computes what it exports.
     for rows in (
         [{"plant_id": "P1", "date": "2026-03-01", "n_total": 20, "n_positive": 1, "ratio": 0.05,
           "n_unclassified": 0, "n_missing": 0}],
-        [{"plant_id": "P1", "date": "2026-03-15", "catkin_count": 42}],
-        [{"plant_id": "P1", "bloom_start": "2026-03-01", "bloom_end": "2026-04-02"}],
+        [{"plant_id": "P1", "date": "2026-03-15", "positive_count": 42}],
+        [{"plant_id": "P1", "start_date": "2026-03-01", "end_date": "2026-04-02"}],
     ):
         resp = client.post("/api/results/export_csv", json={
             "rows": rows, "filename": "x.csv", "export_kind": "diagnostic"})
@@ -292,10 +292,10 @@ def test_the_old_declaration_bypass_no_longer_reaches_the_door(
 
 
 def test_no_caller_field_can_raise_the_reconciled_validity(client: TestClient, tmp_path: Path) -> None:
-    # Validity is read from the buckets' own sidecars, so an optimistic caller assertion — under the
-    # stamp column names the delivered CSV itself uses — must be inert. Extra fields are ignored by
+    # Validity is read from the buckets' own sidecars, so an optimistic caller assertion (under the
+    # stamp column names the delivered CSV itself uses) must be inert. Extra fields are ignored by
     # the payload model, so the refusal is byte-identical to the one with no assertion at all.
-    body = _bloom_fixture(tmp_path, validated=False)
+    body = _phenology_fixture(tmp_path, validated=False)
     bare = client.post("/api/results/per_plant_curves", json=body)
     optimistic = client.post("/api/results/per_plant_curves", json={
         **body,
@@ -314,7 +314,7 @@ def test_a_genuinely_unvalidated_classifier_refuses_even_when_the_count_is_valid
     # The two dimensions are reconciled separately: a validated count operating point must not
     # carry an unvalidated classifier through. Names the failing dimension so the breeder knows
     # which one to fix.
-    body = _bloom_fixture(tmp_path, validated=True)
+    body = _phenology_fixture(tmp_path, validated=True)
     for bucket in body["predictions_by_date"].values():
         (Path(bucket) / "classifier_operating_point.json").write_text(json.dumps({
             "validated": False, "trait": "catkin",
@@ -330,12 +330,12 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
 ) -> None:
     # The web CSV used to write whatever keys the caller's rows carried, so it lacked the MCP door's
     # provenance columns entirely. It now writes phenology_csv_columns and stamps it from the same
-    # reconciliation the gate used — and every column the schema declares is filled, or it would be
-    # the same phantom this round removed from the schema itself.
+    # reconciliation the gate used, and every column the schema declares is filled, or it would be
+    # the same phantom already removed from the schema itself.
     from tcip_mcp.pipelines.postprocessing.phenology import phenology_csv_columns
     from tcip_mcp.traits import get_trait
 
-    body = _bloom_fixture(tmp_path, validated=True)
+    body = _phenology_fixture(tmp_path, validated=True)
     resp = _export(client, body, "milestones")
     assert resp.status_code == 200
     header, first = resp.text.splitlines()[0].split(","), resp.text.splitlines()[1].split(",")
@@ -355,7 +355,7 @@ def test_curve_and_milestone_doors_report_the_same_measurement(
     # Both doors project one per_plant_phenology result, so a milestone date and the curve it was
     # read off cannot come from different numbers. The milestone door used to recompute from rows
     # the client handed back.
-    body = _bloom_fixture(tmp_path, validated=True, detections=100)
+    body = _phenology_fixture(tmp_path, validated=True, detections=100)
     curves = client.post("/api/results/per_plant_curves", json=body).json()["rows"]
     milestones = client.post("/api/results/onset_dates", json=body).json()["rows"]
     a_curve = sorted((r for r in curves if r["plant_id"] == "PLANT_A"), key=lambda r: r["date"])
@@ -380,12 +380,12 @@ def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
 def test_a_classifier_calibrated_for_another_trait_does_not_validate_this_delivery(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # compute_phenology binds the classifier stamp to the delivery — a sidecar recorded against a
+    # compute_phenology binds the classifier stamp to the delivery: a sidecar recorded against a
     # different trait, or against a run that did not produce these predictions, is not trusted. The
     # web door reconciled without that binding, so it accepted a stamp the MCP door rejects, and
     # then wrote it into the delivered CSV as positive_state_classifier_validated. Both doors now
     # call the one shared binding.
-    body = _bloom_fixture(tmp_path, validated=True)
+    body = _phenology_fixture(tmp_path, validated=True)
     _rewrite_classifier_sidecars(body, trait="chestnut_bur")
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
@@ -397,7 +397,7 @@ def test_a_classifier_calibrated_for_another_trait_does_not_validate_this_delive
 def test_a_classifier_calibrated_against_another_experiment_does_not_validate_this_delivery(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    body = _bloom_fixture(tmp_path, validated=True)
+    body = _phenology_fixture(tmp_path, validated=True)
     _rewrite_classifier_sidecars(body, experiment_id="exp-OTHER")
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
@@ -407,13 +407,13 @@ def test_a_classifier_calibrated_against_another_experiment_does_not_validate_th
 
 def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_path: Path) -> None:
     # The refusals above must not be satisfiable by a door that refuses every classifier stamp.
-    body = _bloom_fixture(tmp_path, validated=True)
+    body = _phenology_fixture(tmp_path, validated=True)
     _rewrite_classifier_sidecars(body, trait="catkin", experiment_id="exp-1")
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 200
     # A foreign checkpoint with no recorded experiment_id is not rejected for lacking one to
-    # compare against (the K3 owner decision) — only a real mismatch is.
+    # compare against; only a real mismatch is.
     _rewrite_classifier_sidecars(body, trait="catkin", experiment_id=None)
     assert client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"}).status_code == 200
@@ -422,7 +422,7 @@ def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_pat
 def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    # A curve is the same delivered bloom measurement, un-summarised — which is why it takes the
+    # A curve is the same delivered phenology measurement, un-summarised, which is why it takes the
     # identical gate. It must therefore carry the identical evidence: the milestone branch was
     # stamped while the curve branch wrote the bare aggregation, so half of what this door delivers
     # was unauditable.
@@ -431,7 +431,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     provenance = ["operating_point_conf", "operating_point_validated",
                   "positive_state_classifier_validated", "producer_model_sha256",
                   "producer_experiment_id"]
-    body = _bloom_fixture(tmp_path, validated=True)
+    body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "curves", "filename": "c.csv"})
     assert resp.status_code == 200
@@ -448,13 +448,13 @@ def test_export_refuses_a_bucket_whose_id_map_never_carried_the_positive_class(
     client: TestClient, tmp_path: Path,
 ) -> None:
     # compute_phenology's first guard is that the positive class id resolves from some bucket's own
-    # recorded id_map. per_plant_phenology's elongation_classified flag is not a substitute: a date
+    # recorded id_map. per_plant_phenology's positive_class_assessed flag is not a substitute: a date
     # with ZERO detections is trivially "fully classified", so an axis-less bucket with no
     # detections read as classified and the export door had nothing left to refuse on.
-    body = _bloom_fixture(tmp_path, validated=True, id_map={"catkin": 0}, detections=0)
+    body = _phenology_fixture(tmp_path, validated=True, id_map={"catkin": 0}, detections=0)
     curves = client.post("/api/results/per_plant_curves", json=body)
     assert curves.status_code == 200
-    assert curves.json()["elongation_classified"] is False
+    assert curves.json()["positive_class_assessed"] is False
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 400
