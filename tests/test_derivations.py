@@ -68,7 +68,7 @@ def test_derive_cross_tile_nms_clamped_to_upper_bound():
 
 def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loose():
     # Same box size (20x20, char size 20) both times; only neighbor spacing differs. Tight spacing
-    # (10px between centers) must derive a smaller fraction than loose spacing (100px) — the
+    # (10px between centers) must derive a smaller fraction than loose spacing (100px): the
     # tolerance has to stay well inside how close real neighbors actually get, or two distinct
     # nearby objects start double-matching to one detection.
     tight = [[(0, 0, 20, 20), (10, 0, 20, 20), (20, 0, 20, 20), (30, 0, 20, 20), (40, 0, 20, 20)]]
@@ -109,21 +109,21 @@ def test_derive_sliver_frac_no_boxes_returns_none():
 
 
 def test_derive_sliver_frac_too_few_samples_returns_none():
-    # A single box's ratio to itself is trivially ~1.0 regardless of the class's real variation —
+    # A single box's ratio to itself is trivially ~1.0 regardless of the class's real variation:
     # not a spread, just noise. Below min_samples must refuse rather than derive from it.
     assert derive_sliver_frac([25.6]) is None
     assert derive_sliver_frac([10.0, 20.0, 30.0, 40.0]) is None  # 4 < default min_samples=5
 
 
 def test_derive_localization_kind_small_objects_are_center_match():
-    # 20x20 boxes (char size 20) — well under the ~45px default crossover; IoU would be unreliable
+    # 20x20 boxes (char size 20): well under the ~45px default crossover; IoU would be unreliable
     # under realistic jitter, so center-match must govern.
     boxes = [[(0, 0, 20, 20), (100, 0, 20, 20)]]
     assert derive_localization_kind(boxes) == "center_match"
 
 
 def test_derive_localization_kind_large_objects_are_iou_match():
-    # 200x200 boxes (char size 200) — well over the crossover; IoU is a meaningful criterion here.
+    # 200x200 boxes (char size 200): well over the crossover; IoU is a meaningful criterion here.
     boxes = [[(0, 0, 200, 200), (500, 0, 200, 200)]]
     assert derive_localization_kind(boxes) == "iou_match"
 
@@ -135,7 +135,7 @@ def test_derive_localization_kind_no_boxes_returns_none():
 
 
 def test_derive_localization_kind_crossover_is_monotonic_in_size():
-    # Larger characteristic size must never flip FROM iou_match BACK to center_match — the
+    # Larger characteristic size must never flip from iou_match back to center_match: the
     # achievable-IoU formula is monotonically increasing in size, so this must hold for any jitter.
     small = derive_localization_kind([[(0, 0, 10, 10)]])
     mid = derive_localization_kind([[(0, 0, 45, 45)]])
@@ -189,7 +189,7 @@ def test_write_class_map(tmp_path):
     assert res["subjects"] == ["catkin"]
     assert res["classes_path"] == str(out)
     # Declared order is the id order (assign_class_ids is the one name->id derivation): 0=dormant,
-    # 1=elongated — and the on-disk nested shape carries the same value order.
+    # 1=elongated, and the on-disk nested shape carries the same value order.
     reg = class_registry.read_registry(out)
     assert class_registry.assign_class_ids(reg, "catkin", "elongation") == {"dormant": 0, "elongated": 1}
     assert json.loads(out.read_text())["catkin"]["attributes"]["elongation"]["values"] == \
@@ -198,7 +198,7 @@ def test_write_class_map(tmp_path):
 
 def test_write_class_map_no_labels(tmp_path):
     from tcip_mcp.tools.annotation_tools import write_class_map
-    # An empty registry mapping is not authorable — the tool refuses rather than writing nothing.
+    # An empty registry mapping is not authorable: the tool refuses rather than writing nothing.
     res = write_class_map(str(tmp_path), subjects={}, output_path=str(tmp_path / "c.json"))
     assert "error" in res
 
