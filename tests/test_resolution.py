@@ -17,8 +17,8 @@ from tcip_mcp.pipelines.resolution import (
 from tcip_mcp.traits import TraitUnknownError, get_trait, registered_traits
 from tests._trait_fixtures import CATKIN
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so get_trait("catkin") keeps resolving by default.
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
+# test's pinned project root so get_trait("catkin") keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
@@ -55,7 +55,7 @@ def test_review_confirmed_calibration_is_shippable():
     assert p.value == 0.4
 
 
-# --- W1-R3: reconcile the delivery gate against on-disk operating_point.json (T5-3) ---
+# --- reconcile the delivery gate against on-disk operating_point.json ---
 
 def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
     import json
@@ -70,7 +70,7 @@ def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
 
 def test_reconcile_missing_sidecar_floors_to_false(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
-    # A caller asserting validated cannot open the gate when no sidecar backs it (the T5-3 hole).
+    # A caller asserting validated cannot open the gate when no sidecar backs it.
     r = reconcile_operating_point_validity([str(tmp_path / "nope")], asserted=VALIDATED_HELD_OUT)
     assert r["validated"] == VALIDATED_FALSE
     assert r["missing_sidecars"] == [str(tmp_path / "nope")]
@@ -168,11 +168,11 @@ def test_capture_scoped_param_is_not_comparable_without_a_capture_id():
                .shippable_issues(target_capture_id="cap2"))
 
 
-# --- K10: tile_size gates the same shape conf already does ----------------
+# --- tile_size gates the same shape conf already does ----------------
 
 def test_tile_size_untiled_is_never_gating():
-    # An untiled run's count never depends on tile_size — it stays a plain non-gating fact (mirrors
-    # in_chans), never manufacturing a refusal over a dimension that was never operative.
+    # An untiled run's count never depends on tile_size, so it stays a plain non-gating fact
+    # (mirrors in_chans), never manufacturing a refusal over a dimension that was never operative.
     from tcip_mcp.pipelines.resolution import resolve_tile_size_param
 
     p = resolve_tile_size_param(640, tiled=False, tile_size_source="default")
@@ -205,8 +205,8 @@ def test_tile_size_explicit_caller_override_is_shippable():
 
 
 def test_tile_size_fabricated_default_is_not_shippable():
-    # The exact hole K10 closes: a checkpoint with no persisted geometry and no explicit override
-    # fabricates a fallback (640) with no real basis — now firewalled the same shape conf is.
+    # A checkpoint with no persisted geometry and no explicit override fabricates a fallback (640)
+    # with no real basis, so it is now firewalled the same shape conf is.
     from tcip_mcp.pipelines.resolution import resolve_tile_size_param
 
     p = resolve_tile_size_param(640, tiled=True, tile_size_source="default")
@@ -219,9 +219,9 @@ def test_tile_size_fabricated_default_is_not_shippable():
 
 
 def test_raw_operating_point_fabricated_tiled_default_surfaces_its_own_shippable_issue():
-    # Before K10: tile_size never participated in shippable_issues() at all, regardless of source —
-    # a fabricated 640 fallback was silently shippable engineering trivia. Now it surfaces its own
-    # named issue, independent of (and in addition to) conf's own always-unvalidated raw-path issue.
+    # tile_size must participate in shippable_issues() regardless of source: a fabricated 640
+    # fallback must not be silently shippable engineering trivia. It surfaces its own named issue,
+    # independent of (and in addition to) conf's own always-unvalidated raw-path issue.
     from tcip_mcp.pipelines.resolution import raw_operating_point
 
     b = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=1000)
@@ -232,11 +232,10 @@ def test_raw_operating_point_fabricated_tiled_default_surfaces_its_own_shippable
 
 def test_raw_operating_point_untiled_never_gates_tile_size():
     # The rail must admit valid work, not only reject invalid work: an untiled call must never be
-    # refused over a tile_size that was never operative for it. Asserted as a CONTRAST against the
-    # same fabricated tile_size value actually gating once tiled=True — an untiled-only assertion
-    # alone would pass just as well against a broken build where tile_size never gates at all
-    # (exactly the pre-K10 baseline), so this pins the "only when operative" boundary, not merely
-    # "untiled is fine" in isolation.
+    # refused over a tile_size that was never operative for it. Asserted as a contrast against the
+    # same fabricated tile_size value actually gating once tiled=True: an untiled-only assertion
+    # alone would pass just as well against a broken build where tile_size never gates at all, so
+    # this pins the "only when operative" boundary, not merely "untiled is fine" in isolation.
     from tcip_mcp.pipelines.resolution import raw_operating_point
 
     tiled = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=1000)
@@ -335,7 +334,7 @@ def test_validate_bundle_surfaces_all_firewall_issues_at_export():
     # The realistic delivery-time call: a dataset-scoped calibration inherited across a different
     # dataset while exporting, plus an in_chans mismatch. All three firewall checks must fire, so a
     # regression dropping any one (e.g. the shippable_issues(target_dataset_hash=...) fold-in)
-    # can't slip past — each check is exercised in isolation elsewhere but never together.
+    # can't slip past: each check is exercised in isolation elsewhere but never together.
     b = ResolvedBundle("catkin", "AAAA", {
         "in_chans": derived("in_chans", 3, derived_from="raster"),
         "conf": derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="sweep",
