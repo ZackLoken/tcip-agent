@@ -1,11 +1,11 @@
 /**
  * HPO search-space model for the Tuning tab's structured form. Builds the typed param-space
- * the `run_hpo` tool feeds to Ray Tune, for a fixed set of purpose-built axes — lr / weight_decay
- * / batch_size — each with dedicated GUI handling (a log-uniform range, a numeric list, ...).
+ * the `run_hpo` tool feeds to Ray Tune, for a fixed set of purpose-built axes (lr, weight_decay,
+ * batch_size), each with dedicated GUI handling (a log-uniform range, a numeric list, ...).
  *
- * This is NOT the full sweep surface: the backend's `_apply_hpo_params` (K11) also accepts any
+ * This is not the full sweep surface: the backend's `_apply_hpo_params` also accepts any
  * other top-level config key on the sweep dict, routed straight to the resolved config for a
- * bespoke `training_source` to read from `ctx.config` — there is no purpose-built GUI affordance
+ * bespoke `training_source` to read from `ctx.config`. There is no purpose-built GUI affordance
  * for an arbitrary custom axis yet (would need a free-form key/value add-on, not a mechanical
  * change to this file). Use `run_hpo`'s `param_space` argument directly for that case.
  */
@@ -38,7 +38,7 @@ export const DEFAULT_HPO_PARAMS: HpoParam[] = [
 /**
  * Search algorithms Ray Tune can drive. `random`/`grid` are native; the rest need their
  * backend installed on the server (an unavailable pick surfaces as a clear sweep error).
- * The agent normally chooses per task/data — this menu is here for the human's direct use.
+ * The agent normally chooses per task/data; this menu is here for the human's direct use.
  */
 export const SEARCH_ALGORITHMS = [
   "random",
@@ -58,7 +58,7 @@ export const SEARCH_ALGORITHMS = [
 export const SCHEDULERS = ["asha", "hyperband", "bohb", "pbt", "median", "none"] as const;
 
 /** Parse a comma-separated list of numbers, dropping blanks / non-numbers.
- *  (Blanks must be dropped BEFORE Number() — `Number("")` is 0, not NaN.) */
+ *  (Blanks must be dropped before Number(): `Number("")` is 0, not NaN.) */
 export function parseNumList(s: string): number[] {
   return s
     .split(",")
@@ -78,7 +78,7 @@ export function buildSearchSpace(params: HpoParam[]): Record<string, unknown> {
   for (const p of params) {
     if (!p.enabled) continue;
     if (p.kind === "loguniform") {
-      // Skip a param whose bounds were cleared to NaN — an unbounded log-uniform makes
+      // Skip a param whose bounds were cleared to NaN: an unbounded log-uniform makes
       // the sweep launch and then crash at runtime.
       if (Number.isFinite(p.low) && Number.isFinite(p.high)) {
         space[p.key] = { type: "loguniform", low: p.low, high: p.high };
