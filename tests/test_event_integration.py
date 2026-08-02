@@ -69,7 +69,7 @@ class TestPostPanelEventRoute:
         assert events[-1]["data"]["trial"] == 2
 
     def test_review_focus_persists_advisory_state(self, client: TestClient) -> None:
-        # The agent reads gui state back via view_gui_state — a focus event must
+        # The agent reads gui state back via view_gui_state: a focus event must
         # land there even though the browser applies it with local setters only.
         resp = client.post(
             "/api/events/app",
@@ -209,12 +209,12 @@ class TestHpoToolOutputSchema:
         assert callable(training_tools.run_hpo)
 
 
-# ── Phase-0 audit fixes: port fallback chain + pytest hermeticity ──────────
+# ── Port fallback chain + pytest hermeticity ──────────
 
 
 def test_resolve_web_port_falls_back_to_repo_root(tmp_path, monkeypatch):
     """After set_active_project repins the platform root to a project, the port file still
-    lives under the backend's startup (repo) root — the lookup must find it there instead of
+    lives under the backend's startup (repo) root: the lookup must find it there instead of
     silently degrading to the default port."""
     from tcip_mcp import web_client
 
