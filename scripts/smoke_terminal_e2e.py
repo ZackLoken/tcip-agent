@@ -1,6 +1,6 @@
-"""One-shot smoke: the embedded agent terminal against the REAL `claude` CLI.
+"""One-shot smoke: the embedded agent terminal against the real `claude` CLI.
 
-Exercises the exact flow the GUI uses — POST /api/terminal/sessions (spawns claude.exe
+Exercises the exact flow the GUI uses: POST /api/terminal/sessions (spawns claude.exe
 in a ConPTY, cwd = repo root), attach the WebSocket, answer the terminal's
 Device-Attributes query like xterm.js would, type a prompt, and assert a real model
 response streams back. This is the scenario that silently failed in the old chat
