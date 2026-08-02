@@ -35,7 +35,7 @@ flower elongation/receptivity call.
 > immutable authority ("Date when most catkins have elongated"). The implementation computes
 > `catkin_elongation_date` as the **95% majority crossing** (= `catkin_95per_date`), the
 > current best-guess reading of that text, to be confirmed with the breeders; correct the
-> mapping in `phenology.plant_milestones` if they rule otherwise. `elongation_onset_date`
+> mapping in `phenology.plant_milestones` if they rule otherwise. `positive_onset_date`
 > (first date any elongation appears) remains a **separate** helper, not the delivered trait.
 
 **Not a count-of-peak.** Do not normalize catkin *count* to the season peak and call the
@@ -52,7 +52,7 @@ thought rather than a default.
 ## The measurement-integrity guard
 
 Because "elongated" is a learned per-catkin call, predictions that carry **no** elongation
-call cannot yield a valid bloom fraction. Every surface reports `elongation_classified`:
+call cannot yield a valid bloom fraction. Every surface reports `positive_class_assessed`:
 when it is false, the milestones are **not** a measurement; do not deliver them. Train and
 *validate* whatever model produces the elongation call first, against a reference sized to the
 trait: GT annotations, **or** a breeder-confirmed sample of the model's own outputs
@@ -83,8 +83,8 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 | Piece | Where | Role |
 |-------|-------|------|
 | `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | **agent entry point (step 1)**: geolocated images + plant CSVs → persisted `plant_mapping.json` |
-| `compute_phenology` (MCP tool) | `tools/phenology_tools.py` | **agent entry point (step 2)**: mapping.json + classified preds → delivered `catkin_phenology.csv`; refuses to write when `elongation_classified` is false |
-| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the **one** canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `elongation_onset_date`, `plant_milestones`, `write_phenology_csv` |
+| `compute_phenology` (MCP tool) | `tools/phenology_tools.py` | **agent entry point (step 2)**: mapping.json + classified preds → delivered `catkin_phenology.csv`; refuses to write when `positive_class_assessed` is false |
+| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the **one** canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, `write_phenology_csv` |
 | `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping` |
 | Web Results routes | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/per_plant_curves`, `/onset_dates`: the human UI; delegates to the **same** shared modules |
 
@@ -93,6 +93,13 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 milestone date mean the same thing on both surfaces. If you change a definition, change it
 there; never fork a second copy. So the agent composes tools end to end:
 `build_plant_mapping` → `run_inference` → (elongation call) → `compute_phenology`.
+
+Once a real localization-kind derivation (from actual GT box geometry) or a real breeder-answered
+count objective exists for this trait, persist it with `update_trait_spec_fields(trait_name,
+fields, provenance_entries)`, the one audited write path for a `TraitSpec`'s fields
+(`count_objective`, `localization`, `positive_class_name`, ...). It refuses if the trait has no
+existing spec file (creating a new trait is a separate, still-manual step) and re-validates the
+merged spec against `crops.yml` before writing. Never hand-write the trait's spec YAML directly.
 
 **Don't confuse `score_predictions`** (IoU GT-vs-prediction *eval* matching) with plant-GPS
 mapping; they are unrelated.
@@ -109,7 +116,7 @@ honest, interpretable signals. It deliberately emits **no** fabricated 0–1 "co
 
 ## Delivery checklist
 
-1. `elongation_classified` is **true** (predictions carry the elongation call).
+1. `positive_class_assessed` is **true** (predictions carry the elongation call).
 2. Every expected plant has a row; genotype/`accession` is carried through.
 3. Milestones are chronologically sane (`05per` ≤ `50per` ≤ `95per`; `elongation_date`, the
    majority crossing, equals `95per`).
