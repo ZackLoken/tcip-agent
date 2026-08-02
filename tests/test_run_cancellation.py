@@ -1,4 +1,4 @@
-"""Phase 4.1 — training-run cancellation (cancel_run / cancel_training; graceful stop)."""
+"""Training-run cancellation (cancel_run / cancel_training; graceful stop)."""
 
 import pytest
 
