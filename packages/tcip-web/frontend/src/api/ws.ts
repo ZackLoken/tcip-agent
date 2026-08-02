@@ -27,7 +27,7 @@ export class StateSocket {
   connect() {
     this.closed = false;
     // Don't stack a second socket when one is already live/opening (React
-    // StrictMode double-mounts, rapid reconnects) — that produced duplicate live
+    // StrictMode double-mounts, rapid reconnects); that produced duplicate live
     // WebSockets each driving their own reconnect loop.
     if (
       this.ws &&
@@ -92,7 +92,7 @@ export class StateSocket {
   /**
    * Subscribe to server-pushed events for one panel, reconnecting with capped
    * exponential backoff if the socket drops (backend restart, transient
-   * network) — without it, panel events silently stop for the rest of the
+   * network); without it, panel events silently stop for the rest of the
    * browser session. The returned unsubscribe closes the live socket and
    * cancels any pending reconnect.
    */
