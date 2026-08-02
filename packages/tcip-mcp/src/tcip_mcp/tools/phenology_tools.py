@@ -653,5 +653,6 @@ def compute_phenology(
         "positive_state_classifier_validated": stamp["positive_state_classifier_validated"],
         "operating_point_validated": stamp["operating_point_validated"],
         "tile_size_validated": gate.stamp.get("tile_size"),
+        "n_images_unmapped": result["n_images_unmapped"],
         "columns": phenology.phenology_csv_columns(spec),
     }
