@@ -5,6 +5,8 @@ classification/ordinal checkpoints (ComposedModel -> ``_format_other``) carry
 ``head{i}_confidences``, never an ``output`` key.
 """
 
+import pytest
+
 from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue
 
 
@@ -74,6 +76,11 @@ class TestAutoAccept:
 
     def test_empty_detection_not_accepted(self):
         assert auto_accept([{"image": "neg.png", "scores": []}], threshold=0.8) == []
+
+    def test_threshold_is_required(self):
+        """No pinned default: a caller must derive and pass a confirmed threshold."""
+        with pytest.raises(TypeError):
+            auto_accept([{"image": "a.png", "scores": [0.95]}])
 
 
 # ====================================================================
