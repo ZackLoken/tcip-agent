@@ -11,7 +11,7 @@ export const CHART = {
   legendText: "#E7E5DC", // tcip-fg
 } as const;
 
-/** On-brand, visually distinct series palette — SI green + persimmon + the season scale +
+/** On-brand, visually distinct series palette: SI green + persimmon + the season scale +
  *  the detection blue. Cycled for charts with many series. */
 export const CHART_LINE_COLORS = [
   "#507754", // SI green
