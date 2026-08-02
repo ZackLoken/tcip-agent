@@ -1,9 +1,9 @@
 /**
- * The front door. Lists the projects the agent built under the workspace and opens one —
+ * The front door. Lists the projects the agent built under the workspace and opens one:
  * the human never browses the filesystem for two roots. Opening a project points the GUI
  * at it (project root = dataset root); a date/subject/model can be picked per project. The
  * active project (set by the agent after ingesting, or by the human here) auto-opens on
- * first load. Project creation is agent-driven (ingest_images) — the user hands the agent
+ * first load. Project creation is agent-driven (ingest_images); the user hands the agent
  * data paths rather than hand-structuring a folder here.
  */
 
@@ -19,8 +19,8 @@ import { useStore } from "@/store";
 let autoOpenAttempted = false;
 
 // The subjects/models that actually have data on a given date. Empty when nothing is
-// labelled/predicted there — the selectors show only these, so a date with no catkin
-// labels won't offer "catkin" (which would open a blank canvas).
+// labelled/predicted there: the selectors show only these, so a date with no bush
+// labels won't offer "bush" (which would open a blank canvas).
 const subjectsForDate = (p: ProjectSummary, d: string): string[] => p.subjects_by_date[d] ?? [];
 const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
 
@@ -78,7 +78,7 @@ export function ProjectPicker() {
     if (!chosenDate) {
       // Opening with no date can't satisfy datasetReady, so it would leave the picker on
       // screen with a dead button. Tell the human instead of silently latching.
-      setOpenError("This project has no dated images yet — ingest images first.");
+      setOpenError("This project has no dated images yet, ingest images first.");
       return;
     }
     openedRef.current = true;
@@ -108,7 +108,7 @@ export function ProjectPicker() {
           autoOpenAttempted = true;
           const active = res.projects.find((p) => p.name === res.active);
           const d = active ? defaultDate(active.dates) : "";
-          // Auto-open only when the default (newest) date actually has labelled subjects —
+          // Auto-open only when the default (newest) date actually has labelled subjects,
           // otherwise skipping straight into the app would land on a blank canvas with no
           // way to change date. Instead preselect the card so the human lands on the picker
           // (honest-empty dropdowns + the date selector) and picks a date with labels.
@@ -165,7 +165,7 @@ export function ProjectPicker() {
           <div className="tcip-panel p-6 text-[12px] text-tcip-muted flex flex-col gap-2">
             <span className="text-tcip-fg font-medium">No projects yet</span>
             <span>
-              Ask the agent to structure your images into a project — it creates one with{" "}
+              Ask the agent to structure your images into a project; it creates one with{" "}
               <span className="font-mono">ingest_images</span>.
             </span>
           </div>
