@@ -1,4 +1,4 @@
-"""K5->K6 acceptance criterion, closed (round 11, 2026-07-29): a second registered trait, driven
+"""A second registered trait, driven
 through both delivery doors (the JSON curve/milestone doors and export_csv), asserting its own
 schema and that an unvalidated row is refused. ``registered_traits()`` returning only ``catkin``
 was the standing gap this closes.
@@ -6,11 +6,10 @@ was the standing gap this closes.
 ``currant_bloom`` is authored here, in this test file's own pinned project root, honestly
 provisional: no domain expert has confirmed it, and it exists to prove the delivery mechanism
 generalizes to a real *second* trait, not to describe a validated measurement. It deliberately
-differs from catkin in the one shape round 7's design doc flagged as untested: crops.yml names no
-"majority" bloom date for currant, so ``majority_milestone``/``majority_label`` are left empty
-rather than copied from catkin — proving ``_milestone_columns`` (round 7) produces the smaller,
-no-majority column set for real, not only for the local ``TraitSpec`` shapes round 7's own review
-used to prove the structural invariant.
+leaves ``majority_milestone``/``majority_label`` empty rather than copied from catkin, since
+crops.yml names no "majority" bloom date for currant, proving ``_milestone_columns`` produces the
+smaller, no-majority column set for a real second trait, not only for local ``TraitSpec`` shapes
+constructed to prove the structural invariant.
 """
 
 from __future__ import annotations
@@ -54,19 +53,19 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         "sliver_frac": 0.5,
         "count_bias_tolerance_frac": 0.01,
         "delivers": ["bloom_05per_date", "bloom_50per_date", "bloom_95per_date"],
-        "notes": "Test-only, provisional (round 11, 2026-07-29): proves the delivery mechanism "
+        "notes": "Test-only, provisional: proves the delivery mechanism "
                  "generalizes to a second trait. Not a domain-expert-confirmed measurement.",
         "provenance": [
-            "positive_class_name: claude_proposed_unvalidated — authored "
-            "solely to exercise the K5->K6 acceptance test; no domain expert involved.",
-            "count_objective: claude_proposed_unvalidated — a test-only stub value to exercise "
-            "the delivery door, not a real breeder decision (K18 B4: this field is normally only "
+            "positive_class_name: claude_proposed_unvalidated, authored "
+            "solely to exercise this acceptance test; no domain expert involved.",
+            "count_objective: claude_proposed_unvalidated, a test-only stub value to exercise "
+            "the delivery door, not a real breeder decision (this field is normally only "
             "set from an actual plain-language answer about what the number needs to be reliable "
             "for, never authored blind or copied from another trait).",
-            "localization: claude_proposed_unvalidated — a test-only stub value; this fixture "
-            "never runs real GT through derive_localization_kind (K18 B3), so this is NOT what a "
+            "localization: claude_proposed_unvalidated, a test-only stub value; this fixture "
+            "never runs real GT through derive_localization_kind, so this is not what a "
             "real trait's recorded value would look like (that comes from data, not authoring).",
-            "milestone_fractions: vocabulary_derived — 0.05/0.50/0.95 from crops.yml's real "
+            "milestone_fractions: vocabulary_derived, 0.05/0.50/0.95 from crops.yml's real "
             "bloom_05per_date/bloom_50per_date/bloom_95per_date entries for currant.",
         ],
     }
@@ -77,8 +76,8 @@ def _currant_bloom_fixture(
     tmp_path: Path, *, validated: bool, fractions: tuple[float, ...] = (0.0, 0.10, 0.60, 1.0),
     detections: int = 10,
 ) -> dict:
-    """Mirrors test_tcip_web_results_routes.py's ``_bloom_fixture`` shape, for currant_bloom's own
-    classes/trait name — the same real writers, the same real doors, a different registered trait."""
+    """Mirrors test_tcip_web_results_routes.py's ``_phenology_fixture`` shape, for currant_bloom's own
+    classes/trait name: the same real writers, the same real doors, a different registered trait."""
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     _seed_currant_bloom_trait(tmp_path)
@@ -149,7 +148,7 @@ def test_currant_bloom_json_doors_deliver_its_own_schema_when_validated(
         assert resp.json()["rows"], route
     rows = client.post("/api/results/onset_dates", json=body).json()["rows"]
     onset = next(r for r in rows if r["plant_id"] == "BUSH_A")
-    # currant_bloom's own column names — not catkin's, and no majority alias column at all.
+    # currant_bloom's own column names, not catkin's, and no majority alias column at all.
     assert "bloom_05per_date" in onset and "bloom_50per_date" in onset and "bloom_95per_date" in onset
     assert "catkin_elongation_date" not in onset
     assert "bloom_elongation_date" not in onset  # no phantom majority column either
