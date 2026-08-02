@@ -257,7 +257,7 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
 # raw_operating_point (no trait/dataset resolution) carries no localization_tolerance_frac; only
 # resolve_operating_point (trait-aware) derives and stamps it.
 _OP_PARAM_KEYS = {"conf", "cross_tile_nms", "tiled", "tile_size", "max_dets"}
-_RESOLVED_OP_PARAM_KEYS = _OP_PARAM_KEYS | {"localization_tolerance_frac"}
+_RESOLVED_OP_PARAM_KEYS = _OP_PARAM_KEYS | {"localization_tolerance_frac", "count_objective"}
 _PARAM_PROVENANCE_KEYS = {
     "name", "value", "source", "derived_from",
     "requires_validation", "validation_kind", "validated_against",
