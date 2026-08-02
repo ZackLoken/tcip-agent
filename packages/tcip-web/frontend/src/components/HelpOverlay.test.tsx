@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-// Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly —
+// Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly:
 // a leftover overlay from one test would leak into the next.
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
@@ -40,7 +40,7 @@ describe("HelpOverlay", () => {
     fireEvent.keyDown(document.body, { key: "?" });
 
     // Verdicts author GT: accepting an FP adds the prediction, rejecting a TP/FN
-    // deletes the object. The old "does not change GT" wording must not come back —
+    // deletes the object. The old "does not change GT" wording must not come back:
     // it told reviewers a destructive key was safe.
     expect(screen.getByText(/adds the prediction to GT/)).toBeInTheDocument();
     expect(screen.getByText(/deletes the ground-truth object/)).toBeInTheDocument();
