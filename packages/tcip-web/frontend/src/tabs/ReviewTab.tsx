@@ -55,7 +55,7 @@ import type {
   ReviewStatusFilter,
 } from "@/store/types";
 
-// K15: plain-language labels for a breeder audience — the TP/FP/FN tag stays as a short code next
+// Plain-language labels for a breeder audience: the TP/FP/FN tag stays as a short code next
 // to it, not as the primary label a non-CV user has to decode.
 const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashed?: boolean }[] = [
   { key: "tp", label: "Matches ground truth", tag: "TP" },
@@ -66,8 +66,8 @@ const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashe
 const MIN_BOX_SIDE = 3;
 const HANDLE_HIT_PX = 10; // screen-px hit radius for edit handles
 
-/** The shape Edit picks up, from the geometry the detection draws as (the matched GT for a TP/FN —
- *  what a save replaces — or the prediction for an FP, which a save adds). Deep-copied so dragging
+/** The shape Edit picks up, from the geometry the detection draws as (the matched GT for a TP/FN,
+ *  what a save replaces, or the prediction for an FP, which a save adds). Deep-copied so dragging
  *  never mutates matches. Single-ring by construction: hand-editing adjusts one contour, and
  *  ``/review/action``'s ``edited_points`` carries exactly one (startEdit turns a multi-part shape
  *  away rather than seeding one part and saving it as the whole object). A point never gets here:
@@ -110,7 +110,7 @@ export function ReviewTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const patchGui = useStore((s) => s.patchGui);
   // Narrow subscriptions: pan/zoom mutates gui.view (the whole gui object is replaced by
-  // setView), so subscribing to the whole gui slice re-rendered this tab — and its overlays —
+  // setView), so subscribing to the whole gui slice re-rendered this tab (and its overlays)
   // on every tick. Take only view (needed for the canvas-push heartbeat) and the review filters.
   const view = useStore((s) => s.gui.view);
   const filters = useStore((s) => s.gui.review);
@@ -124,7 +124,7 @@ export function ReviewTab() {
   const setDetectionIdx = useStore((s) => s.setReviewDetectionIdx);
   const markDetReviewed = useStore((s) => s.markDetectionReviewed);
   const setPredReference = useStore((s) => s.setPredReference);
-  // Shared annotation status (coloring, Complete lock) — synced when a verdict authors GT.
+  // Shared annotation status (coloring, Complete lock), synced when a verdict authors GT.
   const setStoreImageStatus = useStore((s) => s.setImageStatus);
   // Image-level review status (its own store slice) drives Review navigation: which images are
   // Reviewed vs Unreviewed, and which have anything to review at all.
@@ -173,7 +173,7 @@ export function ReviewTab() {
   );
   // Shared filtered navigation, scoped to review status + non-empty images (same traversal
   // machinery as the arrow keys + TopBar Prev/Next, different filter source).
-  // nav (useImageNav) is declared further below, once priorityOrder (K23) is computed — it needs
+  // nav (useImageNav) is declared further below, once priorityOrder is computed; it needs
   // that value to feed useImageNav's `order` option.
 
   const [showGT, setShowGT] = useState(true);
@@ -206,13 +206,13 @@ export function ReviewTab() {
     try {
       localStorage.setItem("tcip.review.filtersOpen", filtersOpen ? "1" : "0");
     } catch {
-      /* private mode / disabled storage — the shelf just won't persist */
+      /* private mode / disabled storage: the shelf just won't persist */
     }
   }, [filtersOpen]);
   const [counterDraft, setCounterDraft] = useState<string | null>(null);
   const counterRef = useRef<HTMLInputElement | null>(null);
   const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
-  // A reviewed (completed) image is locked — no verdicts/edits until it's reopened.
+  // A reviewed (completed) image is locked: no verdicts/edits until it's reopened.
   const reviewLocked = imageStatus === "completed";
   // Result of "use this review as a validation reference" (dataset-level, so it clears on selection).
   const [validating, setValidating] = useState(false);
@@ -223,8 +223,8 @@ export function ReviewTab() {
   useEffect(() => {
     setValidationResult(null);
   }, [visKey]);
-  // K15: the bucket's own generation confidence, fetched once per prediction dir (read-only, no
-  // gate run) so the "Conf ≥" filter can warn live — see the filter shelf below.
+  // The bucket's own generation confidence, fetched once per prediction dir (read-only, no
+  // gate run) so the "Conf ≥" filter can warn live (see the filter shelf below).
   const [generationConf, setGenerationConf] = useState<number | null>(null);
   useEffect(() => {
     setGenerationConf(null);
@@ -235,10 +235,10 @@ export function ReviewTab() {
         if (!cancelled) setGenerationConf(res.generation_conf);
       },
       () => {
-        // Fetch failed — stay null. Correctly still warns below: no known generation_conf reads
-        // exactly like a missing sidecar (a foreign checkpoint, a not-yet-staged bucket), and the
-        // backend's own _conf_censored treats staged_conf_floor is None as ALWAYS censored, not as
-        // "nothing to check" — so this must warn too, not go quiet.
+        // Fetch failed: stay null. A missing generation_conf reads the same as a missing sidecar
+        // (a foreign checkpoint, a not-yet-staged bucket), and the backend's own _conf_censored
+        // treats a None staged_conf_floor as always censored, not as nothing to check, so this
+        // warns too, rather than going quiet.
       },
     );
     return () => {
@@ -247,17 +247,17 @@ export function ReviewTab() {
   }, [dataset.predictions_dir]);
   // Raising this filter above the predictions' own generation confidence hides low-confidence
   // detections from review; any verdict then recorded under it raises review_conf_threshold past
-  // generation_conf, which validate_reference's identical gate reads as conf_censored (K15 #7's
-  // sibling finding — same signal, surfaced here before a review is even complete). A bucket with
-  // NO recorded generation_conf warns too (stage-6 review): the backend's own staged_conf_floor is
-  // None branch is always-censored, never "no evidence, so nothing to warn about" — going quiet
-  // here would be silent in exactly the case the real gate refuses hardest.
+  // generation_conf, which validate_reference's identical gate reads as conf_censored, the same
+  // signal, surfaced here before a review is even complete. A bucket with no recorded
+  // generation_conf warns too: the backend's own None staged_conf_floor branch is always-censored,
+  // never "no evidence, so nothing to warn about," so going quiet here would be silent in exactly
+  // the case the real gate refuses hardest.
   const confFilterCensoring =
     !!dataset.predictions_dir &&
     (generationConf === null || filters.conf_threshold > generationConf);
 
-  // ── Active-learning priority queue (K23) ──────────────────────────────────
-  // prioritize_review_queue's ranking otherwise never reaches the breeder — the only path was the
+  // ── Active-learning priority queue ──────────────────────────────────
+  // prioritize_review_queue's ranking otherwise never reaches the breeder; the only path was the
   // agent manually steering focus() one image at a time. Session-local (like generationConf/
   // validationResult above): nothing else in the app needs to know the computed order.
   const [pqModels, setPqModels] = useState<RegisteredModel[]>([]);
@@ -334,7 +334,7 @@ export function ReviewTab() {
     }
   }
 
-  // Map the computed queue (image names, ranked) onto image_list indices for useImageNav — an
+  // Map the computed queue (image names, ranked) onto image_list indices for useImageNav; an
   // image the queue named that no longer appears in image_list (deleted/renamed since scoring) is
   // dropped rather than crashing the traversal.
   const priorityOrder = useMemo(() => {
@@ -362,13 +362,13 @@ export function ReviewTab() {
   );
 
   // ── Live canvas push (agent visibility: capture_live_canvas) ──────────────
-  // Which image the installed matches belong to — identity beats the loading flag (a failed or
+  // Which image the installed matches belong to: identity beats the loading flag (a failed or
   // superseded reload leaves stale matches with loading=false; identity still blocks the push).
   const matchesImageRef = useRef<string | null>(null);
   const buildCanvasBodyRef = useRef<() => CanvasStateBody | null>(() => null);
   buildCanvasBodyRef.current = () => {
     if (!imgPath || !dataset.project_root || !matches) return null;
-    // Mid-transition guards: the store must hold this image's matches, and not be mid-reload —
+    // Mid-transition guards: the store must hold this image's matches, and not be mid-reload;
     // otherwise the previous image's shapes would push under the new image_path (a false canvas).
     if (matchesImageRef.current !== imgName) return null;
     if (useStore.getState().review.loading) return null;
@@ -417,10 +417,10 @@ export function ReviewTab() {
   const [colorEditKey, setColorEditKey] = useState<keyof ReviewColors | null>(null);
   const [edit, setEdit] = useState<EditShape | null>(null);
   const editDrag = useRef<EditDrag | null>(null);
-  // "Mark missed object" (Fix H's small affordance): draw a brand-new GT box with no detection
-  // selected, for a previously-unlabeled image the walkable TP/FP/FN list has nothing to seed from.
+  // "Mark missed object": draw a brand-new GT box with no detection selected, for a
+  // previously-unlabeled image the walkable TP/FP/FN list has nothing to seed from.
   // `drawingMiss` = armed (next canvas drag draws the box); once drawn, the box moves into the
-  // SAME `edit` state the existing shape editor already handles (drag handles, Save/Cancel), with
+  // same `edit` state the existing shape editor already handles (drag handles, Save/Cancel), with
   // `pendingMiss` marking that a Save should submit a brand-new missed-object verdict, not an edit
   // of `current`.
   const [drawingMiss, setDrawingMiss] = useState(false);
@@ -462,7 +462,7 @@ export function ReviewTab() {
     setLoading(true);
     try {
       // One unified label file per image holds every subject's box and polygon annotations, so a
-      // single gt/pred path drives the match — compute_matches keys IoU on each annotation's bbox
+      // single gt/pred path drives the match: compute_matches keys IoU on each annotation's bbox
       // and the overlay renders each by its own geometry.
       const res = await api.review.matches(
         {
@@ -484,7 +484,7 @@ export function ReviewTab() {
       if ((now.image_list[now.current_image_index] ?? null) !== imgName) return;
       applyMatches(res, indexHint);
     } catch (e) {
-      // A superseded (aborted) request is expected during slider drags — ignore it.
+      // A superseded (aborted) request is expected during slider drags; ignore it.
       if (signal?.aborted || (e instanceof DOMException && e.name === "AbortError")) return;
       useStore
         .getState()
@@ -502,7 +502,7 @@ export function ReviewTab() {
     const wrapper = document.querySelector("[data-canvas-host]") as HTMLElement | null;
     const cw = wrapper?.clientWidth ?? 1200;
     const ch = wrapper?.clientHeight ?? 800;
-    // Clamp to the wheel ladder's range — beyond MAX_SCALE the wheel goes dead/jumpy.
+    // Clamp to the wheel ladder's range: beyond MAX_SCALE the wheel goes dead/jumpy.
     const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(cw / (dw * 3), ch / (dh * 3))));
     setView({
       scale,
@@ -521,7 +521,7 @@ export function ReviewTab() {
       clearTimeout(t);
       ac.abort();
     };
-    // The path strings (not the `paths` object — mergeSnapshot rebuilds the dataset
+    // The path strings (not the `paths` object: mergeSnapshot rebuilds the dataset
     // object on every WS snapshot, which would spuriously re-fire this and reset the
     // detection index/zoom) so a backend-adopted change of the prediction dir (e.g. the
     // agent re-selects the dataset with a different model) refreshes the matches instead
@@ -606,7 +606,7 @@ export function ReviewTab() {
         return;
       }
     }
-    // Filter type exhausted — try other types under "all" filter context
+    // Filter type exhausted, try other types under "all" filter context
     if (filters.filter_type !== "all") {
       const otherTypes = TYPE_ORDER.filter((t) => t !== filters.filter_type);
       for (const t of otherTypes) {
@@ -624,7 +624,7 @@ export function ReviewTab() {
         }
       }
     }
-    // No more on this image — go to next image.
+    // No more on this image, go to next image.
     stepImage(1);
   }
 
@@ -637,9 +637,9 @@ export function ReviewTab() {
     if (actionPending.current) return false;
     if (reviewLocked) return false; // a completed/reviewed image is locked until reopened
     if (!current || !dataset.project_root || !imgPath || !imgName) return false;
-    // K15 finding #6: Reject on a detection that HAS ground truth (TP/FN) deletes that GT box —
-    // a destructive, irreversible action (CLAUDE.md "confirm before destructive actions"). Reject
-    // on an FP is safe (discards a prediction, GT unchanged) and needs no confirmation.
+    // Reject on a detection that has ground truth (TP/FN) deletes that GT box: a destructive,
+    // irreversible action (CLAUDE.md "confirm before destructive actions"). Reject on an FP is
+    // safe (discards a prediction, GT unchanged) and needs no confirmation.
     if (action === "rejected" && current.det_type !== "fp") {
       const confirmed = window.confirm(
         "This deletes the existing ground-truth box for this object. This cannot be undone. Continue?",
@@ -648,7 +648,7 @@ export function ReviewTab() {
     }
     actionPending.current = true;
     try {
-      // The .original snapshot must exist before the first GT write — awaited, and a
+      // The .original snapshot must exist before the first GT write: awaited, and a
       // failure aborts the verdict rather than mutating labels with no pristine baseline.
       if (!(await ensureBackup())) return false;
       const res = await api.review.action({
@@ -679,7 +679,7 @@ export function ReviewTab() {
       advanceToNextUnreviewed();
       if (res.annotation_status) {
         // GT changed: the verdict already recomputed matches server-side (gt_idx/pred_idx rebuilt
-        // from the written files), so install them directly — no second /matches round-trip.
+        // from the written files), so install them directly, no second /matches round-trip.
         setStoreImageStatus(imgName, res.annotation_status);
         applyMatches(res.matches, useStore.getState().gui.review.detection_idx);
       }
@@ -699,7 +699,7 @@ export function ReviewTab() {
     const dirs = [dataset.annotations_dir].filter(Boolean) as string[];
     if (!dirs.length) return true;
     // backup_original_labels captures every original file in the dir in one pass, so it only needs
-    // running once per label-dir set — skip the (whole-dir-scanning) call once it's done this session.
+    // running once per label-dir set: skip the (whole-dir-scanning) call once it's done this session.
     const key = `${dataset.project_root}/${dirs.join("/")}`;
     if (backedUpKeys.current.has(key)) return true;
     try {
@@ -713,7 +713,7 @@ export function ReviewTab() {
   }
 
   // Submit a brand-new "missed object" box directly through the existing /api/review/action
-  // endpoint (no new backend route) — det_type "fn", gt_idx/pred_idx null, so record_action's
+  // endpoint (no new backend route): det_type "fn", gt_idx/pred_idx null, so record_action's
   // _apply_gt_mutation appends a new GT annotation and records a proper gt-only verdict entry.
   async function recordMissedObject(box: [number, number, number, number]): Promise<boolean> {
     if (actionPending.current) return false;
@@ -858,7 +858,7 @@ export function ReviewTab() {
     }
     if (geom.kind === "polygon" && geom.rings.length > 1) {
       // Editing by hand commits one contour (edited_points), so seeding part 1 of an
-      // occlusion-split shape would save that part as the entire object — a quietly wrong
+      // occlusion-split shape would save that part as the entire object: a quietly wrong
       // measurement. Refuse instead, and say what the reviewer can do.
       useStore
         .getState()
@@ -942,7 +942,7 @@ export function ReviewTab() {
     );
   }
 
-  // An edit belongs to one detection on one matches snapshot — leaving either discards it.
+  // An edit belongs to one detection on one matches snapshot; leaving either discards it.
   useEffect(() => {
     setEdit(null);
     editDrag.current = null;
@@ -962,7 +962,7 @@ export function ReviewTab() {
   function onEditMove(x: number, y: number, ev: Konva.KonvaEventObject<MouseEvent>) {
     const drag = editDrag.current;
     if (!edit || !drag || !matches) return;
-    // The button was released outside the canvas — Konva never delivered the mouseup.
+    // The button was released outside the canvas; Konva never delivered the mouseup.
     if (ev.evt.buttons === 0) {
       editDrag.current = null;
       return;
@@ -1003,7 +1003,7 @@ export function ReviewTab() {
     { keys: "escape", action: () => cancelEdit(), when: () => !!edit },
     { keys: "arrowleft", action: () => stepDetection(-1), when: () => !edit },
     { keys: "arrowright", action: () => stepDetection(1), when: () => !edit },
-    // Image flips ignore held-key auto-repeat — each one costs a full image render.
+    // Image flips ignore held-key auto-repeat; each one costs a full image render.
     {
       keys: "arrowup",
       action: (e) => {
@@ -1047,13 +1047,13 @@ export function ReviewTab() {
       : "Keep this ground-truth object (A)";
   const rejectTitle =
     current?.det_type === "fp"
-      ? "Discard this prediction — ground truth unchanged (R)"
+      ? "Discard this prediction; ground truth unchanged (R)"
       : "Delete this ground-truth object (R)";
 
   return (
     <div className="flex-1 flex flex-col relative min-h-0">
       <div className="relative border-b border-tcip-border bg-tcip-panel">
-        {/* Row 1 — filter shelf toggle + live summary + legend, then image / detection navigation */}
+        {/* Row 1: filter shelf toggle + live summary + legend, then image / detection navigation */}
         <div className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
           <button
             className="tcip-btn"
@@ -1067,7 +1067,7 @@ export function ReviewTab() {
             </span>
             &nbsp;&nbsp;Filters
           </button>
-          {/* Live summary — always shows every filter, so the shelf can stay collapsed. */}
+          {/* Live summary: always shows every filter, so the shelf can stay collapsed. */}
           <span className="flex items-center gap-1.5 tabular-nums">
             <FilterChip>IoU ≥ {filters.iou_threshold.toFixed(2)}</FilterChip>
             <FilterChip
@@ -1080,13 +1080,13 @@ export function ReviewTab() {
             >
               {confFilterCensoring ? "⚠ " : ""}Conf ≥ {filters.conf_threshold.toFixed(2)}
             </FilterChip>
-            {/* K15: not tooltip-only (same reasoning as the validation-reason fix below) — a
-                breeder who raises this filter needs to see why it matters without hovering. */}
+            {/* Not tooltip-only: a breeder who raises this filter needs to see why it matters
+                without hovering. */}
             {confFilterCensoring && (
               <span className="text-tcip-warn max-w-[280px]">
                 {generationConf === null
-                  ? "no recorded generation confidence for this bucket — always conf-censored for validation"
-                  : `above this bucket's own generation confidence (${generationConf.toFixed(2)}) — new verdicts will be conf-censored for validation`}
+                  ? "no recorded generation confidence for this bucket, always conf-censored for validation"
+                  : `above this bucket's own generation confidence (${generationConf.toFixed(2)}), new verdicts will be conf-censored for validation`}
               </span>
             )}
             <FilterChip>
@@ -1117,7 +1117,7 @@ export function ReviewTab() {
             className="tcip-btn"
             onClick={() => void promoteReviewToValidationReference()}
             disabled={validating || !!edit}
-            title="Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check — it will tell you if it isn't enough yet."
+            title="Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check; it will tell you if it isn't enough yet."
           >
             {validating ? "Checking…" : "Use review as validation reference"}
           </button>
@@ -1133,8 +1133,8 @@ export function ReviewTab() {
               >
                 {validationResult.validated ? "Validated" : "Not yet"}
               </span>
-              {/* K15 finding #7: the reason was tooltip-only, with no visible next step — a
-                  breeder who hits "Not yet" needs to see WHY without hovering, and what to try. */}
+              {/* The reason was tooltip-only, with no visible next step: a breeder who hits
+                  "Not yet" needs to see why without hovering, and what to try. */}
               {!validationResult.validated && (
                 <span className="text-[11px] text-tcip-muted max-w-[360px]">
                   {validationResult.reason}
@@ -1143,9 +1143,9 @@ export function ReviewTab() {
             </span>
           )}
 
-          {/* Fix H's small affordance: attest a missed object on ANY image, even one with no
-              existing detections to select — draws a brand-new box, submitted through the same
-              /api/review/action endpoint as an edited FN verdict. */}
+          {/* Attest a missed object on any image, even one with no existing detections to select;
+              draws a brand-new box, submitted through the same /api/review/action endpoint as an
+              edited FN verdict. */}
           <button
             className="tcip-btn"
             onClick={() => (drawingMiss ? cancelMarkMissedObject() : startMarkMissedObject())}
@@ -1165,7 +1165,7 @@ export function ReviewTab() {
             {IMAGE_STATUS_LABEL[imageStatus]}
           </span>
 
-          {/* Image navigation — same function + layout/order as the Annotate tab */}
+          {/* Image navigation: same function + layout/order as the Annotate tab */}
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold uppercase tracking-wide text-tcip-muted">
               Image
@@ -1213,7 +1213,7 @@ export function ReviewTab() {
             </button>
           </div>
 
-          {/* Reviewed — same position as Annotate's Complete; a reversible confirm. */}
+          {/* Reviewed: same position as Annotate's Complete; a reversible confirm. */}
           <label className="flex items-center gap-1">
             <input
               type="checkbox"
@@ -1225,7 +1225,7 @@ export function ReviewTab() {
           </label>
         </div>
 
-        {/* Row 2 — the filter controls, collapsed by default and remembered across sessions */}
+        {/* Row 2: the filter controls, collapsed by default and remembered across sessions */}
         {filtersOpen && (
           <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 border-t border-tcip-border text-[11px]">
             <span className="text-tcip-muted">IoU ≥</span>
@@ -1308,8 +1308,8 @@ export function ReviewTab() {
             </label>
 
             <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
-            {/* K23: prioritize_review_queue's ranking, otherwise reachable only one image at a
-                time via the agent's own focus() calls — surfaced here as a real browsable order. */}
+            {/* prioritize_review_queue's ranking, otherwise reachable only one image at a
+                time via the agent's own focus() calls; surfaced here as a real browsable order. */}
             <span
               className="text-[10px] font-semibold uppercase tracking-wide text-tcip-muted"
               title="Rank unreviewed images by how much the model would learn from your input on them, so you look at the most useful ones first"
@@ -1396,7 +1396,7 @@ export function ReviewTab() {
             />
           )}
         </CanvasStage>
-        {/* Screen-fixed detection-type badge — in image coords it was illegible at fit
+        {/* Screen-fixed detection-type badge: in image coords it was illegible at fit
             zoom and canvas-blanketing when zoomed to a detection. */}
         {current && (
           <span
@@ -1417,7 +1417,7 @@ export function ReviewTab() {
         <ReviewLegend colors={reviewColors} onEdit={setColorEditKey} />
       </div>
 
-      {/* Empty-state card: tells the reviewer WHY there is nothing to step through —
+      {/* Empty-state card: tells the reviewer why there is nothing to step through,
           "no predictions configured" vs "filters exclude everything". Non-opaque and
           pointer-transparent so still-rendered GT overlays stay visible behind it. */}
       {matches && matches.detections.length === 0 && (
@@ -1426,12 +1426,12 @@ export function ReviewTab() {
             <p className="text-sm font-semibold text-tcip-fg">No detections to review</p>
             <p className="mt-1 text-xs text-tcip-muted">
               {!dataset.predictions_dir
-                ? "No predictions directory configured — run inference or select a model with predictions for this dataset."
+                ? "No predictions directory configured; run inference or select a model with predictions for this dataset."
                 : `No detections on this image under the current filters (IoU ≥ ${filters.iou_threshold.toFixed(
                     2,
                   )}, Conf ≥ ${filters.conf_threshold.toFixed(2)}, type ${
                     filters.filter_type
-                  }) — relax filters to see more.`}
+                  }); relax filters to see more.`}
             </p>
           </div>
         </div>
@@ -1487,7 +1487,7 @@ export function ReviewTab() {
 
         {current && !edit && (
           <>
-            {reviewLocked && <span className="text-tcip-muted">Reviewed — uncheck to edit</span>}
+            {reviewLocked && <span className="text-tcip-muted">Reviewed; uncheck to edit</span>}
             <button
               className="tcip-btn-primary"
               onClick={() => void recordAction("accepted")}
@@ -1535,7 +1535,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn"
               onClick={cancelEdit}
-              title="Discard this adjustment — ground truth unchanged (Esc)"
+              title="Discard this adjustment; ground truth unchanged (Esc)"
             >
               Cancel
             </button>
@@ -1581,7 +1581,7 @@ function FilterChip({
   );
 }
 
-/** A legend row whose colour swatch is a button — click it to retune that symbology colour. */
+/** A legend row whose colour swatch is a button: click it to retune that symbology colour. */
 function LegendRow({
   color,
   dashed,
@@ -1742,13 +1742,13 @@ interface OverlayProps {
   showGT: boolean;
   showPred: boolean;
   colors: ReviewColors;
-  /** While editing, the picked-up shape is hidden here — it renders live in the edit overlay. */
+  /** While editing, the picked-up shape is hidden here; it renders live in the edit overlay. */
   suppressFocusedGt?: boolean;
   suppressFocusedPred?: boolean;
 }
 
 // Memoized, and scale is read from the store internally (not a prop) so pan/zoom re-renders
-// of ReviewTab don't rebuild this O(detection count) shape list — it re-runs only when the
+// of ReviewTab don't rebuild this O(detection count) shape list; it re-runs only when the
 // matches/filters/colors props actually change (or its own scale subscription fires).
 const ReviewOverlays = memo(function ReviewOverlays({
   matches,
@@ -1763,7 +1763,7 @@ const ReviewOverlays = memo(function ReviewOverlays({
   const lw = 1 / (scale || 1);
   const ACTIVE_COLOR = colors.active;
 
-  // Every detection renders by ITS OWN annotation's geometry — a box stays a box, a polygon stays
+  // Every detection renders by its own annotation's geometry: a box stays a box, a polygon stays
   // a polygon, a point stays a point, and no kind is hidden (hiding one is an unreviewed
   // false-negative). Every ring of a polygon draws too, in the same stroke: a verdict on an
   // occlusion-split shape is a verdict on all of it, so a truncated render would be a verdict on
@@ -1845,7 +1845,7 @@ const ReviewOverlays = memo(function ReviewOverlays({
           if (showGT && !(active && suppressFocusedGt)) {
             const activeFn = active && d.det_type === "fn";
             const stroke = activeFn ? ACTIVE_COLOR : outcome;
-            // The active FN has no prediction, so its GT IS the thing under review — draw it dashed
+            // The active FN has no prediction, so its GT is the thing under review; draw it dashed
             // blue like every other under-review shape so it matches the "Under review" legend
             // entry instead of reading as a solid outcome box. A faint blue wash reads through.
             const fill = activeFn ? `${ACTIVE_COLOR}26` : d.reviewed ? `${outcome}26` : undefined;
@@ -1925,7 +1925,7 @@ function ReviewRect({
 }
 
 /** A point annotation under review: the Annotate canvas' reticle in the detection's outcome colour.
- *  Same mark in both tabs, so a location a reviewer accepts is drawn the way it was placed — and no
+ *  Same mark in both tabs, so a location a reviewer accepts is drawn the way it was placed, and no
  *  box is drawn around it, which would show the reviewer an extent the annotation does not claim. */
 function ReviewPoint({
   point,
