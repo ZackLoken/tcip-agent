@@ -1,9 +1,9 @@
-"""W4 — the correctness loop is wired to a sanctioned surface.
+"""The correctness loop is wired to a sanctioned surface.
 
-Before this, ``check_model_contract`` / ``overfit_check`` had zero production callers: a broken
-bespoke builder wasted a full audited run. These prove the loop is now reachable and gating:
-``preflight_config(smoke=True)`` builds + smokes at the RESOLVED dims and blocks a broken builder,
-and ``TrainContext`` exposes the checks + craft primitives so a hand-rolled ``train(ctx)`` self-proves.
+``check_model_contract`` / ``overfit_check`` must have production callers, so a broken
+bespoke builder cannot waste a full audited run: ``preflight_config(smoke=True)`` builds + smokes
+at the resolved dims and blocks a broken builder, and ``TrainContext`` exposes the checks + craft
+primitives so a hand-rolled ``train(ctx)`` self-proves.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _broken_builder(**kwargs):
         def forward(self, images, targets=None):
             if self.training:
                 return {"loss": self.lin(torch.rand(1, 4)).sum()}
-            return torch.rand(3)  # not list[dict] — violates the detection boundary
+            return torch.rand(3)  # not list[dict], violates the detection boundary
 
     return _Broken()
 
@@ -51,7 +51,7 @@ def _bespoke_task_dataset(**_kwargs):
 
 
 def _strict_bespoke_dataset(images_dir=None, transforms=None, task=None, stems=None):
-    """Declares only what the training path passes — no `**kwargs` catch-all to absorb stray keys."""
+    """Declares only what the training path passes: no `**kwargs` catch-all to absorb stray keys."""
     from torch.utils.data import Dataset
 
     class _DS(Dataset):
@@ -69,7 +69,7 @@ def _unbuildable_dataset(**_kwargs):
 
 
 def _bespoke_task_model(**_kwargs):
-    """Agent-authored model for that same task — trains and emits a scored output."""
+    """Agent-authored model for that same task: trains and emits a scored output."""
     import torch.nn as nn
 
     class _Net(nn.Module):
@@ -87,7 +87,7 @@ def _bespoke_task_model(**_kwargs):
 
 
 # --------------------------------------------------------------------------
-# resolve_contract_dims — resolved, not the tiny 64px default (critic G5)
+# resolve_contract_dims: resolved, not the tiny 64px default
 # --------------------------------------------------------------------------
 
 def test_resolve_contract_dims_prefers_tile_edge_over_default():
@@ -100,18 +100,18 @@ def test_resolve_contract_dims_prefers_tile_edge_over_default():
 
 
 def test_resolve_contract_dims_falls_back_without_inventing():
-    # No num_classes / in_chans / tile_size — resolved to safe fallbacks, never a hard fail.
+    # No num_classes / in_chans / tile_size: resolved to safe fallbacks, never a hard fail.
     dims = resolve_contract_dims({"model_source": {}}, "detection")
     assert dims == {"in_chans": 3, "num_classes": 1, "img_size": 224}
 
 
 def test_resolve_contract_dims_attribute_without_registry_raises_not_silently_falls_back(tmp_path):
-    """K18 B2: before this fix, a bare `except Exception: pass` around _resolve_registry_id_map
-    fell open to the head's declared num_classes for ANY read failure, not just the legitimate
-    "no subject in scope" case — masking a real problem (an attribute-classification config with
-    no classes.json to order its values) as a healthy smoke-test dims resolution. No subject at
-    all still legitimately falls back (test above); a subject THAT IS given, with an attribute and
-    no registry, must now raise."""
+    """A bare `except Exception: pass` around _resolve_registry_id_map
+    must not fall open to the head's declared num_classes for any read failure, only the legitimate
+    "no subject in scope" case: falling open more broadly would mask a real problem (an
+    attribute-classification config with no classes.json to order its values) as a healthy
+    smoke-test dims resolution. No subject at all still legitimately falls back (test above); a
+    subject that is given, with an attribute and no registry, must raise."""
     cfg = {
         "model_source": {"builder_kwargs": {"num_classes": 5}},
         "data": {"subject": "catkin", "attribute": "elongation", "labels_dir": str(tmp_path / "labels")},
@@ -121,7 +121,7 @@ def test_resolve_contract_dims_attribute_without_registry_raises_not_silently_fa
 
 
 # --------------------------------------------------------------------------
-# preflight_config(smoke=True) — builds + smokes, blocks a broken builder
+# preflight_config(smoke=True): builds + smokes, blocks a broken builder
 # --------------------------------------------------------------------------
 
 def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
@@ -137,7 +137,7 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
         "training": {"batch_size": 1, "stages": [{"freeze_to": 0, "epochs": 1}]},
     }
-    # Fast path (no smoke) is structurally valid — the builder imports fine.
+    # Fast path (no smoke) is structurally valid: the builder imports fine.
     assert preflight_config(cfg)["valid"] is True
     # Smoke path builds + runs the contract and catches the measurement-boundary violation.
     r = preflight_config(cfg, smoke=True)
@@ -168,7 +168,7 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# A task the contract has no synthetic schema for is smoked against a real batch —
+# A task the contract has no synthetic schema for is smoked against a real batch:
 # no task taxonomy, and no run launching with the contract silently skipped.
 # --------------------------------------------------------------------------
 
@@ -187,7 +187,7 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
     }
     r = preflight_config(cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
-    # The contract actually ran — a real batch stood in for the missing synthetic schema.
+    # The contract actually ran: a real batch stood in for the missing synthetic schema.
     assert r["smoke"]["not_smokeable"] is None
     assert r["smoke"]["ok"] is True
     assert r["smoke"]["train_loss"] is not None
@@ -225,7 +225,7 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
 
 
 def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
-    """Unsmokeable is a blocked launch, not a skipped check — the boundary stays proven."""
+    """Unsmokeable is a blocked launch, not a skipped check: the boundary stays proven."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -240,9 +240,9 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     }
     r = preflight_config(cfg, smoke=True)
     assert r["valid"] is False
-    # Assert on what only the blocking path produces. "valid is False" alone is vacuous here: the
-    # pre-fix code reached False by a different route (an unknown task fell through to a
-    # classification-shaped synthetic batch, which this model rejects).
+    # Assert on what only the blocking path produces: "valid is False" alone is vacuous here,
+    # since an unrelated route (an unknown task falling through to a classification-shaped
+    # synthetic batch, which this model also rejects) could reach False too.
     assert r["smoke"]["not_smokeable"]
     assert any("measurement boundary is unproven" in i for i in r["issues"]), r["issues"]
     # The real reason the batch could not be built is surfaced, not swallowed into the log.
@@ -250,7 +250,7 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# ctx surface — a custom loop self-proves + reuses the craft primitives
+# ctx surface: a custom loop self-proves + reuses the craft primitives
 # --------------------------------------------------------------------------
 
 def _ctx_for(task: str, builder: str, **builder_kwargs):
