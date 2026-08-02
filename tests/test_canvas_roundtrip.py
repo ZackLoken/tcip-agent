@@ -1,4 +1,4 @@
-"""Canvas round-trip tests — verify annotation pipeline end-to-end.
+"""Canvas round-trip tests: verify annotation pipeline end-to-end.
 
 These tests simulate what the annotation canvas webview does:
 1. Load image → read existing labels
@@ -82,7 +82,7 @@ class TestBoxRoundtrip:
             assert orig.subject == loaded.subject
 
     def test_undo_redo_then_save(self, img_dir: Path) -> None:
-        """Draw boxes, verify save — state management is tested elsewhere."""
+        """Draw boxes, verify save: state management is tested elsewhere."""
         state = AnnotationState(img_width=640, img_height=480)
 
         state.annotations.append(Annotation(subject="catkin", geometry=BBox(x1=10, y1=10, x2=100, y2=100)))
@@ -170,7 +170,7 @@ class TestPolygonRoundtrip:
 
 
 class TestSingleFileSave:
-    """The canvas saves every subject — boxes and polygons alike — into one per-image file."""
+    """The canvas saves every subject, boxes and polygons alike, into one per-image file."""
 
     def test_box_and_polygon_single_file(self, img_dir: Path) -> None:
         """Save a box and a polygon together, verify both survive in one file."""
