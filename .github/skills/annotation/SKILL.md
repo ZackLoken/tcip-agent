@@ -18,8 +18,8 @@ directly. An unspecified format resolves to `.json` (`dataset_layout.py`'s `labe
 
 | Format | Files | Coordinates | Recognized by |
 |--------|-------|------------|---------------|
-| **json** | One `.json` per image (canonical) | Pixel coordinates | an `objects` key |
-| **coco** | Single `.json` for the dataset | Pixel coordinates | an `images`/`annotations` key |
+| **json** | One `.json` per image (canonical) | Pixel coordinates | an `annotations` key, no `images`/`categories` key |
+| **coco** | Single `.json` for the dataset | Pixel coordinates | an `images`/`categories` key |
 
 Both are read by `format_io.load_annotations` / written by `save_annotations`; the agent-facing
 MCP tool wrapping the read side is `read_annotations` (see Tools below). `format_io.detect_format`
@@ -47,7 +47,7 @@ applied twice or skipped.
 1. **Initial labeling**: manual or engine-assisted bounding box and polygon annotation
 2. **Review**: IoU matching between predictions and ground truth to accept/correct/reject
 3. **Active learning**: score unlabeled images by model uncertainty to prioritize annotation effort
-4. **Quality audit**: per-class AP, coverage analysis, inter-annotator agreement
+4. **Quality audit**: coverage analysis, inter-annotator agreement
 
 ## Tools
 
@@ -96,7 +96,7 @@ classification and QA.
 **Full workflow:**
 1. `propose_annotations(image_path, engine='sam')` → the engine proposes candidates, renders a numbered overlay
 2. Agent `view_image` on overlay → identifies and classifies each candidate
-3. `accept_proposals(image_path, assignments=[{candidate_id: 0, class_id: 1}, ...])` → stages
+3. `accept_proposals(image_path, assignments=[{candidate_id: 0, subject: "leaf"}, ...])` → stages
    accepted candidates as predictions (`created_by=<engine>`) in the predictions tree for human
    review on the Review canvas, never writes GT directly, and through the verdict-guarded staging
    helper so a re-run never orphans recorded verdicts
@@ -140,7 +140,7 @@ The agent must **never write ground truth the human hasn't seen**. Stage proposa
 *predictions* tree and drive the human to review them:
 
 - **`stage_proposals(dataset_root, model_name, date, stem, boxes)`** writes agent-proposed
-  detections to `predictions/<model>/<date>/detect/<stem>.json` (per-image COCO/JSON), the
+  detections to `predictions/<model>/<date>/<stem>.json` (per-image COCO/JSON), the
   predictions tree, **not** `annotations/`. They render on the Review canvas as predictions for
   the human to accept/reject/edit. `model_name` is stamped as each object's `created_by`, so name
   the real producer (`sam`, `claude`, `groundingdino`, `model:<run>`), not a generic placeholder.
@@ -149,7 +149,7 @@ The agent must **never write ground truth the human hasn't seen**. Stage proposa
   re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place, which is
   still refused when verdicts exist.
 - **`focus(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
-  detection_idx, filter_type, iou, conf)`** drives the live Review tab straight to a model's
+  detection_idx, filter_type, iou_threshold, conf_threshold)`** drives the live Review tab straight to a model's
   predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a
   missed catkin) without hunting. The Review analog of `focus(tab='annotate')`; a soft no-op if no
   GUI is running.
@@ -160,11 +160,10 @@ frames → they accept on the canvas → only then does it become GT. See
 
 ## Quality Metrics
 
-- **Per-class AP** at IoU 0.5 and 0.5:0.95
 - **Coverage**: fraction of images with labels
-- **Negatives**: a training negative is an empty label file (`objects: []`) **plus** a human
+- **Negatives**: a training negative is an empty label file (`"annotations": []`) **plus** a human
   Complete on that image, recorded as the status token `"negative"` in
-  `.tcip/state/image_status.json`, scoped to the campaign. `to_coco_dataset` silently skips an
+  `.tcip/state/image_status.json`, scoped to the subject. `to_coco_dataset` silently skips an
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
   negatives; writing empty label files does not create them; only the human's Complete does.
   `python scripts/doctor.py <root>` flags every empty-label/status disagreement. Never delete
