@@ -3,7 +3,7 @@
 The inference/HPO routes keep an in-memory dict of background jobs that previously grew
 unbounded (a memory leak) and vanished on restart. These helpers atomically persist job
 summaries to ``.tcip/state/<name>.json`` and evict the oldest *terminal* jobs so the live
-registry stays bounded. (Running jobs can't survive a restart — their threads are gone —
+registry stays bounded. (Running jobs can't survive a restart, their threads are gone,
 so the persisted file is a record, not a resumable state.)
 """
 
@@ -16,7 +16,7 @@ from tcip_mcp.utils.atomic_io import atomic_write_json, read_json
 
 
 def _state_path(name: str) -> Path:
-    # Resolved at use time against the pinned platform root — a bare CWD-relative path would
+    # Resolved at use time against the pinned platform root: a bare CWD-relative path would
     # scatter job records by launch dir (and let tests pollute the repo's real .tcip/).
     return resolve_state(Path(".tcip") / "state" / f"{name}.json")
 
@@ -36,7 +36,7 @@ def persist(name: str, summaries: list[dict]) -> None:
 def load(name: str) -> list[dict]:
     """Read persisted job summaries from ``.tcip/state/<name>.json``.
 
-    Returns ``[]`` when the file is missing/unparseable or doesn't hold a list — a
+    Returns ``[]`` when the file is missing/unparseable or doesn't hold a list, a
     restart with no prior state (or a corrupt file) starts clean rather than raising.
     """
     data = read_json(_state_path(name), default=[])
