@@ -4,7 +4,7 @@ Locks that instance_seg's masks travel end to end instead of being silently drop
 ``check_model_contract`` requires them for instance_seg, ``GenericPredictor._format_detection``
 carries them (soft, unbinarized), ``predict_tiled`` refuses loudly for instance_seg rather than
 silently dropping masks, and ``write_predictions_json`` converts a mask to a real (possibly
-multi-ring) ``Polygon`` via ``resolve_binarize_threshold`` — never a second hardcoded threshold.
+multi-ring) ``Polygon`` via ``resolve_binarize_threshold``, never a second hardcoded threshold.
 
 The refusal is a rail, so it must still admit valid work: the MCP doors resolve an unset ``tile``
 to untiled for an instance_seg checkpoint (and refuse an explicit ``tile=True`` with a tool-level
@@ -30,11 +30,11 @@ from tests import bespoke_models  # noqa: E402
 
 
 # --------------------------------------------------------------------------
-# model_contract — instance_seg requires masks in the eval output
+# model_contract: instance_seg requires masks in the eval output
 # --------------------------------------------------------------------------
 
 def test_contract_rejects_maskless_instance_seg_model():
-    """A model that emits boxes/scores/labels but no masks must fail the instance_seg contract —
+    """A model that emits boxes/scores/labels but no masks must fail the instance_seg contract:
     it would otherwise pass as a detector while the platform's only sanctioned dimensional
     measurement can never reach it."""
     import torch.nn as nn
@@ -63,7 +63,7 @@ def test_contract_accepts_real_masked_instance_seg_model():
 
 
 def test_contract_detection_task_unaffected_by_mask_requirement():
-    """Plain detection (no masks trained/expected) must not start requiring masks — a regression
+    """Plain detection (no masks trained/expected) must not start requiring masks: a regression
     guard that the instance_seg-only requirement stays instance_seg-only."""
     model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=128)
     report = check_model_contract(model, "detection", num_classes=1, img_size=64)
@@ -71,11 +71,11 @@ def test_contract_detection_task_unaffected_by_mask_requirement():
 
 
 # --------------------------------------------------------------------------
-# GenericPredictor._format_detection — soft masks carried, unbinarized
+# GenericPredictor._format_detection: soft masks carried, unbinarized
 # --------------------------------------------------------------------------
 
 def _bare_predictor(task: str, score_threshold: float = 0.5) -> GenericPredictor:
-    """A GenericPredictor with no real checkpoint — __init__ is never called, only the attributes
+    """A GenericPredictor with no real checkpoint: __init__ is never called, only the attributes
     _format_detection/predict_tiled actually read are set. Avoids loading a real model just to
     unit-test output formatting / the tiled refusal, which both happen before any inference."""
     p = GenericPredictor.__new__(GenericPredictor)
@@ -99,7 +99,7 @@ def test_format_detection_carries_soft_masks_for_instance_seg():
     assert len(result["masks"]) == 2
     # Squeezed to [H, W] per instance (the singleton channel dim dropped).
     assert np.asarray(result["masks"][0]).shape == (8, 8)
-    # Kept soft — not binarized here (values other than exactly 0/1 must survive).
+    # Kept soft, not binarized here (values other than exactly 0/1 must survive).
     flat = np.asarray(result["masks"]).ravel()
     assert not np.all((flat == 0.0) | (flat == 1.0))
 
@@ -134,7 +134,7 @@ def test_format_detection_keep_mask_filters_with_scores():
 
 
 # --------------------------------------------------------------------------
-# predict_tiled — refuses loudly for instance_seg rather than silently
+# predict_tiled: refuses loudly for instance_seg rather than silently
 # dropping masks through cross-tile reconstruction/merge
 # --------------------------------------------------------------------------
 
@@ -146,7 +146,7 @@ def test_predict_tiled_refuses_for_instance_seg():
 
 def test_predict_tiled_detection_reaches_real_tiling_path(tmp_path):
     """Sharper version of the above: detection must reach real tiling logic (fail on a bad image
-    path with an image-loading error, never NotImplementedError) — proves the instance_seg refusal
+    path with an image-loading error, never NotImplementedError), proving the instance_seg refusal
     is scoped to instance_seg only."""
     p = _bare_predictor("detection")
     missing = tmp_path / "missing.jpg"
@@ -156,7 +156,7 @@ def test_predict_tiled_detection_reaches_real_tiling_path(tmp_path):
 
 
 def test_predict_tiled_error_names_the_caller_facing_routes():
-    """The refusal must point at real alternatives a caller can act on — the untiled library calls,
+    """The refusal must point at real alternatives a caller can act on: the untiled library calls,
     the two MCP doors' own ``tile=False`` parameter, and the boxes-only opt-out."""
     p = _bare_predictor("instance_seg")
     with pytest.raises(NotImplementedError) as exc_info:
@@ -187,7 +187,7 @@ TILE = 64
 
 @pytest.fixture(scope="module")
 def instance_seg_ckpt(tmp_path_factory) -> str:
-    """A real bespoke instance_seg (Mask R-CNN) checkpoint, built once and only read afterwards —
+    """A real bespoke instance_seg (Mask R-CNN) checkpoint, built once and only read afterwards:
     these tests exercise reachable tool/eval paths, so a stub predictor would assume the very
     dispatch under test."""
     from tcip_mcp.pipelines.model_build import build_model
@@ -211,7 +211,7 @@ def _image(directory: Path, name: str = "img.png", size: int = 128) -> str:
 
 
 def test_predict_tiled_require_masks_false_returns_boxes_only(instance_seg_ckpt, tmp_path):
-    """The opt-out tiles normally and returns NO masks key at all — never a partial one — while the
+    """The opt-out tiles normally and returns no masks key at all, never a partial one, while the
     same predictor's untiled path still carries masks (an opt-out, not a global downgrade)."""
     pred = GenericPredictor(instance_seg_ckpt, device="cpu", score_threshold=0.5)
     assert pred.task == "instance_seg"
@@ -227,9 +227,9 @@ def test_predict_tiled_require_masks_false_returns_boxes_only(instance_seg_ckpt,
 
 
 def test_run_inference_instance_seg_unset_tile_runs_untiled(instance_seg_ckpt, tmp_path):
-    """DEFAULT_TILED is True, so an unset ``tile`` used to send an instance_seg checkpoint into
-    predict_tiled and surface NotImplementedError as a raw traceback out of the MCP tool. The door
-    resolves to untiled instead — masks intact — and says so."""
+    """DEFAULT_TILED is True, so an unset ``tile`` must not send an instance_seg checkpoint into
+    predict_tiled (that would surface NotImplementedError as a raw traceback out of the MCP tool).
+    The door resolves to untiled instead, masks intact, and says so."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu")
@@ -242,7 +242,7 @@ def test_run_inference_instance_seg_unset_tile_runs_untiled(instance_seg_ckpt, t
 
 def test_run_inference_instance_seg_explicit_tile_true_returns_error(instance_seg_ckpt, tmp_path):
     """An explicit tile=True is a refusal in the tool's own ``{"error": ...}`` contract, naming the
-    tool-level parameter — not a raised NotImplementedError about library internals."""
+    tool-level parameter, not a raised NotImplementedError about library internals."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu",
@@ -266,10 +266,10 @@ def test_export_predictions_instance_seg_unset_tile_writes_untiled(instance_seg_
 
 
 def test_tabulate_counts_instance_seg_unset_tile_carries_warning(instance_seg_ckpt, tmp_path):
-    """Round-2 stage-6 finding: export_predictions already surfaces the instance_seg forced-untiled
-    warning in its response; tabulate_counts's own docstring documents the same behavior but its
-    success return had no warning key, so a count CSV (the count IS the phenotype) could ship with
-    the regime change disclosed only in the server log."""
+    """export_predictions surfaces the instance_seg forced-untiled warning in its response;
+    tabulate_counts's own docstring documents the same behavior but its success return had no
+    warning key, so a count CSV (the count is the phenotype) could ship with the regime change
+    disclosed only in the server log."""
     from tcip_mcp.tools.inference_tools import tabulate_counts
 
     images_dir = tmp_path / "images"
@@ -281,9 +281,9 @@ def test_tabulate_counts_instance_seg_unset_tile_carries_warning(instance_seg_ck
 
 
 def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(instance_seg_ckpt, tmp_path):
-    """Round-2 stage-6 finding: the unvalidated mask-binarize threshold used to be stamped into
-    Annotation.attributes (the domain trait namespace, polluting GT). It must instead travel once,
-    as a run constant, in operating_point.json — the same door tiled/tile_size/conf already use."""
+    """The unvalidated mask-binarize threshold must not be stamped into Annotation.attributes
+    (the domain trait namespace, which would pollute GT). It travels once, as a run constant,
+    in operating_point.json, the same door tiled/tile_size/conf already use."""
     import json
 
     from tcip_mcp.tools.inference_tools import export_predictions
@@ -317,7 +317,7 @@ def test_export_predictions_instance_seg_explicit_tile_true_returns_error(instan
 
 
 def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_ckpt, tmp_path):
-    """The delivery-gating eval never consumed masks — it reads boxes/scores/labels only — so a
+    """The delivery-gating eval never consumed masks: it reads boxes/scores/labels only, so a
     tile-trained Mask R-CNN must still evaluate here instead of crashing on the mask refusal."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -336,15 +336,15 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     assert r["scored_images"] == 1
     assert r["n_gt"] == 1
     assert Path(r["results_path"]).is_file()
-    # Round-2 stage-6 finding: this used to hardcode task="detection" even for an instance_seg
-    # checkpoint, mislabeling the delivery artifact's own producer-task fact. iou_type stays "bbox"
-    # regardless of task — this gate always scores boxes only, by design (see the docstring).
+    # task records the checkpoint's actual producer task, not a hardcoded "detection". iou_type
+    # stays "bbox" regardless of task: this gate always scores boxes only, by design (see the
+    # docstring).
     assert r["task"] == "instance_seg"
     assert r["iou_type"] == "bbox"
 
 
 # --------------------------------------------------------------------------
-# mask_geometry.mask_to_polygon_points — every connected component, own ring
+# mask_geometry.mask_to_polygon_points: every connected component, own ring
 # --------------------------------------------------------------------------
 
 def test_mask_to_polygon_single_blob_one_ring():
@@ -357,7 +357,7 @@ def test_mask_to_polygon_single_blob_one_ring():
 
 def test_mask_to_polygon_two_disjoint_blobs_two_rings():
     """An occlusion-split mask (two disjoint regions) must return two rings, not one truncated
-    to the largest — this is the actual K20 measurement-integrity fix."""
+    to the largest."""
     m = np.zeros((64, 64), dtype=np.uint8)
     m[5:15, 5:15] = 1
     m[40:55, 40:55] = 1  # far enough away to be a separate connected component
@@ -371,7 +371,7 @@ def test_mask_to_polygon_empty_mask_no_rings():
 
 
 # --------------------------------------------------------------------------
-# export.py write_predictions_json — masks become a real (possibly
+# export.py write_predictions_json: masks become a real (possibly
 # multi-ring) Polygon; resolve_binarize_threshold is a real caller
 # --------------------------------------------------------------------------
 
@@ -396,11 +396,11 @@ def test_export_single_component_mask_writes_polygon(tmp_path):
 
 
 def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(tmp_path):
-    """Round-2 stage-6 finding: round 1 fixed the missing-provenance gap by stamping the threshold
-    into Annotation.attributes — the domain trait namespace, not a machine-provenance one — so it
-    survived unfixed into GT the moment a breeder accepted the prediction. attributes must stay
-    empty; the threshold travels via mask_binarize_provenance() into the run's operating_point.json
-    instead (see test_export_predictions_stamps_mask_binarize_provenance_when_masks_present)."""
+    """Stamping the mask-binarize threshold into Annotation.attributes (the domain trait
+    namespace, not a machine-provenance one) would let it survive into GT the moment a breeder
+    accepts the prediction. attributes must stay empty; the threshold travels via
+    mask_binarize_provenance() into the run's operating_point.json instead (see
+    test_export_predictions_stamps_mask_binarize_provenance_when_masks_present)."""
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
     from tcip_annotation import json_io
 
@@ -428,9 +428,9 @@ def test_mask_binarize_provenance_reports_the_unvalidated_default():
 
 
 def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
-    """The actual K20/reviewer fix under test: an occlusion-split mask must export every region as
-    its own ring in one Polygon, never silently truncated to the largest component and never
-    downgraded to a BBox that would lose the shape entirely."""
+    """An occlusion-split mask must export every region as its own ring in one Polygon, never
+    silently truncated to the largest component and never downgraded to a BBox that would lose
+    the shape entirely."""
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
@@ -471,7 +471,7 @@ def test_export_empty_mask_falls_back_to_bbox(tmp_path):
 
 def test_export_no_masks_key_writes_bbox_as_before():
     """Regression guard: a plain detection result (no masks key at all) must still export BBox
-    exactly as before K20 — masks are additive, not a behavior change for non-instance_seg."""
+    as before; masks are additive, not a behavior change for non-instance_seg."""
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
     from tcip_annotation import json_io
     from tcip_annotation.state import BBox
@@ -494,14 +494,14 @@ def test_export_no_masks_key_writes_bbox_as_before():
 
 
 def test_resolve_binarize_threshold_is_a_real_caller_of_export(monkeypatch, tmp_path):
-    """resolve_binarize_threshold must be the actual threshold export uses — not a bare hardcoded
+    """resolve_binarize_threshold must be the actual threshold export uses, not a bare hardcoded
     0.5 reintroduced beside it. Proven by changing the threshold and observing the binarized mask
     (and therefore the exported polygon) change accordingly."""
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon, BBox
 
-    # A mask whose values sit strictly between 0.3 and 0.6 — binarizes to a real blob at threshold
+    # A mask whose values sit strictly between 0.3 and 0.6: binarizes to a real blob at threshold
     # 0.3, and to nothing at threshold 0.6.
     mask = np.zeros((32, 32), dtype=np.float32)
     mask[5:20, 5:20] = 0.45
@@ -512,9 +512,9 @@ def test_resolve_binarize_threshold_is_a_real_caller_of_export(monkeypatch, tmp_
     }
 
     import importlib
-    # tcip_mcp.pipelines.measurement.mask_geometry as a PACKAGE ATTRIBUTE resolves to the
-    # re-exported `mask_geometry` FUNCTION (measurement/__init__.py shadows the submodule name
-    # with a same-named function) — importlib.import_module bypasses that via sys.modules and
+    # tcip_mcp.pipelines.measurement.mask_geometry as a package attribute resolves to the
+    # re-exported `mask_geometry` function (measurement/__init__.py shadows the submodule name
+    # with a same-named function); importlib.import_module bypasses that via sys.modules and
     # returns the real submodule, which is what _mask_geometry_for_export actually imports from.
     mg = importlib.import_module("tcip_mcp.pipelines.measurement.mask_geometry")
 
