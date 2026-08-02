@@ -99,7 +99,7 @@ export function StatusBar() {
           {agentStem ? ` (${agentStem})` : ""}
         </span>
       )}
-      {/* Project breadcrumb — lower-right: project (recent) · date (switch) · Switch Project (all). */}
+      {/* Project breadcrumb, lower-right: project (recent) · date (switch) · Switch Project (all). */}
       <ProjectBreadcrumb />
     </div>
   );
@@ -112,7 +112,7 @@ function ReviewProgress({ reviewed, total }: { reviewed: number; total: number }
   return (
     <span
       className="flex items-center gap-1.5 tabular-nums"
-      title="Detections reviewed on this image — updates as you accept, edit, or reject"
+      title="Detections reviewed on this image, updates as you accept, edit, or reject"
     >
       <svg width="13" height="13" viewBox="0 0 20 20" aria-hidden="true">
         <circle cx="10" cy="10" r="7" fill="none" stroke="#33352C" strokeWidth="3" />
