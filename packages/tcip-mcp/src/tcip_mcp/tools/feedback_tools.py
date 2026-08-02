@@ -16,8 +16,6 @@ from tcip_mcp.pipelines.feedback.materialize import (
     materialize_dataset, reviewed_image_names, select_unreviewed,
 )
 
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-
 
 def _review_state_exists(review_state_dir: str) -> bool:
     """True if the ``review/`` shard dir holds any review state."""
@@ -148,18 +146,29 @@ def prioritize_review_queue(
     images_path = Path(images_dir)
     if not images_path.is_dir():
         return {"error": f"Images dir not found: {images_dir}"}
-    paths = sorted(str(f) for f in images_path.iterdir() if f.suffix.lower() in _IMAGE_EXTS)
-    if not paths:
+    from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
+
+    logical = list_logical_images(images_path)
+    if not logical:
         return {"error": "No images found in images_dir"}
+    # Real sources (a plain path or a BandGroupRef), one per logical image: a band-grouped
+    # capture's sibling band files are folded into its one entry instead of each enumerating
+    # as its own (spurious) candidate.
+    sources = [logical[stem] for stem in sorted(logical)]
 
     reviewed_skipped = 0
     if review_state_dir and skip_reviewed:
         if _review_state_exists(review_state_dir):
             from tcip_annotation.review_engine import ReviewEngine
             reviewed = reviewed_image_names(ReviewEngine(review_state_dir).raw_state)
-            before = len(paths)
-            paths = select_unreviewed(paths, reviewed)
-            reviewed_skipped = before - len(paths)
+            before = len(sources)
+            # select_unreviewed compares basenames against review-state img_name, which for a
+            # band-grouped capture is the manifest's own filename (the identity every review-state
+            # reader/writer in this platform uses), not any one sibling band file's name.
+            display = [str(s.manifest_path) if isinstance(s, BandGroupRef) else str(s) for s in sources]
+            kept = set(select_unreviewed(display, reviewed))
+            sources = [s for s, d in zip(sources, display) if d in kept]
+            reviewed_skipped = before - len(sources)
 
     try:
         from tcip_mcp.pipelines.inference.predictor import build_predictor
@@ -169,12 +178,12 @@ def prioritize_review_queue(
     if strategy == "confidence_triage":
         from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue
 
-        if not paths:
+        if not sources:
             return {"strategy": strategy, "total_images": 0, "reviewed_skipped": reviewed_skipped,
                     "auto_accepted": 0, "needs_review": 0, "review_images": [],
                     "auto_accepted_images": []}
         predictor = build_predictor(checkpoint_path)
-        predictions = predictor.predict_batch(paths)
+        predictions = predictor.predict_batch(sources)
         needs_review = review_queue(predictions, low=low, high=high)
         # Auto-accept turns predictions into GT. Refuse to do so at a pinned threshold: the
         # threshold must be derived from the model's validated conf distribution and breeder
@@ -207,7 +216,7 @@ def prioritize_review_queue(
             "auto_accepted_images": [a.get("image", "") for a in accepted],
         }
 
-    if not paths:
+    if not sources:
         return {"strategy": strategy, "method": method, "task": task, "total_candidates": 0,
                 "reviewed_skipped": reviewed_skipped, "selected_count": 0, "queue": []}
 
@@ -225,13 +234,17 @@ def prioritize_review_queue(
     except ValueError as e:  # unknown scorer: refuse rather than silently reordering the queue
         return {"error": str(e)}
 
-    scored = scorer.score(paths, predictor.model, predictor.device)[:budget]
+    scored = scorer.score(sources, predictor.model, predictor.device)[:budget]
     return {
         "strategy": strategy,
         "method": method,
         "task": task,
-        "total_candidates": len(paths),
+        "total_candidates": len(sources),
         "reviewed_skipped": reviewed_skipped,
         "selected_count": len(scored),
-        "queue": [{"image": p, "score": round(float(s), 6)} for p, s in scored],
+        "queue": [
+            {"image": str(p.manifest_path) if isinstance(p, BandGroupRef) else str(p),
+             "score": round(float(s), 6)}
+            for p, s in scored
+        ],
     }
