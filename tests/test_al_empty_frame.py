@@ -1,4 +1,4 @@
-"""L15 — an empty-detection frame must not flood the uncertainty queue with a max (1.0) score."""
+"""An empty-detection frame must not flood the uncertainty queue with a max (1.0) score."""
 
 from __future__ import annotations
 
