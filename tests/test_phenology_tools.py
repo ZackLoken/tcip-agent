@@ -748,6 +748,41 @@ def test_resolve_classifier_operating_point_honors_trait_authored_agreement_floo
     assert "compensating_error_floor_failed" in res["failures"]
 
 
+def test_resolve_classifier_operating_point_count_bias_tolerance_frac_source(monkeypatch) -> None:
+    """TraitSpec.count_bias_tolerance_frac mirrors classifier_agreement_floor's own provenance
+    stamp: unauthored (CATKIN's own state) resolves to the platform's provisional fraction and
+    stamps that; a trait that authors its own value stamps ``"trait"`` instead."""
+    from dataclasses import replace
+
+    from tcip_mcp.pipelines import operating_point as op_mod
+    from tests._trait_fixtures import CATKIN
+
+    def make_items(n, flips):
+        items = []
+        for i in range(n):
+            is_tp = i < n // 2
+            pred = (not is_tp) if i in flips else is_tp
+            items.append({"image_id": f"i{i}", "is_true_positive": is_tp, "is_pred_positive": pred,
+                         "bbox": [float(i), 0.0, float(i + 10), 10.0]})
+        return items
+
+    cal = make_items(20, flips=set())
+    hold = make_items(100, flips=set())  # clean, zero bias, so this stamp is reachable regardless
+
+    monkeypatch.setattr(op_mod, "get_trait", lambda name: CATKIN)
+    res_default = op_mod.resolve_classifier_operating_point(
+        "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
+    assert res_default["sweep_data"]["count_bias_tolerance_frac"] == pytest.approx(0.01)
+    assert res_default["sweep_data"]["count_bias_tolerance_frac_source"] == "platform_provisional_default"
+
+    authored_catkin = replace(CATKIN, count_bias_tolerance_frac=0.2)
+    monkeypatch.setattr(op_mod, "get_trait", lambda name: authored_catkin)
+    res_trait = op_mod.resolve_classifier_operating_point(
+        "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
+    assert res_trait["sweep_data"]["count_bias_tolerance_frac"] == pytest.approx(0.2)
+    assert res_trait["sweep_data"]["count_bias_tolerance_frac_source"] == "trait"
+
+
 def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_reachable(
     tmp_path: Path,
 ) -> None:
