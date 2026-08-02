@@ -2,7 +2,7 @@
 
 The vectorized IoU-pair computation must produce byte-identical output to a
 straightforward per-pair reference: same tp/fp/fn *order*, same dict fields, same
-rounded floats — not merely equal counts. To pin that, this file keeps an independent
+rounded floats, not merely equal counts. To pin that, this file keeps an independent
 reference implementation (``_reference_compute_matches``, self-contained down to its own
 IoU helpers) mirroring the name-based ``compute_matches`` semantics, and asserts deep
 equality across a seeded RNG sweep plus constructed edge cases.
@@ -424,10 +424,10 @@ def test_multi_ring_polygon_equivalence(seed):
 
 
 def test_multi_ring_gt_iou_counts_the_area_of_every_ring():
-    """The IoU denominator is the union of ALL of an instance's rings.
+    """The IoU denominator is the union of all of an instance's rings.
 
     Lobe A is 20x40 = 800, lobe B is 50x50 = 2500. A prediction that recovered only lobe A therefore
-    scores 800/3300 against the two-lobe GT — comparing against lobe A alone would score it 1.0 and
+    scores 800/3300 against the two-lobe GT: comparing against lobe A alone would score it 1.0 and
     hand a half-found object a perfect match.
     """
     lobe_a = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]
@@ -452,7 +452,7 @@ def test_timing_sanity_vectorized_not_slower():
     """At a realistic review scale the vectorized path must beat the pure loop.
 
     Correctness is still asserted; the timing check is a rough regression guard,
-    not a benchmark — it only fires the comparative assert when the reference
+    not a benchmark: it only fires the comparative assert when the reference
     workload is non-trivial, to avoid CI noise on tiny inputs.
     """
     rng = random.Random(42)
