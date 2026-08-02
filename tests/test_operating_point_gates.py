@@ -397,7 +397,7 @@ def test_passed_holdout_is_exactly_the_absence_of_named_failures():
 # ── Genuine per-image dispersion in the admitting direction ─────────────────
 #
 # Every prior "good detector, should validate" fixture in this module (here and in
-# test_operating_point.py / test_conf_censoring_guard.py / test_audit_cv_fixes.py /
+# test_operating_point.py / test_conf_censoring_guard.py / test_detection_measurement_integrity.py /
 # test_char_goldens_measurement.py / test_calibration_holdout_disjointness.py / test_review_calibration.py /
 # this file's own integration fixture above) has exactly zero per-image
 # count-bias variance at the picked conf: a uniform miss/fp pattern, or a varying one whose
