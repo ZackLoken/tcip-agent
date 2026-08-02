@@ -1,4 +1,4 @@
-/** Meta-loop API helpers — Claude's friction reports and retrospectives. */
+/** Meta-loop API helpers: Claude's friction reports and retrospectives. */
 
 import { getJson } from "@/api/http";
 
