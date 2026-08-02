@@ -1,4 +1,4 @@
-"""Governance Part 2 — self-learning capture + distill.
+"""Governance: self-learning capture + distill.
 
 The SessionEnd capture hook files a machine-local backstop record; the distill script gathers the
 journal + reports + retros + captures into one worksheet; the fence materialization absolutizes
@@ -39,7 +39,7 @@ def test_distill_worksheet_gathers_reports_captures_and_themes(tmp_path):
     assert "Friction reports (1)" in ws
     assert "Session captures (1)" in ws
     assert "exif" in ws.lower()          # recurring theme detected
-    assert "Nothing here is applied" in ws  # gathering only — governance stays human
+    assert "Nothing here is applied" in ws  # gathering only, governance stays human
 
 
 def test_distill_worksheet_surfaces_disagreements(tmp_path):
@@ -65,7 +65,7 @@ def test_themes_generic_frequency_and_recurrence_floor():
     text = ("the wobblesync module keeps desyncing. wobblesync desyncing again. "
             "a one-off mention of zzyzx.")
     themes = dict(distill._themes(text))
-    # "wobblesync"/"desyncing" are not, and never will be, in any hardcoded theme vocabulary —
+    # "wobblesync"/"desyncing" are not, and never will be, in any hardcoded theme vocabulary:
     # they surface purely because they recurred in this project's own text.
     assert themes.get("wobblesync") == 2
     assert themes.get("desyncing") == 2
@@ -81,8 +81,8 @@ def test_themes_picks_up_bigram_phrases():
 
 def test_cross_project_themes_require_multiple_distinct_projects():
     distill = _load_distill()
-    # "wobblesync" repeats many times within ONE project's own text — a pooled frequency count
-    # would clear a >=2 bar on that alone. The per-project SET approach must not let it.
+    # "wobblesync" repeats many times within one project's own text: a pooled frequency count
+    # would clear a >=2 bar on that alone. The per-project set approach must not let it.
     per_project = {
         "proj_a": distill._project_token_set(
             "wobblesync desyncing. wobblesync desyncing again and again."
@@ -125,13 +125,13 @@ def test_build_workspace_worksheet_gathers_across_projects(tmp_path):
 
 def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
     distill = _load_distill()
-    (tmp_path / "not_a_project").mkdir()  # no .tcip/ — must not be treated as a project
+    (tmp_path / "not_a_project").mkdir()  # no .tcip/, must not be treated as a project
     ws = distill.build_workspace_worksheet(tmp_path)
     assert "No projects with a `.tcip/` directory" in ws
 
 
 def test_workspace_mode_never_writes_anything(tmp_path):
-    # The read-only invariant this whole governance surface depends on — a --workspace run must
+    # The read-only invariant this whole governance surface depends on: a --workspace run must
     # leave every project's .tcip/ untouched, same as the single-project mode already does.
     distill = _load_distill()
     reports_dir = tmp_path / "proj_a" / ".tcip" / "reports"
@@ -162,7 +162,7 @@ def test_capture_hook_appends_and_never_raises(tmp_path, monkeypatch):
     assert cap.is_file()
     assert json.loads(cap.read_text(encoding="utf-8").strip())["session_id"] == "s1"
 
-    # Malformed / empty stdin must not raise — a capture backstop cannot break the session.
+    # Malformed / empty stdin must not raise: a capture backstop cannot break the session.
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json at all"))
     agent_learning_capture.main()
 
