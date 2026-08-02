@@ -453,13 +453,19 @@ export function AnnotateToolbar({
         {/* Complete */}
         <label
           className="flex items-center gap-1.5 text-[12px]"
-          title={canvasReady ? undefined : "Loading this image's labels…"}
+          title={
+            !dataset.subject
+              ? "Select a subject before marking Complete."
+              : canvasReady
+                ? undefined
+                : "Loading this image's labels…"
+          }
         >
           <input
             type="checkbox"
             checked={currentStatus === "complete" || currentStatus === "negative"}
             onChange={(e) => void toggleComplete(e.target.checked)}
-            disabled={!currentImage || !canvasReady}
+            disabled={!currentImage || !canvasReady || !dataset.subject}
           />
           Complete
         </label>
