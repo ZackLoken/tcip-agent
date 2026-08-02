@@ -1,7 +1,7 @@
 """Persistence + memory-cap helpers for the web's async job registries.
 
-The inference/HPO routes keep an in-memory dict of background jobs that previously grew
-unbounded (a memory leak) and vanished on restart. These helpers atomically persist job
+The inference/HPO routes keep an in-memory dict of background jobs; left unbounded, this dict
+leaks memory, and every job vanishes on restart. These helpers atomically persist job
 summaries to ``.tcip/state/<name>.json`` and evict the oldest *terminal* jobs so the live
 registry stays bounded. (Running jobs can't survive a restart, their threads are gone,
 so the persisted file is a record, not a resumable state.)
