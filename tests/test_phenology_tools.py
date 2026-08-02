@@ -102,16 +102,29 @@ def _write_preds(dir_path: Path, stem: str, subjects: list[str]) -> None:
 
 
 def _write_op_sidecar(dir_path: Path, *, validated: bool, conf: float = 0.4,
-                      id_map: dict | None = None, experiment_id: str | None = None) -> None:
-    """The operating_point.json a calibrated export_predictions writes."""
+                      id_map: dict | None = None, experiment_id: str | None = None,
+                      tile_size_prov: dict | None = None) -> None:
+    """The operating_point.json a calibrated export_predictions writes.
+
+    ``tile_size_prov`` is the tile_size param's own provenance entry, present for a run that
+    actually tiled; omitted here for an untiled run, which carries no gating tile scale.
+    """
     ref = "held_out_annotations" if validated else "false"
     dir_path.mkdir(parents=True, exist_ok=True)
+    op: dict = {"conf": {"value": conf, "validated_against": ref}}
+    if tile_size_prov is not None:
+        op["tile_size"] = tile_size_prov
     (dir_path / "operating_point.json").write_text(json.dumps({
         "validated": validated,
-        "operating_point": {"conf": {"value": conf, "validated_against": ref}},
+        "operating_point": op,
         "id_map": id_map,
         "experiment_id": experiment_id,
     }), encoding="utf-8")
+
+
+def _tiled(ref: str, value: int = 640) -> dict:
+    return {"value": value, "requires_validation": True, "validation_kind": "geometry",
+            "validated_against": ref}
 
 
 def _write_classifier_sidecar(dir_path: Path, *, validated: bool, trait: str | None = None,
@@ -332,6 +345,78 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
     assert out_csv.exists()
 
 
+def _tile_gate_fixture(tmp_path: Path, tile_size_prov: dict | None) -> dict:
+    """A fully-validated two-date phenology delivery, varying only the tile scale's own basis."""
+    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    _write_preds(d1, "P1_a", ["dormant"])
+    _write_preds(d2, "P1_b", ["elongated"])
+    _write_op_sidecar(d1, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
+    _write_op_sidecar(d2, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
+    _write_classifier_sidecar(d1, validated=True, trait="catkin")
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    return {
+        "trait": "catkin",
+        "mapping_path": str(mapping_path),
+        "predictions_by_date": {"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        "output_csv_path": str(tmp_path / "out" / "catkin_phenology.csv"),
+        "classifier_pred_dirs": [str(d1)],
+    }
+
+
+def test_compute_phenology_refuses_a_fabricated_tile_size(tmp_path: Path) -> None:
+    """A phenology fraction is built from per-image counts, and the tile edge scales those counts.
+    A tiled bucket whose tile_size fell back to the fabricated default, with no persisted training
+    geometry and no explicit caller override, must refuse here even though the classifier and the
+    conf beside it are both genuinely validated."""
+    args = _tile_gate_fixture(tmp_path, _tiled("false"))
+    res = compute_phenology(**args)
+    assert "error" in res
+    assert res["tile_size_validated"] == "false"
+    assert res["operating_point_validated"] == "held_out_annotations"  # conf is not what refused
+    assert not Path(args["output_csv_path"]).exists()
+
+
+def test_compute_phenology_delivers_when_the_tile_scale_has_a_real_basis(tmp_path: Path) -> None:
+    """The rail must admit valid work: a tile edge derived from the checkpoint's own persisted
+    training geometry delivers cleanly."""
+    args = _tile_gate_fixture(tmp_path, _tiled("persisted_training_geometry", 224))
+    res = compute_phenology(**args)
+    assert "error" not in res, res
+    assert res["tile_size_validated"] == "persisted_training_geometry"
+    assert Path(args["output_csv_path"]).exists()
+
+
+def test_compute_phenology_never_gates_an_untiled_delivery_on_tile_size(tmp_path: Path) -> None:
+    """Buckets from untiled runs carry a non-gating tile_size entry; it must not manufacture a
+    refusal over a dimension that was never operative."""
+    args = _tile_gate_fixture(tmp_path, {"value": None, "requires_validation": False,
+                                         "validation_kind": None, "validated_against": None})
+    res = compute_phenology(**args)
+    assert "error" not in res, res
+    assert res["tile_size_validated"] is None
+    assert Path(args["output_csv_path"]).exists()
+
+
+def test_compute_phenology_acknowledged_tile_size_floors_the_csv_operating_point_stamp(
+    tmp_path: Path,
+) -> None:
+    """The CSV's operating_point_validated column is the count operating point's only count-side
+    stamp, and the tile scale has no column of its own. A delivery whose tile edge only shipped
+    through acknowledge_unvalidated must not read as fully validated there."""
+    import csv
+
+    args = _tile_gate_fixture(tmp_path, _tiled("false"))
+    res = compute_phenology(**args, acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert res["operating_point_validated"] == "false"
+    rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
+    assert rows and all(r["operating_point_validated"] == "false" for r in rows)
+
+
 def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> None:
     # Predictions from a bare detector (no elongation axis at all) must refuse,
     # never report full coverage.
@@ -539,6 +624,47 @@ def test_resolve_classifier_operating_point_refuses_single_image_holdout() -> No
 
     assert res["passed"] is False
     assert "insufficient_holdout_images" in res["failures"], res["failures"]
+
+
+def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -> None:
+    """count_bias/count_bias_std must be measured over the same population typical_positive_count
+    is already scoped to (images carrying a true or predicted positive), the same present-scoped fix
+    the pooled detector gate already has, mirroring _count_stats_at_conf's own `if gt or dt`. Before
+    the fix, an all-negative image (no true positive, no predicted positive -- a confirmed-dormant
+    catkin the classifier correctly called negative) contributed a certain zero to the bias mean/std
+    while never counting toward typical_positive_count, diluting a real systematic miscall by
+    n_bias_images/n_present exactly as the detector path's own dilution did."""
+    from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
+
+    cal = [
+        {"image_id": "c0", "is_true_positive": True, "is_pred_positive": True, "bbox": [0.0, 0.0, 10.0, 10.0]},
+        {"image_id": "c1", "is_true_positive": False, "is_pred_positive": False, "bbox": [20.0, 0.0, 30.0, 10.0]},
+    ]
+    hold = []
+    # 10 informative images: 100 real positives each, systematically over-called by +2 (102
+    # predicted positive) -- a real 2% relative over-count.
+    for i in range(10):
+        for k in range(100):
+            hold.append({"image_id": f"h{i}", "is_true_positive": True, "is_pred_positive": True,
+                        "bbox": [float(k), 0.0, float(k + 1), 10.0]})
+        for k in range(2):
+            hold.append({"image_id": f"h{i}", "is_true_positive": False, "is_pred_positive": True,
+                        "bbox": [float(9000 + k), 0.0, float(9001 + k), 10.0]})
+    # 40 uninformative images: every instance confirmed negative and correctly called negative.
+    # No true positive, no predicted positive anywhere on these -- exactly the population
+    # typical_positive_count already excludes.
+    for i in range(40):
+        hold.append({"image_id": f"empty{i}", "is_true_positive": False, "is_pred_positive": False,
+                    "bbox": [-100.0 - i, 0.0, -90.0 - i, 10.0]})
+
+    res = resolve_classifier_operating_point(
+        "catkin", calibration_items=cal, holdout_items=hold, experiment_id=None)
+
+    assert res["sweep_data"]["typical_positive_count"] == pytest.approx(100.0)
+    assert res["sweep_data"]["count_bias_n_images"] == 10  # scoped to the 10 informative images only
+    assert res["sweep_data"]["count_bias"] == pytest.approx(2.0)  # not diluted toward 0.4 by the 40 empties
+    assert res["passed"] is False
+    assert "count_bias_exceeds_tolerance" in res["failures"], res["failures"]
 
 
 def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
