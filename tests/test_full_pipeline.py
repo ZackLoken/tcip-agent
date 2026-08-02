@@ -162,7 +162,7 @@ class TestFullClassificationPipeline:
                 "scores": confs if isinstance(confs, list) else [confs] if confs else [],
             })
         # Uncalibrated smoke export: acknowledge the count is unvalidated (the delivery gate refuses
-        # a bare write) — it is stamped measurement_validated=false.
+        # a bare write); it is stamped measurement_validated=false.
         export_detection_csv(csv_results, csv_path, acknowledge_unvalidated=True)
 
         assert Path(csv_path).is_file()
