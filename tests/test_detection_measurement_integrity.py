@@ -765,9 +765,13 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_dense_cal_holdout()
+    # tiled=False here matches the real tile=False the export_predictions call below makes: an
+    # operating point resolved as if the run always tiles (resolve_operating_point's own tiled
+    # default) would carry a gating tile_size dimension that the actual untiled call never runs
+    # at, and the delivery gate now refuses on exactly that kind of mismatch.
     bundle = resolve_operating_point("catkin", dataset_hash="H",
                                      calibration_records=cal, holdout_records=hold,
-                                     staged_conf_floor=0.01)
+                                     staged_conf_floor=0.01, tiled=False)
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
     stub = _CalStub()
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
