@@ -2,17 +2,17 @@
  * Live canvas-state sync: lets the agent see exactly what the canvas shows.
  *
  * Hybrid cadence so dense images (thousands of polygons) never jank the UI:
- *   - heartbeat (shapes: null — image, viewport, classes, counts; a few KB) on view/meta changes
+ *   - heartbeat (shapes: null; image, viewport, classes, counts; a few KB) on view/meta changes
  *   - full geometry only when shapes actually change (draw / edit / delete / image load), and
- *     never mid-drag/stream — the tab downgrades to heartbeats while a pointer interaction is
+ *     never mid-drag/stream: the tab downgrades to heartbeats while a pointer interaction is
  *     live and pushes once on release, so committed geometry is never re-serialized per tick
  *   - the agent can ping "canvas_state_request" through the panel-event hub; the mounted tab
  *     answers with an immediate full push (see onCanvasStateRequest).
  *
- * Shapes are display-resolved AND display-filtered: each carries the exact hex color / dash /
+ * Shapes are display-resolved and display-filtered: each carries the exact hex color / dash /
  * label the GUI renders, and the builders reproduce the canvas's own visibility rules (mode
  * filters, active-class filter, derived detect boxes, the labels toggle, review's single-kind
- * rule) — so the server-side render (capture_live_canvas) is faithful by construction.
+ * rule), so the server-side render (capture_live_canvas) is faithful by construction.
  */
 
 import { ringsBbox } from "@/lib/polygonGeometry";
@@ -105,7 +105,7 @@ export function measureCanvasHost(): { w: number; h: number } | null {
 
 /** Whether a placed point draws in the current mode: in point mode, every point of the active
  *  subject; in any mode, the selected one (a selection survives a mode switch, so the shape being
- *  inspected stays on screen — the same rule box mode applies to the selected polygon). The
+ *  inspected stays on screen, the same rule box mode applies to the selected polygon). The
  *  Annotate canvas imports this rather than restating it, so the agent's mirror and the GUI cannot
  *  disagree about which points are on screen. */
 export function pointShapeVisible(args: {
@@ -202,7 +202,7 @@ export function buildAnnotateShapes(args: {
   }
 
   // Box mode: the active subject's editable boxes render solid. Point mode draws no box or
-  // derived box — only its own points and the selection carried in from another mode.
+  // derived box, only its own points and the selection carried in from another mode.
   const boxMode = args.mode === "box";
   args.boxes.forEach((b, i) => {
     if (!boxMode || b.subject !== args.activeSubject) return;
@@ -218,9 +218,9 @@ export function buildAnnotateShapes(args: {
     });
   });
   // ...plus each active-subject polygon's read-only derived box, mirroring the canvas so the capture
-  // stays faithful. Derived from ringsBbox here — the same min/max the loader and COCO export
-  // re-derive, over every ring — never a stored box, so it can't be double-counted as its own
-  // annotation. Dashed distinguishes it from a real editable box (solid) — the same convention the
+  // stays faithful. Derived from ringsBbox here (the same min/max the loader and COCO export
+  // re-derive, over every ring), never a stored box, so it can't be double-counted as its own
+  // annotation. Dashed distinguishes it from a real editable box (solid), the same convention the
   // in-progress/under-review shapes already use for "not a committed, directly-editable annotation."
   args.polygons.forEach((p) => {
     if (!boxMode || p.subject !== args.activeSubject) return;
@@ -258,8 +258,8 @@ export function buildAnnotateShapes(args: {
   return shapes;
 }
 
-/** Review-tab shapes, mirroring the Review canvas rules: EACH detection draws by its own
- *  annotation's geometry (a box stays a box, a polygon stays a polygon — no geometry kind is
+/** Review-tab shapes, mirroring the Review canvas rules: each detection draws by its own
+ *  annotation's geometry (a box stays a box, a polygon stays a polygon, no geometry kind is
  *  hidden), FP = its prediction (dashed blue when focused), TP/FN = the ground truth (focused FN
  *  goes active-blue; reviewed shapes washed), the focused TP overlays its prediction dashed, and
  *  the focused detection draws last so neighbours never bury it. */
@@ -395,10 +395,10 @@ export function createCanvasPusher(
     fullPending = false;
     const body = builder ? builder() : null;
     if (!body) {
-      fullPending = fullPending || full; // nothing sent — geometry is still owed
+      fullPending = fullPending || full; // nothing sent, geometry is still owed
       return;
     }
-    if (!full) body.shapes = null; // heartbeat — backend keeps the last geometry for this image
+    if (!full) body.shapes = null; // heartbeat: backend keeps the last geometry for this image
     try {
       const res = post(body);
       if (res && typeof (res as Promise<unknown>).catch === "function") {
