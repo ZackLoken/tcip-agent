@@ -282,7 +282,10 @@ export const api = {
       gt_idx?: number | null;
       pred_idx?: number | null;
       bbox: [number, number, number, number];
-      action: "accepted" | "rejected" | "edited";
+      // "swept": no geometry, no gt/pred index; an explicit "I checked this image for missed
+      // objects and found none" attestation, distinct from "edited" (which always writes a real
+      // GT box). Never mutates ground truth.
+      action: "accepted" | "rejected" | "edited" | "swept";
       // Only for action "edited": the shape the user adjusted on the Review canvas.
       edited_box?: [number, number, number, number] | null;
       edited_points?: number[][] | null;
