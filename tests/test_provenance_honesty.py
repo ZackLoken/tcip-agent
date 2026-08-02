@@ -2,7 +2,7 @@
 
 Guards against the cross_tile_nms costume bug: code once stamped derived_from="GT neighbor-IoU
 distribution" while no function computed it. Every derived_from label stamped anywhere in
-tcip_mcp must be a reviewed entry in DERIVATION_IMPLEMENTATIONS — mapped to an importable
+tcip_mcp must be a reviewed entry in DERIVATION_IMPLEMENTATIONS, mapped to an importable
 callable, or explicitly marked as a non-derivation ("caller-input"/"placeholder")."""
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def test_every_derived_stamp_has_a_registered_implementation():
         hit = label in DERIVATION_IMPLEMENTATIONS or any(
             label.startswith(k) for k in DERIVATION_IMPLEMENTATIONS)
         assert hit, (f"{fname}: derived_from={label!r} is stamped but not registered in "
-                     "DERIVATION_IMPLEMENTATIONS — add the implementing callable "
+                     "DERIVATION_IMPLEMENTATIONS: add the implementing callable "
                      "(or an explicit non-derivation marker) before stamping it.")
 
 
@@ -58,15 +58,13 @@ def test_registered_implementations_exist_and_are_callable():
 
 
 def test_scanner_actually_finds_resolve_match_criterions_stamps():
-    """K18 B3 round-2 stage-6 review: a `derived(...)` call is invisible to `_stamped_labels()`
+    """A `derived(...)` call is invisible to `_stamped_labels()`
     when either (a) the import is aliased (the scanner matches the literal call name) or (b) the
     `derived_from=` argument is a variable reference rather than a literal/f-string written at the
-    call site (the scanner reads the AST node, not a runtime value) — both happened here in two
-    successive attempts at this exact fix, and the test suite passing was not proof either
-    attempt worked, since a scanner that finds nothing trivially satisfies "every stamped label is
-    registered." Pin that `evaluation.py`'s three real stamps are genuinely found, not just that
-    the two honesty tests above pass (which they would even if this file's stamps stayed
-    invisible — this is the actual gap the round-2 review caught)."""
+    call site (the scanner reads the AST node, not a runtime value). A scanner that finds nothing
+    trivially satisfies "every stamped label is registered", so this pins that `evaluation.py`'s
+    three real stamps are genuinely found, not just that the two honesty tests above pass (which
+    they would even if this file's stamps stayed invisible)."""
     labels = {label for fname, label in _stamped_labels() if fname == "evaluation.py"}
     assert labels == {
         "achievable IoU under annotation jitter (GT characteristic size)",
