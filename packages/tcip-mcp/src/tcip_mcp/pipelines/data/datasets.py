@@ -408,7 +408,7 @@ def confirmed_negative_names(
     :func:`~tcip_mcp.class_registry.attribute_schema_digest`: positive, provable evidence the
     subject's classification schema changed since that confirmation was made. Absence of a stamp,
     no sidecar, no stamp for that image, or a dataset that predates this mechanism entirely, is
-    **not** quarantined: a rail must admit valid work, not only reject it, and treating "nobody
+    not quarantined: a rail must admit valid work, not only reject it, and treating "nobody
     stamped this yet" as "unverifiable, therefore invalid" would silently empty
     every pre-existing project's confirmed negatives. Pass ``quarantined_out`` (a set, mutated in
     place) to also learn which names were excluded, see :func:`trainable_stems`'s
