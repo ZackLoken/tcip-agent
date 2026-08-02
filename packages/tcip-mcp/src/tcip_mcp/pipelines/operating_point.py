@@ -88,6 +88,12 @@ _EQUIVALENCE_Z = 1.645
 # whose errors are compensating (net count-bias ~0) but substantial.
 _PROVISIONAL_KAPPA_FLOOR = 0.41
 
+# The same "not yet authored for this trait" shape as `_PROVISIONAL_KAPPA_FLOOR`: how much relative
+# per-image count error a trait's own phenotype can tolerate is measurement semantics, the domain
+# expert's call. This value is a provisional, platform-chosen placeholder used only when a trait
+# hasn't authored `TraitSpec.count_bias_tolerance_frac` (None), see that field's docstring.
+_PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC = 0.01
+
 
 def _effective_count_bias_tolerance(tolerance_frac: float, typical_count: float, n: int) -> float:
     """The absolute per-image count-bias tolerance one scope (pooled, or one class) is actually held
@@ -519,6 +525,11 @@ def resolve_operating_point(
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
                          f"got {validated_reference!r}")
     trait = get_trait(trait_name)
+    # "not yet authored for this trait" falls back to the platform's provisional interim fraction,
+    # the same shape resolve_classifier_operating_point resolves its own kappa floor with.
+    count_bias_tolerance_frac = (
+        trait.count_bias_tolerance_frac if trait.count_bias_tolerance_frac is not None
+        else _PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC)
     review = validated_reference == VALIDATED_REVIEW_CONFIRMED
     # This is a gate, not a filter, see the docstring above for why a filter fails open: every
     # record must satisfy the predicate or the whole reference is refused, unfiltered, further down.
@@ -641,7 +652,7 @@ def resolve_operating_point(
             pooled_typical = gt_class_typical_count(holdout_records)
             count_bias_ok = _bias_equivalence_ok(
                 hb["count_bias_mean_present"], hb["count_bias_std_present"], hb["n_present"],
-                tolerance_frac=trait.count_bias_tolerance_frac, typical_count=pooled_typical)
+                tolerance_frac=count_bias_tolerance_frac, typical_count=pooled_typical)
             # The pooled test above is blind to a per-class error. Its matcher ignores category, so a
             # detector that calls every class-A object class B scores tp-only with zero bias, and one
             # that over-detects A exactly as much as it under-detects B nets to zero too, either way
@@ -660,7 +671,7 @@ def resolve_operating_point(
                 cid for cid, s in hb["per_class"].items()
                 if not _bias_equivalence_ok(s["count_bias_mean_present"], s["count_bias_std_present"],
                                             s["n_present"],
-                                            tolerance_frac=trait.count_bias_tolerance_frac,
+                                            tolerance_frac=count_bias_tolerance_frac,
                                             typical_count=holdout_typical_by_class[cid]))
             # The pooled scope's own reference-sufficiency floor (`hb["n_present"] < 2` below) is
             # scoped to the whole reference, not to one class, and the per-class relative tolerance's
@@ -765,18 +776,21 @@ def resolve_operating_point(
 
             sweep_data = {"calibration": cal_sweep, "f1_max_conf": pick_f1_max(cal_sweep),
                           "holdout_bias": hb,
-                          "count_bias_tolerance_frac": trait.count_bias_tolerance_frac,
+                          "count_bias_tolerance_frac": count_bias_tolerance_frac,
+                          "count_bias_tolerance_frac_source": (
+                              "trait" if trait.count_bias_tolerance_frac is not None
+                              else "platform_provisional_default"),
                           # Reconstructibility: the fraction alone does not say what a pass/refusal
                           # actually compared against, the derived typical count and the resulting
                           # absolute tolerance, per scope, so a reviewer can rebuild the gate's own
                           # arithmetic from this record alone.
                           "pooled_typical_count": pooled_typical,
                           "pooled_count_bias_tolerance": _effective_count_bias_tolerance(
-                              trait.count_bias_tolerance_frac, pooled_typical, hb["n_present"]),
+                              count_bias_tolerance_frac, pooled_typical, hb["n_present"]),
                           "per_class_typical_count": holdout_typical_by_class,
                           "per_class_count_bias_tolerance": {
                               cid: _effective_count_bias_tolerance(
-                                  trait.count_bias_tolerance_frac, holdout_typical_by_class[cid],
+                                  count_bias_tolerance_frac, holdout_typical_by_class[cid],
                                   s["n_present"])
                               for cid, s in hb["per_class"].items()
                           },
@@ -970,6 +984,11 @@ def resolve_classifier_operating_point(
     cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
     hold_pos = sum(1 for it in holdout_items if it["is_true_positive"])
     trait = get_trait(trait_name)
+    # "not yet authored for this trait" falls back to the platform's provisional interim fraction,
+    # the same shape `agreement_floor` below resolves its own kappa floor with.
+    count_bias_tolerance_frac = (
+        trait.count_bias_tolerance_frac if trait.count_bias_tolerance_frac is not None
+        else _PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC)
     # Per-image mean count-bias, via the same mean+SE equivalence test the detection path gates on.
     # A whole-holdout total gated against trait.count_bias_tolerance (a per-image mean by its own
     # docstring) would silently get stricter as the holdout grew. Grouped by
@@ -1004,7 +1023,7 @@ def resolve_classifier_operating_point(
         sum(1 for it in its if it["is_true_positive"]) for its in by_image.values())
     count_bias_ok = _bias_equivalence_ok(
         count_bias, count_bias_std, n_bias_images,
-        tolerance_frac=trait.count_bias_tolerance_frac, typical_count=typical_positive_count)
+        tolerance_frac=count_bias_tolerance_frac, typical_count=typical_positive_count)
 
     kappa = _classification_kappa(holdout_items)
     # kappa is None only when the holdout is degenerate (a single class throughout), a real
@@ -1054,7 +1073,9 @@ def resolve_classifier_operating_point(
         "content_overlap_frac": content["content_overlap_frac"], "content_duplicated": content["duplicated"],
         "train_disjointness": td, "disjoint": disjoint, "adjudication_covered": adjudication_ok,
         "count_bias": count_bias, "count_bias_std": count_bias_std, "count_bias_n_images": n_bias_images,
-        "count_bias_tolerance_frac": trait.count_bias_tolerance_frac,
+        "count_bias_tolerance_frac": count_bias_tolerance_frac,
+        "count_bias_tolerance_frac_source": ("trait" if trait.count_bias_tolerance_frac is not None
+                                             else "platform_provisional_default"),
         "typical_positive_count": typical_positive_count,
         # Never the bare "count_bias_tolerance" name once used for the authored value here: reusing
         # that exact name for the derived effective value would silently swap what the same key
@@ -1063,7 +1084,7 @@ def resolve_classifier_operating_point(
         # either, this sidecar has no "pooled" vs "per-class" split to distinguish from, so it needs
         # its own name, not a borrowed one.
         "count_bias_tolerance_absolute": _effective_count_bias_tolerance(
-            trait.count_bias_tolerance_frac, typical_positive_count, n_bias_images),
+            count_bias_tolerance_frac, typical_positive_count, n_bias_images),
         "kappa": kappa, "kappa_floor": agreement_floor,
         "kappa_floor_source": ("trait" if trait.classifier_agreement_floor is not None
                                else "platform_provisional_default"),
