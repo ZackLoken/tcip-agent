@@ -442,6 +442,26 @@ def test_curve_and_milestone_doors_report_the_same_measurement(
     assert a_row["catkin_95per_date"] <= a_curve[-1]["date"]
 
 
+def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_path: Path) -> None:
+    # Two delivery doors read the same on-disk evidence for the same trait: the web route's
+    # onset_dates and the MCP tool's compute_phenology. Both route through the identical
+    # tcip_mcp.pipelines.resolution reconciliation functions, so identical inputs must stamp
+    # identical validity, never two independently-derived answers that happen to usually agree.
+    from tcip_mcp.tools.phenology_tools import compute_phenology
+
+    body = _phenology_fixture(tmp_path, validated=True, detections=100)
+    web_validated = client.post("/api/results/onset_dates", json=body).json()["validated"]
+
+    mcp_result = compute_phenology(
+        trait=body["trait"], mapping_path=body["mapping_path"],
+        predictions_by_date=body["predictions_by_date"], output_csv_path=str(tmp_path / "out.csv"),
+        classifier_pred_dirs=list(body["predictions_by_date"].values()),
+    )
+    assert "error" not in mcp_result, mcp_result
+    assert mcp_result["operating_point_validated"] == web_validated["operating_point"]
+    assert mcp_result["positive_state_classifier_validated"] == web_validated["classifier"]
+
+
 def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
     for bucket in body["predictions_by_date"].values():
         sidecar = {"validated": True, "trait": "catkin", "experiment_id": "exp-1",
