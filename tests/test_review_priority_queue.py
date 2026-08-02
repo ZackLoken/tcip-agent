@@ -1,9 +1,9 @@
-"""K23 — the breeder-browsable priority queue surfaced from prioritize_review_queue.
+"""The breeder-browsable priority queue surfaced from prioritize_review_queue.
 
 The route (`/api/review/queue/launch` + `/api/review/queue/{job_id}`) must never reimplement
-`prioritize_review_queue`'s own scoring/filtering — its own tests (test_feedback_tools.py) already
+`prioritize_review_queue`'s own scoring/filtering: its own tests (test_feedback_tools.py) already
 cover checkpoint-missing / non-composed-kind / unresolvable-scorer. These tests pin the route's
-own job-lifecycle wiring: it calls the SAME tool function on a background thread and maps its
+own job-lifecycle wiring: it calls the same tool function on a background thread and maps its
 result (or its soft {"error": ...}) onto the job, deriving review_state_dir from project_root
 rather than trusting a client-supplied internal-state path.
 """
@@ -93,17 +93,17 @@ def test_job_completes_and_carries_the_tool_s_own_queue(client, tmp_path: Path, 
     assert body["reviewed_skipped"] == 1
 
     # The route derives review_state_dir from project_root (the platform's own internal-state
-    # layout) rather than trusting a client-supplied path for it — same shape _get_engine uses.
+    # layout) rather than trusting a client-supplied path for it, same shape _get_engine uses.
     assert len(calls) == 1
     assert calls[0]["review_state_dir"] == str(Path(tmp_path) / ".tcip" / "state")
-    # Only ever the ranking strategy — confidence_triage's auto-accept-as-GT path (D11) is not
+    # Only ever the ranking strategy: confidence_triage's auto-accept-as-GT path is not
     # reachable through this route.
     assert calls[0]["strategy"] == "informativeness"
 
 
 def test_job_fails_honestly_on_the_tool_s_own_refusal(client, tmp_path: Path, monkeypatch):
     # prioritize_review_queue returns a soft {"error": ...} dict (never raises) for e.g. an
-    # unresolvable scorer name — the job must surface that as status=failed with the same message,
+    # unresolvable scorer name: the job must surface that as status=failed with the same message,
     # not swallow it or report completed with an empty queue.
     ckpt = tmp_path / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
