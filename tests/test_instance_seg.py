@@ -1,4 +1,4 @@
-"""Phase 2.2 — functional instance_seg via Mask R-CNN: masks reach the loss, predictions
+"""Functional instance_seg via Mask R-CNN: masks reach the loss, predictions
 carry masks, and metrics use segmentation IoU (segm AP)."""
 
 import pytest
@@ -12,7 +12,7 @@ def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
     from tests import bespoke_models
 
     # resnet18: loss_mask / predicted-masks are mask-head assertions, independent of backbone
-    # depth — the FPN out_channels normalizes the channel difference.
+    # depth: the FPN out_channels normalizes the channel difference.
     model = bespoke_models.build_bespoke_instance_seg(num_classes=1, min_size=64, max_size=128)
     assert isinstance(model, bespoke_models.BespokeDetection)
 
