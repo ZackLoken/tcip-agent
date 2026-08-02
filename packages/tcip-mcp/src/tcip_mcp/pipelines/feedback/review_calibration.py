@@ -122,8 +122,27 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "total even when the total itself agrees. Any result that separates the kinds (a percentage "
      "of one kind, for instance) would be wrong. Correcting the mislabelled kinds in your review, "
      "or improving the model, can help."),
+    # Raised by review_to_records before the gate ever runs (a verdict's class identity couldn't be
+    # resolved against its producing bucket), not one of resolve_operating_point's own sweep
+    # failures, so it never appears in a bundle's "failures" list; still shares this vocabulary
+    # rather than an independently-authored string, see review_to_records below.
+    (("class_id_unresolvable",),
+     "Not yet. At least one reviewed verdict can't be tied to a class this prediction bucket "
+     "recognizes: no resolvable class identity was recorded for it, either the bucket never "
+     "recorded a name->id map, or this class name isn't one of its keys. Class-aware "
+     "review-confirmed validation isn't available for this bucket/trait combination yet."),
 ]
 _KNOWN_FAILURE_NAMES = {name for names, _ in _FAILURE_MESSAGES for name in names}
+
+
+def _breeder_message(name: str) -> str:
+    """The breeder-facing text for one named failure in :data:`_FAILURE_MESSAGES`, the single
+    vocabulary every review-based calibration refusal reads from rather than authoring its own
+    prose inline."""
+    for names, msg in _FAILURE_MESSAGES:
+        if name in names:
+            return msg
+    raise AssertionError(f"{name!r} is not a name in _FAILURE_MESSAGES")
 
 
 def _to_xywh(box_norm: list, img_w: float, img_h: float) -> list[float]:
@@ -261,6 +280,16 @@ def review_to_records(
         gt: list[dict] = []
         dt: list[dict] = []
         for entry in scoped:
+            gt_norm = entry.get("gt_bbox_norm")
+            pred_norm = entry.get("pred_bbox_norm")
+            if gt_norm is None and pred_norm is None:
+                # A coverage-only attestation ("swept this image, found nothing more", the Review
+                # tab's "sweep" verdict: neither gt_idx nor pred_idx set and no edited geometry
+                # either) carries no class-scoped evidence at all, only its own
+                # missed_object_attested stamp (folded into has_missed_object_attestation below).
+                # Requiring a resolvable class_id here would refuse the whole reference over an
+                # entry that could never contribute a gt/dt box in the first place.
+                continue
             action = entry.get("action")
             cid_raw = entry.get("class_id")
             if cid_raw is None:
@@ -273,15 +302,10 @@ def review_to_records(
                 # make gt/dt agree by construction and pass the count-bias gate on a reference that
                 # is missing real evidence, the opposite of what class-aware admission is for.
                 raise ValueError(
-                    f"review verdict on {img_name!r} (class {entry.get('class_name')!r}) has no "
-                    "resolvable class identity for its producing prediction bucket, either no "
-                    "id_map was recorded for that bucket, or this class name is not one of its "
-                    "keys. Class-aware review-confirmed validation isn't available for this "
-                    "bucket/trait combination yet."
+                    f"{_breeder_message('class_id_unresolvable')} "
+                    f"(image {img_name!r}, class {entry.get('class_name')!r})"
                 )
             cid = int(cid_raw)
-            gt_norm = entry.get("gt_bbox_norm")
-            pred_norm = entry.get("pred_bbox_norm")
             conf = entry.get("conf")
             # dt: the model's own prediction with its recorded score (any verdict that has one).
             if pred_norm and len(pred_norm) == 4 and conf is not None:
