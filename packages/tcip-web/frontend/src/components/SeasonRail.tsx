@@ -1,5 +1,5 @@
 /**
- * Season rail — the app's signature. Phenology is seasonal time: a breeding project's
+ * Season rail: the app's signature. Phenology is seasonal time: a breeding project's
  * captures are a series of dates across a growing season. This plots those capture dates
  * as ticks along a dormant → bud → canopy → late-summer → fruit gradient, so a project's
  * temporal shape is legible at a glance (and unmistakably a phenology instrument, not a
@@ -31,7 +31,7 @@ function parts(iso: string): [number, number, number] {
 }
 
 /** Absolute timestamp, or null if the ISO-shaped string isn't a real calendar date
- *  (e.g. "2026-13-40" rolls over — reject it rather than mislabel it). */
+ *  (e.g. "2026-13-40" rolls over: reject it rather than mislabel it). */
 function timeOf(iso: string): number | null {
   const [y, mo, d] = parts(iso);
   const date = new Date(y, mo - 1, d);
@@ -70,7 +70,7 @@ export function SeasonRail({ dates, active, className, showLabels }: SeasonRailP
   if (iso.length === 0 && undated === 0) return null;
 
   // Position by absolute timestamp (not day-of-year) so a season that crosses a year
-  // boundary — the primary winter-catkin case — orders correctly.
+  // boundary orders correctly.
   const times = iso.map((d) => timeOf(d) as number);
   const min = times.length ? Math.min(...times) : 0;
   const max = times.length ? Math.max(...times) : 0;
