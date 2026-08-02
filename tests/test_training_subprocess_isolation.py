@@ -1,6 +1,6 @@
 """Subprocess isolation tests for launch_training and resource visibility/caps. Each test pins a
 specific concurrency/isolation gap rather than re-testing the whole subprocess path end to end
-(that's test_audit_cv_fixes.py::test_cv2_launch_training_persists_effective_tile_geometry)."""
+(that's test_detection_measurement_integrity.py::test_launch_training_persists_effective_tile_geometry)."""
 
 from __future__ import annotations
 
