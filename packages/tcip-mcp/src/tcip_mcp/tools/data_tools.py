@@ -106,7 +106,9 @@ def scan_dataset(folder_path: str) -> dict:
 def validate_data_quality(folder_path: str) -> dict:
     """Run quality checks on a dataset (any supported annotation format).
 
-    Checks: empty labels, missing images, class consistency, coordinate ranges.
+    Checks: empty label files, and stem matching between images and labels (a label with no
+    matching image, or for COCO, a referenced image file not found in the images dir). Class
+    consistency against a subject registry and coordinate-range validation are not implemented.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -215,6 +217,10 @@ def make_splits(
             written only if this is set.
         materialize: Also copy/symlink files into a {train,val,test}/{images,labels}/ tree.
         copy_files: Copy files (True) or create symlinks (False) when materializing.
+        subject: The object the confirmed negatives are keyed under. A materialized split tree
+            can't recover the subject from its own path, so an image a human confirmed negative
+            is silently dropped from the materialized set (reads as an unconfirmed empty label)
+            unless this is passed. Only relevant with `materialize=True`.
     """
     if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
         return {"error": "Ratios must sum to 1.0"}
@@ -297,7 +303,7 @@ def make_splits(
     }
 
     if materialize:
-        # Lay out a YOLO {train,val,test}/{images,labels}/ tree from the split assignment.
+        # Lay out a {train,val,test}/{images,labels}/ tree from the split assignment.
         place_fn = shutil.copy2 if copy_files else os.symlink
         for split_name, split_stems in parts.items():
             img_dir = out_dir / split_name / "images"
