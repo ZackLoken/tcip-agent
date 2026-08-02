@@ -1,4 +1,4 @@
-"""W3 — sliding-window tiling geometry + TiledDetectionDataset wrapper.
+"""Sliding-window tiling geometry + TiledDetectionDataset wrapper.
 
 The geometry tests are pure numpy (no torch). The wrapper tests skip if torch is
 absent (they go through ``build_dataset``).
@@ -31,7 +31,7 @@ def test_clip_boxes_to_tile_sliver_drop_and_remap():
     tb, tl = tiling.clip_boxes_to_tile(np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 12.0)
     assert tb.shape == (1, 4)
     assert np.allclose(tb[0], [10, 10, 30, 30])
-    # Straddling box whose visible part is substantial (clipped to 14x14, char 14 >= 12) -> KEPT.
+    # Straddling box whose visible part is substantial (clipped to 14x14, char 14 >= 12) -> kept.
     tb2, _ = tiling.clip_boxes_to_tile(np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 12.0)
     assert len(tb2) == 1
     # Straddling box whose visible part is a sliver (clipped to 9x9, char 9 < 12) -> dropped.
@@ -132,9 +132,9 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
                               256, 256, keep_empty=True)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
                        subject="catkin", tiling={"enabled": True, "tile_size": 64, "overlap": 0.2})
-    # class_avg_size is DERIVED from the class-average box size. sliver_frac would be too, but a
+    # class_avg_size is derived from the class-average box size. sliver_frac would be too, but a
     # single box is too few to measure a size spread from (derive_sliver_frac's own min_samples
-    # guard) — an honest "underivable", not a value dressed as derived, so it falls back to 0.5.
+    # guard), an honest "underivable", not a value dressed as derived, so it falls back to 0.5.
     assert ds.class_avg_size == pytest.approx(25.6, abs=1.0)
     assert ds.sliver_frac == pytest.approx(0.5)
     assert ds.sliver_frac_source == "documented default (underivable: too few GT boxes to measure a spread)"
@@ -146,7 +146,7 @@ def test_tiled_dataset_derives_sliver_and_keeps_empty_tiles(tmp_path):
 
 def test_tiled_dataset_derives_sliver_frac_with_enough_boxes(tmp_path):
     # With real spread and enough boxes (>= min_samples), the sliver cutoff is genuinely derived,
-    # end to end through build_dataset — not just the pure function in test_derivations.py.
+    # end to end through build_dataset, not just the pure function in test_derivations.py.
     pytest.importorskip("torch")
     from PIL import Image
     from tcip_annotation import json_io
