@@ -16,14 +16,14 @@ const modeButton = (name: "Box" | "Polygon" | "Point") =>
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   // The Editor shelf's open/closed state persists to localStorage, which some environments keep
-  // across every test in this file (one jsdom instance per file, not per test) — an earlier test
+  // across every test in this file (one jsdom instance per file, not per test): an earlier test
   // leaving it open would make a later test's fresh render start open too. Guarded because
   // `localStorage` itself is unavailable in some Node/environment combinations (the component's
   // own read/write of this key is guarded the same way, for the same reason).
   try {
     localStorage.removeItem("tcip.annotate.editorOpen");
   } catch {
-    /* not available in this environment — nothing to clear */
+    /* not available in this environment, nothing to clear */
   }
   // The toolbar's nav hook persists the settled index; nothing here should reach the backend.
   vi.spyOn(api.dataset, "nav").mockResolvedValue({ status: "ok" } as never);
@@ -100,14 +100,14 @@ describe("AnnotateToolbar draw mode", () => {
       s.addPoint({ x: 3, y: 4, subject: "tip", attributes: {} });
       s.addPoint({ x: 5, y: 6, subject: "other", attributes: {} });
     });
-    // The pill shows the active subject's own count — a placed point is an annotation like any other.
+    // The pill shows the active subject's own count: a placed point is an annotation like any other.
     expect(screen.getByText("(2)")).toBeInTheDocument();
   });
 
   it("Snap and Stream stay polygon-only in point mode (they have no meaning for a point)", () => {
     renderToolbar();
     // The shelf's open/closed state persists to localStorage, which vitest keeps across every
-    // test in this file (one jsdom environment per file, not per test) — a blind toggle click can
+    // test in this file (one jsdom environment per file, not per test): a blind toggle click can
     // close a shelf an earlier test left open instead of opening it.
     const editorBtn = screen.getByRole("button", { name: /Editor/ });
     if (editorBtn.getAttribute("aria-expanded") !== "true") fireEvent.click(editorBtn);
