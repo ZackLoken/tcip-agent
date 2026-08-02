@@ -1,11 +1,11 @@
 /**
- * The agent rail — the real Claude Code CLI, embedded. An xterm.js terminal attached
+ * The agent rail: the real Claude Code CLI, embedded. An xterm.js terminal attached
  * over WebSocket to a server-side PTY running `claude` in the repo root, so the breeder
  * talks to the same agent (CLAUDE.md, skills, MCP tools, permission prompts) the
- * platform is designed around — full fidelity, no translation layer. The terminal is
+ * platform is designed around: full fidelity, no translation layer. The terminal is
  * recolored to the field-station palette via the ANSI theme (Claude Code paints its TUI
  * with ANSI colors, so it renders in our palette natively); its internal layout is
- * untouched — that's the exact-experience point.
+ * untouched, that's the exact-experience point.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -32,11 +32,11 @@ function clampWidth(px: number): number {
  * Field-station terminal theme. Claude Code draws with the 16 ANSI slots, so mapping
  * them to the app palette re-skins the real TUI: green → SI-green (the app accent), yellow
  * → late-summer gold, red → FP red, dim gray → sage. Background stays tcip-bg so the rail
- * sits flush with the app chrome; the cursor is persimmon — the accent the SeasonRail ends on.
+ * sits flush with the app chrome; the cursor is persimmon, the accent the SeasonRail ends on.
  * The greens are lifted from the #507754 accent toward legibility so the TUI keeps contrast.
  */
 const FIELD_STATION_THEME = {
-  background: "#20211B", // tcip-panel — the warm bark surface used across the app chrome
+  background: "#20211B", // tcip-panel: the warm bark surface used across the app chrome
   foreground: "#E7E5DC", // tcip-fg
   cursor: "#E6976B",
   cursorAccent: "#20211B",
@@ -70,8 +70,8 @@ export function TerminalRail() {
   const sessionRef = useRef<string | null>(null);
   const termRef = useRef<Terminal | null>(null);
 
-  // K23: a first-time breeder's first view of this rail is otherwise a blank cursor in a full
-  // developer CLI. Show a starter hint until either a project is open (App.tsx's own signal —
+  // A first-time breeder's first view of this rail is otherwise a blank cursor in a full
+  // developer CLI. Show a starter hint until either a project is open (App.tsx's own signal,
   // once the breeder/agent has a project going, they don't need an example prompt) or they've
   // sent their first input (they're already engaging; the hint would just be in the way).
   const projectOpen = useStore((s) => !!s.gui.dataset.dataset_root && !!s.gui.dataset.date);
@@ -116,7 +116,7 @@ export function TerminalRail() {
       .status()
       .then(setStatus)
       .catch(() =>
-        // Backend unreachable is not "claude missing" — say so, and keep Retry viable.
+        // Backend unreachable is not "claude missing"; say so, and keep Retry viable.
         setStatus({
           available: false,
           reason: "Couldn't reach the TCIP backend. Is it running? Retry once it's up.",
@@ -154,14 +154,14 @@ export function TerminalRail() {
     // Copy fix (root cause): Claude Code turns on SGR mouse tracking, which hands every mouse +
     // wheel event to it and disables xterm's own selection + scrollback. Swallow the mouse-mode
     // set/reset (DEC private 1000-1016) so tracking never engages and xterm stays a normal
-    // selectable terminal — drag selects, the wheel scrolls the scrollback, drag-to-edge
+    // selectable terminal: drag selects, the wheel scrolls the scrollback, drag-to-edge
     // auto-scrolls, a selection survives streaming output, and it works at the shell prompt after
     // /exit too. Claude is keyboard-driven; the wheel now scrolls the terminal scrollback instead
-    // of Claude's view — which is what you want when copying.
+    // of Claude's view, which is what you want when copying.
     const MOUSE_MODES = new Set([1000, 1001, 1002, 1003, 1005, 1006, 1015, 1016]);
     const swallowMouseMode = (params: (number | number[])[]) => {
       for (const p of params) if (MOUSE_MODES.has(Array.isArray(p) ? p[0] : p)) return true;
-      return false; // not a mouse mode (alt-screen, bracketed paste, cursor…) — let xterm handle it
+      return false; // not a mouse mode (alt-screen, bracketed paste, cursor…), let xterm handle it
     };
     term.parser.registerCsiHandler({ prefix: "?", final: "h" }, swallowMouseMode);
     term.parser.registerCsiHandler({ prefix: "?", final: "l" }, swallowMouseMode);
@@ -169,8 +169,8 @@ export function TerminalRail() {
     // Paste: Ctrl/Cmd+V fires a native paste event on xterm's hidden textarea, but the
     // browser doesn't always route it there (focus, or the app swallowing the key), so
     // Ctrl+V "did nothing". Intercept in the capture phase and hand the text to
-    // term.paste(), which wraps it in bracketed-paste mode — so a multi-line paste
-    // reaches Claude Code as ONE paste, not a line-per-Enter burst.
+    // term.paste(), which wraps it in bracketed-paste mode, so a multi-line paste
+    // reaches Claude Code as one paste, not a line-per-Enter burst.
     const onPaste = (e: ClipboardEvent) => {
       const text = e.clipboardData?.getData("text");
       if (text) {
@@ -197,7 +197,7 @@ export function TerminalRail() {
         .catch(() => {});
     };
     // Window-level: xterm finalizes drags via window listeners, so a release outside
-    // the rail still completes the selection — a host listener would miss the copy.
+    // the rail still completes the selection; a host listener would miss the copy.
     const onWindowMouseUp = () => {
       if (term.hasSelection()) copySelection();
     };
@@ -245,7 +245,7 @@ export function TerminalRail() {
     });
 
     // Wheel scroll: mouse tracking is suppressed so drag selects locally, but Claude still expects
-    // mouse reports (it enabled tracking — xterm just swallowed the enable), so forward the wheel as
+    // mouse reports (it enabled tracking; xterm just swallowed the enable), so forward the wheel as
     // SGR wheel events and Claude scrolls its own full-screen conversation (which has no xterm
     // scrollback to scroll). Without this the wheel falls through to xterm's alternate-screen
     // behavior and becomes cursor keys that Claude's prompt reads as history navigation.
@@ -290,7 +290,7 @@ export function TerminalRail() {
         return;
       }
       // Re-check after the await: the effect may have cleaned up mid-request (rail
-      // toggled, StrictMode remount) — a socket created now would attach to a
+      // toggled, StrictMode remount); a socket created now would attach to a
       // disposed terminal and leak.
       if (closedByClient) return;
       const socket = new WebSocket(terminalWsUrl(sessionRef.current));
@@ -311,7 +311,7 @@ export function TerminalRail() {
         if (closedByClient) return;
         setConn("reconnecting");
         // A close before open (or 1008 "unknown session") means the backend no longer
-        // knows this session — e.g. it restarted. Retrying the dead id forever is the
+        // knows this session, e.g. it restarted. Retrying the dead id forever is the
         // silent-death failure mode; drop it so the next attempt re-creates a session.
         if (!opened || ev.code === 1008) {
           sessionRef.current = null;
@@ -428,7 +428,7 @@ export function TerminalRail() {
           <button
             onClick={() => setOpen(false)}
             aria-label="Minimize agent terminal"
-            title="Minimize — the agent keeps running; reopen from the TCIP Agent button"
+            title="Minimize (the agent keeps running); reopen from the TCIP Agent button"
             className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
           >
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
@@ -455,7 +455,7 @@ export function TerminalRail() {
               data-testid="terminal-starter-hint"
               className="shrink-0 px-3 py-2 border-b border-tcip-border bg-tcip-panel text-[11px] text-tcip-muted"
             >
-              Tell the agent what you&rsquo;re working on — for example: &ldquo;I have photos of my{" "}
+              Tell the agent what you&rsquo;re working on, for example: &ldquo;I have photos of my{" "}
               <span className="italic">[crop]</span> and want to measure{" "}
               <span className="italic">[trait]</span>.&rdquo;
             </div>
