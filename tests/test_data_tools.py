@@ -35,6 +35,10 @@ def test_validate_data_quality(data_dir: Path):
     assert "catkin" in result["subjects"]
 
 
+def test_validate_data_quality_missing_dir():
+    assert "error" in validate_data_quality("/nonexistent/path/xyz123")
+
+
 def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
     out = tmp_path / "splits"
     result = make_splits(str(data_dir), output_path=str(out), materialize=True)
