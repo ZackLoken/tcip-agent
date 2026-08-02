@@ -1,4 +1,4 @@
-"""S1 — build_model indirection + the thin measurement-boundary contract.
+"""build_model indirection and the thin measurement-boundary contract.
 
 Covers ``build_model`` dispatch (``model_source`` only) and the behavioral
 ``check_model_contract`` / ``overfit_check`` utilities on real bespoke models.
@@ -21,7 +21,7 @@ from tests import bespoke_models  # noqa: E402
 
 
 def _bespoke_builder(**kwargs):
-    """An importable 'agent-written' builder — a real bespoke classification module."""
+    """An importable 'agent-written' builder: a real bespoke classification module."""
     return bespoke_models.build_bespoke_classifier(num_classes=2)
 
 
@@ -48,7 +48,7 @@ def test_build_model_bad_builder_raises():
 
 
 # --------------------------------------------------------------------------
-# TCIPModel Protocol — duck-type marker, not an architecture requirement
+# TCIPModel Protocol: duck-type marker, not an architecture requirement
 # --------------------------------------------------------------------------
 
 def test_tcip_model_protocol_membership():
@@ -57,7 +57,7 @@ def test_tcip_model_protocol_membership():
 
 
 # --------------------------------------------------------------------------
-# check_model_contract — behavioral smoke on the measurement boundary
+# check_model_contract: behavioral smoke on the measurement boundary
 # --------------------------------------------------------------------------
 
 def test_check_model_contract_classification_ok():
@@ -69,7 +69,7 @@ def test_check_model_contract_classification_ok():
 
 
 def test_check_model_contract_rejects_prediction_free_eval_output():
-    """A dict is the shape, not the content — an output with no tensor is not a measurement."""
+    """A dict is the shape, not the content: an output with no tensor is not a measurement."""
     import torch.nn as nn
 
     class _Empty(nn.Module):
@@ -89,7 +89,7 @@ def test_check_model_contract_rejects_prediction_free_eval_output():
 
 def test_check_model_contract_accepts_a_ragged_nested_eval_output():
     """A bespoke non-detection task may legitimately return a per-image ragged list of tensors (or
-    a nested dict of them) rather than one flat top-level tensor — e.g. a variable number of
+    a nested dict of them) rather than one flat top-level tensor, e.g. a variable number of
     per-instance predictions per image. The eval-output check must see the tensor wherever it is
     nested, not only at the top level of the dict."""
     import torch.nn as nn
@@ -117,7 +117,7 @@ def test_check_model_contract_detection_ok():
 
 
 # --------------------------------------------------------------------------
-# overfit_check — the loss must fall on a fixed tiny batch
+# overfit_check: the loss must fall on a fixed tiny batch
 # --------------------------------------------------------------------------
 
 def test_overfit_check_classification_passes():
