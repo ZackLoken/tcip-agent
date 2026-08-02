@@ -6,7 +6,7 @@ import { useStore } from "@/store";
 
 /**
  * Warm the next/previous images in the filtered traversal once the current one has had a
- * head start. A cold image costs the server a multi-second render (first visit ever) —
+ * head start. A cold image costs the server a multi-second render (first visit ever);
  * prefetching hides that behind the time spent reviewing the current frame, and also
  * populates the server's disk cache for later sessions.
  */
