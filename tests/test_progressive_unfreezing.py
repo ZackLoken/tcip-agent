@@ -1,4 +1,4 @@
-"""W2 — progressive-unfreezing fidelity.
+"""Progressive-unfreezing fidelity.
 
 Covers the three optimizer_factory helpers (LR scaling, name-keyed optimizer
 snapshot/restore) and their integration in generic_trainer.train(): the
@@ -33,7 +33,7 @@ BASE_BB_LR = 1e-3
 
 
 # --------------------------------------------------------------------------
-# Unit tests — pure helpers
+# Unit tests: pure helpers
 # --------------------------------------------------------------------------
 
 def test_compute_lr_scale():
@@ -87,7 +87,7 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 
     class Staged(nn.Module):
-        """Sole named child is a ModuleList — the shape the descent exists for."""
+        """Sole named child is a ModuleList, the shape the descent exists for."""
 
         def __init__(self) -> None:
             super().__init__()
@@ -144,7 +144,7 @@ def _classification_loader(tmp_path: Path, n: int = 6, batch_size: int = 2) -> D
 
 def _model_source() -> dict:
     # resnet18 (not tv_resnet50): these integration tests exercise backbone-agnostic
-    # LR-schedule / freeze / warmup logic — the smaller backbone routes through the identical
+    # LR-schedule / freeze / warmup logic. The smaller backbone routes through the identical
     # BackboneWrapper.freeze_to path and cuts per-test model-construction cost. The tv_* freeze
     # branch stays covered by test_freeze_to_is_per_stage_for_tv_backbones (kept on resnet50).
     return {"builder": "tests.bespoke_models:build_bespoke_classifier",
@@ -166,7 +166,7 @@ def _cfg(stages, **extra) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Integration tests — train()
+# Integration tests: train()
 # --------------------------------------------------------------------------
 
 def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
