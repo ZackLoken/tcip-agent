@@ -2,7 +2,7 @@
 
 The tool resolves the first *annotated* image and the mode its labels imply, then posts an
 ``annotate_focus`` event. With no GUI running, delivery is a soft miss (``delivered=False``),
-but the resolution (index + mode) must still be correct — that's what these pin.
+but the resolution (index + mode) must still be correct: that's what these pin.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def test_focus_annotate_lands_on_first_annotated_polygon_frame(tmp_path: Path) -
 def test_focus_annotate_scopes_annotated_to_the_requested_subject(tmp_path: Path) -> None:
     # Name-based schema: one file per image holds every subject. IMG_0001 is labeled only for 'leaf',
     # IMG_0002 only for 'catkin'. Focusing on 'leaf' must land on IMG_0001 (its subject's frame) in
-    # polygon mode and count only leaf's frame — the tool scopes 'annotated' to the requested subject
+    # polygon mode and count only leaf's frame: the tool scopes 'annotated' to the requested subject
     # (the name-based replacement for the old per-frame active-class resolution).
     root = tmp_path / "proj"
     date = "2026-03-02"
@@ -81,7 +81,7 @@ def test_focus_annotate_scopes_annotated_to_the_requested_subject(tmp_path: Path
 
 def test_focus_annotate_mode_follows_the_explicit_index_not_the_first_frame(tmp_path: Path) -> None:
     # IMG_0002 has polygons, IMG_0007 has only boxes. Asking for index 7 with mode=None must
-    # infer 'box' from frame 7 — not 'polygon' from the first annotated frame.
+    # infer 'box' from frame 7, not 'polygon' from the first annotated frame.
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(8)]
@@ -103,7 +103,7 @@ def test_focus_annotate_index_matches_frontend_listing_ignoring_non_files(tmp_pa
     idir = Path(image_dir(root, date))
     idir.mkdir(parents=True)
     (idir / "IMG_0000.JPG").write_bytes(b"x")
-    (idir / "IMG_0001.png").mkdir()  # a directory with an image suffix — must be ignored
+    (idir / "IMG_0001.png").mkdir()  # a directory with an image suffix, must be ignored
     (idir / "IMG_0002.JPG").write_bytes(b"x")
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 
@@ -166,7 +166,7 @@ def test_focus_annotate_still_rejects_a_mode_the_gui_has_no_tool_for(tmp_path: P
 
 
 def test_focus_annotate_empty_label_is_not_a_focus_target(tmp_path: Path) -> None:
-    # An empty label file is a confirmed negative (nothing to show) — skip it.
+    # An empty label file is a confirmed negative (nothing to show); skip it.
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
