@@ -1,9 +1,9 @@
-"""Evidence loader for the 478-agent review corpus — the source of record for the refactor.
+"""Evidence loader for the 478-agent review corpus: the source of record for the refactor.
 
 Each refactor phase reads its own cluster's raw agent output through here rather than through any
 summary. The post-processed JSON is a ~52% compression of the journal: it is lossless for confirmed
 findings and carries the lens-tagged corrections, but it drops 412 of 456 verifier ``reasoning``
-records (~1.31M chars) — which is where the greps, executed reproductions, and falsification attempts
+records (~1.31M chars), which is where the greps, executed reproductions, and falsification attempts
 that prove a defect at HEAD actually live. So: spine from the JSON, evidence from the journal.
 
     python scripts/review_evidence.py                 # corpus integrity self-check
@@ -66,7 +66,7 @@ FINDINGS, CONFIRMED, _BY_CORRECTION, POST = _load()
 
 
 def evidence(key: tuple[str, str, int]) -> dict:
-    """Full evidence for one finding: its 10 raw fields + all 3 verifiers WITH reasoning."""
+    """Full evidence for one finding: its 10 raw fields + all 3 verifiers with reasoning."""
     conf = CONFIRMED[key]
     out = []
     for tagged in conf.get("corrections", []):
@@ -86,7 +86,7 @@ def cluster(name: str) -> list[dict]:
 
 
 def refuted_full(substr: str = "") -> list[dict]:
-    """The 21 refuted findings. Their bodies exist ONLY in the journal — the JSON keeps a title."""
+    """The 21 refuted findings. Their bodies exist only in the journal; the JSON keeps a title."""
     out = []
     for r in POST["refuted"]:
         match = [f for k, f in FINDINGS.items()
@@ -273,8 +273,8 @@ if __name__ == "__main__":
         print(f"\n{'='*78}\n[{f['severity']}] {f['file']}:{f['line']}  ({f['surface']})")
         print(f"  {f['title']}")
         print(f"  refuted by {item['refute_count']}/3")
-        print(f"  EVIDENCE : {f['evidence'][:300]}")
-        print(f"  FIX      : {f['proposed_fix'][:300]}")
+        print(f"  evidence : {f['evidence'][:300]}")
+        print(f"  fix      : {f['proposed_fix'][:300]}")
         for v in item["verifiers"]:
             print(f"  -- {v['lens']} (refuted={v.get('refuted')}, {v.get('confidence')})")
             if v.get("correction"):
