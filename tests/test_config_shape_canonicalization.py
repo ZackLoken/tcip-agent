@@ -1,4 +1,4 @@
-"""L1 — config-shape canonicalization. The GUI/validated schema nests
+"""Config-shape canonicalization. The GUI/validated schema nests
 ``stages``/``mixed_precision``/``batch_size`` under ``training``, but ``generic_trainer.train()``
 reads them from the top level of ``run.config``. ``normalize_train_config`` must hoist them
 (top-level-wins) so a GUI-launched run trains the configured schedule, not the default stage."""
@@ -25,7 +25,7 @@ def test_normalize_hoists_training_section_to_top_level():
     from tcip_mcp.pipelines.schemas import normalize_train_config
 
     cfg = normalize_train_config(GUI_CONFIG)
-    # train() reads these from the top level — they must equal the nested schedule/knobs.
+    # train() reads these from the top level: they must equal the nested schedule/knobs.
     assert cfg["stages"] == GUI_CONFIG["training"]["stages"]
     assert cfg["batch_size"] == 4
     assert cfg["mixed_precision"] is True
@@ -47,8 +47,8 @@ def test_normalize_top_level_wins_over_nested():
 
 
 def test_run_config_exposes_top_level_stages_after_normalize(tmp_path, monkeypatch):
-    """The characterization the fix is about: what train() reads (run.config['stages'])
-    equals the GUI's configured schedule — not the default single stage."""
+    """What train() reads (run.config['stages']) equals the GUI's configured schedule,
+    not the default single stage."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.schemas import normalize_train_config
     from tcip_mcp.pipelines.training.generic_trainer import create_run
