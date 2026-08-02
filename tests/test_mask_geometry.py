@@ -31,7 +31,7 @@ def _rect_mask(h=64, w=64, r0=5, r1=24, c0=10, c1=49):
 
 def test_rectangle_pixel_measurements_exact():
     m = _rect_mask()  # 40 wide (cols 10..49), 20 tall (rows 5..24)
-    g = mask_geometry(m)
+    g = mask_geometry(m, unit="mm")
     assert g["empty"] is False
     assert g["area_px"] == 40 * 20
     assert g["principal_axis_extent_px"] == 40.0   # major axis == the longer side
@@ -92,7 +92,7 @@ def test_no_length_or_width_key_survives_under_any_alias():
     """
     from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
 
-    for g in (mask_geometry(_rect_mask()), mask_geometry(_rect_mask(), scale=0.5, unit="mm")):
+    for g in (mask_geometry(_rect_mask(), unit="mm"), mask_geometry(_rect_mask(), scale=0.5, unit="mm")):
         assert not [k for k in g if k.startswith(("length", "width"))], sorted(g)
     # unit_from_value_key is vocabulary-driven (crops.yml's real declared units), not a field-name
     # whitelist: a bespoke ``length_mm``/``width_cm`` from measurement code outside this module is
@@ -115,7 +115,7 @@ def test_ellipse_area_and_axes():
     cx, cy, a, b = 64.0, 64.0, 30.0, 15.0   # semi-axes: 30 along x (major), 15 along y (minor)
     yy, xx = np.ogrid[:h, :w]
     m = (((xx - cx) / a) ** 2 + ((yy - cy) / b) ** 2 <= 1.0).astype(np.uint8)
-    g = mask_geometry(m)
+    g = mask_geometry(m, unit="mm")
     assert g["area_px"] == pytest.approx(math.pi * a * b, rel=0.05)
     assert g["principal_axis_extent_px"] == pytest.approx(2 * a, abs=2.0)
     assert g["secondary_axis_extent_px"] == pytest.approx(2 * b, abs=2.0)
@@ -127,7 +127,7 @@ def test_ellipse_area_and_axes():
 # --------------------------------------------------------------------------
 
 def test_empty_mask_is_handled_without_inventing_a_measurement():
-    g = mask_geometry(np.zeros((32, 32), dtype=np.uint8), scale=2.0)
+    g = mask_geometry(np.zeros((32, 32), dtype=np.uint8), scale=2.0, unit="mm")
     assert g["empty"] is True
     assert g["area_px"] == 0.0
     assert g["principal_axis_extent_px"] == 0.0 and g["secondary_axis_extent_px"] == 0.0
@@ -138,7 +138,7 @@ def test_empty_mask_is_handled_without_inventing_a_measurement():
 def test_single_row_line_is_1px_wide():
     m = np.zeros((16, 16), dtype=np.uint8)
     m[8, 3:13] = 1                      # a 10 px horizontal line
-    g = mask_geometry(m)
+    g = mask_geometry(m, unit="mm")
     assert g["area_px"] == 10.0
     assert g["principal_axis_extent_px"] == 10.0 and g["secondary_axis_extent_px"] == 1.0
     assert g["perimeter_px"] == 2 * (10 + 1)
@@ -151,13 +151,13 @@ def test_single_row_line_is_1px_wide():
 def test_accepts_chw_and_soft_masks():
     m = _rect_mask().astype(np.float32)[None]         # [1, H, W], float
     soft = m * 0.9                                     # soft probabilities, still >= 0.5 in-shape
-    assert mask_geometry(soft)["area_px"] == 40 * 20
-    assert mask_geometry(m * 0.4)["empty"] is True     # all below threshold -> empty
+    assert mask_geometry(soft, unit="mm")["area_px"] == 40 * 20
+    assert mask_geometry(m * 0.4, unit="mm")["empty"] is True     # all below threshold -> empty
 
 
 def test_accepts_torch_tensor():
     torch = pytest.importorskip("torch")
-    g = mask_geometry(torch.from_numpy(_rect_mask()))
+    g = mask_geometry(torch.from_numpy(_rect_mask()), unit="mm")
     assert g["area_px"] == 40 * 20 and g["principal_axis_extent_px"] == 40.0
 
 
@@ -198,7 +198,7 @@ def test_resolve_scale_is_unvalidated_by_default():
     from tcip_mcp.pipelines.measurement.mask_geometry import resolve_scale
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, UnvalidatedOperatingPointError
 
-    p = resolve_scale(0.5)
+    p = resolve_scale(0.5, unit="mm")
     assert p.name == "scale_mm_per_px"
     assert p.source == "explicit"
     assert p.requires_validation is True
@@ -209,15 +209,15 @@ def test_resolve_scale_is_unvalidated_by_default():
         p.value
     assert p.unvalidated_value(acknowledge_unvalidated=True) == 0.5
     assert resolve_scale(2.0, unit="cm").name == "scale_cm_per_px"
-    assert resolve_scale().source == "default"
+    assert resolve_scale(unit="mm").source == "default"
 
 
 def test_resolve_scale_capture_scoping_is_the_callers_fact():
     from tcip_mcp.pipelines.measurement.mask_geometry import resolve_scale
 
-    unscoped = resolve_scale(0.5)
+    unscoped = resolve_scale(0.5, unit="mm")
     assert unscoped.capture_scoped is False and unscoped.capture_id is None
-    scoped = resolve_scale(0.5, capture_id="2026-02-10_plot7")
+    scoped = resolve_scale(0.5, unit="mm", capture_id="2026-02-10_plot7")
     assert scoped.capture_scoped is True and scoped.capture_id == "2026-02-10_plot7"
 
 
@@ -240,7 +240,7 @@ def test_an_annotations_reference_can_never_validate_a_physical_scale():
         accepted_references,
     )
 
-    base = resolve_scale(0.5)
+    base = resolve_scale(0.5, unit="mm")
     for wrong_kind_ref in (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED):
         stamped = dataclasses.replace(base, validated_against=wrong_kind_ref)
         assert wrong_kind_ref not in accepted_references("physical")
