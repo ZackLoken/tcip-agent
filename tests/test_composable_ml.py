@@ -1,4 +1,4 @@
-"""Tests for composable ML primitives — Phases 0-4."""
+"""Tests for composable ML primitives."""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ torch = pytest.importorskip("torch")
 
 
 # ====================================================================
-# Phase 1: Neck forward tests
+# Neck forward tests
 # ====================================================================
 
 class TestBackboneOrdering:
     """The wrapper renames stages so pyramid order survives into the necks.
 
     The necks rebuild order with ``sorted(features.keys())``. A module that emits its own names
-    would be consumed alphabetically — and with uniform stage widths there is no shape error to
+    would be consumed alphabetically, and with uniform stage widths there is no shape error to
     catch it, so the finest map silently lands where a detector assigns the smallest anchors.
     """
 
@@ -102,7 +102,7 @@ class TestNecks:
 
 
 # ====================================================================
-# Phase 2: Head tests
+# Head tests
 # ====================================================================
 
 class TestHeads:
@@ -162,7 +162,7 @@ class TestHeads:
 
 
 # ====================================================================
-# Phase 3: Loss tests
+# Loss tests
 # ====================================================================
 
 class TestLosses:
