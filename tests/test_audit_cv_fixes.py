@@ -1,5 +1,5 @@
-"""Audit CV-rigor fixes: val-loss over negatives (CV9), standard+operating mAP (CV10),
-tiled evaluation (CV1), inference tile geometry (CV2), calibrated inference (CV0).
+"""Detection measurement-integrity coverage: val-loss over negatives, standard+operating mAP,
+tiled evaluation, inference tile geometry, calibrated inference.
 
 Kept in one file so the audit's measurement-integrity locks live together. Vision/state
 tests here are pure-Python or monkeypatched (no GPU) so they stay xdist-safe.
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
 # ======================================================================
-# CV9: detection val-loss must include all-negative images
+# Detection val-loss must include all-negative images
 # ======================================================================
 
 class _StubDetector:
@@ -95,7 +95,7 @@ def test_cv9_all_negative_only_loader_is_not_skipped():
 
 
 # ======================================================================
-# CV10: report standard map@100 and map@max_dets
+# Report standard map@100 and map@max_dets
 # ======================================================================
 
 def _rec(gt, dt, w=100, h=100):
@@ -135,7 +135,7 @@ def test_cv10_standard_keys_unchanged_at_100():
 
 
 # ======================================================================
-# CV1: tiled evaluation regimes
+# Tiled evaluation regimes
 # ======================================================================
 
 def _det_dataset(tmp_path, n=3, size=128):
@@ -284,7 +284,7 @@ def test_k18_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch
 
 
 # ======================================================================
-# CV2: inference tile geometry derived from the checkpoint
+# Inference tile geometry derived from the checkpoint
 # ======================================================================
 
 def _stub_inference(monkeypatch, *, train_tile_size=None, train_overlap=None):
@@ -601,7 +601,7 @@ def test_cv2_launch_training_persists_effective_tile_geometry(tmp_path, monkeypa
 
 
 # ======================================================================
-# CV0: calibrated operating point wired into the delivery doors
+# Calibrated operating point wired into the delivery doors
 # ======================================================================
 
 def _op_box(cx, cy, s=20.0):
