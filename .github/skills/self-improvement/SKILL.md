@@ -5,7 +5,7 @@ description: "How the agent turns friction and findings into a durable record th
 
 # Self-improvement: learning that stays with the project
 
-Learning lands **with the project it came from**, in that project's `.tcip/` store. Nothing a
+Learning lands with the project it came from, in that project's `.tcip/` store. Nothing a
 session learns writes into the repo: skills, `CLAUDE.md`, and platform code change only when the
 owner changes them.
 
@@ -50,7 +50,7 @@ Over-report. A report is cheap; a silent guess is not.
 ## Record: what the retrospective should contain
 
 At the end of substantial work, call `project_retrospective`. Write what a future session working
-**this project** would need, and be honest about what failed; that is the most useful part.
+this project would need, and be honest about what failed; that is the most useful part.
 
 - **What you measured about this dataset**: object scale and elongation from the GT, capture
   cadence and missing dates, class imbalance, where the operating point resolved and on what
