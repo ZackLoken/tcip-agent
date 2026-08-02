@@ -1,8 +1,7 @@
-"""Overnight-audit Wave A: data-fidelity fixes locked by test.
-
-Covers: confirmed negatives survive every save door (MCP save_annotations, ReviewEngine.save_gt),
-inference predictions carry model provenance, SAM staging carries created_at, review label backups
-capture the canonical JSON format, and stratified splits count JSON objects (not JSON lines).
+"""Data-fidelity coverage: confirmed negatives survive every save door (MCP save_annotations,
+ReviewEngine.save_gt), inference predictions carry model provenance, SAM staging carries
+created_at, review label backups capture the canonical JSON format, and stratified splits count
+JSON objects, not JSON lines.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ def test_mcp_save_annotations_empty_refuses_and_preserves_gt(tmp_path):
     """An empty save is refused (each annotation needs a subject) and never deletes existing GT.
 
     A confirmed negative is now an empty label + a human Complete in image_status.json, not a
-    product of an empty save door — so the door that used to write ``{objects: []}`` is gone. What
+    product of an empty save door, so the door that used to write ``{objects: []}`` is gone. What
     stays load-bearing is that a save call cannot destroy annotated ground truth.
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
@@ -104,7 +103,7 @@ def test_make_splits_counts_json_objects_not_lines(tmp_path):
                       group_by="stem")
     assert "error" not in res
     # foreground_annotations sums per split: true total is 3+1+0+0. Counting raw JSON text
-    # lines (the old bug) would have reported dozens — negatives alone read as several each.
+    # lines (the old bug) would have reported dozens: negatives alone read as several each.
     assert sum(res["foreground_annotations"].values()) == 4
 
 
