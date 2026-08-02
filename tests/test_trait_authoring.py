@@ -1,10 +1,10 @@
-"""W8 — config-driven multi-trait TraitSpec authoring + derived class-id + read-semantics.
+"""Config-driven multi-trait TraitSpec authoring + derived class-id + read-semantics.
 
 Pins the softened scope-provisional behavior: registering trait #2 is a breeder-authored config
 edit (cross-checked against the crops.yml controlled vocab, never agent-invented), the elongated
 class id is a mapping fact derived from classes.json by name (never a pinned default), and the
-provisional 95%-mapping marker travels with the delivery. There are no built-in traits (round 10,
-2026-07-29) — catkin is authored the same way as any other trait; this module's ``pytestmark``
+provisional 95%-mapping marker travels with the delivery. There are no built-in traits: catkin is
+authored the same way as any other trait; this module's ``pytestmark``
 requests ``conftest.py``'s ``seed_catkin_trait_spec``, which writes a real config file matching
 ``tests/_trait_fixtures.CATKIN`` into this test's pinned project root, so ``get_trait("catkin")``
 keeps resolving by default the way it did when a builtin was unconditionally present.
@@ -49,7 +49,7 @@ def test_load_trait_specs_reads_vocab_checked_config(tmp_path: Path):
 
 
 def test_config_spec_off_vocab_delivers_is_rejected(tmp_path: Path):
-    # A fabricated phenotype (not in crops.yml) must not register — the anti-fabrication anchor.
+    # A fabricated phenotype (not in crops.yml) must not register: the anti-fabrication anchor.
     _write_spec(tmp_path, "unicorn", {"delivers": ["unicorn_horn_length"]})
     assert load_trait_specs(specs_dir=tmp_path) == []
 
@@ -64,12 +64,12 @@ def test_config_spec_unknown_field_is_rejected(tmp_path: Path):
     assert load_trait_specs(specs_dir=tmp_path) == []
 
 
-# ── K2 Fix E: count_objective is validated against the registry, not a hardcoded whitelist ─
+# ── count_objective is validated against the registry, not a hardcoded whitelist ─
 
 def test_config_spec_arbitrary_count_objective_is_accepted_at_registration(tmp_path: Path):
-    # K18 B4: count_objective is NOT a closed enum — a trait may name any objective an agent has
+    # count_objective is not a closed enum: a trait may name any objective an agent has
     # implemented and registered a picker for. Registration accepts it regardless; whether it can
-    # actually be CALIBRATED depends on whether operating_point.COUNT_OBJECTIVE_PICKERS has a
+    # actually be calibrated depends on whether operating_point.COUNT_OBJECTIVE_PICKERS has a
     # matching entry (see test_resolve_operating_point_refuses_unregistered_count_objective).
     _write_spec(tmp_path, "custom", {"delivers": ["leaf_length"], "count_objective": "a_brand_new_objective"})
     specs = load_trait_specs(specs_dir=tmp_path)
@@ -77,7 +77,7 @@ def test_config_spec_arbitrary_count_objective_is_accepted_at_registration(tmp_p
 
 
 def test_config_spec_unset_count_objective_is_empty_not_defaulted(tmp_path: Path):
-    # No silent default to catkin's historical value — an omitted count_objective stays honestly
+    # No silent default to catkin's historical value: an omitted count_objective stays honestly
     # empty, the same "not yet decided" shape as count_error_tolerance's None.
     _write_spec(tmp_path, "undecided", {"delivers": ["leaf_length"]})
     specs = load_trait_specs(specs_dir=tmp_path)
@@ -103,7 +103,7 @@ def test_resolve_operating_point_refuses_unregistered_count_objective(tmp_path: 
 
 
 def test_config_spec_every_registered_objective_is_accepted(tmp_path: Path):
-    # The validator's accepted values are DERIVED from the same registry the picker uses (Fix E) —
+    # The validator's accepted values are derived from the same registry the picker uses:
     # one source of truth, not a second hardcoded list that could drift out of sync.
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
@@ -117,7 +117,7 @@ def test_missing_specs_dir_yields_no_config(tmp_path: Path):
     assert load_trait_specs(specs_dir=tmp_path / "nope") == []
 
 
-# ── K18 B2.5: the audited write path for an already-registered trait spec ──────────────────
+# ── the audited write path for an already-registered trait spec ──────────────────
 
 def test_write_trait_spec_fields_updates_and_persists(tmp_path: Path):
     _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance_frac": 1.0})
@@ -127,7 +127,7 @@ def test_write_trait_spec_fields_updates_and_persists(tmp_path: Path):
     )
     assert updated.count_bias_tolerance_frac == 2.5
     assert "count_bias_tolerance_frac: domain_expert_confirmed" in updated.provenance
-    # persisted, not just returned — a fresh load sees the same value
+    # persisted, not just returned: a fresh load sees the same value
     reloaded = load_trait_specs(specs_dir=tmp_path)
     assert reloaded[0].count_bias_tolerance_frac == 2.5
 
@@ -154,7 +154,7 @@ def test_write_trait_spec_fields_refuses_an_invalid_merged_spec(tmp_path: Path):
     _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"]})
     with pytest.raises(ValueError, match="invalid spec"):
         traits.write_trait_spec_fields("leaf", {"not_a_real_field": 3}, [], specs_dir=tmp_path)
-    # refusal means nothing was written — the spec is unchanged
+    # refusal means nothing was written: the spec is unchanged
     assert load_trait_specs(specs_dir=tmp_path)[0].delivers == ("leaf_length",)
 
 
@@ -172,7 +172,7 @@ def test_update_trait_spec_fields_tool_end_to_end(tmp_path: Path, monkeypatch: p
 
 def test_registry_reads_every_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Point the default specs dir at an absolute tmp path (resolve_state returns it unchanged), with
-    # two authored files — the registry must read every one, not just the first (no builtin to fall
+    # two authored files: the registry must read every one, not just the first (no builtin to fall
     # back to if it stopped short).
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
     _write_spec(tmp_path, "catkin", {"delivers": ["catkin_05per_date"]})
@@ -182,10 +182,9 @@ def test_registry_reads_every_config_file(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 def test_config_authored_catkin_is_the_real_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    # Round 10 (2026-07-29) removed the prior precedence bug where a built-in Python object silently
-    # outranked a config file authoring the same trait name. There is no built-in anymore, so an
-    # authored catkin.yml is simply what get_trait("catkin") returns — proven here by a value a real
-    # builtin would never have carried.
+    # There is no built-in trait definition that could outrank a config file authoring the same
+    # trait name, so an authored catkin.yml is simply what get_trait("catkin") returns, proven here
+    # by a value a real builtin would never have carried.
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
     _write_spec(tmp_path, "catkin", {"delivers": ["catkin_05per_date"], "count_bias_tolerance_frac": 99.0})
     assert get_trait("catkin").count_bias_tolerance_frac == 99.0
@@ -197,8 +196,8 @@ def test_unknown_trait_still_hard_fails():
 
 
 def test_catkin_config_semantics_match_reference_fixture():
-    # This module's pytestmark seeds a real catkin.yml (round 10) matching tests/_trait_fixtures.CATKIN
-    # — proves the config path round-trips every field faithfully, not just the ones this test
+    # This module's pytestmark seeds a real catkin.yml matching tests/_trait_fixtures.CATKIN,
+    # proving the config path round-trips every field faithfully, not just the ones this test
     # happens to check by name below. Config-loaded specs are rebuilt fresh per call (traits.py),
     # never module-load singletons, so this is value equality, not identity.
     t = get_trait("catkin")
@@ -208,13 +207,13 @@ def test_catkin_config_semantics_match_reference_fixture():
     assert t.sliver_frac == 0.5
     assert t.majority_milestone == "95per"
     assert t.majority_provisional is True
-    assert t.count_bias_tolerance_frac == 0.01  # RELATIVE fraction, breeder-set (D12; K4 residual)
+    assert t.count_bias_tolerance_frac == 0.01  # relative fraction, breeder-set
     assert set(t.delivers) == {
         "catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"}
 
 
 def test_reference_fixture_delivers_are_all_in_crops_vocab():
-    # Guardrail: the local test fixture must itself obey the controlled vocab it enforces on config —
+    # Guardrail: the local test fixture must itself obey the controlled vocab it enforces on config,
     # else this whole suite would be exercising an off-vocab trait shape no real config could load.
     vocab = traits._crops_vocab()
     assert vocab, "crops.yml vocab should be loadable in the repo checkout"
@@ -222,7 +221,7 @@ def test_reference_fixture_delivers_are_all_in_crops_vocab():
         assert name in vocab, name
 
 
-# ── K4/K5: positive class id resolved from a prediction bucket's own recorded id_map ───────
+# ── positive class id resolved from a prediction bucket's own recorded id_map ───────
 
 def _op_sidecar(dir_path: Path, id_map: dict | None) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
@@ -260,7 +259,7 @@ def test_resolve_positive_class_id_no_map_is_none(tmp_path: Path):
     assert cid is None
 
 
-# ── K4/K5 end-to-end through compute_phenology ────────────────────────────
+# ── end-to-end through compute_phenology ────────────────────────────
 
 def _pheno_fixture(tmp_path: Path, *, classified: bool):
     from tcip_annotation import json_io
@@ -306,7 +305,7 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
     # The positive class id resolves from the buckets' own recorded id_map; both dimensions are
     # validated, so this delivers.
     assert "error" not in res, res
-    assert res["elongation_classified"] is True
+    assert res["positive_class_assessed"] is True
     assert out_csv.exists()
     assert "catkin_elongation_provisional" in phenology.phenology_csv_columns(get_trait("catkin"))
 
