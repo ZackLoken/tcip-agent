@@ -361,12 +361,15 @@ def per_plant_series(
     mapping: dict[str, list],
     predictions_by_date: dict[str, str],
     positive_class_name: str,
-) -> dict[str, dict]:
+) -> tuple[dict[str, dict], int]:
     """Aggregate classified predictions into a per-plant positive-fraction series.
 
     ``mapping`` is ``{date: [assignment, ...]}`` where each assignment has ``.stem`` /
     ``.plot_name`` / ``.accession_name`` (attributes or dict keys). Returns
-    ``{plant_id: {accession, series: [(date, total, positive, unclassified, missing), ...]}}``.
+    ``({plant_id: {accession, series: [(date, total, positive, unclassified, missing), ...]}}, n_unmapped)``,
+    ``n_unmapped`` the count of mapping entries, across every date, that named no ``plot_name`` (an
+    image the plant-mapping step could not assign, see ``build_plant_mapping``'s own ``n_unmapped``),
+    disclosed here rather than silently dropped from every plant's coverage.
 
     Coverage is measured against the stems the plant mapping actually names for each (plant, date),
     not merely against whatever prediction files happen to exist: a named stem with no
@@ -380,6 +383,7 @@ def per_plant_series(
         return getattr(a, name, None) if not isinstance(a, dict) else a.get(name)
 
     per_plant: dict[str, dict] = {}
+    n_unmapped = 0
     # Iterate the mapping's own dates, not predictions_by_date's, the mapping is the coverage
     # reference, so a date it names is never silently absent just because the caller dropped it.
     for date_str in mapping:
@@ -395,6 +399,7 @@ def per_plant_series(
         for a in mapping[date_str]:
             plant_id = _attr(a, "plot_name")
             if not plant_id:
+                n_unmapped += 1
                 continue
             acc = by_plant.setdefault(plant_id, [0, 0, 0, 0, 0])
             acc[4] += 1
@@ -410,7 +415,7 @@ def per_plant_series(
         for plant_id, (total, positive, unclassified, missing, n_images) in by_plant.items():
             entry = per_plant.setdefault(plant_id, {"accession": accession.get(plant_id), "series": []})
             entry["series"].append((date_str, total, positive, unclassified, missing, n_images))
-    return per_plant
+    return per_plant, n_unmapped
 
 
 def per_plant_phenology(
@@ -421,18 +426,20 @@ def per_plant_phenology(
 ) -> dict:
     """Full canonical pipeline: classified predictions + plant mapping → per-plant milestones.
 
-    Returns ``{rows: [...], positive_class_assessed: bool}``. Each row carries the positive-fraction
-    series, the milestone dates, and coverage-disclosure fields (``n_dates_unclassified``,
-    ``n_dates_missing_images``). A plant's milestones are computed only over dates that are both
-    fully classified (``unclassified == 0``) and fully observed (``missing == 0``) for that date,
-    conjunctive across dates, not an "any date" union: a plant with even one
-    partially-unclassified or partially-missing date does not earn milestone dates for that plant,
-    it earns disclosure of which dates were excluded and why. The top-level ``positive_class_assessed``
-    is ``True`` iff at least one date, anywhere in the delivery, was fully classified, distinguishing
-    "the classifier bridge was never wired at all" (nothing here, refuse the whole call) from "wired,
-    with some per-plant/per-date gaps" (deliver, with per-row disclosure).
+    Returns ``{rows: [...], positive_class_assessed: bool, n_images_unmapped: int}``. Each row
+    carries the positive-fraction series, the milestone dates, and coverage-disclosure fields
+    (``n_dates_unclassified``, ``n_dates_missing_images``). A plant's milestones are computed only
+    over dates that are both fully classified (``unclassified == 0``) and fully observed
+    (``missing == 0``) for that date, conjunctive across dates, not an "any date" union: a plant
+    with even one partially-unclassified or partially-missing date does not earn milestone dates
+    for that plant, it earns disclosure of which dates were excluded and why. The top-level
+    ``positive_class_assessed`` is ``True`` iff at least one date, anywhere in the delivery, was
+    fully classified, distinguishing "the classifier bridge was never wired at all" (nothing here,
+    refuse the whole call) from "wired, with some per-plant/per-date gaps" (deliver, with per-row
+    disclosure). ``n_images_unmapped`` is a delivery-wide summary, not a per-plant field, since an
+    unmapped image was never assigned to any plant to disclose it against.
     """
-    per_plant = per_plant_series(mapping, predictions_by_date, positive_class_name)
+    per_plant, n_images_unmapped = per_plant_series(mapping, predictions_by_date, positive_class_name)
     rows = []
     any_classified_date = False
     for plant_id, info in sorted(per_plant.items()):
@@ -469,7 +476,8 @@ def per_plant_phenology(
         # an excluded plant's row a different shape than an included one's within a single delivery.
         row.update(plant_milestones(frac_series if plant_fully_classified else [], spec))
         rows.append(row)
-    return {"rows": rows, "positive_class_assessed": any_classified_date}
+    return {"rows": rows, "positive_class_assessed": any_classified_date,
+            "n_images_unmapped": n_images_unmapped}
 
 
 def write_phenology_csv(rows: list[dict], out_path: Path, spec, stamp: dict | None = None) -> str:
