@@ -27,20 +27,20 @@ describe("computeFilteredIndices", () => {
     expect(computeFilteredIndices(LIST, STATUS, "complete", navigable)).toEqual([2]);
   });
 
-  // K23: an explicit `order` (e.g. an active-learning priority ranking) replaces positional
+  // An explicit `order` (e.g. an active-learning priority ranking) replaces positional
   // traversal, with the same filter/isNavigable predicates still applied on top of it.
   it("omitting order behaves exactly as before (regression pin)", () => {
     expect(computeFilteredIndices(LIST, STATUS, "all", undefined, undefined)).toEqual([0, 1, 2, 3]);
   });
   it("traverses in the supplied order instead of positional order", () => {
-    const priority = [3, 0, 2, 1]; // d, a, c, b — most-informative first
+    const priority = [3, 0, 2, 1]; // d, a, c, b: most-informative first
     expect(computeFilteredIndices(LIST, STATUS, "all", undefined, priority)).toEqual([3, 0, 2, 1]);
   });
   it("still applies the status filter and isNavigable on top of a supplied order", () => {
     const priority = [3, 0, 2, 1];
     const navigable = (name: string) => name !== "d.jpg";
     // "complete" keeps a.jpg/c.jpg; isNavigable additionally drops d.jpg (moot here, already
-    // excluded by the status filter) — order among survivors is still priority's, not positional.
+    // excluded by the status filter); order among survivors is still priority's, not positional.
     expect(computeFilteredIndices(LIST, STATUS, "complete", navigable, priority)).toEqual([0, 2]);
   });
 });
