@@ -35,6 +35,7 @@ from tcip_annotation import (
     ReviewContext,
     ReviewDetection,
     ReviewEngine,
+    compute_classified_trait_matches,
     compute_matches,
 )
 from tcip_annotation.json_io import read_annotations
@@ -227,6 +228,31 @@ def _ann_dict(a: Annotation) -> dict:
     return out
 
 
+def _check_classification_scope(subject: Optional[str], attribute: Optional[str]) -> None:
+    """Reviewing a classified trait needs both facts: ``attribute`` alone can't say which GT
+    instances it scopes. Raised before anything is read/mutated, not just at the matcher call, so a
+    malformed request 400s instead of silently authoring GT under a ``None`` subject."""
+    if attribute is not None and not subject:
+        raise HTTPException(400, "attribute given for a classified-trait review, but no subject "
+                                  "was provided to scope which GT instances it applies to")
+
+
+def _compute_matches(
+    gt: list, preds: list, *, iou_threshold: float, conf_threshold: float,
+    subject: Optional[str], attribute: Optional[str],
+) -> dict:
+    """Dispatch to plain detection matching, or classified-trait matching when the caller names the
+    (subject, attribute) axis under review. The one call site both ``/matches`` and ``/action`` use,
+    so a verdict's freshly recomputed matches are always scoped identically to what produced it."""
+    if attribute is None:
+        return compute_matches(gt, preds, iou_threshold, conf_threshold)
+    _check_classification_scope(subject, attribute)
+    return compute_classified_trait_matches(
+        gt, preds, subject=subject, attribute=attribute,
+        iou_threshold=iou_threshold, conf_threshold=conf_threshold,
+    )
+
+
 def _load_ctx(image_name: str, image_path: str, *, gt_path: Optional[str],
               pred_path: Optional[str]) -> ReviewContext:
     w, h = _image_dims(image_path)
@@ -251,6 +277,13 @@ class MatchesRequest(BaseModel):
     conf_threshold: float = 0.25
     filter_type: str = "all"
     filter_class: str = "all"          # a class name (an annotation's subject) or "all"
+    # Reviewing a classified trait rather than plain detection: `subject` names the object type GT
+    # isolates (an enabling/trait subject already annotated), `attribute` the axis whose confirmed/
+    # predicted value is under review. Both, or neither: a bare `attribute` can't scope which GT
+    # instances it applies to. `None`/`None` (the default) is today's detection-only matching,
+    # unchanged.
+    subject: Optional[str] = None
+    attribute: Optional[str] = None
 
 
 class Detection(BaseModel):
@@ -325,8 +358,9 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
     """Compute TP/FP/FN, decorate with review status, and return everything the canvas needs."""
     ctx = _load_ctx(req.image_name, req.image_path, gt_path=req.gt_path, pred_path=req.pred_path)
     engine = _get_engine(req.project_root)
-    matches = compute_matches(
-        ctx.gt, ctx.preds, iou_threshold=req.iou_threshold, conf_threshold=req.conf_threshold
+    matches = _compute_matches(
+        ctx.gt, ctx.preds, iou_threshold=req.iou_threshold, conf_threshold=req.conf_threshold,
+        subject=req.subject, attribute=req.attribute,
     )
     return _matches_response(
         ctx, matches, engine, req.image_name,
@@ -348,7 +382,9 @@ class ActionPayload(BaseModel):
     gt_idx: Optional[int] = None
     pred_idx: Optional[int] = None
     bbox: tuple[float, float, float, float]
-    action: str  # "accepted" | "rejected" | "edited"
+    action: str  # "accepted" | "rejected" | "edited" | "swept" (an explicit "checked this image
+    # for missed objects, found none" attestation: no geometry, never mutates GT, see
+    # _apply_gt_mutation)
     # GUI-set reviewer identity (bare name, e.g. "zack"); stamped as accepted_by/created_by
     # ("user:<name>"). Omitted by non-GUI callers -> backend falls back to the OS/env user.
     user: Optional[str] = None
@@ -364,6 +400,10 @@ class ActionPayload(BaseModel):
     # what /matches would have returned (the client installs them without a second fetch).
     filter_type: str = "all"
     filter_class: str = "all"
+    # Same (subject, attribute) meaning as MatchesRequest: set together when this verdict is on a
+    # classified trait rather than plain detection.
+    subject: Optional[str] = None
+    attribute: Optional[str] = None
 
 
 def _apply_gt_mutation(
@@ -372,13 +412,30 @@ def _apply_gt_mutation(
     """Author GT from a verdict; return ``(gt_changed, index the written annotation landed at in
     ctx.gt)``: the index is set only for edited/accepted writes. Accept an FP adds the prediction;
     accept a TP/FN keeps GT; reject a TP/FN deletes that GT; reject an FP is a no-op; edit writes
-    the edited shape (replacing the matched GT, or adding it).
+    the edited shape (replacing the matched GT, or adding it); ``action="swept"`` (an explicit
+    "checked this image for missed objects, found none" attestation) matches none of the branches
+    below and always no-ops, GT is never mutated by sweeping.
 
     Provenance (``reviewer`` = ``user:<name>``, ``now_iso`` = UTC): an accepted prediction **carries**
     its ``created_by``/``created_at`` into GT (origin travels) and gets ``accepted_by``/``accepted_at``
     with its ``score`` dropped (it is ground truth now); a reviewer-drawn edit is stamped
-    ``created_by`` = reviewer."""
+    ``created_by`` = reviewer.
+
+    Reviewing a classified trait (``payload.attribute`` set): ``payload.class_name`` is the confirmed/
+    predicted *value*, never the GT object identity, so an authored annotation keeps the real object
+    type on ``subject`` (``payload.subject``) and stamps the value onto ``attributes[attribute]``,
+    the same schema every other GT annotation for this subject already carries; plain detection review
+    (``payload.attribute`` is ``None``) is unchanged, ``class_name`` is the object identity itself."""
     dt, act = payload.det_type, payload.action
+    classifying = payload.attribute is not None
+
+    def _author(base_subject: str, geometry, *, attributes: Optional[dict] = None, **fields) -> Annotation:
+        if classifying:
+            attrs = dict(attributes or {})
+            attrs[payload.attribute] = base_subject
+            return Annotation(subject=payload.subject, geometry=geometry, attributes=attrs, **fields)
+        return Annotation(subject=base_subject, geometry=geometry, attributes=dict(attributes or {}),
+                          **fields)
 
     if act == "edited":
         geom: BBox | Polygon | None = None
@@ -389,8 +446,7 @@ def _apply_gt_mutation(
             geom = Polygon(rings=[[(float(p[0]), float(p[1])) for p in payload.edited_points]])
         if geom is None:
             return False, None
-        new = Annotation(subject=payload.class_name, geometry=geom,
-                         created_by=reviewer, created_at=now_iso)
+        new = _author(payload.class_name, geom, created_by=reviewer, created_at=now_iso)
         if dt in ("tp", "fn") and payload.gt_idx is not None \
                 and 0 <= payload.gt_idx < len(ctx.gt):
             ctx.gt[payload.gt_idx] = new
@@ -406,7 +462,16 @@ def _apply_gt_mutation(
     if act == "accepted" and dt == "fp" and payload.pred_idx is not None \
             and 0 <= payload.pred_idx < len(ctx.preds):
         pred = ctx.preds[payload.pred_idx]
-        ctx.gt.append(replace(pred, score=None, accepted_by=reviewer, accepted_at=now_iso))
+        if classifying:
+            # `pred.subject` is the model's predicted value (an attribute-scoped detector's own
+            # class space), never the real object type; accepting it as GT means confirming that
+            # value for `payload.subject`'s real instance, not minting a new object of that name.
+            accepted = _author(pred.subject, pred.geometry, attributes=pred.attributes,
+                               created_by=pred.created_by, created_at=pred.created_at,
+                               accepted_by=reviewer, accepted_at=now_iso)
+        else:
+            accepted = replace(pred, score=None, accepted_by=reviewer, accepted_at=now_iso)
+        ctx.gt.append(accepted)
         return True, len(ctx.gt) - 1
 
     return False, None  # accept TP/FN and reject FP leave GT untouched
@@ -415,6 +480,7 @@ def _apply_gt_mutation(
 @router.post("/action")
 def record_action(payload: ActionPayload) -> dict:
     """Record a user's accept/reject/edit decision; auto-complete the image when done."""
+    _check_classification_scope(payload.subject, payload.attribute)
     ctx = _load_ctx(payload.image_name, payload.image_path,
                     gt_path=payload.gt_path, pred_path=payload.pred_path)
     engine = _get_engine(payload.project_root)
@@ -471,9 +537,10 @@ def record_action(payload: ActionPayload) -> dict:
 
     # Promote to 'completed' once every detection at these thresholds is reviewed, the only path
     # by which a GUI review reaches 'completed'. Recompute against the (now-authored) GT.
-    matches = compute_matches(
+    matches = _compute_matches(
         work.gt, ctx.preds,
         iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
+        subject=payload.subject, attribute=payload.attribute,
     )
     engine.check_image_review_complete(payload.image_name, matches)
     _audit(payload.project_root, "gui_review_action", {
