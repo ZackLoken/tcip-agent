@@ -75,7 +75,7 @@ be a **proxy, not a measurement**:
 - `bark_thickness` (mm): external RGB shows bark furrow/texture, not mm thickness.
   Needs a bark gauge or destructive coring.
 - `ploidy`: cannot be inferred from any pixel or geometric feature. Tetraploids
-  trend toward larger leaves/vigor, but leaf size is **not** ploidy; a valid value
+  trend toward larger leaves/vigor, but leaf size is not ploidy; a valid value
   requires flow cytometry / cytology.
 
 ## Phenophase calendar
@@ -164,7 +164,7 @@ not dense GT for every trait; geometry needs a validated mask + physical scale).
 traps:
 
 - `dbh` / `plant_height`: an uncalibrated pixel width or bounding-box height is
-  **not** a metric diameter or height. These need calibrated 3D (LiDAR/SfM with
+  not a metric diameter or height. These need calibrated 3D (LiDAR/SfM with
   ground control); report no meters without metric scale.
 - `borer_damage`: the trait is an ordinal severity of largely **internal** wood
   damage. Counting external holes or measuring frass area is a proxy that misses
