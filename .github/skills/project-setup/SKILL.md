@@ -58,6 +58,17 @@ ingest_images(source="<raw folder or glob>", name="{crop}_{trait}_{site}")
 `ingest_images` does **not** annotate, split, choose a task, or write `classes.json`; the
 next steps do. After it, `inspect_project` reports the capture dates and image count.
 
+`ingest_images` scaffolds `.tcip/` (`config.toml`, `artifacts/`, `models/`) as a side effect of
+structuring images. If you need that scaffold before there are images to ingest, call
+`init_project(project_path)` directly; it creates the identical layout without touching image
+files (both share the same internal scaffolding, so calling one after the other is idempotent,
+not additive).
+
+After ingest, `register_dataset(dataset_root, crop)` records the dataset's identity (a minted
+`id` plus a whole-dataset content fingerprint) in `<dataset_root>/dataset.json` and the project's
+`.tcip/datasets.json`, so a later delivered number can be traced back to the exact data behind
+it. `crop` is required and is never inferred from the path or a slug.
+
 ## 3. Translate the goal into a trait, task, and `classes.json`
 
 Turn the breeder's sentence into a trait and the classes they distinguish. The CV task is yours to
@@ -68,19 +79,26 @@ derive from the data, not from the phrasing (see `.github/skills/pipeline-design
   individual catkins" names the *object* and the *phenotype* (the catkin, and a count), not the
   CV task. Which task measures that is yours to derive from object scale, separability, and what
   the trait actually counts; their verb is vocabulary, not the answer.
-- **Trait / annotation campaign**: the `<trait>` path segment under `annotations/`
-  (e.g. `catkin`). Multiple campaigns can coexist (`catkin`, `bush`).
-- **Classes**: write `classes.json` for what the breeder actually distinguishes. Keep it
-  minimal first (progressive disclosure); class semantics live in `classes.json`, never
-  in filenames. Verify crop traits against `.github/skills/crops/` before asserting them.
+- **Subject**: the object class the annotations isolate (e.g. `catkin`, `bush`), not a path
+  segment. Labels are one file per image (`annotations/<date>/<stem>.json`; see
+  `dataset_layout.py`), holding every subject's annotation records for that image; `subject` is a
+  field inside each record, resolved through the dataset's `classes.json` registry. Multiple
+  subjects coexist in the same file (a bush isolated alongside its catkins).
+- **Classes**: register the subject/attribute vocabulary in `classes.json` via the audited
+  `write_class_map(dataset_root, subjects)` tool (never hand-edit the file) for what the breeder
+  actually distinguishes: it validates the nested subject/attribute shape and writes the file plus
+  an audit record. Keep it minimal first (progressive disclosure); class semantics live in
+  `classes.json`, never in filenames. Verify crop traits against `.github/skills/crops/` before
+  asserting them.
 
 ## 4. Bootstrap annotation (engine-assisted)
 
 There must be something to train on. Two paths (see `.github/skills/annotation`):
 
 - **Agent/MCP path**: `propose_annotations` a starter batch with a chosen `engine` (`'sam'` is the
-  built-in reference; the agent can bring another) → review the candidates visually (`visualize` /
-  `view_image`) → `accept_proposals` the good ones. Trial engines and keep the one whose high-conf
+  built-in reference; the agent can bring another) → review the candidates visually (`visualize`,
+  then your client's image-capable read tool on the returned `image_path`) → `accept_proposals`
+  the good ones. Trial engines and keep the one whose high-conf
   proposals survive review. An empty label file is **not** a negative on its own; it trains as one
   only once the breeder marks that image Complete (`.tcip/state/image_status.json`), so an empty
   file you write reads as unannotated until then. Never delete or skip them.
@@ -93,8 +111,9 @@ the format cannot be determined, `read_annotations` returns an error rather than
 
 Create leakage-free train/val/test splits with `make_splits` (group-aware, keeps sibling
 tiles of one source image in the same split). Non-destructive by default (writes stem
-manifests + stats); pass `materialize=True` to also lay out a YOLO
-`{train,val,test}/{images,labels}/` tree.
+manifests + stats); pass `materialize=True` to also lay out a
+`{train,val,test}/{images,labels}/` tree, with the platform's own per-image JSON labels
+(not YOLO's `.txt` format; `tcip-annotation` supports `{json, coco}` only).
 
 ## 6. Build a model, train, infer
 
