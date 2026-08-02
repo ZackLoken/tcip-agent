@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -80,6 +82,33 @@ class InferenceJob:
 
 _jobs: dict[str, InferenceJob] = {}
 _job_lock = threading.Lock()
+
+
+def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
+    """Append a GUI inference mutation to ``<dataset_root>/.tcip/audit.jsonl`` (best-effort).
+
+    Predictions are dataset-native, not project-private (a dataset can be opened by more than one
+    project, see ``dataset_layout.dataset_root_of``), so there is no single project's audit log a
+    prediction write here unambiguously belongs to. Mirrors ``classes._audit_dataset_write`` /
+    ``review._audit`` in shape, diverges from them only in root. Never fails the request.
+    """
+    if not dataset_root:
+        return
+    try:
+        from tcip_mcp.utils.atomic_io import append_jsonl
+
+        append_jsonl(
+            os.path.join(dataset_root, ".tcip", "audit.jsonl"),
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "tool": tool,
+                "source": "gui",
+                "arguments": arguments,
+                "status": "ok",
+            },
+        )
+    except Exception:
+        pass
 
 
 def _summary(job: InferenceJob) -> dict:
@@ -307,6 +336,24 @@ def _worker(job: InferenceJob) -> None:
         job.status = "failed"
         job.error = str(exc)
     finally:
+        from tcip_mcp.dataset_layout import dataset_root_of
+
+        dataset_root = dataset_root_of(job.output_dir)
+        if dataset_root is not None:
+            _audit_dataset_write(
+                str(dataset_root),
+                "gui_inference_run",
+                {
+                    "job_id": job.job_id,
+                    "checkpoint_path": job.checkpoint_path,
+                    "images_dir": job.images_dir,
+                    "output_dir": job.output_dir,
+                    "status": job.status,
+                    "images_written": job.done,
+                    "total": job.total,
+                    "error": job.error,
+                },
+            )
         _persist()
 
 
