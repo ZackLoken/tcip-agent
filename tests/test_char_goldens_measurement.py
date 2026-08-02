@@ -1,18 +1,19 @@
-"""Phase-0 CHARACTERIZATION GOLDENS — pin the CURRENT numeric behavior of the measurement
-and provenance rails that later workstreams (W1/W5/W6/W7) will touch.
+"""Characterization goldens: pin the current numeric behavior of the measurement
+and provenance rails that later work will touch.
 
 These are deliberately *exact*: they assert the numbers today's code produces on tiny
 deterministic fixtures, so a later semantic change (a different conf pick, a re-defined
-localization criterion, a consolidated default, a re-shaped stamp) fails LOUDLY instead of
-sliding through silently. They are not aspirational — a golden turning red is the signal to
+localization criterion, a consolidated default, a re-shaped stamp) fails loudly instead of
+sliding through silently. They are not aspirational: a golden turning red is the signal to
 update it *deliberately* alongside the change that moved the number.
 
 Rails pinned here (one section each):
   1. conf operating-point sweep + count-unbiased pick + resolve_operating_point
   2. phenology fraction curve + milestone dates (crossing_date / plant_milestones / per_plant_phenology)
   3. operating_point.json stamp shape + the validated flag path (calibrated vs raw)
-  4. the CURRENTLY divergent NMS / max_dets defaults across the three modules (W6 target)
-  5. IoU-matching eval metrics at iou_threshold=0.5 (W6-R3 criterion-change target)
+  4. the currently divergent NMS / max_dets defaults across the three modules
+  5. IoU-matching eval metrics at iou_threshold=0.5 (current criterion, to be replaced by a
+     derived center-match tolerance)
   6. compute_phenology gate behavior (refuses without an elongation class; requires validated flags)
 """
 
@@ -39,7 +40,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
 from tests._trait_fixtures import CATKIN  # noqa: E402
 from tests._dense_op_fixtures import dense_records  # noqa: E402
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real
 # catkin.yml into this test's pinned project root so resolve_operating_point("catkin", ...) /
 # compute_phenology(trait="catkin", ...) keep resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
@@ -49,8 +50,8 @@ _OBJECTS_PER_IMAGE = 80
 
 
 def _good_cal_holdout(*, shift: float = 5.0):
-    """A dense, realistic (K2 rule 17) reference: a good detector with one low-conf spurious
-    detection per image — the count-unbiased pick lands at the high, correct-match score (0.9)
+    """A dense, realistic reference: a good detector with one low-conf spurious
+    detection per image; the count-unbiased pick lands at the high, correct-match score (0.9)
     once that low-conf FP is filtered out, with zero bias/dispersion on the holdout."""
     miss = [0] * _N_IMAGES
     fp = [1] * _N_IMAGES
@@ -82,10 +83,10 @@ def _sweep_records(idp="c", *, shift: float = 0.0):
 
     ``shift`` offsets every GT box's center by that many px (well inside the ~10px center-match
     tolerance derived from these boxes), leaving the detections in place. Used to give the holdout
-    fixture (K1) genuinely different GT content from calibration's — a holdout differing from
-    calibration only by ``image_id`` is byte-identical CONTENT and the content-overlap gate now
+    fixture genuinely different GT content from calibration's: a holdout differing from
+    calibration only by ``image_id`` is byte-identical content and the content-overlap gate now
     (correctly) refuses it; see ``test_golden_duplicate_content_holdout_is_false`` below, which
-    pins exactly that refusal on the OLD (shift=0) fixture pair.
+    pins exactly that refusal on the shift=0 fixture pair.
     """
     a = {"width": 400, "height": 400, "image_id": f"{idp}_a",
          "gt": [_ann(100 + shift, 100)],
@@ -110,7 +111,7 @@ def test_golden_sweep_curve_exact():
     assert sweep["tolerance"] == pytest.approx(10.0)
     assert sweep["class_id"] is None
 
-    # The FULL swept curve, pinned exactly (conf grid = {0.0} ∪ observed scores).
+    # The full swept curve, pinned exactly (conf grid = {0.0} ∪ observed scores).
     expected = [
         {"conf": 0.0, "tp": 3, "fp": 1, "fn": 0, "count_bias_mean": 0.5, "abs_count_error_mean": 0.5},
         {"conf": 0.3, "tp": 3, "fp": 1, "fn": 0, "count_bias_mean": 0.5, "abs_count_error_mean": 0.5},
@@ -142,15 +143,15 @@ def test_golden_pick_count_unbiased_and_f1_max():
 
 
 def test_golden_resolve_operating_point_validated_conf():
-    # K2 (Fix D): resolve_operating_point now fails closed without an asserted staged_conf_floor,
-    # and rule 17 requires a dense, realistic reference to exercise the holdout gate — the old
-    # 2-image sparse fixture no longer suffices (its per-image variance now trips Fix C's
+    # resolve_operating_point fails closed without an asserted staged_conf_floor,
+    # and requires a dense, realistic reference to exercise the holdout gate: a
+    # 2-image sparse fixture no longer suffices (its per-image variance trips the
     # equivalence criterion; see test_golden_duplicate_content_holdout_is_false below for what a
-    # sparse fixture STILL correctly refuses).
+    # sparse fixture still correctly refuses).
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_cal_holdout()
-    # tiled=False: this golden is about conf-calibration shippability, not tiling (K10 — tile_size
+    # tiled=False: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
@@ -164,7 +165,7 @@ def test_golden_resolve_operating_point_validated_conf():
     assert conf.dataset_hash == "h1"
     assert b.is_shippable is True
     assert b.get("max_dets")._raw == 120  # ~1.5x p99 GT/image (80/image here)
-    assert conf.sweep["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout (K1)
+    assert conf.sweep["content_overlap_frac"] == pytest.approx(0.0)  # genuinely distinct holdout
     assert conf.sweep["failures"] == []
 
 
@@ -181,14 +182,14 @@ _PHENO_SERIES = [
 
 
 def test_golden_crossing_dates_interpolated():
-    # K4: the return is now a Crossing record (date + evidentiary bound), not a bare string.
+    # The return is a Crossing record (date + evidentiary bound), not a bare string.
     assert PH.crossing_date(_PHENO_SERIES, 0.05).date == "2026-02-15"  # midway 0.0→0.10, 10 days
     assert PH.crossing_date(_PHENO_SERIES, 0.50).date == "2026-03-01"
     assert PH.crossing_date(_PHENO_SERIES, 0.95).date == "2026-03-12"
     assert PH.crossing_date(_PHENO_SERIES, 0.95).bound == "interpolated"  # 0.97 observed, not 0.95 exactly
     assert PH.crossing_date(_PHENO_SERIES, 0.97).bound == "exact"
-    # never reached within the observed window -> right-censored at the LAST observed date, not a
-    # bare None (round 12, 2026-07-29): distinguishable from "no observations at all".
+    # never reached within the observed window -> right-censored at the last observed date, not a
+    # bare None: distinguishable from "no observations at all".
     c99 = PH.crossing_date(_PHENO_SERIES, 0.99)
     assert c99.date == "2026-03-12"
     assert c99.bound == "right_censored"
@@ -232,8 +233,8 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
         mapping, {"2026-02-11": str(d1), "2026-03-09": str(d2)},
         positive_class_name="elongated", spec=CATKIN)
 
-    # K4/K5: both buckets are fully classified, so the fraction IS produced and delivered.
-    assert res["elongation_classified"] is True
+    # Both buckets are fully classified, so the fraction is produced and delivered.
+    assert res["positive_class_assessed"] is True
     assert len(res["rows"]) == 1
     row = res["rows"][0]
     assert row["plant_id"] == "P1"
@@ -274,7 +275,7 @@ def test_golden_stamp_shape_calibrated_validated():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_cal_holdout()
-    # tiled=False: this golden is about conf-calibration shippability, not tiling (K10 — tile_size
+    # tiled=False: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
@@ -328,12 +329,10 @@ def test_golden_validated_flag_path_calibrated_no_holdout_is_false():
 
 
 def test_golden_duplicate_content_holdout_is_false():
-    """K1's delivered number, old->new: the SAME fixture pair the two goldens above used before
-    this cluster (identical GT content, differing only by ``image_id`` prefix — the OLD
-    ``_sweep_records("c")``/``_sweep_records("h")`` call with no ``shift``) used to stamp
-    ``VALIDATED_HELD_OUT``/shippable=True. A byte-identical-content holdout can't function as an
-    independent check, so K1 adds the content-overlap gate and this pair now stamps
-    ``false``/shippable=False instead — pinned here exactly as before/after this cluster's change.
+    """A byte-identical-content holdout can't function as an
+    independent check: the same fixture pair the two goldens above use (identical GT content,
+    differing only by ``image_id`` prefix, ``_sweep_records("c")``/``_sweep_records("h")`` with no
+    ``shift``) must stamp ``false``/shippable=False, gated by the content-overlap check.
     """
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
@@ -347,29 +346,29 @@ def test_golden_duplicate_content_holdout_is_false():
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 4. consolidated inference operating-point defaults (W6-R1)
+# 4. consolidated inference operating-point defaults
 # ══════════════════════════════════════════════════════════════════════════
 
 def test_golden_consolidated_operating_point_defaults():
-    # W6-R1 old->new: operating_point.py previously carried a SECOND, divergent copy of the
+    # operating_point.py must not carry a second, divergent copy of the
     # inference operating-point knobs (_DEFAULT_CROSS_TILE_NMS=0.5, _DEFAULT_MAX_DETS=300,
-    # _DEFAULT_CONF_PLACEHOLDER=0.5, _DEFAULT_TILE_SIZE=640) so the same model+images gave a
-    # different count by entry door. Those private constants are deleted; every operating-point
-    # fallback now resolves to resolution.py's single source of truth.
+    # _DEFAULT_CONF_PLACEHOLDER=0.5, _DEFAULT_TILE_SIZE=640): a second copy would let the same
+    # model+images give a different count by entry door. Every operating-point
+    # fallback resolves to resolution.py's single source of truth.
     from tcip_mcp.pipelines import operating_point as OP
     from tcip_mcp.pipelines import resolution as R
     from tcip_mcp.pipelines.inference import generic_predictor as GP
     from tcip_mcp.pipelines.training import evaluation as EV
     from tcip_mcp.tools import training_tools as TT
 
-    # resolution.py — the shared inference operating-point defaults.
+    # resolution.py: the shared inference operating-point defaults.
     assert R.DEFAULT_CONF == 0.5
     assert R.DEFAULT_NMS_IOU == 0.3
     assert R.DEFAULT_MAX_DETS == 1000
     assert R.DEFAULT_TILE_SIZE == 640
     assert R.DEFAULT_TILED is True
 
-    # operating_point.py — the private _DEFAULT_* copies are gone; the module now imports the
+    # operating_point.py: the private _DEFAULT_* copies are gone; the module now imports the
     # shared constants (same objects), proving one source of truth.
     assert not hasattr(OP, "_DEFAULT_CROSS_TILE_NMS")
     assert not hasattr(OP, "_DEFAULT_MAX_DETS")
@@ -392,25 +391,26 @@ def test_golden_consolidated_operating_point_defaults():
     assert gp_sig.parameters["tile_size"].default == R.DEFAULT_TILE_SIZE
     assert gp_sig.parameters["global_nms_iou"].default == R.DEFAULT_NMS_IOU
 
-    # training_tools.evaluate_model — K10 finding 2: max_dets is no longer a plain 100 default
+    # training_tools.evaluate_model: max_dets is no longer a plain 100 default
     # shared by both eval regimes via a rescuing ">100 else 1000" sentinel (which collided with
     # _max_dets_from_density's own floor of exactly 100). The signature default is now the honest
-    # None sentinel; TRAP 5 (cluster-map.md) requires pinning what each regime RESOLVES it to for a
-    # no-arg caller, not just the unspecified shape — see the two resolved-value assertions below.
+    # None sentinel; what each regime resolves it to for a
+    # no-arg caller must be pinned too, not just the unspecified shape; see the two resolved-value
+    # assertions below.
     ev_sig = inspect.signature(TT.evaluate_model)
     assert ev_sig.parameters["max_dets"].default is None
     assert ev_sig.parameters["iou_threshold"].default == 0.5
     assert ev_sig.parameters["global_nms_iou"].default == 0.3
     assert ev_sig.parameters["conf_threshold"].default == 0.5
 
-    # evaluation.py surfaces — pinned so a metrics-default change is visible too.
+    # evaluation.py surfaces: pinned so a metrics-default change is visible too.
     coco_sig = inspect.signature(EV.coco_detection_metrics)
     assert coco_sig.parameters["conf_threshold"].default == 0.25
     assert coco_sig.parameters["iou_threshold"].default == 0.5
     assert coco_sig.parameters["max_dets"].default == 100
     ff_sig = inspect.signature(EV.run_full_frame_evaluation)
     assert ff_sig.parameters["global_nms_iou"].default == 0.3
-    # K10 finding 1: tile_size/overlap are no longer pinned constants (640/0.2) — an honest None
+    # tile_size/overlap are no longer pinned constants (640/0.2): an honest None
     # sentinel resolved from the checkpoint's persisted geometry (or refused) by resolve_tile_geometry.
     assert ff_sig.parameters["tile_size"].default is None
     assert ff_sig.parameters["overlap"].default is None
@@ -421,8 +421,8 @@ def test_golden_consolidated_operating_point_defaults():
 
 
 def test_golden_k10_evaluate_model_resolves_max_dets_per_regime_when_unset():
-    """TRAP 5 counterpart assertion (cluster-map.md): a signature-shape golden alone cannot see
-    what a no-arg caller's max_dets actually RESOLVES to per regime — without this, the golden set
+    """A signature-shape golden alone cannot see
+    what a no-arg caller's max_dets actually resolves to per regime; without this, the golden set
     would ratify "the default is unspecified" rather than pin the two real behaviors (1000 on the
     delivery-gating regime, 100 on the tile-level/diagnostic regime)."""
     from tcip_mcp.pipelines import resolution as R
@@ -476,7 +476,8 @@ def test_golden_k10_evaluate_model_resolves_max_dets_per_regime_when_unset():
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 5. IoU-matching eval metrics at iou_threshold=0.5 (W6-R3 criterion-change target)
+# 5. IoU-matching eval metrics at iou_threshold=0.5 (current criterion, to be replaced by a
+#    derived center-match tolerance)
 # ══════════════════════════════════════════════════════════════════════════
 
 def _iou_records():
@@ -516,8 +517,8 @@ def test_golden_coco_metrics_at_iou_050():
 
 
 def test_golden_coco_matching_is_iou_threshold_sensitive():
-    # The SAME predictions score differently at 0.75 — proof the criterion is IoU-thresholded
-    # today (what W6-R3 replaces with a derived center-match tolerance for the count).
+    # The same predictions score differently at 0.75, proof the criterion is IoU-thresholded
+    # today (a future change replaces this with a derived center-match tolerance for the count).
     m = coco_detection_metrics(_iou_records(), iou_threshold=0.75,
                                conf_threshold=0.25, max_dets=100)
     assert (m["tp"], m["fp"], m["fn"]) == (1, 2, 2)
@@ -530,10 +531,10 @@ def test_golden_coco_matching_is_iou_threshold_sensitive():
 def _write_op_sidecar(d: Path, *, validated: bool, conf: float = 0.4, id_map: dict | None = None,
                       checkpoint_sha256: str | None = "deadbeef" * 8,
                       experiment_id: str | None = "exp-golden") -> None:
-    """The operating_point.json stamp export_predictions writes beside a bucket's labels — the
-    on-disk validity compute_phenology reconciles against (K3), including id_map (K4/K5) and
-    producer identity (K12 finding 7: the real writer always stamps checkpoint_sha256/experiment_id
-    at the top level — a fixture that omitted them blessed a shape the platform never produces)."""
+    """The operating_point.json stamp export_predictions writes beside a bucket's labels: the
+    on-disk validity compute_phenology reconciles against, including id_map and
+    producer identity (the real writer always stamps checkpoint_sha256/experiment_id
+    at the top level; a fixture that omitted them blessed a shape the platform never produces)."""
     ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
     (d / "operating_point.json").write_text(json.dumps({
@@ -565,7 +566,7 @@ def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None =
         _write_op_sidecar(d2, validated=op_validated, id_map=id_map)
     else:
         # count-operating-point sidecar still needs an id_map for the coverage rule even when its
-        # own validity isn't the thing under test — a bucket with NO sidecar at all is the
+        # own validity isn't the thing under test: a bucket with no sidecar at all is the
         # "no operating_point.json" case, tested separately.
         pass
     mapping_path = tmp_path / "state" / "plant_mapping.json"
@@ -608,9 +609,9 @@ def test_golden_compute_phenology_requires_both_validated_flags(tmp_path: Path):
 
 
 def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sidecar(tmp_path: Path):
-    # K3: an asserted validity string is floored by the on-disk sidecar's real (false) state —
-    # never trusted. The predictions ARE classified (a real id_map is on disk), but the sidecar's
-    # own conf.validated_against is "false" — a caller asserting "held_out_annotations" cannot override it.
+    # An asserted validity string is floored by the on-disk sidecar's real (false) state:
+    # never trusted. The predictions are classified (a real id_map is on disk), but the sidecar's
+    # own conf.validated_against is "false"; a caller asserting "held_out_annotations" cannot override it.
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
     mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=False)
@@ -631,8 +632,8 @@ def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sideca
 def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    # K4/K5: the elongated fraction IS now produced, so a fully-validated call (classifier + count
-    # operating point both validated on disk) delivers a real bloom CSV.
+    # The positive-state fraction is now produced, so a fully-validated call (classifier + count
+    # operating point both validated on disk) delivers a real phenology CSV.
     mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=True)
     _write_classifier_sidecar(d1, validated=True)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
@@ -646,11 +647,10 @@ def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
         operating_point_validated="held_out_annotations",
     )
     assert "error" not in res, res
-    assert res["elongation_classified"] is True
+    assert res["positive_class_assessed"] is True
     assert out_csv.exists()
 
-    # K12 finding 7: a fully-validated delivery must carry real producer identity, not blank
-    # producer columns — no test previously asserted compute_phenology actually populates them.
+    # A fully-validated delivery must carry real producer identity, not blank producer columns.
     import csv as _csv
     with out_csv.open(newline="", encoding="utf-8") as f:
         rows = list(_csv.DictReader(f))
