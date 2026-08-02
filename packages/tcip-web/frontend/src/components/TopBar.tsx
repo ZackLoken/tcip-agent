@@ -45,7 +45,7 @@ export function TopBar() {
         draggable={false}
       />
 
-      {/* Tabs — the grid's auto track keeps them truly centered */}
+      {/* Tabs: the grid's auto track keeps them truly centered */}
       <div className="flex items-center gap-1 justify-self-center">
         {TABS.map((t) => (
           <button
@@ -63,7 +63,7 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center justify-self-end">
-        {/* Connection state — visible only when something is wrong; it self-dismisses
+        {/* Connection state: visible only when something is wrong; it self-dismisses
             when the auto-reconnect succeeds. */}
         {degraded && (
           <div className="flex items-center gap-1.5 h-6 px-2 mr-2 rounded-full border border-tcip-border bg-tcip-bg text-[11px]">
@@ -73,7 +73,7 @@ export function TopBar() {
               }`}
             />
             <span className="text-tcip-muted">
-              {wsStatus === "connecting" ? "reconnecting…" : "disconnected — retrying"}
+              {wsStatus === "connecting" ? "reconnecting…" : "disconnected, retrying"}
             </span>
           </div>
         )}
