@@ -20,7 +20,7 @@ import { mergeMetric } from "@/tabs/trainingMetrics";
 const TRAINING_CANCELLABLE: ReadonlySet<string> = new Set(["created", "running"]);
 
 // Training is configured and launched by the agent (it writes the model + train loop). This tab
-// tracks those runs and their live metrics — the human does not hand-author a model here.
+// tracks those runs and their live metrics; the human does not hand-author a model here.
 export function TrainingTab() {
   const projectRoot = useStore((s) => s.gui.dataset.project_root);
 
@@ -54,7 +54,7 @@ export function TrainingTab() {
       if (msg.type === "metric" && msg.row) {
         setMetrics((prev) => mergeMetric(prev, msg.row as MetricRow));
       } else if (msg.type === "status") {
-        // Terminal frame — surface completion/failure/cancellation + refresh the list.
+        // Terminal frame: surface completion/failure/cancellation + refresh the list.
         const st = msg.status?.status;
         if (st) useStore.getState().pushToast(`Training ${selectedRun}: ${st}`, "info");
         void refreshRuns();
