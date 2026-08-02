@@ -45,7 +45,7 @@ const VERTEX_HANDLE_RADIUS = 4;
 const EDGE_INSERT_THRESHOLD = 6;
 const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Stream (freehand) mode
 const MIN_BOX_SIDE = 3;
-// Screen-px grab radius for a placed point — the whole mark is its own handle, so this matches the
+// Screen-px grab radius for a placed point: the whole mark is its own handle, so this matches the
 // mark's outer reach (see the tick geometry in PointOverlay) rather than a hidden smaller target.
 const POINT_HIT_CANVAS = 11;
 
@@ -57,7 +57,7 @@ function currentImagePath(dataset: DatasetSelection): string | null {
 }
 
 /** A polygon's read-only derived box (the axis-aligned bounds of every ring), for box-mode display
- *  only. Reuses ringsBbox — the same min/max the loader and COCO export re-derive — so it can't
+ *  only. Reuses ringsBbox (the same min/max the loader and COCO export re-derive), so it can't
  *  drift. */
 function derivedBoxFromPolygon(p: PolygonShape): Box {
   const [x1, y1, x2, y2] = ringsBbox(p.rings);
@@ -100,7 +100,7 @@ function pointToSegmentDist(
 }
 
 /**
- * The committed boxes + polygons (content layer). Memoized and — crucially — the mouse
+ * The committed boxes + polygons (content layer). Memoized, and crucially, the mouse
  * cursor is not one of its props, so a mouse move (which only updates cursor-following
  * overlays) does not re-render/reconcile these hundreds–thousands of Konva nodes. It
  * re-renders only when the shapes, selection/hover, active subject, or zoom-derived stroke
@@ -174,10 +174,10 @@ const AnnotationShapes = memo(function AnnotationShapes({
         )}
 
       {/* Read-only derived boxes: each active-subject polygon's bounding box, shown in box mode so a
-          polygon's detection footprint is visible while boxing. Render-only — derived from
+          polygon's detection footprint is visible while boxing. Render-only, derived from
           polygonBbox here and never added to canvas.boxes, so it can't be selected/edited/deleted or
           saved (handle-less). Dashed marks it as read-only, distinct from a real editable box
-          (solid) — the same convention in-progress/under-review shapes already use. */}
+          (solid), the same convention in-progress/under-review shapes already use. */}
       {mode === "box" &&
         polygons.map((p, i) =>
           p.subject === activeSubject ? (
@@ -217,7 +217,7 @@ const AnnotationShapes = memo(function AnnotationShapes({
         );
       })}
 
-      {/* Points — the same visibility rule the agent's mirror uses (pointShapeVisible) */}
+      {/* Points: the same visibility rule the agent's mirror uses (pointShapeVisible) */}
       {points.map((p, i) => {
         const selected = selectedPointIdx === i;
         if (
@@ -296,11 +296,11 @@ export function AnnotateTab() {
   const [selectedBoxIdx, setSelectedBoxIdx] = useState<number | null>(null);
   const boxDragRef = useRef<{ idx: number; drag: EditDrag } | null>(null);
   // Index of the point being dragged. A point has no vertices, so repositioning it is the whole
-  // edit — one undo snapshot is taken when the drag starts (see onDown), like a box/vertex drag.
+  // edit: one undo snapshot is taken when the drag starts (see onDown), like a box/vertex drag.
   const pointDragRef = useRef<number | null>(null);
 
   // I/O safety. The canvas belongs to exactly the image last loaded from disk:
-  //  - loadedPathsRef: the (image, label) the current shapes came from. save() writes there —
+  //  - loadedPathsRef: the (image, label) the current shapes came from. save() writes there,
   //    never to a path recomputed from a since-changed dataset, which is how the old code could
   //    write one image's shapes onto another's file.
   //  - loadedKeyRef: gates reloads to a genuine image-identity change, so unrelated store updates
@@ -314,14 +314,14 @@ export function AnnotateTab() {
   } | null>(null);
   const [ioError, setIoError] = useState<string | null>(null);
   const [saveBlocked, setSaveBlocked] = useState(false);
-  // True when a save/reload conflict is showing (file changed underneath us) —
+  // True when a save/reload conflict is showing (file changed underneath us);
   // the banner then offers a Reload button.
   const [conflict, setConflict] = useState(false);
   const agentActivity = useStore((s) => s.agentActivity);
 
   const imgPath = currentImagePath(dataset);
   const currentImageName = dataset.image_list[dataset.current_image_index] ?? null;
-  // A confirmed negative is a completed review (empty) — lock it like "complete".
+  // A confirmed negative is a completed review (empty): lock it like "complete".
   const currentStatus = currentImageName ? imageStatus.byImage[currentImageName] : undefined;
   const isLocked = currentStatus === "complete" || currentStatus === "negative";
   const saveDisabled = !imgPath || isLocked || saveBlocked;
@@ -362,7 +362,7 @@ export function AnnotateTab() {
   buildCanvasBodyRef.current = () => {
     if (!imgPath || !dataset.project_root) return null;
     // Never push mid-transition: after an image change the canvas briefly still holds the
-    // previous image's shapes — attaching them to the new image_path would show the agent a
+    // previous image's shapes: attaching them to the new image_path would show the agent a
     // false canvas. Wait until the loaded-labels identity matches (the post-load push covers it).
     if (loadedPathsRef.current?.image !== imgPath) return null;
     const host = measureCanvasHost();
@@ -406,7 +406,7 @@ export function AnnotateTab() {
   const canvasPusherRef = useRef(createCanvasPusher((b) => api.canvas.pushState(b)));
   useEffect(() => () => canvasPusherRef.current.dispose(), []);
   // Anything that changes which shapes the canvas draws → full push (geometry travels), except
-  // mid-drag/stream where committed geometry re-serializing per tick would jank dense images —
+  // mid-drag/stream where committed geometry re-serializing per tick would jank dense images:
   // those downgrade to heartbeats and the release (drag ref clearing, commit) sends the full.
   useEffect(() => {
     const interacting =
@@ -455,7 +455,7 @@ export function AnnotateTab() {
   // mid-transition to another image.
   async function save(opts?: { interactive?: boolean }) {
     // interactive=false is the auto-flush on navigate/unmount: it can't show the Reload
-    // banner (the user is on another image), but a dropped save must never be silent —
+    // banner (the user is on another image), but a dropped save must never be silent:
     // it surfaces as a toast naming the image whose edits were lost.
     const interactive = opts?.interactive ?? true;
     const paths = loadedPathsRef.current;
@@ -496,7 +496,7 @@ export function AnnotateTab() {
     if (result.status === "conflict") {
       // Someone else (agent or another tab) wrote this file since we loaded it.
       // Never clobber their work; keep the canvas dirty. The banner belongs to the
-      // image on screen — after navigating away, the loss is reported as a toast.
+      // image on screen; after navigating away, the loss is reported as a toast.
       if (interactive && loadedPathsRef.current === paths) {
         setConflict(true);
         setIoError(
@@ -620,7 +620,7 @@ export function AnnotateTab() {
     const label = dataset.annotations_dir ? `${dataset.annotations_dir}/${stem}.json` : null;
     const key = `${imgPath}\0${label ?? ""}`;
 
-    // Already displaying this exact image + label target. Ignore — this is what
+    // Already displaying this exact image + label target. Ignore: this is what
     // stops an unrelated store change (a WS state snapshot, a mode/subject toggle,
     // any patchGui that swaps the dataset object) from re-reading disk and
     // discarding unsaved canvas edits.
@@ -712,7 +712,7 @@ export function AnnotateTab() {
 
   function commitPolygonAndTrack() {
     if (isLocked) return;
-    // Closing always ends a live stream — a double-click's leading clicks re-arm streaming,
+    // Closing always ends a live stream: a double-click's leading clicks re-arm streaming,
     // and a stale flag would immediately stream a fresh polygon from the next mouse move.
     streamingRef.current = false;
     if (commitCurrentPolygon()) incrementAnnotationsAdded(1);
@@ -790,7 +790,7 @@ export function AnnotateTab() {
         selectPoint(null);
       },
     },
-    // Held-key auto-repeat (~30/s) would queue a full image render per tick — one flip per press.
+    // Held-key auto-repeat (~30/s) would queue a full image render per tick: one flip per press.
     {
       keys: "arrowleft",
       action: (e) => {
@@ -872,7 +872,7 @@ export function AnnotateTab() {
     didDragRef.current = false;
     if (mode === "point") {
       // A press on an existing point selects it and picks it up; the whole mark is the handle.
-      // Missing every point does nothing here — the click (see onClick) places a new one, so a
+      // Missing every point does nothing here: the click (see onClick) places a new one, so a
       // single click both authors and a press-drag repositions without a mode or modifier.
       const hit = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
       if (hit !== null) {
@@ -921,7 +921,7 @@ export function AnnotateTab() {
       if (!poly) return;
       const sc = view.scale || 1;
       const vertThr = 8 / sc;
-      // Try vertex grab — on any ring of the selected annotation.
+      // Try vertex grab, on any ring of the selected annotation.
       for (let ri = 0; ri < poly.rings.length; ri++) {
         const ring = poly.rings[ri];
         for (let vi = 0; vi < ring.length; vi++) {
@@ -936,7 +936,7 @@ export function AnnotateTab() {
           }
         }
       }
-      // Try edge insert — the nearest edge across every ring; the new vertex joins that ring.
+      // Try edge insert, the nearest edge across every ring; the new vertex joins that ring.
       const edgeThr = EDGE_INSERT_THRESHOLD / sc;
       let bestRing = -1;
       let bestEdge = -1;
@@ -975,7 +975,7 @@ export function AnnotateTab() {
 
   // rAF-throttle mouse moves: coalesce a burst of pointer events into one update per frame.
   // The ref always holds the freshest closure, so a re-render between scheduling and the
-  // frame firing means the callback runs on current — never stale — state.
+  // frame firing means the callback runs on current, never stale, state.
   const pendingMoveRef = useRef<[number, number] | null>(null);
   const moveRafRef = useRef<number | null>(null);
   const processMoveRef = useRef<(ix: number, iy: number) => void>(() => {});
@@ -1011,7 +1011,7 @@ export function AnnotateTab() {
     }
 
     // Streaming (freehand): between the two clicks, drop a vertex each time the pointer has
-    // moved far enough — no button held.
+    // moved far enough, no button held.
     if (streamingRef.current && annotateUi.stream && mode === "polygon") {
       const pts = canvas.currentPolygon;
       const last = pts[pts.length - 1];
@@ -1136,7 +1136,7 @@ export function AnnotateTab() {
         return;
       }
       if (!requireSubject()) return;
-      // One click commits it — a point has nothing to drag out and no second vertex to wait for.
+      // One click commits it: a point has nothing to drag out and no second vertex to wait for.
       addPoint({
         x: Math.max(0, Math.min(canvas.imgWidth || ix, ix)),
         y: Math.max(0, Math.min(canvas.imgHeight || iy, iy)),
@@ -1154,11 +1154,11 @@ export function AnnotateTab() {
     }
 
     // Stream (freehand): click starts laying vertices, click again pauses (the polygon stays
-    // open — resume with another click), and double-click closes it, exactly like non-stream
+    // open, resume with another click), and double-click closes it, exactly like non-stream
     // drawing. The button is never held; right-click (onContextMenu) cancels outright.
     if (annotateUi.stream) {
       if (streamingRef.current) {
-        streamingRef.current = false; // pause — closing is double-click's job, same as always
+        streamingRef.current = false; // pause: closing is double-click's job, same as always
         return;
       }
       if (canvas.currentPolygon.length === 0 && canvas.selectedPolygonIdx !== null) {
@@ -1184,7 +1184,7 @@ export function AnnotateTab() {
       return;
     }
 
-    // Not currently drawing — clicking on any part of a polygon selects the whole annotation
+    // Not currently drawing: clicking on any part of a polygon selects the whole annotation
     for (let pi = 0; pi < canvas.polygons.length; pi++) {
       if (pointInRings([ix, iy], canvas.polygons[pi].rings)) {
         selectPolygon(pi);
@@ -1264,7 +1264,7 @@ export function AnnotateTab() {
       selectPolygon(null);
       return;
     }
-    // Box right-click delete — box mode only.
+    // Box right-click delete, box mode only.
     if (mode === "box") {
       for (let i = 0; i < canvas.boxes.length; i++) {
         const b = canvas.boxes[i];
@@ -1291,7 +1291,7 @@ export function AnnotateTab() {
   const scaleLineW = 1 / s;
   const boxStroke = Math.max(1, Math.min(2 + s * 0.5, 6)) * scaleLineW;
   const polyStroke = Math.max(1, Math.min(2.5 + s * 0.5, 7)) * scaleLineW;
-  // Both radii resolve in screen px, then compensate by 1/s exactly once — mixing the
+  // Both radii resolve in screen px, then compensate by 1/s exactly once: mixing the
   // spaces here once made selected handles grow 1/s² and blanket the frame at fit zoom.
   const vertScreen = Math.max(3, Math.min(VERTEX_HANDLE_RADIUS * (1.6 - s * 0.2), 12));
   const selScreen = Math.max(vertScreen + 1, Math.min(VERTEX_HANDLE_RADIUS * (2.2 - s * 0.2), 16));
@@ -1300,7 +1300,7 @@ export function AnnotateTab() {
   const labelSize = Math.max(8, Math.min(Math.round(9 * (0.6 + s * 0.4)), 18)) * scaleLineW;
   // A point's mark is fixed in screen px (resolved once, then 1/s like every other radius here): the
   // annotation asserts a location and no extent, so its glyph must not grow with the image and imply
-  // one. The ticks reach past the core to POINT_HIT_CANVAS — the mark IS the grab target.
+  // one. The ticks reach past the core to POINT_HIT_CANVAS: the mark is the grab target.
   const pointCoreR = 3.5 * scaleLineW;
   const pointSelCoreR = 5 * scaleLineW;
   const pointTickInner = 6.5 * scaleLineW;
@@ -1399,7 +1399,7 @@ export function AnnotateTab() {
             </>
           }
         >
-          {/* Committed shapes — memoized, cursor-independent (see AnnotationShapes) */}
+          {/* Committed shapes: memoized, cursor-independent (see AnnotationShapes) */}
           <AnnotationShapes
             boxes={canvas.boxes}
             polygons={canvas.polygons}
@@ -1650,7 +1650,7 @@ function AttributeEditors({
 }
 
 /** Hover-triggered legend, anchored lower-left of the canvas. Lists the dataset's subjects
- *  (outline colour = subject, GUI-local) plus the selected-shape blue — the same grammar as
+ *  (outline colour = subject, GUI-local) plus the selected-shape blue, the same grammar as
  *  Review. In box mode, an extra row explains the dashed boxes: a polygon's own read-only bounds,
  *  not a second editable annotation. */
 function AnnotateLegend() {
@@ -1714,7 +1714,7 @@ function AnnotateLegend() {
 
 // Per-shape memo: dragVertex/dragBox replace the whole polygons/boxes array on each RAF
 // tick (slice() keeps the unchanged elements' identity), so an unrelated shape's props are
-// referentially equal and it skips re-render — containing a one-shape drag to that shape.
+// referentially equal and it skips re-render, containing a one-shape drag to that shape.
 const BoxOverlay = memo(function BoxOverlay({
   box,
   stroke,
@@ -1789,7 +1789,7 @@ const PolygonOverlay = memo(function PolygonOverlay({
 }) {
   // Every ring of the annotation draws, in the instance's own stroke: the shape a reviewer confirms
   // is all of it, not the first contour. Selection/hover styling is shared, so touching any part
-  // lights up all of them — that shared highlight is what reads as "these are one object".
+  // lights up all of them: that shared highlight is what reads as "these are one object".
   const rings = polygon.rings.filter((ring) => ring.length >= 2);
   if (!rings.length) return null;
   const [x0, y0] = rings[0][0];
@@ -1812,7 +1812,7 @@ const PolygonOverlay = memo(function PolygonOverlay({
             />
           )),
         )}
-      {/* One label per annotation, not per ring — a two-part catkin is one catkin. */}
+      {/* One label per annotation, not per ring: a two-part shape is one annotation. */}
       <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={labelSize} />
     </>
   );
@@ -1820,7 +1820,7 @@ const PolygonOverlay = memo(function PolygonOverlay({
 
 /**
  * A placed point: four short ticks converging on the coordinate, plus a filled core in the
- * subject's colour with a white keyline. The ticks are the point of the mark — they say "this exact
+ * subject's colour with a white keyline. The ticks are the point of the mark: they say "this exact
  * location" the way an instrument's reticle does, and they are what separates a point from the two
  * things it could otherwise be mistaken for on this canvas: a very small box or a collapsed polygon
  * (both hollow outlines) and a polygon vertex handle (a bare filled dot). Selection uses the same
