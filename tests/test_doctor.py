@@ -1,4 +1,4 @@
-"""scripts/doctor.py — the data-state doctor catches the field-session bug family."""
+"""scripts/doctor.py: the data-state doctor catches the field-session bug family."""
 
 from __future__ import annotations
 
@@ -28,13 +28,13 @@ def _project(tmp_path: Path) -> Path:
     write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
     for name in ("IMG_A", "IMG_B", "IMG_C"):
         Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / f"{name}.JPG")
-    # A: confirmed negative (empty + status). B: empty WITHOUT confirmation (the IMG_0150 case).
+    # A: confirmed negative (empty + status). B: empty without confirmation (the IMG_0150 case).
     # C: has objects but status wrongly says negative (contradiction).
     json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
     json_io.write_annotations(ann / "IMG_B.json", [], 32, 32, keep_empty=True)
     json_io.write_annotations(ann / "IMG_C.json",
                               [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
-    # Scoped by subject/date — a confirmation belongs to the subject it was made in.
+    # Scoped by subject/date: a confirmation belongs to the subject it was made in.
     (state / "image_status.json").write_text(json.dumps(
         {status_bucket("catkin", "2026-02-11"): {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated",
                                                  "IMG_C.JPG": "negative"}}))
@@ -63,8 +63,8 @@ def test_doctor_flags_the_field_session_bug_family(tmp_path):
 
 
 def test_doctor_flags_incomplete_source_snapshot(tmp_path):
-    """K12 finding 1: a bespoke run's source snapshot that failed to capture a declared file is
-    now self-describing (``missing``/``snapshot_errors``) — doctor.py surfaces it rather than the
+    """A bespoke run's source snapshot that failed to capture a declared file is
+    self-describing (``missing``/``snapshot_errors``); doctor.py surfaces it rather than the
     manifest reading as complete."""
     root = tmp_path / "clean"
     (root / "images" / "d").mkdir(parents=True)
