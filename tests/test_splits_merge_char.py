@@ -1,10 +1,9 @@
-"""Characterization goldens for the splits merge (Merge B).
+"""Characterization goldens for the splits merge.
 
 Freezes ``make_splits`` stats and ``split_dataset`` on-disk tree/return against current code, so
-folding materialization into ``make_splits(materialize=...)`` is provably behavior-preserving.
-Before the merge these assert the two original tools; after it, ``make_splits(materialize=False)``
-reproduces the stats and ``make_splits(materialize=True)`` reproduces the tree plus
-``output_dir``/``structure``.
+folding materialization into ``make_splits(materialize=...)`` is provably behavior-preserving:
+``make_splits(materialize=False)`` reproduces the stats and ``make_splits(materialize=True)``
+reproduces the tree plus ``output_dir``/``structure``.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
 
-# 4 source prefixes (srcA..srcD) × 3 tiles × 1 GT box each — 4 leakage groups, uniform density.
+# 4 source prefixes (srcA..srcD) × 3 tiles × 1 GT box each: 4 leakage groups, uniform density.
 GOLDEN_MAKE_SPLITS = {
     "splits": {"train": 6, "val": 3, "test": 3},
     "foreground_annotations": {"train": 6, "val": 3, "test": 3},
@@ -70,7 +69,7 @@ def test_make_splits_stats_golden(tmp_path: Path):
     out = tmp_path / "m"
     result = make_splits(str(root), output_path=str(out), seed=1)
     result.pop("manifest_dir")
-    # dataset_hash is a content hash of the labels (R5) — present + stable, but not pinned in the golden.
+    # dataset_hash is a content hash of the labels, present and stable, but not pinned in the golden.
     dh = result.pop("dataset_hash")
     assert isinstance(dh, str) and len(dh) == 16
     assert result == GOLDEN_MAKE_SPLITS
