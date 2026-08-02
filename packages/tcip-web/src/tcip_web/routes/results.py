@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Literal, Optional
@@ -51,6 +53,44 @@ def _guard(*paths: str | None) -> None:
             raise HTTPException(403, str(exc)) from exc
 
 
+def _audit(project_root: str, tool: str, arguments: dict) -> None:
+    """Append a GUI results mutation to ``<project_root>/.tcip/audit.jsonl`` (best-effort).
+
+    Mirrors ``review._audit`` in shape; never fails the request.
+    """
+    if not project_root:
+        return
+    try:
+        from tcip_mcp.utils.atomic_io import append_jsonl
+
+        append_jsonl(
+            os.path.join(project_root, ".tcip", "audit.jsonl"),
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "tool": tool,
+                "source": "gui",
+                "arguments": arguments,
+                "status": "ok",
+            },
+        )
+    except Exception:
+        pass
+
+
+def _project_root_of_state_path(path: str) -> Optional[str]:
+    """The project root owning a ``<project_root>/.tcip/...`` path, or ``None`` if it isn't one.
+
+    Mirrors ``dataset_layout.dataset_root_of``, anchored on the ``.tcip`` marker directory itself
+    (the one shared platform state dir, see root CLAUDE.md) rather than a fixed depth under it.
+    """
+    parts = Path(path).parts
+    idxs = [k for k, p in enumerate(parts) if p == ".tcip"]
+    if not idxs:
+        return None
+    i = idxs[-1]
+    return str(Path(*parts[:i])) if i > 0 else None
+
+
 # ── Plant mapping ──────────────────────────────────────────────────────
 
 
@@ -73,6 +113,17 @@ def build_plant_mapping(payload: BuildMappingPayload) -> dict:
     )
     if payload.persist_path:
         plant_mapping.persist_mapping(mapping, Path(payload.persist_path))
+        root = _project_root_of_state_path(payload.persist_path)
+        if root:
+            _audit(
+                root,
+                "gui_build_plant_mapping",
+                {
+                    "persist_path": payload.persist_path,
+                    "images_root": payload.images_root,
+                    "n_dates": len(mapping),
+                },
+            )
 
     summary = {}
     for date, assignments in mapping.items():
