@@ -31,13 +31,13 @@ class AnnotationPayload(BaseModel):
 
     subject: str
     bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel
-    points: Optional[list[list[float]]] = None  # single-ring polygon vertices, pixel — a shape the
+    points: Optional[list[list[float]]] = None  # single-ring polygon vertices, pixel: a shape the
                                                  # canvas itself drew/edited by hand
     rings: Optional[list[list[list[float]]]] = None  # multi-ring polygon (a loaded, unedited
                                                        # occlusion-split instance_seg shape round-
-                                                       # tripping through save) — takes precedence
+                                                       # tripping through save): takes precedence
                                                        # over `points` when both are present
-    point: Optional[list[float]] = None         # [x, y], pixel — one placed prompt / keypoint.
+    point: Optional[list[float]] = None         # [x, y], pixel: one placed prompt / keypoint.
                                                  # Singular, deliberately distinct from `points`:
                                                  # a point and a one-vertex contour are not the
                                                  # same geometry.
@@ -58,7 +58,7 @@ class SavePayload(BaseModel):
     # Project root for the audit trail (optional; skipped if absent).
     project_root: Optional[str] = None
     # The label-file mtime token the client loaded. When present, a write is rejected (409) if the
-    # file changed underneath the client — a concurrent agent or second browser tab — so its edits
+    # file changed underneath the client (a concurrent agent or second browser tab), so its edits
     # aren't clobbered. Omit to skip the check.
     base_mtime: Optional[str] = None
     # GUI-set annotator identity (bare name, e.g. "zack"); stamped as created_by ("user:<name>").
@@ -83,7 +83,7 @@ def _guard_label_path(path: Optional[str]) -> None:
     """Reject a client-supplied label path that escapes the configured image roots.
 
     Label read/write paths are attacker-controlled, so an exposed deployment
-    (``TCIP_IMAGE_ROOTS`` set) must confine them exactly like image serving —
+    (``TCIP_IMAGE_ROOTS`` set) must confine them exactly like image serving,
     otherwise ``write_annotations`` is an arbitrary file write/delete primitive.
     """
     if not path:
@@ -99,7 +99,7 @@ def _mtime_token(path: Optional[str]) -> Optional[str]:
 
     A string, not an int: the ns value exceeds JavaScript's 2**53 exact-integer range, so a
     numeric token is silently rounded by the browser's JSON parse and every echo mismatches
-    (the 409-on-every-save bug). The client never inspects it — it only echoes it back.
+    (the 409-on-every-save bug). The client never inspects it: it only echoes it back.
     """
     if not path:
         return None
@@ -112,7 +112,7 @@ def _mtime_token(path: Optional[str]) -> Optional[str]:
 def _ann_dict(a: Annotation) -> dict:
     """Serialize an :class:`Annotation` for the canvas (pixel coords + provenance).
 
-    ``rings`` (not ``points``) for a polygon — a loaded GT annotation can be a multi-ring
+    ``rings`` (not ``points``) for a polygon: a loaded GT annotation can be a multi-ring
     occlusion-split instance_seg prediction accepted through Review, so the canvas always receives
     every ring rather than silently only the first. The canvas itself still only ever *draws* a
     single ring by hand (see ``AnnotationPayload.points`` below, the save side). ``point`` is the
@@ -139,7 +139,7 @@ def _audit_gui_write(payload: "SavePayload") -> None:
     """Append a GUI label-write to the project's audit log, mirroring @audited MCP tools.
 
     Best-effort and project-scoped (``<project_root>/.tcip/audit.jsonl``); a missing
-    project_root or any I/O error just skips the entry — never fails the save.
+    project_root or any I/O error just skips the entry, never fails the save.
     """
     if not payload.project_root:
         return
@@ -188,7 +188,7 @@ def save_labels(payload: SavePayload) -> dict:
 
     An empty annotation list is written as ``{"annotations": []}`` (``keep_empty=True``) rather than
     deleted, so clearing all annotations keeps the record instead of erasing it. That record is not a
-    negative on its own — it trains as one only once the breeder marks the image Complete
+    negative on its own: it trains as one only once the breeder marks the image Complete
     (``image_status.json``); until then it reads as unannotated (CLAUDE.md's negative invariant).
     """
     w, h = _image_dims(payload.image_path)
@@ -202,7 +202,7 @@ def save_labels(payload: SavePayload) -> dict:
             raise HTTPException(409, {"error": "label file changed since it was loaded"})
 
     # Human-authored GT: a round-tripped shape keeps its original created_by (the creator stays the
-    # creator through edits); only shapes with no provenance — new ones — are stamped to the current
+    # creator through edits); only shapes with no provenance (new ones) are stamped to the current
     # annotator. json_io persists all four provenance fields natively.
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -212,14 +212,14 @@ def save_labels(payload: SavePayload) -> dict:
         if ap.rings:
             geometry = Polygon(rings=[[(float(p[0]), float(p[1])) for p in ring] for ring in ap.rings])
         elif ap.points:
-            # The canvas draws one contour by hand — single-ring input. Polygon itself supports
+            # The canvas draws one contour by hand: single-ring input. Polygon itself supports
             # multiple rings (occlusion-split model output), but a freshly-drawn shape is always one.
             geometry = Polygon(rings=[[(float(p[0]), float(p[1])) for p in ap.points]])
         elif ap.bbox is not None:
             geometry = BBox(*ap.bbox)
         elif ap.point is not None:
             geometry = Point(float(ap.point[0]), float(ap.point[1]))
-        # accepted_* only ride along on round-tripped shapes (created_by present) — a new shape
+        # accepted_* only ride along on round-tripped shapes (created_by present): a new shape
         # claiming acceptance would mint review sign-off that never happened.
         round_tripped = bool(ap.created_by)
         return Annotation(
