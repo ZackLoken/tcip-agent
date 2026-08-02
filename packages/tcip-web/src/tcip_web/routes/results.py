@@ -182,6 +182,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         check_delivery_gate,
         reconcile_classifier_validity,
         reconcile_operating_point_validity,
+        reconcile_tile_size_validity,
     )
     from tcip_mcp.traits import TraitUnknownError, get_trait
 
@@ -206,6 +207,11 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     classifier_state, binding_note = bind_classifier_validity(
         classifier_recon["validated"], pred_dirs, pred_dirs, trait=payload.trait,
     )
+    # The tile scale the counts were produced at is the same count operating point's other gating
+    # dimension: a curve is built from per-image counts, and a tile edge with no persisted or
+    # caller-stated basis moves those counts as surely as an uncalibrated conf does. Only operative
+    # for buckets that actually ran tiled, so an untiled delivery is never refused over it.
+    tile_recon = reconcile_tile_size_validity(pred_dirs)
     validity = {
         "operating_point": recon["validated"],
         "classifier": classifier_state,
@@ -214,11 +220,13 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         "unvalidated_buckets": recon["unvalidated_buckets"],
         "missing_classifier_sidecars": classifier_recon["missing_sidecars"],
         "classifier_binding_note": binding_note,
+        "tile_size": tile_recon["validated"],
+        "unvalidated_tile_size_buckets": tile_recon["unvalidated_buckets"],
     }
-    gate = check_delivery_gate(
-        {"classifier": classifier_state, "operating_point": recon["validated"]},
-        acknowledge_unvalidated=payload.acknowledge_unvalidated,
-    )
+    flags = {"classifier": classifier_state, "operating_point": recon["validated"]}
+    if tile_recon["operative"]:
+        flags["tile_size"] = tile_recon["validated"]
+    gate = check_delivery_gate(flags, acknowledge_unvalidated=payload.acknowledge_unvalidated)
     plants = phenology.per_plant_phenology(
         mapping_raw, payload.predictions_by_date,
         positive_class_name=spec.positive_class_name, spec=spec,
@@ -228,16 +236,26 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
 
 
 def _refusal(measurement: _PhenologyMeasurement) -> str:
+    tile_note = ""
+    if measurement.validity["unvalidated_tile_size_buckets"]:
+        tile_note = (
+            f" Tiled bucket(s) {measurement.validity['unvalidated_tile_size_buckets']} carry a "
+            "tile_size with no persisted training geometry and no explicit caller override, so the "
+            "scale their counts were produced at has no basis. Re-export with an explicit tile_size, "
+            "or from a checkpoint whose training tile geometry was persisted."
+        )
     return (
         "phenology delivery requires a validated classifier and count operating point, reconciled from "
         "the prediction buckets' own sidecars (never a caller-asserted string). Unvalidated: "
         f"{list(measurement.gate.unvalidated)} (operating_point="
-        f"{measurement.validity['operating_point']!r}, classifier={measurement.validity['classifier']!r}; "
+        f"{measurement.validity['operating_point']!r}, classifier={measurement.validity['classifier']!r}, "
+        f"tile_size={measurement.validity['tile_size']!r}; "
         f"missing operating_point.json: {measurement.validity['missing_operating_point_sidecars']}; "
         f"unvalidated buckets: {measurement.validity['unvalidated_buckets']}; missing "
         f"classifier_operating_point.json: {measurement.validity['missing_classifier_sidecars']}). "
         "Produce the predictions via a calibrated export_predictions and calibrate the classifier "
         "via calibrate_classifier_operating_point."
+        + tile_note
         + (f" {measurement.validity['classifier_binding_note']}"
            if measurement.validity["classifier_binding_note"] else "")
     )
