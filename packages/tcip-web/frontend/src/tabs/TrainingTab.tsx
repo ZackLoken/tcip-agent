@@ -25,6 +25,7 @@ export function TrainingTab() {
   const projectRoot = useStore((s) => s.gui.dataset.project_root);
 
   const [runs, setRuns] = useState<TrainingRunSummary[]>([]);
+  const [runsError, setRunsError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
   const streamRef = useRef<(() => void) | null>(null);
@@ -33,8 +34,9 @@ export function TrainingTab() {
     try {
       const r = await trainingApi.listRuns();
       setRuns(r.runs ?? []);
-    } catch {
-      /* ignore */
+      setRunsError(null);
+    } catch (e) {
+      setRunsError(`Could not load training runs: ${e instanceof Error ? e.message : String(e)}`);
     }
   }, []);
 
@@ -100,10 +102,20 @@ export function TrainingTab() {
               ↻&nbsp;&nbsp;Refresh
             </button>
           </div>
-          {runs.length === 0 ? (
-            <div className="text-[11px] text-tcip-muted">
-              No runs yet. The agent configures and launches training.
+          {runsError && (
+            <div className="text-[11px] text-tcip-fp mb-2">
+              {runsError}{" "}
+              <button className="tcip-btn text-[11px] ml-1" onClick={refreshRuns}>
+                Retry
+              </button>
             </div>
+          )}
+          {runs.length === 0 ? (
+            !runsError && (
+              <div className="text-[11px] text-tcip-muted">
+                No runs yet. The agent configures and launches training.
+              </div>
+            )
           ) : (
             <ul className="space-y-1">
               {runs.map((r) => (
