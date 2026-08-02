@@ -1,4 +1,4 @@
-"""Phase 2.3 — training↔experiment↔registry lifecycle wiring (registration from an
+"""Training↔experiment↔registry lifecycle wiring (registration from an
 experiment links final metrics + a back-reference + lineage)."""
 
 import json
