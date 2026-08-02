@@ -1,4 +1,4 @@
-"""FastAPI application — REST API for MCP tools + WebSocket for GUI state sync.
+"""FastAPI application: REST API for MCP tools + WebSocket for GUI state sync.
 
 This backend is the single source of truth for live GUI state across the
 TCIP tabs (Annotate / Review / Training / Tuning / Inference / Results).
@@ -35,14 +35,14 @@ async def _lifespan(_app: FastAPI):
     """Rehydrate persisted job/sweep/run registries so GUI history survives a restart.
 
     Their worker threads don't survive, so rehydrated non-terminal entries surface as
-    'interrupted' — a record, not a resumable job (see ``jobstore``).
+    'interrupted' (a record, not a resumable job; see ``jobstore``).
     """
     try:
         from tcip_web.routes import inference, tuning
 
         inference.rehydrate()
         tuning.rehydrate()
-        # Training runs aren't rehydrated from a state file — the training list route
+        # Training runs aren't rehydrated from a state file: the training list route
         # reconstructs past runs on demand from the immutable .tcip/experiments/ records.
     except Exception:  # pragma: no cover - rehydrate is best-effort
         logger.exception("job registry rehydrate failed")
@@ -69,7 +69,7 @@ async def _lifespan(_app: FastAPI):
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 
-# CORS is not enabled by default — browser is expected to hit the same origin
+# CORS is not enabled by default: browser is expected to hit the same origin
 # via the Vite dev proxy. If we ever serve the frontend elsewhere, add
 # fastapi.middleware.cors.CORSMiddleware here.
 
@@ -171,7 +171,7 @@ async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
 def _find_static_dir() -> Path:
     """Locate the built frontend across install layouts.
 
-    Prefers a copy packaged inside the installed package (``tcip_web/static/`` — how a
+    Prefers a copy packaged inside the installed package (``tcip_web/static/``, how a
     wheel should ship it) and falls back to the src-layout checkout
     (``packages/tcip-web/static/``). Returns the src-layout path if neither is built yet,
     so ``/`` can render build instructions rather than 404.
@@ -248,7 +248,7 @@ async def post_panel_event(panel: str, event: PanelEvent):
     }
     _recent_events[panel].append(payload)
     # Agent focus events also update the advisory GuiState slice, so gui.json (what the
-    # agent reads back via view_gui_state) reflects where it pointed the human — the
+    # agent reads back via view_gui_state) reflects where it pointed the human: the
     # browser applies the event locally and never syncs these fields back itself.
     if event.event_type == "review_focus":
         review = _gui_store.state.review.model_copy(
