@@ -26,7 +26,7 @@ requires_real_dji_data = pytest.mark.skipif(
 @pytest.fixture
 def grouped_dir(tmp_path: Path) -> Path:
     """Two sibling single-band files sharing a manifest, plus one ordinary plain image, plus one
-    unclaimed loose raster — the shape every enumeration call site needs to fold and pass through
+    unclaimed loose raster: the shape every enumeration call site needs to fold and pass through
     correctly at once."""
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
@@ -100,10 +100,10 @@ def test_list_logical_images_on_missing_dir_returns_empty(tmp_path):
 def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_standalone_file(
     tmp_path,
 ):
-    """Stage-6 review finding 5: a raw standalone file whose own stem collides with a manifest's
-    canonical stem used to vanish silently (the manifest entry won, the standalone file was simply
-    never added) — every listing (training, splits, review, gallery) then lost it with no error.
-    This must refuse loudly instead."""
+    """A raw standalone file whose own stem collides with a manifest's canonical stem must refuse
+    loudly, not vanish silently with the manifest entry winning while the standalone file simply
+    never gets added; every listing (training, splits, review, gallery) would otherwise lose it
+    with no error."""
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, list_logical_images
 
@@ -124,7 +124,7 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
 
 def test_list_logical_images_does_not_raise_when_stems_are_all_distinct(grouped_dir):
     """A rail must admit valid work: the ordinary (non-colliding) grouped_dir fixture used
-    throughout this file must keep resolving cleanly — the new refusal is scoped to a genuine
+    throughout this file must keep resolving cleanly; the new refusal is scoped to a genuine
     collision, not triggered by every group's mere presence."""
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
@@ -148,8 +148,8 @@ def test_stem_of_a_plain_path_and_a_band_group(grouped_dir):
 
 
 def test_probe_channels_of_a_plain_tif_does_not_decode_pixels(grouped_dir, monkeypatch):
-    """Stage-6 review finding 6's groundwork: probe_channels reads a TIFF's header-only series
-    shape when it can, never paying for a full pixel decode just to learn the band count."""
+    """probe_channels reads a TIFF's header-only series shape when it can, never paying for a
+    full pixel decode just to learn the band count."""
     import tifffile as _tifffile
 
     from tcip_mcp.pipelines.derivations import probe_channels
@@ -202,7 +202,7 @@ def test_probe_channels_of_a_band_group_sums_each_siblings_own_count(grouped_dir
     from tcip_mcp.pipelines.image_utils import resolve_image_source
 
     ref = resolve_image_source(grouped_dir, "cap")
-    assert probe_channels(ref) == 2  # 1 band each, summed — never assumed
+    assert probe_channels(ref) == 2  # 1 band each, summed (never assumed)
 
 
 # ── BandGroupRef-accepting decode overloads (real DJI data) ────────────────────────────
