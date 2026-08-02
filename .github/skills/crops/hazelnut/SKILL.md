@@ -90,7 +90,7 @@ regions. Defer the elongated-fraction / crossing math to the `phenology` skill.
 | ~late Aug-Sept (into Oct) | Ripening, husk browning, harvest | none; triggers destructive nut/kernel/cluster measurements |
 | ~Oct-Nov | Senescence & dormancy | none; cankers/galls most detectable on bare stems |
 
-The hazelnut vocabulary has **no** leaf-out, ripening/harvest, or senescence date trait (those
+The hazelnut vocabulary has no leaf-out, ripening/harvest, or senescence date trait (those
 belong to other crops). Do not populate a phenology trait that is not in the hazelnut set.
 
 ## Key structures in imagery
