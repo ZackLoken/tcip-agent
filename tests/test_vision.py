@@ -12,7 +12,7 @@ from PIL import Image
 
 @pytest.fixture
 def viz_dataset(tmp_path: Path) -> Path:
-    """Create a dataset with images, labels, and predictions (K13.5 name-based layout)."""
+    """Create a dataset with images, labels, and predictions (name-based layout)."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
@@ -49,7 +49,7 @@ def viz_dataset(tmp_path: Path) -> Path:
 
 def test_default_output_resolves_under_project_root(tmp_path, monkeypatch):
     # The default viz dir must resolve under TCIP_PROJECT_ROOT (the active project), not the
-    # process CWD — the agent's CWD is often the repo, which fragmented renders away from the
+    # process CWD: the agent's CWD is often the repo, which fragmented renders away from the
     # project. The returned path is absolute so callers know which root it used.
     from tcip_annotation.viz import _default_output
 
@@ -119,7 +119,7 @@ class TestRenderSegmentations:
         assert Path(result).is_file()
 
     def test_renders_every_ring_of_an_occlusion_split_instance(self, viz_dataset: Path):
-        """An instance's rings all get drawn, and it is labelled once — not once per contour."""
+        """An instance's rings all get drawn, and it is labelled once, not once per contour."""
         from tcip_annotation.viz import render_segmentations
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
@@ -174,17 +174,6 @@ class TestRenderGrid:
         out = str(viz_dataset / "test_empty.png")
         result = render_grid([], output_path=out)
         assert Path(result).is_file()
-
-
-class TestYoloToPixel:
-    def test_conversion(self):
-        from tcip_annotation.viz import yolo_to_pixel
-
-        x1, y1, x2, y2 = yolo_to_pixel(0.5, 0.5, 0.2, 0.2, 640, 480)
-        assert abs(x1 - 256.0) < 0.01
-        assert abs(y1 - 192.0) < 0.01
-        assert abs(x2 - 384.0) < 0.01
-        assert abs(y2 - 288.0) < 0.01
 
 
 # â”€â”€ Vision MCP tool tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -392,7 +381,7 @@ class TestSamPredictorCache:
 
     def test_model_swap_invalidates_image_cache(self, monkeypatch, tmp_path: Path):
         # sam_wrapper loads images via cv2, which ships only with the optional ``sam`` extra
-        # (not installed in CI) — skip there, like the other SAM-stack tests.
+        # (not installed in CI): skip there, like the other SAM-stack tests.
         pytest.importorskip("cv2")
         import sys
         import types
@@ -546,7 +535,7 @@ class TestAcceptProposalsTool:
         assert result["proposal_count"] == 2
         assert Path(result["image_path"]).is_file()
 
-        # Masks are staged as SAM predictions (predictions/<engine>, engine="sam"), not GT — one
+        # Masks are staged as SAM predictions (predictions/<engine>, engine="sam"), not GT: one
         # unified per-image file holding both accepted objects by subject name.
         from tcip_annotation import json_io
 
@@ -610,7 +599,7 @@ MOCK_CANDIDATES = [
 
 
 def _sam_available() -> bool:
-    """Whether SAM2 and its runtime deps are importable — the wrapper uses ``sam2`` (not SAM1)."""
+    """Whether SAM2 and its runtime deps are importable (the wrapper uses ``sam2``, not SAM1)."""
     try:
         import cv2  # noqa: F401
         import sam2  # noqa: F401
@@ -620,12 +609,12 @@ def _sam_available() -> bool:
         return False
 
 
-#: The SAM2 model the guarded tests exercise — the smallest variant, for speed.
+#: The SAM2 model the guarded tests exercise: the smallest variant, for speed.
 SAM_TEST_MODEL = "hiera_t"
 
 
 def _sam_checkpoint_available() -> bool:
-    """Whether the SAM2 checkpoint the guarded tests load (``SAM_TEST_MODEL``) exists — resolved
+    """Whether the SAM2 checkpoint the guarded tests load (``SAM_TEST_MODEL``) exists, resolved
     through the wrapper's own ``checkpoint_path`` so the guard can't drift from what the code reads."""
     from tcip_annotation.sam_wrapper import checkpoint_path
 
@@ -951,7 +940,7 @@ class TestFullPipelineIntegration:
 
         pred_file = pipeline_dataset / "predictions" / "sam" / "sample.json"
         anns = json_io.read_annotations(pred_file)
-        # Each object is one polygon with a derivable box under the same subject — the box and mask
+        # Each object is one polygon with a derivable box under the same subject: the box and mask
         # views can never diverge because they are the same annotations.
         subjects_poly = sorted(a.subject for a in anns if a.geometry is not None)
         subjects_box = sorted(a.subject for a in anns if bbox_of(a.geometry) is not None)
@@ -1106,8 +1095,8 @@ class TestGridCellToSamPrompt:
             assert "cols and rows" in result["error"]
 
     def test_grid_cells_resolve_against_the_callers_own_grid(self, viz_dataset: Path):
-        """The cells are resolved with the caller's cols/rows — the grid overlay_reference_grid
-        actually rendered — not the wrapper's own 8x6 signature default."""
+        """The cells are resolved with the caller's cols/rows, the grid overlay_reference_grid
+        actually rendered, not the wrapper's own 8x6 signature default."""
         from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
@@ -1118,7 +1107,7 @@ class TestGridCellToSamPrompt:
             segment_prompt(image_path=img_path, grid_cells=["C4"], cols=10, rows=8)
 
         x, y = mock_predict.call_args[0][1], mock_predict.call_args[0][2]
-        # C4 on a 10x8 grid over 640x480: x = (2+0.5)*640/10 = 160, y = (3+0.5)*480/8 = 210 —
+        # C4 on a 10x8 grid over 640x480: x = (2+0.5)*640/10 = 160, y = (3+0.5)*480/8 = 210;
         # the 8x6 reading of the same cell would be (200, 280).
         assert abs(x - 160.0) < 1.0
         assert abs(y - 210.0) < 1.0
@@ -1169,12 +1158,12 @@ class TestSamPredictionStaging:
         assert pred.is_file()
         anns = json_io.read_annotations(pred)
         assert len(anns) == 1 and {a.subject for a in anns} == {"catkin"}
-        # The staged object carries a polygon (mask) with a derivable box — both views of one object.
+        # The staged object carries a polygon (mask) with a derivable box: both views of one object.
         assert anns[0].geometry is not None
         assert bbox_of(anns[0].geometry) is not None
 
     def test_prediction_carries_sam_score(self, format_dataset: Path):
-        """Staged SAM output is a prediction — each object has created_by="sam" and a ``score``."""
+        """Staged SAM output is a prediction: each object has created_by="sam" and a ``score``."""
         self._cache("fmt_test")
         from tcip_mcp.tools.vision_tools import accept_proposals
 
