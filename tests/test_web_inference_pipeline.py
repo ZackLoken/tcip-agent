@@ -1,5 +1,5 @@
-"""Phase 2.1c — the web inference job runs through the tcip pipeline GenericPredictor
-(one detector code path; K21 removed the second, ultralytics+SAHI-specific one)."""
+"""The web inference job runs through the tcip pipeline GenericPredictor, the only detector
+code path; there is no separate ultralytics+SAHI-specific one."""
 
 import pytest
 
@@ -84,9 +84,9 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
 
 
 def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch):
-    """K3/Commit-1: the GUI door reads subject/attribute off predictor.config["data"] the same way
-    run_inference already does, and decodes predictions through the resolved id_map (never a raw
-    index string) — the case stage-6 review flagged as untested (FakePredictor had no .config)."""
+    """The GUI door reads subject/attribute off predictor.config["data"] the same way
+    run_inference already does, and decodes predictions through the resolved id_map: never a raw
+    index string."""
     pytest.importorskip("fastapi")
     from PIL import Image
 
@@ -101,7 +101,7 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
 
     class FakePredictor:
         # A single-subject detector's config, the same shape run_inference reads
-        # (predictor.config["data"]["subject"]) — no classes.json needed, _resolve_registry_id_map
+        # (predictor.config["data"]["subject"]), no classes.json needed, _resolve_registry_id_map
         # synthesizes {subject: 0} for a plain single-class run.
         config = {"data": {"subject": "catkin"}}
 
@@ -130,11 +130,9 @@ def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch)
 
 
 def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkeypatch):
-    """K25/K13.5-2c stage-6 review round 1, MUST-FIX 3: the GUI inference worker used to re-derive
-    its id_map locally from the live registry, independently of run_inference's own resolution —
-    a second implementation whose own comment falsely claimed parity once run_inference started
-    preferring a training-recorded map. Both doors now call the SAME
-    tcip_mcp.tools.inference_tools.resolve_decode_id_map — this proves the GUI door genuinely
+    """The GUI inference worker must not re-derive its id_map locally from the live registry,
+    independently of run_inference's own resolution. Both doors call the same
+    tcip_mcp.tools.inference_tools.resolve_decode_id_map: this proves the GUI door genuinely
     prefers a recorded map too, not just falls through to live-registry derivation."""
     pytest.importorskip("fastapi")
     from PIL import Image
@@ -149,7 +147,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     ckpt.write_bytes(b"stub")
 
     class FakePredictor:
-        # A recorded id_map naming class 1 "elongated" — deliberately NOT what a live registry at
+        # A recorded id_map naming class 1 "elongated", deliberately not what a live registry at
         # images_dir would derive (there is no classes.json under images_dir at all), so a pass
         # here can only mean the recorded map was used, never a registry fallback.
         config = {"data": {"subject": "catkin", "attribute": "elongation",
@@ -182,11 +180,11 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
 
 
 def test_web_worker_forces_untiled_for_instance_seg(tmp_path, monkeypatch):
-    """Round-2 stage-6 finding: an instance_seg checkpoint launched with the GUI's tile
-    checkbox checked used to crash with a raw traceback (tiled inference can't carry masks
-    through the cross-tile merge). The GUI's checkbox has no "unset" state, so — unlike the
-    MCP door's run_inference, which can refuse an explicit tile=True — this door always
-    forces untiled for instance_seg instead, with a warning, rather than ever refusing."""
+    """An instance_seg checkpoint launched with the GUI's tile checkbox checked can crash with a
+    raw traceback: tiled inference can't carry masks through the cross-tile merge. The GUI's
+    checkbox has no "unset" state, so (unlike the MCP door's run_inference, which can refuse an
+    explicit tile=True) this door always forces untiled for instance_seg instead, with a
+    warning, rather than ever refusing."""
     pytest.importorskip("fastapi")
     from PIL import Image
 
@@ -223,7 +221,7 @@ def test_web_worker_forces_untiled_for_instance_seg(tmp_path, monkeypatch):
     )
     _worker(job)
 
-    assert job.status == "completed"        # no crash, unlike before the fix
+    assert job.status == "completed"        # no crash
     assert captured["tile"] is False         # masks survive: forced untiled regardless of the checkbox
     assert job.tile is False
     assert job.tile_source == "default"      # platform, not the breeder, decided this run's tiling
