@@ -1,4 +1,4 @@
-"""Tests for tcip_web.state.StateStore — versioning, flush targeting, rehydrate."""
+"""Tests for tcip_web.state.StateStore: versioning, flush targeting, rehydrate."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def test_version_increments_on_mutate() -> None:
 def test_flush_targets_current_project_not_stale(tmp_path: Path) -> None:
     # Regression: the debounced save used to capture the destination dir at schedule
     # time, so a project switch during the debounce window wrote the new project's
-    # snapshot into the OLD project's gui.json. The flush must resolve the dir from
+    # snapshot into the old project's gui.json. The flush must resolve the dir from
     # the *current* state.
     store = StateStore()
     proj_a = tmp_path / "A"
