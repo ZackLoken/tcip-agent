@@ -1,4 +1,4 @@
-"""G5b trust-boundary hardening: Host allow-list, WS Origin check, insecure-bind refusal."""
+"""Trust-boundary hardening: Host allow-list, WS Origin check, insecure-bind refusal."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def test_trusted_host_rejects_foreign_host(client: TestClient) -> None:
 
 def test_inference_launch_confines_checkpoint_to_image_roots(client, tmp_path, monkeypatch) -> None:
     # A locked-down server (TCIP_IMAGE_ROOTS set) must reject a checkpoint outside the allowed
-    # roots BEFORE it reaches torch.load(weights_only=False) — an arbitrary-pickle sink.
+    # roots before it reaches torch.load(weights_only=False), an arbitrary-pickle sink.
     allowed = tmp_path / "allowed"
     allowed.mkdir()
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
@@ -47,7 +47,7 @@ def test_inference_launch_unconfined_when_no_image_roots(client, tmp_path, monke
 
 
 def test_ws_state_allows_missing_origin(client: TestClient) -> None:
-    # A non-browser client sends no Origin — allowed, and gets the initial snapshot.
+    # A non-browser client sends no Origin: allowed, and gets the initial snapshot.
     with client.websocket_connect("/ws/state") as ws:
         assert ws.receive_json()["type"] == "state_snapshot"
 
@@ -110,7 +110,7 @@ def test_ws_inference_stream_rejects_cross_site_origin(client: TestClient) -> No
 
 
 def test_ws_training_stream_rejects_cross_site_origin(client: TestClient) -> None:
-    # The training metrics stream takes a project_root and tails metrics.jsonl — a
+    # The training metrics stream takes a project_root and tails metrics.jsonl: a
     # path-shaped cross-site file read if left ungated.
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(
@@ -123,8 +123,8 @@ def test_ws_training_stream_rejects_cross_site_origin(client: TestClient) -> Non
 def test_ws_training_stream_confines_project_root_to_allowed_roots(
     client: TestClient, tmp_path, monkeypatch
 ) -> None:
-    # K19: training_stream_ws took project_root as a query param and passed it straight to
-    # _metrics_path with no confinement, unlike get_run_metrics' identical parameter.
+    # training_stream_ws takes project_root as a query param and passes it straight to
+    # _metrics_path; it must be confined the same way get_run_metrics' identical parameter is.
     allowed = tmp_path / "allowed"
     allowed.mkdir()
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
