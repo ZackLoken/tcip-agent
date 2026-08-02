@@ -1,6 +1,6 @@
 /**
  * Drive the Review tab to a model's predictions on a specific frame/detection in response to
- * the agent's `review_focus` event. The Review analog of `applyAnnotateFocus`: uses LOCAL store
+ * the agent's `review_focus` event. The Review analog of `applyAnnotateFocus`: uses local store
  * setters, never the passive state snapshot (which keeps `current_image_index` / review filters
  * browser-local so a re-broadcast can't yank the user mid-review). A `review_focus` event is a
  * deliberate command, so applying it locally is correct and preserves that invariant.
@@ -61,7 +61,7 @@ export async function applyReviewFocus(d: ReviewFocusData): Promise<void> {
   if (typeof d.iou_threshold === "number") review.iou_threshold = d.iou_threshold;
   if (typeof d.conf_threshold === "number") review.conf_threshold = d.conf_threshold;
   useStore.getState().patchGui({ review });
-  // The detection index goes through a one-shot the reload effect honors once — writing
+  // The detection index goes through a one-shot the reload effect honors once: writing
   // gui.review.detection_idx directly would be clobbered by the reload's "jump to first
   // unreviewed" when the frame/filters change (which this focus always causes).
   if (typeof d.detection_idx === "number") useStore.getState().setReviewFocusIdx(d.detection_idx);
