@@ -503,10 +503,24 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
     The single implementation of "match, count, and take the per-image count bias", the class-pooled
     curve entry and every per-class entry beside it both come from here, so a per-class bias can
     never be measured by a second matcher that drifts from the pooled one.
+
+    Two scopes of the same per-image bias travel side by side. The whole-reference statistics
+    (``count_bias_mean``/``count_bias_std`` over ``n_images``) are what a conf picker compares across
+    the grid: ``n_images`` is the same at every conf, so ``count_bias_mean`` is the reference's total
+    signed miscount up to one fixed constant and minimizing it minimizes that total. The
+    present-scoped statistics (``count_bias_mean_present``/``count_bias_std_present``
+    over ``n_present``) are what an equivalence gate compares against a relative tolerance: an image
+    with no GT and no surviving detection contributes a certain zero and says nothing about how far
+    off the count is on an image that carries the thing being counted. Including it divides the
+    measured mean bias by exactly ``n_images / n_present`` and counts those empty images in the
+    equivalence test's own sample size, while the tolerance the result is compared against is scaled
+    by a density measured over present images only (:func:`mean_of_present_counts`). The two sides
+    then describe different populations, and a systematic miscount on the images that carry
+    something reads as that fraction of itself.
     """
     tp = fp = fn = 0
     biases: list[int] = []
-    n_present = 0
+    present_biases: list[int] = []
     for rec in per_image:
         gt = [a for a in rec.get("gt", []) if class_id is None or a["category_id"] == class_id]
         dt = sorted(
@@ -520,7 +534,7 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
         fn += n
         biases.append(f - n)
         if gt or dt:
-            n_present += 1
+            present_biases.append(f - n)
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
@@ -537,9 +551,13 @@ def _count_stats_at_conf(per_image: list[dict], *, tolerance: float, conf: float
         "count_bias_std": float(np.std(biases, ddof=1)) if len(biases) > 1 else 0.0,
         "n_images": len(biases),
         # Images that actually carried this class (gt or a surviving dt), distinct from n_images
-        # (the whole holdout) because a class scarce in the reference gets its SE denominator from
-        # how much evidence there really is, not diluted by images that say nothing about it.
-        "n_present": n_present,
+        # (the whole holdout) because a scope scarce in the reference gets the denominator of both
+        # its bias and its standard error from how much evidence there really is, not diluted by
+        # images that say nothing about it.
+        "n_present": len(present_biases),
+        "count_bias_mean_present": float(np.mean(present_biases)) if present_biases else 0.0,
+        "count_bias_std_present": (float(np.std(present_biases, ddof=1))
+                                   if len(present_biases) > 1 else 0.0),
     }
 
 
@@ -569,9 +587,10 @@ def sweep_operating_point(per_image: list[dict], *, tolerance: float, class_id: 
     evaluates exactly those points, the exact-conf holdout evaluation (no nearest-neighbor snap)
     relies on this. Returns ``{tolerance, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
     count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images, n_present,
-    per_class}]}``
+    count_bias_mean_present, count_bias_std_present, per_class}]}``
 , the dispersion + reference-sufficiency terms are per-conf statistics across ``per_image`` that
-    the operating-point gate reads, never recomputes.
+    the operating-point gate reads, never recomputes. See :func:`_count_stats_at_conf` for why the
+    bias travels in two scopes and which consumer reads which.
 
     ``per_class`` carries the same statistics measured within each class the records carry,
     keyed by ``str(category_id)`` (string keys so an in-memory sweep and one round-tripped through
