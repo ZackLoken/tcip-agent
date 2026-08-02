@@ -13,6 +13,7 @@ from tcip_annotation import (
     ReviewContext,
     ReviewDetection,
     ReviewEngine,
+    compute_classified_trait_matches,
     compute_matches,
 )
 
@@ -289,6 +290,83 @@ def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -
     assert engine.backup_original_labels(labels_dir) == 1
     assert (labels_dir / ".original" / "IMG_0002.json").read_text() == second
     assert backup.read_text() == orig
+
+
+def test_plain_compute_matches_can_never_produce_a_tp_for_a_classified_trait() -> None:
+    # The reproduced defect: an attribute-scoped detector's predictions carry the classified VALUE
+    # on `subject` (a joint detect-and-classify class space, class_registry.assign_class_ids), while
+    # GT keeps the real object type on `subject` and the confirmed value in `attributes[attribute]`.
+    # Plain compute_matches groups strictly by identical `subject`, so these two vocabularies never
+    # intersect -- a correctly classified instance could never register as a match, regardless of
+    # model quality.
+    gt = [Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200),
+                     attributes={"elongation": "elongated"})]
+    preds = [Annotation(subject="elongated", geometry=BBox(102, 102, 198, 198), score=0.9)]
+    matches = compute_matches(gt, preds, iou_threshold=0.5, conf_threshold=0.25)
+    assert matches["tp"] == []
+    assert len(matches["fn"]) == 1 and len(matches["fp"]) == 1  # never even compared
+
+
+def test_compute_classified_trait_matches_produces_a_tp_for_a_correct_classification() -> None:
+    gt = [Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200),
+                     attributes={"elongation": "elongated"})]
+    preds = [Annotation(subject="elongated", geometry=BBox(102, 102, 198, 198), score=0.9)]
+    matches = compute_classified_trait_matches(
+        gt, preds, subject="catkin", attribute="elongation", iou_threshold=0.5, conf_threshold=0.25,
+    )
+    assert len(matches["tp"]) == 1
+    assert matches["fp"] == [] and matches["fn"] == []
+    tp = matches["tp"][0]
+    assert tp["class_name"] == "elongated"
+    assert tp["gt_idx"] == 0 and tp["pred_idx"] == 0  # indexes the caller's real, unprojected lists
+
+
+def test_compute_classified_trait_matches_a_misclassification_is_an_fp_and_fn_pair() -> None:
+    # The model found the object (geometry matches) but called it the wrong value: this decomposes
+    # into an FN for the true confirmed value and an FP for the wrongly predicted one, exactly the
+    # existing accept/reject vocabulary a detection review already uses, no new verdict shape needed.
+    gt = [Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200),
+                     attributes={"elongation": "dormant"})]
+    preds = [Annotation(subject="elongated", geometry=BBox(102, 102, 198, 198), score=0.9)]
+    matches = compute_classified_trait_matches(
+        gt, preds, subject="catkin", attribute="elongation", iou_threshold=0.5, conf_threshold=0.25,
+    )
+    assert matches["tp"] == []
+    assert [m["class_name"] for m in matches["fn"]] == ["dormant"]
+    assert [m["class_name"] for m in matches["fp"]] == ["elongated"]
+
+
+def test_compute_classified_trait_matches_excludes_unassessed_and_out_of_scope_instances() -> None:
+    gt = [
+        # never assessed for `elongation` yet: a soft, expected gap, not a confirmed negative
+        Annotation(subject="catkin", geometry=BBox(100, 100, 200, 200)),
+        # a different, enabling subject sharing the same labels dir -- must not enter the match pool
+        Annotation(subject="bush", geometry=BBox(300, 300, 400, 400), attributes={"elongation": "elongated"}),
+    ]
+    preds = [Annotation(subject="elongated", geometry=BBox(102, 102, 198, 198), score=0.9)]
+    matches = compute_classified_trait_matches(
+        gt, preds, subject="catkin", attribute="elongation", iou_threshold=0.5, conf_threshold=0.25,
+    )
+    assert matches["tp"] == [] and matches["fn"] == []  # neither GT instance was ever a real match
+    assert len(matches["fp"]) == 1  # the prediction itself is still walkable, nothing confirms it
+
+
+def test_check_image_review_complete_ignores_a_coverage_only_sweep_entry(
+    engine: ReviewEngine, ctx: ReviewContext
+) -> None:
+    # "swept this image, found nothing more" (no gt_idx/pred_idx, no edited geometry) must not
+    # inflate the reviewed count: it doesn't correspond to any of `matches`' TP/FP/FN entries, so
+    # counting it could flip an image with real unreviewed detections to "completed" early.
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
+    sweep_det = ReviewDetection(det_type="sweep", class_name="", conf=None, iou=None,
+                                gt_idx=None, pred_idx=None, bbox=(0, 0, ctx.img_width, ctx.img_height))
+    engine.record_detection_action(sweep_det, ctx, action="swept")
+    assert engine.check_image_review_complete(ctx.img_name, matches) is False
+
+    dets = engine.build_detection_list(ctx, matches)
+    for det in dets:
+        engine.record_detection_action(det, ctx, action="accepted")
+    assert engine.check_image_review_complete(ctx.img_name, matches) is True
 
 
 def test_save_gt_writes_merged_file(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
