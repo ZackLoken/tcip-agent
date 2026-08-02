@@ -76,7 +76,7 @@ def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path):
 
     regs = read_datasets(src)
     same = [r for r in regs if r["id"] == reg["id"]]
-    assert len(same) == 1  # one entry for the id — the move updated the path, not duplicated
+    assert len(same) == 1  # one entry for the id: the move updated the path, not duplicated
     assert same[0]["path"] == str(moved)
     assert same[0]["fingerprint"] == reg["fingerprint"]  # unchanged content -> same fingerprint
 
@@ -104,7 +104,7 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path):
 
     init_project(str(tmp_path))
     status = inspect_project(str(tmp_path))
-    assert status["recent_activity"] == {}  # no history yet — genuinely empty, not corrupt
+    assert status["recent_activity"] == {}  # no history yet: genuinely empty, not corrupt
 
     claude_reports(str(tmp_path), category="missing_tool", detail="a")
     status = inspect_project(str(tmp_path))
@@ -119,7 +119,7 @@ def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path):
 
     status = inspect_project(str(tmp_path))
     assert "status_unavailable" in status["recent_activity"]
-    # Live counts must stay unaffected by a corrupt status file — different store, different rail.
+    # Live counts must stay unaffected by a corrupt status file: different store, different rail.
     assert status["initialized"] is True
 
 
@@ -163,7 +163,7 @@ def test_export_import_roundtrip(tmp_path: Path):
         str(labels / "img_000.json"),
         [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 64, 64,
     )
-    # The class registry decodes the labels' names — a self-contained bundle must carry it, or the
+    # The class registry decodes the labels' names: a self-contained bundle must carry it, or the
     # archived annotations are unreadable on the other end. One nested classes.json at the root.
     class_registry.write_registry(
         src / "classes.json",
@@ -189,7 +189,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     # The registry survived, so the restored labels are still decodable.
     restored = class_registry.read_registry(dest / "classes.json")
     assert [s.name for s in restored.subjects] == ["catkin"]
-    # dataset.json travelled with the data — identity (id/crop/fingerprint) survives the round-trip.
+    # dataset.json travelled with the data: identity (id/crop/fingerprint) survives the round-trip.
     import json
 
     restored_id = json.loads((dest / "dataset.json").read_text())
