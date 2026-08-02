@@ -1,4 +1,4 @@
-"""Tests for the workspace project front-door routes (WS-B)."""
+"""Tests for the workspace project front-door routes."""
 
 from __future__ import annotations
 
