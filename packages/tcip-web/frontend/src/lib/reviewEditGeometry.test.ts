@@ -13,7 +13,7 @@ const poly = (points: [number, number][]): EditShape => ({ kind: "polygon", poin
 describe("hitTestEdit", () => {
   it("grabs the nearest corner, not the first within tolerance", () => {
     // 12px box with tol 10: a click 2px from the top-right corner is also within
-    // tolerance of the top-left — the nearest (top-right) must win, anchoring bottom-left.
+    // tolerance of the top-left: the nearest (top-right) must win, anchoring bottom-left.
     const drag = hitTestEdit(box([0, 0, 12, 12]), 10, 0, 10);
     expect(drag).toEqual({ mode: "corner", ax: 0, ay: 12 });
   });
@@ -40,7 +40,7 @@ describe("hitTestEdit", () => {
   });
 });
 
-describe("applyEditDrag — box", () => {
+describe("applyEditDrag (box)", () => {
   it("corner drag re-anchors to the opposite corner and survives crossing over", () => {
     // Dragging the (100,100) corner (anchor 0,0) past the anchor to (-,-) still normalizes.
     const r = applyEditDrag(
@@ -95,7 +95,7 @@ describe("applyEditDrag — box", () => {
   });
 });
 
-describe("applyEditDrag — polygon", () => {
+describe("applyEditDrag (polygon)", () => {
   const square: [number, number][] = [
     [10, 10],
     [30, 10],
