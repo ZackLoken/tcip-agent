@@ -33,9 +33,9 @@ never assert one it does not list. This skill does not reproduce the catalog.
 ## Field-imageable vs lab / destructive
 
 The integrity-positive partition: which traits *can* come from imagery (with the
-caveats below) versus those that **cannot** and require a lab assay, instrument,
+caveats below) versus those that cannot and require a lab assay, instrument,
 sensory panel, or breeding record. Placement in "field-imageable" means a valid CV
-path exists in principle; it does **not** waive validation or scale calibration.
+path exists in principle; it does not waive validation or scale calibration.
 
 **Field-imageable, the CV surface:**
 
@@ -177,7 +177,7 @@ the catkin-elongation cautionary tale there). Currant-specific traps:
   `fruit_anthocyanin_content` are lab assays).
 - **Disease ordinals** map to the breeder's rating scale validated against expert
   scoring, not an arbitrary percent-lesion-area cutoff. WPBR lesion presence in a
-  photo is **not** the same quantity as a cultivar's genetic resistance.
+  photo is not the same quantity as a cultivar's genetic resistance.
 - **`fruit_configuration`** is a categorical descriptor; do not manufacture a numeric
   surrogate for it.
 
