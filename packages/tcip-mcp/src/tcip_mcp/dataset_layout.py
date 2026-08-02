@@ -46,7 +46,9 @@ def parse_image_path(image_path: str | Path) -> tuple[Path, Optional[str], str]:
     """Return ``(dataset_root, date, stem)`` for an image path.
 
     Handles both canonical date-nested (``<root>/images/<date>/<stem>``) and flat
-    (``<root>/images/<stem>``) images; ``date`` is ``None`` for the flat form.
+    (``<root>/images/<stem>``) images; ``date`` is ``None`` for the flat form. Raises on any other
+    shape: a guessed dataset root is a fabrication a downstream write (a label file, a staged
+    prediction) would silently land at the wrong place, never a mitigation.
     """
     img = Path(image_path)
     stem = img.stem
@@ -55,8 +57,10 @@ def parse_image_path(image_path: str | Path) -> tuple[Path, Optional[str], str]:
         return parent.parent, None, stem
     if parent.parent.name == "images":
         return parent.parent.parent, parent.name, stem
-    # Unknown structure: best effort (treat the grandparent as the dataset root).
-    return parent.parent, None, stem
+    raise ValueError(
+        f"parse_image_path: {image_path!r} is not under a recognized dataset image tree "
+        "(<root>/images/<date>/<stem> or <root>/images/<stem>), refusing to guess a dataset root."
+    )
 
 
 def _date_seg(date: Optional[str]) -> tuple[str, ...]:
