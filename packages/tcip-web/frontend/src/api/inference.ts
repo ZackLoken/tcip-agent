@@ -120,30 +120,31 @@ export interface PerPlantRow {
   n_positive: number;
   n_unclassified: number;
   n_missing: number;
-  // null when this date was not fully classified/observed (K4/K5) — never a fabricated ratio.
+  // null when this date was not fully classified/observed, never a fabricated ratio.
   ratio: number | null;
 }
 
-// K4/K5: milestone column names are derived from the threaded trait's own spec, not hardcoded to
-// catkin — the fixed fields below are the columns every phenology delivery carries regardless of
-// trait; the trait-specific milestone/date columns (e.g. catkin_05per_date) arrive as additional
-// keys and are read generically (see ResultsTab.tsx's milestoneColumns helper).
+// Milestone column names are derived from the threaded trait's own spec, not hardcoded to
+// any one trait: the fixed fields below are the columns every phenology delivery carries
+// regardless of trait; the trait-specific milestone/date columns (e.g. <trait>_50per_date)
+// arrive as additional keys and are read generically (see ResultsTab.tsx's milestoneColumns
+// helper).
 export interface OnsetRow {
   plant_id: string;
   accession: string | null;
   n_dates: number;
   n_dates_unclassified: number;
   n_dates_missing_images: number;
-  // Dates with a real, non-zero-detection observation (stage-6 review N6) — a plant can be fully
-  // classified AND fully observed (0 unclassified, 0 missing) while still never having detected
-  // anything, e.g. before emergence; that reads as "no observations", not "valid".
+  // Dates with a real, non-zero-detection observation: a plant can be fully classified and fully
+  // observed (0 unclassified, 0 missing) while still never having detected anything, e.g. before
+  // emergence; that reads as "no observations", not "valid".
   n_observed_dates: number;
   [milestoneColumn: string]: string | number | null;
 }
 
-// The inputs a bloom measurement is computed FROM. Every Results door takes this same shape — none
+// The inputs a phenology measurement is computed from. Every Results door takes this same shape; none
 // accepts rows, so no caller-composed table can be mistaken for (or declared to be) a delivery.
-export interface BloomRequest {
+export interface PhenologyRequest {
   project_root: string;
   mapping_path: string;
   predictions_by_date: Record<string, string>;
@@ -154,18 +155,18 @@ export interface BloomRequest {
 }
 
 // Every door returns the evidence that qualifies its numbers alongside them, so no surface can
-// render a bloom measurement bare.
-export interface BloomResponse<Row> {
+// render a phenology measurement bare.
+export interface PhenologyResponse<Row> {
   rows: Row[];
   // Per-dimension reconciled state, e.g. { operating_point: "validated_held_out", classifier: "false" }.
   validated: Record<string, string>;
-  // True when any dimension lacked on-disk evidence — including when the caller acknowledged it,
+  // True when any dimension lacked on-disk evidence, including when the caller acknowledged it,
   // which is exactly when these numbers must not be rendered as valid.
   provisional: boolean;
   validity_detail: Record<string, unknown>;
-  // False when nothing was ever classified along the trait's positive-class axis — the ratios are
-  // then not a valid bloom measurement (run + validate the classifier first).
-  elongation_classified: boolean;
+  // False when nothing was ever classified along the trait's positive-class axis: the ratios are
+  // then not a valid phenology measurement (run + validate the classifier first).
+  positive_class_assessed: boolean;
   n_plants?: number;
   positive_class_id?: number | null;
 }
@@ -174,6 +175,13 @@ export const resultsApi = {
   registeredModels: (project_path: string) =>
     getJson<{ models: RegisteredModel[] }>(
       `/api/results/models/registered?project_path=${encodeURIComponent(project_path)}`,
+    ),
+
+  // The project's own registered traits, so the Results tab resolves which trait it is
+  // computing for from the project's registry instead of assuming one.
+  traits: (project_root: string) =>
+    getJson<{ traits: string[] }>(
+      `/api/results/traits?project_root=${encodeURIComponent(project_root)}`,
     ),
 
   buildPlantMapping: (body: {
@@ -191,18 +199,18 @@ export const resultsApi = {
   loadPlantMapping: (persist_path: string) =>
     postJson<{ mapping: unknown }>("/api/results/plant_mapping/load", { persist_path }),
 
-  perPlantCurves: (body: BloomRequest) =>
-    postJson<BloomResponse<PerPlantRow>>("/api/results/per_plant_curves", body),
+  perPlantCurves: (body: PhenologyRequest) =>
+    postJson<PhenologyResponse<PerPlantRow>>("/api/results/per_plant_curves", body),
 
-  onsetDates: (body: BloomRequest) =>
-    postJson<BloomResponse<OnsetRow>>("/api/results/onset_dates", body),
+  onsetDates: (body: PhenologyRequest) =>
+    postJson<PhenologyResponse<OnsetRow>>("/api/results/onset_dates", body),
 
-  // The server computes what it exports: this sends the INPUTS a bloom measurement is derived from
-  // plus which computation to run, never a table of rows. Rounds 2-5 sent rows and had the backend
-  // decide what they meant — four column-shape predicates and one `export_kind` declaration were
-  // each defeated in turn, because the caller controls both the columns and the declaration.
+  // The server computes what it exports: this sends the inputs a phenology measurement is derived from
+  // plus which computation to run, never a table of rows: sending rows would let the caller
+  // control both the columns and any accompanying kind declaration, so the backend could no
+  // longer trust either.
   exportCsv: async (
-    body: BloomRequest,
+    body: PhenologyRequest,
     payload: "curves" | "milestones",
     filename: string,
   ): Promise<Blob> => {
@@ -214,13 +222,13 @@ export const resultsApi = {
       body: JSON.stringify({ ...body, acknowledge_unvalidated: false, payload, filename }),
     });
     if (!resp.ok) {
-      // K15: surface the server's actual reason instead of discarding the response body.
+      // Surface the server's actual reason instead of discarding the response body.
       let detail = `export_csv failed: ${resp.status}`;
       try {
         const body = (await resp.json()) as { detail?: string };
         if (body.detail) detail = body.detail;
       } catch {
-        // response body wasn't JSON — keep the status-only message
+        // response body wasn't JSON, keep the status-only message
       }
       throw new Error(detail);
     }
