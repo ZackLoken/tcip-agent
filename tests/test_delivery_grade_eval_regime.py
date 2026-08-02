@@ -41,7 +41,7 @@ def _det_dataset(tmp_path, n=3, size=128):
     return images_dir, labels_dir
 
 
-def test_k10_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
+def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
     """training_tools.evaluate_model's use_tiled_inference branch must honor an explicit max_dets
     verbatim, even at or below 100: that's the exact value _max_dets_from_density's own floor
     legitimately derives for a sparse dataset, so silently substituting 1000 would clobber a real
@@ -65,7 +65,7 @@ def test_k10_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
     assert captured["max_dets"] == 50  # honored verbatim, not bumped to 1000
 
 
-def test_k10_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch):
+def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
     from tcip_mcp.tools.training_tools import evaluate_model
@@ -86,7 +86,7 @@ def test_k10_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypa
     assert captured["max_dets"] == DEFAULT_MAX_DETS == 1000
 
 
-def test_k10_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypatch):
+def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypatch):
     """The COCOeval maxDets convention default for the other (tile-level/diagnostic) regime,
     distinct from the gating regime's 1000, resolved without the two colliding via a shared
     sentinel value."""
@@ -108,7 +108,7 @@ def test_k10_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monke
     assert captured["max_dets"] == 100
 
 
-def test_k10_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
+def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -128,7 +128,7 @@ def test_k10_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
     assert captured["max_dets"] == 7
 
 
-def test_k10_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
+def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
     """evaluate_model is an @mcp.tool() surface that returns {"error": ...} for every other
     failure: a bare raise from run_full_frame_evaluation would surface as an MCP exception
     instead, inconsistent with the rest of this tool's contract."""
@@ -149,7 +149,7 @@ def test_k10_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatc
     assert "tiling=" in r["error"]
 
 
-def test_k10_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
+def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     """Honoring an explicit low max_dets verbatim reopens a truncation hole unless it's at least
     detectable. A caller-explicit cap that actually binds on real detections must be visible in
     the result, not silently assumed safe."""
@@ -194,7 +194,7 @@ def test_k10_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
 # tiled provenance distinguishes explicit from default
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_k10_raw_operating_point_tiled_source_explicit_vs_default():
+def test_raw_operating_point_tiled_source_explicit_vs_default():
     from tcip_mcp.pipelines.resolution import raw_operating_point
 
     explicit_bundle = raw_operating_point(
@@ -209,7 +209,7 @@ def test_k10_raw_operating_point_tiled_source_explicit_vs_default():
     assert default_bundle.get("tiled").source == "default"
 
 
-def test_k10_resolve_operating_point_tile_size_source_not_inferred_from_truthiness():
+def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness():
     """`tile_size`'s source is never inferred from truthiness: a truthy value alone, even a
     fabricated fallback the caller never actually derived, must not be stamped "derived". The
     caller's own resolved source travels through explicitly."""
@@ -229,7 +229,7 @@ def test_k10_resolve_operating_point_tile_size_source_not_inferred_from_truthine
     assert b_explicit.get("tile_size").source == "explicit"
 
 
-def test_k10_resolve_operating_point_tiled_source_explicit_vs_default():
+def test_resolve_operating_point_tiled_source_explicit_vs_default():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     b_default = resolve_operating_point("catkin", dataset_hash=None, tiled=True)
