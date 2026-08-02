@@ -71,7 +71,7 @@ def test_every_decorated_tool_registers():
 
 
 def test_consolidated_tools_present_and_removed_absent():
-    """Phase-6 consolidation: the merged tools register and the removed ones do not.
+    """Merged tools register and the tools they replaced do not.
 
     An explicit presence/absence check (not a hard-coded count) so the eval-on-disk /
     splits merges and the machine-plumbing de-registrations stay put.
@@ -85,13 +85,13 @@ def test_consolidated_tools_present_and_removed_absent():
     for present in (
         "make_splits", "focus", "get_experiment",
         "register_model", "load_project_memory",
-        # R1 renames — the new names must register.
+        # Renamed tools: the new names must register.
         "archive_project", "inspect_project", "scan_dataset", "read_annotations",
         "render_failure_cases", "overlay_reference_grid", "capture_live_canvas",
-        # R2 renames — the new names must register.
+        # Renamed tools: the new names must register.
         "preflight_config", "select_best_model", "score_predictions",
         "tabulate_counts", "view_gui_state",
-        # W2 de-SAM renames — method-neutral auto-labeling seam.
+        # Method-neutral auto-labeling seam: no longer SAM-specific names.
         "propose_annotations", "accept_proposals", "segment_prompt",
     ):
         assert present in registered, f"{present} should be registered"
@@ -110,13 +110,13 @@ def test_consolidated_tools_present_and_removed_absent():
         "register_model_from_experiment",
         # load_reports + load_retrospectives merged into load_project_memory(kind=).
         "load_reports", "load_retrospectives",
-        # R1 renames — the old names must no longer register.
+        # Old names: must no longer register.
         "export_project", "get_project_status", "load_dataset", "load_annotations",
         "visualize_worst_predictions", "visualize_grid_overlay", "visualize_canvas",
         "sam_auto_label",
-        # W2 de-SAM renames — the old SAM-hardcoded names must no longer register.
+        # The old SAM-hardcoded names must no longer register.
         "generate_mask_candidates", "accept_candidates", "sam_predict",
-        # R2 renames — the old names must no longer register.
+        # Old names: must no longer register.
         "validate_config", "get_best_model", "evaluate_predictions",
         "export_results_csv", "get_active_context",
     }
@@ -127,7 +127,7 @@ def test_docs_do_not_hardcode_tool_count():
     """Docs must point at scripts/list_tools.py, not cite a literal count.
 
     The regex allows an optional run of adjectives before "tool(s)" so the
-    project's idiomatic phrasings are all caught — "57 MCP tools",
+    project's idiomatic phrasings are all caught: "57 MCP tools",
     "54 domain tools", "56 specialized tools", "57 total tools", bare "56 tools".
     It does not match prose like "all MCP tool calls" (no leading number).
     """
