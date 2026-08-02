@@ -4,8 +4,8 @@ The GUI runs with its backend on the same machine as the browser, so "the server
 filesystem" is the user's own. This lists **directories only**, and only where reads are
 allowed: with ``TCIP_IMAGE_ROOTS`` unset (the default local single-user GUI) browsing is
 unrestricted; set it and browsing is confined to those roots (a networked deployment).
-The wider trust-boundary hardening for exposed servers (Origin / TrustedHost / token) is
-tracked in the G5 plan.
+The wider trust-boundary hardening for exposed servers (Origin / TrustedHost / token) is a
+documented follow-up, not done here.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ _FOUND_RE = re.compile(r"^found\.\d{3}$", re.IGNORECASE)
 def _is_noise_dir(name: str, st: os.stat_result) -> bool:
     """A folder the picker should hide: dotfiles and Windows system/hidden folders
     (``$RECYCLE.BIN``, ``System Volume Information``, ``FOUND.000``, or anything carrying
-    the hidden/system attribute — the latter is a no-op on POSIX)."""
+    the hidden/system attribute: the latter is a no-op on POSIX)."""
     if name.startswith((".", "$")):
         return True
     if name.lower() == "system volume information" or _FOUND_RE.match(name):
@@ -81,7 +81,7 @@ def _list_dir(p: Path) -> dict:
         try:
             st = child.stat()  # follows symlinks; raises on access-denied/dead links
         except OSError:
-            continue  # e.g. a locked "System Volume Information" junction — just skip it
+            continue  # e.g. a locked "System Volume Information" junction: just skip it
         if not statmod.S_ISDIR(st.st_mode):
             continue  # directories only
         if _is_noise_dir(child.name, st):
