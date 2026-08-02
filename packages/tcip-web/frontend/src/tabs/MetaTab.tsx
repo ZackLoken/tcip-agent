@@ -61,7 +61,7 @@ export function MetaTab() {
       </div>
 
       <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">Friction reports — {reports.length} shown</div>
+        <div className="tcip-heading mb-3">Friction reports: {reports.length} shown</div>
         {reports.length > 0 ? (
           <div className="flex flex-col gap-2">
             {reports.map((r) => (
@@ -90,7 +90,7 @@ export function MetaTab() {
       </div>
 
       <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">Retrospectives — {retros.length} shown</div>
+        <div className="tcip-heading mb-3">Retrospectives: {retros.length} shown</div>
         {retros.length > 0 ? (
           <div className="flex flex-col gap-3">
             {retros.map((rt) => (
@@ -112,7 +112,7 @@ export function MetaTab() {
       </div>
 
       <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">Annotation sessions — {sessions.length} recorded</div>
+        <div className="tcip-heading mb-3">Annotation sessions: {sessions.length} recorded</div>
         {sessions.length > 0 ? (
           <table className="w-full text-[11px]">
             <thead>
@@ -145,7 +145,7 @@ export function MetaTab() {
           </table>
         ) : (
           <div className="text-[11px] text-tcip-muted">
-            No annotation sessions yet — they're recorded automatically while you annotate.
+            No annotation sessions yet; they're recorded automatically while you annotate.
           </div>
         )}
       </div>
