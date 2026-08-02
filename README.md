@@ -1,12 +1,12 @@
 # TCIP Agent
 
-Prototype (in progress) of an agentic ML/CV system for automated phenotyping in tree crop breeding programs. A Claude agent (ML/CV engineer persona) drives annotation, model training, inference, and per-plant result delivery through an MCP tool server, while a browser-based GUI supports human annotation, review, and training oversight. The system is freestanding — the MCP server is a transport-neutral stdio server (any MCP client) and the GUI is a standalone browser app; no editor required.
+Prototype (in progress) of an agentic ML/CV system for automated phenotyping in tree crop breeding programs. A Claude agent (ML/CV engineer persona) drives annotation, model training, inference, and per-plant result delivery through an MCP tool server, while a browser-based GUI supports human annotation, review, and training oversight. The system is freestanding: the MCP server is a transport-neutral stdio server (any MCP client) and the GUI is a standalone browser app; no editor required.
 
 **Current scope: 2D imagery (RGB + N-channel), object detection first.** The data layer reads RGB and multi-band 2D rasters (GeoTIFF / NPZ / grayscale); 3D point-cloud (LiDAR / SfM) support is not built yet (see [Roadmap](#roadmap)).
 
 Six crops in scope: hazelnut, chestnut, currant, elderberry, persimmon, black locust. Phase 1 target is hazelnut catkin phenology from ground imagery.
 
-Status: the browser GUI is built out across all tabs (Annotate / Review / Training / Tuning / Inference / Results / Meta) and the MCP tool surface is in place; recent work completed full systems and GUI audits with phased remediation. Phase 1 focus is hazelnut catkin phenology on ground imagery.
+Status: the browser GUI is built out across all tabs (Annotate / Review / Training / Tuning / Inference / Results / Meta) and the MCP tool surface is in place. Phase 1 focus is hazelnut catkin phenology on ground imagery.
 
 ## Architecture
 
@@ -31,7 +31,7 @@ Status: the browser GUI is built out across all tabs (Annotate / Review / Traini
 
 All three processes share `.tcip/` on disk (experiment state, model registry, audit log, GUI state).
 
-Supporting library: `packages/tcip-annotation` — headless annotation engine (label I/O, IoU matching, SAM wrapper). No dependency on the other packages.
+Supporting library: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper). No dependency on the other packages.
 
 ## Repository layout
 
@@ -58,7 +58,7 @@ data/                          # sample hazelnut dataset (gitignored)
 ## Setup
 
 ```bash
-# Python — creates the env and installs the three packages (editable). Run from
+# Python: creates the env and installs the three packages (editable). Run from
 # the repo root. Installs a CPU/-or-platform torch wheel; see environment.yml for
 # the CUDA option.
 conda env create -f environment.yml
@@ -95,7 +95,7 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 
 ## Conventions
 
-- **Annotations**: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), plus the dataset-level COCO assembled from it for training. A negative is an empty label set **plus** an explicit human "Complete" — an empty label file alone is not a negative.
+- **Annotations**: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), plus the dataset-level COCO assembled from it for training. A negative is an empty label set **plus** an explicit human "Complete"; an empty label file alone is not a negative.
 - **Experiments**: tracked in `.tcip/experiments/<id>/` with config, metrics JSONL, artifacts, lineage.
 - **Audit log**: all MCP tool calls logged to `.tcip/audit.jsonl` via `@audited` decorator.
 - **Lazy imports**: heavy deps (torch, torchvision) imported inside function bodies for fast MCP startup.
@@ -106,14 +106,14 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 The pitch above describes the long-term target. What's actually built today is a
 narrower slice; this section keeps the two honest.
 
-**Working now:** 2D-image tasks end to end — detection, instance/semantic
-segmentation, classification, ordinal, regression — via an agent-written `nn.Module`
+**Working now:** 2D-image tasks end to end (detection, instance/semantic
+segmentation, classification, ordinal, regression) via an agent-written `nn.Module`
 that imports the plain building blocks (necks, heads, losses, backbone wrappers, and
 `build_detector`; `instance_seg` via Mask R-CNN), on **RGB and N-channel imagery** (multi-band
 GeoTIFF/NPZ/grayscale; `num_channels` threads to the backbone's `in_chans`, and an `in_chans != 3`
 detector takes per-band `image_mean`/`image_std` from `derivations.band_normalization_stats`), with
 training that loads the native per-image JSON labels directly, experiment tracking,
-annotation/review, SAM-assisted labeling, and per-plant CSV export — including the
+annotation/review, SAM-assisted labeling, and per-plant CSV export, including the
 Phase 1 **catkin bloom phenology** deliverable (per-plant `catkin_05/50/95per_date` = the
 dates a plant's *elongated fraction* of detected catkins crosses 5/50/95%; elongation is a
 validated per-catkin call, never a geometric proxy). The agent composes it end to end via
@@ -122,22 +122,22 @@ backs the Results tab, so a bloom date means one thing on both surfaces.
 
 The detection training pipeline mirrors a production drone-phenotyping workflow:
 
-- **Metrics & selection** — real per-task validation metrics (detection/instance-seg
+- **Metrics & selection**: real per-task validation metrics (detection/instance-seg
   mAP via `pycocotools` `COCOeval`; accuracy/F1; MAE/rank-acc) and a composite
   best-model objective (blends loss, F1, mAP50) instead of raw `val_loss`.
-- **Progressive unfreezing** — multi-stage training with optimizer-momentum handoff
+- **Progressive unfreezing**: multi-stage training with optimizer-momentum handoff
   between stages, optional inter-stage LR warmup, and effective-batch LR scaling.
-- **Small objects** — opt-in SAHI-style sliding-window tiling at train and inference
+- **Small objects**: opt-in SAHI-style sliding-window tiling at train and inference
   time (core-region reconstruction + global NMS), plus an FCOS/RetinaNet anchor-free
   detector option and an extra high-resolution (P2) pyramid level.
-- **Honest splits** — group-aware, annotation-stratified train/val/test splitting
+- **Honest splits**: group-aware, annotation-stratified train/val/test splitting
   (no source-image leakage) with automatic validation loaders.
-- **Imbalance & augmentation** — class-weighted / focal losses and a nadir-imagery
+- **Imbalance & augmentation**: class-weighted / focal losses and a nadir-imagery
   augmentation preset (free rotation + flips; mosaic/copy-paste intentionally off).
-- **HPO** — Optuna search with ASHA pruning + known-good warm start on the composite.
-- **Reproducibility** — global seeding, checkpoint resume (model + optimizer +
+- **HPO**: Optuna search with ASHA pruning + known-good warm start on the composite.
+- **Reproducibility**: global seeding, checkpoint resume (model + optimizer +
   scheduler), and pydantic + neck/head channel-compatibility config validation.
-- **Review → retrain** — turn human review verdicts into a curated training set
+- **Review → retrain**: turn human review verdicts into a curated training set
   (accepted/edited → labels, rejected → hard negatives) with experiment lineage, and
   prioritize the next review batch by active-learning score.
 
@@ -146,7 +146,7 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
   so this is new work rather than a config flag. (Multispectral / hyperspectral / depth
   as additional 2D channels *is* now supported via the N-channel path above.)
 - Temporal / relational pipeline patterns in general. The one temporal trait built today is
-  **catkin bloom phenology** (per-plant elongated-fraction 05/50/95-per-date milestones — see
+  **catkin bloom phenology** (per-plant elongated-fraction 05/50/95-per-date milestones, see
   "Working now"); broader phenology-sequence and relational patterns beyond the per-image case
   remain future work.
 - Fully automated active learning loop without human-in-the-loop. 
