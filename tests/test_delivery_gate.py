@@ -77,6 +77,70 @@ def test_export_detection_csv_acknowledge_stamps_false(tmp_path):
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
 
 
+# ── export_detection_csv reconciles pred_dirs against on-disk sidecars ─────
+
+def _detection_bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6,
+                      tile_size_prov=None):
+    d = tmp_path / name
+    d.mkdir(parents=True, exist_ok=True)
+    op = {"conf": {"value": conf, "validated_against": ref if validated else VALIDATED_FALSE}}
+    if tile_size_prov is not None:
+        op["tile_size"] = tile_size_prov
+    (d / "operating_point.json").write_text(json.dumps({
+        "validated": validated, "operating_point": op,
+    }), encoding="utf-8")
+    return str(d)
+
+
+def test_export_detection_csv_reconciles_sidecar_floor(tmp_path):
+    # A caller-asserted measurement_validated cannot open the gate when the bucket it names has no
+    # readable/validated sidecar backing it: pred_dirs reconciles from disk, never trusts the string.
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    bucket = _detection_bucket(tmp_path, "preds", validated=False)
+    with pytest.raises(ValueError, match="unvalidated measurement"):
+        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
+                             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+
+
+def test_export_detection_csv_pred_dirs_ships_when_bucket_validated(tmp_path):
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    bucket = _detection_bucket(tmp_path, "preds", validated=True)
+    out = tmp_path / "o.csv"
+    export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
+                         measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+
+
+def test_export_detection_csv_pred_dirs_gates_fabricated_tile_size(tmp_path):
+    # A tiled bucket with no persisted training geometry must gate the delivery even though the
+    # conf operating point itself cleared, mirroring export_aggregated_csv's tile_size dimension.
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    bucket = _detection_bucket(
+        tmp_path, "preds", validated=True,
+        tile_size_prov={"value": 640, "requires_validation": True,
+                        "validation_kind": "geometry", "validated_against": VALIDATED_FALSE},
+    )
+    with pytest.raises(ValueError, match="unvalidated measurement"):
+        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
+                             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+
+
+def test_export_detection_csv_omitted_pred_dirs_trusts_bare_string(tmp_path):
+    # No buckets to reconcile from: measurement_validated is taken as-is, unchanged from before
+    # pred_dirs existed (a caller that already resolved the gate against a live run's own bundle).
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    out = tmp_path / "o.csv"
+    export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
+                         measurement_validated=VALIDATED_HELD_OUT)
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+
+
 # ── export_aggregated_csv (writer) refuses a bare write ────────────────────
 
 def test_export_aggregated_csv_refuses_bare_write(tmp_path):
