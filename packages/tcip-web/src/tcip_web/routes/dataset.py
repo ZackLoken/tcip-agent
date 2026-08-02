@@ -5,7 +5,7 @@ The frontend hits these to:
   * list images for a given (dataset_root, subject, date),
   * read and persist the ``GuiState.dataset`` selection.
 
-Convention — the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
+Convention: the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
 
     <dataset_root>/
         images/<date>/*.JPG
@@ -38,7 +38,7 @@ router = APIRouter(prefix="/api/dataset", tags=["dataset"])
 
 
 def _logical_image_names(date_dir: Path) -> list[str]:
-    """Every logical image's display name under ``date_dir`` — a plain file's own name, or (for a
+    """Every logical image's display name under ``date_dir``: a plain file's own name, or (for a
     ``.bandgroup``-grouped capture) its manifest's filename. Folds sibling band files into one
     grouped entry per capture so the GUI's gallery shows 16 composites, not 64 grayscale frames."""
     return sorted(
@@ -48,7 +48,7 @@ def _logical_image_names(date_dir: Path) -> list[str]:
 
 # Whether this server process has selected a dataset yet. Resuming the persisted image index
 # is helpful within a running session, but a fresh process opening a project should start at
-# the first image — resuming a prior session's position across a restart reads as stale state.
+# the first image: resuming a prior session's position across a restart reads as stale state.
 _selected_this_session = False
 
 
@@ -56,13 +56,13 @@ class DatasetTree(BaseModel):
     dataset_root: str
     dates_with_images: list[str]
     # Every subject the dataset's registry (``classes.json``) declares, e.g.
-    # ["catkin", "bush"]. This is *what a label set is about*, not the shape kind; a label file
+    # ["bush", "leaf"]. This is *what a label set is about*, not the shape kind; a label file
     # names its subject on each annotation rather than in the path.
     subjects: list[str]
     model_names: list[str]       # every model present anywhere, e.g. ["baseline"]
     # Per-date availability: the subjects that actually have labels / models that actually
     # have predictions on each date. The GUI's subject/model pickers filter to these so a
-    # date with no catkin labels doesn't offer "catkin" (which would open an empty canvas).
+    # date with no labels for a subject doesn't offer it (which would open an empty canvas).
     subjects_by_date: dict[str, list[str]]
     models_by_date: dict[str, list[str]]
 
@@ -77,7 +77,7 @@ def _list_children(p: Path) -> list[str]:
 # subjects_with_labels/models_with_predictions each re-list annotations/ or predictions/ and
 # scan every per-image label file per date, so a naive /tree is an iterdir storm on a dataset
 # with many dates. Cache the built tree per dataset_root, keyed by a signature of every
-# directory the computation reads (stat-only, no listing) — a write inside any of those date
+# directory the computation reads (stat-only, no listing): a write inside any of those date
 # dirs bumps its own mtime_ns and invalidates the entry. Bounded to a handful of recent roots.
 _TREE_CACHE_MAX = 64
 _tree_cache: "OrderedDict[str, tuple[tuple, DatasetTree]]" = OrderedDict()
@@ -113,7 +113,7 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
 
     dates = _list_children(root / "images")
-    # Subjects come from the dataset registry, not from listing annotations/ — that dir now holds
+    # Subjects come from the dataset registry, not from listing annotations/: that dir now holds
     # date buckets, not subject dirs.
     subjects = list_subjects(root)
     model_names = sorted(
@@ -181,7 +181,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
         if date_dir.is_dir():
             image_list = _logical_image_names(date_dir)
 
-    # Canonical layout (see tcip_mcp.dataset_layout) — the single source of truth shared with the
+    # Canonical layout (see tcip_mcp.dataset_layout): the single source of truth shared with the
     # agent tools, so agent writes land where the GUI reads. One file per image now holds every
     # subject, so the label/prediction dirs carry no subject or task segment.
     annotations_dir = str(annotation_dir(root, req.date)) if req.date else None
@@ -192,7 +192,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
     # Re-selecting the same (root, subject, date) within a session resumes at the persisted
     # position instead of clobbering it back to image 0. The first select of a fresh process
     # (the auto-open on app load) starts at image 0 rather than resurfacing a prior session's
-    # position — that stale resume is bug #1 (opening a project landed on image 3/112).
+    # position: a stale resume there previously landed a freshly opened project on image 3/112.
     global _selected_this_session
     prev = store.state.dataset
     same_identity = (
@@ -219,7 +219,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
 
     # Advisory only (never rejects): does the resolved (subject, date) actually have any labels /
     # the (model, date) any predictions? Empty label files count as present (confirmed
-    # negatives), and starting a brand-new annotation on an unlabelled date is still allowed —
+    # negatives), and starting a brand-new annotation on an unlabelled date is still allowed,
     # so we don't block; we just tell the caller (agent or GUI) the canvas will start empty
     # instead of leaving a silent blank canvas.
     annotations_present = bool(
