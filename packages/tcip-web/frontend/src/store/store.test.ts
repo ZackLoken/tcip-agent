@@ -46,7 +46,7 @@ describe("canvas store", () => {
     expect(s().canvas.redoStack).toHaveLength(0);
   });
 
-  it("dragVertex moves a vertex WITHOUT pushing an undo snapshot", () => {
+  it("dragVertex moves a vertex without pushing an undo snapshot", () => {
     loadOnePolygon();
     const before = s().canvas.undoStack.length;
     s().dragVertex(0, 0, 1, [42, 7]);
@@ -76,7 +76,7 @@ describe("canvas store", () => {
     expect(s().canvas.redoStack).toHaveLength(1);
   });
 
-  it("dragBox moves a box WITHOUT pushing an undo snapshot", () => {
+  it("dragBox moves a box without pushing an undo snapshot", () => {
     s().addBox({ x1: 0, y1: 0, x2: 5, y2: 5, subject: "catkin", attributes: {} });
     const before = s().canvas.undoStack.length;
     s().dragBox(0, { x1: 2, y1: 3, x2: 9, y2: 11, subject: "catkin", attributes: {} });
@@ -117,7 +117,7 @@ describe("canvas store", () => {
     ]);
     expect(s().commitCurrentPolygon()).toBe(true);
     expect(s().canvas.polygons[0].subject).toBe("catkin");
-    // A hand-drawn shape is exactly one contour — the drawing tool never authors a second ring.
+    // A hand-drawn shape is exactly one contour: the drawing tool never authors a second ring.
     expect(s().canvas.polygons[0].rings).toHaveLength(1);
   });
 });
@@ -141,7 +141,7 @@ describe("canvas store points", () => {
     expect(s().canvas.points).toEqual([pt(10, 20)]);
   });
 
-  it("dragPoint repositions WITHOUT pushing an undo snapshot", () => {
+  it("dragPoint repositions without pushing an undo snapshot", () => {
     s().addPoint(pt(10, 20));
     const before = s().canvas.undoStack.length;
     s().dragPoint(0, 33, 44);
