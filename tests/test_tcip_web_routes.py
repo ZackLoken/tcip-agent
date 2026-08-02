@@ -91,7 +91,7 @@ def test_dataset_tree(client: TestClient, dataset_root: Path) -> None:
     assert "3-2-26" in body["dates_with_images"]
     assert sorted(body["subjects"]) == ["bush", "catkin"]
     assert "baseline" in body["model_names"]
-    # Per-date maps present for every image date (empty here — the registry declares subjects but
+    # Per-date maps present for every image date (empty here: the registry declares subjects but
     # no label files exist yet).
     assert set(body["subjects_by_date"]) == {"2-11-26", "3-2-26"}
     assert body["subjects_by_date"]["2-11-26"] == []
@@ -289,7 +289,7 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
     assert len(anns) == 2
     assert all(a["subject"] == "catkin" for a in anns)
     # One carries a box, one a polygon (geometry kinds coexist in one file). The load side reports a
-    # polygon as `rings` — a stored shape can be occlusion-split, so it is never flattened to one.
+    # polygon as `rings`: a stored shape can be occlusion-split, so it is never flattened to one.
     assert sum("bbox" in a for a in anns) == 1
     assert sum("rings" in a for a in anns) == 1
 
@@ -298,7 +298,7 @@ def test_annotate_save_empty_preserves_negative(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     # Clearing all annotations and saving must keep the label file (an {"annotations": []} record),
-    # not delete it — it becomes a confirmed negative once the image is explicitly completed.
+    # not delete it: it becomes a confirmed negative once the image is explicitly completed.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
 
@@ -325,7 +325,7 @@ def test_annotate_save_empty_preserves_negative(
 def test_annotate_save_label_path_outside_allowed_root_403(
     client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch
 ) -> None:
-    # With an allow-list configured, a label path outside it must be rejected —
+    # With an allow-list configured, a label path outside it must be rejected:
     # write_annotations is otherwise an arbitrary file write/delete primitive.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(dataset_root.resolve()))
@@ -420,7 +420,7 @@ def test_annotate_save_persists_polygon_as_polygon(client, dataset_root, tmp_pat
 def test_annotate_multi_ring_polygon_round_trips_through_the_route(client, dataset_root, tmp_path):
     """An occlusion-split shape loaded onto the canvas and re-saved unedited must keep every ring.
 
-    The save side accepts ``rings`` for exactly this, and the load side reports ``rings`` back — so a
+    The save side accepts ``rings`` for exactly this, and the load side reports ``rings`` back, so a
     multi-ring instance_seg shape survives an ordinary open/save with no edits, instead of being
     silently reduced to its first contour.
     """
@@ -444,7 +444,7 @@ def test_annotate_multi_ring_polygon_round_trips_through_the_route(client, datas
 
 
 def test_annotate_save_prefers_rings_over_points_when_both_are_sent(client, dataset_root, tmp_path):
-    """`rings` is the full shape and `points` only ever one contour, so `rings` wins — otherwise a
+    """`rings` is the full shape and `points` only ever one contour, so `rings` wins: otherwise a
     client that sends both (a loaded multi-ring shape plus a legacy single-ring mirror) would persist
     the truncated version."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
@@ -526,7 +526,7 @@ def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_p
 
 def test_review_image_statuses_batch(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     # A prediction file with a box (reviewable), a confirmed-negative empty file (nothing to review),
-    # and a third image with no file at all — only the first should surface as a detection stem.
+    # and a third image with no file at all: only the first should surface as a detection stem.
     pred_dir = tmp_path / "predictions"
     pred_dir.mkdir(parents=True)
     _write_pred(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
@@ -590,8 +590,8 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
 def test_review_action_resolves_class_id_from_bucket_id_map(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    """K25: the verdict entry now carries a resolved ``class_id`` — the producing bucket's own
-    recorded ``id_map`` (``operating_point.json``), read at record time — not the previously-dead
+    """The verdict entry carries a resolved ``class_id``: the producing bucket's own recorded
+    ``id_map`` (``operating_point.json``), read at record time, not the previously-dead
     ``class_id`` field ``review_to_records`` used to default to 0 for every entry."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
@@ -621,7 +621,7 @@ def test_review_action_records_unresolvable_class_id_as_none(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A verdict class_name the producing bucket's id_map does not recognize (e.g. an attribute-
-    scoped bucket handed a GT annotation's raw subject name) records ``class_id: null`` — an honest
+    scoped bucket handed a GT annotation's raw subject name) records ``class_id: null``, an honest
     unresolved fact, never a guessed 0/1. This is exactly the case a later review-confirmed build
     (``review_calibration.review_to_records``) must refuse on, not silently mis-class."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
@@ -651,8 +651,8 @@ def test_review_action_records_unresolvable_class_id_as_none(
 def test_review_action_no_sidecar_records_unresolvable_class_id(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    """No recorded ``id_map`` at all (no sidecar, or a bucket predating K25) also records
-    ``class_id: null`` — never silently defaults to a guessed single class."""
+    """No recorded ``id_map`` at all (no sidecar, or an older bucket) also records
+    ``class_id: null``, never silently defaulting to a guessed single class."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
@@ -717,7 +717,7 @@ def test_review_reject_deletes_reviewed_gt(client, dataset_root, tmp_path) -> No
     resp = _review_action(client, img_path, gt, project_root,
                           det_type="fn", pred_idx=None, action="rejected")
     assert resp.status_code == 200
-    # Emptying GT does not auto-confirm a negative (that needs an explicit Complete) — it reads as
+    # Emptying GT does not auto-confirm a negative (that needs an explicit Complete): it reads as
     # needing review. The label file is kept (empty record), not deleted.
     assert resp.json()["annotation_status"] == "unannotated"
     assert gt.is_file()
@@ -771,7 +771,7 @@ def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_roo
     )
     assert resp.status_code == 200
 
-    # The next reload rebuilds the FN from the edited GT file — the verdict must still be
+    # The next reload rebuilds the FN from the edited GT file: the verdict must still be
     # recognized, i.e. the entry is keyed to the post-edit geometry, not the pre-edit one.
     m = client.post(
         "/api/review/matches",
@@ -864,8 +864,8 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
 def test_review_action_records_subject_name_and_reviewer(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    # A prediction stores its subject NAME on disk, so the recorded verdict carries the real name
-    # ("catkin") directly — no registry lookup, no "class_{id}" placeholder.
+    # A prediction stores its subject name on disk, so the recorded verdict carries the real name
+    # ("catkin") directly: no registry lookup, no "class_{id}" placeholder.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
@@ -952,7 +952,7 @@ def test_fs_list_directories(client: TestClient, tmp_path: Path) -> None:
     (tmp_path / "beta" / "images").mkdir(parents=True)  # looks like a dataset root
     (tmp_path / ".hidden").mkdir()
     (tmp_path / "afile.txt").write_text("x")
-    # Windows system/recovery folders that clutter a picker — filtered out by name.
+    # Windows system/recovery folders that clutter a picker, filtered out by name.
     (tmp_path / "$RECYCLE.BIN").mkdir()
     (tmp_path / "System Volume Information").mkdir()
     (tmp_path / "FOUND.000").mkdir()
@@ -963,7 +963,7 @@ def test_fs_list_directories(client: TestClient, tmp_path: Path) -> None:
     names = {e["name"]: e for e in body["entries"]}
     assert "alpha" in names and "beta" in names
     assert ".hidden" not in names  # hidden dirs skipped
-    assert "afile.txt" not in names  # files skipped — directories only
+    assert "afile.txt" not in names  # files skipped, directories only
     assert "$RECYCLE.BIN" not in names
     assert "System Volume Information" not in names
     assert "FOUND.000" not in names
@@ -1038,7 +1038,7 @@ def test_annotate_save_falls_back_to_os_user(client, dataset_root, tmp_path) -> 
 
 def test_review_accept_fp_carries_created_by_and_stamps_accepted_by(client, dataset_root, tmp_path) -> None:
     """Accepting an FP prediction into GT carries the prediction's created_by and stamps
-    accepted_by=reviewer — the origin travels, and the acceptance is recorded."""
+    accepted_by=reviewer: the origin travels, and the acceptance is recorded."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [], keep_empty=True)  # confirmed negative → the pred shows as FP
@@ -1098,8 +1098,8 @@ def test_annotate_load_returns_provenance(client, dataset_root, tmp_path) -> Non
 
 
 def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_path) -> None:
-    """A re-save must not wholesale re-stamp loaded shapes to the current annotator — the
-    original creator survives (keep-original-creator policy); only NEW shapes get stamped."""
+    """A re-save must not wholesale re-stamp loaded shapes to the current annotator: the
+    original creator survives (keep-original-creator policy); only new shapes get stamped."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = client.post("/api/annotate/labels", json={
@@ -1141,7 +1141,7 @@ def test_annotate_polygons_keep_and_stamp_provenance(client, dataset_root, tmp_p
 def test_review_subject_names_flow_from_annotations(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    """The recorded class name is the annotation's own subject — reviewing a catkin records
+    """The recorded class name is the annotation's own subject: reviewing a catkin records
     'catkin', reviewing an efb records 'efb'; the name rides on the label, so one subject's name
     can never bleed onto another's (the bug a project-cached numeric-id engine would have)."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
