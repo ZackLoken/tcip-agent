@@ -1,7 +1,7 @@
 """HTTP client for MCP tools to push state to the tcip-web backend.
 
-Replaces the legacy ``.tcip/events/`` file-bridge. MCP tools call
-``post_panel_event`` to ship a panel event to the running FastAPI GUI.
+MCP tools call ``post_panel_event`` to ship a panel event to the running FastAPI GUI over HTTP,
+never through a file on disk.
 
 Port discovery order:
   1. ``TCIP_WEB_PORT`` environment variable.
