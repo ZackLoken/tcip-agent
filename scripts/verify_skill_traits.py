@@ -67,11 +67,11 @@ def load_vocab(path: Path | None = None) -> tuple[set[str], dict[str, set[str]]]
 # fabricated trait.
 NON_TRAIT_ALLOW = {
     "plant_mapping", "plant_id", "accession_name", "compute_phenology", "build_plant_mapping",
-    "run_inference", "run_matching", "tile_size", "class_id", "elongation_classified",
+    "run_inference", "run_matching", "tile_size", "class_id", "positive_class_assessed",
     "catkin_phenology", "plant_mapping.json", "load_annotations",
     "save_annotations", "in_chans", "num_channels", "num_classes",
     "det_type", "gt_type", "pred_type", "count_by_class", "per_plant_phenology",
-    "crossing_date", "elongation_onset_date", "plant_milestones", "write_phenology_csv",
+    "crossing_date", "positive_onset_date", "plant_milestones", "write_phenology_csv",
     "boxes_from_polygons", "phenology_tools", "results.py", "aggregation.py",
 }
 
