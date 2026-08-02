@@ -9,6 +9,7 @@ import {
   SEARCH_ALGORITHMS,
   type HpoParam,
 } from "@/tabs/hpoSpace";
+import { useStore } from "@/store";
 
 const DEFAULT_BASE = `{
   "model_source": {
@@ -22,7 +23,30 @@ const DEFAULT_BASE = `{
 
 const TERMINAL = new Set(["completed", "failed", "interrupted"]);
 
+/** Plain-language HPO request, editable before it's sent: what the agent chooses (the training
+ *  config, the search space, the scheduler, the trial count) is the point of routing this
+ *  through the agent rather than a form for those same choices. */
+function defaultSweepRequest(datasetRoot: string | null): string {
+  const where = datasetRoot ? ` for the dataset at ${datasetRoot}` : "";
+  return (
+    `Run a hyperparameter sweep${where}. Pick the training config and task, decide which ` +
+    "hyperparameters are worth searching (e.g. learning rate, batch size, weight decay) and " +
+    "reasonable ranges for them, choose a search algorithm/scheduler and a sensible number of " +
+    "trials, and launch it with run_hpo. Let me know once it's running so I can watch it here."
+  );
+}
+
 export function TuningTab() {
+  const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
+  const [request, setRequest] = useState(() => defaultSweepRequest(null));
+  // Once the breeder edits the request, stop overwriting it as the dataset selection resolves.
+  const [requestTouched, setRequestTouched] = useState(false);
+
+  useEffect(() => {
+    if (!requestTouched) setRequest(defaultSweepRequest(datasetRoot));
+  }, [datasetRoot, requestTouched]);
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [base, setBase] = useState(DEFAULT_BASE);
   const [params, setParams] = useState<HpoParam[]>(DEFAULT_HPO_PARAMS);
   const [nTrials, setNTrials] = useState(5);
@@ -81,6 +105,11 @@ export function TuningTab() {
     setParams((ps) => ps.map((p) => (p.key === key ? ({ ...p, ...patch } as HpoParam) : p)));
   }
 
+  function askAgent() {
+    if (!request.trim()) return;
+    useStore.getState().sendToAgentTerminal(request);
+  }
+
   async function launch() {
     setLaunchMsg(null);
     const space = buildSearchSpace(params);
@@ -112,167 +141,35 @@ export function TuningTab() {
   return (
     <div className="flex-1 grid grid-cols-[440px_1fr] overflow-hidden">
       <div className="border-r border-tcip-border p-4 overflow-auto">
-        <div className="tcip-heading mb-3">HPO config</div>
-
-        <label className="tcip-label mb-1">Base training config (JSON)</label>
+        <div className="tcip-heading mb-3">HPO sweep</div>
+        <p className="text-[11px] text-tcip-muted mb-2">
+          The agent picks the training config, the search space, and the scheduler, then launches
+          the sweep with <span className="font-mono">run_hpo</span>: the same reasoning it uses to
+          configure a training run. Describe what you want swept, then send it.
+        </p>
         <textarea
-          className="tcip-input w-full h-40 font-mono text-[11px] leading-4 resize-none mb-3"
-          value={base}
-          onChange={(e) => setBase(e.target.value)}
-          spellCheck={false}
+          className="tcip-input w-full h-32 text-[11px] leading-4 resize-none mb-2"
+          value={request}
+          onChange={(e) => {
+            setRequestTouched(true);
+            setRequest(e.target.value);
+          }}
+          spellCheck={true}
         />
-
-        {/* Structured search space (fed to Ray Tune) */}
-        <label className="tcip-label mb-1">Search space: each trial trains for real</label>
-        <div className="tcip-panel p-2 mb-3">
-          {params.map((p) => (
-            <div key={p.key} className="py-1 border-b border-tcip-border last:border-0">
-              <label className="flex items-center gap-2 text-[11px]">
-                <input
-                  type="checkbox"
-                  checked={p.enabled}
-                  onChange={(e) => updateParam(p.key, { enabled: e.target.checked })}
-                />
-                <span className="font-medium">{p.label}</span>
-                <span className="text-[10px] text-tcip-muted font-mono">{p.key}</span>
-              </label>
-              {p.enabled && (
-                <div className="mt-1 ml-5 text-[10px]">
-                  {p.kind === "loguniform" && (
-                    <div className="flex items-center gap-2">
-                      <label className="flex items-center gap-1">
-                        low
-                        <input
-                          className="tcip-input w-24 text-[11px]"
-                          type="number"
-                          step="any"
-                          value={Number.isFinite(p.low) ? p.low : ""}
-                          onChange={(e) => updateParam(p.key, { low: parseFloat(e.target.value) })}
-                        />
-                      </label>
-                      <label className="flex items-center gap-1">
-                        high
-                        <input
-                          className="tcip-input w-24 text-[11px]"
-                          type="number"
-                          step="any"
-                          value={Number.isFinite(p.high) ? p.high : ""}
-                          onChange={(e) => updateParam(p.key, { high: parseFloat(e.target.value) })}
-                        />
-                      </label>
-                      <span className="text-tcip-muted">log-uniform</span>
-                    </div>
-                  )}
-                  {p.kind === "numlist" && (
-                    <input
-                      className="tcip-input w-full text-[11px]"
-                      value={p.values.join(", ")}
-                      onChange={(e) => updateParam(p.key, { values: parseNumList(e.target.value) })}
-                      placeholder="comma-separated, e.g. 2, 4, 8"
-                      spellCheck={false}
-                    />
-                  )}
-                  {p.kind === "choices" && (
-                    <div className="flex flex-wrap gap-1">
-                      {p.options.map((opt) => {
-                        const on = p.selected.includes(opt);
-                        return (
-                          <button
-                            key={opt}
-                            type="button"
-                            aria-pressed={on}
-                            className={`h-6 rounded border px-2 text-[10px] transition-colors ${
-                              on
-                                ? "border-tcip-accent bg-tcip-accent text-white"
-                                : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
-                            }`}
-                            onClick={() =>
-                              updateParam(p.key, {
-                                selected: on
-                                  ? p.selected.filter((o) => o !== opt)
-                                  : [...p.selected, opt],
-                              })
-                            }
-                          >
-                            {opt}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 mb-3 text-[11px] text-tcip-muted">
-          <label className="flex flex-col gap-1">
-            Trials
-            <input
-              className="tcip-input w-full"
-              type="number"
-              min={1}
-              max={200}
-              value={nTrials}
-              onChange={(e) => setNTrials(parseInt(e.target.value, 10) || 1)}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            Search algorithm
-            <select
-              className="tcip-select w-full"
-              value={searchAlg}
-              onChange={(e) => setSearchAlg(e.target.value)}
-            >
-              {SEARCH_ALGORITHMS.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            Scheduler
-            <select
-              className="tcip-select w-full"
-              value={scheduler}
-              onChange={(e) => setScheduler(e.target.value)}
-            >
-              {SCHEDULERS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <label className="tcip-label mb-1">Output directory</label>
-        <input
-          className="tcip-input w-full mb-3"
-          value={outputDir}
-          onChange={(e) => setOutputDir(e.target.value)}
-          placeholder=".../Valley_Farm/.tcip/hpo"
-        />
-
-        <button className="tcip-btn-primary w-full" onClick={launch}>
-          ▶&nbsp;&nbsp;Launch HPO
+        <button
+          className="tcip-btn-primary w-full mb-1"
+          onClick={askAgent}
+          disabled={!request.trim()}
+        >
+          Ask the agent to run this sweep
         </button>
-        {launchMsg && (
-          <div className={`mt-2 text-[11px] ${launchMsg.ok ? "text-tcip-tp" : "text-tcip-fp"}`}>
-            {launchMsg.text}
-          </div>
-        )}
-        <div className="mt-1 text-[10px] text-tcip-muted">
-          Note: a running sweep can’t be cancelled, trials run to completion. Keep the trial count
-          modest.
-        </div>
 
         <div className="mt-5">
           <div className="tcip-heading mb-2">Sweeps</div>
           {sweeps.length === 0 ? (
-            <div className="text-[11px] text-tcip-muted">No sweeps yet.</div>
+            <div className="text-[11px] text-tcip-muted">
+              No sweeps yet. The agent launches a sweep from the request above.
+            </div>
           ) : (
             <ul className="space-y-1">
               {sweeps.map((s) => (
@@ -295,6 +192,180 @@ export function TuningTab() {
             </ul>
           )}
         </div>
+
+        <details
+          className="mt-5"
+          open={showAdvanced}
+          onToggle={(e) => setShowAdvanced(e.currentTarget.open)}
+        >
+          <summary className="tcip-heading cursor-pointer select-none">
+            Advanced: hand-author and launch a sweep directly
+          </summary>
+          <p className="text-[11px] text-tcip-muted mt-2 mb-2">
+            Skips the agent; only for a sweep shape it has no reasonable default for.
+          </p>
+
+          <label className="tcip-label mb-1">Base training config (JSON)</label>
+          <textarea
+            className="tcip-input w-full h-40 font-mono text-[11px] leading-4 resize-none mb-3"
+            value={base}
+            onChange={(e) => setBase(e.target.value)}
+            spellCheck={false}
+          />
+
+          {/* Structured search space (fed to Ray Tune) */}
+          <label className="tcip-label mb-1">Search space: each trial trains for real</label>
+          <div className="tcip-panel p-2 mb-3">
+            {params.map((p) => (
+              <div key={p.key} className="py-1 border-b border-tcip-border last:border-0">
+                <label className="flex items-center gap-2 text-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={p.enabled}
+                    onChange={(e) => updateParam(p.key, { enabled: e.target.checked })}
+                  />
+                  <span className="font-medium">{p.label}</span>
+                  <span className="text-[10px] text-tcip-muted font-mono">{p.key}</span>
+                </label>
+                {p.enabled && (
+                  <div className="mt-1 ml-5 text-[10px]">
+                    {p.kind === "loguniform" && (
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1">
+                          low
+                          <input
+                            className="tcip-input w-24 text-[11px]"
+                            type="number"
+                            step="any"
+                            value={Number.isFinite(p.low) ? p.low : ""}
+                            onChange={(e) =>
+                              updateParam(p.key, { low: parseFloat(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className="flex items-center gap-1">
+                          high
+                          <input
+                            className="tcip-input w-24 text-[11px]"
+                            type="number"
+                            step="any"
+                            value={Number.isFinite(p.high) ? p.high : ""}
+                            onChange={(e) =>
+                              updateParam(p.key, { high: parseFloat(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <span className="text-tcip-muted">log-uniform</span>
+                      </div>
+                    )}
+                    {p.kind === "numlist" && (
+                      <input
+                        className="tcip-input w-full text-[11px]"
+                        value={p.values.join(", ")}
+                        onChange={(e) =>
+                          updateParam(p.key, { values: parseNumList(e.target.value) })
+                        }
+                        placeholder="comma-separated, e.g. 2, 4, 8"
+                        spellCheck={false}
+                      />
+                    )}
+                    {p.kind === "choices" && (
+                      <div className="flex flex-wrap gap-1">
+                        {p.options.map((opt) => {
+                          const on = p.selected.includes(opt);
+                          return (
+                            <button
+                              key={opt}
+                              type="button"
+                              aria-pressed={on}
+                              className={`h-6 rounded border px-2 text-[10px] transition-colors ${
+                                on
+                                  ? "border-tcip-accent bg-tcip-accent text-white"
+                                  : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
+                              }`}
+                              onClick={() =>
+                                updateParam(p.key, {
+                                  selected: on
+                                    ? p.selected.filter((o) => o !== opt)
+                                    : [...p.selected, opt],
+                                })
+                              }
+                            >
+                              {opt}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mb-3 text-[11px] text-tcip-muted">
+            <label className="flex flex-col gap-1">
+              Trials
+              <input
+                className="tcip-input w-full"
+                type="number"
+                min={1}
+                max={200}
+                value={nTrials}
+                onChange={(e) => setNTrials(parseInt(e.target.value, 10) || 1)}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              Search algorithm
+              <select
+                className="tcip-select w-full"
+                value={searchAlg}
+                onChange={(e) => setSearchAlg(e.target.value)}
+              >
+                {SEARCH_ALGORITHMS.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              Scheduler
+              <select
+                className="tcip-select w-full"
+                value={scheduler}
+                onChange={(e) => setScheduler(e.target.value)}
+              >
+                {SCHEDULERS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="tcip-label mb-1">Output directory</label>
+          <input
+            className="tcip-input w-full mb-3"
+            value={outputDir}
+            onChange={(e) => setOutputDir(e.target.value)}
+            placeholder=".../Valley_Farm/.tcip/hpo"
+          />
+
+          <button className="tcip-btn-primary w-full" onClick={launch}>
+            ▶&nbsp;&nbsp;Launch HPO
+          </button>
+          {launchMsg && (
+            <div className={`mt-2 text-[11px] ${launchMsg.ok ? "text-tcip-tp" : "text-tcip-fp"}`}>
+              {launchMsg.text}
+            </div>
+          )}
+          <div className="mt-1 text-[10px] text-tcip-muted">
+            Note: a running sweep can’t be cancelled, trials run to completion. Keep the trial count
+            modest.
+          </div>
+        </details>
       </div>
 
       <div className="p-4 overflow-auto">
