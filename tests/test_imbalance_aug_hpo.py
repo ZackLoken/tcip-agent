@@ -337,6 +337,7 @@ def test_tune_search_warm_start_and_optimizes(tmp_path):
         metric="objective", mode="min", num_samples=6,
         search_alg="random", scheduler="none",
         warm_start=True, baseline_params={"x": 2.0},
+        storage_path=str(tmp_path),
     )
     assert result["warm_start"] is True
     assert result["n_trials"] == 6
