@@ -82,7 +82,7 @@ def project_dir(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Phase 13: E2E Pipeline Test
+# E2E Pipeline Test
 # ---------------------------------------------------------------------------
 
 class TestE2EPipeline:
@@ -120,7 +120,7 @@ class TestE2EPipeline:
         assert ann["labels"]["count"] >= 2
         assert ann["predictions"]["count"] >= 2
 
-        # ── Step 6: Modify annotations — add boxes and save ─────────
+        # ── Step 6: Modify annotations, add boxes and save ─────────
         new_anns = [
             {"subject": "catkin", "bbox": [200, 200, 264, 248]},
             {"subject": "catkin", "bbox": [128, 112, 160, 136]},
@@ -226,7 +226,7 @@ class TestE2EPipelineEdgeCases:
         json_io.write_annotations(str(labels / "test.json"),
                                   [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264))], 640, 480)
 
-        # No predictions directory — evaluate should handle gracefully
+        # No predictions directory: evaluate should handle gracefully
         result = score_predictions(str(img_path))
         # Either returns an error dict or metrics with 0 TP
         assert isinstance(result, dict)
