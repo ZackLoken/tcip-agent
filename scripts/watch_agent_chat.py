@@ -2,13 +2,13 @@
 
 The in-app (breeder-lane) agent is a *separate*, fenced ``claude`` process. It logs its
 conversation to ``~/.claude/projects/<encoded-repo>/<session>.jsonl`` in real time. This
-read-only helper finds that session and prints the clean conversation — so the orchestrating
+read-only helper finds that session and prints the clean conversation, so the orchestrating
 agent (me) can see the in-app chat with no copy-paste. It replaces the clipboard round-trip
 that broke when the embedded terminal couldn't copy.
 
-By default it shows the newest session that ISN'T the one driving this script (that session's
+By default it shows the newest session that isn't the one driving this script (that session's
 transcript contains this file's name), so ``python scripts/watch_agent_chat.py`` just shows
-"the other agent's chat" — the in-app one.
+"the other agent's chat," the in-app one.
 
 Usage (repo root, tcip-agent env):
     python scripts/watch_agent_chat.py                 # newest in-app session, full transcript
@@ -112,7 +112,7 @@ def _sessions(pdir: Path) -> list[Path]:
 
 
 def _driver_id(sessions: list[Path]) -> str | None:
-    """The session running this script — its transcript mentions this file's name."""
+    """The session running this script, its transcript mentions this file's name."""
     for s in sessions:
         try:
             if _MARKER in s.read_text(encoding="utf-8", errors="ignore"):
