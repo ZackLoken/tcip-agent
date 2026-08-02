@@ -71,6 +71,15 @@ At the end of substantial work, call `project_retrospective`. Write what a futur
 - **An inventory of existing machinery.** It goes stale the first time the source moves. Read the
   source, or run `scripts/list_tools.py`.
 
+## Distill: closing the loop toward a platform change
+
+`scripts/distill_learnings.py` gathers one project's (or, with `--workspace`, every project's)
+reports and retrospectives into a worksheet of recurring themes; it only reads, nothing is
+written, applied, or promoted. After reviewing a worksheet, call `record_distillation_pass(project_path)` per project covered:
+the one audited write in this loop, kept out of the script on purpose. It only resets that
+project's distillation-backlog counters; turning a recurring theme into a skill line, a
+`CLAUDE.md` rule, or a tool change stays your own separate edit, per the scoping above.
+
 ## Honesty
 
 Report what you actually did. If you skipped a capture, say so. A learning record that pretends to
