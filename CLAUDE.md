@@ -152,10 +152,12 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   toolkit, docs that match the code) and must guide the breeder without stranding them. The
   breeder's only surface is the browser GUI, and their clarity and flow through it are the product
   from their side, same weight as the agent's own reasoning surface.
-- **A subject is not a trait.** `annotations/<subject>/` names an object class that must be
-  isolated: every prior `campaign`/`annotation_type`/segment-sense `trait` name is unified to
-  `subject` end to end, backend and web layer (verified current in `dataset_layout.py` and
-  `packages/tcip-web/src`, no stale references). Sometimes a subject is a trait's own object
+- **A subject is not a trait.** `subject` names an object class that must be isolated: every
+  prior `campaign`/`annotation_type`/segment-sense `trait` name is unified to `subject` end to
+  end, backend and web layer. On disk, labels are one file per image
+  (`annotations/<date>/<stem>.json`, see `dataset_layout.py`) holding every subject's annotation
+  records by name; `subject` is a field inside each record, resolved through the dataset's
+  `classes.json` registry, not a path segment. Sometimes a subject is a trait's own object
   (catkins, for `catkin_50per_date`); often it is an enabling object no trait names: a *bush*
   isolated so anything can be aggregated per plant, a *leaf* isolated before leaf area is measured.
   So subject names are not governed by `crops.yml` and must not be validated against it.
@@ -230,7 +232,9 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
 You can see images: call `visualize` (with `source="annotations"|"predictions"|"comparison"|
 "dataset"`) or a specialized renderer (`render_failure_cases`, `overlay_reference_grid`,
 `capture_live_canvas`, `propose_annotations`) → it writes to `.tcip/artifacts/viz/` and returns
-`image_path` → call `view_image` on it → describe what you see, then recommend.
+`image_path` → call your client's image-capable read tool on it (e.g. `Read` in Claude Code; the
+platform is transport-neutral, so this is not a tool TCIP itself guarantees) → describe what you
+see, then recommend.
 `capture_live_canvas` shows the human's live GUI canvas: their image, viewport, and unsaved
 shapes with the GUI's own symbology. See the `visual-analysis` skill.
 
