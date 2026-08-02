@@ -1313,6 +1313,7 @@ export function AnnotateTab() {
           onSave={() => void save()}
           saveDisabled={saveDisabled}
           dirty={canvas.dirty}
+          isLocked={isLocked}
         />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
           <div className="max-w-lg rounded-lg border border-tcip-border bg-tcip-panel px-5 py-4 text-center">
@@ -1350,6 +1351,7 @@ export function AnnotateTab() {
         onSave={() => void save()}
         saveDisabled={saveDisabled}
         dirty={canvas.dirty}
+        isLocked={isLocked}
         bandsInfo={bandsInfo}
         bandSelection={bandSelection}
         onBandSelectionChange={setBandSelection}
