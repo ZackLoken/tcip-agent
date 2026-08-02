@@ -223,6 +223,35 @@ export function ReviewTab() {
   useEffect(() => {
     setValidationResult(null);
   }, [visKey]);
+  // The trait a validation-reference promotion is computed for, resolved from this project's own
+  // registered traits (mirrors ResultsTab, never assumed from dataset.subject, which names an
+  // object class, not necessarily a registered trait): auto-selected when there is exactly one,
+  // left blank (with an explicit error, not a silent guess) when there are zero, offered as a
+  // choice when there are several.
+  const [availableTraits, setAvailableTraits] = useState<string[]>([]);
+  const [trait, setTrait] = useState("");
+  const [traitError, setTraitError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!dataset.project_root) return;
+    setTrait("");
+    setTraitError(null);
+    void resultsApi
+      .traits(dataset.project_root)
+      .then((res) => {
+        setAvailableTraits(res.traits);
+        if (res.traits.length === 0) {
+          setTraitError("No trait is registered for this project yet.");
+        } else if (res.traits.length === 1) {
+          setTrait(res.traits[0]);
+        }
+      })
+      .catch((e) => {
+        setAvailableTraits([]);
+        setTraitError(
+          `Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+  }, [dataset.project_root]);
   // The bucket's own generation confidence, fetched once per prediction dir (read-only, no
   // gate run) so the "Conf ≥" filter can warn live (see the filter shelf below).
   const [generationConf, setGenerationConf] = useState<number | null>(null);
@@ -864,8 +893,12 @@ export function ReviewTab() {
   // Promote the current dataset's completed review into a validation reference. Runs the platform's
   // own validation gate server-side; the honest validated / not-yet result is surfaced (never forced).
   async function promoteReviewToValidationReference() {
-    if (!dataset.project_root || !dataset.subject) {
-      useStore.getState().pushToast("Select a dataset with a subject and predictions first.");
+    if (!dataset.project_root) {
+      useStore.getState().pushToast("Select a dataset first.");
+      return;
+    }
+    if (!trait) {
+      useStore.getState().pushToast(traitError ?? "Pick a trait before validating.");
       return;
     }
     if (!dataset.predictions_dir) {
@@ -878,7 +911,7 @@ export function ReviewTab() {
     try {
       const res = await api.review.validateReference({
         project_root: dataset.project_root,
-        trait: dataset.subject,
+        trait,
         pred_dir: dataset.predictions_dir,
       });
       setValidationResult({ validated: res.validated, reason: res.reason });
@@ -1173,13 +1206,37 @@ export function ReviewTab() {
           </span>
 
           <span aria-hidden className="mx-1 h-4 w-px bg-tcip-border" />
+          {/* Which registered trait a validation-reference promotion is computed for (see
+              ResultsTab's identical picker): only shown when the project has more than one. */}
+          {availableTraits.length > 1 && (
+            <span className="flex items-center gap-1.5">
+              <label className="tcip-label">Trait</label>
+              <select
+                className="tcip-input w-auto"
+                value={trait}
+                onChange={(e) => setTrait(e.target.value)}
+              >
+                <option value="" disabled>
+                  Choose a trait…
+                </option>
+                {availableTraits.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </span>
+          )}
           {/* Dataset-level: promote this review into a validation reference the results can trust.
               The backend runs the same validation check and answers validated / not-yet honestly. */}
           <button
             className="tcip-btn"
             onClick={() => void promoteReviewToValidationReference()}
-            disabled={validating || !!edit}
-            title="Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check; it will tell you if it isn't enough yet."
+            disabled={validating || !!edit || !trait}
+            title={
+              traitError ??
+              "Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check; it will tell you if it isn't enough yet."
+            }
           >
             {validating ? "Checking…" : "Use review as validation reference"}
           </button>
@@ -1292,7 +1349,7 @@ export function ReviewTab() {
               type="checkbox"
               checked={imageStatus === "completed"}
               onChange={(e) => void markImageComplete(e.target.checked)}
-              disabled={!imgName || !!edit}
+              disabled={!imgName || !!edit || !dataset.subject}
             />
             Reviewed
           </label>
