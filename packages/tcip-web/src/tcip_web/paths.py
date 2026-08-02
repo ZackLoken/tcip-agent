@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 def is_loopback_host(host: str) -> bool:
     """True if ``host`` binds only the local machine (127.0.0.0/8, ::1, localhost).
 
-    ``0.0.0.0`` / ``::`` mean "all interfaces" and are therefore not loopback — binding
+    ``0.0.0.0`` / ``::`` mean "all interfaces" and are therefore not loopback: binding
     them exposes the server to the network.
     """
     h = (host or "").strip().lower()
@@ -52,7 +52,7 @@ def origin_allowed(origin: str | None) -> bool:
 def allowed_image_roots() -> list[Path]:
     """Allowed roots for absolute file reads, from ``TCIP_IMAGE_ROOTS`` (os.pathsep list).
 
-    Empty (the default) means unrestricted — appropriate for a local single-user GUI.
+    Empty (the default) means unrestricted, appropriate for a local single-user GUI.
     Set it to lock an exposed/networked deployment down to specific dataset directories.
     """
     raw = os.environ.get("TCIP_IMAGE_ROOTS", "").strip()
