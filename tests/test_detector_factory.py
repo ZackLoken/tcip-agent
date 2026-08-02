@@ -1,4 +1,4 @@
-"""Detector builders — plain ``build_detector`` / ``_build_*`` factories, imported
+"""Detector builders: plain ``build_detector`` / ``_build_*`` factories, imported
 directly by bespoke model code (no registry)."""
 
 import pytest
