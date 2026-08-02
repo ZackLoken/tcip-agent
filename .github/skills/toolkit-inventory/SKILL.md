@@ -14,7 +14,7 @@ bespoke seams, and what the platform can ingest today see the `pipeline-design` 
 no pipeline shape on purpose; this skill is the name-and-location reference its import block points at.
 
 `build_detector` and `build_loss` already self-document at runtime: an unknown name raises
-`KeyError: Unknown … Available: [...]`. The heads, necks, backbones, and ctx methods have **no**
+`KeyError: Unknown … Available: [...]`. The heads, necks, backbones, and ctx methods have no
 such factory, so this skill is where their names live.
 
 ## Model building blocks (import and compose inside your own `nn.Module`)
