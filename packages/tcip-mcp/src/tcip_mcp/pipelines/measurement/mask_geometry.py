@@ -63,7 +63,7 @@ def resolve_binarize_threshold(value: float | None = None):
                          validated_against=VALIDATED_FALSE)
 
 
-def resolve_scale(value: float | None = None, *, unit: str = "mm", capture_id: str | None = None):
+def resolve_scale(value: float | None = None, *, unit: str, capture_id: str | None = None):
     """A physical per-pixel scale as a firewalled ``ResolvedParam`` (validated=false by default).
 
     Requires validation (``validation_kind="physical"``), shippable only once ``validated_against``
@@ -201,7 +201,7 @@ def unit_from_value_key(key: str) -> tuple[str, str] | None:
     return display, linear_basis
 
 
-def mask_geometry(mask: Any, *, scale: float | None = None, unit: str = "mm",
+def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
                   threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> dict:
     """Dimensional geometry of a single validated 2D mask (``[H, W]`` or ``[1, H, W]``).
 
@@ -274,7 +274,7 @@ def mask_to_polygon_points(
     return mask_to_polygon_rings(_to_numpy(mask), threshold=threshold, epsilon_frac=epsilon_frac)
 
 
-def instance_geometries(masks: Any, *, scale: float | None = None, unit: str = "mm",
+def instance_geometries(masks: Any, *, scale: float | None = None, unit: str,
                         threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> list[dict]:
     """Per-instance :func:`mask_geometry` over an ``[N, H, W]`` mask stack (or a single ``[H, W]``)."""
     arr = _to_numpy(masks)
