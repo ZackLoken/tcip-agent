@@ -1,12 +1,12 @@
 """List every claim-shaped sentence this change *adds* to comments and docstrings.
 
-`verify_doc_examples.py` checks that code examples run. Nothing checked the prose — and prose is
+`verify_doc_examples.py` checks that code examples run. Nothing checked the prose, and prose is
 where the expensive mistakes went: "Falls back to torchvision when timm is unavailable" (no
 fallback exists), "Any timm name is accepted" (convnext/swin raise), "an MCP tool cannot carry a
 real batch" (it can, as JSON). Each was reasoning that felt settled, so no "remember to verify"
 rule caught it.
 
-This does not judge truth — it cannot. It enumerates, from the diff, every sentence that asserts
+This does not judge truth; it cannot. It enumerates, from the diff, every sentence that asserts
 something checkable, so each one is looked at deliberately instead of slipping through as
 background reasoning. Output empty = the change adds no unverified assertion.
 
@@ -24,7 +24,7 @@ import re
 import subprocess
 import sys
 
-# Language that asserts a fact beyond "here is what this line does" — purpose, capability,
+# Language that asserts a fact beyond "here is what this line does": purpose, capability,
 # necessity, exclusivity, causation. These are the shapes that cannot be checked by running the
 # function, which is exactly why they need naming.
 _CLAIM = re.compile(
@@ -36,7 +36,7 @@ _CLAIM = re.compile(
     r"because|so\s+that|otherwise|instead\s+of|rather\s+than|"
     r"guarantees?|ensures?|prevents?|"
     r"nothing\s+(?:calls?|uses?|reads?)|no\s+(?:caller|consumer|reader)|"
-    # Capability claims — "works for everything" and "you may do X" are the two shapes that
+    # Capability claims: "works for everything" and "you may do X" are the two shapes that
     # slipped through as instructions rather than assertions.
     r"(?:accepts?|supports?|allows?|handles?)\s+any|"
     r"any\s+\S+(?:\s+\S+)?\s+(?:is|are)\s+(?:accepted|supported|allowed|honou?red)|"
@@ -76,7 +76,7 @@ def _is_prose(path: str, text: str) -> bool:
         return False
     if _CODE_COMMENT.match(text):
         return True
-    # A docstring body line: prose-looking, not code. Cheap heuristic — over-including a code line
+    # A docstring body line: prose-looking, not code. Cheap heuristic: over-including a code line
     # only costs a false listing, while missing a docstring line costs the thing this exists for.
     stripped = text.strip()
     return bool(stripped) and not re.match(r"^[\w.\[\]\"']+\s*[=(:]|^(from|import|return|raise)\b",
