@@ -1,4 +1,4 @@
-"""Phase 4.6 — sampler class_key contract (configurable; no silent class-0 bucketing)."""
+"""Sampler class_key contract (configurable; no silent class-0 bucketing)."""
 
 import pytest
 
@@ -28,7 +28,7 @@ def test_target_class_id_explicit_key_and_fallbacks():
     assert _target_class_id({"labels": torch.tensor([5, 6])}) == 4
     assert _target_class_id({"labels": torch.tensor([1])}) == 0      # single-class detection
     assert _target_class_id({"other": 1}) is None                    # nothing applicable
-    # Explicit class_key bypasses the shift — documented; don't use class_key="labels"
+    # Explicit class_key bypasses the shift: documented; don't use class_key="labels"
     # for detection targets.
     assert _target_class_id({"labels": torch.tensor([5, 6])}, class_key="labels") == 5
 
