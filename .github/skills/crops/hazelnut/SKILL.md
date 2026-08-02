@@ -145,7 +145,7 @@ traps:
 - **`catkin_elongation_date`**: elongation/anthesis is a breeder-defined *visible morphological
   state* (loosening + pollen shed), established by a validated call against expert scoring: a state,
   not a dimension you read off a bbox. See the `phenology` skill for the elongated-fraction
-  definition and its `elongation_classified` guard.
+  definition and its `positive_class_assessed` guard.
 - **`catkin_*per_*` and `pistillate_*per_*` "% open"** mean the fraction of catkins/flowers at the
   breeder-defined anthesis/receptivity state, not "% detected." No date without an expert-scored
   "open" criterion validated against ground truth.
