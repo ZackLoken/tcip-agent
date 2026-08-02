@@ -7,7 +7,7 @@ description: "Annotation and review workflows for TCIP's native per-image JSON l
 
 ## Canonical format: per-image JSON with provenance
 
-The on-disk default for both GT and predictions is **one per-image, COCO-shaped `.json`**
+The on-disk default for both GT and predictions is one per-image, COCO-shaped `.json`
 (`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
 `accepted_at` provenance per object. `stage_proposals`, `accept_proposals`, and
 `export_predictions` all read/write this schema; a dataset-level COCO training set is
@@ -23,7 +23,7 @@ directly. An unspecified format resolves to `.json` (`dataset_layout.py`'s `labe
 
 Both are read by `format_io.load_annotations` / written by `save_annotations`; the agent-facing
 MCP tool wrapping the read side is `read_annotations` (see Tools below). `format_io.detect_format`
-reads the format off the file's own keys and **raises** on anything else rather than guessing: a
+reads the format off the file's own keys and raises on anything else rather than guessing: a
 misdetected format reads real annotations as empty, so no answer beats a wrong one.
 
 A collaborator's delivery in some other schema is yours to convert: read a sample, write a
@@ -32,7 +32,7 @@ importers, so nothing constrains you to a format someone else's tool happened to
 
 ## Coordinate frame: upright, EXIF applied once
 
-Every coordinate (normalized or pixel) lives in the **EXIF-upright** frame. Images are
+Every coordinate (normalized or pixel) lives in the EXIF-upright frame. Images are
 decoded through one door, `load_image` (`image_utils.py`) / `get_image_dimensions`, both
 via `auto_orient_image`, which applies the EXIF orientation exactly once, so the GUI
 canvas, the model, tiling, and viz all share one pixel space. This matters most for
@@ -63,7 +63,7 @@ applied twice or skipped.
 
 ## Engine-assisted auto-labeling (the engine is a capability, not a fixed method)
 
-Auto-labeling runs through a **method-neutral proposal seam** (`tcip_mcp.pipelines.proposal`): the
+Auto-labeling runs through a method-neutral proposal seam (`tcip_mcp.pipelines.proposal`): the
 agent names an `engine` and the platform runs it. `engine='sam'` is the built-in SAM2 reference; the
 agent can register another engine (`register_proposal_engine`) or pass a dotted `module:factory` it
 wrote, a Grounding DINO / open-vocab detector, or a bespoke proposer, exactly the way `model_source`
@@ -75,7 +75,7 @@ That bespoke proposer may be classical-analysis-based (an OpenCV / scikit-image 
 writes), one option among engines, not a prescribed step; its proposals are soft and prove out only
 by surviving review.
 
-**Trial and compare by review: pick the engine the data justifies.** Don't assume one engine; wire
+Trial and compare by review: pick the engine the data justifies. Don't assume one engine; wire
 two or three, propose on the same images, and let the breeder's review decide: the useful engine is
 the one whose high-confidence proposals *survive review* (high accept rate, few edits). That accept
 rate is the measured comparison, the same signal that gates auto-accept in the review→retrain loop.
@@ -136,12 +136,12 @@ classification and QA.
 
 ### The review channel: propose on canvas, never write GT blind
 
-The agent must **never write ground truth the human hasn't seen**. Stage proposals to the
+The agent must never write ground truth the human hasn't seen. Stage proposals to the
 *predictions* tree and drive the human to review them:
 
 - **`stage_proposals(dataset_root, model_name, date, stem, boxes)`** writes agent-proposed
   detections to `predictions/<model>/<date>/<stem>.json` (per-image COCO/JSON), the
-  predictions tree, **not** `annotations/`. They render on the Review canvas as predictions for
+  predictions tree, not `annotations/`. They render on the Review canvas as predictions for
   the human to accept/reject/edit. `model_name` is stamped as each object's `created_by`, so name
   the real producer (`sam`, `claude`, `groundingdino`, `model:<run>`), not a generic placeholder.
   A bucket that already carries review verdicts is immutable: a stage into it is redirected to a
@@ -161,7 +161,7 @@ frames → they accept on the canvas → only then does it become GT. See
 ## Quality Metrics
 
 - **Coverage**: fraction of images with labels
-- **Negatives**: a training negative is an empty label file (`"annotations": []`) **plus** a human
+- **Negatives**: a training negative is an empty label file (`"annotations": []`) plus a human
   Complete on that image, recorded as the status token `"negative"` in
   `.tcip/state/image_status.json`, scoped to the subject. `to_coco_dataset` silently skips an
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
