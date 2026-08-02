@@ -1,8 +1,8 @@
-"""S3 — code+env provenance for a bespoke (model_source) run.
+"""Code+env provenance for a bespoke (model_source) run.
 
 Locks: snapshot_model_source (copy source files + sha256 + env + seed), KIND_TCIP_MODULE stamping,
 the _kind_from_ckpt structural fallback, build_predictor rebuilding a bespoke model from its
-importable builder (NO exec) + predicting, and register_model_from_experiment round-tripping the
+importable builder (no exec) + predicting, and register_model_from_experiment round-tripping the
 bespoke kind.
 """
 
@@ -38,7 +38,7 @@ def _model_source() -> dict:
 
 
 # --------------------------------------------------------------------------
-# snapshot_model_source — source files + sha256 + env + seed
+# snapshot_model_source: source files + sha256 + env + seed
 # --------------------------------------------------------------------------
 
 def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
@@ -59,7 +59,7 @@ def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# K12 finding 1 — silent partial capture is now self-describing
+# silent partial capture is self-describing
 # --------------------------------------------------------------------------
 
 def test_snapshot_model_source_records_missing_files(tmp_path):
@@ -85,13 +85,13 @@ def test_snapshot_model_source_records_import_error(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# K12 finding 2 — content-addressed destination: no basename clobber, no double-count
+# content-addressed destination: no basename clobber, no double-count
 # --------------------------------------------------------------------------
 
 def test_snapshot_model_source_dedups_same_file_reached_two_ways(tmp_path):
     """The auto-appended builder module __file__ (absolute) and a differently-spelled
-    source_files entry for the SAME physical file (e.g. via a relative/dotted path) must dedup
-    by content, not merely by exact path-string equality — a naive ``str(p) in seen`` dedup
+    source_files entry for the same physical file (e.g. via a relative/dotted path) must dedup
+    by content, not merely by exact path-string equality: a naive ``str(p) in seen`` dedup
     misses this because the two spellings never compare equal as strings."""
     exp_dir = tmp_path / "exp"
     exp_dir.mkdir()
