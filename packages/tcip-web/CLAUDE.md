@@ -33,11 +33,10 @@ Use the `frontend-design` skill for IA/visual work.
 `--settings packages/tcip-web/src/tcip_web/agent_terminal.settings.json`, a committed permission
 fence (deny-by-default edits outside a narrow allowlist, `Bash`/`PowerShell` guards, a `SessionStart`
 ritual-injection hook, `SessionEnd` learning capture) scoped to that breeder-facing session. It is
-**not** merged with the repo root's own `.claude/settings.json`: the developer's own `claude`
+not merged with the repo root's own `.claude/settings.json`: the developer's own `claude`
 session (this one, with no `--settings` flag) stays unrestricted by it, by design. Don't extend or
 edit that fence file without calling it out explicitly; it's a security boundary, not incidental
-config. (Known drift: `terminal.py` comments reference `AGENT_GOVERNANCE_PLAN.md`, which doesn't
-exist in the tree; worth resolving separately, not fixed here.)
+config.
 
 ## Conventions specific to this package
 
