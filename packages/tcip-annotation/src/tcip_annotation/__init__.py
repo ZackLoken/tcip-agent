@@ -21,7 +21,13 @@ from tcip_annotation.format_io import (
     parse_coco_annotations,
     write_coco,
 )
-from tcip_annotation.matching import compute_matches, box_iou, polygon_iou, point_in_polygon
+from tcip_annotation.matching import (
+    compute_classified_trait_matches,
+    compute_matches,
+    box_iou,
+    polygon_iou,
+    point_in_polygon,
+)
 # The one mask -> Polygon.rings extractor, shared with tcip-mcp's prediction-export path.
 from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_annotation.annotation_engine import AnnotationEngine
@@ -53,6 +59,7 @@ __all__ = [
     "write_coco",
     # Matching
     "compute_matches",
+    "compute_classified_trait_matches",
     "box_iou",
     "polygon_iou",
     "point_in_polygon",
