@@ -134,6 +134,13 @@ def test_build_augmentation_from_preset_string():
     assert any(isinstance(t, RandomRotation) for t in aug.transforms)
 
 
+def test_build_augmentation_refuses_unknown_key():
+    """An unrecognized key must not be silently skipped: that would leave the persisted
+    experiment config claiming an augmentation that never ran."""
+    with pytest.raises(ValueError, match="mosaic"):
+        build_augmentation({"horizontal_flip": 0.5, "mosaic": True})
+
+
 def test_random_rotation_detection_keeps_boxes_valid():
     torch.manual_seed(0)
     img = Image.new("RGB", (64, 64), (120, 120, 120))
