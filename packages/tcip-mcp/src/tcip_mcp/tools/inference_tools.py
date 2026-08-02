@@ -23,6 +23,19 @@ from tcip_mcp.pipelines.resolution import (
 logger = logging.getLogger(__name__)
 
 
+def _recorded_training_id_map(predictor) -> dict | None:
+    """The training run's own recorded name->id map (``config["data"]["id_map"]``), or ``None``
+    when the checkpoint carries none. The one read :func:`resolve_decode_id_map` and calibration's
+    own GT-side id-map resolution (:func:`_calibrate_operating_point`) both share, so a checkpoint's
+    recorded vocabulary is preferred identically wherever an id_map is derived for it, never
+    re-checked independently by each caller."""
+    data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
+    recorded = data_cfg.get("id_map")
+    if isinstance(recorded, dict) and recorded:
+        return {str(k): int(v) for k, v in recorded.items()}
+    return None
+
+
 def resolve_decode_id_map(predictor, images_dir: str | None) -> dict | None:
     """This run's name->id map for recording + decoding predictions.
 
@@ -47,12 +60,12 @@ def resolve_decode_id_map(predictor, images_dir: str | None) -> dict | None:
     on any failure; the two doors share this one resolution but choose different failure postures on
     top of it, not two different resolutions.
     """
+    recorded = _recorded_training_id_map(predictor)
+    if recorded is not None:
+        return recorded
     data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
     subject = data_cfg.get("subject")
     attribute = data_cfg.get("attribute")
-    recorded_id_map = data_cfg.get("id_map")
-    if isinstance(recorded_id_map, dict) and recorded_id_map:
-        return {str(k): int(v) for k, v in recorded_id_map.items()}
     if not (subject and images_dir):
         return None
 
@@ -117,7 +130,8 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         count_label_lines, label_image_stems, resolve_locked_cal_holdout_split,
     )
     from tcip_mcp.pipelines.operating_point import (
-        attach_split_policy_provenance, resolve_operating_point, set_detector_operating_point,
+        attach_split_policy_provenance, derive_max_dets_from_counts, resolve_operating_point,
+        set_detector_operating_point,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
     from tcip_mcp.pipelines.training.evaluation import build_coco_image_record
@@ -128,18 +142,29 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     # same loader-side reader the training targets use, so the swept count can't diverge from training.
     _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
     _subject, _attribute = _data_cfg.get("subject"), _data_cfg.get("attribute")
-    # No try/except: _resolve_registry_id_map's only exception is its own deliberate ValueError
-    # refusal, which must reach the caller on the calibration rail rather than silently degrade
-    # to a single-class GT read. Its one legitimate "no registry, that's fine" case (single-class,
-    # no attribute) already returns normally without raising.
+    # Prefers the training run's own recorded map over a fresh registry read, the same preference
+    # resolve_decode_id_map applies to decode: the model can only speak the vocabulary it was
+    # trained on, so a classes.json whose declared attribute-value order was edited since training
+    # must not silently relabel the calibration GT. No try/except on the registry fallback:
+    # _resolve_registry_id_map's only exception is its own deliberate ValueError refusal, which must
+    # reach the caller on the calibration rail rather than silently degrade to a single-class GT
+    # read. Its one legitimate "no registry, that's fine" case (single-class, no attribute) already
+    # returns normally without raising.
     _cal_id_map = None
     if _subject:
-        _reg, _cal_id_map = _resolve_registry_id_map(labels_dir, _subject, _attribute)
+        _cal_id_map = _recorded_training_id_map(predictor)
+        if _cal_id_map is None:
+            _reg, _cal_id_map = _resolve_registry_id_map(labels_dir, _subject, _attribute)
     # Labels-intersect-images-on-disk: the shared scan force_redraw_cal_holdout_split
     # now also uses, so the two paths can't disagree about which stems exist. A stem whose image was
     # deleted/renamed never even enters the split universe here.
     stems, stem_to_image = label_image_stems(labels_dir, images_dir)
     annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+    # Detector-cap censoring: a flat max_dets can still truncate a dense calibration image's raw
+    # detections the same way a too-high conf floor censors them, so derive the collection-pass cap
+    # from this labeled split's own density (same formula scripts/calibrate_operating_point.py uses)
+    # rather than measuring the sweep against the caller's (possibly unrelated) max_dets.
+    density_cap = derive_max_dets_from_counts(list(annotation_counts.values()))
     locked = resolve_locked_cal_holdout_split(
         stems, identity_hash=dh, annotation_counts=annotation_counts,
         group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
@@ -152,11 +177,13 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         )
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
-    # Floor the in-model + predictor conf so hesitant detections survive to be swept. The applied
-    # value (not a re-typed 0.01 literal) is threaded into resolve_operating_point as the reference's
-    # staged_conf_floor, the same value this call actually applied, per CLAUDE.md's "when
-    # two paths must agree, call one from the other."
-    applied = set_detector_operating_point(predictor.model, score_thresh=0.01)
+    # Floor the in-model + predictor conf so hesitant detections survive to be swept, and raise the
+    # cap to this split's own density (derived above). The applied score_thresh (not a re-typed 0.01
+    # literal) is threaded into resolve_operating_point as the reference's staged_conf_floor, the
+    # same value this call actually applied, per CLAUDE.md's "when two paths must agree, call one
+    # from the other."
+    applied = set_detector_operating_point(predictor.model, score_thresh=0.01,
+                                           detections_per_img=density_cap)
     predictor.score_threshold = applied.get("score_thresh", 0.01)
 
     n_excluded_incomplete_attribute = 0
@@ -765,13 +792,25 @@ def export_predictions(
     calibration_images_dir: str | None = None,
     experiment_id: str | None = None,
     overwrite: bool = False,
+    acknowledge_unvalidated: bool = False,
 ) -> dict:
     """Run inference and save predictions as per-image COCO/JSON files.
 
     Routes through ``run_inference`` so this delivery door resolves the same firewalled
-    operating point (conf/NMS/tiling/max_dets), earlier it built its own bare predictor and
-    so truncated the count at the framework default and shipped labels with no provenance.
+    operating point (conf/NMS/tiling/max_dets) rather than building a bare predictor of its own,
+    which would truncate the count at the framework default and ship labels with no provenance.
     Writes ``<stem>.json`` per image plus an ``operating_point.json`` stamp beside them.
+
+    ``run_inference`` itself never refuses on an unvalidated dimension, it is the shared,
+    honestly-stamped raw substrate every delivery door (this one included) builds on, the same
+    contract an uncalibrated ``conf`` already has there. This tool is the one that actually
+    persists a prediction bucket other doors treat as ground truth, so it is where the refusal
+    belongs: a tiled run whose tile_size fell back to the fabricated default (no persisted
+    training geometry, no explicit override) refuses to write here unless
+    ``acknowledge_unvalidated=True``, the same gate ``tabulate_counts``/``compute_phenology``/
+    the web results routes/``export_aggregated_csv`` already apply, via the same shared
+    :func:`tcip_mcp.pipelines.resolution.tile_size_gate_flag`. An untiled run's tile_size is
+    never operative and can't manufacture a refusal.
 
     A prediction bucket (``output_dir``) that already carries review verdicts is immutable: by
     default the export is redirected to a fresh run-scoped bucket (``<dir>@r2``, ``@r3``, next
@@ -802,6 +841,9 @@ def export_predictions(
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
         overwrite: Write into ``output_dir`` even if it exists. Refused if the bucket has review
             verdicts; the default (False) auto-redirects to a fresh bucket instead.
+        acknowledge_unvalidated: Write the bucket even when tile_size (a tiled run only) has no
+            real basis, stamping ``tile_size_validated=false`` on the sidecar so the
+            un-trustworthiness travels with it rather than writing silently.
     """
     from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_writable_bucket
     from tcip_mcp.project_paths import resolve_state
@@ -830,6 +872,15 @@ def export_predictions(
     if "error" in result:
         return result
 
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, check_delivery_gate, tile_size_gate_flag
+
+    tile_ref = tile_size_gate_flag(result.get("operating_point"))
+    tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
+    gate = check_delivery_gate(tile_flags, acknowledge_unvalidated=acknowledge_unvalidated)
+    if not gate.ok:
+        return {"error": gate.reason, "tile_size_validated": tile_ref}
+    tile_size_validated = gate.stamp.get("tile_size")
+
     from tcip_mcp.utils.atomic_io import atomic_write_json
 
     out.mkdir(parents=True, exist_ok=True)
@@ -849,9 +900,14 @@ def export_predictions(
     # Stamp the operating point + producing-model identity beside the delivered labels. ``validated``
     # is derived from the run's resolved bundle (true only when a held-out calibration passed),
     # never hardcoded, or a passing calibration would be recorded as unvalidated (and vice versa).
+    # tile_size is a second gating dimension of the same operating point with no column of its own:
+    # a bucket that only reached this write through acknowledge_unvalidated floors the whole stamp,
+    # otherwise a bucket whose counts were produced at a fabricated tile edge would read validated on
+    # its only stamp.
     op_stamp = {"operating_point": result.get("operating_point"),
                "id_map": id_map,
-               "validated": bool(result.get("validated", False)),
+               "validated": bool(result.get("validated", False)) and tile_size_validated != VALIDATED_FALSE,
+               "tile_size_validated": tile_size_validated,
                "shippable_issues": result.get("shippable_issues", []),
                "checkpoint": Path(checkpoint_path).stem,
                "checkpoint_sha256": sha,
@@ -885,7 +941,8 @@ def export_predictions(
                 "bucket_redirected": resolution.redirected,
                 "requested_output_dir": output_dir if resolution.redirected else None,
                 "operating_point": result.get("operating_point"),
-                "validated": bool(result.get("validated", False)),
+                "validated": op_stamp["validated"],
+                "tile_size_validated": tile_size_validated,
                 "conf_source": result.get("conf_source"),
                 "checkpoint_sha256": sha,
                 "experiment_id": exp_id}
@@ -981,6 +1038,7 @@ def tabulate_counts(
         VALIDATED_FALSE,
         accepted_references,
         check_delivery_gate,
+        tile_size_gate_flag,
     )
 
     op = result.get("operating_point") or {}
@@ -997,16 +1055,11 @@ def tabulate_counts(
 
     # tile_size gates the same way, closing the asymmetry with run_full_frame_evaluation (which
     # already refuses outright for a checkpoint with no persisted tile geometry), a fabricated 640
-    # fallback is exactly as untrustworthy for a delivered count as an uncalibrated conf. Only added
-    # to the gate when tile_size is actually a gating dimension for this run (requires_validation is
-    # only set when tiled=True, see resolve_tile_size_param), so an untiled run's tile_size, never
-    # operative, can't manufacture a spurious refusal.
-    tile_prov = op.get("tile_size") or {}
-    tile_ref: str | None = None
-    if tile_prov.get("requires_validation"):
-        tile_ref = tile_prov.get("validated_against")
-        if tile_ref not in accepted_references("geometry"):
-            tile_ref = VALIDATED_FALSE
+    # fallback is exactly as untrustworthy for a delivered count as an uncalibrated conf. The flag
+    # is resolved by the shared tile_size_gate_flag, the same one every other delivery door uses, and
+    # is None (never entering the gate) for a run where tiling was not operative.
+    tile_ref = tile_size_gate_flag(op)
+    if tile_ref is not None:
         flags["tile_size"] = tile_ref
 
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
