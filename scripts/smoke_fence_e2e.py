@@ -1,8 +1,8 @@
-"""Live smoke: does the REAL fenced `claude` refuse to edit platform internals?
+"""Live smoke: does the real fenced `claude` refuse to edit platform internals?
 
 Spawns the in-app terminal exactly as the GUI does (so resolve_terminal_command adds
 --settings/--add-dir/--permission-mode), asks the agent to write a file under
-`packages/`, and asserts the file is not created — i.e. the deny rule actually bites
+`packages/`, and asserts the file is not created, i.e. the deny rule actually bites
 against the live CLI. Also confirms the fenced agent still starts (the settings file is
 accepted). Run after any change to the fence.
 
@@ -57,7 +57,7 @@ def main() -> int:
             time.sleep(6)
             started = len(session.scrollback_snapshot()) > 100
             print("[3] fenced agent started:", started)
-            # Ask it to write into platform internals — the deny rule must block this.
+            # Ask it to write into platform internals; the deny rule must block this.
             ws.send_json(
                 {
                     "type": "input",
