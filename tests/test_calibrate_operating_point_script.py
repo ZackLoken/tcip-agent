@@ -28,7 +28,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     code paths: the script's ``main()`` (via the same monkeypatch approach
     ``test_script_threads_applied_floor_and_shared_cap`` above uses) and the MCP door's
     ``run_inference`` (via the same ``build_predictor`` monkeypatch
-    ``test_audit_cv_fixes.py``'s CV0 tests use), asserting the ``max_dets`` each one actually
+    ``test_detection_measurement_integrity.py``'s calibrated-operating-point tests use), asserting the ``max_dets`` each one actually
     passed to ``build_predictor`` is the identical value, at runtime.
     """
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS
