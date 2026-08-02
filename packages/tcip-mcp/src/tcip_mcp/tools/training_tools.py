@@ -788,6 +788,15 @@ def run_hpo(
         param_space: Param-space dict (see ``hpo.get_default_space``); default when omitted.
         n_trials: Number of trials.
         output_dir: Base output directory for trial results (defaults under ``.tcip/hpo``).
+        search_alg: Search algorithm, see the list above; call ``hpo.available_search_algs()``
+            for what's actually installed on this box.
+        scheduler: Trial scheduler, see the list above.
+        grace_period: Minimum epochs before a halving scheduler (``asha``/``hyperband``) can
+            stop a trial early.
+        reduction_factor: Halving factor for ``asha``/``hyperband`` (fraction of trials kept
+            at each rung).
+        warm_start: Seed the search with ``baseline_params`` as a known-good starting point.
+        baseline_params: Hyperparameter values to seed the search with when ``warm_start=True``.
         max_concurrent: Trials to run at once (default 1, safe for single-GPU training).
         resources_per_trial: Ray resource request per trial, omit to derive one from the
             host's real GPU count and ``max_concurrent`` (see ``hpo._default_trial_resources``);
@@ -1387,9 +1396,15 @@ def evaluate_model(
             tile-level eval. None + a run id reuses the run's training tiling; None + a
             checkpoint path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
+        global_nms_iou: Cross-tile global NMS IoU threshold (tiled paths only).
+        postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split
+            across a tile seam.
         trait: When set, the trait's derived localization criterion (traits.py, e.g. a count
             trait's center-match) governs the reported count and the selection f1; AP@0.5 (``iou_threshold``)
             is kept as a labeled comparability metric. Absent -> the IoU convention governs.
+        subject: Name-based GT scope. Caller-supplied wins; else resolved from the producing
+            run's own config so the eval reads GT through the same id map the run trained with.
+        attribute: Attribute scope for the same name-based GT resolution as ``subject``.
     """
     import torch
     from torch.utils.data import DataLoader
