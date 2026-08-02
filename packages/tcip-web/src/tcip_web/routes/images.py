@@ -4,7 +4,7 @@ The browser must receive pixels in the same frame the annotations were authored
 against. Valley_Farm labels were created on EXIF-transposed images, so we
 apply ``auto_orient_image`` uniformly here.
 
-Only one code path reads raw JPEGs from disk — this one. All other
+Only one code path reads raw JPEGs from disk: this one. All other
 components should receive images via :func:`serve_image`.
 """
 
@@ -99,7 +99,7 @@ def _stretch_band(band, mode: str, orig_dtype):
     raw = band.astype(np.float64)
     if mode == "none":
         # No data-range stretch: scale by the dtype's own max (integer rasters) or assume an
-        # already-[0,1]-ish float source — the same scale pil_to_tensor applies for training.
+        # already-[0,1]-ish float source, the same scale pil_to_tensor applies for training.
         if np.issubdtype(orig_dtype, np.integer):
             denom = float(np.iinfo(orig_dtype).max) or 1.0
         else:
@@ -108,7 +108,7 @@ def _stretch_band(band, mode: str, orig_dtype):
     elif mode == "percent_clip":
         lo, hi = np.percentile(raw, [2.0, 98.0])
         out = (raw - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(raw)
-    else:  # minmax (default) — this composite's own data range, independently per band
+    else:  # minmax (default): this composite's own data range, independently per band
         lo, hi = float(raw.min()), float(raw.max())
         out = (raw - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(raw)
     return np.clip(out, 0, 255).astype(np.uint8)
@@ -117,7 +117,7 @@ def _stretch_band(band, mode: str, orig_dtype):
 def _composite_bands(source, band_tokens: "list[str] | None", stretch: str) -> Image.Image:
     """Decode ``source`` (a plain multi-band raster or a ``BandGroupRef``), select 3 bands (by
     declared band name when the source has one, else by 0-index), stretch each independently, and
-    composite to an 8-bit RGB image — the same live-composite mechanism the ArcGIS-Pro-styled
+    composite to an 8-bit RGB image, the same live-composite mechanism the ArcGIS-Pro-styled
     picker drives (never a physically-stacked file on disk).
     """
     import numpy as np
@@ -152,19 +152,19 @@ def serve_image(
     quality: int = Query(90, ge=1, le=100),
     bands: str | None = Query(
         None, description="3 comma-separated band names or 0-based indices, e.g. "
-                          "'NIR,Red,Green' or '3,2,1' — selects a live composite instead of the "
+                          "'NIR,Red,Green' or '3,2,1'; selects a live composite instead of the "
                           "file's own pixels as-is."),
     stretch: str = Query(
-        "minmax", description="minmax|percent_clip|none — applied only when compositing bands "
+        "minmax", description="minmax|percent_clip|none; applied only when compositing bands "
                               "(bands given, or path names a .bandgroup-grouped capture)."),
 ) -> Response:
     """Serve an EXIF-corrected JPEG.
 
-    Optional ``max_width`` downsamples (preserving aspect) — useful for
+    Optional ``max_width`` downsamples (preserving aspect): useful for
     thumbnail grids and the lo-res background layer. Full-res is served
     by omitting ``max_width``.
 
-    ``path`` naming a ``.bandgroup`` manifest (a grouped multi-band capture — see
+    ``path`` naming a ``.bandgroup`` manifest (a grouped multi-band capture, see
     ``pipelines.data.band_groups``) or an explicit ``bands`` selection routes through a live
     band-composite render instead of a bare ``Image.open``; omitting both keeps today's behavior
     byte-identical for an ordinary photographic file.
@@ -191,7 +191,7 @@ def serve_image(
     st = src.stat()
     # Without bands/stretch in the key, two different band-combination requests against the same
     # .bandgroup path would collide on cache key and the second would silently be served the
-    # first's cached composite — additive to the pre-existing key format, never removed from it.
+    # first's cached composite. Additive to the pre-existing key format, never removed from it.
     key = hashlib.md5(
         f"{src}:{st.st_mtime_ns}:{st.st_size}:{max_width}:{quality}:{bands}:{stretch}".encode()
     ).hexdigest()
@@ -261,18 +261,18 @@ def get_dimensions(path: str = Query(...)) -> dict:
 
 @router.get("/bands")
 def get_bands(path: str = Query(...)) -> dict:
-    """Band count + per-band stats for ``path`` — the picker's symbology data, and the one fact
+    """Band count + per-band stats for ``path``: the picker's symbology data, and the one fact
     (``band_count > 3``) the frontend uses to decide whether to show the picker at all.
 
     Resolves the same way ``serve_image`` does: ``path`` may be a plain raster or a
     ``.bandgroup`` manifest naming a grouped multi-band capture. ``band_count`` is always cheap
     (``probe_channels`` never decodes pixels for a photographic format, and reads only the TIFF
     header when possible); the per-band min/max/dtype decode below only runs when it can actually
-    tell the picker something new — a plain (non-grouped) raster at ``band_count <= 3`` is an
+    tell the picker something new: a plain (non-grouped) raster at ``band_count <= 3`` is an
     ordinary photographic image with no real per-band symbology to report, so that case skips the
     decode entirely (progressive disclosure: an RGB request never pays for a full decode it would
     discard). A ``.bandgroup``-grouped capture always gets the full per-band stats even at exactly
-    3 bands — its bands are real, independently named/wavelength-tagged captures the picker
+    3 bands: its bands are real, independently named/wavelength-tagged captures the picker
     legitimately shows, not RGB color channels.
     """
     import numpy as np
