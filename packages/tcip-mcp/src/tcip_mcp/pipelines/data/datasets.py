@@ -815,6 +815,7 @@ class TiledDetectionDataset(BaseImageDataset):
             fb = np.asarray(full_boxes, dtype=np.float32).reshape(-1, 4)
             fl = np.asarray(full_labels, dtype=np.int64)
             if len(fb):
+                # Computed independently of derivations._char_sizes_from_boxes (derive_sliver_frac's own doc cross-references this); known duplication.
                 char_sizes.extend((((fb[:, 2] - fb[:, 0]) * (fb[:, 3] - fb[:, 1])).clip(min=0) ** 0.5).tolist())
             stems_data.append((stem, fb, fl, w, h))
             self._decoded_frame[stem] = (int(w), int(h))
