@@ -20,7 +20,7 @@ import { MetaTab } from "@/tabs/MetaTab";
 import { ReviewTab } from "@/tabs/ReviewTab";
 
 // Code-split the recharts-heavy tabs (recharts + its d3 deps are ~5MB unpacked and used only
-// here) so the Annotate/Review workflow — the primary use — paints without them. App mounts
+// here) so the Annotate/Review workflow (the primary use) paints without them. App mounts
 // exactly one tab at a time, so deferring these chunks costs no UX.
 const InferenceTab = lazy(() =>
   import("@/tabs/InferenceTab").then((m) => ({ default: m.InferenceTab })),
@@ -82,7 +82,7 @@ function App() {
           .then((selection) => {
             if (!selection) return;
             if (!selection.date) {
-              // No dated capture to land on — say so instead of appearing to do nothing.
+              // No dated capture to land on: say so instead of appearing to do nothing.
               useStore
                 .getState()
                 .pushToast(`Opened ${name}, but it has no dated images yet.`, "info");
@@ -97,7 +97,7 @@ function App() {
       }
 
       // Agent → GUI "focus the Annotate tab": land on a (subject, date) in the right mode on an
-      // annotated frame (see applyAnnotateFocus — uses local setters like Review→Edit so the
+      // annotated frame (see applyAnnotateFocus, which uses local setters like Review→Edit so the
       // deliberate "mode/index stay local" behavior of mergeSnapshot is preserved).
       if (ev.event_type === "annotate_focus") {
         void applyAnnotateFocus(ev.data as AnnotateFocusData).catch(() => {
@@ -116,7 +116,7 @@ function App() {
       }
 
       // Agent → GUI "focus the Review tab": load a model's predictions on a frame/detection so
-      // the human sees exactly what the agent flagged (a false positive, a missed catkin).
+      // the human sees exactly what the agent flagged (a false positive, a missed detection).
       if (ev.event_type === "review_focus") {
         void applyReviewFocus(ev.data as ReviewFocusData).catch(() => {
           useStore
@@ -134,7 +134,7 @@ function App() {
   useEffect(() => {
     if (!projectRoot) return;
     const user = useStore.getState().user || "web";
-    // Best-effort telemetry — never surface a failure to the user.
+    // Best-effort telemetry: never surface a failure to the user.
     void sessionsApi.start(projectRoot, user).catch(() => {});
     endedSessionForRoot.current = null;
 
@@ -174,7 +174,7 @@ function App() {
     };
   }, [projectRoot]);
 
-  // A refresh/close with unsaved canvas edits gets the browser's leave-page prompt —
+  // A refresh/close with unsaved canvas edits gets the browser's leave-page prompt;
   // React never unmounts on unload, so AnnotateTab's flush-on-unmount can't cover this.
   useEffect(() => {
     function guardUnload(e: BeforeUnloadEvent) {
@@ -192,7 +192,7 @@ function App() {
         const reg = await classesApi.load(projectRoot, datasetRoot, annotationsDir);
         setRegistry(reg.subjects);
         // Default the active authoring subject to the selection's subject when it exists in the
-        // registry, else the first declared subject — a shape can't be authored with none set.
+        // registry, else the first declared subject: a shape can't be authored with none set.
         const names = Object.keys(reg.subjects);
         const active = useStore.getState().gui.active_subject;
         if (!active || !names.includes(active)) {
@@ -201,9 +201,9 @@ function App() {
             .setActiveSubject(subject && names.includes(subject) ? subject : (names[0] ?? null));
         }
 
-        // Scoped to the selected subject: a Complete recorded while annotating catkin says
+        // Scoped to the selected subject: a Complete recorded while annotating leaf says
         // nothing about bush, and reading a global map re-applied it to subjects the breeder
-        // never looked at — then wrote the result back over their original confirmations.
+        // never looked at, then wrote the result back over their original confirmations.
         const saved = await classesApi.loadImageStatus(
           projectRoot,
           subject,
@@ -213,7 +213,7 @@ function App() {
         );
         const savedMap = saved.statuses ?? {};
         // Reconcile every image against the label files, honoring confirmed reviews via
-        // complete_override — so a wrongly-saved "negative" whose files have content heals
+        // complete_override, so a wrongly-saved "negative" whose files have content heals
         // to partial instead of silently locking the canvas forever.
         const confirmed = imageList.filter(
           (name) => savedMap[name] === "complete" || savedMap[name] === "negative",
@@ -266,11 +266,11 @@ function App() {
     <div className="h-full flex flex-col bg-tcip-bg text-tcip-fg">
       <TopBar />
       {/* Only Annotate / Review / Results need an imagery dataset+date; the rest
-          (Training / Tuning / Inference / Meta) are reachable without one — being
+          (Training / Tuning / Inference / Meta) are reachable without one; being
           forced to pick a dataset just to read agent reports or watch a run was a
           usability trap. Dataset-dependent tabs show the picker until one is set.
           The agent rail (the real Claude Code in a PTY) docks to the right; the tabs
-          are its canvas — it drives them through the MCP panel channel. */}
+          are its canvas: it drives them through the MCP panel channel. */}
       <div className="flex-1 flex min-h-0">
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           <ErrorBoundary resetKey={activeTab}>
