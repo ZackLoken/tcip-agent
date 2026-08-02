@@ -247,6 +247,37 @@ def test_missing_class_id_key_also_refuses_not_defaulted_to_class_one():
         review_to_records(state, image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
 
 
+def test_class_id_unresolvable_message_is_drawn_from_the_shared_failure_vocabulary():
+    # The refusal text must read in the same breeder-facing "Not yet." voice
+    # describe_review_validation's own _FAILURE_MESSAGES entries use, not an independently
+    # authored string, so a breeder sees one consistent voice regardless of which check refused.
+    state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": True, "detections": [
+        {"match_type": "TP", "action": "accepted", "class_id": None, "class_name": "catkin",
+         "gt_bbox_norm": [0.25, 0.25, 0.05, 0.05], "pred_bbox_norm": [0.25, 0.25, 0.05, 0.05],
+         "conf": 0.9, "producer_identity": _IDENTITY_A}
+    ]}}}
+    with pytest.raises(ValueError) as exc_info:
+        review_to_records(state, image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
+    assert str(exc_info.value).startswith("Not yet.")
+    assert "no resolvable class identity" in str(exc_info.value)
+
+
+def test_a_coverage_only_attestation_needs_no_resolvable_class_id():
+    # "swept this image, found nothing more" (ReviewTab.tsx's recordSweepAttested): neither
+    # gt_bbox_norm nor pred_bbox_norm set, class_id unresolved (nothing was classified). This must
+    # not refuse the reference -- the entry carries no class-scoped evidence to admit either way --
+    # and its missed_object_attested stamp must still count toward adjudication coverage.
+    state = {"image": {"A.jpg": {"img_status": "completed", "gt_preexisting": False, "detections": [
+        {"match_type": "sweep", "action": "swept", "class_id": None, "class_name": "",
+         "gt_bbox_norm": None, "pred_bbox_norm": None, "conf": None,
+         "producer_identity": _IDENTITY_A, "missed_object_attested": True}
+    ]}}}
+    recs = review_to_records(state, image_dims=_DIMS, bucket_identities=[_IDENTITY_A])
+    assert len(recs) == 1
+    assert recs[0]["gt"] == [] and recs[0]["dt"] == []
+    assert recs[0]["adjudication_covered"] is True
+
+
 def test_confirmed_negative_image_carries_its_own_producer_identity():
     # A confirmed negative (mark_complete, zero verdict entries) stamps identity at the image
     # level; it must remain in the reference, correctly attributed, not silently dropped just
