@@ -5,17 +5,21 @@ derives, never re-asks per dataset (CLAUDE.md: the human defines a trait's inten
 agent derives the operating points that realize it). Keeping them in one place, versioned with the
 code, stops a measurement definition from living only in a session's memory.
 
-Two fields are a different shape, by design, neither is authored blind, and neither
-has a default: ``localization`` (what "finding one" means) is derived once from real GT the first
-time it's needed and recorded (a genuine geometric fact about the object's scale, computable from
-data, see ``pipelines.derivations.derive_localization_kind``); ``count_objective`` (what the
-phenotype *is*, hence what the operating point optimizes) is decided once from a real, plain-language
-answer the breeder gives about what the delivered number needs to be reliable for, and recorded the
-same way. Both get written through ``write_trait_spec_fields``, with a ``provenance`` entry naming
-who decided and how, and both are read from the recorded value on every later call, never silently
-defaulted, never copied from another trait's values (the exact failure this replaced: an earlier
-design let both fields default to one trait's own historical values, silently inherited by any
-trait whose config omitted them).
+Two fields are a different shape, by design, neither is authored blind: ``localization`` (what
+"finding one" means) has no default at all, it is derived once from real GT the first time it's
+needed and recorded (a genuine geometric fact about the object's scale, computable from data, see
+``pipelines.derivations.derive_localization_kind``). ``count_objective`` (what the phenotype *is*,
+hence what the operating point optimizes) *does* have a platform default (``COUNT_UNBIASED``,
+errors canceling is the right tolerance for a fraction/ratio phenotype, the common case), used when
+the breeder hasn't decided yet, rather than refusing to calibrate at all: nobody can meaningfully
+answer what a delivered number needs to be reliable for before any result exists to judge it
+against, so the real confirmation point is the delivered result itself (the review-confirmation
+loop), not a blind precondition. Either field, once a real answer is recorded, gets written through
+``write_trait_spec_fields`` with a ``provenance`` entry naming who decided and how, and is read from
+the recorded value on every later call. A trait whose config omits either field must resolve its own
+default or derivation, never silently inherit another trait's value. ``resolve_operating_point``
+stamps whether a given run's ``count_objective`` was trait-authored or the platform default, so the
+distinction is never silently lost downstream.
 
 Everything else in ``TraitSpec`` says: which class in ``classes.json`` is the positive/target state,
 the milestone convention, and the tile-seam sliver policy, genuinely authored-once breeder facts.
@@ -47,7 +51,7 @@ PRESENCE = "presence"             # only whether the object is present
 # level) purely so referencing these three names never drags torch into
 # ``get_trait``/``registered_traits``. ``operating_point.py``'s picker/label registry
 # (``COUNT_OBJECTIVE_PICKERS``) shares these same keys rather than maintaining a second list. Not a
-# validation whitelist, ``_spec_from_config`` no longer rejects a ``count_objective`` outside this
+# validation whitelist, ``_spec_from_config`` does not reject a ``count_objective`` outside this
 # set; a trait may name any objective an agent has implemented and registered a picker for.
 COUNT_OBJECTIVES = {COUNT_UNBIASED, DETECTION_F1, PRESENCE}
 
@@ -65,12 +69,14 @@ class TraitSpec:
     # What the delivered phenotype needs to be reliable for, hence what the operating point
     # optimizes. Not authored blind: a consequence judgment only a human stakeholder can make (does
     # this number need every object found correctly, or is it fine if errors cancel out as long as
-    # the total is right?), asked in plain domain terms, never CV vocabulary. Empty = not yet
-    # decided, never silently defaulted or copied from another trait's value (this field
-    # used to default to "count_unbiased" and get silently inherited by any trait whose config
-    # omitted it). Record the real answer via ``write_trait_spec_fields``, with a ``provenance``
-    # entry naming who decided and why; ``resolve_operating_point`` refuses rather than guessing
-    # when this is unset.
+    # the total is right?), asked in plain domain terms, never CV vocabulary, and never silently
+    # copied from another trait's value. Empty = not yet decided; resolve_operating_point defaults
+    # to COUNT_UNBIASED (the common case for a fraction/ratio phenotype) rather than refusing to
+    # calibrate, since nobody can meaningfully answer this before a result exists to judge it
+    # against, stamping the run's provenance as trait-authored or platform-default so the
+    # distinction is never lost downstream. Record a real breeder answer via
+    # ``write_trait_spec_fields``, with a ``provenance`` entry naming who decided and why, once one
+    # exists.
     count_objective: str = ""
     # What "a hit" means when validating counts (center_match vs iou_match), not authored: derived
     # once from real GT the first time it's needed and recorded via
@@ -124,14 +130,18 @@ class TraitSpec:
     # fraction term alone would give (it is a `max()`), it is bounded, never a runaway number: at
     # n >= 2 (the reference-sufficiency minimum every scope using this floor is independently gated
     # on, see `insufficient_holdout_images`/`insufficient_holdout_images_per_class`) the floor
-    # itself never exceeds 0.5, at or below the old flat 1.0 default it replaced. 0.01 is an interim
-    # platform default (same "not yet authored for this trait" shape as
-    # `classifier_agreement_floor`'s `_PROVISIONAL_KAPPA_FLOOR`), chosen so this default does not
-    # get looser than the old absolute default at the densities this platform's own test suite's
-    # dense fixtures use (~80-100 objects/image, the shape those fixtures' own docstrings describe
-    # as calibrated to a realistic detector, not verified against real breeder imagery), pending the
-    # domain expert's real per-trait value, and a real density figure from an actual project once
-    # one exists.
+    # itself never exceeds 0.5. 0.01 is an interim platform default (same "not yet authored for this
+    # trait" shape as `classifier_agreement_floor`'s `_PROVISIONAL_KAPPA_FLOOR`), awaiting the domain
+    # expert's real per-trait value; it is a platform placeholder, not a measurement bar anyone has
+    # confirmed. What it resolves to depends entirely on the reference's density, and real dense
+    # imagery is far denser than the test suite's own fixtures: on the one real labeled hazelnut
+    # catkin reference this platform has measured, per-image counts run from 2 to 289 and a holdout
+    # half of it carries a typical per-image count near 133, so 0.01 resolves to an absolute
+    # tolerance near 1.3 objects per image, an order of magnitude above the 1/n floor. On sparse
+    # imagery the floor is what binds instead. Read the per-scope
+    # `pooled_count_bias_tolerance`/`per_class_count_bias_tolerance` in a run's own sweep record for
+    # what a given calibration was actually held to, rather than inferring it from this fraction
+    # alone.
     count_bias_tolerance_frac: float = 0.01
     # Max acceptable p90 |per-image count error| (a tail statistic, not a mean, a population mean
     # can hide one badly-off image among many) on the held-out split. No default: an invented number
@@ -158,7 +168,7 @@ class TraitSpec:
     # Per-field provenance: who actually asserted each semantic choice above, and how firmly, so a
     # spec's own history is legible instead of living only in a session's memory or, worse, a fabricated
     # comment. Each entry is ``"<field>: <kind>, <note>"``; ``<kind>`` is one of
-    # domain_expert_confirmed / zack_methodology_correction / claude_proposed_unvalidated /
+    # domain_expert_confirmed / domain_expert_correction / claude_proposed_unvalidated /
     # claude_recommended_unconfirmed / vocabulary_derived / data_derived_at_runtime. Not a validation
     # gate, nothing reads this to decide anything; it exists so the next reader (human or agent) does
     # not have to guess, or worse, invent, why a field holds the value it does.
@@ -171,11 +181,9 @@ class TraitUnknownError(KeyError):
 
 # --- Config-driven authoring ------------------------------------------------
 # There are no built-in traits; every trait is authored the same way, as a
-# per-project spec file. This is the only registration path, so it can never be silently
-# outranked by trusted Python the way a builtin
-# used to outrank config on name collision. Cross-checked against the crops.yml controlled
-# vocabulary, so an agent cannot fabricate a trait definition. Resolution is per-call (not a
-# module-load snapshot) so a repin of the project root is picked up.
+# per-project spec file. This is the only registration path. Cross-checked against the crops.yml
+# controlled vocabulary, so an agent cannot fabricate a trait definition. Resolution is per-call
+# (not a module-load snapshot) so a repin of the project root is picked up.
 
 _TRAIT_SPECS_RELPATH = Path(".tcip") / "state" / "trait_specs"
 _SPEC_FIELDS = {f.name for f in fields(TraitSpec)}
