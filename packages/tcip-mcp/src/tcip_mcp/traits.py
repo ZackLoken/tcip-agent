@@ -168,8 +168,8 @@ class TraitSpec:
     # Per-field provenance: who actually asserted each semantic choice above, and how firmly, so a
     # spec's own history is legible instead of living only in a session's memory or, worse, a fabricated
     # comment. Each entry is ``"<field>: <kind>, <note>"``; ``<kind>`` is one of
-    # domain_expert_confirmed / domain_expert_correction / claude_proposed_unvalidated /
-    # claude_recommended_unconfirmed / vocabulary_derived / data_derived_at_runtime. Not a validation
+    # domain_expert_confirmed / domain_expert_correction / agent_proposed_unvalidated /
+    # agent_recommended_unconfirmed / vocabulary_derived / data_derived_at_runtime. Not a validation
     # gate, nothing reads this to decide anything; it exists so the next reader (human or agent) does
     # not have to guess, or worse, invent, why a field holds the value it does.
     provenance: tuple[str, ...] = ()
@@ -295,11 +295,11 @@ def write_trait_spec_fields(
     refuses to write anything that would silently fail to load or fall out of
     ``registered_traits()`` afterward. Writes atomically.
 
-    This is the only write path for a trait spec anywhere in the platform. Before this, a spec
-    was authored by hand-writing YAML directly, with no ``@audited`` record, this function is
-    what the ``update_trait_spec_fields`` MCP tool calls, and what the derived localization kind
-    and the recorded count-objective decision both use to persist themselves; neither gets its
-    own write implementation.
+    This is the only write path for updating a trait spec anywhere in the platform: initial
+    authoring is still hand-written YAML with no ``@audited`` record (a separate, still-manual
+    step, see above), but once a spec exists, this function is what the ``update_trait_spec_fields``
+    MCP tool calls, and what the derived localization kind and the recorded count-objective
+    decision both use to persist themselves; neither gets its own write implementation.
     """
     from tcip_mcp.project_paths import resolve_state
     from tcip_mcp.utils.atomic_io import atomic_write_text
