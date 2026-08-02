@@ -1,4 +1,4 @@
-"""Phase 0.2 — quick-correctness bundle regression tests."""
+"""Quick-correctness bundle regression tests."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def test_export_predictions_writes_json(tmp_path, monkeypatch):
     assert data["image"] == "img"
     assert (data["width"], data["height"]) == (100, 100)
     anns = data["annotations"]
-    assert len(anns) == 1                              # (was an empty file before the fix)
+    assert len(anns) == 1
     assert anns[0]["subject"] == "0"                   # label 1 -> id 0; no run id_map -> stringified id
     assert anns[0]["score"] == pytest.approx(0.9)      # confidence
     # COCO xywh (pixel) from pixel-xyxy box [10,10,30,30].
