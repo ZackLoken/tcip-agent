@@ -61,8 +61,7 @@ class InferenceJob:
     overlap: float
     max_dets: int = DEFAULT_MAX_DETS
     postprocess: str = "nms"  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
-    # Renamed from sahi/sahi_source: this predates ultralytics removal and is the generic tile
-    # toggle, not a SAHI-specific one. Whether the caller explicitly chose to tile, or it fell back
+    # The generic tile toggle: whether the caller explicitly chose to tile, or it fell back
     # to DEFAULT_TILED, threaded into raw_operating_point's tiled_source so the sidecar's
     # provenance can tell the two apart, same as the MCP door's run_inference already does for its
     # own `tile` param.
@@ -365,16 +364,14 @@ class LaunchInferencePayload(BaseModel):
     images_dir: str
     output_dir: str
     # tiling + conf/iou default to the one shared source so the GUI and the MCP agent produce the
-    # same count off the same checkpoint (they used to diverge: this field, named `sahi` before
-    # ultralytics/SAHI support was removed, at 640 + 0.25/0.7 here vs tile=False/224 + 0.5/0.3 in
-    # run_inference; tiling drives the count most of all).
+    # same count off the same checkpoint; tiling drives the count most of all.
     # None (default) is a documented fallback, not an implicit True: distinguished
     # from an explicit caller choice so the job's provenance can say which one happened.
     tile: bool | None = None
-    # conf/iou/slice_h/slice_w/overlap are all None-by-default now: an omitted
+    # conf/iou/slice_h/slice_w/overlap are all None by default: an omitted
     # field is a real "let the platform derive it" request, distinguished from an explicit choice
-    # that happens to match the default, the same way `tile` already works. Without this, the GUI
-    # transmitted a frozen literal on every launch, permanently shadowing resolve_tile_geometry's
+    # that happens to match the default, the same way `tile` already works. A frozen literal
+    # transmitted on every launch would permanently shadow resolve_tile_geometry's
     # checkpoint-derived tile_size/overlap and the shared conf/iou defaults below.
     conf: float | None = None
     iou: float | None = None
