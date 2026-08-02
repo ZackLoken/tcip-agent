@@ -1,9 +1,9 @@
-"""D17 — the breeder GUI affordance that promotes a completed review into a validation reference.
+"""The breeder GUI affordance that promotes a completed review into a validation reference.
 
 Two layers: (1) ``describe_review_validation`` translates a resolved bundle into a plain-language,
-breeder-facing result (torch-free); (2) the ``/api/review/validate_reference`` route runs the IDENTICAL
-review->calibration gate and stamps the bucket's ``operating_point.json`` review_confirmed (or an honest
-un-shippable placeholder), never a shortcut to validated.
+breeder-facing result (torch-free); (2) the ``/api/review/validate_reference`` route runs the
+identical review->calibration gate and stamps the bucket's ``operating_point.json``
+review_confirmed (or an honest un-shippable placeholder), never a shortcut to validated.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from tcip_mcp.pipelines.resolution import (
     derived,
 )
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so trait="catkin" call sites keep resolving.
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
+# test's pinned project root so trait="catkin" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
@@ -42,13 +42,13 @@ def test_describe_validated():
     assert out["reference"] == VALIDATED_REVIEW_CONFIRMED
     assert out["conf"] == pytest.approx(0.42)
     assert "Validated" in out["reason"] and "4" in out["reason"]
-    # Fix I: the miss-coverage claim is read off the exact-conf holdout_bias entry, not asserted.
+    # The miss-coverage claim is read off the exact-conf holdout_bias entry, not asserted.
     assert "8 of 10" in out["reason"]
 
 
 def test_describe_conf_censored():
     # The named-failure list (not the raw "conf_censored" key alone) drives the branch, and
-    # "passed_holdout" must be present or the "too few images" branch wins first (stage-6 review).
+    # "passed_holdout" must be present or the "too few images" branch wins first.
     b = _bundle(validated=VALIDATED_FALSE,
                 sweep={"conf_censored": True, "passed_holdout": False, "failures": ["conf_censored"]})
     out = describe_review_validation(b, reviewed_image_count=3)
@@ -57,9 +57,9 @@ def test_describe_conf_censored():
 
 
 def test_describe_conf_floor_mismatch_is_non_gating_provenance_only():
-    # Fix D reconciliation (stage-6 review): conf_floor_mismatch is surfaced as provenance
-    # (sweep["conf_floor_mismatch"]) but never gates on its own — it never appears in "failures", so
-    # a bundle with no OTHER named failure stays Validated even when the floor mismatch is flagged.
+    # conf_floor_mismatch is surfaced as provenance (sweep["conf_floor_mismatch"]) but never gates
+    # on its own; it never appears in "failures", so a bundle with no other named failure stays
+    # Validated even when the floor mismatch is flagged.
     b = _bundle(validated=VALIDATED_REVIEW_CONFIRMED,
                 sweep={"conf_censored": False, "conf_floor_mismatch": True, "passed_holdout": True,
                        "failures": [], "holdout_bias": {"tp": 5, "fn": 0}})
@@ -68,8 +68,8 @@ def test_describe_conf_floor_mismatch_is_non_gating_provenance_only():
 
 
 def test_conf_floor_mismatch_never_hijacks_a_real_failure_message():
-    # A stronger companion to the above: conf_floor_mismatch=True present ALONGSIDE a real, distinct
-    # failure must not divert the message — there is no conf_floor_mismatch-specific branch at all
+    # A stronger companion to the above: conf_floor_mismatch=True present alongside a real, distinct
+    # failure must not divert the message; there is no conf_floor_mismatch-specific branch at all
     # (it is non-gating provenance only), so the real failure's own message must still surface.
     b = _bundle(validated=VALIDATED_FALSE,
                 sweep={"conf_censored": False, "disjoint": True, "conf_floor_mismatch": True,
@@ -99,8 +99,8 @@ def test_describe_holdout_bias_failed():
 
 
 def test_describe_no_adjudication_coverage():
-    # Fix H's own new failure name ("insufficient_adjudication_coverage") — a distinct, honest
-    # reason naming the affordance, not a fallthrough to the generic "counts didn't agree" message.
+    # "insufficient_adjudication_coverage" is a distinct, honest reason naming the affordance, not
+    # a fallthrough to the generic "counts didn't agree" message.
     b = _bundle(validated=VALIDATED_FALSE,
                 sweep={"passed_holdout": False, "failures": ["insufficient_adjudication_coverage"]})
     out = describe_review_validation(b, reviewed_image_count=5)
@@ -109,7 +109,7 @@ def test_describe_no_adjudication_coverage():
 
 
 def test_describe_reports_every_applicable_failure_not_just_the_first():
-    # K2: a breeder who hits two blockers at once (e.g. an all-negative split side AND a per-class
+    # A breeder who hits two blockers at once (e.g. an all-negative split side and a per-class
     # bias failure) must see both in one pass, not fix the first, resubmit, and only then discover
     # the second. _FAILURE_MESSAGES lists insufficient_calibration_gt before
     # count_bias_exceeds_tolerance, so both messages must appear, in that order.
@@ -125,14 +125,14 @@ def test_describe_reports_every_applicable_failure_not_just_the_first():
 
 
 def test_describe_never_asserts_the_counts_agree_when_the_pooled_bias_check_also_failed():
-    # K2 stage-6 review: operating_point.py computes count_bias_ok, per_class_bias_failures,
-    # localization_floor_ok and dispersion_ok independently (no mutual exclusion between their
-    # failures.append calls), so count_bias_exceeds_tolerance can co-occur with any of the three
-    # messages below. Each of those three used to presuppose the pooled check had PASSED ("the
-    # counts happened to match" / "the counts agree on average" / "the overall number... looks
-    # right") — true only under first-match-wins ordering. Now that every applicable message is
-    # joined, a presupposing phrase would directly contradict count_bias_exceeds_tolerance's own
-    # "the model's counts didn't agree closely enough" in the same reason string.
+    # operating_point.py computes count_bias_ok, per_class_bias_failures, localization_floor_ok
+    # and dispersion_ok independently (no mutual exclusion between their failures.append calls),
+    # so count_bias_exceeds_tolerance can co-occur with any of the three messages below. Each of
+    # those three must not presuppose the pooled check had passed ("the counts happened to
+    # match" / "the counts agree on average" / "the overall number... looks right"), since every
+    # applicable message is joined and a presupposing phrase would directly contradict
+    # count_bias_exceeds_tolerance's own "the model's counts didn't agree closely enough" in the
+    # same reason string.
     for co_failure in ("localization_quality_floor_failed", "count_error_dispersion_too_high",
                        "count_bias_exceeds_tolerance_per_class"):
         b = _bundle(validated=VALIDATED_FALSE,
@@ -148,7 +148,7 @@ def test_describe_never_asserts_the_counts_agree_when_the_pooled_bias_check_also
 
 def test_describe_unrecognized_failure_name_is_a_loud_error():
     # Named-failure architecture (cross-cutting): an unmapped failure name must never fall through
-    # to the generic message silently — it's a defect in describe_review_validation itself.
+    # to the generic message silently: it's a defect in describe_review_validation itself.
     b = _bundle(validated=VALIDATED_FALSE,
                 sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
                        "failures": ["some_future_fix_g_or_h_failure_not_yet_mapped"]})
@@ -185,8 +185,8 @@ def _write_sidecar(pred_dir: Path, identity: dict, *, generation_conf: float | N
         "validated": False,
     }
     if generation_conf is not None:
-        # Fix D item 4: the conf the bucket's predictions were actually generated/floored at — the
-        # route reads this straight off the sidecar (never re-typed) to build staged_conf_floor.
+        # The conf the bucket's predictions were actually generated/floored at: the route reads
+        # this straight off the sidecar (never re-typed) to build staged_conf_floor.
         sidecar["operating_point"] = {"conf": {"value": generation_conf}}
     (pred_dir / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
 
@@ -197,8 +197,8 @@ def _make_project(tmp_path: Path, *, floored: bool, producer_identity: dict = _I
     """A project with two completed-review images + a prediction bucket. ``floored`` includes the
     low-conf tail (the sweep can reach it -> validated); otherwise every conf is above the display
     floor (conf-censored -> refused). Verdicts are recorded against ``producer_identity``; the
-    bucket's own sidecar carries ``sidecar_identity`` (defaults to the SAME identity — a matching,
-    scoped reference; Fix G's tests pass a deliberately DIFFERENT one to reproduce the mismatch)."""
+    bucket's own sidecar carries ``sidecar_identity`` (defaults to the same identity, a matching,
+    scoped reference; some tests pass a deliberately different one to reproduce the mismatch)."""
     proj = tmp_path / "proj"
     review_dir = proj / ".tcip" / "state" / "review"
     lo = 0.05 if floored else 0.8
@@ -223,18 +223,18 @@ def _make_project(tmp_path: Path, *, floored: bool, producer_identity: dict = _I
 def _make_dense_reviewed_project(tmp_path: Path, *, n_images: int = 6, gt_preexisting: bool = True,
                                  producer_identity: dict = _IDENTITY) -> tuple[str, str]:
     """A project with ``n_images`` completed-review images (>= 2 per side of the locked cal/holdout
-    split, clearing Fix C's non-degeneracy floor — ``_make_project``'s 2-image fixture cannot, since
-    it can only ever produce a single holdout image) and a REALISTIC staged conf floor: every verdict
-    carries its own recorded ``conf_threshold`` (Fix D item 4) and the bucket's sidecar carries its
-    own recorded generation conf (Fix D), so ``routes/review.py`` threads a real, non-``None``
-    ``staged_conf_floor`` end to end rather than always failing closed as conf-censored.
+    split, since ``_make_project``'s 2-image fixture cannot clear the non-degeneracy floor: it can
+    only ever produce a single holdout image) and a realistic staged conf floor: every verdict
+    carries its own recorded ``conf_threshold`` and the bucket's sidecar carries its own recorded
+    generation conf, so ``routes/review.py`` threads a real, non-``None`` ``staged_conf_floor`` end
+    to end rather than always failing closed as conf-censored.
 
     Every image gets 2 accepted, exactly-matching verdicts at a real detection score (0.9), each
     geometrically distinct from every other image's (so the content-overlap gate never fires on a
-    holdout that happens to duplicate calibration's boxes). ``gt_preexisting`` toggles Fix H
-    adjudication coverage for every image at once — ``True`` clears it (a genuine pre-existing-GT
-    image the breeder reviewed), ``False`` reproduces Fix H's refusal (no evidence a missed object
-    was ever checked for).
+    holdout that happens to duplicate calibration's boxes). ``gt_preexisting`` toggles adjudication
+    coverage for every image at once: ``True`` clears it (a genuine pre-existing-GT image the
+    breeder reviewed), ``False`` reproduces the refusal (no evidence a missed object was ever
+    checked for).
     """
     proj = tmp_path / "proj"
     review_dir = proj / ".tcip" / "state" / "review"
@@ -273,12 +273,12 @@ def _read_sidecar(pred_dir: str) -> dict:
 
 
 def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
-    # K2 (Fix D): routes/review.py DOES thread a real staged_conf_floor into
-    # resolve_operating_point_from_review — max(generation_conf, review_conf_threshold), the
-    # generation half read off the bucket's own operating_point.json sidecar, the review half read
-    # off the verdicts' own recorded conf_threshold. This is the design's mandatory acceptance test
-    # for the review path: a realistic, disjoint, count-agreeing, adjudication-covered review
-    # reference must actually reach review_confirmed end to end through the route.
+    # routes/review.py threads a real staged_conf_floor into resolve_operating_point_from_review:
+    # max(generation_conf, review_conf_threshold), the generation half read off the bucket's own
+    # operating_point.json sidecar, the review half read off the verdicts' own recorded
+    # conf_threshold. This is the design's mandatory acceptance test for the review path: a
+    # realistic, disjoint, count-agreeing, adjudication-covered review reference must actually
+    # reach review_confirmed end to end through the route.
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     resp = client.post("/api/review/validate_reference", json={
         "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
@@ -292,7 +292,7 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
 
 
 def test_route_refuses_conf_censored_and_stamps_honest_placeholder(client, tmp_path: Path):
-    # The identical gate refuses a display-floored reference — surfaced honestly, not upgraded.
+    # The identical gate refuses a display-floored reference, surfaced honestly, not upgraded.
     proj, pred_dir = _make_project(tmp_path, floored=False)
     resp = client.post("/api/review/validate_reference", json={
         "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
@@ -329,10 +329,10 @@ def test_route_unknown_trait_is_honest_400(client, tmp_path: Path):
 
 
 def test_route_honestly_refuses_when_class_id_unresolvable(client, tmp_path: Path):
-    # K25: a verdict recorded before this fix (or from a bucket whose id_map never recognized its
-    # class_name) carries class_id=None. The route must refuse loudly (400, naming the real cause)
-    # rather than silently stamp VALIDATED_REVIEW_CONFIRMED on a reference the old dead `class_id`
-    # field would have defaulted to category_id 1 for every entry.
+    # A verdict with no resolvable class identity (class_id=None, e.g. from a bucket whose
+    # id_map never recognized its class_name) must make the route refuse loudly (400, naming the
+    # real cause) rather than silently stamp VALIDATED_REVIEW_CONFIRMED on a reference the dead
+    # `class_id` field would otherwise default to category_id 1 for every entry.
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     review_dir = Path(proj) / ".tcip" / "state" / "review"
     shard = json.loads((review_dir / "A.jpg.json").read_text(encoding="utf-8"))
@@ -344,7 +344,7 @@ def test_route_honestly_refuses_when_class_id_unresolvable(client, tmp_path: Pat
         "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 400
     assert "no resolvable class identity" in resp.json()["detail"]
-    # The refusal happens before any stamping — the sidecar's own generation-time `validated: False`
+    # The refusal happens before any stamping: the sidecar's own generation-time `validated: False`
     # is untouched, never silently upgraded to VALIDATED_REVIEW_CONFIRMED on bad data.
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is False
@@ -370,9 +370,9 @@ def test_route_does_not_downgrade_already_validated(client, tmp_path: Path):
 
 
 def test_route_refuses_when_verdicts_belong_to_a_different_producer(client, tmp_path: Path):
-    # Fix G's reproduced defect: verdicts recorded against model A must not validate model B's
-    # bucket (retrain -> re-run inference into a new bucket -> press Validate). The sidecar names a
-    # DIFFERENT producer than the one the verdicts were recorded against.
+    # Verdicts recorded against model A must not validate model B's bucket (retrain -> re-run
+    # inference into a new bucket -> press Validate). The sidecar names a different producer than
+    # the one the verdicts were recorded against.
     proj, pred_dir = _make_project(
         tmp_path, floored=True, producer_identity=_IDENTITY, sidecar_identity=_OTHER_IDENTITY)
     resp = client.post("/api/review/validate_reference", json={
@@ -380,16 +380,16 @@ def test_route_refuses_when_verdicts_belong_to_a_different_producer(client, tmp_
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is False
-    assert body["reviewed_image_count"] == 2  # the images were reviewed — just not for this bucket
+    assert body["reviewed_image_count"] == 2  # the images were reviewed, just not for this bucket
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is False
 
 
 def test_route_refuses_when_no_image_ever_recorded_fn_adjudication(client, tmp_path: Path):
-    # Fix H's reproduced scenario: previously-unlabeled images (gt_preexisting=False), reviewed
-    # (accept/reject), but never checked for a missed object — must refuse, naming the tool. Uses
-    # the dense, realistically-floored fixture (not _make_project's 2-image one) so a real,
-    # non-None staged_conf_floor is threaded and conf_censored does not mask this failure.
+    # Previously-unlabeled images (gt_preexisting=False), reviewed (accept/reject), but never
+    # checked for a missed object, must refuse, naming the tool. Uses the dense,
+    # realistically-floored fixture (not _make_project's 2-image one) so a real, non-None
+    # staged_conf_floor is threaded and conf_censored does not mask this failure.
     proj, pred_dir = _make_dense_reviewed_project(tmp_path, gt_preexisting=False)
     resp = client.post("/api/review/validate_reference", json={
         "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
