@@ -74,13 +74,15 @@ sample, see the `evaluation` and `cv-research` skills), read from the prediction
 - `compute_phenology` gates both the elongation classifier (reconciled from
   `classifier_operating_point.json`, see `calibrate_classifier_operating_point`) and the count
   operating point; the web `/export_csv` phenology branch gates the same, per row.
-- `tabulate_counts` gates the count operating point on the run's resolved bundle. `export_aggregated_csv`
-  gates at the writer: pass `pred_dirs` for a count trait so the validity is reconciled from each
-  bucket's `operating_point.json` sidecar rather than trusting a bare caller string. `export_detection_csv`
-  has no `pred_dirs` parameter; it takes `measurement_validated` directly as a caller-asserted string
-  with no on-disk reconciliation against a prediction bucket's sidecar. A continuous/ordinal trait has no
-  on-disk measurement-validity producer today, so without `pred_dirs` the only route to delivery through
-  `export_aggregated_csv` is the explicit acknowledge below.
+- `tabulate_counts` gates the count operating point on the run's resolved bundle, so it calls
+  `export_detection_csv` without `pred_dirs` and passes it the already-reconciled state directly.
+  `export_detection_csv` and `export_aggregated_csv` both gate at the writer the same way: pass
+  `pred_dirs` for a count trait so the validity is reconciled from each bucket's
+  `operating_point.json` sidecar rather than trusting a bare caller string. Without `pred_dirs`,
+  either writer takes `measurement_validated` directly as a caller-asserted string with no on-disk
+  reconciliation. A continuous/ordinal trait has no on-disk measurement-validity producer today, so
+  without `pred_dirs` the only route to delivery through `export_aggregated_csv` is the explicit
+  acknowledge below.
 - A tiled run's `tile_size` is a second gating dimension of the same count operating point, at
   every one of those doors: the tile edge scales the per-image counts, so a fabricated fallback with
   no persisted training geometry and no explicit caller override refuses exactly as an uncalibrated
