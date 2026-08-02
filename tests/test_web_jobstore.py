@@ -1,4 +1,4 @@
-"""Phase 4.1b — web job lifecycle: memory cap, persistence, and inference cancellation."""
+"""Web job lifecycle: memory cap, persistence, and inference cancellation."""
 
 import json
 
