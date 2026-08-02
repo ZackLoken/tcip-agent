@@ -1,11 +1,11 @@
 """Tests for per-plant aggregation postprocessing.
 
-Covers the plant_id hard requirement (K17 finding 4 — plant identity is never guessed from a
+Covers the plant_id hard requirement (plant identity is never guessed from a
 filename; a record must carry an explicit plant_id_key value or one plant_id_fn resolves),
 identity-provenance pass-through (plant_id_source/plant_id_distance_m, mirroring
 build_plant_mapping's own real Assignment fields), the crops.yml-derived units column, and the
-aggregation strategies (count / mean / mode / sum). Bloom phenology milestones are not here — they
-are the elongated-fraction crossing, tested in test_phenology.py.
+aggregation strategies (count / mean / mode / sum). Phenology milestones are not here; they
+are the positive-fraction crossing, tested in test_phenology.py.
 """
 
 from __future__ import annotations
@@ -21,16 +21,16 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
 
 
 def _identity_fn(image_name: str) -> str:
-    """A trivial plant_id_fn for tests that don't care about grouping specifics — every image maps
+    """A trivial plant_id_fn for tests that don't care about grouping specifics: every image maps
     to a plant_id equal to its own stem-derived group key."""
     return image_name.rsplit("_", 1)[0]
 
 
-# ── plant identity — no guessing, ever (K17 finding 4) ──────────────────────
+# ── plant identity: no guessing, ever ──────────────────────
 
 
 def test_no_extract_plant_id_helper_exists_anymore():
-    """The filename-guessing fallback is deleted, not just unused — this locks its absence."""
+    """The filename-guessing fallback is deleted, not just unused; this locks its absence."""
     import tcip_mcp.pipelines.postprocessing.aggregation as agg_module
 
     assert not hasattr(agg_module, "_extract_plant_id")
@@ -43,7 +43,7 @@ def test_missing_plant_id_and_no_fn_raises():
 
 
 def test_missing_image_key_and_no_plant_id_raises():
-    """The old fallback silently bucketed a keyless record under 'unknown' — now it raises, same as
+    """The old fallback silently bucketed a keyless record under 'unknown'; now it raises, same as
     any other unresolved-identity record."""
     results = [{"count": 1}]
     with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
@@ -66,8 +66,8 @@ def test_plant_id_fn_returning_none_raises_not_groups_under_none():
 
 
 def test_empty_string_plant_id_value_raises():
-    """A membership test alone (`plant_id_key in r`) would pass for an empty-string value — the
-    check must be on the VALUE, not just presence of the key."""
+    """A membership test alone (`plant_id_key in r`) would pass for an empty-string value: the
+    check must be on the value, not just presence of the key."""
     results = [{"image": "x", "plant_id": "", "count": 1}]
     with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
         aggregate_per_plant(results, strategy="count", value_key="count")
@@ -137,7 +137,7 @@ def test_plant_id_source_absent_when_never_supplied():
     assert "plant_id_source" not in out[0]
 
 
-# ── strategies (all now supply plant_id_fn — no bare-filename grouping left) ─
+# ── strategies (all now supply plant_id_fn, no bare-filename grouping left) ─
 
 
 def test_count_strategy_median():
@@ -201,9 +201,9 @@ def test_export_aggregated_csv(tmp_path):
 
 
 def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
-    """A dimensional value_key (mask_geometry-style, area_mm2) must label the units column mm2 —
+    """A dimensional value_key (mask_geometry-style, area_mm2) must label the units column mm2,
     derived from the key that produced the number, never a caller-asserted string. Squared, not the
-    bare linear unit: an area labeled "mm" (round-2 stage-6 finding) understates its own dimensionality."""
+    bare linear unit: an area labeled "mm" understates its own dimensionality."""
     results = [
         {"plant_id": "PLANT_001", "value": 12.5, "observations": 1, "value_key": "area_mm2"},
     ]
@@ -229,7 +229,7 @@ def test_export_aggregated_csv_count_trait_has_blank_units(tmp_path):
 
 def test_export_aggregated_csv_refuses_unit_mismatch_against_crops_yml(tmp_path):
     """A trait crops.yml declares in one unit must not ship under a different unit implied by the
-    aggregated values' own key — the exact failure mode this column exists to prevent."""
+    aggregated values' own key: that's the exact failure mode this column exists to prevent."""
     from tcip_mcp.traits import crops_units
 
     units = crops_units()
@@ -248,10 +248,10 @@ def test_export_aggregated_csv_refuses_unit_mismatch_against_crops_yml(tmp_path)
 
 
 def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
-    """Stage-6 review finding, confirmed by execution: a px-suffixed value_key must NOT inherit
-    crops.yml's declared physical unit as a fallback — that shipped a 124-pixel measurement labeled
-    'mm' under a real mm-declared trait. The units column must be blank, not the declared unit,
-    whenever the value's own key implies no physical unit at all."""
+    """A px-suffixed value_key must not inherit crops.yml's declared physical unit as a fallback:
+    that shipped a 124-pixel measurement labeled 'mm' under a real mm-declared trait. The units
+    column must be blank, not the declared unit, whenever the value's own key implies no physical
+    unit at all."""
     from tcip_mcp.traits import crops_units
 
     units = crops_units()
@@ -272,7 +272,7 @@ def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(t
 
 def test_export_aggregated_csv_units_never_falls_back_with_no_value_key_at_all(tmp_path):
     """A results list not produced by aggregate_per_plant (no value_key present) must not inherit
-    crops.yml's declared unit either — there is nothing to cross-check it against."""
+    crops.yml's declared unit either; there is nothing to cross-check it against."""
     from tcip_mcp.traits import crops_units
 
     units = crops_units()
@@ -290,9 +290,9 @@ def test_export_aggregated_csv_units_never_falls_back_with_no_value_key_at_all(t
 
 @pytest.mark.parametrize("value_key", ["plant_id", "detections_total", "elongated_fraction", "pct_open"])
 def test_unit_from_value_key_never_fabricates_from_an_unrelated_key(value_key):
-    """The unit-suffix regex used to match ANY trailing underscore-word, so 'detections_total' read
+    """The unit-suffix regex used to match any trailing underscore-word, so 'detections_total' read
     as unit='total' and 'plant_id' as unit='id'. Only a trailing token that is one of crops.yml's own
-    declared units (or a mechanically-squared form of one) may imply a unit — 'id'/'total'/'fraction'/
+    declared units (or a mechanically-squared form of one) may imply a unit: 'id'/'total'/'fraction'/
     'open' are none of those, regardless of what precedes them."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
 
@@ -300,11 +300,11 @@ def test_unit_from_value_key_never_fabricates_from_an_unrelated_key(value_key):
 
 
 def test_unit_from_value_key_is_vocabulary_driven_not_a_field_name_whitelist():
-    """Round-2 follow-up: the unit vocabulary used to be 4 hardcoded mask_geometry field names, so a
-    bespoke agent-composed measurement (arc length, a landmark distance — anything outside
-    mask_geometry) shipped with a blank units column even when its value_key was a perfectly sensible
-    '{name}_{unit}'. Recognition is now driven by crops.yml's own declared units, so any key ending in
-    one of them (or its squared form) is recognized, regardless of what module produced it."""
+    """The unit vocabulary is driven by crops.yml's own declared units, not a hardcoded whitelist of
+    mask_geometry field names, so a bespoke agent-composed measurement (arc length, a landmark
+    distance, anything outside mask_geometry) is still recognized when its value_key is a sensible
+    '{name}_{unit}'. Any key ending in one of crops.yml's declared units (or its squared form) is
+    recognized, regardless of what module produced it."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
 
     assert _unit_from_value_key("area_mm2") == ("mm2", "mm")
@@ -322,8 +322,8 @@ def test_unit_from_value_key_is_vocabulary_driven_not_a_field_name_whitelist():
 
 def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
     """A value_key that names 'area' but whose trailing unit isn't squared (area_mm instead of
-    area_mm2) is a real dimensional-mismatch bug in the producing code, not a case to guess through —
-    an area is length^2, and silently labeling it with a bare linear unit is exactly the kind of wrong
+    area_mm2) is a real dimensional-mismatch bug in the producing code, not a case to guess through.
+    An area is length^2, and silently labeling it with a bare linear unit is exactly the kind of wrong
     number this function exists to prevent from shipping quietly."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _unit_from_value_key
 
@@ -334,10 +334,9 @@ def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
 
 
 def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
-    """Round-2 stage-6 finding: area_mm2 used to resolve to units='mm' (the linear unit, dropping the
-    squaring) — a real area shipped mislabeled, and crops.yml's cross-check (declared only in linear
-    units) could never catch it since 'mm' == 'mm' always passed. The CSV's units column must say
-    'mm2'; the cross-check itself must still compare the linear unit crops.yml actually declares."""
+    """area_mm2 must resolve to units='mm2' in the CSV, but crops.yml's cross-check declares only
+    the linear unit ('mm'), so the cross-check itself must still compare against that linear unit.
+    Comparing 'mm2' to 'mm' directly would never match."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [{"plant_id": "P1", "value": 800.0, "observations": 1, "value_key": "area_mm2"}]
@@ -369,7 +368,7 @@ def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
 
 def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
     """The refusal in unit_from_value_key must reach export_aggregated_csv's own caller, not be
-    swallowed — a delivery CSV must never ship silently mislabeled because of a naming bug upstream."""
+    swallowed: a delivery CSV must never ship silently mislabeled because of a naming bug upstream."""
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [{"plant_id": "P1", "value": 800.0, "observations": 1, "value_key": "area_mm"}]
@@ -378,8 +377,8 @@ def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
 
 
 def test_export_aggregated_csv_writes_value_key_column(tmp_path):
-    """The corrected fix asked for value_key as a real CSV column, not just an internal field — the
-    one thing that lets a reader independently detect a px/mm mismatch themselves."""
+    """value_key is a real CSV column, not just an internal field: it's the one thing that lets a
+    reader independently detect a px/mm mismatch themselves."""
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2"}]
     out_path = tmp_path / "out.csv"
     export_aggregated_csv(results, str(out_path), trait_name="whatever", acknowledge_unvalidated=True)
