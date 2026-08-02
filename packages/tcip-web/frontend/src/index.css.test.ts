@@ -26,7 +26,7 @@ describe("index.css component layer", () => {
   beforeAll(async () => {
     // Read from disk: vitest's `css: false` stubs CSS imports (even ?raw) to
     // empty strings. @types/node isn't installed in this package, so import
-    // node:fs dynamically — vitest runs in Node, so it resolves at runtime.
+    // node:fs dynamically: vitest runs in Node, so it resolves at runtime.
     // @ts-expect-error TS2307: no @types/node in the frontend tsconfig
     const { readFileSync } = await import("node:fs");
     // Vitest runs with cwd = frontend root (vitest.config.ts lives there).
@@ -49,7 +49,7 @@ describe("index.css component layer", () => {
   });
 
   // .tcip-btn-primary/.tcip-btn-danger inherit via `@apply tcip-btn`, and
-  // .tcip-select via `@apply tcip-input` — assert all so the chain can't break.
+  // .tcip-select via `@apply tcip-input`: assert all so the chain can't break.
   it.each([".tcip-btn", ".tcip-btn-primary", ".tcip-btn-danger", ".tcip-input", ".tcip-select"])(
     "%s has a visible focus-visible ring",
     (base) => {
@@ -67,7 +67,7 @@ describe("index.css component layer", () => {
   it("buttons suppress the UA outline only under focus-visible", () => {
     const decls = declsFor(root, ".tcip-btn:focus-visible");
     expect(decls.get("outline")).toBe("2px solid transparent");
-    // No plain :focus outline suppression on buttons — mouse clicks keep
+    // No plain :focus outline suppression on buttons: mouse clicks keep
     // default behavior and only keyboard focus swaps to the ring.
     expect(declsFor(root, ".tcip-btn:focus").size).toBe(0);
   });
