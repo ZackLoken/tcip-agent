@@ -3,13 +3,13 @@
 A Point is a placed prompt (SAM-style) or a keypoint/landmark: a real annotation with a location, but
 never a detection/segmentation target. It has no box and no area, so ``bbox_of`` refuses one rather
 than fabricate a degenerate zero-area box that would read downstream as a real object. That refusal is
-the backstop, not the guard — these tests pin the two behaviours that widening the union demands of
+the backstop, not the guard: these tests pin the two behaviours that widening the union demands of
 every consumer:
 
-  * a training-target / IoU-matching / delivery-grade path SKIPS a Point cleanly (never crashes on
+  * a training-target / IoU-matching / delivery-grade path skips a Point cleanly (never crashes on
     ``bbox_of``, never emits a fabricated extent), while still doing its normal job for the boxes and
     polygons alongside it; and
-  * a serializer / write path REPRESENTS a Point (the ``"point": [x, y]`` key, symmetric on read and
+  * a serializer / write path represents a Point (the ``"point": [x, y]`` key, symmetric on read and
     write) instead of silently dropping the only thing that annotation says.
 """
 
@@ -110,8 +110,8 @@ def _entries(tmp_path: Path, anns: list[Annotation], name: str = "IMG_0001.JPG")
 
 
 def test_to_coco_dataset_counts_a_point_only_image_but_emits_no_annotation(tmp_path: Path) -> None:
-    """A point is real content (the image is annotated, not an empty negative) yet has no COCO record
-    — a zero-area box in ``annotations`` would train as an object."""
+    """A point is real content (the image is annotated, not an empty negative) yet has no COCO
+    record: a zero-area box in ``annotations`` would train as an object."""
     coco = json_io.to_coco_dataset(
         _entries(tmp_path, [Annotation(subject="catkin", geometry=Point(20.0, 20.0))]),
         subject="catkin", id_map={"catkin": 0})
@@ -157,13 +157,13 @@ def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
     boxes, labels, n_unlabeled = _json_det_targets(str(label), "catkin", None, {"catkin": 0})
     assert boxes == [[10.0, 10.0, 30.0, 30.0]]
     assert labels == [1]
-    assert n_unlabeled == 0  # a point is not an unlabeled instance either — it is not an instance
+    assert n_unlabeled == 0  # a point is not an unlabeled instance either: it is not an instance
 
 
 def test_a_point_only_image_is_not_a_trainable_sample(tmp_path: Path) -> None:
     """``_label_record_state``'s ``has_objects`` is target membership, not mere annotatedness: a
     point-only image kept on the direct-json path would train as a zero-object negative no human
-    confirmed — the exact fabrication the function's docstring exists to prevent."""
+    confirmed: the exact fabrication the function's docstring exists to prevent."""
     from tcip_mcp.pipelines.data.datasets import _label_record_state
 
     labels = tmp_path / "annotations"
@@ -184,7 +184,7 @@ def test_compute_matches_ignores_a_point_on_either_side() -> None:
     gt = [Annotation(subject="catkin", geometry=Point(20.0, 20.0))]
     preds = [Annotation(subject="catkin", geometry=Point(20.0, 20.0), score=0.9)]
     m = compute_matches(gt, preds, iou_threshold=0.5, conf_threshold=0.1)
-    # Not a TP (nothing overlapped), not an FP, not an FN — a point makes no spatial claim to score.
+    # Not a TP (nothing overlapped), not an FP, not an FN: a point makes no spatial claim to score.
     assert (m["tp"], m["fp"], m["fn"]) == ([], [], [])
 
 
@@ -364,7 +364,7 @@ def test_save_annotations_tool_writes_an_incoming_point(tmp_path: Path) -> None:
 
 
 def test_save_annotations_tool_keeps_points_and_point_distinct(tmp_path: Path) -> None:
-    """``points`` is a polygon contour and ``point`` is one location — one spelling must not serve
+    """``points`` is a polygon contour and ``point`` is one location: one spelling must not serve
     both, or a point and a one-vertex polygon become indistinguishable on disk."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
