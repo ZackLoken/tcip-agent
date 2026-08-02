@@ -1,4 +1,4 @@
-"""json_io — the canonical name-based per-image JSON label format (GT + predictions).
+"""json_io: the canonical name-based per-image JSON label format (GT + predictions).
 
 Covers geometry round-trips (xyxy in memory <-> xywh on disk), score handling (predictions
 only), provenance persistence, the negative invariant (present-empty file == confirmed
@@ -26,7 +26,7 @@ from tcip_annotation.state import Annotation, BBox, Polygon, bbox_of
 SQUARE = [(10.0, 20.0), (110.0, 20.0), (110.0, 220.0), (10.0, 220.0)]
 TRIANGLE = [(0.5, 0.25), (30.0, 0.25), (15.25, 40.75)]
 
-# Two disjoint rings of ONE instance (an occlusion-split object — a catkin behind a branch).
+# Two disjoint rings of one instance (an occlusion-split object: a catkin behind a branch).
 LEFT_LOBE = [(10.0, 10.0), (30.0, 10.0), (30.0, 50.0), (10.0, 50.0)]
 RIGHT_LOBE = [(70.0, 12.0), (90.0, 12.0), (90.0, 48.0), (70.0, 48.0)]
 
@@ -104,8 +104,8 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
     assert data["annotations"][1]["segmentation"] == [[0.5, 0.25, 30.0, 0.25, 15.25, 40.75]]
     assert all("score" not in o for o in data["annotations"])
 
-    # Each polygon record ALSO carries its derived box (COCO xywh of bbox_of(points)) alongside the
-    # segmentation — the polygon stays the source of truth, its box travels with it on disk.
+    # Each polygon record also carries its derived box (COCO xywh of bbox_of(points)) alongside the
+    # segmentation; the polygon stays the source of truth, its box travels with it on disk.
     def _xywh(pts: list[tuple[float, float]]) -> list[float]:
         b = bbox_of(Polygon([pts]))
         return [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1]
@@ -113,8 +113,8 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
     assert data["annotations"][0]["bbox"] == _xywh(SQUARE) == [10.0, 20.0, 100.0, 200.0]
     assert data["annotations"][1]["bbox"] == _xywh(TRIANGLE) == [0.5, 0.25, 29.5, 40.5]
 
-    # The on-disk bbox is derived, not a second geometry: each record reads back as exactly ONE
-    # polygon annotation (segmentation wins over the co-stored bbox), never a box AND a polygon.
+    # The on-disk bbox is derived, not a second geometry: each record reads back as exactly one
+    # polygon annotation (segmentation wins over the co-stored bbox), never a box and a polygon.
     got = read_annotations(path)
     assert len(got) == 2
     assert all(isinstance(a.geometry, Polygon) for a in got)
@@ -122,8 +122,8 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
 
 
 def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(tmp_path: Path) -> None:
-    # An occlusion-split instance is ONE annotation with more than one ring. Every ring must survive
-    # the write/read round trip, in authored order — a reader that kept only the first would silently
+    # An occlusion-split instance is one annotation with more than one ring. Every ring must survive
+    # the write/read round trip, in authored order; a reader that kept only the first would silently
     # shrink the object, and its derived box with it.
     path = tmp_path / "labels" / "IMG_multi.json"
     write_annotations(
@@ -135,7 +135,7 @@ def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(tmp_path: Path)
         [10.0, 10.0, 30.0, 10.0, 30.0, 50.0, 10.0, 50.0],
         [70.0, 12.0, 90.0, 12.0, 90.0, 48.0, 70.0, 48.0],
     ]
-    # The co-stored box spans BOTH rings, not just the first.
+    # The co-stored box spans both rings, not just the first.
     assert rec["bbox"] == [10.0, 10.0, 80.0, 40.0]
 
     got = read_annotations(path)
@@ -146,7 +146,7 @@ def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(tmp_path: Path)
 
 
 def test_degenerate_ring_is_dropped_without_losing_its_siblings(tmp_path: Path) -> None:
-    # A ring that is not a shape is dropped INDIVIDUALLY; the annotation and its valid rings survive.
+    # A ring that is not a shape is dropped individually; the annotation and its valid rings survive.
     # (Before multi-ring support a bad first ring could take the whole annotation with it.)
     path = tmp_path / "labels" / "IMG_partial.json"
     write_annotations(
@@ -185,7 +185,7 @@ def test_read_drops_only_the_bad_ring_of_a_mixed_segmentation(tmp_path: Path) ->
 
 
 def test_box_only_record_reads_as_single_bbox_annotation(tmp_path: Path) -> None:
-    # A hand-drawn box (no segmentation) still reads as exactly one BBox annotation — the polygon's
+    # A hand-drawn box (no segmentation) still reads as exactly one BBox annotation; the polygon's
     # bbox co-storage must not make an ordinary box record ambiguous or double-counted.
     path = tmp_path / "labels" / "IMG_box.json"
     write_annotations(path, [Annotation(subject="catkin", geometry=BBox(10.0, 20.0, 110.0, 220.0))], 640, 480)
@@ -352,14 +352,14 @@ def test_json_that_is_not_a_dict_reads_empty(tmp_path: Path) -> None:
 
 def test_entry_without_subject_skipped_geometryless_kept(tmp_path: Path) -> None:
     # A name-based label is undecodable without a subject, so a subject-less entry is dropped; a
-    # subject WITH no geometry is a real image-level label and is kept.
+    # subject with no geometry is a real image-level label and is kept.
     path = tmp_path / "a.json"
     payload = {
         "image": "a", "width": 100, "height": 100,
         "annotations": [
-            {"subject": "catkin"},                                # image-level label — kept
-            {"subject": "leaf", "bbox": [1.0, 2.0, 3.0, 4.0]},    # box — kept
-            {"bbox": [5.0, 6.0, 7.0, 8.0]},                       # no subject — skipped
+            {"subject": "catkin"},                                # image-level label: kept
+            {"subject": "leaf", "bbox": [1.0, 2.0, 3.0, 4.0]},    # box: kept
+            {"bbox": [5.0, 6.0, 7.0, 8.0]},                       # no subject: skipped
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -379,7 +379,7 @@ def test_bad_bbox_yields_no_box_geometry(tmp_path: Path) -> None:
             {"subject": "catkin", "bbox": [1, 2, 3, 4, 5]},          # wrong length
             {"subject": "catkin", "bbox": "10,20,30,40"},            # not a list
             {"subject": "catkin", "bbox": ["a", "b", "c", "d"]},     # non-numeric
-            {"bbox": [1.0, 2.0, 3.0, 4.0]},                          # no subject — skipped entirely
+            {"bbox": [1.0, 2.0, 3.0, 4.0]},                          # no subject: skipped entirely
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -468,7 +468,7 @@ def test_null_or_bad_score_reads_as_none(tmp_path: Path) -> None:
 def test_non_finite_score_is_written_as_valid_json(tmp_path: Path) -> None:
     path = tmp_path / "labels" / "a.json"
     write_annotations(path, [Annotation(subject="catkin", geometry=BBox(1.0, 2.0, 3.0, 4.0), score=float("nan"))], 100, 100)
-    # File must be STRICT-valid JSON (no bare NaN literal); the non-finite score collapses to 0.0.
+    # File must be strict-valid JSON (no bare NaN literal); the non-finite score collapses to 0.0.
     text = path.read_text(encoding="utf-8")
     assert "NaN" not in text and "Infinity" not in text
     assert json.loads(text)["annotations"][0]["score"] == 0.0
@@ -502,8 +502,8 @@ def test_to_coco_dataset_assembles_mixed_entries(tmp_path: Path) -> None:
                            confirmed_negative_names={"IMG_0003.JPG"})
 
     assert coco["categories"] == [{"id": 0, "name": "catkin"}]
-    # Present files yield an images record — including IMG_0003's empty file because a human
-    # CONFIRMED it negative (an empty file alone never trains as a negative). The missing
+    # Present files yield an images record, including IMG_0003's empty file because a human
+    # confirmed it negative (an empty file alone never trains as a negative). The missing
     # (unannotated) IMG_0004 is skipped entirely.
     assert [i["file_name"] for i in coco["images"]] == [
         "IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG"]
@@ -593,7 +593,7 @@ def test_to_coco_dataset_empty_entries(tmp_path: Path) -> None:
                     "excluded_incomplete_attribute": []}
 
 
-# ── target_class_id — unlabeled vs. undecodable (K4/K5) ──────────────────────
+# ── target_class_id: unlabeled vs. undecodable ───────────────────────────────
 
 
 def test_target_class_id_distinguishes_unlabeled_from_undecodable() -> None:
@@ -626,12 +626,11 @@ def test_target_class_id_distinguishes_unlabeled_from_undecodable() -> None:
 def test_to_coco_dataset_excludes_the_whole_image_when_any_instance_is_unlabeled(
     tmp_path: Path,
 ) -> None:
-    """K4/K5, stage-6 review N2/NEW-1: an instance the annotator hasn't assessed for `attribute`
-    yet must not abort the whole assembly with a raise (the original bug) -- but must also not be
-    silently narrowed to just its labeled subset, training the image's other real objects as
-    background (the N2 regression this fix corrects). The WHOLE image is excluded and disclosed,
-    the same treatment a missing label file already gets. A genuinely undecodable value still
-    raises -- that distinction is unaffected."""
+    """An instance the annotator hasn't assessed for `attribute` yet must not abort the whole
+    assembly with a raise, and must also not be silently narrowed to just its labeled subset,
+    training the image's other real objects as background. The whole image is excluded and
+    disclosed, the same treatment a missing label file already gets. A genuinely undecodable
+    value still raises -- that distinction is unaffected."""
     mixed_path = tmp_path / "IMG_A.json"
     write_annotations(mixed_path, [
         Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30),
@@ -649,14 +648,14 @@ def test_to_coco_dataset_excludes_the_whole_image_when_any_instance_is_unlabeled
         subject="catkin", id_map={"elongated": 0, "dormant": 1}, attribute="elongation",
     )
 
-    # The mixed image is excluded WHOLESALE -- not present at all, not even with its labeled
+    # The mixed image is excluded wholesale -- not present at all, not even with its labeled
     # instance -- and the exclusion is disclosed, never silent.
     assert [i["file_name"] for i in coco["images"]] == ["IMG_B.JPG"]
     assert len(coco["annotations"]) == 1
     assert coco["annotations"][0]["category_id"] == 0  # "elongated", from IMG_B only
-    # Names, not just a count: the downstream partition (trainable_stems) needs to know WHICH
+    # Names, not just a count: the downstream partition (trainable_stems) needs to know which
     # images left, or it attributes their absence to whichever category it resembles and reports
-    # a false reason (round-4 review).
+    # a false reason.
     assert coco["excluded_incomplete_attribute"] == ["IMG_A.JPG"]
 
     undecodable_path = tmp_path / "IMG_C.json"
