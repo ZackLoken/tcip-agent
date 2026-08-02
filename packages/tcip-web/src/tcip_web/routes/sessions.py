@@ -1,4 +1,4 @@
-"""Session-tracking routes — annotation_stats.json equivalent.
+"""Session-tracking routes: annotation_stats.json equivalent.
 
 A per-image annotation timer + session aggregate at
 ``<project_root>/.tcip/state/annotation_stats.json`` with this shape::
@@ -154,7 +154,7 @@ def start_session(payload: StartSessionPayload) -> dict:
         data = _read(path)
         sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
         if sessions and not sessions[0].get("ended"):
-            # Already an open session — keep it.
+            # Already an open session, keep it.
             return {"status": "ok", "session": sessions[0]}
         entry = _new_session_entry(user=payload.user)
         sessions.insert(0, entry)
