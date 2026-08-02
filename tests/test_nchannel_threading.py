@@ -1,6 +1,6 @@
-"""Phase 3.1 — N-channel threading: sensor->in_chans, backbones accept in_chans, a
-train-start channel guard, and dataset channel metadata. (Multi-channel *readers* are 3.2;
-here the plumbing carries channel counts and validates them.)"""
+"""N-channel threading: sensor->in_chans, backbones accept in_chans, a train-start channel
+guard, and dataset channel metadata. Multi-channel *readers* are separate; here the plumbing
+carries channel counts and validates them."""
 
 import pytest
 
@@ -75,7 +75,7 @@ def test_n_channel_detector_builds_and_trains():
 
 
 def test_n_channel_detector_without_stats_is_refused_by_default():
-    """The refusal fires for an agent who never passed in_chans — the agent it exists for."""
+    """The refusal fires for an agent who never passed in_chans: the agent it exists for."""
     from tcip_mcp.pipelines.components.detectors import build_detector
 
     adapter = _nchan_adapter(5)
@@ -99,8 +99,8 @@ def test_normalization_length_and_channel_count_are_validated():
 def test_explicit_in_chans_wins_over_the_registration_order_probe():
     """The probe is a hint. Only the caller knows the band count, so it may not be overruled.
 
-    An adapter that registers its neck before its backbone — or band-projects N bands through a
-    1x1 conv into a pretrained 3-channel stem — reports a first-conv width that is not the image's
+    An adapter that registers its neck before its backbone, or band-projects N bands through a
+    1x1 conv into a pretrained 3-channel stem, reports a first-conv width that is not the image's
     band count. Letting that veto the caller blocks correct builds and admits wrong ones.
     """
     import torch.nn as nn
@@ -112,7 +112,7 @@ def test_explicit_in_chans_wins_over_the_registration_order_probe():
     class NeckFirstAdapter(nn.Module):
         def __init__(self, backbone, neck):
             super().__init__()
-            self.neck = neck          # registered first — the probe sees this conv
+            self.neck = neck          # registered first: the probe sees this conv
             self.backbone = backbone
             self.out_channels = neck.out_channels if isinstance(neck.out_channels, int) \
                 else neck.out_channels[-1]
@@ -165,7 +165,7 @@ def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(tmp_path,
     """The statistic must be of the tensor the loader yields, not of a scale re-derived here.
 
     `pil_to_tensor` decides [0,1] scaling from dtype. A derivation that decides from pixel values
-    lands in a different unit system — silently, and worst on the float rasters multispectral
+    lands in a different unit system silently, and worst on the float rasters multispectral
     imagery actually ships as.
     """
     import numpy as np
