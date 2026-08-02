@@ -18,7 +18,7 @@ const ANNOTATE: Shortcut[] = [
   { key: "Ctrl+Shift+Z", desc: "Redo" },
   { key: "Ctrl+Y", desc: "Redo (alias)" },
   { key: "Ctrl+S", desc: "Save labels" },
-  { key: "v", desc: "Toggle stream drawing — click starts/pauses laying, double-click closes" },
+  { key: "v", desc: "Toggle stream drawing: click starts/pauses laying, double-click closes" },
   { key: "s", desc: "Toggle vertex snapping (polygon mode)" },
   { key: "0–9", desc: "Select class by ID" },
   { key: "Enter", desc: "Close current polygon (or double-click)" },
@@ -26,13 +26,13 @@ const ANNOTATE: Shortcut[] = [
   { key: "←  →", desc: "Prev / Next image" },
 ];
 
-// Verdicts write ground truth — keep in sync with ReviewTab's button titles.
+// Verdicts write ground truth: keep in sync with ReviewTab's button titles.
 const REVIEW: Shortcut[] = [
   { key: "a", desc: "Accept: keep this object in GT (accepting an FP adds the prediction to GT)" },
   { key: "r", desc: "Reject: FP discards the prediction; TP/FN deletes the ground-truth object" },
   { key: "e", desc: "Edit the shape in place on this canvas (drag corners / points)" },
   { key: "Enter", desc: "Save the edited shape to ground truth" },
-  { key: "Esc", desc: "Cancel the edit — ground truth unchanged" },
+  { key: "Esc", desc: "Cancel the edit, ground truth unchanged" },
   { key: "←  →", desc: "Prev / Next detection" },
   { key: "↑  ↓", desc: "Prev / Next image" },
 ];
@@ -43,7 +43,7 @@ const MOUSE: Shortcut[] = [
   { key: "Shift + Scroll", desc: "Pan horizontally" },
   { key: "Space + drag", desc: "Pan (hold space, drag with the left button)" },
   { key: "Middle-click + drag", desc: "Pan" },
-  { key: "Click", desc: "Place a point (point mode) — press and drag a placed point to move it" },
+  { key: "Click", desc: "Place a point (point mode); press and drag a placed point to move it" },
   { key: "Double-click", desc: "Close current polygon (polygon mode)" },
   {
     key: "Right-click",
