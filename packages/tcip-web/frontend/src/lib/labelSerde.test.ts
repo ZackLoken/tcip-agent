@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { annotationsToCanvas, canvasToAnnotations } from "@/lib/labelSerde";
 import type { Annotation, AnnotationPayload } from "@/store/types";
 
-/** What the load routes hand back for a payload just saved — the save/load asymmetry made explicit:
+/** What the load routes hand back for a payload just saved: the save/load asymmetry made explicit,
  *  `_to_annotation` builds one Polygon from `rings` or `points`, and `_ann_dict` always emits
  *  `rings`. A save payload is therefore never a load payload; going through this is what makes a
  *  round-trip test a round-trip. `point` is symmetric (same field both ways), so it rides through
@@ -17,7 +17,7 @@ function asLoaded(saved: AnnotationPayload[]): Annotation[] {
 
 describe("labelSerde round-trip", () => {
   it("splits a unified list by each annotation's own geometry, then reassembles it symmetrically", () => {
-    // One of each kind in one file, including a geometry-less rating that must NOT be dropped.
+    // One of each kind in one file, including a geometry-less rating that must not be dropped.
     const annotations: Annotation[] = [
       { subject: "catkin", bbox: [10, 20, 30, 40], attributes: { elongation: "elongated" } },
       {
@@ -43,7 +43,7 @@ describe("labelSerde round-trip", () => {
     expect(canvas.boxes[0].subject).toBe("catkin");
     expect(canvas.imageAnnotations[0].subject).toBe("efb");
 
-    // Save reassembles every bucket — a box stays a box, a polygon a polygon, a point a point.
+    // Save reassembles every bucket: a box stays a box, a polygon a polygon, a point a point.
     const back = canvasToAnnotations(canvas);
     expect(back).toHaveLength(4);
     const box = back.find((a) => a.bbox);
@@ -85,8 +85,8 @@ describe("labelSerde round-trip", () => {
 
   it("buckets a both-geometry annotation (rings and bbox) to one polygon, zero boxes", () => {
     // Measurement-critical: a polygon record carries its derived bbox on disk. The split is
-    // rings-first (if/else-if), so it must produce exactly one polygon and no box — a two-ifs
-    // regression would emit BOTH and double-count the catkin.
+    // rings-first (if/else-if), so it must produce exactly one polygon and no box: a two-ifs
+    // regression would emit both and double-count the catkin.
     const annotations: Annotation[] = [
       {
         subject: "catkin",
@@ -106,7 +106,7 @@ describe("labelSerde round-trip", () => {
     expect(canvas.boxes).toHaveLength(0);
   });
 
-  it("a polygon-with-bbox stays one polygon and emits NO bbox/second record across load->save->load", () => {
+  it("a polygon-with-bbox stays one polygon and emits no bbox/second record across load->save->load", () => {
     const original: Annotation[] = [
       {
         subject: "catkin",
@@ -122,7 +122,7 @@ describe("labelSerde round-trip", () => {
       },
     ];
     const saved = canvasToAnnotations(annotationsToCanvas(original));
-    // Save emits the polygon only — no bbox, no extra record — so the box is never authored.
+    // Save emits the polygon only, no bbox, no extra record, so the box is never authored.
     expect(saved).toHaveLength(1);
     expect(saved[0].points).toBeDefined();
     expect(saved[0].bbox).toBeUndefined();
@@ -174,7 +174,7 @@ describe("labelSerde multi-ring polygons", () => {
     expect(saved[0].points).toBeUndefined(); // `points` would carry one contour = a lost region
   });
 
-  it("saves a one-ring shape as `points` — the field a hand-drawn/edited contour belongs in", () => {
+  it("saves a one-ring shape as `points`, the field a hand-drawn/edited contour belongs in", () => {
     const saved = canvasToAnnotations({
       boxes: [],
       polygons: [{ rings: [twoRings[0]], subject: "catkin", attributes: {} }],
@@ -199,7 +199,7 @@ describe("labelSerde multi-ring polygons", () => {
 });
 
 describe("labelSerde points", () => {
-  it("loads a point annotation into the points bucket — never a box or a polygon", () => {
+  it("loads a point annotation into the points bucket, never a box or a polygon", () => {
     // A point has no extent: bucketing it as a box would hand a fabricated zero-area target to
     // every downstream consumer that reads canvas.boxes.
     const canvas = annotationsToCanvas([
@@ -222,7 +222,7 @@ describe("labelSerde points", () => {
     expect(canvas.imageAnnotations).toHaveLength(0); // and not mistaken for a geometry-less rating
   });
 
-  it("saves a point as `point` only — no bbox, no points/rings contour", () => {
+  it("saves a point as `point` only, no bbox, no points/rings contour", () => {
     const saved = canvasToAnnotations({
       boxes: [],
       polygons: [],
