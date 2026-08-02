@@ -1,10 +1,10 @@
-"""Check a dataset's on-disk content against its recorded identity — detect changed / moved data.
+"""Check a dataset's on-disk content against its recorded identity: detect changed / moved data.
 
 Reproduce-a-number defensibility: a delivered number is only reproducible from the data on disk if that
 data still matches what was recorded. This recomputes the dataset's fingerprint (the authority) and
-compares it to (a) the fingerprint cached in ``<dataset_root>/dataset.json`` — a mismatch means the
-data CHANGED since it was registered — and (b) the project's ``.tcip/datasets.json`` by id, so a
-dataset found at a new path but with the same fingerprint reads as MOVED, not changed.
+compares it to (a) the fingerprint cached in ``<dataset_root>/dataset.json`` (a mismatch means the
+data changed since it was registered) and (b) the project's ``.tcip/datasets.json`` by id, so a
+dataset found at a new path but with the same fingerprint reads as moved, not changed.
 
 A dedicated script rather than folded into the ``@audited`` read tools: recomputing touches every
 image on disk, which a read tool must not do.
@@ -32,7 +32,7 @@ def main() -> int:
     root: Path = args.dataset_root
     current = dataset_fingerprint(root)
     if current is None:
-        print(f"no fingerprint for {root} (no images/labels — bespoke or empty)")
+        print(f"no fingerprint for {root} (no images/labels, bespoke or empty)")
         return 0
 
     ident_path = dataset_identity_path(root)
@@ -48,7 +48,7 @@ def main() -> int:
         status = 0
     else:
         print(f"CHANGED: {root} content differs from its recorded identity "
-              f"(recorded={recorded} current={current}) — a number reproduced from it is no longer valid")
+              f"(recorded={recorded} current={current}); a number reproduced from it is no longer valid")
         status = 2
 
     # Moved: the project registry knows this id at a different path.
