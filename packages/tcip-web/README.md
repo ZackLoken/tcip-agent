@@ -92,12 +92,12 @@ Port discovery inside MCP tools: `TCIP_WEB_PORT` env > `.tcip/state/web_port.txt
 Conscious calls for this single-operator desktop GUI (recorded so they're not
 re-litigated):
 
-- **Dark-only theme.** No light mode or theme toggle — the palette is the SI dark
+- **Dark-only theme.** No light mode or theme toggle: the palette is the SI dark
   tokens + `color-scheme: dark`. (The old inert `class="dark"` was removed; no
   Tailwind `dark:` variants are used.)
 - **Accessibility bar.** The core flows are keyboard-navigable (shortcut map above;
   focusable native controls). Full ARIA/screen-reader support is **not** targeted for
-  this local single-user tool — revisit if it's ever shipped to broader users.
+  this local single-user tool; revisit if it's ever shipped to broader users.
 - **Touch / pen: not supported.** The annotation canvas is mouse-only (wheel-zoom,
   middle-drag pan, click-to-draw). Field-tablet (touch/pen) annotation is a known
   limitation and future work, not a regression.
@@ -116,5 +116,5 @@ re-litigated):
 from a checkout (`python -m tcip_web`) needs only `npm run build` (writes
 `packages/tcip-web/static/`). To ship the GUI **inside** a wheel, build the frontend
 first, then include the built `static/` at `tcip_web/static/` in the wheel (e.g. a
-hatch `force-include`) — build the frontend before building the wheel, or the wheel will
+hatch `force-include`). Build the frontend before building the wheel, or the wheel will
 ship API-only and `/` returns a 503 with build instructions.
