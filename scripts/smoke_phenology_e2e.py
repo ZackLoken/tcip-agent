@@ -111,6 +111,41 @@ def _stem(plot: str, date: str) -> str:
     return f"{plot}_{date.replace('-', '')}"
 
 
+def _author_catkin_trait_spec(root: Path) -> None:
+    """Write a real catkin trait spec into ``<root>/.tcip/state/trait_specs/``, the way any
+    project authors one (there are no built-in traits, see ``tcip_mcp.traits``). Field values are
+    the crops.yml-grounded definition ``tests/_trait_fixtures.CATKIN`` also uses, not invented here."""
+    import dataclasses
+
+    import yaml
+
+    from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec
+
+    spec = TraitSpec(
+        name="catkin",
+        count_objective=COUNT_UNBIASED,
+        localization=CENTER_MATCH,
+        localization_tolerance="half_class_avg_size",
+        localization_tolerance_frac=0.5,
+        positive_class_name="elongated",
+        milestone_fractions=(0.05, 0.50, 0.95),
+        milestone_on="positive_fraction",
+        majority_milestone="95per",
+        majority_provisional=True,
+        phenology_prefix="catkin",
+        majority_label="elongation",
+        sliver_policy="class_avg_size",
+        sliver_frac=0.5,
+        delivers=("catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"),
+        notes="Bloom = fraction of a plant's catkins that are elongated. Elongated is a texture call "
+              "(frilled/salt-and-peppery), never a bbox-ratio proxy.",
+    )
+    specs_dir = root / ".tcip" / "state" / "trait_specs"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    data = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()}
+    (specs_dir / "catkin.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
 def main() -> int:
     print("Phenology e2e smoke: build_plant_mapping -> compute_phenology\n")
     with tempfile.TemporaryDirectory() as td:
@@ -120,84 +155,98 @@ def main() -> int:
         mapping_path = root / ".tcip" / "state" / "plant_mapping.json"
         csv_out = root / "delivery" / "catkin_phenology.csv"
 
-        # 1. Scene: geolocated images + per-image classified predictions.
-        for date in DATES:
-            base_time = datetime.strptime(date, "%Y-%m-%d").replace(hour=9, minute=30)
-            n_elong = round(FRACTIONS[date] * N_DETECTIONS)
-            for j, plant in enumerate(PLANTS):
-                stem = _stem(plant["plot"], date)
-                _write_geo_image(
-                    images_root / date / f"{stem}.jpg",
-                    plant["lat"], plant["lon"], base_time + timedelta(minutes=j),
-                )
-                (preds_root / date).mkdir(parents=True, exist_ok=True)
-                json_io.write_annotations(
-                    preds_root / date / f"{stem}.json",
-                    _pred_boxes(n_elong, N_DETECTIONS), 8, 8,
-                )
-            # The bucket's own recorded id_map (count_by_class reads the positive class from this,
-            # per date, never a pinned integer), the real shape export_predictions stamps.
-            (preds_root / date / "operating_point.json").write_text(
-                json.dumps({"id_map": ID_MAP}), encoding="utf-8")
+        # Trait registration is per-project state resolved via $TCIP_PROJECT_ROOT
+        # (tcip_mcp.project_paths.resolve_state); the outer chdir into a separate audit-only
+        # tmpdir does not point resolution at root, so pin it explicitly for this run, restoring
+        # whatever the process already had once done.
+        _saved_project_root = os.environ.get("TCIP_PROJECT_ROOT")
+        os.environ["TCIP_PROJECT_ROOT"] = str(root)
+        try:
+            _author_catkin_trait_spec(root)
 
-        plant_csv = root / "plants.csv"
-        with plant_csv.open("w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-            for p in PLANTS:
-                w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
+            # 1. Scene: geolocated images + per-image classified predictions.
+            for date in DATES:
+                base_time = datetime.strptime(date, "%Y-%m-%d").replace(hour=9, minute=30)
+                n_elong = round(FRACTIONS[date] * N_DETECTIONS)
+                for j, plant in enumerate(PLANTS):
+                    stem = _stem(plant["plot"], date)
+                    _write_geo_image(
+                        images_root / date / f"{stem}.jpg",
+                        plant["lat"], plant["lon"], base_time + timedelta(minutes=j),
+                    )
+                    (preds_root / date).mkdir(parents=True, exist_ok=True)
+                    json_io.write_annotations(
+                        preds_root / date / f"{stem}.json",
+                        _pred_boxes(n_elong, N_DETECTIONS), 8, 8,
+                    )
+                # The bucket's own recorded id_map (count_by_class reads the positive class from this,
+                # per date, never a pinned integer), the real shape export_predictions stamps.
+                (preds_root / date / "operating_point.json").write_text(
+                    json.dumps({"id_map": ID_MAP}), encoding="utf-8")
 
-        preds_by_date = {d: str(preds_root / d) for d in DATES}
+            plant_csv = root / "plants.csv"
+            with plant_csv.open("w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
+                for p in PLANTS:
+                    w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
 
-        # 2. build_plant_mapping: real EXIF GPS → plant assignments.
-        print("Step 1: build_plant_mapping")
-        m = build_plant_mapping(
-            images_root=str(images_root),
-            plant_csv_paths=[str(plant_csv)],
-            output_mapping_path=str(mapping_path),
-        )
-        check("no error", "error" not in m, m.get("error", ""))
-        check("3 dates mapped", m.get("n_dates") == 3, str(m.get("n_dates")))
-        check("6 images seen", m.get("n_images") == 6, str(m.get("n_images")))
-        check("all 6 images mapped to a plant", m.get("n_mapped") == 6,
-              f"n_mapped={m.get('n_mapped')} n_unmapped={m.get('n_unmapped')}")
-        check("mapping.json persisted", mapping_path.is_file())
+            preds_by_date = {d: str(preds_root / d) for d in DATES}
 
-        # 3. compute_phenology: the real coverage rule and classifier gate are both live. The
-        # positive class is resolved from each bucket's own recorded id_map (never a pinned
-        # int), and every image is classified (no bare single-class-detector buckets here), so the
-        # elongation split is valid; this script is the delivery path's acceptance artifact,
-        # proving the delivery path genuinely produces a curve+milestones end to end, not just
-        # refuses.
-        print("\nStep 2: compute_phenology delivers a real bloom curve + milestones")
-        r = compute_phenology(
-            trait="catkin",
-            mapping_path=str(mapping_path),
-            predictions_by_date=preds_by_date,
-            output_csv_path=str(csv_out),
-            acknowledge_unvalidated=True,
-        )
-        check("no error", "error" not in r, str(r.get("error", "")))
-        check("elongation_classified true (every bucket fully classified)",
-              r.get("elongation_classified") is True, str(r.get("elongation_classified")))
-        check("CSV delivered", csv_out.is_file())
+            # 2. build_plant_mapping: real EXIF GPS → plant assignments.
+            print("Step 1: build_plant_mapping")
+            m = build_plant_mapping(
+                images_root=str(images_root),
+                plant_csv_paths=[str(plant_csv)],
+                output_mapping_path=str(mapping_path),
+            )
+            check("no error", "error" not in m, m.get("error", ""))
+            check("3 dates mapped", m.get("n_dates") == 3, str(m.get("n_dates")))
+            check("6 images seen", m.get("n_images") == 6, str(m.get("n_images")))
+            check("all 6 images mapped to a plant", m.get("n_mapped") == 6,
+                  f"n_mapped={m.get('n_mapped')} n_unmapped={m.get('n_unmapped')}")
+            check("mapping.json persisted", mapping_path.is_file())
 
-        if csv_out.is_file():
-            with csv_out.open(newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-            check("one row per plant", len(rows) == len(PLANTS), str(len(rows)))
-            row = next((r2 for r2 in rows if r2.get("plant_id") == "P1"), None)
-            check("P1 row present", row is not None)
-            if row:
-                d05, d50, d95 = row.get("catkin_05per_date"), row.get("catkin_50per_date"), row.get("catkin_95per_date")
-                check("05/50/95per dates all populated (not a fabricated blank)",
-                      all([d05, d50, d95]), f"05={d05} 50={d50} 95={d95}")
-                if d05 and d50 and d95:
-                    check("milestones correctly ordered (05 <= 50 <= 95)", d05 <= d50 <= d95,
-                          f"05={d05} 50={d50} 95={d95}")
-                    check("milestones fall within the observed date range",
-                          DATES[0] <= d05 and d95 <= DATES[-1],
-                          f"range={DATES[0]}..{DATES[-1]} 05={d05} 95={d95}")
+            # 3. compute_phenology: the real coverage rule and classifier gate are both live. The
+            # positive class is resolved from each bucket's own recorded id_map (never a pinned
+            # int), and every image is classified (no bare single-class-detector buckets here), so the
+            # elongation split is valid; this script is the delivery path's acceptance artifact,
+            # proving the delivery path genuinely produces a curve+milestones end to end, not just
+            # refuses.
+            print("\nStep 2: compute_phenology delivers a real bloom curve + milestones")
+            r = compute_phenology(
+                trait="catkin",
+                mapping_path=str(mapping_path),
+                predictions_by_date=preds_by_date,
+                output_csv_path=str(csv_out),
+                acknowledge_unvalidated=True,
+            )
+            check("no error", "error" not in r, str(r.get("error", "")))
+            check("positive_class_assessed true (every bucket resolved the positive class)",
+                  r.get("positive_class_assessed") is True, str(r.get("positive_class_assessed")))
+            check("CSV delivered", csv_out.is_file())
+
+            if csv_out.is_file():
+                with csv_out.open(newline="", encoding="utf-8") as f:
+                    rows = list(csv.DictReader(f))
+                check("one row per plant", len(rows) == len(PLANTS), str(len(rows)))
+                row = next((r2 for r2 in rows if r2.get("plant_id") == "P1"), None)
+                check("P1 row present", row is not None)
+                if row:
+                    d05, d50, d95 = row.get("catkin_05per_date"), row.get("catkin_50per_date"), row.get("catkin_95per_date")
+                    check("05/50/95per dates all populated (not a fabricated blank)",
+                          all([d05, d50, d95]), f"05={d05} 50={d50} 95={d95}")
+                    if d05 and d50 and d95:
+                        check("milestones correctly ordered (05 <= 50 <= 95)", d05 <= d50 <= d95,
+                              f"05={d05} 50={d50} 95={d95}")
+                        check("milestones fall within the observed date range",
+                              DATES[0] <= d05 and d95 <= DATES[-1],
+                              f"range={DATES[0]}..{DATES[-1]} 05={d05} 95={d95}")
+        finally:
+            if _saved_project_root is None:
+                os.environ.pop("TCIP_PROJECT_ROOT", None)
+            else:
+                os.environ["TCIP_PROJECT_ROOT"] = _saved_project_root
 
     print()
     if _failures:
