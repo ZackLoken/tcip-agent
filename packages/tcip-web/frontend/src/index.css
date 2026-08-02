@@ -53,13 +53,13 @@ body,
   padding: 0;
 }
 
-/* Scrollbar polish — warm bark tones matching the field-station palette. */
+/* Scrollbar polish: warm bark tones matching the field-station palette. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #1e1e1e; /* tcip-bg — track sits flush with the page background */
+  background: #1e1e1e; /* tcip-bg: track sits flush with the page background */
 }
 ::-webkit-scrollbar-thumb {
   background: #33352c; /* tcip-border */
@@ -69,7 +69,7 @@ body,
   background: #454a3b; /* tcip-border-hover */
 }
 
-/* Deliberate motion only — respect the OS reduced-motion preference. */
+/* Deliberate motion only: respect the OS reduced-motion preference. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -96,7 +96,7 @@ body,
   }
 
   .tcip-btn-danger {
-    /* Hover signal rides the border only — a lighter fill under 12px warn text fails AA. */
+    /* Hover signal rides the border only: a lighter fill under 12px warn text fails AA. */
     @apply tcip-btn bg-tcip-warn/20 border-tcip-warn/40 text-tcip-warn
            hover:bg-tcip-warn/20 hover:border-tcip-warn;
   }
@@ -122,13 +122,13 @@ body,
     @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium;
   }
 
-  /* Section header — the small uppercase "instrument label" used on every panel
+  /* Section header: the small uppercase "instrument label" used on every panel
      and sidebar section, so all tabs share one typographic hierarchy. */
   .tcip-heading {
     @apply text-[11px] font-semibold uppercase tracking-wider text-tcip-muted;
   }
 
-  /* Hero "specimen tag" eyebrow — the identity motif: an uppercase instrument label
+  /* Hero "specimen tag" eyebrow, the identity motif: an uppercase instrument label
      led by a small green→persimmon rule (canopy to fruit), echoing a botanical
      specimen tag. Used sparingly, on the front door and section heroes. */
   .tcip-eyebrow {
@@ -147,7 +147,7 @@ body,
     @apply block text-[11px] font-medium text-tcip-muted;
   }
 
-  /* Table column header — matches .tcip-heading at table scale. */
+  /* Table column header: matches .tcip-heading at table scale. */
   .tcip-th {
     @apply py-1.5 pr-3 text-left text-[10px] font-semibold uppercase tracking-wider text-tcip-muted;
   }
