@@ -1,7 +1,6 @@
-"""training_tools fixes — validator/StageSpec alignment, HPO param plumbing,
-HPO trial reporting (per-epoch trace + failed-trial sentinels), HPO/train regime parity,
-experiment immutability on relaunch, and canonical-format confidence parsing
-in get_worst_predictions."""
+"""Tests for training_tools: validator/StageSpec alignment, HPO param plumbing, HPO trial
+reporting (per-epoch trace + failed-trial sentinels), HPO/train regime parity, experiment
+immutability on relaunch, and canonical-format confidence parsing in get_worst_predictions."""
 
 from __future__ import annotations
 
@@ -9,13 +8,13 @@ import json
 
 import pytest
 
-# Round 10 (2026-07-29): no built-in traits — seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so trait="catkin" call sites keep resolving.
+# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
+# test's pinned project root so trait="catkin" call sites keep resolving.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
 # --------------------------------------------------------------------------
-# preflight_config — per-stage 'lr' is optional (trainer never reads it)
+# preflight_config: per-stage 'lr' is optional (trainer never reads it)
 # --------------------------------------------------------------------------
 
 def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
@@ -42,7 +41,7 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     r2 = preflight_config(cfg)
     assert any("Stage 0 missing 'epochs'" in i for i in r2["issues"])
 
-    # No stages at all is fine — launch_training supplies its own default schedule.
+    # No stages at all is fine: launch_training supplies its own default schedule.
     del cfg["training"]["stages"]
     assert preflight_config(cfg)["valid"] is True
 
@@ -72,10 +71,10 @@ def test_preflight_config_warns_on_ignored_per_stage_lr(tmp_path):
 
 
 def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
-    """Round 12 (2026-07-29): trainable_stems' own partition was computed by
-    DetectionDataset/InstanceSegDataset and thrown away — a run whose label store admits only a
-    fraction of its candidate images used to report "valid, no warnings" with no visibility into
-    what would silently train on far fewer images than the operator expects."""
+    """trainable_stems' own partition is computed by DetectionDataset/InstanceSegDataset and
+    thrown away: a run whose label store admits only a fraction of its candidate images must not
+    report "valid, no warnings" with no visibility into what would silently train on far fewer
+    images than the operator expects."""
     pytest.importorskip("torch")
     from PIL import Image
     from tcip_annotation import json_io
@@ -130,7 +129,7 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# preflight_config — training_source seam (K9): a bare "module:function" string
+# preflight_config's training_source seam: a bare "module:function" string
 # --------------------------------------------------------------------------
 
 def test_preflight_config_training_source_shape_and_importability(tmp_path):
@@ -167,7 +166,7 @@ def test_preflight_config_training_source_shape_and_importability(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# preflight_config — selection_metric coherence (K9): reject a comparability-only
+# preflight_config's selection_metric coherence: reject a comparability-only
 # metric for a center-match trait at validation time, not mid-run.
 # --------------------------------------------------------------------------
 
@@ -202,7 +201,7 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# _apply_hpo_params — lr/weight_decay reach what the trainer actually reads
+# _apply_hpo_params: lr/weight_decay reach what the trainer actually reads
 # --------------------------------------------------------------------------
 
 def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
@@ -231,8 +230,8 @@ def test_apply_hpo_params_lr_reaches_optimizer_param_groups():
 
 
 def test_apply_hpo_params_preserves_base_config_stages():
-    """K11: sweeping lr must NOT overwrite the agent's own progressive-unfreeze schedule with a
-    hardcoded recipe — base_config's stages (however it expressed them) survive unchanged."""
+    """Sweeping lr must not overwrite the agent's own progressive-unfreeze schedule with a
+    hardcoded recipe: base_config's stages (however it expressed them) survive unchanged."""
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
     custom_stages = [{"freeze_to": -1, "epochs": 2}, {"freeze_to": 0, "epochs": 8}]
@@ -249,8 +248,8 @@ def test_apply_hpo_params_preserves_base_config_stages():
 
 
 def test_apply_hpo_params_derives_backbone_ratio_not_frozen():
-    """K11: backbone_lr must scale by whatever ratio the agent's own base_config expressed, not
-    a frozen *0.1 — a pinned constant here discards a deliberate agent choice (derive, don't pin)."""
+    """backbone_lr must scale by whatever ratio the agent's own base_config expressed, not
+    a frozen *0.1: a pinned constant here discards a deliberate agent choice (derive, don't pin)."""
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
     base = {"model_source": {"builder": "x:y", "task": "detection"},
@@ -266,9 +265,10 @@ def test_apply_hpo_params_derives_backbone_ratio_not_frozen():
 
 
 def test_apply_hpo_params_unrecognized_key_reaches_top_level():
-    """K11 (F1): a swept key outside the known optimizer/batch/weight_decay set must land at the
-    TOP LEVEL of the resolved config (where train() reads it), not nested under "training" after
-    normalize_train_config's hoist already ran — the bug that made it silently unreachable."""
+    """A swept key outside the known optimizer/batch/weight_decay set must land at the top level
+    of the resolved config (where train() reads it), not nested under "training" after
+    normalize_train_config's hoist already ran, since nesting there would leave it silently
+    unreachable."""
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
     base = {"model_source": {"builder": "x:y", "task": "detection"}}
@@ -278,7 +278,7 @@ def test_apply_hpo_params_unrecognized_key_reaches_top_level():
 
 
 # --------------------------------------------------------------------------
-# _run_hpo_trial — reports the composite (lower=better) each epoch + final, with
+# _run_hpo_trial: reports the composite (lower=better) each epoch + final, with
 # failed / empty trials reporting +inf so a dead trial can never win a min sweep.
 # The trial runs directly (no Ray) so the training machinery can be stubbed.
 # --------------------------------------------------------------------------
@@ -342,7 +342,7 @@ def test_run_hpo_trial_reports_each_epoch_then_final_composite(monkeypatch, tmp_
 
 
 def test_run_hpo_trial_epoch_cb_prefers_selection_over_val_objective(monkeypatch, tmp_path):
-    """K11/K9: once a center-match trait sets which key governs checkpoint choice ('selection'),
+    """Once a center-match trait sets which key governs checkpoint choice ('selection'),
     HPO pruning must rank trials on that key, not the raw composite it can diverge from."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial
@@ -362,8 +362,8 @@ def test_run_hpo_trial_epoch_cb_prefers_selection_over_val_objective(monkeypatch
 
 
 def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch, tmp_path):
-    """A crashed trial (or one with no model_source) reports +inf — the worst value under
-    mode='min' — so it can never become the sweep's best."""
+    """A crashed trial (or one with no model_source) reports +inf, the worst value under
+    mode='min', so it can never become the sweep's best."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial
 
@@ -410,7 +410,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
 
 
 def test_run_hpo_trial_writes_resolved_config_with_unconsumed_params(monkeypatch, tmp_path):
-    """K11 (F1): a swept key the training body never reads is surfaced by OBSERVATION, not
+    """A swept key the training body never reads is surfaced by observation, not
     gated by a whitelist. resolved_config.json records which swept keys went unconsumed."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial
@@ -438,8 +438,8 @@ def _bespoke_hpo_agent_train(ctx):
 
 
 def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeypatch, tmp_path):
-    """K11 (F1): a bespoke training_source reading its OWN swept custom key must not be
-    falsely flagged unconsumed merely because generic_trainer.train() doesn't know it —
+    """A bespoke training_source reading its own swept custom key must not be
+    falsely flagged unconsumed merely because generic_trainer.train() doesn't know it:
     tracking is genuine runtime access, not a static comparison against train()'s key list."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import _run_hpo_trial
@@ -462,14 +462,14 @@ def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeyp
 
 
 # --------------------------------------------------------------------------
-# get_worst_predictions — confidence comes from the canonical prediction format
+# get_worst_predictions: confidence comes from the canonical prediction format
 # --------------------------------------------------------------------------
 
 def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch):
     """Prediction files are per-image JSON with a native ``score`` (json_io); confidence
-    reads from that field, not from box geometry. The old parser read a normalized box
-    HEIGHT as confidence, so the (1 - avg_conf) ranking term was ~1.0 for every image with
-    small boxes (e.g. catkins)."""
+    reads from that field, not from box geometry. Reading a normalized box height as confidence
+    instead would make the (1 - avg_conf) ranking term ~1.0 for every image with small boxes
+    (e.g. catkins)."""
     pytest.importorskip("torch")
     monkeypatch.chdir(tmp_path)
     from tcip_annotation import json_io
@@ -502,7 +502,7 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
 
 
 # --------------------------------------------------------------------------
-# _ensure_experiment — experiments are immutable on relaunch
+# _ensure_experiment: experiments are immutable on relaunch
 # --------------------------------------------------------------------------
 
 def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypatch):
@@ -552,9 +552,9 @@ def test_ensure_experiment_attaches_to_precreated(tmp_path, monkeypatch):
 
 
 def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, monkeypatch):
-    """K12 finding 3: a pristine pre-created experiment's config.json is refreshed with the config
-    actually launched (tiling/seed resolved after create_experiment ran), not left describing the
-    config as it stood before those were resolved."""
+    """A pristine pre-created experiment's config.json is refreshed with the config actually
+    launched (tiling/seed resolved after create_experiment ran), not left describing the config
+    as it stood before those were resolved."""
     monkeypatch.chdir(tmp_path)
     import json
 
@@ -571,11 +571,11 @@ def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, 
 
 
 def test_ensure_experiment_resume_into_populated_id_mints_fresh_parented_id(tmp_path, monkeypatch):
-    """K12 finding 4: resume_from no longer reuses an id that already has recorded history — it
-    mints a fresh parented id instead, matching the non-resume collision behavior. Silently reusing
-    it discarded the resumed run's own metrics/lineage writes (refused by the terminal-state lock)
-    and let ModelRegistry.register_model replace the original's registry entry by name with no
-    record of what was superseded."""
+    """resume_from must not reuse an id that already has recorded history: it mints a fresh
+    parented id instead, matching the non-resume collision behavior. Reusing it would discard the
+    resumed run's own metrics/lineage writes (refused by the terminal-state lock) and let
+    ModelRegistry.register_model replace the original's registry entry by name with no record of
+    what was superseded."""
     monkeypatch.chdir(tmp_path)
     import json
 
@@ -596,7 +596,7 @@ def test_ensure_experiment_resume_into_populated_id_mints_fresh_parented_id(tmp_
 
 
 def test_ensure_experiment_resume_into_pristine_id_still_attaches(tmp_path, monkeypatch):
-    """A resume_from target that is itself still pristine (never actually run) is unaffected —
+    """A resume_from target that is itself still pristine (never actually run) is unaffected:
     pristine reuse doesn't depend on resume_from at all."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.experiments import create_experiment
