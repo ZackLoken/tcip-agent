@@ -1,6 +1,6 @@
 # packages/tcip-web
 
-FastAPI backend + Vite/React/TS/Tailwind/Konva frontend — the human's UI. Loads on top of the root
+FastAPI backend + Vite/React/TS/Tailwind/Konva frontend: the human's UI. Loads on top of the root
 `CLAUDE.md`; invariants and operating posture there apply here and aren't restated.
 
 ## Layout
@@ -16,7 +16,7 @@ frontend/src/
   api/  components/  hooks/  lib/  store/  tabs/  test/
 ```
 
-## Frontend gate — run in CI order
+## Frontend gate: run in CI order
 
 A partial run misses `format:check`/`lint`:
 
@@ -30,18 +30,18 @@ Use the `frontend-design` skill for IA/visual work.
 ## The in-app agent terminal is a separate, already-hardened fence
 
 `terminal.py` spawns a real `claude` process for the browser-facing "Agent" terminal, with
-`--settings packages/tcip-web/src/tcip_web/agent_terminal.settings.json` — a committed permission
+`--settings packages/tcip-web/src/tcip_web/agent_terminal.settings.json`, a committed permission
 fence (deny-by-default edits outside a narrow allowlist, `Bash`/`PowerShell` guards, a `SessionStart`
 ritual-injection hook, `SessionEnd` learning capture) scoped to that breeder-facing session. It is
-**not** merged with the repo root's own `.claude/settings.json` — the developer's own `claude`
+**not** merged with the repo root's own `.claude/settings.json`: the developer's own `claude`
 session (this one, with no `--settings` flag) stays unrestricted by it, by design. Don't extend or
 edit that fence file without calling it out explicitly; it's a security boundary, not incidental
 config. (Known drift: `terminal.py` comments reference `AGENT_GOVERNANCE_PLAN.md`, which doesn't
-exist in the tree — worth resolving in the refactor's whole-tree docs sweep, not fixed here.)
+exist in the tree; worth resolving separately, not fixed here.)
 
 ## Conventions specific to this package
 
-- Path access from routes goes through `assert_path_allowed` (`TCIP_IMAGE_ROOTS` allow-list) — a
+- Path access from routes goes through `assert_path_allowed` (`TCIP_IMAGE_ROOTS` allow-list): a
   403 on escape is the rail working, not a bug to route around.
 - Review save formats mirror the annotation-engine's `{json, coco}` scope (see
-  `packages/tcip-annotation/CLAUDE.md`) — don't add a frontend format option the backend can't read.
+  `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option the backend can't read.
