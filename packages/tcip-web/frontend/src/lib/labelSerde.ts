@@ -1,7 +1,7 @@
 /**
  * The single mapping between the unified name-based label file (one Annotation list per image)
  * and the Annotate canvas' drawing model (boxes + polygons + points + geometry-less ratings). Load
- * and save share this so the round-trip is symmetric — a box stays a box, a polygon stays a polygon,
+ * and save share this so the round-trip is symmetric: a box stays a box, a polygon stays a polygon,
  * a point stays a point, and a geometry-less rating is never silently dropped on the next save.
  */
 
@@ -30,7 +30,7 @@ export interface CanvasLabels {
 
 /** Split a unified annotation list into the canvas' four buckets, keyed on each annotation's own
  *  geometry: rings -> polygon, else bbox -> box, else point -> point, else geometry-less rating.
- *  Every ring of a polygon is kept — dropping the rest of an occlusion-split shape would show the
+ *  Every ring of a polygon is kept: dropping the rest of an occlusion-split shape would show the
  *  reviewer a part of the object and save it back as the whole. */
 export function annotationsToCanvas(annotations: Annotation[]): CanvasLabels {
   const boxes: Box[] = [];
@@ -71,7 +71,7 @@ export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
     });
   }
   for (const p of labels.polygons) {
-    // One contour goes back as `points` — the field a hand-drawn/hand-edited shape belongs in, and
+    // One contour goes back as `points`, the field a hand-drawn/hand-edited shape belongs in, and
     // the only one the Review edit route (`edited_points`) has. More than one goes back as `rings`,
     // which is the only field that can carry them. Never both: the backend prefers `rings`.
     const geometry =
@@ -86,7 +86,7 @@ export function canvasToAnnotations(labels: CanvasLabels): AnnotationPayload[] {
     });
   }
   for (const p of labels.points) {
-    // One coordinate pair, always — a point has no contour, so neither `points` nor `rings` applies.
+    // One coordinate pair, always: a point has no contour, so neither `points` nor `rings` applies.
     out.push({
       subject: p.subject,
       point: [p.x, p.y],
