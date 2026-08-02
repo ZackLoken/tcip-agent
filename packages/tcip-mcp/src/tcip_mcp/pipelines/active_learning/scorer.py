@@ -113,8 +113,9 @@ class DiversityScorer(BaseScorer):
         if not hasattr(model, "backbone"):
             # No silent random-noise embeddings: diversity needs real backbone features.
             raise RuntimeError(
-                f"DiversityScorer requires a backbone-bearing model (ComposedModel/"
-                f"DetectionModel) to extract embeddings; got {type(model).__name__}."
+                f"DiversityScorer requires a model exposing a .backbone attribute (e.g. one "
+                f"built via build_detector, or a bespoke nn.Module exposing one) to extract "
+                f"embeddings; got {type(model).__name__}."
             )
         model.eval()
 
