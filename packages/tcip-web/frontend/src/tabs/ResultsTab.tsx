@@ -102,7 +102,9 @@ export function ResultsTab() {
       })
       .catch((e) => {
         setAvailableTraits([]);
-        setTraitError(`Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`);
+        setTraitError(
+          `Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`,
+        );
       });
   }, [projectRoot]);
 
@@ -292,9 +294,7 @@ export function ResultsTab() {
 
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
-      {traitError && (
-        <div className="tcip-panel p-3 text-[11px] text-tcip-fp">{traitError}</div>
-      )}
+      {traitError && <div className="tcip-panel p-3 text-[11px] text-tcip-fp">{traitError}</div>}
       {availableTraits.length > 1 && (
         <div className="tcip-panel p-3 flex items-center gap-2">
           <label className="tcip-label">Trait</label>
@@ -418,14 +418,14 @@ export function ResultsTab() {
           </div>
           <div className="flex flex-col gap-2">
             <p className="text-[11px] text-tcip-muted">
-              The positive-state fraction is the share of a plant's detected objects that are in
-              the trait's positive state. That state is a class from the validated classifier, not
-              a bbox measurement; predictions must be classified for it.
+              The positive-state fraction is the share of a plant's detected objects that are in the
+              trait's positive state. That state is a class from the validated classifier, not a
+              bbox measurement; predictions must be classified for it.
             </p>
             {positiveClassUnassessed && (
               <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
-                These predictions carry no positive-state class, so the curves below are not a
-                valid phenology measurement and CSV export is disabled. Run the classifier first.
+                These predictions carry no positive-state class, so the curves below are not a valid
+                phenology measurement and CSV export is disabled. Run the classifier first.
               </div>
             )}
             {unvalidatedRefusal && (
@@ -524,8 +524,8 @@ export function ResultsTab() {
 
       <div className="tcip-panel p-4">
         <div className="tcip-heading mb-3">
-          Phenology milestones for {trait || "the selected trait"} (onset + percentile crossings
-          per plant): {onset.length} rows
+          Phenology milestones for {trait || "the selected trait"} (onset + percentile crossings per
+          plant): {onset.length} rows
         </div>
         {onset.length > 0 ? (
           <div className="overflow-auto max-h-96">
