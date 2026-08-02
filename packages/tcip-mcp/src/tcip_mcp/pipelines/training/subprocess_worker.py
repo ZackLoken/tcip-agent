@@ -1,8 +1,8 @@
 """The subprocess entry point ``launch_training`` spawns to run one bespoke training run's
 actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in
 an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any
-other concurrent run's process. Everything here mirrors what ``launch_training`` did synchronously
-in-process before this boundary existed; only the process boundary moved.
+other concurrent run's process. Everything here mirrors what running the same body synchronously
+in-process would do; only the process boundary differs.
 
 Invoked as ``python -m tcip_mcp.pipelines.training.subprocess_worker --run-id ... --experiment-id
 ... --config-path ... --output-dir ... --resume-from ...``, never imported for its functions
@@ -104,7 +104,7 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     ``has_coco``/``dataset_source`` branch), or the one legitimate degraded case
     ``_resolve_registry_id_map`` itself names (an attribute scope with no ``classes.json`` for this
     labels dir), honest: no map recorded, decode falls through to its own live-registry
-    re-derivation, same as before this fix.
+    re-derivation.
     """
     if task not in ("detection", "instance_seg") or not data_cfg.get("subject"):
         return None
@@ -123,8 +123,8 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
 
 
 def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resume_from: str) -> None:
-    """The training body, identical in substance to what ``launch_training`` ran synchronously
-    in-process before this boundary existed, just executing in this dedicated process instead."""
+    """The training body, identical in substance to running synchronously in-process, just
+    executing in this dedicated process instead."""
     from tcip_mcp.pipelines.training.generic_trainer import (
         attach_run, seeded_loader_kwargs, task_collate,
     )
