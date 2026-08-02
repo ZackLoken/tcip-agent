@@ -195,6 +195,73 @@ def test_ordinal_e2e(tmp_path: Path):
     _assert_trained(run, tmp_path / "out")
 
 
+def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
+    """A rank scale wider than the old hardcoded default (5) must derive its own count from
+    the CSV, not silently truncate. crops.yml's kernel_pellicle trait is a real 1-7 scale
+    (ranks 0-6, 7 ranks) once 0-indexed."""
+    images_dir = tmp_path / "images"
+    rows = []
+    for rank in range(7):
+        _save_png(images_dir / f"img{rank}.png", bright=(rank >= 4))
+        rows.append((f"img{rank}", rank))
+    csv_path = tmp_path / "ranks.csv"
+    _write_csv(csv_path, rows, ("stem", "rank"))
+
+    dataset = build_dataset("ordinal", images_dir=str(images_dir), csv_path=str(csv_path))
+    assert dataset.num_classes == 7
+
+    loader = DataLoader(dataset, batch_size=7, collate_fn=task_collate("ordinal"))
+    model_source = _model_source("build_bespoke_ordinal", num_ranks=dataset.num_classes)
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = train(run, loader, val_loader=None, task="ordinal")
+    _assert_trained(run, tmp_path / "out")
+
+
+def test_ordinal_num_ranks_mismatch_raises(tmp_path: Path):
+    """A caller-configured num_ranks too small for the CSV's real ranks must raise, not train
+    the excess ranks as silent duplicates of the top rank."""
+    images_dir = tmp_path / "images"
+    rows = []
+    for rank in range(7):
+        _save_png(images_dir / f"img{rank}.png", bright=(rank >= 4))
+        rows.append((f"img{rank}", rank))
+    csv_path = tmp_path / "ranks.csv"
+    _write_csv(csv_path, rows, ("stem", "rank"))
+
+    with pytest.raises(ValueError, match="num_ranks"):
+        build_dataset("ordinal", images_dir=str(images_dir), csv_path=str(csv_path), num_ranks=5)
+
+
+def test_classification_derives_num_classes_from_data(tmp_path: Path):
+    """A label range wider than the old hardcoded default (2) must derive its own count from
+    the CSV, not silently truncate."""
+    images_dir = tmp_path / "images"
+    rows = []
+    for label in range(4):
+        _save_png(images_dir / f"img{label}.png", bright=(label >= 2))
+        rows.append((f"img{label}", label))
+    csv_path = tmp_path / "labels.csv"
+    _write_csv(csv_path, rows, ("stem", "label"))
+
+    dataset = build_dataset("classification", images_dir=str(images_dir), csv_path=str(csv_path))
+    assert dataset.num_classes == 4
+
+
+def test_classification_num_classes_mismatch_raises(tmp_path: Path):
+    """A caller-configured num_classes too small for the CSV's real labels must raise."""
+    images_dir = tmp_path / "images"
+    rows = []
+    for label in range(4):
+        _save_png(images_dir / f"img{label}.png", bright=(label >= 2))
+        rows.append((f"img{label}", label))
+    csv_path = tmp_path / "labels.csv"
+    _write_csv(csv_path, rows, ("stem", "label"))
+
+    with pytest.raises(ValueError, match="num_classes"):
+        build_dataset(
+            "classification", images_dir=str(images_dir), csv_path=str(csv_path), num_classes=2)
+
+
 def test_regression_e2e(tmp_path: Path):
     images_dir = tmp_path / "images"
     rows = []
