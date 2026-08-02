@@ -1,5 +1,5 @@
 /**
- * Status-bar project breadcrumb: three fast-tracks in the lower-right corner —
+ * Status-bar project breadcrumb: three fast-tracks in the lower-right corner:
  *   project name → a dropdown of recent projects (jump straight in),
  *   date        → a dropdown of this project's dates (switch without the workspace),
  *   Switch Project → the full workspace (all projects).
@@ -37,7 +37,7 @@ export function ProjectBreadcrumb() {
   const [busy, setBusy] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Load the project list when a menu first opens — powers the date switcher and resolves recent
+  // Load the project list when a menu first opens: powers the date switcher and resolves recent
   // project names. On-demand so the status bar never polls.
   useEffect(() => {
     if (!menu || projects) return;
@@ -77,7 +77,7 @@ export function ProjectBreadcrumb() {
     setBusy(true);
     try {
       // openProjectByName funnels through openWorkspaceProject, which saves the outgoing UI state
-      // and restores this project's saved position/filters — no patchGui here.
+      // and restores this project's saved position/filters; no patchGui here.
       const sel = await openProjectByName(name);
       if (!sel) pushToast("That project is no longer in the workspace.");
     } catch (e) {
@@ -123,8 +123,8 @@ export function ProjectBreadcrumb() {
       <span
         title={
           user
-            ? `Annotator: ${user} — set on the workspace page; stamped as the author of your labels`
-            : "No annotator set — open the workspace page to set who you are"
+            ? `Annotator: ${user}, set on the workspace page; stamped as the author of your labels`
+            : "No annotator set; open the workspace page to set who you are"
         }
         className="font-mono"
       >
