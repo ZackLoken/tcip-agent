@@ -2,7 +2,9 @@
 
 All functions are pure (no GUI dependencies). Ground truth and predictions are both
 :class:`~tcip_annotation.state.Annotation` lists: a prediction is an annotation whose ``score`` is
-set. Matching groups by *class name* (an annotation's ``subject``); an integer class id never appears.
+set. :func:`compute_matches` groups by *class name* (an annotation's ``subject``); an integer class
+id never appears. :func:`compute_classified_trait_matches` reviews a classified trait's predictions
+(an object's confirmed/predicted *value*, not its existence) through the same engine.
 """
 
 from __future__ import annotations
@@ -244,6 +246,65 @@ def compute_matches(
             fn_list.append({"gt_idx": gt_idx, "class_name": gt_cname})
 
     return {"tp": tp_list, "fp": fp_list, "fn": fn_list}
+
+
+def _project_gt_for_classification(
+    gt: list[Annotation], *, subject: str, attribute: str,
+) -> list[Annotation]:
+    """A same-length, same-order view of ``gt`` whose class identity is the confirmed ``attribute``
+    value rather than the object type, for :func:`compute_classified_trait_matches`.
+
+    Position ``i`` of the result corresponds to position ``i`` of ``gt``, so a ``gt_idx`` returned by
+    :func:`compute_matches` over this projection still addresses the caller's real, unprojected list.
+    An instance outside ``subject``'s scope, or never assessed for ``attribute`` yet (a soft, expected
+    gap, not a confirmed negative, the same rule ``phenology_tools._classification_items`` applies),
+    is stripped to a geometry-less placeholder so it can neither match nor be scored as either side of
+    a disagreement.
+    """
+    projected: list[Annotation] = []
+    for a in gt:
+        value = a.attributes.get(attribute) if (a.subject == subject and a.attributes) else None
+        if value is None:
+            projected.append(Annotation(subject=a.subject, geometry=None))
+        else:
+            projected.append(Annotation(
+                subject=value, geometry=a.geometry, attributes=a.attributes, score=a.score,
+                created_by=a.created_by, created_at=a.created_at,
+                accepted_by=a.accepted_by, accepted_at=a.accepted_at,
+            ))
+    return projected
+
+
+def compute_classified_trait_matches(
+    gt: list[Annotation],
+    preds: list[Annotation],
+    *,
+    subject: str,
+    attribute: str,
+    iou_threshold: float = 0.5,
+    conf_threshold: float = 0.25,
+) -> dict:
+    """Match predictions to GT for a classified trait: an object already isolated by ``subject``
+    whose confirmed/predicted *value* along ``attribute`` is under review, not merely its existence.
+
+    A detector trained on an attribute-scoped class space (:func:`tcip_mcp.class_registry.
+    assign_class_ids`, one class per attribute value) makes one joint detect-and-classify call per
+    box: its own ``subject`` already carries the predicted value, never the object-type name GT
+    annotations carry (GT keeps the real object type on ``subject`` and the confirmed value in
+    ``attributes[attribute]``, the canonical on-disk schema, see ``json_io``'s module docstring).
+    Plain :func:`compute_matches` groups strictly by identical ``subject``, so these two vocabularies
+    never intersect and a correct classification could never register as a match.
+
+    This projects ``gt`` to the same value vocabulary the predictions already use
+    (:func:`_project_gt_for_classification`), then delegates to :func:`compute_matches` unchanged,
+    so every downstream consumer (the Review walkthrough, verdict recording, the review-confirmed
+    calibration reference) needs no separate classification-aware match logic: a ``tp`` is a
+    correctly classified instance, an ``fp`` is a value predicted where the confirmed value differs
+    (or nothing was confirmed there yet), and an ``fn`` is a confirmed value the model didn't predict
+    there, the identical accept/reject vocabulary reviewing a detection already uses.
+    """
+    projected = _project_gt_for_classification(gt, subject=subject, attribute=attribute)
+    return compute_matches(projected, preds, iou_threshold, conf_threshold)
 
 
 def point_in_polygon(x: float, y: float, polygon: Polygon) -> bool:
