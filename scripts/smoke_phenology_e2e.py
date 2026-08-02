@@ -1,15 +1,15 @@
 """Live e2e smoke: the agent's phenology pipeline on real geolocated images.
 
-Builds a synthetic scene — geolocated JPEGs (real EXIF GPS + capture time) across three
-dates plus a plant-locations CSV — then runs the exact two tools the agent composes:
+Builds a synthetic scene: geolocated JPEGs (real EXIF GPS + capture time) across three
+dates plus a plant-locations CSV, then runs the exact two tools the agent composes:
 
     build_plant_mapping   images + CSV                 → plant_mapping.json
-    compute_phenology     mapping + classified preds   → catkin_phenology.csv
+    compute_phenology     mapping + classified preds   → <trait>_phenology.csv
 
 and asserts the delivered CSV has the canonical columns and plausible, correctly-ordered
 milestone dates. Then it confirms the measurement-integrity guard refuses to write a CSV when
-the predictions carry no elongation class. This covers the seam unit tests don't: real EXIF →
-real GPS matching → real per-plant milestones. No backend or network — it calls the tool
+the predictions carry no positive class. This covers the seam unit tests don't: real EXIF →
+real GPS matching → real per-plant milestones. No backend or network: it calls the tool
 functions directly, in an isolated temp dir.
 
 Usage (repo root, tcip-agent env):
@@ -50,9 +50,9 @@ PLANTS = [
 # Three capture dates; the elongated fraction rises 0.0 → 0.4 → 1.0.
 DATES = ["2026-02-11", "2026-02-25", "2026-03-11"]
 FRACTIONS = {"2026-02-11": 0.0, "2026-02-25": 0.4, "2026-03-11": 1.0}
-# The bucket's own recorded id_map (K4/K5: the positive class is resolved from THIS, on disk —
-# never a pinned integer — so this is the production id_map a real export_predictions run would
-# have stamped, not a magic constant compute_phenology reads directly).
+# The bucket's own recorded id_map (the positive class is resolved from this, on disk, never a
+# pinned integer, so this is the production id_map a real export_predictions run would have
+# stamped, not a magic constant compute_phenology reads directly).
 ID_MAP = {"dormant": 0, "elongated": 1}
 N_DETECTIONS = 10
 
@@ -96,9 +96,9 @@ def _write_geo_image(path: Path, lat: float, lon: float, when: datetime) -> None
 def _pred_boxes(n_elongated: int, n_total: int) -> list[Annotation]:
     """Per-image classified predictions; first n_elongated decode to 'elongated', rest 'dormant'.
 
-    A real prediction's ``.subject`` IS the decoded class name directly (write_predictions_json
+    A real prediction's ``.subject`` is the decoded class name directly (write_predictions_json
     decodes the numeric label through the bucket's id_map straight into ``.subject``, leaving
-    ``.attributes`` empty) — NOT the GT-annotation shape (object-type subject + an attribute value).
+    ``.attributes`` empty), not the GT-annotation shape (object-type subject + an attribute value).
     """
     anns = []
     for i in range(n_total):
@@ -135,8 +135,8 @@ def main() -> int:
                     preds_root / date / f"{stem}.json",
                     _pred_boxes(n_elong, N_DETECTIONS), 8, 8,
                 )
-            # The bucket's own recorded id_map (K4/K5: count_by_class reads the positive class from
-            # THIS, per date, never a pinned integer) — the real shape export_predictions stamps.
+            # The bucket's own recorded id_map (count_by_class reads the positive class from this,
+            # per date, never a pinned integer), the real shape export_predictions stamps.
             (preds_root / date / "operating_point.json").write_text(
                 json.dumps({"id_map": ID_MAP}), encoding="utf-8")
 
@@ -149,7 +149,7 @@ def main() -> int:
 
         preds_by_date = {d: str(preds_root / d) for d in DATES}
 
-        # 2. build_plant_mapping — real EXIF GPS → plant assignments.
+        # 2. build_plant_mapping: real EXIF GPS → plant assignments.
         print("Step 1: build_plant_mapping")
         m = build_plant_mapping(
             images_root=str(images_root),
@@ -163,11 +163,12 @@ def main() -> int:
               f"n_mapped={m.get('n_mapped')} n_unmapped={m.get('n_unmapped')}")
         check("mapping.json persisted", mapping_path.is_file())
 
-        # 3. compute_phenology — K4/K5's real coverage rule + K3's classifier gate are both live.
-        # The positive class is resolved from each bucket's own recorded id_map (never a pinned
+        # 3. compute_phenology: the real coverage rule and classifier gate are both live. The
+        # positive class is resolved from each bucket's own recorded id_map (never a pinned
         # int), and every image is classified (no bare single-class-detector buckets here), so the
-        # elongation split IS valid — this is Commit 2's promoted acceptance artifact, proving the
-        # delivery path genuinely produces a curve+milestones end to end, not just refuses.
+        # elongation split is valid; this script is the delivery path's acceptance artifact,
+        # proving the delivery path genuinely produces a curve+milestones end to end, not just
+        # refuses.
         print("\nStep 2: compute_phenology delivers a real bloom curve + milestones")
         r = compute_phenology(
             trait="catkin",
@@ -200,7 +201,7 @@ def main() -> int:
 
     print()
     if _failures:
-        print(f"SMOKE FAILED — {_failures} assertion(s) failed.")
+        print(f"SMOKE FAILED: {_failures} assertion(s) failed.")
         return 1
     print("SMOKE PASSED - the agent phenology pipeline works end to end.")
     return 0
