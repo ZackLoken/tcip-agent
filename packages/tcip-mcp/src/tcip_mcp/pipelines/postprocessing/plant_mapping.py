@@ -5,7 +5,10 @@ adjacent plots, so nearest-neighbour GPS alone is ambiguous. We resolve the
 ambiguity with a hybrid:
 
   1. Order images on each date by EXIF DateTime (walker's capture sequence).
-  2. Detect "row breaks" as large GPS jumps between consecutive images.
+  2. Detect "row breaks" as GPS jumps between consecutive images that stand out from the
+     rest of that date's own walking gaps (derived per date, not a fixed distance, since a
+     walker produces small, roughly uniform steps within a row and one or more much larger
+     jumps at a row transition, whether the row itself is straight or curved).
   3. Within each row run, assign plants by matching the row end-points to the
      plant CSV and filling in plants sequentially along the row.
 
@@ -25,6 +28,7 @@ import csv
 import json
 import logging
 import math
+import statistics
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -38,10 +42,6 @@ EARTH_RADIUS_M = 6_378_137.0
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp")
 
-# Max displacement between consecutive images still considered "same row run".
-# 25 m is larger than typical row length but smaller than the 100+ m between
-# rows at most Savanna Institute sites.
-ROW_BREAK_METERS = 25.0
 NN_TOLERANCE_METERS = 10.0
 
 
@@ -222,20 +222,73 @@ def _nearest_plant(
 # ── Sequence anchoring ─────────────────────────────────────────────────
 
 
+# A row-transition jump must stand out from the rest of the date's gap distribution by at
+# least this multiple to count as a genuine break rather than continuous within-row variation
+# (e.g. a curved row's uneven step spacing). An order-of-magnitude-style separation factor,
+# not a tuned distance: it says "clearly a different population," not "farther than N metres."
+_ROW_BREAK_MIN_RELATIVE_JUMP = 3.0
+
+
+def _derive_row_break_threshold(gaps: list[float]) -> Optional[float]:
+    """Find the natural break in a date's own consecutive-image gap distances, if one exists.
+
+    A walker's path produces small, roughly-uniform steps within a row and one or more much
+    larger jumps at a row transition, regardless of whether the row is straight or curved. This
+    looks for that break as the largest relative jump between consecutive values in the sorted
+    gap sequence, then checks it actually stands out from the rest of the sorted jumps (not just
+    the single largest of an otherwise smooth continuum) before trusting it. Returns ``None`` when
+    there aren't enough gaps to judge, or the gaps are too uniform to support a split: the caller
+    should then treat the whole sequence as one run rather than fabricating a break the data
+    doesn't support.
+    """
+    if len(gaps) < 2:
+        return None
+    sorted_gaps = sorted(gaps)
+    # A near-zero gap (two images at essentially the same GPS fix, e.g. a duplicate/cached EXIF
+    # reading between two rapid captures) carries no walking-pace information: dividing by it
+    # would make whatever value follows look like an infinitely large jump purely by
+    # construction, not because a row transition actually happened there. Excluded as a
+    # candidate split point entirely, rather than treated as an automatic winner.
+    candidates = [
+        (i, hi / lo) for i, (lo, hi) in enumerate(zip(sorted_gaps, sorted_gaps[1:]))
+        if lo > 1e-9
+    ]
+    if not candidates:
+        return None
+    best_i, best_ratio = max(candidates, key=lambda pair: pair[1])
+
+    other_ratios = [r for i, r in candidates if i != best_i]
+    if not other_ratios:
+        # Only one candidate split to look at: nothing to compare it against, so there's no basis
+        # to call it a genuine transition rather than noise.
+        return None
+    typical_ratio = statistics.median(other_ratios)
+    if best_ratio < max(_ROW_BREAK_MIN_RELATIVE_JUMP, typical_ratio * _ROW_BREAK_MIN_RELATIVE_JUMP):
+        return None
+
+    return sorted_gaps[best_i] + (sorted_gaps[best_i + 1] - sorted_gaps[best_i]) / 2
+
+
 def _segment_runs(stamps: list[ImageStamp]) -> list[list[ImageStamp]]:
-    """Break an ordered list of stamps into row runs on large GPS jumps."""
+    """Break an ordered list of stamps into row runs on GPS jumps that stand out from that
+    date's own walking gaps (see ``_derive_row_break_threshold``)."""
     if not stamps:
         return []
-    runs: list[list[ImageStamp]] = [[stamps[0]]]
+    pairs: list[tuple[ImageStamp, Optional[float]]] = []
     for prev, cur in zip(stamps, stamps[1:]):
-        if prev.lat is None or cur.lat is None:
+        d = None
+        if prev.lat is not None and cur.lat is not None:
+            d = haversine_m(prev.lat, prev.lon or 0.0, cur.lat, cur.lon or 0.0)
+        pairs.append((cur, d))
+
+    threshold = _derive_row_break_threshold([d for _, d in pairs if d is not None])
+
+    runs: list[list[ImageStamp]] = [[stamps[0]]]
+    for cur, d in pairs:
+        if d is None or threshold is None or d <= threshold:
             runs[-1].append(cur)
-            continue
-        d = haversine_m(prev.lat, prev.lon or 0.0, cur.lat, cur.lon or 0.0)
-        if d > ROW_BREAK_METERS:
-            runs.append([cur])
         else:
-            runs[-1].append(cur)
+            runs.append([cur])
     return runs
 
 
