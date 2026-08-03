@@ -252,6 +252,45 @@ def test_read_window_out_of_bounds_raises(tmp_path: Path) -> None:
             reader.read_window(0, 11, 0, 10)
 
 
+def test_read_window_caches_strips_across_a_row_band(tmp_path: Path) -> None:
+    """The access pattern a real tiling loop actually produces: many windows at the same ``y0``,
+    scanning across the width, each spanning the same handful of strips as its row-band neighbours.
+    Each strip must be decoded from disk once, not once per window that touches it.
+    """
+    height, width, rowsperstrip, tile = 64, 200, 8, 20
+    arr = _distinctive_array(height, width)
+    path = tmp_path / "win.tif"
+    _write_striped_tiff(path, arr, rowsperstrip=rowsperstrip)
+    with OrthomosaicWindowReader(path) as reader:
+        y0, y1 = 8, 24  # spans strips 1..2 (rows 8-15, 16-23) exactly
+        windows = [
+            reader.read_window(y0, y1, x0, min(x0 + tile, width))
+            for x0 in range(0, width, tile)
+        ]
+        assert len(windows) > 3  # a real row-band, not a single tile
+        assert reader.strip_decode_count == 2  # the row-band's two strips, decoded exactly once
+        for window, x0 in zip(windows, range(0, width, tile)):
+            x1 = min(x0 + tile, width)
+            assert np.array_equal(window, arr[y0:y1, x0:x1])
+
+        # Advancing to the next row-band's own strips (3, 4) is still a genuine miss for both.
+        reader.read_window(y1, y1 + (y1 - y0), 0, tile)
+        assert reader.strip_decode_count == 4
+
+
+def test_read_window_returns_a_copy_not_a_cached_view(tmp_path: Path) -> None:
+    """A caller that mutates its returned window must not corrupt what a later window, served
+    from the same cached strip, reads back."""
+    arr = _distinctive_array(23, 17)
+    path = tmp_path / "win.tif"
+    _write_striped_tiff(path, arr, rowsperstrip=4)
+    with OrthomosaicWindowReader(path) as reader:
+        first = reader.read_window(0, 4, 0, 17)
+        first[:] = 255
+        second = reader.read_window(0, 4, 0, 17)
+    assert np.array_equal(second, arr[0:4, 0:17])
+
+
 def test_window_reader_refuses_tiled_tiff(tmp_path: Path) -> None:
     arr = _distinctive_array(64, 64)
     path = tmp_path / "tiled.tif"
