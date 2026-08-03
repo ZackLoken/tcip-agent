@@ -7,6 +7,7 @@ import { TerminalRail } from "@/components/TerminalRail";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { StatusBar } from "@/components/StatusBar";
+import { TabBanner } from "@/components/TabBanner";
 import { Toasts } from "@/components/Toasts";
 import { TopBar } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
@@ -15,9 +16,22 @@ import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
 import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
+import type { TabName } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import { MetaTab } from "@/tabs/MetaTab";
 import { ReviewTab } from "@/tabs/ReviewTab";
+
+// Every tab has an agent panel of the same name (the backend's own panel set also carries
+// "app", handled by its own subscription below).
+const TAB_PANELS: TabName[] = [
+  "annotate",
+  "review",
+  "training",
+  "tuning",
+  "inference",
+  "results",
+  "meta",
+];
 
 // Code-split the recharts-heavy tabs (recharts + its d3 deps are ~5MB unpacked and used only
 // here) so the Annotate/Review workflow (the primary use) paints without them. App mounts
@@ -61,20 +75,35 @@ function App() {
     return () => stateSocket.close();
   }, []);
 
-  // Subscribe to agent panel pushes (e.g. the agent writing labels) and route
-  // them into the store so the StatusBar can surface them and the Annotate tab
-  // can offer to refresh. Previously push_panel_data had no consumer at all.
+  // Subscribe to agent panel pushes for every tab: a "banner" event becomes that tab's note
+  // (rendered by TabBanner), and the Annotate panel's pushes also drive the agent-activity
+  // indicator the StatusBar and the Annotate tab's refresh prompt read.
   useEffect(() => {
-    const unsubscribe = stateSocket.subscribePanel("annotate", (ev) => {
-      useStore.getState().pushAgentActivity(ev.panel, ev.event_type, ev.data);
-    });
-    return unsubscribe;
+    const unsubscribes = TAB_PANELS.map((panel) =>
+      stateSocket.subscribePanel(panel, (ev) => {
+        if (ev.event_type === "banner") {
+          const text = ev.data.text;
+          if (typeof text === "string") useStore.getState().pushBanner(ev.panel, ev.event_id, text);
+          return;
+        }
+        if (ev.panel === "annotate") {
+          useStore.getState().pushAgentActivity(ev.panel, ev.event_type, ev.data);
+        }
+      }),
+    );
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
   }, []);
 
   // Agent → GUI "look here": when the agent sets the active project (e.g. after
   // ingesting a breeder's images), open it here so the GUI lands on what it built.
   useEffect(() => {
     const unsubscribe = stateSocket.subscribePanel("app", (ev) => {
+      if (ev.event_type === "banner") {
+        const text = ev.data.text;
+        if (typeof text === "string") useStore.getState().pushBanner(ev.panel, ev.event_id, text);
+        return;
+      }
+
       if (ev.event_type === "active_project_changed") {
         const name = (ev.data as { name?: string }).name;
         if (!name) return;
@@ -278,6 +307,7 @@ function App() {
           are its canvas: it drives them through the MCP panel channel. */}
       <div className="flex-1 flex min-h-0">
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          <TabBanner />
           <ErrorBoundary resetKey={activeTab}>
             <Suspense fallback={<TabFallback />}>
               {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <ProjectPicker />)}
