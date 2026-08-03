@@ -32,8 +32,8 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 
 ## Aggregation Rules
 
-Aggregating per-image measurements into a per-plant value is an agent **choice keyed to the trait's
-read-semantics**, not a frozen one-function-per-type map. The table below is a starting reference of
+Aggregating per-image measurements into a per-plant value is an agent choice keyed to the trait's
+read-semantics, not a frozen one-function-per-type map. The table below is a starting reference of
 common choices; pick (or compose) the aggregation the trait's definition actually calls for (a
 skewed count may want a median, a robust mean, or a yield-model estimate; a date wants a crossing),
 and record which you used. When the trait carries read-semantics fields (`TraitSpec`), those govern.
@@ -46,7 +46,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | Date (bloom) | Elongated-fraction crossing | `catkin_50per_date` → date the elongated fraction crosses 50% (see `phenology` skill) |
 | Ordinal | Mode | `efb_damage` → most common rating |
 | Continuous | Mean | `fruit_diameter` → average across images |
-| Area | Sum / 3D model | `plant_surface_area` → planimetric crown area from a 3D canopy model, **out of current build scope** (3D LiDAR/SfM is not built today; see CLAUDE.md Scope). A validated 2D mask yields a calibrated pixel area, not this trait |
+| Area | Sum / 3D model | `plant_surface_area` → planimetric crown area from a 3D canopy model, out of current build scope (3D LiDAR/SfM is not built today; see CLAUDE.md Scope). A validated 2D mask yields a calibrated pixel area, not this trait |
 
 ## Tools
 
@@ -103,8 +103,8 @@ gated at either door; the measurement gate lives at the final phenotype door.
 ## Quality Control
 
 Before delivery, verify:
-1. **Completeness**: Every plant has values for all expected traits
-2. **Range**: Values within biological plausibility (e.g., fruit diameter 1-15cm)
-3. **Outliers**: Flag statistical outliers for manual review
-4. **Confidence**: Reject predictions below a confidence operating point derived from the data in hand (per the "derive, don't pin" rule), not a frozen constant; the right cutoff varies by dataset, model, and trait
-5. **No duplicates**: One value per plant per trait per date
+1. Completeness: Every plant has values for all expected traits
+2. Range: Values within biological plausibility (e.g., fruit diameter 1-15cm)
+3. Outliers: Flag statistical outliers for manual review
+4. Confidence: Reject predictions below a confidence operating point derived from the data in hand (per the "derive, don't pin" rule), not a frozen constant; the right cutoff varies by dataset, model, and trait
+5. No duplicates: One value per plant per trait per date
