@@ -116,7 +116,11 @@ export function ProjectBreadcrumb() {
 
   const projectName = dataset.dataset_root.split(/[/\\]/).slice(-1)[0];
   const current = projects?.find((p) => p.path === dataset.project_root) ?? null;
-  const recent = loadRecentProjects().filter((r) => r.path !== dataset.project_root);
+  // The open project never lists itself. Name as well as path, so a stale entry left by a move
+  // can't reappear here under the old path.
+  const recent = loadRecentProjects().filter(
+    (r) => r.path !== dataset.project_root && r.name !== projectName,
+  );
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -165,7 +169,7 @@ export function ProjectBreadcrumb() {
           ) : (
             recent.map((r) => (
               <MenuButton
-                key={r.path}
+                key={r.name}
                 onClick={() => void openRecent(r.name)}
                 label={r.name}
                 sub={r.path}
