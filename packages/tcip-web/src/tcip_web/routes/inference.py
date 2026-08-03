@@ -340,8 +340,12 @@ def _worker(job: InferenceJob) -> None:
 
 class LaunchInferencePayload(BaseModel):
     checkpoint_path: str
-    images_dir: str
-    output_dir: str
+    # The run's images and its prediction bucket are named, not spelled: the dataset, the model
+    # whose name the bucket carries, and the capture date. Both dirs are resolved server-side
+    # through dataset_layout / prediction_buckets, so no caller reimplements the layout.
+    dataset_root: str
+    model_name: str
+    date: str | None = None
     # tiling + conf/iou default to the one shared source so the GUI and the MCP agent produce the
     # same count off the same checkpoint; tiling drives the count most of all.
     # None (default) is a documented fallback, not an implicit True: distinguished
@@ -359,7 +363,7 @@ class LaunchInferencePayload(BaseModel):
     overlap: float | None = None
     max_dets: int = DEFAULT_MAX_DETS
     postprocess: str = "nms"
-    # Write into output_dir even if it exists. Refused if the bucket has review verdicts; the
+    # Write into the named bucket even if it exists. Refused if it has review verdicts; the
     # default (False) auto-redirects to a fresh bucket so a re-run never orphans recorded verdicts.
     overwrite: bool = False
 
@@ -370,28 +374,46 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     # (TCIP_IMAGE_ROOTS): the checkpoint is fed to torch.load(weights_only=False), an
     # arbitrary-pickle sink, so an unconfined path is the sharpest edge here. No-op when unset.
     try:
-        for p in (payload.checkpoint_path, payload.images_dir, payload.output_dir):
+        for p in (payload.checkpoint_path, payload.dataset_root):
             assert_path_allowed(p)
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
+
+    from tcip_mcp.dataset_layout import image_dir, prediction_dir
+    from tcip_mcp.workspace import is_valid_name
+
+    # model_name and date become path segments of the prediction bucket: the same check every
+    # other writer of one applies (see stage_proposals), refused here rather than resolving a
+    # path that escapes the dataset.
+    for label, value in (("model_name", payload.model_name), ("date", payload.date)):
+        if value is not None and not is_valid_name(value):
+            raise HTTPException(
+                400,
+                f"{label} must be a single safe path segment (no separators/'..'), got {value!r}",
+            )
+
     if not Path(payload.checkpoint_path).is_file():
         raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
-    if not Path(payload.images_dir).is_dir():
-        raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
+    images_dir = image_dir(payload.dataset_root, payload.date)
+    if not images_dir.is_dir():
+        raise HTTPException(404, f"images_dir not found: {images_dir}")
 
     # Prediction-bucket immutability: never silently overwrite a bucket with review verdicts.
-    from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_writable_bucket
+    from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_prediction_bucket
     from tcip_mcp.project_paths import resolve_state
 
-    out_path = Path(payload.output_dir)
-    parent, base_name = out_path.parent, out_path.name
     review_state_dir = resolve_state(Path(".tcip") / "state")
     try:
-        resolution = resolve_writable_bucket(
-            review_state_dir, base_name, lambda n: [parent / n], overwrite=payload.overwrite)
+        bucket_dir, resolution = resolve_prediction_bucket(
+            payload.dataset_root,
+            payload.model_name,
+            payload.date,
+            review_state_dir=review_state_dir,
+            overwrite=payload.overwrite,
+        )
     except BucketHasVerdicts as exc:
         raise HTTPException(409, str(exc)) from exc
-    resolved_output_dir = str(parent / resolution.name)
+    resolved_output_dir = str(bucket_dir)
 
     # Resolve the None sentinel once, here: InferenceJob.tile stays a concrete
     # bool everywhere else (behavior + provenance both read it), with tile_source carrying which
@@ -416,7 +438,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     job = InferenceJob(
         job_id=f"inf-{uuid.uuid4().hex[:8]}",
         checkpoint_path=payload.checkpoint_path,
-        images_dir=payload.images_dir,
+        images_dir=str(images_dir),
         output_dir=resolved_output_dir,
         tile=resolved_tile,
         tile_source=tile_source,
@@ -434,9 +456,15 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     job.thread = t
     t.start()
 
-    return {"status": "launched", "job_id": job.job_id, "output_dir": resolved_output_dir,
+    requested_dir = (
+        str(prediction_dir(payload.dataset_root, resolution.requested, payload.date))
+        if resolution.redirected
+        else None
+    )
+    return {"status": "launched", "job_id": job.job_id, "images_dir": str(images_dir),
+            "output_dir": resolved_output_dir,
             "bucket_redirected": resolution.redirected,
-            "requested_output_dir": payload.output_dir if resolution.redirected else None}
+            "requested_output_dir": requested_dir}
 
 
 @router.get("/jobs")
