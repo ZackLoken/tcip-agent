@@ -12,7 +12,7 @@ reading the actual content (with its caveats intact) is always one explicit
 ``load_project_memory(kind='retrospectives')`` call away, never silently resurfaced.
 
 Unlike ``.tcip/reports/``/``.tcip/retrospectives/`` (expected to be pruned eventually), this file is
-meant to be a **permanent fixture** a project operates against for its whole life, so a corrupted
+meant to be a permanent fixture a project operates against for its whole life, so a corrupted
 file is reported as corrupt, not silently treated as "no history yet."
 """
 
