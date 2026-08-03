@@ -181,6 +181,19 @@ def test_image_status_write_refuses_without_a_subject(
     assert resp.status_code == 400
 
 
+def test_image_status_bulk_write_refuses_without_a_subject(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A bulk write with no subject must fail loudly rather than land in the "" bucket, which
+    ``get_image_status`` never returns anything meaningful for."""
+    resp = client.post(
+        "/api/classes/image_status/bulk",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "statuses": {"IMG_0001.JPG": "complete"}},
+    )
+    assert resp.status_code == 400
+
+
 def test_image_status_lands_at_dataset_root_not_an_unrelated_project(
     client: TestClient, tmp_path: Path
 ) -> None:
