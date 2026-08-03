@@ -45,10 +45,16 @@ dependencies:
       # --- web backend ---
       - fastapi>=0.115.0
       - uvicorn[standard]>=0.30.0
+      # --- training telemetry ---
+      # torch.utils.tensorboard's SummaryWriter needs this, and it is the server the
+      # tensorboard_manager launches for a run's or a sweep's logdir.
+      - tensorboard>=2.14
       # --- hyperparameter optimization (Ray Tune, lazy-imported) ---
       # Ray drives the sweep; search-algorithm backends are agent-selectable and each
       # degrades gracefully if absent. Installed via pip (Ray on Windows is pip-only).
-      - ray[tune]>=2.9
+      # [default] pulls in the dashboard's own dependencies (aiohttp, grpcio, ...), which
+      # tune_search enables so the Tuning tab can embed it for a running sweep.
+      - ray[default,tune]>=2.9
       - optuna>=3.0
       - hyperopt
       - bayesian-optimization
