@@ -7,19 +7,19 @@ description: "Chestnut (Castanea spp., Chinese chestnut C. mollissima plus inter
 
 ## Identity
 
-Chestnut here is primarily **Chinese chestnut (*Castanea mollissima*)**, with interspecific
+Chestnut here is primarily Chinese chestnut (*Castanea mollissima*), with interspecific
 hybrids in the breeding pool: American × Chinese (*C. dentata* × *C. mollissima*) and
 Euro-Japanese cultivars (*C. sativa* × *C. crenata*, e.g. 'Colossal'). It is a single-stem
 deciduous tree by default: rounded, spreading crown and low, irregular branching, grown in
 orchard/agroforestry rows, not a bush or hedgerow crop like currant or elderberry.
 
-Reproductively it is **monoecious and ambophilous**, pollinated by both wind and insects (the
+Reproductively it is monoecious and ambophilous, pollinated by both wind and insects (the
 strong floral scent, sticky pollen, and nectar-bearing bisexual catkins point to a substantial
-insect role, revising the older "wind-pollinated" label), with a **duodichogamous** bloom that
+insect role, revising the older "wind-pollinated" label), with a duodichogamous bloom that
 governs how the floral traits must be imaged:
 
-- Two catkin morphotypes exist: **unisexual male catkins** and **bisexual/androgynous
-  catkins** (staminate flowers along their length plus 1-3 basal pistillate inflorescences).
+- Two catkin morphotypes exist: unisexual male catkins and bisexual/androgynous
+  catkins (staminate flowers along their length plus 1-3 basal pistillate inflorescences).
 - Sequence: unisexual male catkins open first and shed the major pollen pulse; then pistillate
   flowers become receptive; then bisexual catkins release a second, smaller pulse.
 - Predominantly self-incompatible, so nut set needs cross-pollination between compatible
@@ -30,8 +30,8 @@ off box size or a naive "male vs female" split (see Measurement integrity).
 
 ## Trait authority
 
-**`crops.yml` is the trait authority (21 chestnut traits). Verify every trait there; never
-assert one it does not list.** This skill does not reproduce the catalog.
+`crops.yml` is the trait authority (21 chestnut traits). Verify every trait there; never
+assert one it does not list. This skill does not reproduce the catalog.
 
 ## Field-imageable vs lab / destructive
 
@@ -39,25 +39,25 @@ Which traits can come from imagery is a per-trait, validated question; there is 
 sensor→trait table. The partition below is the starting split; confirm the imaging viewpoint
 and scoring basis with the breeder before treating any of these as measured.
 
-**Field-imageable (standing tree / ground or canopy views):**
+Field-imageable (standing tree / ground or canopy views):
 `catkin_bloom_date`, `burr_drop_date`, `n_burrs`, `burrs_density`, `burr_size`,
 `catkin_sex_ratio`, `cryphonectria_parasitica`, `chestnut_anthracnose`, `plant_height`,
 `plant_width_inrow`, `plant_width_betweenrow`, `plant_surface_area`, `plant_volume`.
 
-- **Plant-size traits** (`plant_height`, `plant_width_inrow`, `plant_width_betweenrow`) are pixel
+- Plant-size traits (`plant_height`, `plant_width_inrow`, `plant_width_betweenrow`) are pixel
   quantities until an in-frame scale / photogrammetric calibration makes them metric. Pixels are
   not millimeters.
-- `plant_surface_area` and `plant_volume` are defined from a **3D canopy model** (SfM/LiDAR).
-  TCIP is **2D-only today** (3D not built), so these are not achievable yet: a 2D bbox
+- `plant_surface_area` and `plant_volume` are defined from a 3D canopy model (SfM/LiDAR).
+  TCIP is 2D-only today (3D not built), so these are not achievable yet: a 2D bbox
   height/area is not a valid proxy for crown volume or planimetric area.
 - `n_burrs` / `burrs_density` from a single 2D view undercount occluded burrs; a raw count is
   not the true per-tree total without multi-view or occlusion modeling.
 
-**Lab or destructive (bench / post-harvest / assay):**
+Lab or destructive (bench / post-harvest / assay):
 `burr_weight`, `burr_yield`, `nut_height`, `nut_length`, `nut_width`, `weevil_damage`,
 `flavor_rating`, `phytophthora_cinnamomi`.
 
-- Nut dimensions require the nut **extracted from the spiny burr** and a reference scale;
+- Nut dimensions require the nut extracted from the spiny burr and a reference scale;
   they cannot be read through an intact burr, and a burr box is not a nut dimension.
 - `weevil_damage` needs cut-test/float-test on harvested nuts; external appearance does not
   reveal internal larvae before exit holes form.
@@ -66,7 +66,7 @@ and scoring basis with the breeder before treating any of these as measured.
 
 ## Phenophase calendar → date traits
 
-Timing is **approximate, region- and year-dependent** (values below are Michigan/Upper-Midwest
+Timing is approximate, region- and year-dependent (values below are Michigan/Upper-Midwest
 derived). The platform derives dates from data, never from a fixed calendar. Only two chestnut
 phenophases map to a date trait; most map to none.
 
@@ -81,72 +81,72 @@ phenophases map to a date trait; most map to none.
 | Burr / nut drop | Sep - Oct | `burr_drop_date` |
 | Leaf senescence / fall color | Oct - Nov | (none) |
 
-A date trait is a **threshold on a validated multi-date time series**, not a single-image
-cutoff. Defer the fraction/crossing mechanics to the **phenology** skill; the biological anchor
+A date trait is a threshold on a validated multi-date time series, not a single-image
+cutoff. Defer the fraction/crossing mechanics to the phenology skill; the biological anchor
 for `catkin_bloom_date` (first pollen shed vs general catkin visibility vs a percent-open
 threshold) is undefined and must be set by the breeder.
 
 ## Key structures and imagery appearance
 
-- **Unisexual (male) catkin**: near shoot terminals, erect; ~10-25 cm long; slender,
+- Unisexual (male) catkin: near shoot terminals, erect; ~10-25 cm long; slender,
   creamy-white to pale-yellow, densely packed with staminate flowers; makes the canopy look
   pale/fuzzy at peak bloom; strongly scented. Visually dominant and most detectable.
-- **Bisexual / androgynous catkin**: near shoot terminals; similar length or slightly
+- Bisexual / androgynous catkin: near shoot terminals; similar length or slightly
   shorter; staminate flowers along its length plus 1-3 pistillate inflorescences at the base.
   Telling it apart from the unisexual male catkin is the crux of `catkin_sex_ratio`.
-- **Pistillate flower / female inflorescence**: at the base of bisexual catkins; a few mm; a
+- Pistillate flower / female inflorescence: at the base of bisexual catkins; a few mm; a
   small green spiny cupule with whitish protruding styles; individually inconspicuous and hard
   to resolve at drone distance.
-- **Burr (involucre)**: on the canopy, singly or clustered; ~2.5-8 cm diameter; rounded,
+- Burr (involucre): on the canopy, singly or clustered; ~2.5-8 cm diameter; rounded,
   densely covered in long sharp branched spines; green when immature, ripening
   golden/yellow-brown; splits into 2-4 valves at maturity. Spines inflate the apparent outline
   versus the woody body.
-- **Nut**: 1-3 per burr; ~2-4 cm; glossy dark mahogany shell with a paler basal scar and a
+- Nut: 1-3 per burr; ~2-4 cm; glossy dark mahogany shell with a paler basal scar and a
   pointed, often pubescent apex; flattened when 2-3 share a burr. Visible only once the burr
   splits or is opened.
-- **Leaf**: throughout canopy; ~10-20 cm, oblong-lanceolate, coarsely serrate with
+- Leaf: throughout canopy; ~10-20 cm, oblong-lanceolate, coarsely serrate with
   bristle-tipped teeth, glossy green; *C. mollissima* has a pubescent underside. Substrate for
   anthracnose and blight flag symptoms.
-- **Trunk / bark / crown**: rounded spreading crown; smooth young bark (blight canker site)
+- Trunk / bark / crown: rounded spreading crown; smooth young bark (blight canker site)
   furrowing with age; lower stem / root crown is the Phytophthora lesion site.
 
 ## Diseases and pests
 
-- **Chestnut blight** (`cryphonectria_parasitica`): *Cryphonectria parasitica* (fungus).
+- Chestnut blight (`cryphonectria_parasitica`): *Cryphonectria parasitica* (fungus).
   Sunken or swollen orange-brown cankers on stems/branches, cracked bark, yellow-orange to
   reddish pustules erupting through bark with orange spore tendrils in wet weather, wilted brown
   "flag" leaves that stay attached above the canker, epicormic sprouts below. Ordinal severity.
-- **Chestnut anthracnose** (`chestnut_anthracnose`): leaf/twig blight fungi (*Colletotrichum*
+- Chestnut anthracnose (`chestnut_anthracnose`): leaf/twig blight fungi (*Colletotrichum*
   and/or *Marssonina* spp.; exact agent on chestnut unconfirmed). Dry brown irregular leaf spots
   and blotches (often along veins/margins), leaf curling, premature defoliation, bud/twig
   dieback; worst after cool wet springs. Ordinal severity from leaf imagery.
-- **Phytophthora root rot / ink disease** (`phytophthora_cinnamomi`): *Phytophthora
+- Phytophthora root rot / ink disease (`phytophthora_cinnamomi`): *Phytophthora
   cinnamomi* (soilborne oomycete). Root and root-crown rot is below-ground and not directly
   imageable; only indirect above-ground signs show: canopy chlorosis, wilting, thin crowns,
   branch dieback, whole-tree decline, and black-to-rusty bleeding streaks through bark near the
   root crown. Symptoms are nonspecific; a definitive rating needs root/crown/soil assessment.
-- **Chestnut weevil** (`weevil_damage`): *Curculio* spp. snout beetles (lesser chestnut
+- Chestnut weevil (`weevil_damage`): *Curculio* spp. snout beetles (lesser chestnut
   weevil, *C. sayi*, is the key Midwest species). ~1-2 mm round exit holes in nut shells,
   cream legless grubs inside cut nuts, frass, premature nut drop. Reliable assessment is on
   harvested/cut nuts (cut or float test), not standing-tree imagery.
 
 ## Annotation challenges
 
-Defer annotation mechanics to the **annotation** skill. Chestnut-specific difficulties:
+Defer annotation mechanics to the annotation skill. Chestnut-specific difficulties:
 
-- **Two catkin types look alike.** Unisexual male vs bisexual/androgynous catkins are not two
+- Two catkin types look alike. Unisexual male vs bisexual/androgynous catkins are not two
   obvious visual classes; the distinguishing pistillate inflorescences sit at the base and are
   tiny. The breeder must define exactly what `catkin_sex_ratio` counts before any class scheme.
-- **Spiny burrs** blur their own boundary: spines extend the visible outline well past the
+- Spiny burrs blur their own boundary: spines extend the visible outline well past the
   woody body, so any burr box or size measure needs a stated convention (body vs including
   spines) and a reference scale.
-- **Occlusion and clustering**: burrs overlap and hide behind foliage, so counts undercount.
-- **Nuts are hidden** inside intact burrs; nut-level annotation implies split/opened burrs or
+- Occlusion and clustering: burrs overlap and hide behind foliage, so counts undercount.
+- Nuts are hidden inside intact burrs; nut-level annotation implies split/opened burrs or
   bench imagery.
 
 ## Measurement integrity
 
-Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
+Per the CLAUDE.md measurement-integrity invariant (never a geometric/pixel proxy; validate
 against a reference sized to the trait: GT annotations, or a breeder-confirmed sample of the
 model's own outputs (review-confirmation), before any result, not dense GT for every trait; see
 the catkin-elongation cautionary tale there). Chestnut-specific traps:
