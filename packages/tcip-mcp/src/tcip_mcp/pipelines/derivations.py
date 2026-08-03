@@ -96,6 +96,64 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]],
     return [r for r in out if r > 0]
 
 
+def _validate_gt_boxes_per_image(
+    gt_boxes_per_image: "Sequence[Sequence[Sequence[float]]]", *, fn_name: str,
+) -> list[list[tuple[float, float, float, float]]]:
+    """Validate and normalize ``gt_boxes_per_image`` into concrete ``(x, y, w, h)`` float tuples, or
+    raise ``ValueError`` naming exactly what was wrong.
+
+    Every ``derive_*`` function that consumes this shape calls this once, so a malformed call fails
+    the same way everywhere in this module, one exception type with a real message, rather than
+    surfacing whatever bare exception the first downstream operation (an unpack, a comparison, a
+    numpy cast) happened to raise first.
+    """
+    if not isinstance(gt_boxes_per_image, Sequence) or isinstance(gt_boxes_per_image, (str, bytes)):
+        raise ValueError(
+            f"{fn_name}: gt_boxes_per_image must be a sequence of per-image box lists, got "
+            f"{type(gt_boxes_per_image).__name__}"
+        )
+    validated: list[list[tuple[float, float, float, float]]] = []
+    for i, boxes in enumerate(gt_boxes_per_image):
+        if not isinstance(boxes, Sequence) or isinstance(boxes, (str, bytes)):
+            raise ValueError(
+                f"{fn_name}: gt_boxes_per_image[{i}] must be a sequence of boxes, got "
+                f"{type(boxes).__name__}"
+            )
+        image_boxes: list[tuple[float, float, float, float]] = []
+        for j, box in enumerate(boxes):
+            if not isinstance(box, Sequence) or isinstance(box, (str, bytes)) or len(box) != 4:
+                raise ValueError(
+                    f"{fn_name}: gt_boxes_per_image[{i}][{j}] must be a 4-element (x, y, w, h) "
+                    f"box, got {box!r}"
+                )
+            try:
+                x, y, w, h = (float(v) for v in box)
+            except (TypeError, ValueError) as e:
+                raise ValueError(
+                    f"{fn_name}: gt_boxes_per_image[{i}][{j}] has a non-numeric coordinate "
+                    f"({box!r}): {e}"
+                ) from e
+            image_boxes.append((x, y, w, h))
+        validated.append(image_boxes)
+    return validated
+
+
+def _validate_char_sizes(char_sizes: Sequence[float], *, fn_name: str) -> list[float]:
+    """Validate and normalize ``char_sizes`` into concrete floats, or raise ``ValueError`` naming
+    exactly what was wrong, the same contract as ``_validate_gt_boxes_per_image``."""
+    if not isinstance(char_sizes, Sequence) or isinstance(char_sizes, (str, bytes)):
+        raise ValueError(
+            f"{fn_name}: char_sizes must be a sequence of numbers, got {type(char_sizes).__name__}"
+        )
+    validated: list[float] = []
+    for i, s in enumerate(char_sizes):
+        try:
+            validated.append(float(s))
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"{fn_name}: char_sizes[{i}] is not numeric ({s!r}): {e}") from e
+    return validated
+
+
 def _neighbor_max_ious(boxes: Sequence[Sequence[float]]) -> list[float]:
     """Each box's max IoU with any other box in the same image (xywh px); fewer than 2 boxes -> []."""
     import numpy as np
@@ -151,6 +209,8 @@ def derive_localization_tolerance_frac(
     filtered to the trait's own class.
     """
     import numpy as np
+    gt_boxes_per_image = _validate_gt_boxes_per_image(
+        gt_boxes_per_image, fn_name="derive_localization_tolerance_frac")
     dists: list[float] = []
     sizes: list[float] = []
     for boxes in gt_boxes_per_image:
@@ -221,6 +281,8 @@ def derive_localization_kind(
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
     filtered to the trait's own class.
     """
+    gt_boxes_per_image = _validate_gt_boxes_per_image(
+        gt_boxes_per_image, fn_name="derive_localization_kind")
     sizes = char_sizes_from_boxes(gt_boxes_per_image)
     if not sizes:
         return None
@@ -268,6 +330,8 @@ def derive_iou_match_threshold(
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
     filtered to the trait's own class.
     """
+    gt_boxes_per_image = _validate_gt_boxes_per_image(
+        gt_boxes_per_image, fn_name="derive_iou_match_threshold")
     sizes = char_sizes_from_boxes(gt_boxes_per_image)
     if not sizes:
         return None
@@ -300,7 +364,8 @@ def derive_sliver_frac(
     :func:`char_sizes_from_boxes` for the shared computation callers derive it from.
     """
     import numpy as np
-    sizes = [float(s) for s in char_sizes if s > 0]
+    char_sizes = _validate_char_sizes(char_sizes, fn_name="derive_sliver_frac")
+    sizes = [s for s in char_sizes if s > 0]
     if len(sizes) < min_samples:
         return None
     mean = float(np.mean(sizes))
@@ -376,6 +441,8 @@ def derive_cross_tile_nms(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image.
     """
     import numpy as np
+    gt_boxes_per_image = _validate_gt_boxes_per_image(
+        gt_boxes_per_image, fn_name="derive_cross_tile_nms")
     tail: list[float] = []
     for boxes in gt_boxes_per_image:
         tail.extend(v for v in _neighbor_max_ious(boxes) if v > 0.0)
