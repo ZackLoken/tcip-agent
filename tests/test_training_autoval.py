@@ -122,6 +122,64 @@ def test_auto_train_val_ordinal_returns_none(tmp_path: Path):
     assert val_ds is None
 
 
+def test_auto_train_val_ordinal_explicit_val_csv_path(tmp_path: Path):
+    train_images = tmp_path / "train_images"
+    train_rows = []
+    for i in range(4):
+        _save_png(train_images / f"img{i}.png")
+        train_rows.append((f"img{i}", i % 2))
+    train_csv = tmp_path / "train_ranks.csv"
+    with open(train_csv, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(("stem", "rank"))
+        w.writerows(train_rows)
+
+    val_images = tmp_path / "val_images"
+    val_rows = []
+    for i in range(2):
+        _save_png(val_images / f"vimg{i}.png")
+        val_rows.append((f"vimg{i}", i % 2))
+    val_csv = tmp_path / "val_ranks.csv"
+    with open(val_csv, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(("stem", "rank"))
+        w.writerows(val_rows)
+
+    data_cfg = {"images_dir": str(train_images), "csv_path": str(train_csv),
+                "val_images_dir": str(val_images), "val_csv_path": str(val_csv)}
+    train_ds, val_ds = _auto_train_val("ordinal", data_cfg, None)
+    assert val_ds is not None
+    assert val_ds.num_samples == 2
+    assert train_ds.num_samples == 4
+
+
+def test_auto_train_val_ordinal_val_images_dir_without_val_csv_path_degrades(tmp_path: Path):
+    """val_images_dir alone isn't enough for a CSV-driven task, unlike the geometry tasks (which
+    fall back to the train labels/masks dir): reusing the train CSV here would build a val_ds that
+    reads rows for images not present in val_images_dir, failing later inside a training loop
+    instead of now. Must degrade to (train_ds, None), not raise, and not silently build a
+    mismatched val_ds."""
+    train_images = tmp_path / "train_images"
+    rows = []
+    for i in range(4):
+        _save_png(train_images / f"img{i}.png")
+        rows.append((f"img{i}", i % 2))
+    train_csv = tmp_path / "ranks.csv"
+    with open(train_csv, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(("stem", "rank"))
+        w.writerows(rows)
+
+    val_images = tmp_path / "val_images"
+    val_images.mkdir(parents=True, exist_ok=True)
+
+    data_cfg = {"images_dir": str(train_images), "csv_path": str(train_csv),
+                "val_images_dir": str(val_images)}
+    train_ds, val_ds = _auto_train_val("ordinal", data_cfg, None)
+    assert val_ds is None
+    assert train_ds.num_samples == 4
+
+
 def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
     images_dir = tmp_path / "images"
     labels_dir = tmp_path / "labels"
