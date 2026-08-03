@@ -481,7 +481,7 @@ def _registry_term(dataset_root: Path) -> str:
 def _confirmations_term(dataset_root: Path) -> str:
     """Digest over the dataset-native confirmed-negative store's raw content (all buckets, sorted).
 
-    Reads ``dataset_layout.image_status_path`` only, never a foreign/legacy store, since
+    Reads ``dataset_layout.image_status_path`` only, never a foreign store, since
     confirmations are dataset-native, the same way ``_registry_term`` reads only
     ``classes_path``. Hashes raw on-disk negative membership, not the quarantine-filtered view
     ``confirmed_negative_names`` returns: fingerprint is content identity (should two datasets be
