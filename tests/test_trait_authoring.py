@@ -22,6 +22,7 @@ from tcip_mcp.traits import (
     TraitUnknownError,
     get_trait,
     load_trait_specs,
+    load_trait_specs_with_errors,
     registered_traits,
 )
 from tests._trait_fixtures import CATKIN
@@ -57,6 +58,33 @@ def test_config_spec_off_vocab_delivers_is_rejected(tmp_path: Path):
 def test_config_spec_empty_delivers_is_rejected(tmp_path: Path):
     _write_spec(tmp_path, "vague", {"count_objective": "presence"})  # no delivers
     assert load_trait_specs(specs_dir=tmp_path) == []
+
+
+def test_load_trait_specs_with_errors_names_the_broken_file_and_why(tmp_path: Path):
+    # A silently-dropped spec is invisible to a breeder; the errors list is the trace of it.
+    _write_spec(tmp_path, "unicorn", {"delivers": ["unicorn_horn_length"]})
+    specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
+    assert specs == []
+    assert len(errors) == 1
+    assert errors[0]["file"] == "unicorn.yml"
+    assert "unicorn_horn_length" in errors[0]["reason"]
+
+
+def test_load_trait_specs_with_errors_leaves_valid_specs_out_of_the_error_list(tmp_path: Path):
+    # One broken spec alongside a real one: the good one still loads, only the bad one is named.
+    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"], "localization": "iou_match",
+                                   "count_objective": "detection_f1"})
+    _write_spec(tmp_path, "unicorn", {"delivers": ["unicorn_horn_length"]})
+    specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
+    assert [s.name for s in specs] == ["leaf"]
+    assert [e["file"] for e in errors] == ["unicorn.yml"]
+
+
+def test_load_trait_specs_with_errors_reports_malformed_yaml(tmp_path: Path):
+    (tmp_path / "broken.yml").write_text("not: valid: yaml: [", encoding="utf-8")
+    specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
+    assert specs == []
+    assert errors[0]["file"] == "broken.yml"
 
 
 def test_config_spec_unknown_field_is_rejected(tmp_path: Path):
