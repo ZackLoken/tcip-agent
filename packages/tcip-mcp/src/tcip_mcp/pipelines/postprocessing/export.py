@@ -125,7 +125,12 @@ def export_detection_csv(
     from the string alone). A bucket produced by a tiled run gates on its ``tile_size`` too, the same
     operating point's other gating dimension: the tile edge scales the per-image counts this CSV
     reports, so a fabricated fallback with no persisted training geometry and no explicit caller
-    override refuses here. Untiled buckets are never gated on it. Without ``pred_dirs`` (no buckets
+    override refuses here. Untiled buckets are never gated on it. This CSV carries no dimensional
+    value (its rows are ``detection_count``/``avg_confidence``, never an area/length/diameter), so
+    the physical-scale dimension (see ``export_aggregated_csv``'s gate on
+    ``resolve_scale.json``/``reconcile_scale_validity``) is never operative here: there is nothing in
+    this CSV's own shape for a physical scale to have produced, so gating on it would manufacture a
+    refusal over a dimension that can't apply to a count. Without ``pred_dirs`` (no buckets
     to reconcile from, e.g. a caller that already resolved the gate against a live run's own bundle),
     ``measurement_validated`` is taken as a bare caller-asserted reference with no on-disk
     reconciliation. Either way, ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional
