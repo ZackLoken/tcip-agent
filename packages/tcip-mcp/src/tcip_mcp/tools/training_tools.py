@@ -285,8 +285,7 @@ def launch_training(
         max_wall_clock_seconds: Optional hard timeout. If the training process hasn't exited on its
             own by then, it is terminated and the run marked failed with that reason, no
             cooperative grace period is attempted (a hung process isn't responding to cooperative
-            signals). Omit for no timeout (the default, no behavior change from before this param
-            existed).
+            signals). Omit for no timeout (the default).
     """
     # smoke=True: build the model and run the correctness contract before spawning the training
     # subprocess, so a broken builder returns here instead of wasting a full audited run.
@@ -866,8 +865,7 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
 
     Architecture is owned by the bespoke ``model_source`` builder (unknown to the sweep), so
     only optimizer/batch axes get purpose-built handling here; ``base_config``'s own progressive-
-    unfreeze schedule is left untouched (it used to be silently overwritten with a hardcoded
-    3-stage recipe, discarding whatever schedule the agent configured):
+    unfreeze schedule is left untouched, preserving whatever schedule the agent configured:
 
       - ``lr``           -> ``optimizer["head_lr"]``, plus ``optimizer["backbone_lr"]`` scaled by
                             whatever backbone/head ratio ``base_config`` already expressed
@@ -959,7 +957,7 @@ def _ensure_experiment(
     is actually launching. Anything else, including a ``resume_from`` that targets
     an id which already has recorded history, mints a fresh ``<id>_<run_id>`` (with the old id as
     parent lineage) so the prior run's status, metrics, lineage, and registry entry stay intact
-    (resuming into a non-pristine id used to silently reuse it, discarding the
+    (resuming into a non-pristine id without this would silently reuse it, discarding the
     resumed run's own metrics/lineage writes behind the terminal-state lock and letting the model
     registry replace the original's entry by name with no record of what was superseded).
 
@@ -1159,8 +1157,8 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         # This path builds train/val from two separate directories with no computed grouping,
         # there is no group policy to persist. Record that shape explicitly so
         # _persist_split_manifest writes a distinct "external" marker rather than leaving the field
-        # unset, which _train_disjointness would otherwise be unable to tell apart from "no split
-        # manifest was ever written" (a split.json this old, from before this check existed).
+        # unset, which _train_disjointness would otherwise be unable to tell apart from a
+        # split.json where the field was never set at all.
         data_cfg.setdefault("split", {})["resolved_group_by"] = "external"
         try:
             train_ds = build_dataset(task, **src, transforms=transforms, tiling=tiling)
