@@ -209,7 +209,7 @@ def trainable_stems(
     - it has none and a human marked that image negative for ``subject``
       (``confirmed_negative_names``, the Complete in ``.tcip/state/image_status.json``).
 
-    An image with no label file, or an empty label file nobody confirmed, is **unannotated**, not a
+    An image with no label file, or an empty label file nobody confirmed, is unannotated, not a
     negative. Enumerating samples from ``images_dir`` instead served both as zero-box samples, so a
     project where the breeder labelled 30 of 400 images trained on 370 images asserted to be empty.
 
@@ -392,7 +392,7 @@ def _label_record_state(stem: str, labels_dir, subject: str | None) -> tuple[boo
 def confirmed_negative_names(
     labels_dir, *, subject: str | None, date=None, quarantined_out: set[str] | None = None,
 ) -> set[str]:
-    """Image names a human marked negative (empty + Complete) **for this subject**.
+    """Image names a human marked negative (empty + Complete) for this subject.
 
     Reads the dataset-native ``image_status_path``, a sibling of ``classes.json``, so confirmations
     travel with the dataset rather than living in whichever project's private ``.tcip/`` happened to
@@ -400,7 +400,7 @@ def confirmed_negative_names(
     a human's statement about one subject on one image; a store keyed by image name alone re-applies
     it to subjects they never looked at, so an image full of bushes trains as "contains no bushes".
 
-    A negative is **quarantined**, excluded from the return value, only when the dataset's
+    A negative is quarantined, excluded from the return value, only when the dataset's
     ``image_status_digest.json`` sidecar carries an explicit stamp for that image (not merely its
     bucket, a bucket holds every image ever touched under the subject/date, so a bucket-wide stamp
     would be silently overwritten by the next unrelated write and un-quarantine a stale confirmation
@@ -414,8 +414,8 @@ def confirmed_negative_names(
     place) to also learn which names were excluded, see :func:`trainable_stems`'s
     ``quarantined_stale_definition`` count.
 
-    ``subject`` is threaded explicitly, the per-subject label dir it used to be recovered from is
-    gone. When ``subject`` is unthreaded and the dataset holds confirmed negatives, this **refuses
+    ``subject`` must be threaded explicitly; there is no per-subject label directory to recover
+    it from. When ``subject`` is unthreaded and the dataset holds confirmed negatives, this **refuses
     loudly** rather than returning nothing: a silent empty would drop every hard negative the review
     loop harvested. With no locatable dataset root, no store, or no confirmations for this subject,
     it returns an empty set.
@@ -783,7 +783,7 @@ class TiledDetectionDataset(BaseImageDataset):
         # Pass 1: read every image's upright dims + full-image-px boxes, and accumulate GT box sizes
         # so the seam-sliver cutoff is derived from this dataset's class-average object size, not a
         # fixed fraction (Q5 / derive-don't-pin). skip_empty defaults False: empty tiles are valid
-        # negatives (the invariant the old skip_empty=True default violated).
+        # negatives.
         stems_data: list[tuple[str, np.ndarray, np.ndarray, int, int]] = []
         # xywh per image (char_sizes_from_boxes's own expected shape), converted from the xyxy boxes
         # this loop otherwise deals in, so the class-average size uses the same computation
