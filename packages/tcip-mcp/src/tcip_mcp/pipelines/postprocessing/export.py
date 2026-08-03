@@ -13,6 +13,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _clip(value: float, upper: float | None) -> float:
+    """Clamp ``value`` into ``[0, upper]``; ``upper=None`` (no known image extent) leaves it as-is."""
+    if upper is None:
+        return value
+    return max(0.0, min(float(value), float(upper)))
+
+
 def write_predictions_json(
     json_path: str | Path, result: dict, created_by: str | None = None, *,
     id_map: dict[str, int] | None = None,
@@ -28,14 +35,19 @@ def write_predictions_json(
     detections still yields an ``{"annotations": []}`` file. ``created_by`` stamps the producing model
     on every prediction so the origin travels into GT when a human accepts it.
 
-    When ``result`` carries ``masks`` (one soft ``[H, W]`` array per detection: ``instance_seg``, see
+    When ``result`` carries ``masks`` (``instance_seg``, see
     :mod:`tcip_mcp.pipelines.inference.generic_predictor`), each mask is binarized via
     :func:`tcip_mcp.pipelines.measurement.mask_geometry.resolve_binarize_threshold` (never a bare
     hardcoded threshold) and converted to a real ``Polygon``: every connected component becomes its
     own ring (an occlusion-split instance, routine in this imagery, is genuinely more than one
     region), so the stored geometry never silently drops part of the object. A mask that binarizes to
     nothing falls back to the detection's ``BBox`` (a warning is logged) since there is no contour to
-    store at all.
+    store at all. Each entry is either a dense ``[H, W]`` array already in full-image coordinates
+    (the untiled predictors' shape) or a ``{"mask_patch", "offset_x", "offset_y"}`` dict (the tiled
+    predictors' shape, a tile-local patch plus its full-image-space origin); either way the polygon
+    this function stores ends up in the same full-image pixel space, the offset (when present) is
+    added to every ring point before it is stored, clipped to the image's own ``width``/``height`` so
+    a patch drawn from a zero-padded boundary tile can never place a point outside the image.
 
     The threshold is an unvalidated default; its own :class:`ResolvedParam` contract requires the
     consuming output to carry ``validated=false`` so the uncertainty travels on. ``Annotation.attributes``
@@ -66,7 +78,7 @@ def write_predictions_json(
         name = id_to_name.get(cid, str(cid))  # decode via the recorded map, never a fresh derivation
         geometry: BBox | Polygon = BBox(x1, y1, x2, y2)
         if masks is not None and i < len(masks):
-            geometry = _mask_geometry_for_export(masks[i], (x1, y1, x2, y2), name)
+            geometry = _mask_geometry_for_export(masks[i], (x1, y1, x2, y2), name, image_size=(w, h))
         preds.append(Annotation(subject=name, geometry=geometry, score=float(score),
                                 created_by=created_by, created_at=created_at))
     json_io.write_annotations(str(json_path), preds, int(w), int(h), keep_empty=True)
@@ -82,16 +94,38 @@ def mask_binarize_provenance() -> dict:
 
 
 def _mask_geometry_for_export(
-    mask, bbox_xyxy: tuple[float, float, float, float], subject: str,
+    mask, bbox_xyxy: tuple[float, float, float, float], subject: str, *,
+    image_size: tuple[int, int] | None = None,
 ) -> BBox | Polygon:
-    """One detection's soft mask -> a real (possibly multi-ring) Polygon, or BBox if empty."""
+    """One detection's soft mask -> a real (possibly multi-ring) Polygon, or BBox if empty.
+
+    ``mask`` is either a dense array already in full-image coordinates (the untiled predictors'
+    shape) or a ``{"mask_patch", "offset_x", "offset_y"}`` dict (the tiled predictors' shape, see
+    :meth:`tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor._tiled_infer_core`): the
+    contour is extracted from the patch in its own local coordinates, then every ring point is
+    shifted by the patch's offset and clipped to ``image_size`` (``(width, height)``), so a patch
+    drawn from a zero-padded boundary tile can never place a stored point outside the image.
+    """
     from tcip_annotation.state import BBox, Polygon
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         mask_to_polygon_points, resolve_binarize_threshold,
     )
 
+    offset_x = offset_y = 0
+    patch = mask
+    if isinstance(mask, dict):
+        patch = mask["mask_patch"]
+        offset_x, offset_y = int(mask["offset_x"]), int(mask["offset_y"])
+
     threshold = resolve_binarize_threshold().unvalidated_value(acknowledge_unvalidated=True)
-    rings = mask_to_polygon_points(mask, threshold=threshold)
+    rings = mask_to_polygon_points(patch, threshold=threshold)
+    if offset_x or offset_y:
+        max_x = image_size[0] if image_size else None
+        max_y = image_size[1] if image_size else None
+        rings = [
+            [(_clip(x + offset_x, max_x), _clip(y + offset_y, max_y)) for x, y in ring]
+            for ring in rings
+        ]
     if rings:
         return Polygon(rings=rings)
     logger.warning(
