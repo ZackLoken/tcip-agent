@@ -170,6 +170,32 @@ def test_derive_iou_match_threshold_no_boxes_returns_none():
     assert derive_iou_match_threshold([[(0, 0, 0, 0)]]) is None
 
 
+@pytest.mark.parametrize("fn", [
+    derive_localization_tolerance_frac, derive_localization_kind,
+    derive_iou_match_threshold, derive_cross_tile_nms,
+])
+def test_derive_box_functions_raise_valueerror_on_malformed_gt_boxes(fn):
+    # A bare Python operation on malformed input raises whatever exception type it happens to hit
+    # (TypeError on None, ValueError on an unpack mismatch, IndexError from numpy); every derive_*
+    # function in this module raises one consistent ValueError instead, with a message naming what
+    # was actually wrong.
+    with pytest.raises(ValueError, match="gt_boxes_per_image"):
+        fn(None)
+    with pytest.raises(ValueError, match="4-element"):
+        fn([[(1, 2, 3)]])  # a box with only 3 coordinates
+    with pytest.raises(ValueError, match="non-numeric"):
+        fn([[("a", "b", "c", "d")]])
+    with pytest.raises(ValueError, match="gt_boxes_per_image"):
+        fn("not a sequence of boxes")
+
+
+def test_derive_sliver_frac_raises_valueerror_on_malformed_char_sizes():
+    with pytest.raises(ValueError, match="char_sizes"):
+        derive_sliver_frac(None)
+    with pytest.raises(ValueError, match="not numeric"):
+        derive_sliver_frac(["abc", 1.0, 2.0, 3.0, 4.0])
+
+
 def test_write_class_map(tmp_path):
     import json
 
