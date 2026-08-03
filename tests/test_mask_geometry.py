@@ -258,3 +258,138 @@ def test_an_annotations_reference_can_never_validate_a_physical_scale():
     thr = dataclasses.replace(resolve_binarize_threshold(),
                               validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
     assert thr.is_shippable is False
+
+
+# --------------------------------------------------------------------------
+# resolve_scale.json: the on-disk sidecar a delivery door reconciles a
+# physical scale from (no production writer yet, so the fixture is written
+# directly, the same style test_delivery_gate.py's _write_bucket uses for
+# operating_point.json).
+# --------------------------------------------------------------------------
+
+def _write_scale_sidecar(path, *, validated_against, value=0.05, unit="mm", capture_id=None):
+    import json
+
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "resolve_scale.json").write_text(json.dumps({
+        "validated": validated_against == "physical_measurement",
+        "operating_point": {
+            "scale": {
+                "value": value, "unit": unit, "capture_id": capture_id,
+                "requires_validation": True, "validation_kind": "physical",
+                "validated_against": validated_against,
+            },
+        },
+    }), encoding="utf-8")
+    return str(path)
+
+
+def test_read_scale_sidecar_round_trips_a_validated_fixture(tmp_path):
+    from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT, read_scale_sidecar
+
+    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    sc = read_scale_sidecar(d)
+    assert sc["validated"] is True
+    assert sc["operating_point"]["scale"]["validated_against"] == VALIDATED_PHYSICAL_MEASUREMENT
+
+
+def test_read_scale_sidecar_missing_file_returns_none(tmp_path):
+    from tcip_mcp.pipelines.resolution import read_scale_sidecar
+
+    (tmp_path / "preds").mkdir()
+    assert read_scale_sidecar(str(tmp_path / "preds")) is None
+
+
+def test_reconcile_scale_validity_ships_when_validated(tmp_path):
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_PHYSICAL_MEASUREMENT,
+        reconcile_scale_validity,
+    )
+
+    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    recon = reconcile_scale_validity([d])
+    assert recon["operative"] is True
+    assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
+    assert recon["unvalidated_buckets"] == []
+
+
+def test_reconcile_scale_validity_missing_sidecar_floors(tmp_path):
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_scale_validity
+
+    (tmp_path / "preds").mkdir()
+    recon = reconcile_scale_validity([str(tmp_path / "preds")])
+    assert recon["operative"] is True
+    assert recon["validated"] == VALIDATED_FALSE
+    assert recon["unvalidated_buckets"] == [str(tmp_path / "preds")]
+
+
+def test_reconcile_scale_validity_no_pred_dirs_is_not_operative():
+    from tcip_mcp.pipelines.resolution import reconcile_scale_validity
+
+    recon = reconcile_scale_validity([])
+    assert recon["operative"] is False
+    assert recon["validated"] is None
+
+
+def test_reconcile_scale_validity_an_annotations_reference_never_clears_it(tmp_path):
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
+        VALIDATED_HELD_OUT,
+        reconcile_scale_validity,
+    )
+
+    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_HELD_OUT)
+    recon = reconcile_scale_validity([d])
+    assert recon["validated"] == VALIDATED_FALSE
+
+
+def test_reconcile_scale_validity_capture_id_mismatch_floors(tmp_path):
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
+        VALIDATED_PHYSICAL_MEASUREMENT,
+        reconcile_scale_validity,
+    )
+
+    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
+                             capture_id="2026-02-10_plot7")
+    recon = reconcile_scale_validity([d], capture_id="2026-02-10_plot9")
+    assert recon["validated"] == VALIDATED_FALSE
+    assert recon["unvalidated_buckets"] == [d]
+
+
+def test_reconcile_scale_validity_capture_id_match_ships(tmp_path):
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_PHYSICAL_MEASUREMENT,
+        reconcile_scale_validity,
+    )
+
+    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
+                             capture_id="2026-02-10_plot7")
+    recon = reconcile_scale_validity([d], capture_id="2026-02-10_plot7")
+    assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
+
+
+def test_reconcile_scale_validity_unscoped_sidecar_applies_to_any_capture(tmp_path):
+    """A scale never resolved with a capture_id makes no capture-specific claim, so it is not floored
+    just because the caller happens to be asking on behalf of a particular capture."""
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_PHYSICAL_MEASUREMENT,
+        reconcile_scale_validity,
+    )
+
+    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
+                             capture_id=None)
+    recon = reconcile_scale_validity([d], capture_id="2026-02-10_plot7")
+    assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
+
+
+def test_reconcile_scale_validity_asserted_can_only_lower(tmp_path):
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
+        VALIDATED_PHYSICAL_MEASUREMENT,
+        reconcile_scale_validity,
+    )
+
+    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    recon = reconcile_scale_validity([d], asserted=VALIDATED_FALSE)
+    assert recon["validated"] == VALIDATED_FALSE
