@@ -101,3 +101,51 @@ def test_export_predictions_redirects_when_bucket_has_verdicts(tmp_path, monkeyp
     assert Path(res["output_dir"]).name == "preds@r2"
     assert (Path(res["output_dir"]) / "img.json").is_file()
     assert json.loads((out / "img.json").read_text())["annotations"] == []  # untouched
+
+
+def test_export_predictions_redirect_varies_the_model_segment_for_a_canonical_bucket(
+    tmp_path, monkeypatch
+) -> None:
+    """A caller-assembled predictions/<model>/<date> output_dir must redirect the same way the
+    platform's other writers do, or the redirected bucket is invisible to every date-keyed reader."""
+    from pathlib import Path
+
+    from tcip_mcp.dataset_layout import prediction_dir
+
+    project_root = tmp_path / "proj"
+    (project_root / ".tcip" / "state").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project_root))
+
+    dataset_root = tmp_path / "dataset"
+    images_dir = dataset_root / "images" / "2026-01-01"
+    images_dir.mkdir(parents=True)
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
+
+    out = prediction_dir(dataset_root, "baseline", "2026-01-01")
+    out.mkdir(parents=True)
+    (out / "img.json").write_text(
+        json.dumps({"image": "img", "width": 100, "height": 100, "annotations": []}))
+    from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
+    from tcip_annotation.state import Annotation, BBox
+
+    engine = ReviewEngine(project_root / ".tcip" / "state")
+    ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
+                        preds=[Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 30.0, 30.0),
+                                          score=0.9)])
+    det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
+                          pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
+    engine.record_detection_action(det, ctx, action="accepted")
+
+    _fake_predictor(monkeypatch)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    res = export_predictions(str(ckpt), str(images_dir), str(out), tile=False)
+    assert res["bucket_redirected"] is True
+    redirected = Path(res["output_dir"])
+    # The model segment moved, not the date: still findable under the same date, a different model name.
+    assert redirected == prediction_dir(dataset_root, "baseline@r2", "2026-01-01")
+    assert redirected.name == "2026-01-01"
+    assert redirected.parent.name == "baseline@r2"
+    assert (redirected / "img.json").is_file()
