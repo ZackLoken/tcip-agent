@@ -5,7 +5,7 @@ description: "The front-door arc: turn a breeder's raw pile of photos plus a sta
 
 # Project setup: from raw photos to a trainable project
 
-The real user is a **tree-crop breeder, not an ML engineer**, and the first interaction
+The real user is a tree-crop breeder, not an ML engineer, and the first interaction
 is a sentence, not a folder picker:
 
 > "I have all these images of hazelnut bushes with catkins on the plant. Help me detect
@@ -24,15 +24,15 @@ it (missing site, ambiguous goal, unconfirmed format).
 ## 1. Name the project: `{crop}_{trait}_{site}`
 
 Projects live under the workspace (`TCIP_WORKSPACE`, default `~/tcip-projects/`), one
-folder per project. The name is a controlled slug: **lowercase; hyphens within a segment,
-underscores between segments**:
+folder per project. The name is a controlled slug: lowercase; hyphens within a segment,
+underscores between segments:
 
     {crop}_{trait}_{site}
     hazelnut_catkin-05-50-95-per-date_valley-farm
 
 - `crop`: one of the six controlled crops (verify in `.github/skills/crops/`).
 - `trait`: the phenotype being measured (see `.github/skills/crop-science`).
-- `site`: the field/orchard. **If the goal doesn't name a site, ask the human**; don't
+- `site`: the field/orchard. If the goal doesn't name a site, ask the human; don't
   invent one. A wrong site name fragments a breeder's data across seasons.
 
 Scales across 6 crops × many traits × sites, and sorts sensibly on disk.
@@ -45,12 +45,12 @@ Structure the raw pile into the canonical layout. One auditable primitive:
 ingest_images(source="<raw folder or glob>", name="{crop}_{trait}_{site}")
 ```
 
-- **Copies** by default (originals are left byte-identical); pass `copy=False` only when
+- Copies by default (originals are left byte-identical); pass `copy=False` only when
   the human explicitly wants the source moved.
-- Buckets by **EXIF `DateTimeOriginal` → ISO `YYYY-MM-DD`**; images with no EXIF date go
+- Buckets by EXIF `DateTimeOriginal` → ISO `YYYY-MM-DD`; images with no EXIF date go
   to `images/undated/`. Override with `date_from="none"` (all undated) or a literal ISO
   date (`date_from="2026-02-11"`) when you know the capture date the camera didn't record.
-- **Never overwrites**: a stem collision (two source files → same bucket+stem) is skipped
+- Never overwrites: a stem collision (two source files → same bucket+stem) is skipped
   and reported in `skipped_collisions`. Relay the manifest to the human:
   `{total, buckets, undated, skipped_collisions}`, especially any collisions or a large
   `undated` count (a sign the photos lack EXIF and dates may need `date_from`).
@@ -74,17 +74,17 @@ it. `crop` is required and is never inferred from the path or a slug.
 Turn the breeder's sentence into a trait and the classes they distinguish. The CV task is yours to
 derive from the data, not from the phrasing (see `.github/skills/pipeline-design`):
 
-- **Task**: the task string is an input to `build_dataset`, which routes a known set; a bespoke
+- Task: the task string is an input to `build_dataset`, which routes a known set; a bespoke
   `dataset_source` is the seam for a task it does not route. A breeder saying "detect the
   individual catkins" names the *object* and the *phenotype* (the catkin, and a count), not the
   CV task. Which task measures that is yours to derive from object scale, separability, and what
   the trait actually counts; their verb is vocabulary, not the answer.
-- **Subject**: the object class the annotations isolate (e.g. `catkin`, `bush`), not a path
+- Subject: the object class the annotations isolate (e.g. `catkin`, `bush`), not a path
   segment. Labels are one file per image (`annotations/<date>/<stem>.json`; see
   `dataset_layout.py`), holding every subject's annotation records for that image; `subject` is a
   field inside each record, resolved through the dataset's `classes.json` registry. Multiple
   subjects coexist in the same file (a bush isolated alongside its catkins).
-- **Classes**: register the subject/attribute vocabulary in `classes.json` via the audited
+- Classes: register the subject/attribute vocabulary in `classes.json` via the audited
   `write_class_map(dataset_root, subjects)` tool (never hand-edit the file) for what the breeder
   actually distinguishes: it validates the nested subject/attribute shape and writes the file plus
   an audit record. Keep it minimal first (progressive disclosure); class semantics live in
@@ -95,14 +95,14 @@ derive from the data, not from the phrasing (see `.github/skills/pipeline-design
 
 There must be something to train on. Two paths (see `.github/skills/annotation`):
 
-- **Agent/MCP path**: `propose_annotations` a starter batch with a chosen `engine` (`'sam'` is the
+- Agent/MCP path: `propose_annotations` a starter batch with a chosen `engine` (`'sam'` is the
   built-in reference; the agent can bring another) → review the candidates visually (`visualize`,
   then your client's image-capable read tool on the returned `image_path`) → `accept_proposals`
   the good ones. Trial engines and keep the one whose high-conf
   proposals survive review. An empty label file is not a negative on its own; it trains as one
   only once the breeder marks that image Complete (`.tcip/state/image_status.json`), so an empty
   file you write reads as unannotated until then. Never delete or skip them.
-- **Human path**: hand off to the GUI Annotate tab for the breeder to label a seed set.
+- Human path: hand off to the GUI Annotate tab for the breeder to label a seed set.
 
 Never train or evaluate on an unconfirmed format: if `read_annotations` returns
 the format cannot be determined, `read_annotations` returns an error rather than a guess.
@@ -139,7 +139,7 @@ right now: `active_project`, `project_root`, `subject`, `date`, `active_tab`, an
 one I'm on" without a path. The nav index is persisted debounced as they page through
 frames, so it lags a beat; treat it as "roughly where they are," not a frame-exact cursor.
 
-**Adopt the project with `set_active_project` before doing project work.** Adoption writes the
+Adopt the project with `set_active_project` before doing project work. Adoption writes the
 active marker *and* repins the platform-state root to `<workspace>/<project>`, so from then on
 the `@audited` log, the experiment store, and the model registry all live under that one
 project's `.tcip/` alongside its data (self-contained and portable; `archive_project` bundles
