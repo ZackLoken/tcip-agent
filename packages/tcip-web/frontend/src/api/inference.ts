@@ -28,24 +28,27 @@ export interface InferenceJob {
   warning: string | null;
 }
 
+/** A run is named, not spelled: the backend resolves both the images dir and the prediction
+ *  bucket from (dataset_root, model_name, date) through its own layout resolver. Everything the
+ *  platform derives per checkpoint (conf, IoU, tile geometry, cross-tile merge) is left off. */
 export interface LaunchInferenceBody {
   checkpoint_path: string;
-  images_dir: string;
-  output_dir: string;
+  dataset_root: string;
+  model_name: string;
+  date?: string | null;
   tile?: boolean;
-  conf?: number;
-  iou?: number;
-  slice_h?: number;
-  slice_w?: number;
-  overlap?: number;
-  // Cross-tile merge (tiled runs only): "nms" suppresses overlaps, "nmm" unions boxes split
-  // across a tile seam. Only meaningful when tile=true.
-  postprocess?: "nms" | "nmm";
 }
 
 export const inferenceApi = {
   launch: (body: LaunchInferenceBody) =>
-    postJson<{ status: string; job_id: string }>("/api/inference/launch", body),
+    postJson<{
+      status: string;
+      job_id: string;
+      images_dir: string;
+      output_dir: string;
+      bucket_redirected: boolean;
+      requested_output_dir: string | null;
+    }>("/api/inference/launch", body),
 
   listJobs: () => getJson<{ jobs: InferenceJob[] }>("/api/inference/jobs"),
 
@@ -178,9 +181,10 @@ export const resultsApi = {
     ),
 
   // The project's own registered traits, so the Results tab resolves which trait it is
-  // computing for from the project's registry instead of assuming one.
+  // computing for from the project's registry instead of assuming one. Each trait's declared
+  // milestone fractions come along, so the tab can tell what there is to compute for it.
   traits: (project_root: string) =>
-    getJson<{ traits: string[] }>(
+    getJson<{ traits: string[]; milestone_fractions_by_trait: Record<string, number[]> }>(
       `/api/results/traits?project_root=${encodeURIComponent(project_root)}`,
     ),
 
