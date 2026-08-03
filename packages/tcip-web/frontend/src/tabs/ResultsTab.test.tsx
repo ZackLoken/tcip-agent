@@ -39,6 +39,7 @@ beforeEach(() => {
   vi.spyOn(resultsApi, "traits").mockResolvedValue({
     traits: ["catkin"],
     milestone_fractions_by_trait: { catkin: [0.5, 0.95] },
+    invalid_specs: [],
   });
 });
 
@@ -130,6 +131,34 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
     await waitFor(() => expect(curvesSpy).toHaveBeenCalled());
     expect(curvesSpy.mock.calls[0][0].predictions_by_date).toEqual({});
+  });
+});
+
+describe("ResultsTab broken trait spec visibility", () => {
+  it("names a broken spec file and its reason, not just a blank/empty tab", async () => {
+    vi.spyOn(resultsApi, "traits").mockResolvedValue({
+      traits: ["catkin"],
+      milestone_fractions_by_trait: { catkin: [0.5, 0.95] },
+      invalid_specs: [
+        {
+          file: "leaf_area.yml",
+          reason: "delivers must be non-empty and all in crops.yml (off-vocab: ['leaf_size'])",
+        },
+      ],
+    });
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
+
+    expect(await screen.findByText(/leaf_area\.yml/)).toBeInTheDocument();
+    expect(screen.getByText(/off-vocab: \['leaf_size'\]/)).toBeInTheDocument();
+  });
+
+  it("renders nothing extra when every spec loaded cleanly", async () => {
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
+
+    expect(screen.queryByText(/failed to load/)).not.toBeInTheDocument();
   });
 });
 
