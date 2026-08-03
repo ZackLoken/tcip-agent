@@ -21,11 +21,14 @@ export function loadRecentProjects(): RecentProject[] {
   }
 }
 
-/** Record a project as most-recently opened (dedup by path, cap at MAX). */
+/** Record a project as most-recently opened (dedup by name or path, cap at MAX).
+ *
+ * A moved project keeps its name and changes path, so matching on either replaces the entry that
+ * describes the same project instead of leaving a stale one behind until the cap evicts it. */
 export function recordRecentProject(name: string, path: string): void {
   if (!name || !path) return;
   try {
-    const list = loadRecentProjects().filter((p) => p.path !== path);
+    const list = loadRecentProjects().filter((p) => p.path !== path && p.name !== name);
     list.unshift({ name, path });
     localStorage.setItem(KEY, JSON.stringify(list.slice(0, MAX)));
   } catch {
