@@ -5,7 +5,7 @@ Generalizes the ``tempfile.mkstemp`` + ``os.replace`` pattern already used in
 reader never observes a half-written file (no more corrupt JSON on crash / torn read).
 
 For read-modify-write sequences (lineage / artifacts / registry index) wrap the whole
-read→modify→write in :func:`file_transaction` to also prevent **lost updates**:
+read→modify→write in :func:`file_transaction` to also prevent lost updates:
 
   - within a process: a per-path ``threading.RLock`` serializes threads (parallel HPO
     trials, web request handlers);
