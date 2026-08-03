@@ -165,6 +165,14 @@ def check_state(root: Path, findings: list) -> None:
                 findings.append(("warn", f"review shard {shard.name} references unknown image {img!r}"))
 
 
+def check_trait_specs(root: Path, findings: list) -> None:
+    from tcip_mcp.traits import load_trait_specs_with_errors
+
+    _specs, errors = load_trait_specs_with_errors(specs_dir=root / ".tcip" / "state" / "trait_specs")
+    for e in errors:
+        findings.append(("error", f"trait spec {e['file']} failed to load: {e['reason']}"))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("project_root", help="project directory holding images/ annotations/ .tcip/")
@@ -175,7 +183,7 @@ def main() -> int:
         return 2
 
     findings: list[tuple[str, str]] = []
-    for check in (check_negatives, check_registry, check_provenance, check_state):
+    for check in (check_negatives, check_registry, check_provenance, check_state, check_trait_specs):
         check(root, findings)
 
     rank = {"error": 0, "warn": 1, "info": 2}
