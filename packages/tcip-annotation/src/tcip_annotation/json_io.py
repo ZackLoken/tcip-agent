@@ -23,7 +23,7 @@ Integer class ids never appear on disk; a name→id assignment is a per-training
 (:mod:`tcip_mcp.class_registry`). :func:`to_coco_dataset` takes that run's ``id_map`` (a plain dict,
 so this package never imports tcip-mcp) and assigns COCO ``category_id`` from it.
 
-Negative invariant: a **missing** file is unannotated, and a present file with ``"annotations": []`` is
+Negative invariant: a missing file is unannotated, and a present file with ``"annotations": []`` is
 *still* unannotated until a human marks that image Complete, recorded as ``"negative"`` in
 ``.tcip/state/image_status.json``, scoped to the subject. Only that confirmation makes it a training
 negative; :func:`to_coco_dataset` skips an unconfirmed empty. An annotation with a subject but no
@@ -302,7 +302,7 @@ def to_coco_dataset(
     attribute: str | None = None,
     confirmed_negative_names: set[str] | None = None,
 ) -> dict:
-    """Concatenate per-image JSON files into one COCO dataset dict, **scoped to one subject**.
+    """Concatenate per-image JSON files into one COCO dataset dict, scoped to one subject.
 
     ``entries``: ``[(label_json_path, image_file_name), ...]``. ``id_map`` is the run's name→id
     assignment (``tcip_mcp.class_registry.assign_class_ids``): keyed by the ``attribute``'s value names
@@ -311,7 +311,7 @@ def to_coco_dataset(
 
     Only annotations of ``subject`` that carry a geometry become COCO annotations (a geometry-less
     annotation has no training destination this slice, but its presence still marks the image
-    *annotated*, keeping it out of the negative bucket). A **missing** label file is skipped; an image
+    *annotated*, keeping it out of the negative bucket). A missing label file is skipped; an image
     with no annotations of ``subject`` is included only as a negative when its ``file_name`` is in
     ``confirmed_negative_names`` (a human marked it Complete-with-nothing). ``categories`` are emitted
     from ``id_map``. An annotation whose class key is not in ``id_map`` raises, since a real annotation
