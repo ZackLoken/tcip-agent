@@ -1431,7 +1431,8 @@ def evaluate_model(
     Args:
         run_id_or_ckpt: A training run id (uses its ``model_best.pt``) or a checkpoint path.
         images_dir: Images directory for the evaluation split.
-        labels_dir: Labels dir (detection/instance_seg) or masks dir (semantic_seg).
+        labels_dir: Labels dir (detection/instance_seg), masks dir (semantic_seg), or the GT CSV
+            path (classification/ordinal/regression, one row per image stem).
         task: Task type.
         conf_threshold: Operating confidence for P/R/F1.
         iou_threshold: Operating IoU (on COCOeval's grid; 0.5 -> index 0).
@@ -1516,13 +1517,15 @@ def evaluate_model(
     if task != "detection":
         tiling = None
 
-    ds_kwargs: dict = {"images_dir": images_dir}
-    if task in ("detection", "instance_seg"):
-        ds_kwargs["labels_dir"] = labels_dir
-        ds_kwargs["subject"] = subject
-        ds_kwargs["attribute"] = attribute
-    elif task == "semantic_seg":
-        ds_kwargs["masks_dir"] = labels_dir
+    # One kwargs-builder shared with the training path (_dataset_source_kwargs), not a second
+    # hand-rolled copy: two independent implementations of "which data_cfg keys does this task
+    # read" is exactly what let classification/ordinal/regression drift out of sync with training
+    # (evaluate_model never threaded a CSV path, so OrdinalDataset/RegressionDataset construction
+    # always failed here). labels_dir doubles as the CSV path for the non-geometry tasks, the same
+    # single "wherever this task's GT lives" slot it already serves for masks_dir/semantic_seg.
+    data_cfg = {"images_dir": images_dir, "labels_dir": labels_dir, "masks_dir": labels_dir,
+                "csv_path": labels_dir, "subject": subject, "attribute": attribute}
+    ds_kwargs = _dataset_source_kwargs(task, data_cfg)
     try:
         dataset = build_dataset(task, **ds_kwargs, tiling=tiling)
     except Exception as exc:  # noqa: BLE001
