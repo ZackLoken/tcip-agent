@@ -15,11 +15,30 @@ without torch. Ported from the chestnut-burr ``CanopyTiler`` /
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import numpy as np
 
 EMPTY_BOXES = np.zeros((0, 4), dtype=np.float32)
 EMPTY_LABELS = np.zeros((0,), dtype=np.int64)
 EMPTY_SCORES = np.zeros((0,), dtype=np.float32)
+
+
+class MaskPatch(NamedTuple):
+    """One detection's instance-seg mask, kept tile-local rather than expanded to a full-raster
+    canvas: ``patch`` is a small dense soft-mask array (today, always tile-sized: the tile-local
+    array a per-tile model forward already produced), ``offset_x``/``offset_y`` place its ``[0, 0]``
+    pixel in full-image (or full-raster) pixel space. A consumer that needs full-image pixel
+    coordinates (a polygon for export, a composited canvas) adds the offset at the point of use,
+    the same "defer the expansion" convention ``export.py`` already uses for the untiled path's own
+    dense masks (see ``mask_to_polygon_points``): this representation just makes that deferral
+    mandatory instead of optional, since a tiled source raster can be too large to ever hold one
+    full-size mask per detection.
+    """
+
+    patch: np.ndarray
+    offset_x: int
+    offset_y: int
 
 
 def compute_stride(tile_size: int, overlap: float) -> int:
@@ -128,14 +147,28 @@ def dedup_boxes(
 def reconstruct_core(
     per_tile_boxes: list[np.ndarray], per_tile_scores: list[np.ndarray],
     per_tile_labels: list[np.ndarray], tile_info: list[dict], tile_size: int, stride: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    per_tile_masks: list[np.ndarray] | None = None,
+) -> (tuple[np.ndarray, np.ndarray, np.ndarray]
+      | tuple[np.ndarray, np.ndarray, np.ndarray, list[MaskPatch]]):
     """Shift tile-local detections to full-image coords, keep center-in-core, clip.
 
     ``tile_info[i]`` = ``{'tile_x','tile_y','original_width','original_height'}``.
+
+    ``per_tile_masks[i]`` (optional), when given, is the ``[N_i, tile_size, tile_size]`` tile-local
+    soft-mask stack for tile ``i``, same order/length as ``per_tile_boxes[i]``. A surviving
+    detection's mask travels with it (as a :class:`MaskPatch`, still tile-local, offset by the
+    tile's own full-image origin, never expanded to a full-image canvas here); a detection dropped
+    by the center-in-core check or never returned from a tile drops its mask too, so there is never
+    an orphaned mask for a box that did not survive. Returns a 4-tuple (boxes, scores, labels,
+    masks) when ``per_tile_masks`` is given, else the original 3-tuple, byte-identical to the
+    boxes-only behavior every existing caller of this function already depends on.
     """
     margin = (tile_size - stride) / 2.0
+    collect_masks = per_tile_masks is not None
     out_b, out_s, out_l = [], [], []
-    for tb, ts, tl, info in zip(per_tile_boxes, per_tile_scores, per_tile_labels, tile_info):
+    out_m: list[MaskPatch] = []
+    mask_stream = per_tile_masks if collect_masks else [None] * len(per_tile_boxes)
+    for tb, ts, tl, info, tm in zip(per_tile_boxes, per_tile_scores, per_tile_labels, tile_info, mask_stream):
         if len(tb) == 0:
             continue
         tx, ty = info["tile_x"], info["tile_y"]
@@ -158,11 +191,15 @@ def reconstruct_core(
             out_b.append(clipped)
             out_s.append(float(ts[i]))
             out_l.append(int(tl[i]))
+            if collect_masks:
+                out_m.append(MaskPatch(patch=np.asarray(tm[i]), offset_x=int(tx), offset_y=int(ty)))
     if not out_b:
-        return EMPTY_BOXES.copy(), EMPTY_SCORES.copy(), EMPTY_LABELS.copy()
-    return (np.asarray(out_b, dtype=np.float32),
-            np.asarray(out_s, dtype=np.float32),
-            np.asarray(out_l, dtype=np.int64))
+        empty = (EMPTY_BOXES.copy(), EMPTY_SCORES.copy(), EMPTY_LABELS.copy())
+        return (*empty, []) if collect_masks else empty
+    result = (np.asarray(out_b, dtype=np.float32),
+              np.asarray(out_s, dtype=np.float32),
+              np.asarray(out_l, dtype=np.int64))
+    return (*result, out_m) if collect_masks else result
 
 
 def _numpy_nms(boxes, scores, labels, iou_thresh, class_aware) -> np.ndarray:
@@ -205,30 +242,68 @@ def global_nms(
         return _numpy_nms(np.asarray(boxes), np.asarray(scores), np.asarray(labels), iou_thresh, class_aware)
 
 
+def _composite_mask_patches(merged_box: np.ndarray, patches: list[MaskPatch]) -> MaskPatch:
+    """Paste every tile-local mask patch absorbed into one merged detection onto a canvas sized to
+    the merged box's own (small) hull, not the source raster: a merged cluster is a handful of
+    nearby tile-local detections, so this stays cheap even behind a huge orthomosaic. Overlapping
+    patches take the pixelwise max (masks are soft probabilities; a plain boolean OR would discard
+    the confidence signal NMM otherwise preserves via ``max score kept``)."""
+    x0, y0 = int(np.floor(merged_box[0])), int(np.floor(merged_box[1]))
+    x1, y1 = int(np.ceil(merged_box[2])), int(np.ceil(merged_box[3]))
+    canvas_w, canvas_h = max(1, x1 - x0), max(1, y1 - y0)
+    canvas = np.zeros((canvas_h, canvas_w), dtype=np.float32)
+    for mp in patches:
+        patch = np.asarray(mp.patch)
+        ph, pw = patch.shape[-2:]
+        dy, dx = mp.offset_y - y0, mp.offset_x - x0  # patch-local -> canvas-local shift
+        r0, r1 = max(0, -dy), min(ph, canvas_h - dy)
+        c0, c1 = max(0, -dx), min(pw, canvas_w - dx)
+        if r0 >= r1 or c0 >= c1:
+            continue  # patch falls entirely outside the merged hull (shouldn't happen, defensive)
+        canvas[r0 + dy:r1 + dy, c0 + dx:c1 + dx] = np.maximum(
+            canvas[r0 + dy:r1 + dy, c0 + dx:c1 + dx], patch[r0:r1, c0:c1])
+    return MaskPatch(patch=canvas, offset_x=x0, offset_y=y0)
+
+
 def global_merge(
     boxes: np.ndarray, scores: np.ndarray, labels: np.ndarray,
     iou_thresh: float, class_aware: bool = True,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    per_det_masks: list[MaskPatch] | None = None,
+) -> (tuple[np.ndarray, np.ndarray, np.ndarray]
+      | tuple[np.ndarray, np.ndarray, np.ndarray, list[MaskPatch]]):
     """Cross-tile Non-Max *Merging*: union overlapping same-class boxes (bbox hull, max score)
     instead of suppressing the lower-score one, recovering an object split across a tile seam
     into two partial boxes (SAHI's NMM). Returns merged ``(boxes, scores, labels)``, new boxes,
     not a subset of indices like :func:`global_nms`, so callers consume the arrays directly.
+
+    ``per_det_masks`` (optional), parallel to ``boxes``, carries each input detection's tile-local
+    :class:`MaskPatch`. When given, every merged cluster's absorbed patches are composited (see
+    :func:`_composite_mask_patches`) into one new :class:`MaskPatch` sized to the merged box's own
+    hull, and returned as a 4th value parallel to the merged boxes; the cluster membership used to
+    do that compositing is exactly the ``used``/absorption walk this function already performs, so
+    a caller never has to reconstruct it from a separately-exposed group index. Omitting
+    ``per_det_masks`` returns the original 3-tuple, byte-identical to the boxes-only behavior every
+    existing caller of this function already depends on.
     """
     boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
     scores = np.asarray(scores, dtype=np.float64)
     labels = np.asarray(labels, dtype=np.int64)
+    collect_masks = per_det_masks is not None
     if len(boxes) == 0:
-        return EMPTY_BOXES.copy(), EMPTY_SCORES.copy(), EMPTY_LABELS.copy()
+        empty = (EMPTY_BOXES.copy(), EMPTY_SCORES.copy(), EMPTY_LABELS.copy())
+        return (*empty, []) if collect_masks else empty
 
     order = sorted(range(len(boxes)), key=lambda i: -scores[i])  # highest score seeds each cluster
     used = [False] * len(boxes)
     m_boxes, m_scores, m_labels = [], [], []
+    m_masks: list[MaskPatch] = []
     for i in order:
         if used[i]:
             continue
         used[i] = True
         cur = boxes[i].copy()
         cur_score = float(scores[i])
+        members = [i] if collect_masks else None
         merged = True
         while merged:  # keep absorbing boxes overlapping the growing hull (transitive seams)
             merged = False
@@ -243,10 +318,15 @@ def global_merge(
                                     max(cur[2], boxes[j][2]), max(cur[3], boxes[j][3])])
                     cur_score = max(cur_score, float(scores[j]))
                     merged = True
+                    if collect_masks:
+                        members.append(j)
                     break
         m_boxes.append(cur)
         m_scores.append(cur_score)
         m_labels.append(int(labels[i]))
-    return (np.asarray(m_boxes, dtype=np.float32),
-            np.asarray(m_scores, dtype=np.float32),
-            np.asarray(m_labels, dtype=np.int64))
+        if collect_masks:
+            m_masks.append(_composite_mask_patches(cur, [per_det_masks[k] for k in members]))
+    result = (np.asarray(m_boxes, dtype=np.float32),
+              np.asarray(m_scores, dtype=np.float32),
+              np.asarray(m_labels, dtype=np.int64))
+    return (*result, m_masks) if collect_masks else result
