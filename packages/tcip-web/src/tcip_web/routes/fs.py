@@ -1,7 +1,7 @@
 """Local-filesystem directory browsing for the dataset picker's folder browser.
 
 The GUI runs with its backend on the same machine as the browser, so "the server's
-filesystem" is the user's own. This lists **directories only**, and only where reads are
+filesystem" is the user's own. This lists directories only, and only where reads are
 allowed: with ``TCIP_IMAGE_ROOTS`` unset (the default local single-user GUI) browsing is
 unrestricted; set it and browsing is confined to those roots (a networked deployment).
 The wider trust-boundary hardening for exposed servers (Origin / TrustedHost / token) is a
