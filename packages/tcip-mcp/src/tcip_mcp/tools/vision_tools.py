@@ -185,8 +185,7 @@ def visualize(
         class_names: Comma-separated class names (e.g. "leaf,fruit,bud").
         conf_threshold: Minimum confidence; filters displayed predictions (source='predictions')
             and the predictions matched against GT (source='comparison'). Defaults to the shared
-            ``DEFAULT_CONF`` so the comparison operating point matches inference/evaluate (it used to
-            silently match at compute_matches' own 0.25 default).
+            ``DEFAULT_CONF`` so the comparison operating point matches inference/evaluate.
         iou_threshold: IoU threshold for a positive match (source='comparison' only).
         n: Number of samples in the grid (source='dataset' only).
     """
@@ -481,7 +480,7 @@ def _viz_dataset_sample(
 
     # Every logical image at or under images_dir, folding sibling band files into one grouped
     # entry per capture: recurses into images/<date>/ subfolders (the canonical layout) and any
-    # deeper nesting, mirroring the old flat rglob extension scan.
+    # deeper nesting.
     dirs = {images_dir} | {p for p in images_dir.rglob("*") if p.is_dir()}
     all_images: list[tuple[Path, str]] = [
         (d, stem) for d in sorted(dirs) for stem in sorted(list_logical_images(d))
