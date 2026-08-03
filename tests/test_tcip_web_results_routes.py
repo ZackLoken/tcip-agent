@@ -36,6 +36,23 @@ def _write_id_map_sidecar(dir_path: Path, id_map: dict) -> None:
 _ID_MAP = {"dormant": 0, "elongated": 1}
 
 
+def test_list_traits_names_a_broken_spec_alongside_the_valid_one(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """catkin is seeded valid by the fixture; a second, broken spec must still be visible by
+    name and reason, not silently absent the way a dropped spec looks identical to none at all."""
+    specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
+    (specs_dir / "unicorn.yml").write_text(
+        "name: unicorn\ndelivers: [unicorn_horn_length]\n", encoding="utf-8")
+
+    resp = client.get("/api/results/traits", params={"project_root": str(tmp_path)})
+    body = resp.json()
+    assert body["traits"] == ["catkin"]
+    assert len(body["invalid_specs"]) == 1
+    assert body["invalid_specs"][0]["file"] == "unicorn.yml"
+    assert "unicorn_horn_length" in body["invalid_specs"][0]["reason"]
+
+
 def test_plant_mapping_build_with_empty_images(client: TestClient, tmp_path: Path) -> None:
     resp = client.post(
         "/api/results/plant_mapping/build",
