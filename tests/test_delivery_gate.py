@@ -559,3 +559,111 @@ def test_export_aggregated_csv_acknowledged_tile_size_floors_the_row_stamp(tmp_p
                           trait_name="count", pred_dirs=[d], acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
+
+
+# ── export_aggregated_csv gates a dimensional value_key on its physical scale too ──
+
+def _write_scale_sidecar(path, *, validated_against, capture_id=None, value=0.05, unit="mm"):
+    """A bucket's resolve_scale.json, the shape reconcile_scale_validity reads, alongside its
+    operating_point.json in the same directory."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
+
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "resolve_scale.json").write_text(json.dumps({
+        "validated": validated_against == VALIDATED_PHYSICAL_MEASUREMENT,
+        "operating_point": {
+            "scale": {
+                "value": value, "unit": unit, "capture_id": capture_id,
+                "requires_validation": True, "validation_kind": "physical",
+                "validated_against": validated_against,
+            },
+        },
+    }), encoding="utf-8")
+    return str(path)
+
+
+_DIM_RESULTS = [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2"}]
+
+
+def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tmp_path):
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+    from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
+
+    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
+    _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="not_a_real_crops_yml_trait", pred_dirs=[d])
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["units"] == "mm2"
+
+
+def test_export_aggregated_csv_refuses_a_dimensional_delivery_with_no_scale_sidecar(tmp_path):
+    """A dimensional CSV must not ship stamped validated when its physical scale was never checked
+    against anything, even though the count operating point beside it is genuinely validated: this
+    is exactly the gap the scale gate closes."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
+    with pytest.raises(ValueError, match="unvalidated measurement"):
+        export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
+                              trait_name="not_a_real_crops_yml_trait", pred_dirs=[d])
+
+
+def test_export_aggregated_csv_count_trait_never_gates_on_scale(tmp_path):
+    """A count trait's value_key implies no physical unit, so the scale dimension never becomes
+    operative even though pred_dirs is given: nothing dimensional to protect, nothing to refuse
+    over."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
+    out = tmp_path / "o.csv"
+    export_aggregated_csv([{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}],
+                          str(out), trait_name="count", pred_dirs=[d])
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+
+
+def test_export_aggregated_csv_scale_capture_id_mismatch_floors(tmp_path):
+    """A handheld standoff's scale can vary capture to capture: a sidecar validated for a different
+    capture than the one this delivery names must not silently clear this delivery's scale."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+    from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
+
+    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
+    _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
+                         capture_id="2026-02-10_plot7")
+    with pytest.raises(ValueError, match="unvalidated measurement"):
+        export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
+                              trait_name="not_a_real_crops_yml_trait", pred_dirs=[d],
+                              scale_capture_id="2026-02-10_plot9")
+
+
+def test_export_aggregated_csv_scale_capture_id_match_ships(tmp_path):
+    """The rail must admit valid work: the scale's own recorded capture matches the one this
+    delivery is scoped to, so it ships cleanly."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+    from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
+
+    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
+    _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
+                         capture_id="2026-02-10_plot7")
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="not_a_real_crops_yml_trait",
+                          pred_dirs=[d], scale_capture_id="2026-02-10_plot7")
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+
+
+def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_stamp(tmp_path):
+    """A dimensional CSV whose conf is genuinely validated but whose scale never cleared must stamp
+    its one measurement column false when shipped through acknowledge_unvalidated, not conf's clean
+    reference."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="not_a_real_crops_yml_trait",
+                          pred_dirs=[d], acknowledge_unvalidated=True)
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["measurement_validated"] == VALIDATED_FALSE
