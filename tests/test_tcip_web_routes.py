@@ -899,19 +899,22 @@ def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
     client: TestClient, tmp_path: Path, monkeypatch
 ) -> None:
     from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
+    from tcip_mcp.dataset_layout import image_dir, prediction_dir
 
     project_root = tmp_path / "proj"
     (project_root / ".tcip" / "state").mkdir(parents=True)
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project_root))
 
-    images = tmp_path / "imgs"
-    images.mkdir()
+    dataset_root = tmp_path / "data"
+    date = "2026-02-11"
+    images = image_dir(dataset_root, date)
+    images.mkdir(parents=True)
     Image.new("RGB", (100, 100), (110, 110, 110)).save(images / "img.png")
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
 
-    out = tmp_path / "preds"
-    out.mkdir()
+    out = prediction_dir(dataset_root, "baseline", date)
+    out.mkdir(parents=True)
     (out / "img.json").write_text(
         json.dumps({"image": "img", "width": 100, "height": 100, "annotations": []})
     )
@@ -925,8 +928,8 @@ def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
 
     # overwrite=True into a bucket that has a verdict is a 409 (no job is launched).
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(ckpt), "images_dir": str(images),
-        "output_dir": str(out), "overwrite": True,
+        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
+        "model_name": "baseline", "date": date, "overwrite": True,
     })
     assert resp.status_code == 409
     assert "verdict" in resp.json()["detail"].lower()
