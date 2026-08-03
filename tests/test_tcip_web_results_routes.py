@@ -582,8 +582,9 @@ def test_inference_launch_missing_checkpoint(client: TestClient, tmp_path: Path)
         "/api/inference/launch",
         json={
             "checkpoint_path": str(tmp_path / "no.pt"),
-            "images_dir": str(tmp_path),
-            "output_dir": str(tmp_path / "out"),
+            "dataset_root": str(tmp_path),
+            "model_name": "baseline",
+            "date": "2026-02-11",
         },
     )
     assert resp.status_code == 404
