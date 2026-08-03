@@ -18,8 +18,8 @@ directly. An unspecified format resolves to `.json` (`dataset_layout.py`'s `labe
 
 | Format | Files | Coordinates | Recognized by |
 |--------|-------|------------|---------------|
-| **json** | One `.json` per image (canonical) | Pixel coordinates | an `annotations` key, no `images`/`categories` key |
-| **coco** | Single `.json` for the dataset | Pixel coordinates | an `images`/`categories` key |
+| json | One `.json` per image (canonical) | Pixel coordinates | an `annotations` key, no `images`/`categories` key |
+| coco | Single `.json` for the dataset | Pixel coordinates | an `images`/`categories` key |
 
 Both are read by `format_io.load_annotations` / written by `save_annotations`; the agent-facing
 MCP tool wrapping the read side is `read_annotations` (see Tools below). `format_io.detect_format`
@@ -44,10 +44,10 @@ applied twice or skipped.
 
 ## Stages
 
-1. **Initial labeling**: manual or engine-assisted bounding box and polygon annotation
-2. **Review**: IoU matching between predictions and ground truth to accept/correct/reject
-3. **Active learning**: score unlabeled images by model uncertainty to prioritize annotation effort
-4. **Quality audit**: coverage analysis, inter-annotator agreement
+1. Initial labeling: manual or engine-assisted bounding box and polygon annotation
+2. Review: IoU matching between predictions and ground truth to accept/correct/reject
+3. Active learning: score unlabeled images by model uncertainty to prioritize annotation effort
+4. Quality audit: coverage analysis, inter-annotator agreement
 
 ## Tools
 
@@ -93,7 +93,7 @@ Do not promise an engine that isn't built; SAM is the one that ships as a runnab
 The agent labels images by using a proposal engine for geometry and its multimodal vision for
 classification and QA.
 
-**Full workflow:**
+Full workflow:
 1. `propose_annotations(image_path, engine='sam')` → the engine proposes candidates, renders a numbered overlay
 2. Agent `view_image` on overlay → identifies and classifies each candidate
 3. `accept_proposals(image_path, assignments=[{candidate_id: 0, subject: "leaf"}, ...])` → stages
@@ -102,14 +102,14 @@ classification and QA.
    helper so a re-run never orphans recorded verdicts
 4. Agent `view_image` on the staged result → visual QA pass
 
-**Corrective loop (for missed objects):**
+Corrective loop (for missed objects):
 1. `overlay_reference_grid(image_path)` → labeled grid (A1–H6) for spatial reference
 2. Agent `view_image` → identifies missed regions by grid cell
 3. `segment_prompt(image_path, grid_cells=["B3", "D5"], cols=8, rows=6)` → the engine segments at
    those locations
 4. Save new annotations via `save_annotations`
 
-**Grid cell system:**
+Grid cell system:
 - `overlay_reference_grid(image_path, cols=, rows=)` renders the grid (8 × 6 unless you say otherwise)
   and echoes the `cols`/`rows` it used
 - Agent references cells like "B3" or "F5" instead of pixel coordinates
@@ -139,7 +139,7 @@ classification and QA.
 The agent must never write ground truth the human hasn't seen. Stage proposals to the
 *predictions* tree and drive the human to review them:
 
-- **`stage_proposals(dataset_root, model_name, date, stem, boxes)`** writes agent-proposed
+- `stage_proposals(dataset_root, model_name, date, stem, boxes)` writes agent-proposed
   detections to `predictions/<model>/<date>/<stem>.json` (per-image COCO/JSON), the
   predictions tree, not `annotations/`. They render on the Review canvas as predictions for
   the human to accept/reject/edit. `model_name` is stamped as each object's `created_by`, so name
@@ -148,8 +148,8 @@ The agent must never write ground truth the human hasn't seen. Stage proposals t
   fresh `<model>@r2` bucket (the response's `bucket` field is the one actually written), so a
   re-run never overwrites reviewed predictions. Pass `overwrite=True` to force in-place, which is
   still refused when verdicts exist.
-- **`focus(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
-  detection_idx, filter_type, iou_threshold, conf_threshold)`** drives the live Review tab straight to a model's
+- `focus(tab='review', project_root, dataset_root, subject, date, model_name, image_index,
+  detection_idx, filter_type, iou_threshold, conf_threshold)` drives the live Review tab straight to a model's
   predictions on a frame/detection, so the human sees exactly what you flagged (a false positive, a
   missed catkin) without hunting. The Review analog of `focus(tab='annotate')`; a soft no-op if no
   GUI is running.
@@ -160,15 +160,15 @@ frames → they accept on the canvas → only then does it become GT. See
 
 ## Quality Metrics
 
-- **Coverage**: fraction of images with labels
-- **Negatives**: a training negative is an empty label file (`"annotations": []`) plus a human
+- Coverage: fraction of images with labels
+- Negatives: a training negative is an empty label file (`"annotations": []`) plus a human
   Complete on that image, recorded as the status token `"negative"` in
   `.tcip/state/image_status.json`, scoped to the subject. `to_coco_dataset` silently skips an
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
   negatives; writing empty label files does not create them; only the human's Complete does.
   `python scripts/doctor.py <root>` flags every empty-label/status disagreement. Never delete
   empty label files without asking.
-- **Cohen's κ**: inter-annotator agreement (if multiple annotators)
+- Cohen's κ: inter-annotator agreement (if multiple annotators)
 
 ## Active Learning
 
