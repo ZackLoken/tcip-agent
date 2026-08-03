@@ -84,12 +84,12 @@ Goal: Detailed per-image quality assessment.
 
 When inspecting rendered annotations/predictions, evaluate:
 
-- [ ] **Coverage**: Are all visible objects annotated?
-- [ ] **Tightness**: Do boxes closely fit the objects?
-- [ ] **Class correctness**: Are classes assigned correctly?
-- [ ] **Consistency**: Is the same object type labeled the same way across images?
-- [ ] **Edge cases**: Occluded, overlapping, or ambiguous objects handled?
-- [ ] **Scale variation**: Are small and large objects both captured?
+- [ ] Coverage: Are all visible objects annotated?
+- [ ] Tightness: Do boxes closely fit the objects?
+- [ ] Class correctness: Are classes assigned correctly?
+- [ ] Consistency: Is the same object type labeled the same way across images?
+- [ ] Edge cases: Occluded, overlapping, or ambiguous objects handled?
+- [ ] Scale variation: Are small and large objects both captured?
 
 ## Rendering Details
 
