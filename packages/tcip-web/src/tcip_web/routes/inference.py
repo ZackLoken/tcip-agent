@@ -229,27 +229,6 @@ def _worker(job: InferenceJob) -> None:
             max_dets=job.max_dets,     # transforms it (see its own docstring).
         )
 
-        # instance_seg tiled inference can't carry masks through the cross-tile merge (same rail
-        # run_inference enforces; see inference_tools.py). The MCP door can tell an explicit
-        # tile=True request apart from an unset default and refuse only the explicit case; the
-        # GUI's tile checkbox is a controlled input with no "unset" state, so
-        # job.tile_source is "explicit" on every real launch and refusing on that basis here would
-        # refuse every GUI instance_seg run, not just the ones that mean it. So this door always
-        # forces untiled for instance_seg instead of ever refusing (masks survive; a rail must admit
-        # valid work, not only reject invalid work) and records the forced value's source as
-        # "default" rather than "explicit": the platform, not the breeder, decided this run's
-        # tiling, and the provenance should say so.
-        if getattr(predictor, "task", None) == "instance_seg" and job.tile:
-            job.tile = False
-            job.tile_source = "default"
-            job.warning = (
-                "instance_seg checkpoint: tiled inference cannot carry masks through the "
-                "cross-tile merge yet, so this run forced untiled (masks survive) regardless of "
-                "the 'Tiled inference' checkbox. Small dense objects may be under-detected at "
-                "full resolution."
-            )
-            logger.warning(job.warning)
-
         # Derive tile_size/overlap from the checkpoint's own persisted training geometry:
         # the same resolver run_inference uses, so the GUI door can't silently diverge
         # from the MCP door on the object count's scale for the same checkpoint. An explicit
