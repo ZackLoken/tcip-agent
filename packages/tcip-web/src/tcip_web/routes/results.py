@@ -441,12 +441,23 @@ def export_csv(payload: ExportCsvPayload) -> Response:
 
 @router.get("/traits")
 def list_traits(project_root: str) -> dict:
-    """Trait names registered for this project, so the Results tab resolves which trait it is
-    computing for from the project's own registry instead of assuming one."""
-    _guard(project_root)
-    from tcip_mcp.traits import registered_traits_for
+    """Traits registered for this project, so the Results tab resolves which trait it is computing
+    for from the project's own registry instead of assuming one.
 
-    return {"traits": registered_traits_for(project_root)}
+    ``milestone_fractions_by_trait`` carries each trait's declared milestone fractions verbatim
+    rather than a derived category, so a surface can tell whether a trait has milestones to compute
+    without the server deciding what that means for it.
+    """
+    _guard(project_root)
+    from tcip_mcp.traits import load_trait_specs
+
+    specs = load_trait_specs(specs_dir=Path(project_root) / ".tcip" / "state" / "trait_specs")
+    return {
+        "traits": sorted(spec.name for spec in specs),
+        "milestone_fractions_by_trait": {
+            spec.name: list(spec.milestone_fractions) for spec in specs
+        },
+    }
 
 
 # ── List registered models (used by Inference tab) ─────────────────────
