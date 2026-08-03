@@ -391,6 +391,115 @@ def test_predict_tiled_from_reader_matches_full_array_predict_tiled(tmp_path: Pa
     assert win_result["labels"] == full_result["labels"]
 
 
+def _bespoke_instance_seg_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
+    """A real bespoke Mask R-CNN checkpoint (RGB only, no multispectral norm derivation needed
+    for this end-to-end mask-shape test)."""
+    import torch
+
+    from tcip_mcp.pipelines.model_build import build_model
+
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_instance_seg",
+                    "builder_kwargs": {"num_classes": 1, "in_chans": in_chans,
+                                      "min_size": tile_size, "max_size": tile_size * 2},
+                    "task": "instance_seg", "in_chans": in_chans}
+    model = build_model({"model_source": model_source})
+    ckpt = tmp_path / "instance_seg_best.pt"
+    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    return str(ckpt)
+
+
+def test_predict_tiled_from_reader_and_predict_tiled_produce_matching_tiled_masks(tmp_path: Path) -> None:
+    """Both tiled entry points carry masks for a multi-tile instance_seg case, in the tiled
+    (tile-local-patch + full-image-offset) shape documented on ``predict_tiled``, and the windowed
+    path agrees with the full-array path detection-for-detection, masks included."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+
+    path = tmp_path / "mosaic.tif"
+    _windowed_multiband_tiff(path, channels=3)
+    ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
+
+    full = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    full_result = full.predict_tiled(str(path), tile_size=TILE, overlap=0.2)
+
+    windowed = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    with OrthomosaicWindowReader(path) as reader:
+        win_result = windowed.predict_tiled_from_reader(
+            reader, tile_size=TILE, overlap=0.2, source_label=str(path))
+
+    assert "masks" in full_result and "masks" in win_result
+    assert len(full_result["masks"]) == len(win_result["masks"]) == full_result["count"]
+    for m in full_result["masks"] + win_result["masks"]:
+        assert set(m) == {"mask_patch", "offset_x", "offset_y"}
+        patch = np.asarray(m["mask_patch"])
+        assert patch.shape == (TILE, TILE)  # tile-local, never a full-mosaic-sized array
+        assert 0 <= m["offset_x"] <= win_result["width"]
+        assert 0 <= m["offset_y"] <= win_result["height"]
+    for fm, wm in zip(full_result["masks"], win_result["masks"]):
+        assert fm["offset_x"] == wm["offset_x"] and fm["offset_y"] == wm["offset_y"]
+        np.testing.assert_allclose(fm["mask_patch"], wm["mask_patch"], rtol=1e-5, atol=1e-6)
+
+
+def test_predict_tiled_from_reader_require_masks_false_carries_no_masks_key(tmp_path: Path) -> None:
+    """The boxes-only opt-out still works on the windowed path: no ``masks`` key at all, not an
+    empty one, mirroring ``predict_tiled``'s own opt-out contract."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+
+    path = tmp_path / "mosaic.tif"
+    _windowed_multiband_tiff(path, channels=3)
+    ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
+
+    predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    with OrthomosaicWindowReader(path) as reader:
+        result = predictor.predict_tiled_from_reader(
+            reader, tile_size=TILE, overlap=0.2, require_masks=False)
+    assert "masks" not in result
+    assert {"boxes", "scores", "labels", "count", "tiles"} <= set(result)
+
+
+def test_predict_tiled_from_reader_tiled_mask_polygon_exports_at_correct_offset(tmp_path: Path) -> None:
+    """A tiled instance_seg detection's mask round-trips through ``write_predictions_json`` to a
+    polygon positioned in full-mosaic pixel space, not left at its tile-local offset."""
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Polygon
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+
+    path = tmp_path / "mosaic.tif"
+    _windowed_multiband_tiff(path, channels=3)
+    ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
+
+    predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    with OrthomosaicWindowReader(path) as reader:
+        result = predictor.predict_tiled_from_reader(
+            reader, tile_size=TILE, overlap=0.2, source_label=str(path))
+    assert result["count"] > 0, "fixture assumes at least one surviving detection"
+
+    # A synthetic mask with a clean blob, positioned at a non-zero tile offset, replaces whatever
+    # the untrained model actually predicted: the point of this test is the offset plumbing through
+    # export, not the (meaningless, from-scratch-weights) mask content itself.
+    offset_x, offset_y = result["masks"][0]["offset_x"], result["masks"][0]["offset_y"]
+    patch = np.zeros((TILE, TILE), dtype=np.float32)
+    patch[4:10, 4:10] = 0.9
+    result["masks"][0] = {"mask_patch": patch.tolist(), "offset_x": offset_x, "offset_y": offset_y}
+
+    out = tmp_path / "pred.json"
+    write_predictions_json(out, result)
+    anns = json_io.read_annotations(str(out))
+    assert isinstance(anns[0].geometry, Polygon)
+    xs = [x for ring in anns[0].geometry.rings for x, _ in ring]
+    ys = [y for ring in anns[0].geometry.rings for _, y in ring]
+    # The blob sits at local [4:10, 4:10]; the exported polygon must be shifted into full-mosaic
+    # pixel space by the patch's own offset, not left at its tile-local coordinates.
+    assert min(xs) == pytest.approx(4 + offset_x, abs=1.0)
+    assert min(ys) == pytest.approx(4 + offset_y, abs=1.0)
+
+
 def test_predict_tiled_from_reader_channel_mismatch_refuses() -> None:
     """A model's declared ``in_chans`` disagreeing with the raster's own band count must refuse
     rather than silently truncate/pad the band count the model was trained on. A bare predictor
@@ -417,10 +526,12 @@ def test_predict_tiled_from_reader_channel_mismatch_refuses() -> None:
         p.predict_tiled_from_reader(_FakeReader())
 
 
-def test_predict_tiled_from_reader_refuses_instance_seg_masks() -> None:
-    """The same instance_seg mask-through-tiling refusal ``predict_tiled`` already has (masks
-    can't yet cross ``reconstruct_core``/``global_nms``/``global_merge``) must hold for the
-    windowed-read path too, for the same reason; not silently dropping masks either way."""
+def test_predict_tiled_from_reader_reaches_real_tiling_for_instance_seg_with_and_without_masks() -> None:
+    """instance_seg masks thread through the windowed-read path the same as the full-array
+    ``predict_tiled`` path: neither ``require_masks=True`` (the default, masks collected) nor
+    ``require_masks=False`` (the boxes-only opt-out) refuses outright, both reach the real tile
+    loop, which then fails on the fake reader's own ``AssertionError`` rather than anything raised
+    by ``predict_tiled_from_reader`` itself."""
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
@@ -428,7 +539,7 @@ def test_predict_tiled_from_reader_refuses_instance_seg_masks() -> None:
         height, width, num_channels = 64, 64, 3
 
         def read_window(self, y0, y1, x0, x1):
-            raise AssertionError("the mask refusal must happen before any tile is read")
+            raise AssertionError("reached the real tile loop")
 
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = "instance_seg"
@@ -437,12 +548,9 @@ def test_predict_tiled_from_reader_refuses_instance_seg_masks() -> None:
     p.in_chans = 3
     p.model_source = None
 
-    with pytest.raises(NotImplementedError, match="mask"):
+    with pytest.raises(AssertionError):
         p.predict_tiled_from_reader(_FakeReader())
 
-    # The rail admits valid work: the same predictor with require_masks=False reaches past the
-    # refusal (into the real tile loop, which then fails on the fake reader's own AssertionError,
-    # proving it got there rather than raising NotImplementedError again).
     with pytest.raises(AssertionError):
         p.predict_tiled_from_reader(_FakeReader(), require_masks=False)
 
