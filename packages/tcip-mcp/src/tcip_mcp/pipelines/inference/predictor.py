@@ -41,11 +41,14 @@ class Predictor(Protocol):
     ``{image, width, height, boxes[[x1,y1,x2,y2] px], scores[], labels[], count}`` (tiled adds
     ``tiles``). For ``task == "instance_seg"``, ``predict``/``predict_batch`` (untiled) additionally
     carry ``masks``, one soft (unbinarized) ``[H, W]`` probability array per surviving detection,
-    same order as ``boxes``/``scores``/``labels``. ``predict_tiled`` does not yet thread masks
-    through cross-tile reconstruction/merge and raises ``NotImplementedError`` for ``instance_seg``
-    rather than silently dropping them; a caller that never reads masks opts out deliberately with
-    ``predict_tiled(..., require_masks=False)`` and gets ordinary boxes-only tiled inference.
-    Labels are **1-indexed foreground** (background = 0), the
+    already in full-image coordinates, same order as ``boxes``/``scores``/``labels``.
+    ``predict_tiled``/``predict_tiled_from_reader`` also carry ``masks`` by default
+    (``require_masks=True``), but in a different, tile-local shape: a list of ``{"mask_patch",
+    "offset_x", "offset_y"}`` dicts (a small patch plus its full-image-space origin, never a dense
+    full-image-sized array, since a tile source can be a raster too large to afford one), never
+    interchangeable with the untiled shape above. A caller that never reads masks opts out
+    deliberately with ``predict_tiled(..., require_masks=False)`` and gets ordinary boxes-only tiled
+    inference with no ``masks`` key at all. Labels are **1-indexed foreground** (background = 0), the
     torchvision convention the rest of the pipeline (JSON prediction export, Review, CSV) already
     assumes; a future kind that is natively 0-indexed would shift to it at its own boundary,
     so downstream code never has to know which kind produced a result.
