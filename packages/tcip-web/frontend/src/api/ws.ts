@@ -98,7 +98,14 @@ export class StateSocket {
    */
   subscribePanel(
     panel: string,
-    handler: (event: { panel: string; event_type: string; data: Record<string, unknown> }) => void,
+    handler: (event: {
+      panel: string;
+      event_type: string;
+      data: Record<string, unknown>;
+      // Stamped per event by the backend: the ring buffer replays on every reconnect, so a
+      // handler that acts once per event (dismissing a banner) needs to tell them apart.
+      event_id: string;
+    }) => void,
   ) {
     let ws: WebSocket | null = null;
     let closedByClient = false;
