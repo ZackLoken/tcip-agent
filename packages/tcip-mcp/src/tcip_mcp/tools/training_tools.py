@@ -1179,7 +1179,10 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
     """Build ``(train_ds, val_ds)`` for a run, deriving a leakage-free val split.
 
     Resolution order:
-      1. ``data.val_images_dir`` set -> build val from it explicitly.
+      1. ``data.val_images_dir`` set -> build val from it explicitly (a CSV-driven task -
+         classification/ordinal/regression - also requires ``data.val_csv_path``; there is no
+         graceful fallback to the train CSV the way the geometry tasks fall back to the train
+         labels/masks dir, see the CSV branch below for why).
       2. ``data.auto_val`` (default True) and a stem-capable task
          (detection / instance_seg / semantic_seg / classification) -> derive a
          group-aware train/val split (no held-out test) so the trainer receives
@@ -1222,6 +1225,21 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                 val_src["labels_dir"] = data_cfg.get("val_labels_dir", data_cfg.get("labels_dir", ""))
             elif task == "semantic_seg":
                 val_src["masks_dir"] = data_cfg.get("val_masks_dir", data_cfg.get("masks_dir", ""))
+            elif task in ("classification", "ordinal", "regression"):
+                val_csv = data_cfg.get("val_csv_path")
+                if not val_csv:
+                    # A CSV dataset reads every row eagerly as a real item and only fails per-item
+                    # at __getitem__ time (deep inside a later training-loop iteration) if a row's
+                    # image isn't in val_images_dir - unlike the geometry tasks above, where a
+                    # missing per-image label file degrades gracefully to "no label". Falling back
+                    # to the train csv_path here would risk silently building a val_ds that crashes
+                    # mid-training instead of failing now, so require it explicitly.
+                    raise ValueError(
+                        "val_images_dir set for a CSV-driven task also requires "
+                        "data.val_csv_path; the train CSV's rows won't generally match a "
+                        "different val_images_dir."
+                    )
+                val_src["csv_path"] = val_csv
             return train_ds, build_dataset(task, **val_src, transforms=None, tiling=tiling)
         except Exception as exc:
             logger.warning("Explicit val build failed (%s); training without validation.", exc)
