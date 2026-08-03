@@ -136,6 +136,20 @@ class TestHeads:
 
         decoded = head.decode(out)
         assert decoded["ranks"].shape == (4,)
+        assert decoded["confidences"].shape == (4,)
+        assert ((decoded["confidences"] >= 0) & (decoded["confidences"] <= 1)).all()
+
+    def test_ordinal_head_confidence_hand_computed(self):
+        from tcip_mcp.pipelines.components.heads import OrdinalHead
+        head = OrdinalHead(in_channels=4, num_ranks=3)
+        # logit=0 -> sigmoid=0.5 for both conditional thresholds, deterministic regardless of the
+        # head's own randomly-initialized weights since decode() only consumes outputs["logits"].
+        outputs = {"logits": torch.zeros(1, 2)}
+        decoded = head.decode(outputs)
+        # cum_probs = [0.5, 0.25] -> predicted_rank = (cum_probs > 0.5).sum() = 0.
+        assert decoded["ranks"].item() == 0
+        # P(Y=0) = 1 - P(Y>=1) = 1 - 0.5 = 0.5, the marginal mass at the predicted rank.
+        assert decoded["confidences"].item() == pytest.approx(0.5)
 
     def test_regression_head(self):
         from tcip_mcp.pipelines.components.heads import RegressionHead
