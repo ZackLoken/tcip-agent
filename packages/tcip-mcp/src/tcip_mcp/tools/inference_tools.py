@@ -825,7 +825,12 @@ def export_predictions(
             real basis, stamping ``tile_size_validated=false`` on the sidecar so the
             un-trustworthiness travels with it rather than writing silently.
     """
-    from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_writable_bucket
+    from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.prediction_buckets import (
+        BucketHasVerdicts,
+        resolve_prediction_bucket,
+        resolve_writable_bucket,
+    )
     from tcip_mcp.project_paths import resolve_state
 
     # Resolve the writable bucket before the (expensive) inference so a verdict-blocked overwrite
@@ -833,13 +838,30 @@ def export_predictions(
     out_path = Path(output_dir)
     parent, base_name = out_path.parent, out_path.name
     review_state_dir = resolve_state(Path(".tcip") / "state")
+
+    # A canonical predictions/<model>/<date> output_dir redirects by varying the model segment, like its other writers; a bespoke path keeps the old last-segment redirect.
+    canonical_dataset_root = None
+    if parent.name and parent.parent.name == "predictions":
+        candidate_root = parent.parent.parent
+        if Path(prediction_dir(candidate_root, parent.name, base_name)).resolve() == out_path.resolve():
+            canonical_dataset_root = candidate_root
+
     try:
-        resolution = resolve_writable_bucket(
-            review_state_dir, base_name, lambda n: [parent / n], overwrite=overwrite)
+        if canonical_dataset_root is not None:
+            out, resolution = resolve_prediction_bucket(
+                canonical_dataset_root, parent.name, base_name,
+                review_state_dir=review_state_dir, overwrite=overwrite)
+        else:
+            resolution = resolve_writable_bucket(
+                review_state_dir, base_name, lambda n: [parent / n], overwrite=overwrite)
+            out = parent / resolution.name
     except BucketHasVerdicts as exc:
-        return {"error": str(exc), "verdict_count": exc.count,
-                "suggested_bucket": str(parent / exc.suggested)}
-    out = parent / resolution.name
+        suggested = (
+            str(prediction_dir(canonical_dataset_root, exc.suggested, base_name))
+            if canonical_dataset_root is not None
+            else str(parent / exc.suggested)
+        )
+        return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": suggested}
 
     result = run_inference(
         checkpoint_path=checkpoint_path, images_dir=images_dir, conf_threshold=conf_threshold,
