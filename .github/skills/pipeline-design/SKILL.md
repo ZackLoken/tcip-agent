@@ -40,11 +40,11 @@ Buildable now:
 
 Not buildable now (no loader, no task type, no scaffolding carried):
 
-- **3D point clouds** (LiDAR / SfM). No point-cloud dataset or loader, and no task type. See
+- 3D point clouds (LiDAR / SfM). No point-cloud dataset or loader, and no task type. See
   CLAUDE.md's Scope section and README's Roadmap.
-- **Non-imagery spectral readings** (a bare NIR / hyperspectral sample, not a raster). The dataset
+- Non-imagery spectral readings (a bare NIR / hyperspectral sample, not a raster). The dataset
   layer reads 2D imagery; there is no loader for a spectrum.
-- **A *learned* contextual-ranking task**: a model that scores a plant relative to its plot or
+- A *learned* contextual-ranking task: a model that scores a plant relative to its plot or
   block neighbours. No task type or loader exists for it. Note this is narrower than it sounds:
   ranking plants by a measurement you already produced is ordinary postprocessing over the
   per-plant table, and is available now.
@@ -67,7 +67,7 @@ them costs you depends on what you are measuring and how; that part is yours to 
 
 ## You own the model and the training loop
 
-The platform is a **toolkit you build with, not a mold you fill**. You are the CV scientist:
+The platform is a toolkit you build with, not a mold you fill. You are the CV scientist:
 for every trait you write a bespoke `nn.Module`, from scratch or by importing the plain
 building blocks (FPN/PAN necks, the classification/ordinal/regression/semantic-seg heads, the
 losses, backbone wrappers, and `build_detector` + the `_build_*` detector functions), and,
@@ -89,19 +89,19 @@ No architecture is imposed. The `toolkit-inventory` skill is the name-and-locati
 whole set: the `build_detector` / `build_loss` / task string names, the heads/necks/backbones,
 the derivations, the `ctx` craft library, and the proposal-engine and scorer registries.
 
-**Tailor the architecture to the data in hand** (CLAUDE.md: derive, don't pin):
+Tailor the architecture to the data in hand (CLAUDE.md: derive, don't pin):
 
-- **Anchors from the GT box shapes**, not a fixed `(0.5, 1, 2)`. Feed the dataset's GT `(w, h)`
+- Anchors from the GT box shapes, not a fixed `(0.5, 1, 2)`. Feed the dataset's GT `(w, h)`
   through `pipelines.derivations.gt_aspect_ratios` and set anchor *sizes* from the GT object-size
   distribution, so anchors cover the objects that actually occur (e.g. elongated organs a default
   ratio can't match).
-- **Strides / feature levels to the object scale**: add a finer pyramid level for tiny objects,
+- Strides / feature levels to the object scale: add a finer pyramid level for tiny objects,
   drop levels you don't need.
-- **Normalization to the batch size**: with the tiny batches large detectors force, BatchNorm
+- Normalization to the batch size: with the tiny batches large detectors force, BatchNorm
   statistics are unreliable; prefer `GroupNorm` (or another batch-independent norm).
-- **Activations / layers where the data warrants** it: this is engineering judgment, not a menu.
+- Activations / layers where the data warrants it: this is engineering judgment, not a menu.
 
-**Three seams make bespoke work first-class, and the platform guarantees integrity around it:**
+Three seams make bespoke work first-class, and the platform guarantees integrity around it:
 
 - `pipelines.data.datasets.build_dataset(task, dataset_source, **kwargs)` builds from a
   `dataset_source` when the task string isn't one of the known loaders: an *importable* builder you
@@ -206,7 +206,7 @@ mechanics are identical for one stage or four, and there is no fixed phase vocab
 
 - Start with the simplest thing that could measure the trait, and add complexity only when the
   data or the metrics justify it (CLAUDE.md's progressive-disclosure rail).
-- **Write a retrospective** (`project_retrospective`) when you finish. Record what you measured
+- Write a retrospective (`project_retrospective`) when you finish. Record what you measured
   about *this* dataset and what it implied: object scale, capture cadence, class imbalance, where
   the operating point resolved and why. Not a reusable pipeline shape: the next dataset re-derives
   its own decomposition, and a shape recorded here would become a recipe for a problem it was never
