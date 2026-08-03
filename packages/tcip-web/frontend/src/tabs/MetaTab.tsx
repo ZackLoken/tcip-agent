@@ -196,7 +196,12 @@ export function MetaTab() {
                   <td className="pr-3">{s.user || "—"}</td>
                   <td className="pr-3 tabular-nums">{s.images_annotated}</td>
                   <td className="pr-3 tabular-nums">{s.total_annotations}</td>
-                  <td className="pr-3 tabular-nums">{fmtDuration(s.total_time_seconds)}</td>
+                  <td
+                    className="pr-3 tabular-nums"
+                    title={`New annotations: ${fmtDuration(s.new_annotation_seconds)} · Review: ${fmtDuration(s.review_seconds)} · Negative confirmation: ${fmtDuration(s.negative_confirmation_seconds)}`}
+                  >
+                    {fmtDuration(s.total_time_seconds)}
+                  </td>
                   <td className="pr-3 tabular-nums">
                     {s.avg_seconds_per_annotation ? `${s.avg_seconds_per_annotation}s` : "—"}
                   </td>
