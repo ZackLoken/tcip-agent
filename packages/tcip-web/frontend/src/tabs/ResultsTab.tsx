@@ -92,6 +92,9 @@ export function ResultsTab() {
   >({});
   const [trait, setTrait] = useState("");
   const [traitError, setTraitError] = useState<string | null>(null);
+  // Trait specs that failed to load, so a breeder can tell "nothing registered" from
+  // "something is registered but broken" instead of the two looking identical.
+  const [invalidSpecs, setInvalidSpecs] = useState<{ file: string; reason: string }[]>([]);
 
   useEffect(() => {
     if (!projectRoot) return;
@@ -102,6 +105,7 @@ export function ResultsTab() {
       .then((res) => {
         setAvailableTraits(res.traits);
         setMilestoneFractionsByTrait(res.milestone_fractions_by_trait);
+        setInvalidSpecs(res.invalid_specs);
         if (res.traits.length === 0) {
           setTraitError("No trait is registered for this project yet.");
         } else if (res.traits.length === 1) {
@@ -111,6 +115,7 @@ export function ResultsTab() {
       .catch((e) => {
         setAvailableTraits([]);
         setMilestoneFractionsByTrait({});
+        setInvalidSpecs([]);
         setTraitError(
           `Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`,
         );
@@ -354,6 +359,21 @@ export function ResultsTab() {
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       {traitError && <div className="tcip-panel p-3 text-[11px] text-tcip-fp">{traitError}</div>}
+      {invalidSpecs.length > 0 && (
+        <div className="tcip-panel p-3 text-[11px] text-tcip-fp">
+          <div>
+            {invalidSpecs.length} trait spec{invalidSpecs.length > 1 ? "s" : ""} failed to load and
+            {invalidSpecs.length > 1 ? " are" : " is"} not registered:
+          </div>
+          <ul className="mt-1 list-disc pl-4">
+            {invalidSpecs.map((s) => (
+              <li key={s.file}>
+                {s.file}: {s.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {availableTraits.length > 1 && (
         <div className="tcip-panel p-3 flex items-center gap-2">
           <label className="tcip-label">Trait</label>
