@@ -114,6 +114,21 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     return ray
 
 
+def _patch_aiohttp_availability(monkeypatch, available: bool) -> None:
+    """Force whether the dashboard's own key dependency looks importable, regardless of
+    whatever actually happens to be installed in the environment running this test."""
+    import tcip_mcp.pipelines.training.hpo as hpo
+
+    real_find_spec = hpo.find_spec
+
+    def fake_find_spec(name):
+        if name == "aiohttp":
+            return object() if available else None
+        return real_find_spec(name)
+
+    monkeypatch.setattr(hpo, "find_spec", fake_find_spec)
+
+
 def _run_one_search() -> dict:
     from tcip_mcp.pipelines.training.hpo import tune_search
 
@@ -177,6 +192,7 @@ def test_a_cluster_this_process_did_not_start_is_never_shut_down(monkeypatch):
 def test_the_dashboard_url_is_readable_while_the_cluster_is_up_and_gone_after(monkeypatch):
     from tcip_mcp.pipelines.training.hpo import ray_dashboard_state_path, read_ray_dashboard
 
+    _patch_aiohttp_availability(monkeypatch, True)
     entered = [threading.Event()]
     release = [threading.Event()]
     ray = _install_fake_ray(monkeypatch, entered, release)
@@ -218,6 +234,26 @@ def test_a_dashboard_recorded_by_a_process_that_is_gone_is_not_served(monkeypatc
 
     atomic_write_json(ray_dashboard_state_path(), {**state, "pid": os.getpid()})
     assert read_ray_dashboard() == {**state, "pid": os.getpid()}
+
+
+def test_a_sweep_still_runs_when_the_dashboard_dependency_is_not_installed(monkeypatch):
+    """A bare ray[tune] install (this package's own declared minimum) has no aiohttp; asking
+    ray.init for a dashboard it can't serve raises there, which must not stop a sweep from
+    running on that install."""
+    from tcip_mcp.pipelines.training.hpo import read_ray_dashboard
+
+    _patch_aiohttp_availability(monkeypatch, False)
+    entered = [threading.Event()]
+    release = [threading.Event()]
+    release[0].set()
+    ray = _install_fake_ray(monkeypatch, entered, release)
+
+    _run_one_search()
+
+    assert ray.init_calls == 1
+    assert ray.shutdown_calls == 1
+    assert ray.init_kwargs["include_dashboard"] is False
+    assert read_ray_dashboard() is None
 
 
 def test_sequential_sweeps_each_start_and_stop_their_own_cluster(monkeypatch):
