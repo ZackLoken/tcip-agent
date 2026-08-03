@@ -224,6 +224,7 @@ def export_aggregated_csv(
     *,
     measurement_validated: str | None = None,
     pred_dirs: list[str] | None = None,
+    scale_capture_id: str | None = None,
     acknowledge_unvalidated: bool = False,
 ) -> str:
     """Export per-plant aggregated results to a delivery CSV.
@@ -246,6 +247,18 @@ def export_aggregated_csv(
     (``pred_dirs`` empty/omitted), ``measurement_validated`` is currently not honored: no on-disk
     source exists yet for that dimension's validity, so the state floors to unvalidated
     unconditionally; the only route to delivery is the explicit acknowledge below.
+
+    When the aggregated values' own ``value_key`` implies a physical unit (``area_mm2``, a real
+    dimensional trait, see ``_resolve_units``) and ``pred_dirs`` is given, the delivery also gates on
+    the physical-scale dimension: each bucket's ``resolve_scale.json`` (see
+    ``tcip_mcp.pipelines.measurement.mask_geometry.resolve_scale``) is reconciled the same
+    floor-from-disk way the count operating point and tile geometry are, so a dimensional CSV can no
+    longer ship stamped validated while the scale that produced every mm/cm/m number in it was never
+    checked against a real physical reference. A count trait (no dimensional value_key) never
+    acquires this dimension, the "operative" framing tile_size already uses: a scale was never
+    relevant to what is being delivered, so nothing here manufactures a refusal over it.
+    ``scale_capture_id`` scopes that reconciliation to one capture when the delivery's physical scale
+    is itself capture-scoped (a handheld standoff that can vary image to image).
     ``acknowledge_unvalidated`` ships a clearly-flagged provisional CSV stamped ``validated=false``.
 
     Args:
@@ -259,7 +272,10 @@ def export_aggregated_csv(
             operating point's on-disk validity, never raises it). Ignored, not a delivery path, when
             ``pred_dirs`` is empty, see the note above.
         pred_dirs: Prediction buckets to reconcile the count operating point's validity from (count
-            traits); floored against ``measurement_validated``.
+            traits); floored against ``measurement_validated``. Also the source buckets for the
+            physical-scale dimension when the results are dimensional.
+        scale_capture_id: The capture this delivery's physical scale must match, when the scale is
+            capture-scoped; a bucket's sidecar recording a different capture floors to unvalidated.
         acknowledge_unvalidated: Write an unvalidated phenotype as a flagged provisional CSV.
 
     Returns:
@@ -269,10 +285,14 @@ def export_aggregated_csv(
         VALIDATED_FALSE,
         check_delivery_gate,
         reconcile_operating_point_validity,
+        reconcile_scale_validity,
         reconcile_tile_size_validity,
     )
 
+    units = _resolve_units(trait_name, results)
+
     tile_recon = {"operative": False, "validated": None}
+    scale_recon = {"operative": False, "validated": None}
     if pred_dirs:
         # A count trait: the measurement validity is the count operating point's, read from the
         # buckets' sidecars and floored against any caller assertion (never trusted from the string).
@@ -281,6 +301,10 @@ def export_aggregated_csv(
         # per-image counts this per-plant value aggregates, so a tiled bucket whose tile edge has no
         # persisted or caller-stated basis is exactly as untrustworthy here as an uncalibrated conf.
         tile_recon = reconcile_tile_size_validity(pred_dirs)
+        if units:
+            # A dimensional value is actually present in what's being delivered: the physical scale
+            # that produced it is a real gating dimension, reconciled from the buckets' own sidecars.
+            scale_recon = reconcile_scale_validity(pred_dirs, capture_id=scale_capture_id)
     else:
         # No on-disk source exists for a continuous/ordinal trait's measurement validity today, a
         # bare caller-asserted `measurement_validated` string is never trusted on its own. The only
@@ -290,13 +314,13 @@ def export_aggregated_csv(
     flags: dict[str, str | None] = {"measurement": state}
     if tile_recon["operative"]:
         flags["tile_size"] = tile_recon["validated"]
+    if scale_recon["operative"]:
+        flags["scale"] = scale_recon["validated"]
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         raise ValueError(gate.reason)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-    units = _resolve_units(trait_name, results)
 
     stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
     # The single measurement_validated column must reflect the floor across every gated dimension:
