@@ -488,8 +488,7 @@ def resolve_operating_point(
     an explicit override, derived from the checkpoint's persisted training geometry, or a documented
     default, not inferred here from mere truthiness. A truthy ``tile_size`` is not proof of
     derivation: a caller with no persisted geometry and no explicit value still passes a concrete
-    fallback number, and without the source travelling separately this function used to stamp that
-    fabricated value ``"derived"`` unconditionally.
+    fallback number that ``tile_size_source`` must distinguish from a genuinely derived one.
 
     ``validated_reference`` is the stamp a *passing* held-out gate earns: ``VALIDATED_HELD_OUT`` when
     the records came from GT annotations (default), ``VALIDATED_REVIEW_CONFIRMED`` when they were
@@ -932,7 +931,7 @@ def resolve_classifier_operating_point(
     call are the trait's positive state, plus the instance's own GT geometry (required, see
     ``_as_record`` below for why a placeholder box cannot substitute for it).
 
-    Returns a dict **structurally distinct** from a ``ResolvedParam``/``ResolvedBundle``, never a
+    Returns a dict structurally distinct from a ``ResolvedParam``/``ResolvedBundle``, never a
     shape a generic writer could mistake for the count operating point's ``conf`` param and stamp
     into the wrong sidecar:
     ``{"validated_against", "passed", "failures", "sweep_data"}``. Callers write this into a
