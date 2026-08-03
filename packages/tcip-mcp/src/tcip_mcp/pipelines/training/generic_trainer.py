@@ -630,7 +630,7 @@ def train(
             ckpt = torch.load(resume_from, map_location=device, weights_only=False)
             missing = [k for k in ("model_state_dict", "optimizer_state_dict") if k not in ckpt]
             if missing:
-                # Fail loudly instead of silently restarting from scratch (the old behavior).
+                # Fail loudly instead of silently restarting from scratch.
                 raise ValueError(
                     f"Cannot resume from {resume_from}: checkpoint is missing {missing} "
                     "(a non-resumable checkpoint, e.g. model_best.pt, which never carries resume "
