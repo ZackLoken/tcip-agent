@@ -166,10 +166,12 @@ def derive_localization_tolerance_frac(
     return float(min(max(raw, lo), hi))
 
 
-def _char_sizes_from_boxes(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]]) -> list[float]:
+def char_sizes_from_boxes(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]]) -> list[float]:
     """``sqrt(w*h)`` per GT box across every image, filtered to positive sizes, the shared size
     measure ``derive_localization_kind`` and ``derive_iou_match_threshold`` both derive from, so
-    the two agree on what "this trait's characteristic object size" means by construction."""
+    the two agree on what "this trait's characteristic object size" means by construction. Boxes
+    are ``(x, y, w, h)`` tuples, not ``xyxy``: a caller holding ``xyxy`` boxes (``datasets.py``'s
+    ``TiledDetectionDataset``) converts before calling, rather than this function guessing a shape."""
     sizes = [
         (max(w, 0.0) * max(h, 0.0)) ** 0.5
         for boxes in gt_boxes_per_image for _, _, w, h in boxes
@@ -219,7 +221,7 @@ def derive_localization_kind(
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
     filtered to the trait's own class.
     """
-    sizes = _char_sizes_from_boxes(gt_boxes_per_image)
+    sizes = char_sizes_from_boxes(gt_boxes_per_image)
     if not sizes:
         return None
     import numpy as np
@@ -266,7 +268,7 @@ def derive_iou_match_threshold(
     ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image, already
     filtered to the trait's own class.
     """
-    sizes = _char_sizes_from_boxes(gt_boxes_per_image)
+    sizes = char_sizes_from_boxes(gt_boxes_per_image)
     if not sizes:
         return None
     import numpy as np
@@ -294,10 +296,10 @@ def derive_sliver_frac(
     noise (with 1-2 boxes the ratio is trivially ~1.0 regardless of the class's real variation), the
     caller stamps an honest default, never a derivation label on that number.
 
-    ``char_sizes`` is ``sqrt(w*h)`` per GT box (px), already filtered to the trait's own class.
+    ``char_sizes`` is ``sqrt(w*h)`` per GT box (px), already filtered to the trait's own class; see
+    :func:`char_sizes_from_boxes` for the shared computation callers derive it from.
     """
     import numpy as np
-    # char_sizes' caller, TiledDetectionDataset.__init__ (datasets.py), computes it independently of _char_sizes_from_boxes above; known duplication, see there.
     sizes = [float(s) for s in char_sizes if s > 0]
     if len(sizes) < min_samples:
         return None
