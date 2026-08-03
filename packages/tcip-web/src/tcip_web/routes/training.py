@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from tcip_web.paths import assert_path_allowed, assert_project_root_allowed, origin_allowed, safe_join
+from tcip_web.routes._metrics_common import read_metrics_file
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,26 @@ def get_run(run_id: str) -> dict:
     return check_training_status(run_id)
 
 
+@router.post("/runs/{run_id}/tensorboard")
+def launch_run_tensorboard(run_id: str) -> dict:
+    """Start (or reuse) a TensorBoard serving this run's log directory.
+
+    ``tensorboard_manager`` tracks its children in module-level process state, so a TensorBoard
+    started by the agent's own process is not one this process can hand the browser a URL for.
+    This route is how a TensorBoard exists from the GUI's side, whichever process trained the run.
+    """
+    from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
+    from tcip_mcp.tools.training_tools import check_training_status
+
+    status = check_training_status(run_id)
+    if status.get("error"):
+        raise HTTPException(404, status["error"])
+    output_dir = status.get("output_dir")
+    if not output_dir:
+        raise HTTPException(404, f"run has no output directory: {run_id}")
+    return launch_tensorboard(f"{output_dir}/tensorboard", run_id=run_id)
+
+
 @router.post("/runs/{run_id}/cancel")
 def cancel_run_route(run_id: str) -> dict:
     """Request graceful cancellation of a running run (stops at the next batch boundary).
@@ -201,19 +222,7 @@ def get_run_metrics(project_root: str, run_id: str) -> dict:
         metrics_path = _metrics_path(project_root, run_id)
     except ValueError:
         raise HTTPException(400, f"invalid run_id: {run_id}") from None
-    if not metrics_path.exists():
-        return {"metrics": [], "exists": False}
-    rows: list[dict] = []
-    with metrics_path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except Exception:
-                continue
-    return {"metrics": rows, "exists": True}
+    return read_metrics_file(metrics_path)
 
 
 class ExperimentComparePayload(BaseModel):
