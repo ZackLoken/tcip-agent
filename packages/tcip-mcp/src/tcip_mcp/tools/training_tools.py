@@ -648,6 +648,24 @@ class _AccessTrackingConfig(dict):
         return super().__contains__(key)
 
 
+def hpo_root(output_dir: str = "") -> Path:
+    """Where HPO sweeps live: ``output_dir`` when the caller named one, else ``.tcip/hpo``
+    under the platform state root.
+
+    The one resolver for that decision. Anything that has to find a sweep on disk (the
+    Tuning routes included) calls this rather than rebuilding the same default.
+    """
+    from tcip_mcp.project_paths import project_root
+
+    return Path(output_dir) if output_dir else project_root() / ".tcip" / "hpo"
+
+
+def sweep_dir(study_name: str, output_dir: str = "") -> Path:
+    """One sweep's own directory: its manifest, its ``trial_<id>`` dirs, and (because Ray
+    is handed ``storage_path=hpo_root`` and ``name=study_name``) Ray's experiment store."""
+    return hpo_root(output_dir) / study_name
+
+
 def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> None:
     """Train one HPO trial and ``report`` its composite objective (lower=better).
 
@@ -739,8 +757,12 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         try:
             from tcip_mcp.utils.atomic_io import atomic_write_json
             Path(trial_dir).mkdir(parents=True, exist_ok=True)
+            # trial_params is the sampled point itself, the only record of which axes this
+            # sweep actually varied (the merged config can't say which of its values came
+            # from the search space).
             atomic_write_json(Path(trial_dir) / "resolved_config.json",
-                              {**merged, "unconsumed_params": unconsumed})
+                              {**merged, "trial_params": dict(config),
+                               "unconsumed_params": unconsumed})
         except Exception:
             logger.warning("could not persist resolved_config.json for %s", trial_dir, exc_info=True)
         if unconsumed:
@@ -778,9 +800,13 @@ def run_hpo(
         searcher), ``pbt``, ``median``, or ``none`` to run every trial to completion.
 
     Trials minimize the composite selection objective (lower=better); each trains under the
-    base config's regime so the chosen hyperparameters transfer to ``launch_training``. Ray
-    persists trial results under ``output_dir`` (also the TensorBoard logdir), and a result
-    JSON is written alongside.
+    base config's regime so the chosen hyperparameters transfer to ``launch_training``.
+
+    Everything one sweep writes lands under ``<output_dir or .tcip/hpo>/<study_name>/``: a
+    ``manifest.json`` stamped ``running`` before the first trial starts (so a sweep is
+    visible while it runs, not only once it ends) and updated when the sweep ends, one
+    ``trial_<id>/`` directory per trial, and Ray's own experiment store (also the
+    TensorBoard logdir). The full result is written alongside as ``<study_name>.json``.
 
     Args:
         base_config: Base training config each trial modifies.
@@ -807,12 +833,28 @@ def run_hpo(
         param_space = get_default_space()
 
     import uuid
+    from datetime import datetime, timezone
 
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.utils.atomic_io import atomic_write_json
 
-    hpo_dir = Path(output_dir) if output_dir else project_root() / ".tcip" / "hpo"
+    hpo_dir = hpo_root(output_dir)
     hpo_dir.mkdir(parents=True, exist_ok=True)
     study_name = f"hpo_{uuid.uuid4().hex[:8]}"
+    sweep_root = sweep_dir(study_name, output_dir)
+    sweep_root.mkdir(parents=True, exist_ok=True)
+
+    manifest = {
+        "study_name": study_name,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running",
+        "n_trials": n_trials,
+        "search_alg": search_alg,
+        "scheduler": scheduler,
+        "param_space": param_space,
+        "sweep_dir": str(sweep_root),
+    }
+    manifest_path = sweep_root / "manifest.json"
+    atomic_write_json(manifest_path, manifest)
 
     def objective_fn(config: dict, report) -> None:
         try:
@@ -820,27 +862,34 @@ def run_hpo(
             tid = _tune.get_context().get_trial_id()
         except Exception:
             tid = uuid.uuid4().hex[:8]
-        _run_hpo_trial(config, report, base_config, str(hpo_dir / f"trial_{tid}"))
+        _run_hpo_trial(config, report, base_config, str(sweep_root / f"trial_{tid}"))
 
-    result = tune_search(
-        objective_fn=objective_fn,
-        param_space=param_space,
-        metric="objective",
-        mode="min",
-        num_samples=n_trials,
-        search_alg=search_alg,
-        scheduler=scheduler,
-        grace_period=grace_period,
-        reduction_factor=reduction_factor,
-        warm_start=warm_start,
-        baseline_params=baseline_params,
-        max_concurrent=max_concurrent,
-        storage_path=str(hpo_dir),
-        study_name=study_name,
-        resources_per_trial=resources_per_trial,
-    )
+    try:
+        result = tune_search(
+            objective_fn=objective_fn,
+            param_space=param_space,
+            metric="objective",
+            mode="min",
+            num_samples=n_trials,
+            search_alg=search_alg,
+            scheduler=scheduler,
+            grace_period=grace_period,
+            reduction_factor=reduction_factor,
+            warm_start=warm_start,
+            baseline_params=baseline_params,
+            max_concurrent=max_concurrent,
+            storage_path=str(hpo_dir),
+            study_name=study_name,
+            resources_per_trial=resources_per_trial,
+        )
+    except Exception as exc:
+        manifest.update(status="failed", error=str(exc),
+                        finished_at=datetime.now(timezone.utc).isoformat())
+        atomic_write_json(manifest_path, manifest)
+        raise
 
-    # Auto-launch TensorBoard on Ray's per-trial event files.
+    # Auto-launch TensorBoard on the sweep root: Ray's per-trial event files and each
+    # trial's own tensorboard dir both sit under it.
     tb_info: dict = {}
     tb_logdir = result.get("tensorboard_logdir")
     if tb_logdir:
@@ -851,9 +900,14 @@ def run_hpo(
             pass
 
     result["tensorboard"] = tb_info
-    # Durable result file (best-effort, a write hiccup must not sink a completed sweep).
+    manifest.update(
+        status="completed",
+        finished_at=datetime.now(timezone.utc).isoformat(),
+        result={k: result.get(k) for k in ("best_params", "best_value", "n_trials")},
+    )
+    # Durable result files (best-effort, a write hiccup must not sink a completed sweep).
     try:
-        from tcip_mcp.utils.atomic_io import atomic_write_json
+        atomic_write_json(manifest_path, manifest)
         atomic_write_json(hpo_dir / f"{study_name}.json", result)
     except Exception:
         logger.warning("could not persist hpo result json for %s", study_name, exc_info=True)
