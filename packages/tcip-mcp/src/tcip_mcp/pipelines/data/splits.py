@@ -278,11 +278,11 @@ def label_image_stems(
 ) -> tuple[list[str], dict[str, "Path | BandGroupRef"]]:
     """Stems with a readable per-image label file, one scan shared by every caller.
 
-    ``_calibrate_operating_point`` and ``force_redraw_cal_holdout_split`` each used to run their
-    own independent labels/images scan; a caller adding an images_dir got the stronger
-    labels-intersect-images stem universe, one that only globbed labels got the weaker (and
-    possibly stale, if an image was deleted/renamed) labels-only universe, the two could disagree
-    on what "the dataset's stems" are. This is the one implementation both call.
+    ``_calibrate_operating_point`` and ``force_redraw_cal_holdout_split`` both call this rather
+    than scanning independently, so they agree on what "the dataset's stems" are: a caller
+    passing ``images_dir`` gets the stronger labels-intersect-images stem universe, one that
+    only globs labels gets the weaker (and possibly stale, if an image was deleted/renamed)
+    labels-only universe.
 
     With ``images_dir`` omitted, returns every stem with a label file (``stem_to_image`` empty),
     the label-only universe, for a caller (e.g. a redraw with no images to check) that has no
