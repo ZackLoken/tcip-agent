@@ -8,8 +8,8 @@ stdlib ``pty`` on POSIX) with cwd = the repo root, so it loads ``CLAUDE.md`` /
 exactly like a terminal session. The shell (not claude) is the PTY's top process, so an
 in-TUI ``/exit`` drops back to a live prompt where the ``claude --resume <id>`` hint stays
 usable. Raw PTY bytes stream to xterm.js in the browser over a WebSocket; keystrokes
-stream back. No translation layer: fidelity is the point, and the translation layer is
-where the old chat's silent failures lived.
+stream back. No translation layer: fidelity is the point, and a translation layer is
+exactly where silent failures hide.
 
 This module owns the process/PTY concerns; the HTTP/WS surface is
 ``routes/terminal.py``. The spawn command is injectable via ``TCIP_TERMINAL_CMD`` so
@@ -150,7 +150,7 @@ def resolve_terminal_command() -> Optional[list[str]]:
     """Argv for the agent terminal, or ``None`` when unavailable.
 
     Order: an explicit ``TCIP_TERMINAL_CMD`` override (tests / power users), then the ``claude``
-    CLI on PATH. The real CLI is spawned **fenced** and **directly** (no wrapping shell), so
+    CLI on PATH. The real CLI is spawned fenced and directly (no wrapping shell), so
     ``/exit`` ends the process cleanly: ``--settings`` applies the breeder-lane profile (absolute
     hook paths), ``--add-dir`` grants the workspace, ``--permission-mode default`` surfaces
     un-allowed actions for approval.
