@@ -7,7 +7,7 @@ batch, and ONNX export.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Protocol
 
 import torch
 from PIL import Image
@@ -15,8 +15,10 @@ from PIL import Image
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import numpy as np
+
 from tcip_mcp.pipelines.model_build import build_model
-from tcip_mcp.pipelines.image_utils import BandGroupRef, load_image, pil_to_tensor
+from tcip_mcp.pipelines.image_utils import BandGroupRef, load_image, pad_tile, pil_to_tensor
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU, DEFAULT_TILE_SIZE
 
@@ -28,6 +30,21 @@ _DETECTION_TASKS = frozenset({"detection", "instance_seg"})
 
 
 from tcip_mcp.pipelines.image_utils import crop_pad_tile as _crop_pad_tile  # noqa: E402
+
+
+class WindowedRasterReader(Protocol):
+    """The read surface a huge-raster tile source must expose for :meth:`GenericPredictor.
+    predict_tiled_from_reader`: full-raster pixel dimensions, band count, and a windowed decode.
+    Duck-typed rather than importing a concrete reader here, so this stays usable for any raster
+    too large to load whole, not just :class:`OrthomosaicWindowReader`
+    (``pipelines/postprocessing/orthomosaic_mapping.py``, its one implementation today).
+    """
+
+    height: int
+    width: int
+    num_channels: int
+
+    def read_window(self, y0: int, y1: int, x0: int, x1: int) -> "np.ndarray": ...
 
 
 def _display_path(source: str | Path | BandGroupRef) -> str:
@@ -166,53 +183,49 @@ class GenericPredictor:
                 results.append(self._format_detection(out, disp, w, h))
         return results
 
-    @torch.no_grad()
-    def predict_tiled(
-        self, image_path: str | Path | BandGroupRef, tile_size: int = DEFAULT_TILE_SIZE,
-        overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU,
-        postprocess: str = "nms", *, require_masks: bool = True,
-    ) -> dict:
-        """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict ->
-        core-region reconstruction -> cross-tile merge -> full-image detections.
-
-        ``postprocess`` selects the cross-tile merge: ``"nms"`` suppresses overlaps, ``"nmm"``
-        unions boxes split across a seam. Falls back to :meth:`predict` for non-detection heads.
-        ``image_path`` may be a plain path/string or a :class:`BandGroupRef` (see :meth:`predict`).
-
-        ``require_masks`` (default True) is the instance_seg mask contract: this path is boxes-only,
-        so a caller that will consume masks is refused rather than handed a result whose masks
-        silently vanished. ``require_masks=False`` is the deliberate "boxes only, don't even try"
-        opt-out for a caller that never reads masks (``run_full_frame_evaluation`` scores boxes
-        against full-frame GT), the tiled result then carries no ``masks`` key for any task, so
-        there is no partial-mask channel either way.
+    def _refuse_untiled_masks(self, require_masks: bool) -> None:
+        """The instance_seg mask contract shared by both tiled entry points: reconstruct_core/
+        global_nms/global_merge (data/tiling.py) are boxes-only signatures, so threading masks
+        through tiling without a merge that also merges masks would create a new silent channel
+        (masks present untiled, silently absent tiled). Refuse loudly instead. Untiled instance_seg
+        (predict/predict_batch(tile=False)) is unaffected. ``require_masks=False`` is the
+        deliberate "boxes only, don't even try" opt-out for a caller that never reads masks.
         """
-        if self.task not in _DETECTION_TASKS:
-            return self.predict(image_path)
         if self.task == "instance_seg" and require_masks:
-            # reconstruct_core/global_nms/global_merge (data/tiling.py) are boxes-only signatures.
-            # Threading masks through tiling without a merge that also merges masks would create a
-            # new silent channel (masks present untiled, silently absent tiled), refuse loudly
-            # instead. Untiled instance_seg (predict/predict_batch(tile=False)) is unaffected.
             raise NotImplementedError(
-                "predict_tiled does not yet thread masks through cross-tile reconstruction/merge "
+                "tiled inference does not yet thread masks through cross-tile reconstruction/merge "
                 "for instance_seg. For masks, call predict() / predict_batch(tile=False), or from "
                 "the MCP doors run_inference(..., tile=False) / export_predictions(..., tile=False). "
                 "For boxes-only tiled inference, pass require_masks=False deliberately."
             )
 
+    def _tiled_infer_core(
+        self, height: int, width: int, get_tile: Callable[[int, int], object],
+        tile_size: int, overlap: float, tile_batch_size: int, global_nms_iou: float,
+        postprocess: str,
+    ) -> dict:
+        """Shared tiling/batching/reconstruction loop behind both :meth:`predict_tiled` (a fully
+        decoded in-memory image) and :meth:`predict_tiled_from_reader` (a windowed raster reader):
+        build tile positions from ``(height, width)``, pull each tile's pixels via ``get_tile(tile_x,
+        tile_y)`` (already cropped-and-padded to ``tile_size`` x ``tile_size``, PIL image or ``[H,
+        W, C]`` array), batch them through the model, then ``reconstruct_core``/``global_nms``/
+        ``global_merge``. The two callers differ only in how ``get_tile`` sources its pixels; this
+        loop is not duplicated between them.
+
+        Returns ``width``/``height``/``boxes``/``scores``/``labels``/``count``/``tiles``; the
+        caller stamps its own ``image`` field (a display path or a windowed reader's own label).
+        """
         import numpy as np
         from tcip_mcp.pipelines.data.tiling import (
             compute_stride, tile_positions, reconstruct_core, global_nms, global_merge,
         )
 
-        img = load_image(image_path, self.in_chans)
-        w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
         stride = compute_stride(tile_size, overlap)
-        positions = tile_positions(h, w, tile_size, stride)
+        positions = tile_positions(height, width, tile_size, stride)
 
         min_size = ((self.model_source or {}).get("builder_kwargs") or {}).get("min_size")
         if min_size and abs(int(min_size) - tile_size) > tile_size:
-            logger.warning("predict_tiled: model min_size=%s differs greatly from tile_size=%s "
+            logger.warning("tiled inference: model min_size=%s differs greatly from tile_size=%s "
                            "(tiles will be rescaled).", min_size, tile_size)
 
         per_tile_boxes, per_tile_scores, per_tile_labels, tile_info = [], [], [], []
@@ -233,9 +246,10 @@ class GenericPredictor:
             batch_meta.clear()
 
         for tile_x, tile_y in positions:
-            crop = _crop_pad_tile(img, tile_x, tile_y, tile_size, w, h)
+            crop = get_tile(tile_x, tile_y)
             batch_tiles.append(pil_to_tensor(crop).to(self.device))
-            batch_meta.append({"tile_x": tile_x, "tile_y": tile_y, "original_width": w, "original_height": h})
+            batch_meta.append({"tile_x": tile_x, "tile_y": tile_y,
+                               "original_width": width, "original_height": height})
             if len(batch_tiles) >= tile_batch_size:
                 _flush()
         _flush()
@@ -257,15 +271,104 @@ class GenericPredictor:
             boxes, scores, labels = boxes[top], scores[top], labels[top]
 
         return {
-            "image": _display_path(image_path),
-            "width": w,
-            "height": h,
+            "width": width,
+            "height": height,
             "boxes": boxes.tolist(),
             "scores": scores.tolist(),
             "labels": labels.tolist(),
             "count": int(len(boxes)),
             "tiles": len(positions),
         }
+
+    @torch.no_grad()
+    def predict_tiled(
+        self, image_path: str | Path | BandGroupRef, tile_size: int = DEFAULT_TILE_SIZE,
+        overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU,
+        postprocess: str = "nms", *, require_masks: bool = True,
+    ) -> dict:
+        """Tiled (SAHI-style) detection: sliding-window tiles -> per-tile predict ->
+        core-region reconstruction -> cross-tile merge -> full-image detections.
+
+        ``postprocess`` selects the cross-tile merge: ``"nms"`` suppresses overlaps, ``"nmm"``
+        unions boxes split across a seam. Falls back to :meth:`predict` for non-detection heads.
+        ``image_path`` may be a plain path/string or a :class:`BandGroupRef` (see :meth:`predict`).
+
+        ``require_masks`` (default True) is the instance_seg mask contract: this path is boxes-only,
+        so a caller that will consume masks is refused rather than handed a result whose masks
+        silently vanished. ``require_masks=False`` is the deliberate "boxes only, don't even try"
+        opt-out for a caller that never reads masks (``run_full_frame_evaluation`` scores boxes
+        against full-frame GT), the tiled result then carries no ``masks`` key for any task, so
+        there is no partial-mask channel either way.
+
+        The whole image is decoded into memory once (via ``load_image``) before tiling; for a
+        raster too large for that, use :meth:`predict_tiled_from_reader`.
+        """
+        if self.task not in _DETECTION_TASKS:
+            return self.predict(image_path)
+        self._refuse_untiled_masks(require_masks)
+
+        img = load_image(image_path, self.in_chans)
+        w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
+
+        def _get_tile(tile_x: int, tile_y: int):
+            return _crop_pad_tile(img, tile_x, tile_y, tile_size, w, h)
+
+        result = self._tiled_infer_core(
+            h, w, _get_tile, tile_size, overlap, tile_batch_size, global_nms_iou, postprocess)
+        result["image"] = _display_path(image_path)
+        return result
+
+    @torch.no_grad()
+    def predict_tiled_from_reader(
+        self, reader: WindowedRasterReader, tile_size: int = DEFAULT_TILE_SIZE,
+        overlap: float = 0.2, tile_batch_size: int = 96, global_nms_iou: float = DEFAULT_NMS_IOU,
+        postprocess: str = "nms", *, require_masks: bool = True, source_label: str = "",
+    ) -> dict:
+        """The same tiled (SAHI-style) detection as :meth:`predict_tiled`, but sources each tile's
+        pixels from a windowed reader instead of a fully decoded in-memory image, so a raster too
+        large to load whole (a multi-gigabyte orthomosaic) never has to be.
+
+        ``reader`` is duck-typed (see :class:`WindowedRasterReader`): anything exposing ``.height``,
+        ``.width``, ``.num_channels``, and ``.read_window(y0, y1, x0, x1) -> ndarray[H, W, C]``
+        works, most directly ``OrthomosaicWindowReader``
+        (``pipelines/postprocessing/orthomosaic_mapping.py``), but this method itself has no
+        georeferencing concern and no import of that module: any huge non-georeferenced raster hits
+        the same memory problem and can reuse this.
+
+        ``reader.num_channels`` must equal this model's ``in_chans``; a mismatch raises ``ValueError``
+        rather than silently truncating or zero-padding the band count the model was trained on.
+        Non-detection tasks raise ``ValueError`` too: unlike :meth:`predict_tiled`, there is no
+        untiled ``predict()`` fallback to fall back to, since the whole point of this method is that
+        the raster cannot be decoded whole.
+
+        Returns the same shape as :meth:`predict_tiled` (full-raster pixel space); ``image`` is
+        ``source_label`` if given, else ``""`` (a windowed reader carries no single on-disk path the
+        caller doesn't already know).
+        """
+        if self.task not in _DETECTION_TASKS:
+            raise ValueError(
+                f"predict_tiled_from_reader only supports detection/instance_seg tasks, got "
+                f"{self.task!r}: there is no untiled predict() fallback for a raster too large to "
+                "decode whole."
+            )
+        if reader.num_channels != self.in_chans:
+            raise ValueError(
+                f"raster has {reader.num_channels} channel(s) but the model expects "
+                f"in_chans={self.in_chans}; refusing to silently truncate/pad the band count the "
+                "model was trained on."
+            )
+        self._refuse_untiled_masks(require_masks)
+
+        def _get_tile(tile_x: int, tile_y: int):
+            y0, y1 = tile_y, min(tile_y + tile_size, reader.height)
+            x0, x1 = tile_x, min(tile_x + tile_size, reader.width)
+            return pad_tile(reader.read_window(y0, y1, x0, x1), tile_size)
+
+        result = self._tiled_infer_core(
+            reader.height, reader.width, _get_tile, tile_size, overlap, tile_batch_size,
+            global_nms_iou, postprocess)
+        result["image"] = source_label
+        return result
 
     def export_onnx(self, output_path: str, opset: int = 17) -> str:
         """Export model to ONNX format with dynamic batch size."""
