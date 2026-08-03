@@ -65,6 +65,10 @@ class DatasetTree(BaseModel):
     # date with no labels for a subject doesn't offer it (which would open an empty canvas).
     subjects_by_date: dict[str, list[str]]
     models_by_date: dict[str, list[str]]
+    # Where each (date, model)'s predictions live, straight from ``dataset_layout.prediction_dir``.
+    # The GUI indexes this instead of reassembling the layout convention itself, so a client can
+    # never point a delivery at a path no writer produces.
+    prediction_dirs: dict[str, dict[str, str]]
 
 
 def _list_children(p: Path) -> list[str]:
@@ -135,6 +139,9 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
         model_names=model_names,
         subjects_by_date={d: subjects_with_labels(root, d) for d in dates},
         models_by_date={d: models_with_predictions(root, d) for d in dates},
+        prediction_dirs={
+            d: {m: str(prediction_dir(root, m, d)) for m in model_names} for d in dates
+        },
     )
     _tree_cache[key] = (signature, tree)
     _tree_cache.move_to_end(key)
