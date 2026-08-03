@@ -578,16 +578,16 @@ def push_panel_data(
     returns ``{"status": "no_subscribers"}`` so the agent can proceed.
 
     Args:
-        panel: Target panel, 'annotate', 'review', 'training', 'tuning', 'inference', 'results',
-            or 'app' (app-level events like annotate_focus / review_focus / project_changed).
-        event_type: Event type the panel switches on (e.g. 'load_matches', 'metrics_update').
+        panel: Target panel: one per GUI tab, or 'app' for app-level events like annotate_focus /
+            review_focus / project_changed. See ``web_client.VALID_PANELS`` for the current set.
+        event_type: Event type the panel switches on (e.g. 'load_matches', 'metrics_update', or
+            'banner', whose ``data['text']`` the GUI shows as a quiet note above that tab).
         data: Arbitrary JSON data payload.
     """
-    from tcip_mcp.web_client import post_panel_event
+    from tcip_mcp.web_client import VALID_PANELS, post_panel_event
 
-    valid_panels = {"app", "annotate", "review", "training", "tuning", "inference", "results"}
-    if panel not in valid_panels:
-        return {"error": f"Unknown panel: {panel}. Valid: {sorted(valid_panels)}"}
+    if panel not in VALID_PANELS:
+        return {"error": f"Unknown panel: {panel}. Valid: {sorted(VALID_PANELS)}"}
 
     result = post_panel_event(panel, event_type, data)
     result.setdefault("panel", panel)
