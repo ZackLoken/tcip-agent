@@ -331,7 +331,7 @@ class GenericPredictor:
         (``run_full_frame_evaluation`` scores boxes against full-frame GT) can pass
         ``require_masks=False`` to skip it deliberately; the result then carries no ``masks`` key
         for any task. With ``require_masks=True`` and ``instance_seg``, the returned ``masks`` are
-        **not** the untiled result's dense ``[H, W]`` full-image arrays: each is a small tile-local
+        not the untiled result's dense ``[H, W]`` full-image arrays: each is a small tile-local
         patch plus its full-image-space offset (``{"mask_patch", "offset_x", "offset_y"}``, see
         :meth:`_tiled_infer_core`), the shape a source raster too large to hold one full-size mask
         per detection requires; a consumer must not assume the two ``masks`` shapes are
