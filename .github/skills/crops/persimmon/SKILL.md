@@ -7,31 +7,31 @@ description: "Diospyros virginiana (American persimmon; cold-hardy 90-chromosome
 
 ## Identity
 
-**Species.** The Savanna Institute Upper-Midwest program is built on cold-hardy named
-cultivars of the northern **90-chromosome (hexaploid) race of _Diospyros virginiana_**
+Species. The Savanna Institute Upper-Midwest program is built on cold-hardy named
+cultivars of the northern 90-chromosome (hexaploid) race of _Diospyros virginiana_
 (American / common persimmon). Pure Asian persimmon (_D. kaki_) and interspecific
 _D. virginiana × D. kaki_ hybrids exist commercially but are generally too cold-tender /
 long-season for the region; treat them as not present unless the breeder confirms (see
 "Needs expert confirmation").
 
-**Growth form.** Single-trunked, slow-growing deciduous tree (30–80 ft tall, 20–35 ft wide
+Growth form. Single-trunked, slow-growing deciduous tree (30–80 ft tall, 20–35 ft wide
 at maturity; managed shorter in breeding orchards / silvopasture). Distinctive thick
-dark-grey blocky "alligator" / checkerboard bark. Prone to **root suckering**: a mother
+dark-grey blocky "alligator" / checkerboard bark. Prone to root suckering: a mother
 tree can carry a multi-stem clonal clump, so a "plant" in imagery may be a clonal cluster,
 not one stem. Grown as an orchard / silvopasture tree, not a coppiced hedgerow shrub.
 
-**Reproductive biology (imaging-relevant).** Functionally **dioecious**: male and female
+Reproductive biology (imaging-relevant). Functionally dioecious: male and female
 flowers are borne on separate trees. A few trees are monoecious or perfect-flowered, and a
 tree's expressed sex can shift year to year, so sex cannot be assumed fixed. Insect-
 pollinated (bees), not wind-pollinated. Critically, the 90-chromosome race sets fruit
-**parthenocarpically**: female trees produce full, essentially seedless fruit with no
+parthenocarpically: female trees produce full, essentially seedless fruit with no
 pollination, so fruiting marks a female tree, but seed presence/absence is a genetic /
 ploidy signal rather than a pollination readout.
 
 ## Trait authority
 
-**crops.yml is the trait authority (20 persimmon traits). Verify every trait there; never
-assert one it does not list.** This skill grounds the imagery; it does not redefine the
+crops.yml is the trait authority (20 persimmon traits). Verify every trait there; never
+assert one it does not list. This skill grounds the imagery; it does not redefine the
 vocabulary. Persimmon is the sparsest TCIP crop and carries only the single aggregate
 `overall_disease` trait, no species-specific disease columns.
 
@@ -40,7 +40,7 @@ vocabulary. Persimmon is the sparsest TCIP crop and carries only the single aggr
 This partition replaces any fixed sensor→trait table. Which traits can come from pixels at
 all is a science fact, not a config choice.
 
-**Field-imageable** (measurable from imagery, given valid derivation and validation):
+Field-imageable (measurable from imagery, given valid derivation and validation):
 `bloom_50per_date`, `fruit_ripe_50per_date`, `cropload`, `fruit_drop`, `calyx`,
 `fruit_diameter`, `fruit_height`, `sex`, `plant_height`, `dbh`, `overall_disease`,
 `fruit_set`.
@@ -52,7 +52,7 @@ all is a science fact, not a config choice.
 - `fruit_set` is a flower→fruit conversion ratio needing paired counts over time (see
   integrity note); it may in practice be a hand-count field observation; confirm.
 
-**Lab / destructive** (cannot come from external imagery, internal, or requires a cut /
+Lab / destructive (cannot come from external imagery, internal, or requires a cut /
 assayed fruit subsample): `seeds`, `ploidy`, `astringency`, `flavor_rating`,
 `soluble_tannins`, `total_tannins`, `fruitsample_n`, `fruitsample_weight`. Seeds are
 internal (visible only in a cut fruit); tannins are spectrophotometric assays on pulp; the
@@ -60,9 +60,9 @@ sensory and quality traits ride on a destructive fruit subsample.
 
 ## Phenophase calendar
 
-Timing is **approximate, region- and year-dependent**: the platform derives phenophase
+Timing is approximate, region- and year-dependent: the platform derives phenophase
 dates from the data in hand and must not freeze these placeholders. The two date traits are
-50%-milestone dates; **defer the bloom-fraction / crossing math to the `phenology` skill.**
+50%-milestone dates; defer the bloom-fraction / crossing math to the `phenology` skill.
 
 | Phenophase | Approx. (Upper Midwest) | Imagery | crops.yml date/other traits |
 |---|---|---|---|
@@ -71,48 +71,48 @@ dates from the data in hand and must not freeze these placeholders. The two date
 | Bloom | late May–June | Small inconspicuous cream/greenish flowers, easily hidden in foliage; sex is most directly read here | `bloom_50per_date`, `sex`, `fruit_set` |
 | Fruit development (green) | June–Sept | Green hard astringent fruit enlarging, each with an enlarging 4-lobed green calyx; heavy occlusion | `cropload`, `fruit_set` |
 | Ripening / harvest | Sept–Nov, often post-frost | Fruit yellow → orange → deep orange/red and softens; window for sizing, cropload, drop, and destructive sampling | `fruit_ripe_50per_date`, `cropload`, `fruit_drop`, `calyx`, `fruit_diameter`, `fruit_height`, `astringency`, `flavor_rating`, `seeds`, `soluble_tannins`, `total_tannins`, `fruitsample_n`, `fruitsample_weight` |
-| Leaf senescence / drop | Oct–Nov | Leaves yellow to reddish-purple then drop; **fruit persists on a near-bare canopy**, a valuable low-occlusion window for cropload / fruit_drop | `fruit_drop`, `cropload` |
+| Leaf senescence / drop | Oct–Nov | Leaves yellow to reddish-purple then drop; fruit persists on a near-bare canopy, a valuable low-occlusion window for cropload / fruit_drop | `fruit_drop`, `cropload` |
 
 ## Key structures + imagery appearance
 
-- **Trunk / bark**: thick dark grey-black bark furrowed into small square blocks
+- Trunk / bark: thick dark grey-black bark furrowed into small square blocks
   ("alligator" pattern); a strong species-ID cue and the reference for locating the DBH
   plane (4.5 ft / 1.37 m; mature trunks ~15–45 cm across). Main stem, ground to canopy.
-- **Leaf**: simple, alternate, broadly oblong/ovate, pointed, glossy dark green above,
+- Leaf: simple, alternate, broadly oblong/ovate, pointed, glossy dark green above,
   paler below; fall color yellow to reddish-purple. 5–15 cm long. Throughout canopy.
-- **Male flower**: small tubular cream/greenish-yellow flowers in clusters of 2–3, ~8–13
+- Male flower: small tubular cream/greenish-yellow flowers in clusters of 2–3, ~8–13
   mm; only on male trees; never develop into fruit. Leaf axils on current-season shoots.
-- **Female flower**: solitary, larger (~15–20 mm), urn- / bell-shaped cream/greenish with
+- Female flower: solitary, larger (~15–20 mm), urn- / bell-shaped cream/greenish with
   4 recurved petals and a prominent ovary; on female trees; develops into fruit
   (parthenocarpically in 90-chromosome cultivars). Solitary in leaf axils.
-- **Fruit (berry)**: globular to slightly flattened fleshy berry, ~2.5–4 cm diameter
+- Fruit (berry): globular to slightly flattened fleshy berry, ~2.5–4 cm diameter
   (smaller than _D. kaki_); green → yellow → pale orange → deep orange/red and soft at
   ripeness; often a glaucous waxy bloom; small persistent style "beak" at the apex. One
   fruit per pedicel; persists after leaf drop.
-- **Calyx**: persistent, 4-lobed, leaf-like green (browning at senescence) structure
+- Calyx: persistent, 4-lobed, leaf-like green (browning at senescence) structure
   clasping the base of every fruit (opposite the beak); its retention is the `calyx` trait.
-- **Seed**: flattened, oblong, glossy dark-brown, ~1.5–2 cm; absent or few in
-  parthenocarpic cultivar fruit; **internal, only visible in a cut fruit (destructive).**
+- Seed: flattened, oblong, glossy dark-brown, ~1.5–2 cm; absent or few in
+  parthenocarpic cultivar fruit; internal, only visible in a cut fruit (destructive).
 
 ## Diseases / pests
 
 All persimmon disease/pest pressure maps to the single aggregate `overall_disease` rating;
 there are no species-specific disease traits in crops.yml.
 
-- **Persimmon wilt (Cephalosporium wilt)**: _Nalanthamala diospyri_ (syn. _Acremonium /
+- Persimmon wilt (Cephalosporium wilt): _Nalanthamala diospyri_ (syn. _Acremonium /
   Cephalosporium diospyri_), a vascular wilt fungus and the most serious disease of
   _D. virginiana_. Imagery: sudden wilting, top-down defoliation, branch dieback, standing
-  dead trees. The diagnostic black vascular streaking is **internal and not field-
-  imageable** (requires cutting a stem); external imagery shows only canopy collapse.
-- **Persimmon leaf spot**: fungal complex (_Cercospora_ / _Colletotrichum_ /
+  dead trees. The diagnostic black vascular streaking is internal and not field-
+  imageable (requires cutting a stem); external imagery shows only canopy collapse.
+- Persimmon leaf spot: fungal complex (_Cercospora_ / _Colletotrichum_ /
   _Pseudocercospora_ spp.). Dark brown-to-black angular/rounded leaf spots, sometimes
   coalescing, causing premature (Aug–Sept) defoliation. Ground / close-range RGB.
-- **Anthracnose**: _Colletotrichum_ spp. Dark sunken lesions on leaves and shoots; black
+- Anthracnose: _Colletotrichum_ spp. Dark sunken lesions on leaves and shoots; black
   irregular sunken spots on fruit. Foliar and fruit symptoms are ground-RGB imageable.
-- **Caterpillar / webworm defoliators** (incl. fall webworm, _Hyphantria cunea_): silken
+- Caterpillar / webworm defoliators (incl. fall webworm, _Hyphantria cunea_): silken
   webbing / tents over branch tips with skeletonized leaves and localized defoliation;
   visible as pale silk masses in the canopy.
-- **Persimmon psyllid**: _Trioza diospyri_. Curling, rolling, puckering of new terminal
+- Persimmon psyllid: _Trioza diospyri_. Curling, rolling, puckering of new terminal
   leaves; distorted shoot tips. Lower-confidence for this region.
 
 ## Annotation challenges
@@ -120,35 +120,35 @@ there are no species-specific disease traits in crops.yml.
 Defer annotation mechanics and label / format I/O to the `annotation` skill; the crop-
 specific difficulties are:
 
-- **Canopy occlusion**: dense foliage hides much of the fruit, so a visible-fruit count
-  undercounts. The **leaf-off / post-senescence window** (fruit persists on a bare canopy)
+- Canopy occlusion: dense foliage hides much of the fruit, so a visible-fruit count
+  undercounts. The leaf-off / post-senescence window (fruit persists on a bare canopy)
   is far less occluded; prefer it for cropload and drop.
-- **Small, inconspicuous flowers**, and male vs female flowers differ (clustered tubular vs
+- Small, inconspicuous flowers, and male vs female flowers differ (clustered tubular vs
   solitary urn-shaped), making bloom and sex harder than for showy-flowered crops.
-- **Clonal sucker clumps**: a mother tree plus root suckers can read as one multi-stem
+- Clonal sucker clumps: a mother tree plus root suckers can read as one multi-stem
   "plant"; be explicit about the plant unit before mapping images to plants.
-- **Calyx clasps the fruit base** and the style beak sits opposite it; the two are easily
+- Calyx clasps the fruit base and the style beak sits opposite it; the two are easily
   confused at low resolution.
 
 ## Measurement integrity
 
-Per the **CLAUDE.md** measurement-integrity invariant (never a geometric/pixel proxy; validate
+Per the CLAUDE.md measurement-integrity invariant (never a geometric/pixel proxy; validate
 against a reference sized to the trait: GT annotations, or a breeder-confirmed sample of the
 model's own outputs (review-confirmation), before any result, not dense GT for every trait; see
 the catkin-elongation cautionary tale there). Persimmon-specific traps:
 
-- `fruit_ripe_50per_date`: American persimmon loses astringency only on **softening**
-  (often post-frost), which **lags surface color**. An orange-pixel threshold calls hard,
+- `fruit_ripe_50per_date`: American persimmon loses astringency only on softening
+  (often post-frost), which lags surface color. An orange-pixel threshold calls hard,
   astringent fruit "ripe." Validate ripeness against expert-scored eating stage.
-- `fruit_set`: a flower→fruit conversion **ratio** needing paired flower-at-bloom and
-  fruit-at-set counts on the **same** trees over time; a single-date fruit count is not
+- `fruit_set`: a flower→fruit conversion ratio needing paired flower-at-bloom and
+  fruit-at-set counts on the same trees over time; a single-date fruit count is not
   fruit set, and parthenocarpy further decouples it from pollination.
 - `cropload` / `fruit_drop`: a visible-fruit bbox count is not total production
   (detectability must be modeled); `fruit_drop` requires partitioning on-tree vs
   ground / dropped fruit, which a bbox count does not give.
-- `calyx`: a breeder-defined ordinal **retention** rating; a calyx bounding box or
+- `calyx`: a breeder-defined ordinal retention rating; a calyx bounding box or
   presence flag is not the retention score.
-- `sex`: fruiting identifies a female tree, but **absence of fruit does not prove male**
+- `sex`: fruiting identifies a female tree, but absence of fruit does not prove male
   (could be an unpollinated / immature / off-year female or a monoecious tree); do not infer
   sex from fruit presence without flower-level or multi-year evidence.
 - `fruit_diameter` / `fruit_height`: valid in mm only with a real in-frame scale reference
