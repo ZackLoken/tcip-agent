@@ -181,15 +181,22 @@ def prioritize_review_queue(
         return {"error": f"torch/torchvision unavailable: {e}"}
 
     if strategy == "confidence_triage":
-        from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue
+        from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue, unscoreable
 
         if not sources:
             return {"strategy": strategy, "total_images": 0, "reviewed_skipped": reviewed_skipped,
                     "auto_accepted": 0, "needs_review": 0, "review_images": [],
-                    "auto_accepted_images": []}
+                    "unscoreable_images": [], "auto_accepted_images": []}
         predictor = build_predictor(checkpoint_path)
         predictions = predictor.predict_batch(sources)
         needs_review = review_queue(predictions, low=low, high=high)
+        # A prediction with no confidence-bearing signal at all (e.g. a regression head's point
+        # estimate) can't be partitioned by auto_accept/review_queue on confidence; route it into
+        # review explicitly rather than let it silently vanish from every output, and tag it
+        # distinctly from a genuinely medium-confidence review item so a caller can tell why it's
+        # here.
+        unscoreable_preds = unscoreable(predictions)
+        all_review = needs_review + unscoreable_preds
         # Auto-accept turns predictions into GT. Refuse to do so at a pinned threshold: the
         # threshold must be derived from the model's validated conf distribution and breeder
         # spot-checked. With no explicit (confirmed) threshold, accept nothing and say why.
@@ -203,8 +210,9 @@ def prioritize_review_queue(
                     "auto_threshold=None: auto-accepting predictions as GT requires a threshold "
                     "derived from the model's validated confidence distribution and confirmed by a "
                     "breeder spot-check; pass auto_threshold explicitly once confirmed."),
-                "needs_review": len(needs_review),
-                "review_images": [r.get("image", "") for r in needs_review],
+                "needs_review": len(all_review),
+                "review_images": [r.get("image", "") for r in all_review],
+                "unscoreable_images": [p.get("image", "") for p in unscoreable_preds],
                 "auto_accepted_images": [],
             }
         accepted = auto_accept(predictions, threshold=auto_threshold)
@@ -216,8 +224,9 @@ def prioritize_review_queue(
             "auto_accept_requires_breeder_confirmation": (
                 "auto-accepted labels are GT only if this threshold was breeder-confirmed on a "
                 "high-conf sample"),
-            "needs_review": len(needs_review),
-            "review_images": [r.get("image", "") for r in needs_review],
+            "needs_review": len(all_review),
+            "review_images": [r.get("image", "") for r in all_review],
+            "unscoreable_images": [p.get("image", "") for p in unscoreable_preds],
             "auto_accepted_images": [a.get("image", "") for a in accepted],
         }
 
