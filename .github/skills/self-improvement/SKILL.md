@@ -29,20 +29,20 @@ The loop is three live, audited tools, no separate journal file:
 Call `claude_reports` when you notice any of these. One line is enough in the moment; the free-text
 `detail` matters far more than the category.
 
-- **Pushback / correction**: "no, do it this way", "don't do X", "actually it's Y". Call
+- Pushback / correction: "no, do it this way", "don't do X", "actually it's Y". Call
   `claude_reports` with `user_disagreement=True` for these; it's a separate signal from
   `category`, so a later distill pass can pull every place the owner and you disagreed out of the
   pile on its own, rather than mixed into general friction.
-- **Repetition**: you're told the same thing a second time.
-- **Wrong assumption**: something you assumed about the data, domain, or tools turned out false
+- Repetition: you're told the same thing a second time.
+- Wrong assumption: something you assumed about the data, domain, or tools turned out false
   (e.g. "GPS is too coarse for per-plant" when the plant grid is RTK-accurate).
-- **Re-discovery**: you spent real effort finding machinery that already existed. If you had to
+- Re-discovery: you spent real effort finding machinery that already existed. If you had to
   dig, so will the next session.
-- **Near-reinvention**: you were about to write something the toolkit already does.
-- **Missing / hard tool**: a capability that should exist but is buried in a web route, a script,
+- Near-reinvention: you were about to write something the toolkit already does.
+- Missing / hard tool: a capability that should exist but is buried in a web route, a script,
   or nowhere.
-- **Environment / setup friction**: a missing dependency, a stale path, a slow default.
-- **A blocked or failed mandated action**: a ritual call that errored, a guard that denied a
+- Environment / setup friction: a missing dependency, a stale path, a slow default.
+- A blocked or failed mandated action: a ritual call that errored, a guard that denied a
   read-only command, `doctor.py` refusing to run. Never skip one silently.
 
 Over-report. A report is cheap; a silent guess is not.
@@ -52,23 +52,23 @@ Over-report. A report is cheap; a silent guess is not.
 At the end of substantial work, call `project_retrospective`. Write what a future session working
 this project would need, and be honest about what failed; that is the most useful part.
 
-- **What you measured about this dataset**: object scale and elongation from the GT, capture
+- What you measured about this dataset: object scale and elongation from the GT, capture
   cadence and missing dates, class imbalance, where the operating point resolved and on what
   reference, what the validation gate said.
-- **What you tried that did not work**: dead ends, approaches abandoned and why. This is what
+- What you tried that did not work: dead ends, approaches abandoned and why. This is what
   stops the next session repeating them.
-- **Assumptions that turned out wrong.**
-- **Domain questions for the breeder**: anything about what a trait *means* that you could not
+- Assumptions that turned out wrong.
+- Domain questions for the breeder: anything about what a trait *means* that you could not
   settle from `crops.yml`. Trait semantics are the expert's to confirm; surface the question,
   never invent the answer.
-- **Tools that were missing or unusable.**
+- Tools that were missing or unusable.
 
 ### What must not go in a retrospective
 
-- **A reusable pipeline shape.** A decomposition that worked here becomes a recipe for a problem it
+- A reusable pipeline shape. A decomposition that worked here becomes a recipe for a problem it
   was never measured against, the ceiling this platform exists to avoid. Record what you *measured*
   that led you to a shape, not the shape.
-- **An inventory of existing machinery.** It goes stale the first time the source moves. Read the
+- An inventory of existing machinery. It goes stale the first time the source moves. Read the
   source, or run `scripts/list_tools.py`.
 
 ## Distill: closing the loop toward a platform change
