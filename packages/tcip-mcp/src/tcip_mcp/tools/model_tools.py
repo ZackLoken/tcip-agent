@@ -106,8 +106,8 @@ def select_best_model(project_path: str = "", metric: str = "") -> dict:
         return {"error": "No models registered"}
     if not metric:
         return {
-            "error": "metric is required, select_best_model no longer defaults to 'val_map50' "
-                     "(a labeled comparability metric, not necessarily what governs a trait's "
+            "error": "metric is required: select_best_model has no default (a labeled "
+                     "comparability metric like val_map50 doesn't necessarily govern a trait's "
                      "phenotype). Pick one of available_metrics.",
             "available_metrics": _labeled_available_metrics(models),
             "n_models": len(models),
