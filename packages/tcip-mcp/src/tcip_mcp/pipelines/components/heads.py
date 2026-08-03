@@ -147,17 +147,25 @@ class RegressionHead(BaseHead):
     task_type = "regression"
     default_loss = "smooth_l1"
 
-    def __init__(self, in_channels: int, dropout: float = 0.0) -> None:
+    def __init__(self, in_channels: int, dropout: float = 0.0, loss: str | None = None) -> None:
         super().__init__()
         self.fc = nn.Sequential(
             nn.Dropout(dropout) if dropout > 0 else nn.Identity(),
             nn.Linear(in_channels, 1),
         )
+        # Opt-in registry loss (e.g. huber) as a submodule, same pattern as ClassificationHead.
+        # None -> today's smooth_l1 behavior.
+        self._loss = None
+        if loss is not None:
+            from tcip_mcp.pipelines.components.losses import build_loss
+            self._loss = build_loss(loss)
 
     def forward(self, features: torch.Tensor, targets: Any = None) -> dict[str, torch.Tensor]:
         return {"values": self.fc(features).squeeze(-1)}
 
     def compute_loss(self, outputs, targets):
+        if self._loss is not None:
+            return {"reg_loss": self._loss(outputs["values"], targets["values"])}
         return {"reg_loss": F.smooth_l1_loss(outputs["values"], targets["values"])}
 
     def decode(self, outputs):
