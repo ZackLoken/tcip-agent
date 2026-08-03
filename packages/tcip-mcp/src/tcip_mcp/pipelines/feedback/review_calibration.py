@@ -228,8 +228,7 @@ def review_to_records(
         (the route confirmed the bucket held zero predictions for this image, so there was nothing
         to individually adjudicate and Complete is itself the confirming act), never for a bulk-
         accept of a populated image the breeder never individually reviewed. A missing/unset fact
-        (verdicts written before this distinction existed) is ``False``, fails closed, matching
-        every other unrecorded-fact rule here.
+        is ``False``, fails closed, matching every other unrecorded-fact rule here.
 
     ``resolve_operating_point_from_review`` passes this field to ``resolve_operating_point`` as a
     gate, every record must satisfy it or the whole reference is refused, never a per-record
@@ -352,8 +351,8 @@ def review_conf_threshold(
     floor this reference was actually shown at.
 
     ``None`` when any image (with at least one bucket-scoped verdict entry) recorded no
-    ``conf_threshold`` on any of them (verdicts written before this was tracked), the review-side
-    term is then unknown, which the caller combines with the generation-side floor via ``max(...)``;
+    ``conf_threshold`` on any of them, the review-side term is then unknown, which the caller
+    combines with the generation-side floor via ``max(...)``;
     either half unknown makes the combined ``staged_conf_floor`` ``None`` (fails closed per
     ``_conf_censored``, the same rule a missing producer identity follows). An image with zero
     bucket-scoped verdict entries (nothing walked/reviewed against this bucket) contributes
