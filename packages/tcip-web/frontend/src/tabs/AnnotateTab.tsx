@@ -530,18 +530,20 @@ export function AnnotateTab() {
             : "unannotated";
         if (current !== newStatus) {
           setImageStatus(name, newStatus);
-          // Best-effort status write; the labels are already saved.
-          void classesApi
-            .setImageStatus(
-              projectRoot,
-              name,
-              newStatus,
-              dataset.subject,
-              dataset.date,
-              dataset.dataset_root,
-              dataset.annotations_dir,
-            )
-            .catch(() => {});
+          if (dataset.subject) {
+            // Best-effort status write; the labels are already saved.
+            void classesApi
+              .setImageStatus(
+                projectRoot,
+                name,
+                newStatus,
+                dataset.subject,
+                dataset.date,
+                dataset.dataset_root,
+                dataset.annotations_dir,
+              )
+              .catch(() => {});
+          }
         }
       }
     }
