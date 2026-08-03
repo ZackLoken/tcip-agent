@@ -847,14 +847,68 @@ def classification_metrics(pred_labels: torch.Tensor, targets: torch.Tensor, num
     }
 
 
+def quadratic_weighted_kappa(
+    pred_ranks: torch.Tensor, gt_ranks: torch.Tensor, num_ranks: int | None = None,
+) -> float | None:
+    """Chance-corrected ordinal agreement: squared rank-distance weights, expected agreement from
+    the scored set's own observed rank marginals (no authored constant), the ordinal counterpart
+    to :func:`tcip_mcp.pipelines.operating_point._classification_kappa`'s compensating-error
+    floor. ``None`` when undefined: no items, or expected disagreement is zero (every populated
+    true/predicted pair shares one rank, degenerate).
+
+    ``num_ranks`` derives from the data (``max(pred, gt) + 1``) when not given; pass it explicitly
+    when the caller knows the head's true rank count and the batch may not cover every rank.
+    """
+    pred = pred_ranks.detach().cpu().round().long()
+    gt = gt_ranks.detach().cpu().round().long()
+    n = gt.numel()
+    if n == 0:
+        return None
+    k = num_ranks if num_ranks is not None else int(max(pred.max(), gt.max()).item()) + 1
+    if k < 2:
+        return None
+    observed = torch.zeros((k, k))
+    for t, p in zip(gt.tolist(), pred.tolist()):
+        observed[t][p] += 1
+    row_marginal = observed.sum(dim=1)
+    col_marginal = observed.sum(dim=0)
+    expected = torch.outer(row_marginal, col_marginal) / n
+    idx = torch.arange(k, dtype=torch.float32)
+    weights = (idx.unsqueeze(1) - idx.unsqueeze(0)) ** 2
+    expected_disagreement = (weights * expected).sum().item()
+    if expected_disagreement == 0.0:
+        return None
+    observed_disagreement = (weights * observed).sum().item()
+    return 1.0 - observed_disagreement / expected_disagreement
+
+
+def r_squared(pred_values: torch.Tensor, gt_values: torch.Tensor) -> float | None:
+    """Fraction of variance explained beyond trivially predicting the scored set's own mean, the
+    regression counterpart to :func:`quadratic_weighted_kappa`'s chance-correction (both express
+    "how much better than the trivial baseline achievable from this set's own distribution").
+    ``None`` when undefined: no items, or the set's own values are constant (no variance to
+    explain).
+    """
+    pred = pred_values.detach().cpu().float()
+    gt = gt_values.detach().cpu().float()
+    if gt.numel() == 0:
+        return None
+    ss_tot = ((gt - gt.mean()) ** 2).sum().item()
+    if ss_tot == 0.0:
+        return None
+    ss_res = ((gt - pred) ** 2).sum().item()
+    return 1.0 - ss_res / ss_tot
+
+
 def ordinal_metrics(pred_ranks: torch.Tensor, gt_ranks: torch.Tensor) -> dict:
     pred = pred_ranks.detach().cpu().float()
     gt = gt_ranks.detach().cpu().float()
     if gt.numel() == 0:
-        return {"mae": 0.0, "rank_acc": 0.0}
+        return {"mae": 0.0, "rank_acc": 0.0, "quadratic_weighted_kappa": None}
     return {
         "mae": (pred - gt).abs().mean().item(),
         "rank_acc": (pred.round() == gt.round()).float().mean().item(),
+        "quadratic_weighted_kappa": quadratic_weighted_kappa(pred_ranks, gt_ranks),
     }
 
 
@@ -862,10 +916,11 @@ def regression_metrics(pred_values: torch.Tensor, gt_values: torch.Tensor) -> di
     pred = pred_values.detach().cpu().float()
     gt = gt_values.detach().cpu().float()
     if gt.numel() == 0:
-        return {"mae": 0.0, "rmse": 0.0}
+        return {"mae": 0.0, "rmse": 0.0, "r_squared": None}
     return {
         "mae": (pred - gt).abs().mean().item(),
         "rmse": ((pred - gt) ** 2).mean().sqrt().item(),
+        "r_squared": r_squared(pred_values, gt_values),
     }
 
 
