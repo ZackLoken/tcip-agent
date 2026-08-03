@@ -18,7 +18,7 @@ from tcip_mcp.pipelines.data.band_groups import (
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
     "crop_pad_tile", "image_dimensions", "list_logical_images", "load_image",
-    "load_multiband", "pil_to_tensor", "resolve_image_source", "stem_of",
+    "load_multiband", "pad_tile", "pil_to_tensor", "resolve_image_source", "stem_of",
 ]
 
 
@@ -185,27 +185,39 @@ def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int = 3) -
     return int(arr.shape[1]), int(arr.shape[0])
 
 
-def crop_pad_tile(img, x: int, y: int, tile_size: int, w: int, h: int):
-    """Crop a ``tile_size`` window at (x, y) and zero-pad short (edge) tiles.
+def pad_tile(crop, tile_size: int):
+    """Zero-pad an already-cropped tile up to ``tile_size`` x ``tile_size``.
 
-    Channel-generic: PIL for 1/3/4-channel images, numpy ``[H, W, C]`` for multi-band rasters
-    (which have no ``.crop``). Shared by the training tiler and the inference tiler so the two ends
-    of the reproduce-a-number chain cannot crop differently.
+    Channel-generic: PIL for 1/3/4-channel images, numpy ``[H, W, C]`` for multi-band rasters. The
+    padding half of :func:`crop_pad_tile`, split out so a caller that sources a tile from
+    somewhere other than a fully decoded in-memory image (e.g. a windowed raster reader, which
+    hands back an already-cropped, possibly short edge tile) pads it identically instead of a
+    second padding implementation drifting from this one.
     """
-    x2, y2 = min(x + tile_size, w), min(y + tile_size, h)
-    if isinstance(img, Image.Image):
-        crop = img.crop((x, y, x2, y2))
+    if isinstance(crop, Image.Image):
         if crop.size != (tile_size, tile_size):
-            padded = Image.new(img.mode, (tile_size, tile_size))  # 0-fill for the image's mode
+            padded = Image.new(crop.mode, (tile_size, tile_size))  # 0-fill for the image's mode
             padded.paste(crop, (0, 0))
             crop = padded
         return crop
-    crop = img[y:y2, x:x2]
     ph, pw = tile_size - crop.shape[0], tile_size - crop.shape[1]
     if ph or pw:
         pad_width = [(0, ph), (0, pw)] + ([(0, 0)] if crop.ndim == 3 else [])
         crop = np.pad(crop, pad_width, mode="constant")
     return crop
+
+
+def crop_pad_tile(img, x: int, y: int, tile_size: int, w: int, h: int):
+    """Crop a ``tile_size`` window at (x, y) and zero-pad short (edge) tiles.
+
+    Channel-generic: PIL for 1/3/4-channel images, numpy ``[H, W, C]`` for multi-band rasters
+    (which have no ``.crop``). Shared by the training tiler and the inference tiler so the two ends
+    of the reproduce-a-number chain cannot crop differently. Slices the window, then delegates the
+    padding to :func:`pad_tile`.
+    """
+    x2, y2 = min(x + tile_size, w), min(y + tile_size, h)
+    crop = img.crop((x, y, x2, y2)) if isinstance(img, Image.Image) else img[y:y2, x:x2]
+    return pad_tile(crop, tile_size)
 
 
 def pil_to_tensor(img) -> torch.Tensor:
