@@ -441,10 +441,11 @@ def run_inference(
         tile: Enable tiled (SAHI-style) detection inference. ``None`` (default) is a documented
             default, not silently ``False``/``True``, its provenance is stamped
             ``"default"`` vs ``"explicit"`` so a caller who deliberately chose one way is
-            distinguishable from one who left it unset. For an ``instance_seg`` checkpoint tiling
-            is not available at all (the cross-tile merge cannot yet carry masks, and masks are
-            that task's measurement): an unset ``tile`` runs untiled so the masks survive, and an
-            explicit ``tile=True`` is refused rather than dropping them.
+            distinguishable from one who left it unset. Works for ``instance_seg`` too: each tiled
+            result's ``masks`` (see ``GenericPredictor.predict_tiled``) are a tile-local patch plus
+            its full-image-space offset, never the untiled path's dense full-image array, a
+            downstream reader of ``results[i]["masks"]`` must not assume the two shapes are
+            interchangeable.
         tile_size: Sliding-window tile edge (px). ``None`` (default) derives it from the
             checkpoint's training tile geometry so inference matches the trained scale; a value
             overrides. A checkpoint with no persisted geometry falls back to 640 with a warning,
@@ -514,10 +515,7 @@ def run_inference(
             },
             "note": ("These operating-point values govern the object count (the phenotype for count "
                      "traits). For a trait with a labeled subset, resolve them per dataset "
-                     "(resolve_operating_point) so the count is calibrated, not a default. The "
-                     "checkpoint is not loaded here, so its task is unknown: for an instance_seg "
-                     "checkpoint an unset tile resolves to False (tiling cannot carry masks) and an "
-                     "explicit tile=True is refused."),
+                     "(resolve_operating_point) so the count is calibrated, not a default."),
         }
 
     # Lazy import to avoid torch import at module level
@@ -535,28 +533,6 @@ def run_inference(
         nms_iou=global_nms_iou,
         max_dets=max_dets,
     )
-
-    # The cross-tile merge is boxes-only, and masks are instance_seg's measurement, so this
-    # door never sends an instance_seg checkpoint down the tiled path. Unset ``tile`` resolves to
-    # untiled (masks intact) instead of blindly applying DEFAULT_TILED; an explicit tile=True is a
-    # clean refusal naming this tool's own parameter, not predict_tiled's NotImplementedError
-    # surfacing as a raw traceback through the MCP call.
-    instance_seg_warning = None
-    if getattr(predictor, "task", None) == "instance_seg" and resolved_tile_bool:
-        if tiled_source == "explicit":
-            return {"error": (
-                "instance_seg checkpoint: tiled inference cannot carry masks through the cross-tile "
-                "reconstruction/merge yet, and masks are this task's measurement, so tile=True is "
-                "refused rather than silently dropping them. Re-run with tile=False for untiled "
-                "inference (masks carried); run_inference, export_predictions and tabulate_counts "
-                "all take the same tile parameter.")}
-        resolved_tile_bool = False
-        instance_seg_warning = (
-            "instance_seg checkpoint with tile unset: running untiled so the masks survive (tiled "
-            "inference cannot carry masks through the cross-tile merge yet). Small dense objects "
-            "may be under-detected at full resolution; pass tile=False to state this explicitly."
-        )
-        logger.warning(instance_seg_warning)
 
     # Producing-model identity resolved before calibration, not after: the calibration's
     # train-disjointness gate needs the checkpoint's own experiment_id to check the cal/holdout
@@ -768,7 +744,7 @@ def run_inference(
         "results": results,
         **extra,
     }
-    warning = "; ".join(w for w in (instance_seg_warning, geometry_warning, cpu_warning) if w)
+    warning = "; ".join(w for w in (geometry_warning, cpu_warning) if w)
     if warning:
         out["warning"] = warning
     return out
@@ -828,10 +804,9 @@ def export_predictions(
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
             ``run_inference`` unresolved, see its own ``tile`` doc: a documented default distinct
-            from an explicit choice, not silently ``False``. An ``instance_seg`` checkpoint cannot
-            tile (the cross-tile merge cannot yet carry masks, and this export is the door masks
-            ship through): unset runs untiled with masks, ``tile=True`` is refused with an error
-            naming ``tile=False``.
+            from an explicit choice, not silently ``False``. Works for ``instance_seg`` too; masks
+            reach ``write_predictions_json`` either way, tiled or untiled, in whichever of the two
+            coordinate shapes ``run_inference`` produced.
         tile_size: Sliding-window tile edge (px).
         overlap: Fractional tile overlap.
         tile_batch_size: Tiles per forward batch.
@@ -950,9 +925,9 @@ def export_predictions(
                 "conf_source": result.get("conf_source"),
                 "checkpoint_sha256": sha,
                 "experiment_id": exp_id}
-    # The run's warnings (an instance_seg run forced untiled, a fabricated tile scale, a CPU-bound
-    # workload) belong on this door's own response too, otherwise the reason a delivered bucket ran
-    # in the regime it did is visible only in the server log.
+    # The run's warnings (a fabricated tile scale, a CPU-bound workload) belong on this door's own
+    # response too, otherwise the reason a delivered bucket ran in the regime it did is visible only
+    # in the server log.
     if result.get("warning"):
         response["warning"] = result["warning"]
     return response
@@ -1004,8 +979,7 @@ def tabulate_counts(
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
             ``run_inference`` unresolved, see its own ``tile`` doc: a documented default distinct
-            from an explicit choice, not silently ``False``. An ``instance_seg`` checkpoint runs
-            untiled when unset and refuses an explicit ``tile=True`` (tiling cannot carry masks).
+            from an explicit choice, not silently ``False``.
         tile_size: Sliding-window tile edge (px).
         overlap: Fractional tile overlap.
         tile_batch_size: Tiles per forward batch.
@@ -1111,9 +1085,9 @@ def tabulate_counts(
         "checkpoint_sha256": result.get("checkpoint_sha256"),
         "experiment_id": result.get("experiment_id"),
     }
-    # An instance_seg run forced untiled (run_inference's own warning) is surfaced here too, so a
-    # count CSV (the count is the phenotype for a count trait) never ships with the regime change
-    # disclosed only in the server log.
+    # run_inference's own warnings (a fabricated tile scale, a CPU-bound workload) are surfaced
+    # here too, so a count CSV (the count is the phenotype for a count trait) never ships with the
+    # regime it ran in disclosed only in the server log.
     if result.get("warning"):
         out["warning"] = result["warning"]
     return out
