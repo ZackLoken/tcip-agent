@@ -17,7 +17,7 @@ Public API:
     auto_mask(image_path, model_type, ...)
     grid_to_pixel(cell, img_w, img_h, cols, rows)
 
-The prompted predictors return polygon **rings** (a mask with two disjoint regions is two rings),
+The prompted predictors return polygon rings (a mask with two disjoint regions is two rings),
 via the shared :func:`tcip_annotation.mask_contours.mask_to_polygon_rings`, the same extractor the
 model-prediction export path uses, so SAM-assisted GT and a model's prediction describe an
 occlusion-split object identically.
