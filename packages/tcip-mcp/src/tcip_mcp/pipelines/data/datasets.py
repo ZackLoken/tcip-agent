@@ -763,7 +763,7 @@ class TiledDetectionDataset(BaseImageDataset):
         from tcip_mcp.pipelines.data.tiling import (
             compute_stride, tile_positions, clip_boxes_to_tile, dedup_boxes,
         )
-        from tcip_mcp.pipelines.derivations import derive_sliver_frac
+        from tcip_mcp.pipelines.derivations import char_sizes_from_boxes, derive_sliver_frac
 
         self.base = base
         # This wrapper does its own channel-aware reads rather than delegating to base. Inherit the
@@ -785,7 +785,10 @@ class TiledDetectionDataset(BaseImageDataset):
         # fixed fraction (Q5 / derive-don't-pin). skip_empty defaults False: empty tiles are valid
         # negatives (the invariant the old skip_empty=True default violated).
         stems_data: list[tuple[str, np.ndarray, np.ndarray, int, int]] = []
-        char_sizes: list[float] = []
+        # xywh per image (char_sizes_from_boxes's own expected shape), converted from the xyxy boxes
+        # this loop otherwise deals in, so the class-average size uses the same computation
+        # derive_localization_kind/derive_iou_match_threshold already share, never a second formula.
+        gt_boxes_per_image: list[list[tuple[float, float, float, float]]] = []
         for stem in base.stems:
             img_source = resolve_image_source(base.images_dir, stem)
             # Measured the way __getitem__ will decode it: PIL's header read misreports a
@@ -815,11 +818,12 @@ class TiledDetectionDataset(BaseImageDataset):
             fb = np.asarray(full_boxes, dtype=np.float32).reshape(-1, 4)
             fl = np.asarray(full_labels, dtype=np.int64)
             if len(fb):
-                # Computed independently of derivations._char_sizes_from_boxes (derive_sliver_frac's own doc cross-references this); known duplication.
-                char_sizes.extend((((fb[:, 2] - fb[:, 0]) * (fb[:, 3] - fb[:, 1])).clip(min=0) ** 0.5).tolist())
+                gt_boxes_per_image.append(
+                    [(x1, y1, x2 - x1, y2 - y1) for x1, y1, x2, y2 in fb.tolist()])
             stems_data.append((stem, fb, fl, w, h))
             self._decoded_frame[stem] = (int(w), int(h))
 
+        char_sizes = char_sizes_from_boxes(gt_boxes_per_image)
         self.class_avg_size = float(np.mean(char_sizes)) if char_sizes else 0.0
         # A caller-supplied fraction wins; otherwise derive it from this dataset's own size spread
         # (a class with wide natural size variation needs a lower cutoff than a tightly-sized one,
