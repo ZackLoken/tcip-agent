@@ -280,3 +280,58 @@ def test_regression_e2e(tmp_path: Path):
     run = create_run(_train_config(model_source), str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="regression")
     _assert_trained(run, tmp_path / "out")
+
+
+def test_ordinal_evaluate_model_e2e(tmp_path: Path):
+    """evaluate_model must actually run for ordinal, not just build_dataset/train directly: it
+    previously never threaded a CSV path into its own dataset build, so this failed before the
+    fix (ds_kwargs stayed images_dir-only, OrdinalDataset's required csv_path was never set)."""
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    images_dir = tmp_path / "images"
+    rows = []
+    for i in range(6):
+        _save_png(images_dir / f"img{i}.png", bright=(i % 3 == 0))
+        rows.append((f"img{i}", i % 3))
+    csv_path = tmp_path / "ranks.csv"
+    _write_csv(csv_path, rows, ("stem", "rank"))
+
+    dataset = build_dataset(
+        "ordinal", images_dir=str(images_dir), csv_path=str(csv_path), num_ranks=3)
+    loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("ordinal"))
+    model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = train(run, loader, val_loader=None, task="ordinal")
+    _assert_trained(run, tmp_path / "out")
+
+    result = evaluate_model(
+        str(tmp_path / "out" / "model_best.pt"), str(images_dir), str(csv_path), task="ordinal")
+    assert "error" not in result, result
+    assert "mae" in result
+    assert "quadratic_weighted_kappa" in result
+
+
+def test_regression_evaluate_model_e2e(tmp_path: Path):
+    """evaluate_model must actually run for regression, same fix as the ordinal case above."""
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    images_dir = tmp_path / "images"
+    rows = []
+    for i in range(6):
+        _save_png(images_dir / f"img{i}.png", bright=(i % 2 == 0))
+        rows.append((f"img{i}", float(i) / 6.0))
+    csv_path = tmp_path / "values.csv"
+    _write_csv(csv_path, rows, ("stem", "value"))
+
+    dataset = build_dataset("regression", images_dir=str(images_dir), csv_path=str(csv_path))
+    loader = DataLoader(dataset, batch_size=3, collate_fn=task_collate("regression"))
+    model_source = _model_source("build_bespoke_regressor")
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = train(run, loader, val_loader=None, task="regression")
+    _assert_trained(run, tmp_path / "out")
+
+    result = evaluate_model(
+        str(tmp_path / "out" / "model_best.pt"), str(images_dir), str(csv_path), task="regression")
+    assert "error" not in result, result
+    assert "mae" in result
+    assert "r_squared" in result
