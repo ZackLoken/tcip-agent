@@ -6,11 +6,18 @@ import logging
 import socket
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 _TB_PROCESSES: dict[str, subprocess.Popen] = {}
+
+# How long to let the child prove it survived before reporting a URL. A bad logdir, a
+# taken port, or a missing tensorboard install all fail within this window; anything
+# slower is caught later by the poll in ``list_tensorboard``.
+_STARTUP_GRACE_SECONDS = 0.5
 
 
 def _find_free_port(start: int = 6006, end: int = 6099) -> int:
@@ -25,11 +32,33 @@ def _find_free_port(start: int = 6006, end: int = 6099) -> int:
     raise RuntimeError(f"No free port found in range {start}-{end}")
 
 
+def _collect_output(handle) -> str:
+    """Read back (and close) what a finished child wrote to its capture file."""
+    try:
+        handle.seek(0)
+        return handle.read().decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+    finally:
+        handle.close()
+
+
+def _release_output(proc: subprocess.Popen) -> None:
+    """Close the capture file a process that is no longer tracked was writing to."""
+    handle = getattr(proc, "_tb_output", None)
+    if handle is not None:
+        try:
+            handle.close()
+        except Exception:
+            pass
+
+
 def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
     """Launch a TensorBoard process for the given log directory.
 
-    Returns dict with 'url', 'port', 'pid', 'logdir'.
-    If TensorBoard is already running for this logdir, returns existing info.
+    Returns dict with 'url', 'port', 'pid', 'logdir', or ``{'error': ..., 'output': ...}``
+    when the process died during startup, so a caller never advertises a URL nothing is
+    serving. If TensorBoard is already running for this logdir, returns existing info.
     """
     logdir = str(Path(logdir).resolve())
     key = run_id or logdir
@@ -41,29 +70,48 @@ def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
             # Recover port from stored info
             return {"url": f"http://localhost:{proc._tb_port}", "port": proc._tb_port, "pid": proc.pid, "logdir": logdir}
         else:
-            del _TB_PROCESSES[key]
+            _release_output(_TB_PROCESSES.pop(key))
 
     port = _find_free_port()
 
+    # The child outlives this call and nothing reads its streams, so they go to a temp file:
+    # an undrained pipe blocks the writer as soon as the OS buffer fills.
+    output = tempfile.TemporaryFile()
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "tensorboard", "--logdir", logdir,
+            # The installed tensorboard package has no __main__.py, so "-m tensorboard" fails
+            # with "cannot be directly executed"; tensorboard.main is the module that defines
+            # run_main() under an `if __name__ == "__main__"` guard.
+            [sys.executable, "-m", "tensorboard.main", "--logdir", logdir,
              "--port", str(port), "--host", "127.0.0.1", "--reload_interval", "5"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=output,
+            stderr=subprocess.STDOUT,
         )
-        proc._tb_port = port  # type: ignore[attr-defined]
-        _TB_PROCESSES[key] = proc
-        logger.info("TensorBoard started: http://localhost:%d (pid=%d, logdir=%s)", port, proc.pid, logdir)
-        return {
-            "url": f"http://localhost:{port}",
-            "port": port,
-            "pid": proc.pid,
-            "logdir": logdir,
-        }
     except Exception as e:
+        output.close()
         logger.warning("Failed to launch TensorBoard: %s", e)
         return {"error": str(e), "logdir": logdir}
+
+    time.sleep(_STARTUP_GRACE_SECONDS)
+    if proc.poll() is not None:
+        detail = _collect_output(output)
+        logger.warning("TensorBoard exited during startup (code=%s): %s", proc.returncode, detail)
+        return {
+            "error": f"tensorboard exited during startup with code {proc.returncode}",
+            "output": detail,
+            "logdir": logdir,
+        }
+
+    proc._tb_port = port  # type: ignore[attr-defined]
+    proc._tb_output = output  # type: ignore[attr-defined]
+    _TB_PROCESSES[key] = proc
+    logger.info("TensorBoard started: http://localhost:%d (pid=%d, logdir=%s)", port, proc.pid, logdir)
+    return {
+        "url": f"http://localhost:{port}",
+        "port": port,
+        "pid": proc.pid,
+        "logdir": logdir,
+    }
 
 
 def stop_tensorboard(run_id: str | None = None, logdir: str | None = None) -> dict:
@@ -79,6 +127,7 @@ def stop_tensorboard(run_id: str | None = None, logdir: str | None = None) -> di
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+    _release_output(proc)
     return {"status": "stopped", "pid": proc.pid}
 
 
@@ -88,7 +137,7 @@ def list_tensorboard() -> list[dict]:
     for key, proc in list(_TB_PROCESSES.items()):
         alive = proc.poll() is None
         if not alive:
-            del _TB_PROCESSES[key]
+            _release_output(_TB_PROCESSES.pop(key))
             continue
         result.append({
             "key": key,
