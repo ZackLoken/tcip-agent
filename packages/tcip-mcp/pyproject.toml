@@ -21,6 +21,7 @@ dependencies = [
     "tcip-annotation",
     # torch.utils.tensorboard.SummaryWriter and tensorboard_manager both need this installed.
     "tensorboard>=2.14",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
