@@ -95,6 +95,23 @@ def test_classification_head_loss_optional():
     )
 
 
+def test_regression_head_loss_optional():
+    from tcip_mcp.pipelines.components.heads import RegressionHead
+    feats = torch.randn(4, 256)
+    targets = {"values": torch.tensor([1.0, 2.5, 0.3, -1.2])}
+
+    h = RegressionHead(in_channels=256, loss="huber")
+    out = h(feats)
+    assert h.compute_loss(out, targets)["reg_loss"].requires_grad
+
+    h0 = RegressionHead(in_channels=256)
+    out0 = h0(feats)
+    assert torch.allclose(
+        h0.compute_loss(out0, targets)["reg_loss"],
+        F.smooth_l1_loss(out0["values"], targets["values"]),
+    )
+
+
 def test_semantic_seg_head_weighted_ce():
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
     h = SemanticSegHead(in_channels=64, num_classes=3, class_weights=[1.0, 2.0, 3.0])
