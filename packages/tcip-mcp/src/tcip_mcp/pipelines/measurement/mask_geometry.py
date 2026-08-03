@@ -1,6 +1,6 @@
 """Mask-geometry: dimensional measurements on a validated binary/instance mask.
 
-From a validated mask compute, in **pixels**, the area, perimeter, the extents along the PCA
+From a validated mask compute, in pixels, the area, perimeter, the extents along the PCA
 principal and secondary axes, and the centroid; when a physical ``scale`` (per-pixel, in a
 caller-stated ``unit`` (never assumed to be millimetres) is supplied, the same quantities are also
 returned in that unit. Numpy-first with no heavy imports: the toolkit primitive the agent composes
