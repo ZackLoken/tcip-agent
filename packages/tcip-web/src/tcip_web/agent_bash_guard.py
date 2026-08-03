@@ -40,8 +40,8 @@ _REDIRECT = re.compile(r"\d*>>?(?!&)\s*(?P<target>[^\s;|&<>()]+)")
 _TEE = re.compile(r"\btee\b\s+(?:-a\s+|--append\s+)?(?P<target>[^\s;|&<>()]+)")
 # ``find``'s own file-writing actions (``-fprint``/``-fprint0``/``-fprintf``/``-fls``) write their
 # output to the FILE argument that follows, bypassing every other write check here: no ``>``/``tee``
-# ever appears on the command line, so a plain ``find ... -fprintf packages/x.py '%p'`` reached
-# `packages/` (or a breeder's ``labels/``) undetected before this. Matched by flag name alone
+# ever appears on the command line, so a plain ``find ... -fprintf packages/x.py '%p'`` would reach
+# `packages/` (or a breeder's ``labels/``) undetected without this check. Matched by flag name alone
 # (these names are find-specific) so it fires whether or not ``find`` itself is in view.
 _FIND_WRITE_ACTION = re.compile(r"-f(?:print0?|printf|ls)\s+(?P<target>[^\s;|&<>()]+)")
 # In-place / copy writers, matched coarsely (paired with a protected token in main()). These
