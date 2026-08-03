@@ -707,6 +707,9 @@ export function AnnotateTab() {
         annotations_added_delta: tracking.annotationsAddedDelta,
         final_annotation_count: finalAnnotationCount,
         loaded_annotation_count: tracking.loadedAnnotationCount,
+        dataset_root: state.gui.dataset.dataset_root,
+        subject: state.gui.dataset.subject,
+        date: state.gui.dataset.date,
       })
       .catch(() => {
         // Best-effort telemetry; annotation flow should never block on this.
