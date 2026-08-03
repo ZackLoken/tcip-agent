@@ -31,7 +31,8 @@ def test_inference_launch_confines_checkpoint_to_image_roots(client, tmp_path, m
     outside = tmp_path / "evil.pt"
     outside.write_bytes(b"x")
     resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(outside), "images_dir": str(allowed), "output_dir": str(allowed),
+        "checkpoint_path": str(outside), "dataset_root": str(allowed),
+        "model_name": "baseline", "date": "2026-02-11",
     })
     assert resp.status_code == 403
 
@@ -41,7 +42,7 @@ def test_inference_launch_unconfined_when_no_image_roots(client, tmp_path, monke
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
     resp = client.post("/api/inference/launch", json={
         "checkpoint_path": str(tmp_path / "nope.pt"),
-        "images_dir": str(tmp_path), "output_dir": str(tmp_path),
+        "dataset_root": str(tmp_path), "model_name": "baseline", "date": "2026-02-11",
     })
     assert resp.status_code == 404
 
