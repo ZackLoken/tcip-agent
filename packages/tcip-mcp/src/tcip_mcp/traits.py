@@ -214,28 +214,32 @@ def crops_units() -> dict[str, str]:
     return {t["name"]: t["units"] for t in _crops_traits() if isinstance(t.get("units"), str)}
 
 
-def _spec_from_config(data: dict, vocab: set[str]) -> TraitSpec | None:
+def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, str | None]:
     """Build a ``TraitSpec`` from one breeder-authored config dict, cross-checked against ``vocab``.
 
-    Rejects (returns ``None``) a spec with no ``name``, an unknown field, or a ``delivers`` that is
-    empty or names a phenotype absent from crops.yml, so a config file can never introduce a
-    fabricated trait definition. Registering a real new trait means its delivered outputs are all in
-    the controlled vocabulary.
+    Rejects (returns ``(None, reason)``) a spec with no ``name``, an unknown field, or a
+    ``delivers`` that is empty or names a phenotype absent from crops.yml, so a config file can
+    never introduce a fabricated trait definition. Registering a real new trait means its delivered
+    outputs are all in the controlled vocabulary. ``reason`` is the same text logged as a warning,
+    the one place that wording is authored, so a caller surfacing it (an API response, a
+    write_trait_spec_fields refusal, doctor.py) never re-derives its own explanation.
     """
     name = data.get("name")
     if not isinstance(name, str) or not name:
-        logger.warning("trait spec skipped: missing/invalid 'name' (%r)", name)
-        return None
+        reason = f"missing/invalid 'name' ({name!r})"
+        logger.warning("trait spec skipped: %s", reason)
+        return None, reason
     unknown = set(data) - _SPEC_FIELDS
     if unknown:
-        logger.warning("trait spec %r skipped: unknown field(s) %s", name, sorted(unknown))
-        return None
+        reason = f"unknown field(s) {sorted(unknown)}"
+        logger.warning("trait spec %r skipped: %s", name, reason)
+        return None, reason
     delivers = data.get("delivers") or []
     off_vocab = [d for d in delivers if d not in vocab]
     if not delivers or off_vocab:
-        logger.warning("trait spec %r skipped: delivers must be non-empty and all in crops.yml "
-                       "(off-vocab: %s)", name, off_vocab)
-        return None
+        reason = f"delivers must be non-empty and all in crops.yml (off-vocab: {off_vocab})"
+        logger.warning("trait spec %r skipped: %s", name, reason)
+        return None, reason
     # count_objective is not validated against a closed vocabulary, a trait may name any
     # objective an agent has implemented and registered a picker for in
     # operating_point.COUNT_OBJECTIVE_PICKERS. resolve_operating_point refuses at resolution time
@@ -243,37 +247,55 @@ def _spec_from_config(data: dict, vocab: set[str]) -> TraitSpec | None:
     # needs the picker registry; this module stays torch-free and doesn't import it).
     kwargs = {k: (tuple(v) if k in _TUPLE_FIELDS else v) for k, v in data.items()}
     try:
-        return TraitSpec(**kwargs)
+        return TraitSpec(**kwargs), None
     except TypeError as e:
         logger.warning("trait spec %r skipped: %s", name, e)
-        return None
+        return None, str(e)
+
+
+def load_trait_specs_with_errors(specs_dir: Path | None = None) -> tuple[list[TraitSpec], list[dict]]:
+    """Same scan as :func:`load_trait_specs`, plus the file/reason for every spec skipped.
+
+    This is the one place that detail exists; a caller that needs to tell a breeder or the agent
+    which spec is broken and why (the Results API, ``scripts/doctor.py``) reads it from here
+    rather than re-deriving its own explanation or grepping logs.
+    """
+    import yaml
+
+    from tcip_mcp.project_paths import resolve_state
+
+    directory = specs_dir or resolve_state(_TRAIT_SPECS_RELPATH)
+    if not directory.is_dir():
+        return [], []
+    vocab = _crops_vocab()
+    specs: list[TraitSpec] = []
+    errors: list[dict] = []
+    for path in sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")]):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, yaml.YAMLError) as e:
+            logger.warning("trait spec %s skipped: %s", path.name, e)
+            errors.append({"file": path.name, "reason": str(e)})
+            continue
+        if not isinstance(data, dict):
+            reason = "not a mapping"
+            logger.warning("trait spec %s skipped: %s", path.name, reason)
+            errors.append({"file": path.name, "reason": reason})
+            continue
+        spec, reason = _spec_from_config(data, vocab)
+        if spec is not None:
+            specs.append(spec)
+        else:
+            errors.append({"file": path.name, "reason": reason})
+    return specs, errors
 
 
 def load_trait_specs(specs_dir: Path | None = None) -> list[TraitSpec]:
     """Breeder-authored per-trait spec files (``<root>/.tcip/state/trait_specs/*.yml``), each
     cross-checked against the crops.yml controlled vocab. A missing directory yields none; an invalid
-    or fabricated spec is skipped (so ``get_trait`` later hard-fails honestly rather than serving it)."""
-    from tcip_mcp.project_paths import resolve_state
-
-    directory = specs_dir or resolve_state(_TRAIT_SPECS_RELPATH)
-    if not directory.is_dir():
-        return []
-    vocab = _crops_vocab()
-    specs: list[TraitSpec] = []
-    for path in sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")]):
-        try:
-            import yaml
-
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, ImportError) as e:
-            logger.warning("trait spec %s skipped: %s", path.name, e)
-            continue
-        if not isinstance(data, dict):
-            logger.warning("trait spec %s skipped: not a mapping", path.name)
-            continue
-        spec = _spec_from_config(data, vocab)
-        if spec is not None:
-            specs.append(spec)
+    or fabricated spec is skipped (so ``get_trait`` later hard-fails honestly rather than serving it).
+    See :func:`load_trait_specs_with_errors` for why each skipped spec was skipped."""
+    specs, _errors = load_trait_specs_with_errors(specs_dir)
     return specs
 
 
@@ -322,12 +344,10 @@ def write_trait_spec_fields(
     merged.update(fields_)
     merged["provenance"] = tuple(data.get("provenance") or ()) + tuple(provenance_entries)
 
-    spec = _spec_from_config(merged, _crops_vocab())
+    spec, reason = _spec_from_config(merged, _crops_vocab())
     if spec is None:
         raise ValueError(
-            f"update to trait spec {trait_name!r} would produce an invalid spec (unknown field, "
-            "off-vocab delivers, or an invalid value). Refusing to write; see the logged warning "
-            "above for which check failed."
+            f"update to trait spec {trait_name!r} would produce an invalid spec: {reason}. Refusing to write."
         )
 
     write_data = {
