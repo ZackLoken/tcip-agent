@@ -34,8 +34,12 @@ beforeEach(() => {
   useStore.setState(initialStoreState, true);
   setupDataset();
   // ResultsTab resolves its trait from the project's own registered traits before it will
-  // compute anything; every test fixture here is written against a single-trait project.
-  vi.spyOn(resultsApi, "traits").mockResolvedValue({ traits: ["catkin"] });
+  // compute anything; every test fixture here is written against a single-trait project whose
+  // spec declares milestone fractions, which is what the curve/milestone panels render for.
+  vi.spyOn(resultsApi, "traits").mockResolvedValue({
+    traits: ["catkin"],
+    milestone_fractions_by_trait: { catkin: [0.5, 0.95] },
+  });
 });
 
 afterEach(() => {
@@ -52,6 +56,16 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       model_names: ["baseline", "v2"],
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline", "v2"], "2026-01-08": [] },
+      prediction_dirs: {
+        "2026-01-01": {
+          baseline: "C:/data/predictions/baseline/2026-01-01",
+          v2: "C:/data/predictions/v2/2026-01-01",
+        },
+        "2026-01-08": {
+          baseline: "C:/data/predictions/baseline/2026-01-08",
+          v2: "C:/data/predictions/v2/2026-01-08",
+        },
+      },
     });
     const curvesSpy = vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
       rows: [],
@@ -79,8 +93,10 @@ describe("ResultsTab structured predictions-by-date picker", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
     await waitFor(() => expect(curvesSpy).toHaveBeenCalled());
+    // The dir is the one the tree response supplied for that (date, model), not a path the tab
+    // assembled: a client-built convention is exactly what stopped matching the writers.
     expect(curvesSpy.mock.calls[0][0].predictions_by_date).toEqual({
-      "2026-01-01": "C:/data/predictions/baseline/2026-01-01/detect",
+      "2026-01-01": "C:/data/predictions/baseline/2026-01-01",
     });
   });
 
@@ -92,6 +108,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       model_names: ["baseline"],
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline"] },
+      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
     });
     const curvesSpy = vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
       rows: [],
@@ -127,6 +144,7 @@ describe("ResultsTab onset table validity marker", () => {
       model_names: ["baseline"],
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline"] },
+      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
     });
     vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
       rows: [
