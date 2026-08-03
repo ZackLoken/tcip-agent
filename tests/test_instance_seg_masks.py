@@ -2,14 +2,16 @@
 
 Locks that instance_seg's masks travel end to end instead of being silently dropped:
 ``check_model_contract`` requires them for instance_seg, ``GenericPredictor._format_detection``
-carries them (soft, unbinarized), ``predict_tiled`` refuses loudly for instance_seg rather than
-silently dropping masks, and ``write_predictions_json`` converts a mask to a real (possibly
-multi-ring) ``Polygon`` via ``resolve_binarize_threshold``, never a second hardcoded threshold.
+carries them (soft, unbinarized, full-image coordinates) for the untiled path, tiled inference
+(``predict_tiled``/``predict_tiled_from_reader``) threads them through the cross-tile
+reconstruction/merge too (see ``tests/test_orthomosaic_mapping.py`` for the tiled-shape and
+windowed-reader coverage), and ``write_predictions_json`` converts a mask (either coordinate shape)
+to a real (possibly multi-ring) ``Polygon`` via ``resolve_binarize_threshold``, never a second
+hardcoded threshold.
 
-The refusal is a rail, so it must still admit valid work: the MCP doors resolve an unset ``tile``
-to untiled for an instance_seg checkpoint (and refuse an explicit ``tile=True`` with a tool-level
-``{"error": ...}``), and a caller that never reads masks opts out with ``require_masks=False`` and
-gets ordinary boxes-only tiled inference.
+``require_masks=False`` remains a deliberate boxes-only opt-out for a caller that never reads
+masks (a mask patch per detection is real extra memory/compute across a dense tile grid): a rail
+must admit valid work, so that opt-out is tested here alongside the default mask-carrying path.
 """
 
 from __future__ import annotations
@@ -134,44 +136,33 @@ def test_format_detection_keep_mask_filters_with_scores():
 
 
 # --------------------------------------------------------------------------
-# predict_tiled: refuses loudly for instance_seg rather than silently
-# dropping masks through cross-tile reconstruction/merge
+# predict_tiled: instance_seg reaches the same real tiling path detection
+# does, both with masks collected (the default) and via the boxes-only
+# require_masks=False opt-out
 # --------------------------------------------------------------------------
 
-def test_predict_tiled_refuses_for_instance_seg():
+def test_predict_tiled_instance_seg_reaches_real_tiling_path(tmp_path):
+    """instance_seg must reach real tiling logic exactly like detection does (fail on a bad image
+    path with an image-loading error), not take some separate maskless code path: masks now thread
+    through the cross-tile reconstruction/merge instead of being refused outright."""
     p = _bare_predictor("instance_seg")
-    with pytest.raises(NotImplementedError, match="mask"):
-        p.predict_tiled("does-not-need-to-exist.jpg")
+    missing = tmp_path / "missing.jpg"
+    with pytest.raises(FileNotFoundError):
+        p.predict_tiled(str(missing))
 
 
 def test_predict_tiled_detection_reaches_real_tiling_path(tmp_path):
-    """Sharper version of the above: detection must reach real tiling logic (fail on a bad image
-    path with an image-loading error, never NotImplementedError), proving the instance_seg refusal
-    is scoped to instance_seg only."""
+    """Same real tiling logic for plain detection, so the two tasks' tiled entry points don't
+    silently diverge."""
     p = _bare_predictor("detection")
     missing = tmp_path / "missing.jpg"
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(FileNotFoundError):
         p.predict_tiled(str(missing))
-    assert not isinstance(exc_info.value, NotImplementedError)
-
-
-def test_predict_tiled_error_names_the_caller_facing_routes():
-    """The refusal must point at real alternatives a caller can act on: the untiled library calls,
-    the two MCP doors' own ``tile=False`` parameter, and the boxes-only opt-out."""
-    p = _bare_predictor("instance_seg")
-    with pytest.raises(NotImplementedError) as exc_info:
-        p.predict_tiled("does-not-need-to-exist.jpg")
-    msg = str(exc_info.value)
-    assert "run_inference(..., tile=False)" in msg
-    assert "export_predictions(..., tile=False)" in msg
-    assert "require_masks=False" in msg
 
 
 def test_predict_tiled_require_masks_false_reaches_real_tiling_path_for_instance_seg(tmp_path):
-    """``require_masks=False`` must not refuse: instance_seg gets as far as loading the image, the
-    same real tiling logic detection reaches. Asserting the exact FileNotFoundError (not merely
-    "not NotImplementedError") is what makes this fail rather than pass on a predictor whose
-    signature has no such parameter."""
+    """``require_masks=False`` reaches the same real tiling logic as the default (masks-collecting)
+    path: the boxes-only opt-out is a lighter-weight rail, not a different one."""
     p = _bare_predictor("instance_seg")
     with pytest.raises(FileNotFoundError):
         p.predict_tiled(str(tmp_path / "missing.jpg"), require_masks=False)
@@ -226,64 +217,69 @@ def test_predict_tiled_require_masks_false_returns_boxes_only(instance_seg_ckpt,
     assert "masks" in pred.predict(img)
 
 
-def test_run_inference_instance_seg_unset_tile_runs_untiled(instance_seg_ckpt, tmp_path):
-    """DEFAULT_TILED is True, so an unset ``tile`` must not send an instance_seg checkpoint into
-    predict_tiled (that would surface NotImplementedError as a raw traceback out of the MCP tool).
-    The door resolves to untiled instead, masks intact, and says so."""
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu")
-    assert "error" not in r
-    assert r["tiled"] is False
-    assert r["operating_point"]["tiled"]["value"] is False
-    assert len(r["results"]) == 1
-    assert "instance_seg" in r["warning"]
-
-
-def test_run_inference_instance_seg_explicit_tile_true_returns_error(instance_seg_ckpt, tmp_path):
-    """An explicit tile=True is a refusal in the tool's own ``{"error": ...}`` contract, naming the
-    tool-level parameter, not a raised NotImplementedError about library internals."""
+def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
+    """DEFAULT_TILED is True: an unset ``tile`` now behaves for instance_seg exactly as it does for
+    plain detection (tiled inference threads masks through the cross-tile merge instead of being
+    refused outright), and each result's masks are the tiled (patch + offset) shape."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu",
-                      tile=True, tile_size=TILE)
-    assert "error" in r
-    assert "tile=False" in r["error"]
-    assert "results" not in r
+                      tile_size=TILE, conf_threshold=0.0)
+    assert "error" not in r
+    assert r["tiled"] is True
+    assert r["operating_point"]["tiled"]["value"] is True
+    assert len(r["results"]) == 1
+    result = r["results"][0]
+    assert "masks" in result
+    if result["count"]:
+        assert set(result["masks"][0]) == {"mask_patch", "offset_x", "offset_y"}
 
 
-def test_export_predictions_instance_seg_unset_tile_writes_untiled(instance_seg_ckpt, tmp_path):
+def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
+    """An explicit tile=True is no longer refused for instance_seg: tiled inference threads masks
+    through the cross-tile reconstruction/merge now, so this checkpoint tiles like any other."""
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu",
+                      tile=True, tile_size=TILE, conf_threshold=0.0)
+    assert "error" not in r
+    assert r["tiled"] is True
+    assert len(r["results"]) == 1
+    assert "masks" in r["results"][0]
+
+
+def test_export_predictions_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, tmp_path):
     from tcip_mcp.tools.inference_tools import export_predictions
 
     images_dir = tmp_path / "images"
     _image(images_dir)
     r = export_predictions(instance_seg_ckpt, str(images_dir), str(tmp_path / "preds"),
-                           device="cpu")
+                           device="cpu", tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
-    assert r["operating_point"]["tiled"]["value"] is False
+    assert r["operating_point"]["tiled"]["value"] is True
     assert (Path(r["output_dir"]) / "img.json").is_file()
-    assert "instance_seg" in r["warning"]
 
 
-def test_tabulate_counts_instance_seg_unset_tile_carries_warning(instance_seg_ckpt, tmp_path):
-    """export_predictions surfaces the instance_seg forced-untiled warning in its response;
-    tabulate_counts's own docstring documents the same behavior but its success return had no
-    warning key, so a count CSV (the count is the phenotype) could ship with the regime change
-    disclosed only in the server log."""
+def test_tabulate_counts_instance_seg_writes_csv_tiled(instance_seg_ckpt, tmp_path):
+    """tabulate_counts must produce a count CSV for a tiled instance_seg run just like any other
+    detection checkpoint, now that tiled inference carries masks rather than being blocked."""
     from tcip_mcp.tools.inference_tools import tabulate_counts
 
     images_dir = tmp_path / "images"
     _image(images_dir)
-    r = tabulate_counts(instance_seg_ckpt, str(images_dir), str(tmp_path / "counts.csv"),
-                        device="cpu", acknowledge_unvalidated=True)
+    out_path = tmp_path / "counts.csv"
+    r = tabulate_counts(instance_seg_ckpt, str(images_dir), str(out_path),
+                        device="cpu", tile_size=TILE, acknowledge_unvalidated=True)
     assert "error" not in r
-    assert "instance_seg" in r["warning"]
+    assert out_path.is_file()
 
 
 def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(instance_seg_ckpt, tmp_path):
     """The unvalidated mask-binarize threshold must not be stamped into Annotation.attributes
     (the domain trait namespace, which would pollute GT). It travels once, as a run constant,
-    in operating_point.json, the same door tiled/tile_size/conf already use."""
+    in operating_point.json, the same door tiled/tile_size/conf already use. Exercised on the
+    tiled path (the checkpoint's own default now that instance_seg tiles like any other detection
+    task), so the tiled (patch + offset) mask shape reaches export too."""
     import json
 
     from tcip_mcp.tools.inference_tools import export_predictions
@@ -292,7 +288,7 @@ def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(i
     _image(images_dir)
     out = tmp_path / "preds"
     r = export_predictions(instance_seg_ckpt, str(images_dir), str(out), device="cpu",
-                           conf_threshold=0.0)  # force at least one (masked) detection
+                           tile_size=TILE, conf_threshold=0.0)  # force at least one (masked) detection
     assert "error" not in r
     op = json.loads((Path(r["output_dir"]) / "operating_point.json").read_text())
     assert op["mask_binarize"]["name"] == "mask_binarize_threshold"
@@ -303,17 +299,18 @@ def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(i
         assert ann.get("attributes", {}) == {}  # never per-annotation
 
 
-def test_export_predictions_instance_seg_explicit_tile_true_returns_error(instance_seg_ckpt, tmp_path):
+def test_export_predictions_instance_seg_explicit_tile_true_writes_tiled(instance_seg_ckpt, tmp_path):
+    """An explicit tile=True is no longer refused for instance_seg export: masks travel through
+    the tiled path into the written prediction bucket."""
     from tcip_mcp.tools.inference_tools import export_predictions
 
     images_dir = tmp_path / "images"
     _image(images_dir)
     out = tmp_path / "preds"
     r = export_predictions(instance_seg_ckpt, str(images_dir), str(out), device="cpu",
-                           tile=True, tile_size=TILE)
-    assert "error" in r
-    assert "tile=False" in r["error"]
-    assert not out.exists()  # refused before anything was written
+                           tile=True, tile_size=TILE, conf_threshold=0.0)
+    assert "error" not in r
+    assert (Path(r["output_dir"]) / "img.json").is_file()
 
 
 def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_ckpt, tmp_path):
