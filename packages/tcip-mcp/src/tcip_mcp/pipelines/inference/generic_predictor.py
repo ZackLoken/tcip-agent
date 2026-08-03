@@ -143,6 +143,7 @@ class GenericPredictor:
         self, image_paths: list[str | Path | BandGroupRef], tile: bool = False,
         tile_size: int = DEFAULT_TILE_SIZE, overlap: float = 0.2, tile_batch_size: int = 96,
         global_nms_iou: float = DEFAULT_NMS_IOU, batch_size: int = 16, postprocess: str = "nms",
+        *, require_masks: bool = True,
     ) -> list[dict]:
         """Run inference on multiple images (optionally tiled for small objects).
 
@@ -152,13 +153,15 @@ class GenericPredictor:
         since their inputs are native-resolution (can't be stacked without resizing).
 
         Each element of ``image_paths`` may be a plain path/string or a :class:`BandGroupRef`
-        (see :meth:`predict`).
+        (see :meth:`predict`). ``require_masks`` forwards to :meth:`predict_tiled` when ``tile=True``
+        (see its own docstring for the tiled mask shape); ignored when ``tile=False``, since the
+        untiled path always carries masks for ``instance_seg``.
         """
         if tile:
             return [
                 self.predict_tiled(p, tile_size=tile_size, overlap=overlap,
                                    tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
-                                   postprocess=postprocess)
+                                   postprocess=postprocess, require_masks=require_masks)
                 for p in image_paths
             ]
         if self.task in _DETECTION_TASKS:
@@ -183,26 +186,10 @@ class GenericPredictor:
                 results.append(self._format_detection(out, disp, w, h))
         return results
 
-    def _refuse_untiled_masks(self, require_masks: bool) -> None:
-        """The instance_seg mask contract shared by both tiled entry points: reconstruct_core/
-        global_nms/global_merge (data/tiling.py) are boxes-only signatures, so threading masks
-        through tiling without a merge that also merges masks would create a new silent channel
-        (masks present untiled, silently absent tiled). Refuse loudly instead. Untiled instance_seg
-        (predict/predict_batch(tile=False)) is unaffected. ``require_masks=False`` is the
-        deliberate "boxes only, don't even try" opt-out for a caller that never reads masks.
-        """
-        if self.task == "instance_seg" and require_masks:
-            raise NotImplementedError(
-                "tiled inference does not yet thread masks through cross-tile reconstruction/merge "
-                "for instance_seg. For masks, call predict() / predict_batch(tile=False), or from "
-                "the MCP doors run_inference(..., tile=False) / export_predictions(..., tile=False). "
-                "For boxes-only tiled inference, pass require_masks=False deliberately."
-            )
-
     def _tiled_infer_core(
         self, height: int, width: int, get_tile: Callable[[int, int], object],
         tile_size: int, overlap: float, tile_batch_size: int, global_nms_iou: float,
-        postprocess: str,
+        postprocess: str, *, require_masks: bool = True,
     ) -> dict:
         """Shared tiling/batching/reconstruction loop behind both :meth:`predict_tiled` (a fully
         decoded in-memory image) and :meth:`predict_tiled_from_reader` (a windowed raster reader):
@@ -212,8 +199,24 @@ class GenericPredictor:
         ``global_merge``. The two callers differ only in how ``get_tile`` sources its pixels; this
         loop is not duplicated between them.
 
-        Returns ``width``/``height``/``boxes``/``scores``/``labels``/``count``/``tiles``; the
-        caller stamps its own ``image`` field (a display path or a windowed reader's own label).
+        For ``instance_seg`` with ``require_masks=True`` (the default), each tile's soft masks
+        (``outputs["masks"]``, same squeeze convention as :meth:`_format_detection`) travel through
+        the same reconstruction/merge in lockstep with their boxes, and the returned dict gains a
+        ``masks`` key: a list of ``{"mask_patch", "offset_x", "offset_y"}`` dicts, one per surviving
+        detection (tile-local soft-mask patch + its full-image-space origin, never a dense
+        full-image-sized array; see :class:`tcip_mcp.pipelines.data.tiling.MaskPatch`). This
+        deliberately differs from the untiled result's own ``masks`` (one dense ``[H, W]`` array per
+        detection, already in full-image coordinates): a huge orthomosaic tile source can never
+        afford one full-raster-sized mask per detection, so the tiled shape stays patch-local and a
+        consumer (export, visualization) adds the offset only at the point of use. Any task other
+        than ``instance_seg``, or ``require_masks=False``, never collects masks and the returned
+        dict carries no ``masks`` key at all (an explicit boxes-only opt-out, still worth taking
+        when a caller never reads masks: a mask patch per detection is real extra memory/compute
+        across a dense tile grid).
+
+        Returns ``width``/``height``/``boxes``/``scores``/``labels``/``count``/``tiles`` (``masks``
+        when applicable); the caller stamps its own ``image`` field (a display path or a windowed
+        reader's own label).
         """
         import numpy as np
         from tcip_mcp.pipelines.data.tiling import (
@@ -228,7 +231,10 @@ class GenericPredictor:
             logger.warning("tiled inference: model min_size=%s differs greatly from tile_size=%s "
                            "(tiles will be rescaled).", min_size, tile_size)
 
+        collect_masks = self.task == "instance_seg" and require_masks
+
         per_tile_boxes, per_tile_scores, per_tile_labels, tile_info = [], [], [], []
+        per_tile_masks: list = [] if collect_masks else None
         batch_tiles: list = []
         batch_meta: list = []
 
@@ -241,6 +247,11 @@ class GenericPredictor:
                 per_tile_boxes.append(out["boxes"][keep].cpu().numpy())
                 per_tile_scores.append(out["scores"][keep].cpu().numpy())
                 per_tile_labels.append(out["labels"][keep].cpu().numpy())
+                if collect_masks:
+                    m = out["masks"][keep]
+                    if m.dim() == 4 and m.shape[1] == 1:  # torchvision MaskRCNN: [N, 1, H, W]
+                        m = m[:, 0]
+                    per_tile_masks.append(m.cpu().numpy())
                 tile_info.append(meta)
             batch_tiles.clear()
             batch_meta.clear()
@@ -254,23 +265,38 @@ class GenericPredictor:
                 _flush()
         _flush()
 
-        boxes, scores, labels = reconstruct_core(
-            per_tile_boxes, per_tile_scores, per_tile_labels, tile_info, tile_size, stride)
+        if collect_masks:
+            boxes, scores, labels, masks = reconstruct_core(
+                per_tile_boxes, per_tile_scores, per_tile_labels, tile_info, tile_size, stride,
+                per_tile_masks=per_tile_masks)
+        else:
+            boxes, scores, labels = reconstruct_core(
+                per_tile_boxes, per_tile_scores, per_tile_labels, tile_info, tile_size, stride)
+            masks = None
+
         if len(boxes) == 0:
             pass
         elif postprocess == "nmm":
-            boxes, scores, labels = global_merge(boxes, scores, labels, global_nms_iou)
+            if collect_masks:
+                boxes, scores, labels, masks = global_merge(
+                    boxes, scores, labels, global_nms_iou, per_det_masks=masks)
+            else:
+                boxes, scores, labels = global_merge(boxes, scores, labels, global_nms_iou)
         else:
             keep = global_nms(boxes, scores, labels, global_nms_iou)
             boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+            if collect_masks:
+                masks = [masks[i] for i in keep]
 
         # Enforce the full-frame detection cap after the cross-tile merge (highest score first);
         # the in-model detections_per_img only caps per tile, so a dense image can exceed it.
         if self.max_dets is not None and len(scores) > self.max_dets:
             top = np.argsort(scores)[::-1][: self.max_dets]
             boxes, scores, labels = boxes[top], scores[top], labels[top]
+            if collect_masks:
+                masks = [masks[i] for i in top]
 
-        return {
+        result = {
             "width": width,
             "height": height,
             "boxes": boxes.tolist(),
@@ -279,6 +305,12 @@ class GenericPredictor:
             "count": int(len(boxes)),
             "tiles": len(positions),
         }
+        if collect_masks:
+            result["masks"] = [
+                {"mask_patch": mp.patch.tolist(), "offset_x": mp.offset_x, "offset_y": mp.offset_y}
+                for mp in masks
+            ]
+        return result
 
     @torch.no_grad()
     def predict_tiled(
@@ -293,19 +325,23 @@ class GenericPredictor:
         unions boxes split across a seam. Falls back to :meth:`predict` for non-detection heads.
         ``image_path`` may be a plain path/string or a :class:`BandGroupRef` (see :meth:`predict`).
 
-        ``require_masks`` (default True) is the instance_seg mask contract: this path is boxes-only,
-        so a caller that will consume masks is refused rather than handed a result whose masks
-        silently vanished. ``require_masks=False`` is the deliberate "boxes only, don't even try"
-        opt-out for a caller that never reads masks (``run_full_frame_evaluation`` scores boxes
-        against full-frame GT), the tiled result then carries no ``masks`` key for any task, so
-        there is no partial-mask channel either way.
+        ``require_masks`` (default True) governs whether an ``instance_seg`` checkpoint's masks are
+        threaded through the cross-tile reconstruction/merge at all: a mask patch per detection is
+        real extra memory/compute across a dense tile grid, so a caller that never reads masks
+        (``run_full_frame_evaluation`` scores boxes against full-frame GT) can pass
+        ``require_masks=False`` to skip it deliberately; the result then carries no ``masks`` key
+        for any task. With ``require_masks=True`` and ``instance_seg``, the returned ``masks`` are
+        **not** the untiled result's dense ``[H, W]`` full-image arrays: each is a small tile-local
+        patch plus its full-image-space offset (``{"mask_patch", "offset_x", "offset_y"}``, see
+        :meth:`_tiled_infer_core`), the shape a source raster too large to hold one full-size mask
+        per detection requires; a consumer must not assume the two ``masks`` shapes are
+        interchangeable.
 
         The whole image is decoded into memory once (via ``load_image``) before tiling; for a
         raster too large for that, use :meth:`predict_tiled_from_reader`.
         """
         if self.task not in _DETECTION_TASKS:
             return self.predict(image_path)
-        self._refuse_untiled_masks(require_masks)
 
         img = load_image(image_path, self.in_chans)
         w, h = img.size if isinstance(img, Image.Image) else (img.shape[1], img.shape[0])
@@ -314,7 +350,8 @@ class GenericPredictor:
             return _crop_pad_tile(img, tile_x, tile_y, tile_size, w, h)
 
         result = self._tiled_infer_core(
-            h, w, _get_tile, tile_size, overlap, tile_batch_size, global_nms_iou, postprocess)
+            h, w, _get_tile, tile_size, overlap, tile_batch_size, global_nms_iou, postprocess,
+            require_masks=require_masks)
         result["image"] = _display_path(image_path)
         return result
 
@@ -343,7 +380,11 @@ class GenericPredictor:
 
         Returns the same shape as :meth:`predict_tiled` (full-raster pixel space); ``image`` is
         ``source_label`` if given, else ``""`` (a windowed reader carries no single on-disk path the
-        caller doesn't already know).
+        caller doesn't already know). ``require_masks`` and the resulting ``masks`` shape (tile-local
+        patch + full-raster-space offset, never a dense full-raster-sized array) are exactly
+        :meth:`predict_tiled`'s own contract, see its docstring; it matters even more here, since
+        this method's whole reason to exist is a raster too large for one dense mask per detection
+        to ever be affordable.
         """
         if self.task not in _DETECTION_TASKS:
             raise ValueError(
@@ -357,7 +398,6 @@ class GenericPredictor:
                 f"in_chans={self.in_chans}; refusing to silently truncate/pad the band count the "
                 "model was trained on."
             )
-        self._refuse_untiled_masks(require_masks)
 
         def _get_tile(tile_x: int, tile_y: int):
             y0, y1 = tile_y, min(tile_y + tile_size, reader.height)
@@ -366,7 +406,7 @@ class GenericPredictor:
 
         result = self._tiled_infer_core(
             reader.height, reader.width, _get_tile, tile_size, overlap, tile_batch_size,
-            global_nms_iou, postprocess)
+            global_nms_iou, postprocess, require_masks=require_masks)
         result["image"] = source_label
         return result
 
