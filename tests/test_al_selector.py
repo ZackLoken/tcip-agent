@@ -1,13 +1,14 @@
-"""Active learning selector: auto_accept / review_queue partitioning.
+"""Active learning selector: auto_accept / review_queue / unscoreable partitioning.
 
 Covers the GenericPredictor output contract: detection dicts carry ``scores``;
 classification/ordinal checkpoints (ComposedModel -> ``_format_other``) carry
-``head{i}_confidences``, never an ``output`` key.
+``head{i}_confidences``, never an ``output`` key; regression checkpoints carry only
+``head{i}_values``, no confidence-bearing key at all.
 """
 
 import pytest
 
-from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue
+from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue, unscoreable
 
 
 def _cls_pred(image: str, conf: float) -> dict:
@@ -19,6 +20,29 @@ def _cls_pred(image: str, conf: float) -> dict:
         "head0_labels": [2],
         "head0_confidences": [conf],
         "head0_probabilities": [[(1.0 - conf) / 2, (1.0 - conf) / 2, conf]],
+    }
+
+
+def _ordinal_pred(image: str, rank: int, conf: float) -> dict:
+    """A _format_other-shaped ordinal prediction: OrdinalHead.decode's derived confidence."""
+    return {
+        "image": image,
+        "width": 640,
+        "height": 480,
+        "head0_ranks": [rank],
+        "head0_confidences": [conf],
+        "head0_cumulative_probs": [[conf, conf]],
+    }
+
+
+def _reg_pred(image: str, value: float) -> dict:
+    """A _format_other-shaped regression prediction: RegressionHead.decode emits only "values",
+    no confidence-bearing key, deliberately (a point estimate has no distributional output)."""
+    return {
+        "image": image,
+        "width": 640,
+        "height": 480,
+        "head0_values": [value],
     }
 
 
@@ -53,6 +77,15 @@ class TestAutoAccept:
             _cls_pred("hi.png", 0.93),
             _cls_pred("lo.png", 0.55),
             _cls_pred("edge.png", 0.8),  # threshold is inclusive
+        ]
+        accepted = auto_accept(predictions, threshold=0.8)
+        assert [p["image"] for p in accepted] == ["hi.png", "edge.png"]
+
+    def test_ordinal_partitioning(self):
+        predictions = [
+            _ordinal_pred("hi.png", 2, 0.93),
+            _ordinal_pred("lo.png", 1, 0.55),
+            _ordinal_pred("edge.png", 0, 0.8),  # threshold is inclusive
         ]
         accepted = auto_accept(predictions, threshold=0.8)
         assert [p["image"] for p in accepted] == ["hi.png", "edge.png"]
@@ -108,6 +141,16 @@ class TestReviewQueue:
         # Most uncertain first.
         assert [p["image"] for p in queue] == ["shaky.png", "mid.png"]
 
+    def test_ordinal_partitioning_and_ordering(self):
+        predictions = [
+            _ordinal_pred("confident.png", 2, 0.93),  # above high -> auto territory
+            _ordinal_pred("mid.png", 1, 0.6),
+            _ordinal_pred("shaky.png", 1, 0.35),
+            _ordinal_pred("noise.png", 0, 0.2),  # below low -> reject
+        ]
+        queue = review_queue(predictions, low=0.3, high=0.8)
+        assert [p["image"] for p in queue] == ["shaky.png", "mid.png"]
+
     def test_multi_head_gates_on_least_confident_head(self):
         pred = _cls_pred("multi.png", 0.95)
         pred["head1_confidences"] = [0.5]
@@ -122,3 +165,35 @@ class TestReviewQueue:
         cls = _cls_pred("cls.png", 0.6)
         queue = review_queue([det, cls], low=0.3, high=0.8)
         assert [p["image"] for p in queue] == ["det.png", "cls.png"]
+
+
+# ====================================================================
+# unscoreable
+# ====================================================================
+
+class TestUnscoreable:
+    def test_regression_prediction_has_no_confidence_signal(self):
+        """A regression prediction can't be partitioned by auto_accept/review_queue at all (both
+        already silently exclude it, unchanged); unscoreable() is what catches that it needs
+        explicit routing instead of vanishing."""
+        pred = _reg_pred("val.png", 0.42)
+        assert auto_accept([pred], threshold=0.8) == []
+        assert review_queue([pred], low=0.0, high=1.0) == []
+        assert unscoreable([pred]) == [pred]
+
+    def test_seg_prediction_with_no_confidences_is_unscoreable(self):
+        # 4-D head0_probabilities alone carries no usable per-instance confidence either.
+        pred = _seg_pred("mask.png")
+        assert unscoreable([pred]) == [pred]
+
+    def test_detection_negative_is_not_unscoreable(self):
+        """scores=[] (zero boxes found) is a complete, unambiguous signal, not an architecture
+        gap; it must stay excluded from unscoreable the same way auto_accept/review_queue already
+        exclude it, checked by key presence, not truthiness."""
+        assert unscoreable([{"image": "neg.png", "scores": []}]) == []
+
+    def test_detection_and_classification_and_ordinal_are_not_unscoreable(self):
+        det = {"image": "det.png", "scores": [0.9]}
+        cls = _cls_pred("cls.png", 0.9)
+        ordinal = _ordinal_pred("ord.png", 1, 0.9)
+        assert unscoreable([det, cls, ordinal]) == []
