@@ -66,6 +66,81 @@ def test_segment_runs_splits_on_large_jumps() -> None:
     assert [s.stem for s in runs[1]] == ["c", "d"]
 
 
+def test_segment_runs_splits_on_multiple_jumps() -> None:
+    # Three row runs of ~2 m in-row steps separated by two ~15 m row-transition jumps.
+    # 15 m is well under the old fixed 25 m constant, so this only splits under a derivation
+    # that reads the break relative to this date's own ~2 m walking pace.
+    stamps = [
+        _stamp("a", 43.19600000, -90.0580, 0),
+        _stamp("b", 43.19601797, -90.0580, 2),
+        _stamp("c", 43.19603593, -90.0580, 4),
+        _stamp("d", 43.19617068, -90.0580, 6),  # ~15 m jump -> new run
+        _stamp("e", 43.19618865, -90.0580, 8),
+        _stamp("f", 43.19632339, -90.0580, 10),  # ~15 m jump -> new run
+        _stamp("g", 43.19634136, -90.0580, 12),
+    ]
+    runs = _segment_runs(stamps)
+    assert [[s.stem for s in r] for r in runs] == [
+        ["a", "b", "c"],
+        ["d", "e"],
+        ["f", "g"],
+    ]
+
+
+def test_segment_runs_curved_row_not_fragile_to_uneven_steps() -> None:
+    # In-row steps vary (20-28 m, simulating a curved row's uneven pace) and one includes a step
+    # larger than the old fixed 25 m constant, followed by one unambiguous ~300 m row-transition
+    # jump. A fixed-distance rule would split on every step over 25 m; the derivation should not.
+    stamps = [
+        _stamp("a", 43.196000, -90.0580, 0),
+        _stamp("b", 43.196180, -90.0580, 2),  # ~20 m
+        _stamp("c", 43.196431, -90.0580, 4),  # ~28 m
+        _stamp("d", 43.196628, -90.0580, 6),  # ~22 m
+        _stamp("e", 43.196862, -90.0580, 8),  # ~26 m
+        _stamp("f", 43.199556, -90.0580, 10),  # ~300 m jump -> new run
+    ]
+    runs = _segment_runs(stamps)
+    assert len(runs) == 2
+    assert [s.stem for s in runs[0]] == ["a", "b", "c", "d", "e"]
+    assert [s.stem for s in runs[1]] == ["f"]
+
+
+def test_segment_runs_uniform_gaps_stay_one_run() -> None:
+    # Roughly uniform ~27-32 m gaps throughout, all above the old fixed 25 m constant (which
+    # would have split every consecutive pair) but with no real bimodal break in the sequence.
+    stamps = [
+        _stamp("a", 43.196000, -90.0580, 0),
+        _stamp("b", 43.196252, -90.0580, 2),  # ~28 m
+        _stamp("c", 43.196521, -90.0580, 4),  # ~30 m
+        _stamp("d", 43.196808, -90.0580, 6),  # ~32 m
+        _stamp("e", 43.197069, -90.0580, 8),  # ~29 m
+        _stamp("f", 43.197347, -90.0580, 10),  # ~31 m
+        _stamp("g", 43.197590, -90.0580, 12),  # ~27 m
+    ]
+    runs = _segment_runs(stamps)
+    assert len(runs) == 1
+    assert [s.stem for s in runs[0]] == ["a", "b", "c", "d", "e", "f", "g"]
+
+
+def test_segment_runs_duplicate_gps_gap_does_not_hijack_the_split() -> None:
+    # A duplicate/cached EXIF GPS reading between two rapid captures (an exact 0 m gap) carries
+    # no walking-pace information; it must not be read as an "infinitely large" jump that wins
+    # over a genuine row-transition jump elsewhere in the sequence.
+    stamps = [
+        _stamp("a", 43.19600000, -90.0580, 0),
+        _stamp("b", 43.19601797, -90.0580, 2),  # ~2 m
+        _stamp("c", 43.19603593, -90.0580, 4),  # ~2 m
+        _stamp("d", 43.19603593, -90.0580, 6),  # duplicate of c: 0 m gap
+        _stamp("e", 43.19605390, -90.0580, 8),  # ~2 m
+        _stamp("f", 43.19874790, -90.0580, 10),  # ~300 m jump -> new run
+        _stamp("g", 43.19876587, -90.0580, 12),  # ~2 m
+    ]
+    runs = _segment_runs(stamps)
+    assert len(runs) == 2
+    assert [s.stem for s in runs[0]] == ["a", "b", "c", "d", "e"]
+    assert [s.stem for s in runs[1]] == ["f", "g"]
+
+
 def test_assign_plants_one_to_one() -> None:
     plants = [
         _plant("P1", "A", 43.1960, -90.0580),
