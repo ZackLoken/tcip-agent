@@ -222,11 +222,16 @@ def _nearest_plant(
 # ── Sequence anchoring ─────────────────────────────────────────────────
 
 
-# A row-transition jump must stand out from the rest of the date's gap distribution by at
-# least this multiple to count as a genuine break rather than continuous within-row variation
-# (e.g. a curved row's uneven step spacing). An order-of-magnitude-style separation factor,
-# not a tuned distance: it says "clearly a different population," not "farther than N metres."
-_ROW_BREAK_MIN_RELATIVE_JUMP = 3.0
+# Iglewicz & Hoaglin's modified z-score outlier test (Iglewicz, B. and Hoaglin, D. (1993), "How to
+# Detect and Handle Outliers", ASQC Quality Press), the standard median/MAD-based convention for
+# flagging an outlier in a small, possibly non-normal sample: a candidate row-transition jump must
+# clear this critical value on its modified z-score, computed in log-space (so "how many times
+# bigger" becomes an additive, mean/spread-comparable quantity) against the rest of the date's own
+# consecutive-gap ratios. 0.6745 is the constant that makes MAD a consistent estimator of the
+# standard deviation for a normally-distributed population; 3.5 is the convention's own published
+# cutoff, the same "cited statistical convention with a stated confidence level" shape as
+# ``operating_point._EQUIVALENCE_Z``, not a multiplier tuned to pass a fixture.
+_ROW_BREAK_MODIFIED_Z = 3.5
 
 
 def _derive_row_break_threshold(gaps: list[float]) -> Optional[float]:
@@ -234,36 +239,45 @@ def _derive_row_break_threshold(gaps: list[float]) -> Optional[float]:
 
     A walker's path produces small, roughly-uniform steps within a row and one or more much
     larger jumps at a row transition, regardless of whether the row is straight or curved. This
-    looks for that break as the largest relative jump between consecutive values in the sorted
-    gap sequence, then checks it actually stands out from the rest of the sorted jumps (not just
-    the single largest of an otherwise smooth continuum) before trusting it. Returns ``None`` when
-    there aren't enough gaps to judge, or the gaps are too uniform to support a split: the caller
-    should then treat the whole sequence as one run rather than fabricating a break the data
-    doesn't support.
+    looks for that break as the largest relative (log-space) jump between consecutive values in
+    the sorted gap sequence, then tests it against the rest of the sorted jumps via Iglewicz &
+    Hoaglin's modified z-score (median/MAD-based, robust to the small, often near-degenerate
+    samples a single date's image count produces) rather than trusting it as the single largest of
+    an otherwise smooth continuum. Returns ``None`` when there aren't enough gaps to judge, or the
+    gaps are too uniform to support a split: the caller should then treat the whole sequence as one
+    run rather than fabricating a break the data doesn't support.
     """
     if len(gaps) < 2:
         return None
     sorted_gaps = sorted(gaps)
     # A near-zero gap (two images at essentially the same GPS fix, e.g. a duplicate/cached EXIF
-    # reading between two rapid captures) carries no walking-pace information: dividing by it
-    # would make whatever value follows look like an infinitely large jump purely by
-    # construction, not because a row transition actually happened there. Excluded as a
+    # reading between two rapid captures) carries no walking-pace information: taking its log, or
+    # dividing by it, would make whatever value follows look like an infinitely large jump purely
+    # by construction, not because a row transition actually happened there. Excluded as a
     # candidate split point entirely, rather than treated as an automatic winner.
     candidates = [
-        (i, hi / lo) for i, (lo, hi) in enumerate(zip(sorted_gaps, sorted_gaps[1:]))
+        (i, math.log(hi / lo)) for i, (lo, hi) in enumerate(zip(sorted_gaps, sorted_gaps[1:]))
         if lo > 1e-9
     ]
     if not candidates:
         return None
-    best_i, best_ratio = max(candidates, key=lambda pair: pair[1])
+    best_i, best_log_ratio = max(candidates, key=lambda pair: pair[1])
 
-    other_ratios = [r for i, r in candidates if i != best_i]
-    if not other_ratios:
+    other_log_ratios = [r for i, r in candidates if i != best_i]
+    if not other_log_ratios:
         # Only one candidate split to look at: nothing to compare it against, so there's no basis
         # to call it a genuine transition rather than noise.
         return None
-    typical_ratio = statistics.median(other_ratios)
-    if best_ratio < max(_ROW_BREAK_MIN_RELATIVE_JUMP, typical_ratio * _ROW_BREAK_MIN_RELATIVE_JUMP):
+    median_other = statistics.median(other_log_ratios)
+    mad = statistics.median([abs(r - median_other) for r in other_log_ratios])
+    if mad > 0:
+        modified_z = 0.6745 * (best_log_ratio - median_other) / mad
+        if modified_z < _ROW_BREAK_MODIFIED_Z:
+            return None
+    elif best_log_ratio <= median_other:
+        # The rest of this date's own steps show no measured spread at all (identical, or equal up
+        # to floating-point precision): only a genuinely larger jump counts as a break, the modified
+        # z-score's own limiting behavior as MAD -> 0, not an unconditional pass on any candidate.
         return None
 
     return sorted_gaps[best_i] + (sorted_gaps[best_i + 1] - sorted_gaps[best_i]) / 2
