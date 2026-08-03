@@ -135,6 +135,36 @@ def test_cancel_unknown_run_returns_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+def test_tensorboard_route_404s_for_unknown_run(client: TestClient) -> None:
+    resp = client.post("/api/training/runs/does-not-exist/tensorboard")
+    assert resp.status_code == 404
+    assert "does-not-exist" in resp.json()["detail"]
+
+
+def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient, monkeypatch,
+                                                             tmp_path: Path) -> None:
+    # The GUI's link comes from a TensorBoard this process started, so the route must reach
+    # launch_tensorboard with the run's own log directory and hand back what it returned.
+    calls: list[tuple[str, str]] = []
+
+    def fake_status(run_id: str) -> dict:
+        return {"run_id": run_id, "status": "running", "output_dir": str(tmp_path)}
+
+    def fake_launch(logdir: str, run_id: str | None = None) -> dict:
+        calls.append((logdir, run_id or ""))
+        return {"url": "http://localhost:6006", "port": 6006, "pid": 1, "logdir": logdir}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.check_training_status", fake_status)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", fake_launch
+    )
+
+    resp = client.post("/api/training/runs/run-42/tensorboard")
+    assert resp.status_code == 200
+    assert resp.json()["url"] == "http://localhost:6006"
+    assert calls == [(f"{tmp_path}/tensorboard", "run-42")]
+
+
 def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
     # No live runs (post-restart): the list is rebuilt from .tcip/experiments/. A genuine
     # training experiment left 'running' by a crash resurfaces as 'interrupted'; a
