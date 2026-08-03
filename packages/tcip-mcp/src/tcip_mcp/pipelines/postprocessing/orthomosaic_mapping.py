@@ -15,6 +15,7 @@ determine, is refused rather than silently mis-georeferenced (see :class:`Rotate
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -226,9 +227,19 @@ class OrthomosaicWindowReader:
     planar (band-separate) samples raises :class:`UnsupportedRasterLayout`. Decoding also
     depends on this environment having a working codec for the file's compression: LZW and JPEG
     need the optional ``imagecodecs`` package, which is not part of this environment.
+
+    A real orthomosaic's strips run the raster's full width at a small ``rowsperstrip``, so a
+    tiling loop that scans left to right across one row-band before advancing (``tile_positions``'
+    own order) requests the *same* strips again for every tile in that band. Decoded strips are
+    cached (an LRU keyed by strip index) so a strip already decoded to serve one window is sliced
+    from memory for the next, rather than re-read from disk and re-decoded; the cache is capped
+    well below the file's full strip count so it never approaches holding the whole raster, sized
+    generously for one row-band's worth of strips rather than tuned to this file's own strip
+    count. A caller whose access pattern isn't row-major still gets correct results, just fewer
+    cache hits.
     """
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, strip_cache_capacity: int = 64):
         import tifffile
 
         self._path = Path(path)
@@ -251,8 +262,12 @@ class OrthomosaicWindowReader:
         self.num_channels = int(page.samplesperpixel)
         self.dtype = page.dtype
         self._rows_per_strip = int(page.rowsperstrip)
+        self._strip_cache: OrderedDict[int, np.ndarray] = OrderedDict()
+        self._strip_cache_capacity = strip_cache_capacity
+        self.strip_decode_count = 0  # cache misses actually decoded from disk; a caching test's probe
 
     def close(self) -> None:
+        self._strip_cache.clear()
         self._tif.close()
 
     def __enter__(self) -> "OrthomosaicWindowReader":
@@ -276,16 +291,44 @@ class OrthomosaicWindowReader:
         rps = self._rows_per_strip
         strip0 = y0 // rps
         strip1 = (y1 - 1) // rps
-        fh = self._page.parent.filehandle
-        strips = []
+        if strip0 == strip1:
+            block = self._decode_strip(strip0)
+            row_offset = strip0 * rps
+            # A copy, not a view: `block` is a cached, reused strip array, and a caller mutating
+            # its returned window must not corrupt what a later window reads back.
+            return np.array(block[y0 - row_offset : y1 - row_offset, x0:x1])
+        # A real orthomosaic's strips run the raster's full width, so slice each strip down to
+        # the requested x-range before concatenating: concatenating full-width strips just to
+        # discard everything outside x0:x1 copies orders of magnitude more data than the window
+        # itself needs. `np.concatenate` always allocates a new array, so this is a copy on its
+        # own, same as the single-strip branch's explicit one.
+        pieces = []
         for strip_index in range(strip0, strip1 + 1):
-            fh.seek(self._page.dataoffsets[strip_index])
-            data = fh.read(self._page.databytecounts[strip_index])
-            segment, _position, _shape = self._page.decode(data, strip_index)
-            strips.append(segment[0])
-        block = strips[0] if len(strips) == 1 else np.concatenate(strips, axis=0)
-        row_offset = strip0 * rps
-        return np.asarray(block[y0 - row_offset : y1 - row_offset, x0:x1])
+            strip = self._decode_strip(strip_index)
+            row_offset = strip_index * rps
+            row_lo = max(y0, row_offset) - row_offset
+            row_hi = min(y1, row_offset + strip.shape[0]) - row_offset
+            pieces.append(strip[row_lo:row_hi, x0:x1])
+        return np.concatenate(pieces, axis=0)
+
+    def _decode_strip(self, strip_index: int) -> np.ndarray:
+        """Return strip ``strip_index``'s decoded pixel rows, from the LRU cache if a previous
+        window already decoded it, decoding from disk only on a genuine miss.
+        """
+        cached = self._strip_cache.get(strip_index)
+        if cached is not None:
+            self._strip_cache.move_to_end(strip_index)
+            return cached
+        fh = self._page.parent.filehandle
+        fh.seek(self._page.dataoffsets[strip_index])
+        data = fh.read(self._page.databytecounts[strip_index])
+        segment, _position, _shape = self._page.decode(data, strip_index)
+        decoded = segment[0]
+        self._strip_cache[strip_index] = decoded
+        if len(self._strip_cache) > self._strip_cache_capacity:
+            self._strip_cache.popitem(last=False)
+        self.strip_decode_count += 1
+        return decoded
 
 
 # ── Per-detection plant assignment ──────────────────────────────────────
