@@ -16,8 +16,10 @@ import { classesApi, subjectColor } from "@/api/classes";
 import { resultsApi, type RegisteredModel } from "@/api/inference";
 import { BandPicker } from "@/components/BandPicker";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
+import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
+import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -195,20 +197,7 @@ export function ReviewTab() {
     if (visKey) saveDatasetVisibility(visKey, { showGT, showPred: v });
   };
   // The filter shelf is collapsed by default and remembers the last state across sessions.
-  const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("tcip.review.filtersOpen") === "1";
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem("tcip.review.filtersOpen", filtersOpen ? "1" : "0");
-    } catch {
-      /* private mode / disabled storage: the shelf just won't persist */
-    }
-  }, [filtersOpen]);
+  const { open: filtersOpen, toggle: toggleFilters } = useDisclosure("tcip.review.filtersOpen");
   const [counterDraft, setCounterDraft] = useState<string | null>(null);
   const counterRef = useRef<HTMLInputElement | null>(null);
   const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
@@ -1148,16 +1137,14 @@ export function ReviewTab() {
         {/* Row 1: filter shelf toggle + live summary + legend, then image / detection navigation */}
         <div className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
           <button
-            className="tcip-btn"
-            onClick={() => setFiltersOpen((v) => !v)}
+            className="tcip-btn inline-flex items-center gap-1.5"
+            onClick={toggleFilters}
             aria-expanded={filtersOpen}
             disabled={!!edit}
             title="Show or hide the review filters"
           >
-            <span className={`inline-block transition-transform ${filtersOpen ? "rotate-90" : ""}`}>
-              ▸
-            </span>
-            &nbsp;&nbsp;Filters
+            <DisclosureChevron open={filtersOpen} />
+            Filters
           </button>
           {/* Live summary: always shows every filter, so the shelf can stay collapsed. */}
           <span className="flex items-center gap-1.5 tabular-nums">
