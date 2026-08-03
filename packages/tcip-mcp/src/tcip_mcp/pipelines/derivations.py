@@ -302,10 +302,8 @@ def derive_iou_match_threshold(
     or ``None`` if underivable.
 
     Uses the same achievable-IoU-under-jitter basis ``derive_localization_kind`` uses to decide
-    whether ``iou_match`` should govern at all, the design that introduced automatic kind
-    derivation explicitly required a real threshold derivation to land in the same change, since
-    making ``iou_match`` automatically reachable without one would leave a previously-dormant
-    pinned-``0.5`` literal live for the first time with no real basis behind it.
+    whether ``iou_match`` should govern at all: an ``iou_match`` trait must derive its own IoU
+    threshold here rather than fall back to a pinned ``0.5`` literal with no real basis behind it.
 
     When ``resolve_match_criterion`` derives the kind fresh from this same call's GT
     (``kind_source == "data_derived_at_runtime"``), the characteristic size already cleared
