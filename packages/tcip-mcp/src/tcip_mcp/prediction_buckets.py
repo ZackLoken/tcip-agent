@@ -103,6 +103,37 @@ def resolve_writable_bucket(
     return BucketResolution(name=suggested, redirected=True, verdict_count=base, requested=requested)
 
 
+def resolve_prediction_bucket(
+    dataset_root: str | Path,
+    model_name: str,
+    date: str | None,
+    *,
+    review_state_dir: str | Path,
+    overwrite: bool = False,
+) -> tuple[Path, BucketResolution]:
+    """The prediction dir a run may write for ``(dataset_root, model_name, date)``.
+
+    The one place the platform turns that triple into a writable bucket, so every writer
+    agrees on both the path convention (``dataset_layout.prediction_dir``) and which segment
+    varies when the requested bucket carries review verdicts: the *model* one
+    (``predictions/<model>@r2/<date>``), never the date. A model-named bucket is what
+    ``list_models`` / ``models_with_predictions`` enumerate, so a redirected run stays
+    discoverable; a date-named sibling would be invisible to every reader.
+
+    Returns the dir to write and the resolution behind it (which bucket was requested,
+    whether it was redirected, and the verdict count that forced the redirect).
+    """
+    from tcip_mcp.dataset_layout import prediction_dir
+
+    def _bucket_dirs(name: str) -> list[Path]:
+        return [Path(prediction_dir(dataset_root, name, date))]
+
+    resolution = resolve_writable_bucket(
+        review_state_dir, model_name, _bucket_dirs, overwrite=overwrite
+    )
+    return Path(prediction_dir(dataset_root, resolution.name, date)), resolution
+
+
 def stage_prediction_shapes(
     dataset_root: str,
     model_name: str,
@@ -125,26 +156,23 @@ def stage_prediction_shapes(
     """
     from tcip_annotation import json_io
 
-    from tcip_mcp.dataset_layout import prediction_dir
-
-    review_state_dir = Path(dataset_root) / ".tcip" / "state"
-
-    def _bucket_dirs(name: str) -> list[Path]:
-        return [Path(prediction_dir(dataset_root, name, date))]
-
-    resolution = resolve_writable_bucket(review_state_dir, model_name, _bucket_dirs, overwrite=overwrite)
-    bucket = resolution.name
+    pred_dir, resolution = resolve_prediction_bucket(
+        dataset_root,
+        model_name,
+        date,
+        review_state_dir=Path(dataset_root) / ".tcip" / "state",
+        overwrite=overwrite,
+    )
 
     path = None
     if annotations:
-        pred_dir = Path(prediction_dir(dataset_root, bucket, date))
         pred_dir.mkdir(parents=True, exist_ok=True)
         out = pred_dir / f"{stem}.json"
         json_io.write_annotations(out, annotations, img_w, img_h)
         path = str(out)
 
     return {
-        "bucket": bucket,
+        "bucket": resolution.name,
         "redirected": resolution.redirected,
         "verdict_count": resolution.verdict_count,
         "requested": resolution.requested,
