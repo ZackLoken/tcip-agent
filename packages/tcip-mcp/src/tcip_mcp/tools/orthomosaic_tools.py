@@ -398,8 +398,8 @@ def deliver_orthomosaic_plant_counts(
     # stamped; read it back rather than re-deriving the same decision a second time here.
     import csv as _csv
 
-    with open(csv_path, newline="") as f:
-        rows = list(_csv.DictReader(f))
+    with open(csv_path, newline="") as csv_f:
+        rows = list(_csv.DictReader(csv_f))
     validated_stamp = rows[0]["measurement_validated"] if rows else None
 
     return {
