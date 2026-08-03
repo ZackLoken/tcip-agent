@@ -201,48 +201,53 @@ function App() {
             .setActiveSubject(subject && names.includes(subject) ? subject : (names[0] ?? null));
         }
 
-        // Scoped to the selected subject: a Complete recorded while annotating leaf says
-        // nothing about bush, and reading a global map re-applied it to subjects the breeder
-        // never looked at, then wrote the result back over their original confirmations.
-        const saved = await classesApi.loadImageStatus(
-          projectRoot,
-          subject,
-          datasetDate,
-          datasetRoot,
-          annotationsDir,
-        );
-        const savedMap = saved.statuses ?? {};
-        // Reconcile every image against the label files, honoring confirmed reviews via
-        // complete_override, so a wrongly-saved "negative" whose files have content heals
-        // to partial instead of silently locking the canvas forever.
-        const confirmed = imageList.filter(
-          (name) => savedMap[name] === "complete" || savedMap[name] === "negative",
-        );
-        const derivedRes = await classesApi.deriveImageStatus({
-          project_root: projectRoot,
-          annotations_dir: annotationsDir,
-          subject,
-          image_list: imageList,
-          complete_override: confirmed,
-        });
-        const reconciled = (derivedRes.statuses ?? {}) as Record<
-          string,
-          "complete" | "partial" | "negative" | "unannotated"
-        >;
-        const changed = Object.fromEntries(
-          Object.entries(reconciled).filter(([name, st]) => savedMap[name] !== st),
-        ) as Record<string, "complete" | "partial" | "negative" | "unannotated">;
-        if (Object.keys(changed).length) {
-          await classesApi.setImageStatusBulk(
+        // A fresh project with no subject authored yet has nothing to scope image status to:
+        // skip the load/reconcile/write sequence entirely rather than writing a bucket no
+        // subject-scoped read (get_image_status) ever comes back to.
+        if (subject) {
+          // Scoped to the selected subject: a Complete recorded while annotating leaf says
+          // nothing about bush, and reading a global map re-applied it to subjects the breeder
+          // never looked at, then wrote the result back over their original confirmations.
+          const saved = await classesApi.loadImageStatus(
             projectRoot,
-            changed,
             subject,
             datasetDate,
             datasetRoot,
             annotationsDir,
           );
+          const savedMap = saved.statuses ?? {};
+          // Reconcile every image against the label files, honoring confirmed reviews via
+          // complete_override, so a wrongly-saved "negative" whose files have content heals
+          // to partial instead of silently locking the canvas forever.
+          const confirmed = imageList.filter(
+            (name) => savedMap[name] === "complete" || savedMap[name] === "negative",
+          );
+          const derivedRes = await classesApi.deriveImageStatus({
+            project_root: projectRoot,
+            annotations_dir: annotationsDir,
+            subject,
+            image_list: imageList,
+            complete_override: confirmed,
+          });
+          const reconciled = (derivedRes.statuses ?? {}) as Record<
+            string,
+            "complete" | "partial" | "negative" | "unannotated"
+          >;
+          const changed = Object.fromEntries(
+            Object.entries(reconciled).filter(([name, st]) => savedMap[name] !== st),
+          ) as Record<string, "complete" | "partial" | "negative" | "unannotated">;
+          if (Object.keys(changed).length) {
+            await classesApi.setImageStatusBulk(
+              projectRoot,
+              changed,
+              subject,
+              datasetDate,
+              datasetRoot,
+              annotationsDir,
+            );
+          }
+          setImageStatuses(reconciled);
         }
-        setImageStatuses(reconciled);
       } catch (err) {
         console.warn("registry / image-status hydrate failed", err);
         useStore
