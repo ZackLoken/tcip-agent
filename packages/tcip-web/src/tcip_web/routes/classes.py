@@ -255,7 +255,7 @@ def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
                   image_names: Iterable[str]) -> None:
     """Best-effort: record the subject's current attribute-schema digest against each of
     ``image_names``, so a later read can tell a confirmation made under a since-changed schema from
-    one still valid. Stamped **per image**, not per bucket: a bucket holds every image ever touched
+    one still valid. Stamped per image, not per bucket: a bucket holds every image ever touched
     under this subject/date, so a bucket-wide stamp would be silently overwritten by the next
     unrelated write to the bucket, un-quarantining a different image's stale confirmation nobody
     re-reviewed. Never blocks the status write: an unreadable/absent registry just leaves these
