@@ -7,11 +7,13 @@
  * Lives directly under the global TopBar; Undo/Redo/Save are wired up from AnnotateTab.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
 import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
 import { BandPicker } from "@/components/BandPicker";
+import { DisclosureChevron } from "@/components/CollapsibleSection";
+import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageNav } from "@/hooks/useImageNav";
 import type { BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
@@ -105,20 +107,7 @@ export function AnnotateToolbar({
   const subjectNames = useMemo(() => Object.keys(registry), [registry]);
 
   // Editor shelf: collapsed by default, remembered across sessions.
-  const [editorOpen, setEditorOpen] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("tcip.annotate.editorOpen") === "1";
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem("tcip.annotate.editorOpen", editorOpen ? "1" : "0");
-    } catch {
-      /* storage disabled, the shelf just won't persist */
-    }
-  }, [editorOpen]);
+  const { open: editorOpen, toggle: toggleEditor } = useDisclosure("tcip.annotate.editorOpen");
 
   const [subjectMenuOpen, setSubjectMenuOpen] = useState(false);
   const [counterDraft, setCounterDraft] = useState<string | null>(null);
@@ -353,7 +342,7 @@ export function AnnotateToolbar({
         {/* Editor toggle: drops the second toolbar */}
         <button
           type="button"
-          onClick={() => setEditorOpen((o) => !o)}
+          onClick={toggleEditor}
           aria-expanded={editorOpen}
           className={`flex h-[30px] items-center gap-2 rounded border px-3 text-[12px] font-semibold transition-colors ${
             editorOpen
@@ -361,22 +350,7 @@ export function AnnotateToolbar({
               : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
           }`}
         >
-          <svg
-            viewBox="0 0 16 16"
-            width="11"
-            height="11"
-            fill="none"
-            aria-hidden="true"
-            className={`transition-transform ${editorOpen ? "rotate-90" : ""}`}
-          >
-            <path
-              d="M6 4l4 4-4 4"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <DisclosureChevron open={editorOpen} />
           Editor
         </button>
 
