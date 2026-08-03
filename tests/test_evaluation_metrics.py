@@ -28,6 +28,8 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     ordinal_metrics,
     pick_count_unbiased,
     pick_f1_max,
+    quadratic_weighted_kappa,
+    r_squared,
     regression_metrics,
     resolve_match_criterion,
     run_test_evaluation,
@@ -329,12 +331,53 @@ def test_ordinal_metrics():
     m = ordinal_metrics(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 2]))
     assert m["mae"] == pytest.approx(1 / 3)
     assert m["rank_acc"] == pytest.approx(2 / 3)
+    assert m["quadratic_weighted_kappa"] == pytest.approx(0.8)
 
 
 def test_regression_metrics():
     m = regression_metrics(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 4.0]))
     assert m["mae"] == pytest.approx(1 / 3)
     assert m["rmse"] == pytest.approx(math.sqrt(1 / 3))
+    assert m["r_squared"] == pytest.approx(11 / 14)
+
+
+def test_quadratic_weighted_kappa_perfect_agreement_is_one():
+    kappa = quadratic_weighted_kappa(torch.tensor([0, 1, 2, 1]), torch.tensor([0, 1, 2, 1]))
+    assert kappa == pytest.approx(1.0)
+
+
+def test_quadratic_weighted_kappa_hand_computed():
+    # true=[0,2,2], pred=[0,1,2]: one item off by one rank out of three, worked out by hand
+    # against the expected-disagreement-under-independence formula -> kappa = 1 - 1/5.
+    kappa = quadratic_weighted_kappa(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 2]))
+    assert kappa == pytest.approx(0.8)
+
+
+def test_quadratic_weighted_kappa_empty_is_none():
+    assert quadratic_weighted_kappa(torch.tensor([]), torch.tensor([])) is None
+
+
+def test_quadratic_weighted_kappa_degenerate_single_rank_is_none():
+    # every item shares the same true and predicted rank: no expected disagreement to correct for.
+    kappa = quadratic_weighted_kappa(torch.tensor([1, 1, 1]), torch.tensor([1, 1, 1]), num_ranks=3)
+    assert kappa is None
+
+
+def test_r_squared_perfect_fit_is_one():
+    assert r_squared(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0])) == pytest.approx(1.0)
+
+
+def test_r_squared_worse_than_mean_baseline_is_negative():
+    r2 = r_squared(torch.tensor([5.0, -5.0, 5.0]), torch.tensor([1.0, 2.0, 3.0]))
+    assert r2 < 0
+
+
+def test_r_squared_empty_is_none():
+    assert r_squared(torch.tensor([]), torch.tensor([])) is None
+
+
+def test_r_squared_constant_gt_is_none():
+    assert r_squared(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([5.0, 5.0, 5.0])) is None
 
 
 def test_selection_value_prefers_objective_for_detection():
