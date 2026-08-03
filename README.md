@@ -97,7 +97,7 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 
 ## Conventions
 
-- **Annotations**: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), plus the dataset-level COCO assembled from it for training. A negative is an empty label set **plus** an explicit human "Complete"; an empty label file alone is not a negative.
+- **Annotations**: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), plus the dataset-level COCO assembled from it for training.
 - **Experiments**: tracked in `.tcip/experiments/<id>/` with config, metrics JSONL, artifacts, lineage.
 - **Audit log**: all MCP tool calls logged to `.tcip/audit.jsonl` via `@audited` decorator.
 - **Lazy imports**: heavy deps (torch, torchvision) imported inside function bodies for fast MCP startup.
@@ -131,9 +131,7 @@ surfaces. Phase 1's own shipped example is hazelnut catkin bloom phenology
 
 Trained ML models are the deliverable; classical image analysis (OpenCV, scikit-image) is
 available for the agent to compose as a situational bootstrapping assist, cheaply producing soft
-labels or seeding training data when it fits, never the end product itself. High-throughput
-phenotyping doesn't scale on classical analysis alone, and its output is always reviewed and
-validated before it's trusted as ground truth.
+labels or seeding training data when it fits. 
 
 The detection training pipeline mirrors a production drone-phenotyping workflow:
 
