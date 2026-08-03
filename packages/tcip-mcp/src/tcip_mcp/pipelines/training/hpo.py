@@ -270,11 +270,14 @@ def _ray_session(ray: Any) -> Iterator[None]:
 
     with _ray_lifecycle:
         if not ray.is_initialized():
-            context = ray.init(include_dashboard=True, dashboard_host="127.0.0.1",
+            # A bare ray[tune] install has no aiohttp; probe rather than assume, so a sweep still runs without it.
+            include_dashboard = find_spec("aiohttp") is not None
+            context = ray.init(include_dashboard=include_dashboard, dashboard_host="127.0.0.1",
                                log_to_driver=False, ignore_reinit_error=True,
                                configure_logging=False)
             _ray_started_here = True
-            _publish_ray_dashboard(context.dashboard_url)
+            if include_dashboard:
+                _publish_ray_dashboard(context.dashboard_url)
         _active_searches += 1
     try:
         yield
