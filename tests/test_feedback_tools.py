@@ -105,6 +105,34 @@ def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch
     assert "error" in r and "foreign_kind" in r["error"]
 
 
+def test_prioritize_review_queue_confidence_triage_surfaces_unscoreable(tmp_path, monkeypatch):
+    """A regression checkpoint's predictions carry no confidence signal at all (RegressionHead's
+    point estimate, deliberately no distributional output). confidence_triage must route them
+    into review rather than silently drop them from every output, and tag them distinctly via
+    unscoreable_images so a caller can tell this apart from a genuinely medium-confidence item."""
+    from types import SimpleNamespace
+
+    import tcip_mcp.pipelines.inference.predictor as predmod
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "a.jpg").write_bytes(b"x")
+
+    predictions = [{"image": "a.jpg", "width": 4, "height": 4, "head0_values": [0.42]}]
+    monkeypatch.setattr(
+        predmod, "build_predictor",
+        lambda *a, **k: SimpleNamespace(predict_batch=lambda sources: predictions))
+
+    r = prioritize_review_queue(
+        checkpoint_path=str(ckpt), images_dir=str(images), strategy="confidence_triage")
+    assert r["needs_review"] == 1
+    assert r["review_images"] == ["a.jpg"]
+    assert r["unscoreable_images"] == ["a.jpg"]
+    assert r["auto_accepted_images"] == []
+
+
 def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
     """The refusal is a ValueError whatever the name looks like.
 
