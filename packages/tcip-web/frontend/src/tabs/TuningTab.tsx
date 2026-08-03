@@ -1,63 +1,64 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { tuningApi, type Sweep, type SweepDetail } from "@/api/tuning";
-import {
-  buildSearchSpace,
-  DEFAULT_HPO_PARAMS,
-  parseNumList,
-  SCHEDULERS,
-  SEARCH_ALGORITHMS,
-  type HpoParam,
-} from "@/tabs/hpoSpace";
+import { tuningApi, type Sweep, type SweepDetail, type SweepTrial } from "@/api/tuning";
+import type { TensorboardLaunch } from "@/api/training";
+import { DisclosureChevron } from "@/components/CollapsibleSection";
+import { EmbeddedTool } from "@/components/EmbeddedTool";
+import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
+import { TERMINAL_STATUSES } from "@/lib/runStatus";
 import { useStore } from "@/store";
+import { defaultSweepRequest } from "@/tabs/agentPrompts";
+import { RunMonitorEmpty, RunMonitorLayout } from "@/tabs/RunMonitorLayout";
 
-const DEFAULT_BASE = `{
-  "model_source": {
-    "builder": "my_models:build_net",
-    "builder_kwargs": {"num_classes": 1, "in_chans": 3},
-    "task": "detection"
-  },
-  "data": {"images_dir": "", "labels_dir": "", "task": "detection"},
-  "training": {"batch_size": 4, "num_workers": 0, "stages": [{"epochs": 3}]}
-}`;
+function hasContent(value: unknown): boolean {
+  return typeof value === "object" && value !== null && Object.keys(value).length > 0;
+}
 
-const TERMINAL = new Set(["completed", "failed", "interrupted"]);
+/** A launch either serves a url straight away or says why it could not. */
+function launchOutcome(launched: TensorboardLaunch): { url: string | null; error: string | null } {
+  if (launched.url) return { url: launched.url, error: null };
+  const error = launched.error
+    ? launched.output
+      ? `${launched.error}: ${launched.output}`
+      : launched.error
+    : "TensorBoard did not start.";
+  return { url: null, error };
+}
 
-/** Plain-language HPO request, editable before it's sent: what the agent chooses (the training
- *  config, the search space, the scheduler, the trial count) is the point of routing this
- *  through the agent rather than a form for those same choices. */
-function defaultSweepRequest(datasetRoot: string | null): string {
-  const where = datasetRoot ? ` for the dataset at ${datasetRoot}` : "";
-  return (
-    `Run a hyperparameter sweep${where}. Pick the training config and task, decide which ` +
-    "hyperparameters are worth searching (e.g. learning rate, batch size, weight decay) and " +
-    "reasonable ranges for them, choose a search algorithm/scheduler and a sensible number of " +
-    "trials, and launch it with run_hpo. Let me know once it's running so I can watch it here."
-  );
+function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+function cellText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(4);
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }
 
 export function TuningTab() {
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
-  const [request, setRequest] = useState(() => defaultSweepRequest(null));
-  // Once the breeder edits the request, stop overwriting it as the dataset selection resolves.
-  const [requestTouched, setRequestTouched] = useState(false);
-
-  useEffect(() => {
-    if (!requestTouched) setRequest(defaultSweepRequest(datasetRoot));
-  }, [datasetRoot, requestTouched]);
-
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [base, setBase] = useState(DEFAULT_BASE);
-  const [params, setParams] = useState<HpoParam[]>(DEFAULT_HPO_PARAMS);
-  const [nTrials, setNTrials] = useState(5);
-  const [searchAlg, setSearchAlg] = useState<string>("random");
-  const [scheduler, setScheduler] = useState<string>("asha");
-  const [outputDir, setOutputDir] = useState("");
+  const { request, setRequest } = useEditableAgentRequest(defaultSweepRequest(datasetRoot));
 
   const [sweeps, setSweeps] = useState<Sweep[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SweepDetail | null>(null);
-  const [launchMsg, setLaunchMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [trials, setTrials] = useState<SweepTrial[]>([]);
+  const [selectedTrialId, setSelectedTrialId] = useState<string | null>(null);
+  const [trialMetrics, setTrialMetrics] = useState<Record<string, unknown>[]>([]);
+  const [rayUrl, setRayUrl] = useState<string | null>(null);
+  const [rayError, setRayError] = useState<string | null>(null);
+  const [rayAttempt, setRayAttempt] = useState(0);
+  const [sweepTb, setSweepTb] = useState<{ url: string | null; error: string | null }>({
+    url: null,
+    error: null,
+  });
+  const [sweepTbAttempt, setSweepTbAttempt] = useState(0);
+  const [trialTb, setTrialTb] = useState<{ url: string | null; error: string | null }>({
+    url: null,
+    error: null,
+  });
+  const [trialTbAttempt, setTrialTbAttempt] = useState(0);
 
   async function refresh() {
     try {
@@ -74,22 +75,30 @@ export function TuningTab() {
     return () => clearInterval(t);
   }, []);
 
-  // Load the selected sweep's detail, then poll while it's still running. Keyed on the id
-  // so RE-selecting the same sweep keeps its already-loaded detail (the old code blanked
-  // the result on click and never re-fetched a same-id sweep).
+  // Load the selected sweep's detail and its trials, then poll while it's still running. Trials
+  // are read for the expanded sweep only: a listing per sweep per tick would walk the whole HPO
+  // root every few seconds. Keyed on the id so re-selecting the same sweep keeps what it loaded.
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
+      setTrials([]);
       return;
     }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const r = await tuningApi.getSweep(selectedId);
+        const d = await tuningApi.getSweep(selectedId);
         if (cancelled) return;
-        setDetail(r);
-        if (!TERMINAL.has(r.status)) timer = setTimeout(poll, 3000);
+        setDetail(d);
+        try {
+          const t = await tuningApi.listTrials(selectedId);
+          if (!cancelled) setTrials(t.trials ?? []);
+        } catch {
+          // A sweep launched here has no trial directory until its first trial writes one.
+          if (!cancelled) setTrials([]);
+        }
+        if (!cancelled && !TERMINAL_STATUSES.has(d.status)) timer = setTimeout(poll, 3000);
       } catch {
         /* ignore */
       }
@@ -101,296 +110,319 @@ export function TuningTab() {
     };
   }, [selectedId]);
 
-  function updateParam(key: string, patch: Record<string, unknown>) {
-    setParams((ps) => ps.map((p) => (p.key === key ? ({ ...p, ...patch } as HpoParam) : p)));
-  }
-
-  function askAgent() {
-    if (!request.trim()) return;
-    useStore.getState().sendToAgentTerminal(request);
-  }
-
-  async function launch() {
-    setLaunchMsg(null);
-    const space = buildSearchSpace(params);
-    if (Object.keys(space).length === 0) {
-      setLaunchMsg({ text: "Enable at least one parameter to sweep.", ok: false });
+  useEffect(() => {
+    if (!selectedId || !selectedTrialId) {
+      setTrialMetrics([]);
       return;
     }
-    try {
-      const resp = await tuningApi.launch({
-        base_config: JSON.parse(base),
-        param_space: space,
-        n_trials: nTrials,
-        output_dir: outputDir,
-        search_alg: searchAlg,
-        scheduler,
+    let cancelled = false;
+    void tuningApi.getTrialMetrics(selectedId, selectedTrialId).then(
+      (r) => {
+        if (!cancelled) setTrialMetrics(r.metrics ?? []);
+      },
+      () => {
+        if (!cancelled) setTrialMetrics([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, selectedTrialId]);
+
+  // Ray holds one cluster per process and tears it down with the sweep that started it, so the
+  // dashboard is read fresh whenever this panel comes up rather than cached across selections.
+  useEffect(() => {
+    setRayUrl(null);
+    setRayError(null);
+    if (!selectedId) return;
+    let cancelled = false;
+    void tuningApi.getRayDashboard().then(
+      (r) => {
+        if (cancelled) return;
+        setRayUrl(r.url);
+        setRayError(r.url ? null : "Ray's dashboard isn't running right now.");
+      },
+      (e) => {
+        if (!cancelled) setRayError(messageOf(e));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, rayAttempt]);
+
+  // One TensorBoard over the whole sweep directory: the launch is idempotent and answers with the
+  // url of whatever is already serving it, so there is nothing to wait for afterwards.
+  useEffect(() => {
+    setSweepTb({ url: null, error: null });
+    if (!selectedId) return;
+    let cancelled = false;
+    void tuningApi.launchSweepTensorboard(selectedId).then(
+      (launched) => {
+        if (!cancelled) setSweepTb(launchOutcome(launched));
+      },
+      (e) => {
+        if (!cancelled) setSweepTb({ url: null, error: messageOf(e) });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, sweepTbAttempt]);
+
+  // Every trial's TensorBoard costs a port out of a bounded range, so moving off a trial stops
+  // the one it was showing.
+  useEffect(() => {
+    setTrialTb({ url: null, error: null });
+    if (!selectedId || !selectedTrialId) return;
+    const sweepId = selectedId;
+    const trialId = selectedTrialId;
+    let cancelled = false;
+    void tuningApi.launchTrialTensorboard(sweepId, trialId).then(
+      (launched) => {
+        if (!cancelled) setTrialTb(launchOutcome(launched));
+      },
+      (e) => {
+        if (!cancelled) setTrialTb({ url: null, error: messageOf(e) });
+      },
+    );
+    return () => {
+      cancelled = true;
+      void tuningApi.stopTrialTensorboard(sweepId, trialId).catch(() => {
+        /* the trial's TensorBoard is already gone */
       });
-      if (resp.sweep_id) {
-        setLaunchMsg({ text: `Launched ${resp.sweep_id}`, ok: true });
-        setSelectedId(resp.sweep_id);
-        void refresh();
-      } else {
-        setLaunchMsg({ text: `Error: ${JSON.stringify(resp)}`, ok: false });
-      }
-    } catch (e) {
-      setLaunchMsg({ text: String(e), ok: false });
-    }
+    };
+  }, [selectedId, selectedTrialId, trialTbAttempt]);
+
+  const metricColumns = useMemo(() => {
+    const keys: string[] = [];
+    trialMetrics.forEach((row) => {
+      Object.keys(row).forEach((k) => {
+        if (!keys.includes(k)) keys.push(k);
+      });
+    });
+    return keys;
+  }, [trialMetrics]);
+
+  const selectedTrial = trials.find((t) => t.trial_id === selectedTrialId) ?? null;
+
+  function toggleSweep(sweepId: string) {
+    setSelectedTrialId(null);
+    setSelectedId((current) => (current === sweepId ? null : sweepId));
   }
 
   return (
-    <div className="flex-1 grid grid-cols-[440px_1fr] overflow-hidden">
-      <div className="border-r border-tcip-border p-4 overflow-auto">
-        <div className="tcip-heading mb-3">HPO sweep</div>
-        <p className="text-[11px] text-tcip-muted mb-2">
-          The agent picks the training config, the search space, and the scheduler, then launches
-          the sweep with <span className="font-mono">run_hpo</span>: the same reasoning it uses to
-          configure a training run. Describe what you want swept, then send it.
-        </p>
-        <textarea
-          className="tcip-input w-full h-32 text-[11px] leading-4 resize-none mb-2"
-          value={request}
-          onChange={(e) => {
-            setRequestTouched(true);
-            setRequest(e.target.value);
-          }}
-          spellCheck={true}
-        />
+    <RunMonitorLayout
+      title="Sweeps"
+      onRefresh={() => void refresh()}
+      headerRight={
         <button
-          className="tcip-btn-primary w-full mb-1"
-          onClick={askAgent}
+          className="tcip-btn-primary text-[11px]"
+          onClick={() => useStore.getState().sendToAgentTerminal(request)}
           disabled={!request.trim()}
         >
-          Ask the agent to run this sweep
+          Start Tuning
         </button>
-
-        <div className="mt-5">
-          <div className="tcip-heading mb-2">Sweeps</div>
-          {sweeps.length === 0 ? (
-            <div className="text-[11px] text-tcip-muted">
-              No sweeps yet. The agent launches a sweep from the request above.
+      }
+      detailHeader={
+        selectedTrial ? (
+          <>
+            <span className="tcip-heading">Trial</span>
+            <span className="font-mono text-[12px] text-tcip-fg">{selectedTrial.trial_id}</span>
+            <span className="text-[11px] text-tcip-muted">of {detail?.sweep_id}</span>
+          </>
+        ) : detail ? (
+          <>
+            <span className="tcip-heading">Sweep</span>
+            <span className="font-mono text-[12px] text-tcip-fg">{detail.sweep_id}</span>
+            <span className="text-[11px] text-tcip-muted">({detail.status})</span>
+          </>
+        ) : (
+          <span className="tcip-heading">Select a sweep</span>
+        )
+      }
+      detail={
+        selectedTrial ? (
+          <div className="flex flex-col gap-4">
+            <div className="h-[52vh] min-h-[320px] shrink-0">
+              <EmbeddedTool
+                title="Trial TensorBoard"
+                url={trialTb.url}
+                loading={!trialTb.url && !trialTb.error}
+                error={trialTb.error}
+                onRetry={() => setTrialTbAttempt((n) => n + 1)}
+              />
             </div>
-          ) : (
-            <ul className="space-y-1">
-              {sweeps.map((s) => (
-                <li
-                  key={s.sweep_id}
-                  className={`p-2 rounded border cursor-pointer transition-colors ${
-                    selectedId === s.sweep_id
+            <div>
+              <div className="tcip-heading mb-1">Parameters</div>
+              {Object.keys(selectedTrial.params).length === 0 ? (
+                <div className="text-[11px] text-tcip-muted">
+                  This trial has not written a resolved config yet.
+                </div>
+              ) : (
+                <pre className="text-[11px] font-mono p-3 tcip-panel overflow-auto">
+                  {JSON.stringify(selectedTrial.params, null, 2)}
+                </pre>
+              )}
+              {selectedTrial.unconsumed_params.length > 0 && (
+                <div className="mt-1 text-[11px] text-tcip-fp">
+                  Swept but not read by the training config:{" "}
+                  {selectedTrial.unconsumed_params.join(", ")}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="tcip-heading mb-1">Metrics</div>
+              {trialMetrics.length === 0 ? (
+                <div className="text-[11px] text-tcip-muted">
+                  No metrics rows from this trial yet.
+                </div>
+              ) : (
+                <div className="tcip-panel overflow-auto">
+                  <table className="w-full text-[11px] font-mono">
+                    <thead>
+                      <tr className="text-tcip-muted">
+                        {metricColumns.map((k) => (
+                          <th key={k} className="px-2 py-1 text-left font-normal">
+                            {k}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trialMetrics.map((row, i) => (
+                        <tr key={i} className="border-t border-tcip-border">
+                          {metricColumns.map((k) => (
+                            <td key={k} className="px-2 py-1 tabular-nums">
+                              {cellText(row[k])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : detail ? (
+          <div className="flex flex-col gap-3">
+            <div className="h-[46vh] min-h-[300px] shrink-0">
+              <EmbeddedTool
+                title="Ray dashboard"
+                url={rayUrl}
+                loading={!rayUrl && !rayError}
+                error={rayError}
+                onRetry={() => setRayAttempt((n) => n + 1)}
+              />
+            </div>
+            <div className="h-[38vh] min-h-[260px] shrink-0">
+              <EmbeddedTool
+                title="Sweep TensorBoard"
+                url={sweepTb.url}
+                loading={!sweepTb.url && !sweepTb.error}
+                error={sweepTb.error}
+                onRetry={() => setSweepTbAttempt((n) => n + 1)}
+              />
+            </div>
+            {detail.error ? <div className="text-[11px] text-tcip-fp">{detail.error}</div> : null}
+            {hasContent(detail.result) ? (
+              <pre className="max-h-[24vh] text-[11px] font-mono p-3 tcip-panel overflow-auto">
+                {JSON.stringify(detail.result, null, 2)}
+              </pre>
+            ) : (
+              <div className="text-[11px] text-tcip-muted">
+                The best config appears here once the sweep finishes. Pick one of its trials to
+                follow that trial while it runs.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-[11px] text-tcip-muted">
+            Select a sweep to see its trials and its result.
+          </div>
+        )
+      }
+    >
+      <p className="text-[11px] text-tcip-muted mb-2">
+        The agent picks the training config, the search space, and the scheduler, then launches the
+        sweep with <span className="font-mono">run_hpo</span>: the same reasoning it uses to
+        configure a training run. Describe what you want swept, then send it.
+      </p>
+      <textarea
+        className="tcip-input w-full h-32 text-[11px] leading-4 resize-none mb-3"
+        value={request}
+        onChange={(e) => setRequest(e.target.value)}
+        spellCheck={true}
+      />
+
+      {sweeps.length === 0 ? (
+        <RunMonitorEmpty>
+          No sweeps yet. The agent launches a sweep from the request above.
+        </RunMonitorEmpty>
+      ) : (
+        <ul className="space-y-1">
+          {sweeps.map((s) => {
+            const expanded = selectedId === s.sweep_id;
+            return (
+              <li key={s.sweep_id}>
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  className={`w-full flex items-start gap-2 p-2 rounded border text-left transition-colors ${
+                    expanded && !selectedTrialId
                       ? "border-tcip-accent bg-tcip-accent/10"
                       : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
                   }`}
-                  onClick={() => setSelectedId(s.sweep_id)}
+                  onClick={() => toggleSweep(s.sweep_id)}
                 >
-                  <div className="font-mono text-[11px]">{s.sweep_id}</div>
-                  <div className="text-[10px] text-tcip-muted">
-                    {s.status}
-                    {s.error ? `: ${s.error}` : ""}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <details
-          className="mt-5"
-          open={showAdvanced}
-          onToggle={(e) => setShowAdvanced(e.currentTarget.open)}
-        >
-          <summary className="tcip-heading cursor-pointer select-none">
-            Advanced: hand-author and launch a sweep directly
-          </summary>
-          <p className="text-[11px] text-tcip-muted mt-2 mb-2">
-            Skips the agent; only for a sweep shape it has no reasonable default for.
-          </p>
-
-          <label className="tcip-label mb-1">Base training config (JSON)</label>
-          <textarea
-            className="tcip-input w-full h-40 font-mono text-[11px] leading-4 resize-none mb-3"
-            value={base}
-            onChange={(e) => setBase(e.target.value)}
-            spellCheck={false}
-          />
-
-          {/* Structured search space (fed to Ray Tune) */}
-          <label className="tcip-label mb-1">Search space: each trial trains for real</label>
-          <div className="tcip-panel p-2 mb-3">
-            {params.map((p) => (
-              <div key={p.key} className="py-1 border-b border-tcip-border last:border-0">
-                <label className="flex items-center gap-2 text-[11px]">
-                  <input
-                    type="checkbox"
-                    checked={p.enabled}
-                    onChange={(e) => updateParam(p.key, { enabled: e.target.checked })}
-                  />
-                  <span className="font-medium">{p.label}</span>
-                  <span className="text-[10px] text-tcip-muted font-mono">{p.key}</span>
-                </label>
-                {p.enabled && (
-                  <div className="mt-1 ml-5 text-[10px]">
-                    {p.kind === "loguniform" && (
-                      <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-1">
-                          low
-                          <input
-                            className="tcip-input w-24 text-[11px]"
-                            type="number"
-                            step="any"
-                            value={Number.isFinite(p.low) ? p.low : ""}
-                            onChange={(e) =>
-                              updateParam(p.key, { low: parseFloat(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <label className="flex items-center gap-1">
-                          high
-                          <input
-                            className="tcip-input w-24 text-[11px]"
-                            type="number"
-                            step="any"
-                            value={Number.isFinite(p.high) ? p.high : ""}
-                            onChange={(e) =>
-                              updateParam(p.key, { high: parseFloat(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <span className="text-tcip-muted">log-uniform</span>
-                      </div>
+                  <span className="mt-[3px] text-tcip-muted">
+                    <DisclosureChevron open={expanded} />
+                  </span>
+                  <span className="flex-1">
+                    <span className="block font-mono text-[11px]">{s.sweep_id}</span>
+                    <span className="block text-[10px] text-tcip-muted">
+                      {s.status}
+                      {s.error ? `: ${s.error}` : ""}
+                    </span>
+                  </span>
+                </button>
+                {expanded && (
+                  <ul className="mt-1 ml-5 space-y-1">
+                    {trials.length === 0 ? (
+                      <li className="text-[10px] text-tcip-muted">No trials on disk yet.</li>
+                    ) : (
+                      trials.map((t) => (
+                        <li key={t.trial_id}>
+                          <button
+                            type="button"
+                            className={`w-full p-2 rounded border text-left transition-colors ${
+                              selectedTrialId === t.trial_id
+                                ? "border-tcip-accent bg-tcip-accent/10"
+                                : "border-tcip-border hover:border-tcip-border-hover hover:bg-tcip-hover"
+                            }`}
+                            onClick={() => setSelectedTrialId(t.trial_id)}
+                          >
+                            <span className="block font-mono text-[11px]">{t.trial_id}</span>
+                            <span className="block text-[10px] text-tcip-muted">
+                              {t.has_metrics ? "metrics" : "no metrics yet"}
+                              {Object.keys(t.params).length > 0
+                                ? ` · ${Object.entries(t.params)
+                                    .map(([k, v]) => `${k}=${cellText(v)}`)
+                                    .join(", ")}`
+                                : ""}
+                            </span>
+                          </button>
+                        </li>
+                      ))
                     )}
-                    {p.kind === "numlist" && (
-                      <input
-                        className="tcip-input w-full text-[11px]"
-                        value={p.values.join(", ")}
-                        onChange={(e) =>
-                          updateParam(p.key, { values: parseNumList(e.target.value) })
-                        }
-                        placeholder="comma-separated, e.g. 2, 4, 8"
-                        spellCheck={false}
-                      />
-                    )}
-                    {p.kind === "choices" && (
-                      <div className="flex flex-wrap gap-1">
-                        {p.options.map((opt) => {
-                          const on = p.selected.includes(opt);
-                          return (
-                            <button
-                              key={opt}
-                              type="button"
-                              aria-pressed={on}
-                              className={`h-6 rounded border px-2 text-[10px] transition-colors ${
-                                on
-                                  ? "border-tcip-accent bg-tcip-accent text-white"
-                                  : "border-tcip-border bg-tcip-bg text-tcip-muted hover:border-tcip-border-hover hover:text-tcip-fg"
-                              }`}
-                              onClick={() =>
-                                updateParam(p.key, {
-                                  selected: on
-                                    ? p.selected.filter((o) => o !== opt)
-                                    : [...p.selected, opt],
-                                })
-                              }
-                            >
-                              {opt}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
+                  </ul>
                 )}
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 mb-3 text-[11px] text-tcip-muted">
-            <label className="flex flex-col gap-1">
-              Trials
-              <input
-                className="tcip-input w-full"
-                type="number"
-                min={1}
-                max={200}
-                value={nTrials}
-                onChange={(e) => setNTrials(parseInt(e.target.value, 10) || 1)}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              Search algorithm
-              <select
-                className="tcip-select w-full"
-                value={searchAlg}
-                onChange={(e) => setSearchAlg(e.target.value)}
-              >
-                {SEARCH_ALGORITHMS.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              Scheduler
-              <select
-                className="tcip-select w-full"
-                value={scheduler}
-                onChange={(e) => setScheduler(e.target.value)}
-              >
-                {SCHEDULERS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <label className="tcip-label mb-1">Output directory</label>
-          <input
-            className="tcip-input w-full mb-3"
-            value={outputDir}
-            onChange={(e) => setOutputDir(e.target.value)}
-            placeholder=".../Valley_Farm/.tcip/hpo"
-          />
-
-          <button className="tcip-btn-primary w-full" onClick={launch}>
-            ▶&nbsp;&nbsp;Launch HPO
-          </button>
-          {launchMsg && (
-            <div className={`mt-2 text-[11px] ${launchMsg.ok ? "text-tcip-tp" : "text-tcip-fp"}`}>
-              {launchMsg.text}
-            </div>
-          )}
-          <div className="mt-1 text-[10px] text-tcip-muted">
-            Note: a running sweep can’t be cancelled, trials run to completion. Keep the trial count
-            modest.
-          </div>
-        </details>
-      </div>
-
-      <div className="p-4 overflow-auto">
-        <div className="mb-3 flex items-center gap-2">
-          {detail ? (
-            <>
-              <span className="tcip-heading">Sweep</span>
-              <span className="font-mono text-[12px] text-tcip-fg">{detail.sweep_id}</span>
-              <span className="text-[11px] text-tcip-muted">({detail.status})</span>
-            </>
-          ) : (
-            <span className="tcip-heading">Select a sweep</span>
-          )}
-        </div>
-        {detail?.result ? (
-          <pre className="text-[11px] font-mono p-3 tcip-panel overflow-auto max-h-[80vh]">
-            {JSON.stringify(detail.result, null, 2)}
-          </pre>
-        ) : (
-          <div className="text-[11px] text-tcip-muted">
-            Launch a sweep; the full trials + best config appear here when it finishes.
-            Parallel-coords visualisation planned for a post-Phase-1 iteration.
-          </div>
-        )}
-      </div>
-    </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </RunMonitorLayout>
   );
 }
