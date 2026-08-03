@@ -56,6 +56,7 @@ export function ResultsTab() {
   // primitive the backend already computes this from, via api.dataset.tree.
   const [dates, setDates] = useState<string[]>([]);
   const [modelsByDate, setModelsByDate] = useState<Record<string, string[]>>({});
+  const [predictionDirs, setPredictionDirs] = useState<Record<string, Record<string, string>>>({});
   const [datesError, setDatesError] = useState<string | null>(null);
   // The model picked per date; "" means "skip this date" (dropped before compute()).
   const [dateModel, setDateModel] = useState<Record<string, string>>({});
@@ -84,6 +85,11 @@ export function ResultsTab() {
   // (never assumed): auto-selected when there is exactly one, left blank (with an explicit
   // error, not a silent guess) when there are zero, offered as a choice when there are several.
   const [availableTraits, setAvailableTraits] = useState<string[]>([]);
+  // Each trait's declared milestone fractions, straight from its spec: what this tab can compute
+  // for the selected trait follows from them, not from a category the server assigned.
+  const [milestoneFractionsByTrait, setMilestoneFractionsByTrait] = useState<
+    Record<string, number[]>
+  >({});
   const [trait, setTrait] = useState("");
   const [traitError, setTraitError] = useState<string | null>(null);
 
@@ -95,6 +101,7 @@ export function ResultsTab() {
       .traits(projectRoot)
       .then((res) => {
         setAvailableTraits(res.traits);
+        setMilestoneFractionsByTrait(res.milestone_fractions_by_trait);
         if (res.traits.length === 0) {
           setTraitError("No trait is registered for this project yet.");
         } else if (res.traits.length === 1) {
@@ -103,6 +110,7 @@ export function ResultsTab() {
       })
       .catch((e) => {
         setAvailableTraits([]);
+        setMilestoneFractionsByTrait({});
         setTraitError(
           `Could not load this project's registered traits: ${e instanceof Error ? e.message : String(e)}`,
         );
@@ -116,6 +124,7 @@ export function ResultsTab() {
       .then((t) => {
         setDates(t.dates_with_images);
         setModelsByDate(t.models_by_date);
+        setPredictionDirs(t.prediction_dirs);
         // Default each date to its first model with predictions; a date with none stays "" (skip).
         setDateModel(
           Object.fromEntries(t.dates_with_images.map((d) => [d, t.models_by_date[d]?.[0] ?? ""])),
@@ -133,10 +142,10 @@ export function ResultsTab() {
     refreshDatasetTree();
   }, [refreshDatasetTree]);
 
-  // Same prediction-dir convention prefillPreds always used, kept as one place, now fed by the
-  // structured picker's selections instead of a hand-typed date -> path JSON object.
+  // The dir the backend itself says a model's predictions for a date live in, looked up from the
+  // tree response. A path assembled here would only agree with the writers by coincidence.
   function predDirFor(date: string, model: string): string {
-    return model ? `${datasetRoot}/predictions/${model}/${date}/detect` : "";
+    return (model && predictionDirs[date]?.[model]) || "";
   }
 
   async function buildMapping() {
@@ -305,6 +314,16 @@ export function ResultsTab() {
     );
   }
 
+  // The breeder can't author a trait spec from the GUI, so a trait with no milestone fractions
+  // needs a way forward rather than an empty tab.
+  function milestoneAbsenceRequest(): string {
+    return (
+      `The Results tab has nothing to compute for the "${trait}" trait: its spec declares no ` +
+      "milestone fractions. Please tell me what this trait's measurement delivers and how I get " +
+      "it, and update the spec if milestones are part of it."
+    );
+  }
+
   // Milestone columns are read generically off whatever the (threaded) trait's spec returned,
   // never hardcoded to one trait's own column names, so a different trait's rows render instead
   // of showing empty.
@@ -327,6 +346,10 @@ export function ResultsTab() {
     });
     return Array.from(cols).sort();
   }, [onset]);
+
+  // Curves and milestones are only meaningful for a trait whose spec declares the fractions they
+  // are read off. Nothing else on this tab depends on it.
+  const hasMilestones = (milestoneFractionsByTrait[trait] ?? []).length > 0;
 
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
@@ -404,305 +427,340 @@ export function ResultsTab() {
         )}
       </div>
 
-      <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">Per-plant phenology curves</div>
-        <div className="grid grid-cols-[1fr_180px] gap-3">
-          <div className="flex flex-col gap-1">
-            <label className="tcip-label">Predictions by date</label>
-            {datesError && (
-              <div className="text-[11px] text-tcip-fp mb-1">
-                {datesError}{" "}
-                <button className="tcip-btn text-[11px] ml-1" onClick={refreshDatasetTree}>
-                  Retry
+      {trait && !hasMilestones && (
+        <div className="tcip-panel p-4 flex flex-col gap-2">
+          <div className="tcip-heading">Nothing to compute here for {trait}</div>
+          <p className="text-[11px] text-tcip-muted">
+            This trait's spec declares no milestone fractions, so there are no curves or milestones
+            to compute for it.
+          </p>
+          <button
+            className="tcip-btn-primary text-[11px] self-start"
+            onClick={() => useStore.getState().sendToAgentTerminal(milestoneAbsenceRequest())}
+          >
+            Ask the agent what this trait delivers
+          </button>
+        </div>
+      )}
+
+      {hasMilestones && (
+        <>
+          <div className="tcip-panel p-4">
+            <div className="tcip-heading mb-3">Per-plant phenology curves</div>
+            <div className="grid grid-cols-[1fr_180px] gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="tcip-label">Predictions by date</label>
+                {datesError && (
+                  <div className="text-[11px] text-tcip-fp mb-1">
+                    {datesError}{" "}
+                    <button className="tcip-btn text-[11px] ml-1" onClick={refreshDatasetTree}>
+                      Retry
+                    </button>
+                  </div>
+                )}
+                {dates.length === 0 ? (
+                  !datesError && (
+                    <div className="text-[11px] text-tcip-muted">No dates in this dataset yet.</div>
+                  )
+                ) : (
+                  <div className="max-h-40 overflow-auto rounded border border-tcip-border">
+                    <table className="w-full text-[11px]">
+                      <tbody>
+                        {dates.map((d) => {
+                          const opts = modelsByDate[d] ?? [];
+                          return (
+                            <tr key={d} className="border-t border-tcip-border first:border-t-0">
+                              <td className="py-1 pl-2 pr-2 font-mono tabular-nums">{d}</td>
+                              <td className="py-1 pr-2">
+                                <select
+                                  className="tcip-select text-[11px] w-full"
+                                  value={dateModel[d] ?? ""}
+                                  onChange={(e) =>
+                                    setDateModel((prev) => ({ ...prev, [d]: e.target.value }))
+                                  }
+                                  disabled={opts.length === 0}
+                                  title={
+                                    opts.length === 0
+                                      ? "No model has predictions for this date"
+                                      : "Model whose predictions to use for this date"
+                                  }
+                                >
+                                  <option value="">
+                                    {opts.length === 0 ? "no predictions" : "(skip)"}
+                                  </option>
+                                  {opts.map((m) => (
+                                    <option key={m} value={m}>
+                                      {m}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] text-tcip-muted">
+                  The positive-state fraction is the share of a plant's detected objects that are in
+                  the trait's positive state. That state is a class from the validated classifier,
+                  not a bbox measurement; predictions must be classified for it.
+                </p>
+                {positiveClassUnassessed && (
+                  <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
+                    These predictions carry no positive-state class, so the curves below are not a
+                    valid phenology measurement and CSV export is disabled. Run the classifier
+                    first.
+                  </div>
+                )}
+                {unvalidatedRefusal && (
+                  <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
+                    <div>
+                      These predictions have no validated operating point on disk, so this is not
+                      yet a deliverable phenology measurement. Calibrate first, or look at the
+                      numbers as provisional, which will not let you export them.
+                    </div>
+                    <div className="text-tcip-muted">{unvalidatedRefusal}</div>
+                    <div className="flex gap-2">
+                      <button
+                        className="tcip-btn text-[11px] self-start"
+                        onClick={() => void compute(true)}
+                        disabled={loading}
+                      >
+                        Show provisional numbers
+                      </button>
+                      <button
+                        className="tcip-btn-primary text-[11px] self-start"
+                        onClick={() =>
+                          useStore
+                            .getState()
+                            .sendToAgentTerminal(calibrationRequest(unvalidatedRefusal))
+                        }
+                      >
+                        Ask the agent to calibrate this
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {provisional && (
+                  <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
+                    <div>
+                      Provisional: shown for inspection only, not a deliverable phenotype.
+                      Unvalidated: {unvalidatedDims.join(", ") || "unknown"}. CSV export stays
+                      disabled until both dimensions are validated on disk.
+                    </div>
+                    <button
+                      className="tcip-btn-primary text-[11px] self-start"
+                      onClick={() =>
+                        useStore.getState().sendToAgentTerminal(calibrationRequest(null))
+                      }
+                    >
+                      Ask the agent to calibrate this
+                    </button>
+                  </div>
+                )}
+                <button
+                  className="tcip-btn-primary"
+                  onClick={() => void compute()}
+                  disabled={loading}
+                >
+                  {loading ? "Computing…" : "Compute curves + milestone dates"}
                 </button>
+                <p className="text-[10px] text-tcip-muted">
+                  One computed measurement in two shapes: every (plant, date) point, or the
+                  milestone dates read off it.
+                </p>
+                <div className="flex gap-1">
+                  <button
+                    className="tcip-btn flex-1 text-[11px]"
+                    onClick={downloadCurvesCsv}
+                    disabled={curves.length === 0 || exportBlocked}
+                  >
+                    Curves CSV
+                  </button>
+                  <button
+                    className="tcip-btn flex-1 text-[11px]"
+                    onClick={downloadOnsetCsv}
+                    disabled={onset.length === 0 || exportBlocked}
+                  >
+                    Milestones CSV
+                  </button>
+                </div>
+              </div>
+            </div>
+            {error && <div className="mt-2 text-[11px] text-tcip-fp">{error}</div>}
+          </div>
+
+          <div className="tcip-panel p-4 h-80">
+            <div className="tcip-heading mb-3">
+              Positive-state fraction over time, per plant
+              {plantKeys.length > 30
+                ? ` (showing 30 of ${plantKeys.length} plants, the milestones table below has all)`
+                : ` (${plantKeys.length} plants)`}
+            </div>
+            {chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="90%">
+                <LineChart data={chartData}>
+                  <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" stroke={CHART.axis} style={{ fontSize: 11 }} />
+                  <YAxis stroke={CHART.axis} domain={[0, 1]} style={{ fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{
+                      background: CHART.tooltipBg,
+                      border: `1px solid ${CHART.tooltipBorder}`,
+                      borderRadius: 4,
+                      fontSize: 11,
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
+                  {plantKeys.slice(0, 30).map((pid, i) => (
+                    <Line
+                      key={pid}
+                      type="monotone"
+                      dataKey={pid}
+                      stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
+                      dot={false}
+                      strokeWidth={1}
+                      isAnimationActive={false}
+                      connectNulls
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
+                No data. Configure mapping + predictions above, then compute.
               </div>
             )}
-            {dates.length === 0 ? (
-              !datesError && (
-                <div className="text-[11px] text-tcip-muted">No dates in this dataset yet.</div>
-              )
-            ) : (
-              <div className="max-h-40 overflow-auto rounded border border-tcip-border">
+          </div>
+
+          <div className="tcip-panel p-4">
+            <div className="tcip-heading mb-3">
+              Phenology milestones for {trait || "the selected trait"} (the date each declared
+              fraction is crossed, per plant): {onset.length} rows
+            </div>
+            {onset.length > 0 ? (
+              <div className="overflow-auto max-h-96">
                 <table className="w-full text-[11px]">
+                  <thead className="sticky top-0 bg-tcip-panel">
+                    <tr className="border-b border-tcip-border">
+                      <th className="tcip-th">Plant ID</th>
+                      <th className="tcip-th">Accession</th>
+                      <th className="tcip-th">N points</th>
+                      <th className="tcip-th">Validity</th>
+                      {milestoneColumns.map((c) => (
+                        <th key={c} className="tcip-th">
+                          {c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
                   <tbody>
-                    {dates.map((d) => {
-                      const opts = modelsByDate[d] ?? [];
+                    {onset.map((r) => {
+                      // Gate the derivation itself (matching the setOnset([]) pattern used above)
+                      // rather than a banner, so a plant with any unclassified/missing date shows as
+                      // such, not silently blank milestone cells with no explanation.
+                      const rowValid =
+                        r.n_dates_unclassified === 0 && r.n_dates_missing_images === 0;
+                      // "Valid" alone doesn't distinguish real detection data from a plant that was fully
+                      // classified/observed but never had a single detection (before emergence, or a
+                      // genuinely empty scene): that reads as no observations, not blank cells next
+                      // to a reassuring "valid".
+                      const neverObserved = rowValid && r.n_observed_dates === 0;
                       return (
-                        <tr key={d} className="border-t border-tcip-border first:border-t-0">
-                          <td className="py-1 pl-2 pr-2 font-mono tabular-nums">{d}</td>
-                          <td className="py-1 pr-2">
-                            <select
-                              className="tcip-select text-[11px] w-full"
-                              value={dateModel[d] ?? ""}
-                              onChange={(e) =>
-                                setDateModel((prev) => ({ ...prev, [d]: e.target.value }))
-                              }
-                              disabled={opts.length === 0}
-                              title={
-                                opts.length === 0
-                                  ? "No model has predictions for this date"
-                                  : "Model whose predictions to use for this date"
-                              }
-                            >
-                              <option value="">
-                                {opts.length === 0 ? "no predictions" : "(skip)"}
-                              </option>
-                              {opts.map((m) => (
-                                <option key={m} value={m}>
-                                  {m}
-                                </option>
-                              ))}
-                            </select>
+                        <tr
+                          key={r.plant_id}
+                          className="border-t border-tcip-border first:border-t-0"
+                        >
+                          <td className="py-1.5 pr-3 font-mono">{r.plant_id}</td>
+                          <td className="pr-3">{r.accession ?? "—"}</td>
+                          <td className="pr-3 tabular-nums">{r.n_dates}</td>
+                          <td className="pr-3">
+                            {neverObserved ? (
+                              <span
+                                className="text-tcip-muted"
+                                title="Fully classified and fully observed, but no detections on any date, so there is nothing to derive milestones from."
+                              >
+                                no observations
+                              </span>
+                            ) : rowValid && provisional ? (
+                              // Coverage is complete, but the measurement behind these dates has no
+                              // validated operating point. The banner announcing that sits two panels
+                              // up and scrolls out of view, so the row must say so where it is read:
+                              // a phenology date beside a plain "valid" would be an unearned precision claim.
+                              <span
+                                className="text-tcip-fp"
+                                title="Coverage is complete, but the operating point behind these dates is not validated on disk: provisional, not a deliverable phenotype."
+                              >
+                                provisional
+                              </span>
+                            ) : rowValid ? (
+                              <span className="text-tcip-muted">valid</span>
+                            ) : (
+                              <span
+                                className="text-tcip-fp"
+                                title={`${r.n_dates_unclassified} unclassified date(s), ${r.n_dates_missing_images} missing-image date(s)`}
+                              >
+                                incomplete
+                              </span>
+                            )}
                           </td>
+                          {milestoneColumns.map((c) => {
+                            const date = r[c] as string | null;
+                            const bound = r[`${c}_bound`] as string | null;
+                            // A left-censored crossing means the first observation already met the
+                            // target, so the true date is only an upper bound; a right-censored one
+                            // means the last observation still hadn't, so the true date (if any) is
+                            // after this one, a lower bound. Rendering either as a plain date is a
+                            // precision claim the data does not support.
+                            const marker =
+                              bound === "left_censored"
+                                ? {
+                                    symbol: "≤",
+                                    className: "text-tcip-fp",
+                                    title:
+                                      "Left-censored: the first observation already met this target, so the true date is at or before this one.",
+                                  }
+                                : bound === "right_censored"
+                                  ? {
+                                      symbol: ">",
+                                      className: "text-tcip-fp",
+                                      title:
+                                        "Right-censored: the last observation still hadn't met this target, so the true date, if any, is after this one.",
+                                    }
+                                  : bound === "interpolated"
+                                    ? {
+                                        symbol: "~",
+                                        className: "text-tcip-muted",
+                                        title: "Interpolated between two observed dates.",
+                                      }
+                                    : null;
+                            return (
+                              <td key={c} className="pr-3 tabular-nums">
+                                {date ?? "—"}
+                                {date && marker && (
+                                  <span className={`ml-1 ${marker.className}`} title={marker.title}>
+                                    {marker.symbol}
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          })}
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
               </div>
+            ) : (
+              <div className="text-[11px] text-tcip-muted">Run the compute step to populate.</div>
             )}
           </div>
-          <div className="flex flex-col gap-2">
-            <p className="text-[11px] text-tcip-muted">
-              The positive-state fraction is the share of a plant's detected objects that are in the
-              trait's positive state. That state is a class from the validated classifier, not a
-              bbox measurement; predictions must be classified for it.
-            </p>
-            {positiveClassUnassessed && (
-              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
-                These predictions carry no positive-state class, so the curves below are not a valid
-                phenology measurement and CSV export is disabled. Run the classifier first.
-              </div>
-            )}
-            {unvalidatedRefusal && (
-              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
-                <div>
-                  These predictions have no validated operating point on disk, so this is not yet a
-                  deliverable phenology measurement. Calibrate first, or look at the numbers as
-                  provisional, which will not let you export them.
-                </div>
-                <div className="text-tcip-muted">{unvalidatedRefusal}</div>
-                <div className="flex gap-2">
-                  <button
-                    className="tcip-btn text-[11px] self-start"
-                    onClick={() => void compute(true)}
-                    disabled={loading}
-                  >
-                    Show provisional numbers
-                  </button>
-                  <button
-                    className="tcip-btn-primary text-[11px] self-start"
-                    onClick={() =>
-                      useStore
-                        .getState()
-                        .sendToAgentTerminal(calibrationRequest(unvalidatedRefusal))
-                    }
-                  >
-                    Ask the agent to calibrate this
-                  </button>
-                </div>
-              </div>
-            )}
-            {provisional && (
-              <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2 flex flex-col gap-2">
-                <div>
-                  Provisional: shown for inspection only, not a deliverable phenotype. Unvalidated:{" "}
-                  {unvalidatedDims.join(", ") || "unknown"}. CSV export stays disabled until both
-                  dimensions are validated on disk.
-                </div>
-                <button
-                  className="tcip-btn-primary text-[11px] self-start"
-                  onClick={() => useStore.getState().sendToAgentTerminal(calibrationRequest(null))}
-                >
-                  Ask the agent to calibrate this
-                </button>
-              </div>
-            )}
-            <button className="tcip-btn-primary" onClick={() => void compute()} disabled={loading}>
-              {loading ? "Computing…" : "Compute curves + onset dates"}
-            </button>
-            <div className="flex gap-1">
-              <button
-                className="tcip-btn flex-1 text-[11px]"
-                onClick={downloadCurvesCsv}
-                disabled={curves.length === 0 || exportBlocked}
-              >
-                Curves CSV
-              </button>
-              <button
-                className="tcip-btn-primary flex-1 text-[11px]"
-                onClick={downloadOnsetCsv}
-                disabled={onset.length === 0 || exportBlocked}
-              >
-                Onset CSV
-              </button>
-            </div>
-          </div>
-        </div>
-        {error && <div className="mt-2 text-[11px] text-tcip-fp">{error}</div>}
-      </div>
-
-      <div className="tcip-panel p-4 h-80">
-        <div className="tcip-heading mb-3">
-          Positive-state fraction over time, per plant
-          {plantKeys.length > 30
-            ? ` (showing 30 of ${plantKeys.length} plants, the onset table below has all)`
-            : ` (${plantKeys.length} plants)`}
-        </div>
-        {chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height="90%">
-            <LineChart data={chartData}>
-              <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
-              <XAxis dataKey="date" stroke={CHART.axis} style={{ fontSize: 11 }} />
-              <YAxis stroke={CHART.axis} domain={[0, 1]} style={{ fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{
-                  background: CHART.tooltipBg,
-                  border: `1px solid ${CHART.tooltipBorder}`,
-                  borderRadius: 4,
-                  fontSize: 11,
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 11, color: CHART.legendText }} />
-              {plantKeys.slice(0, 30).map((pid, i) => (
-                <Line
-                  key={pid}
-                  type="monotone"
-                  dataKey={pid}
-                  stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
-                  dot={false}
-                  strokeWidth={1}
-                  isAnimationActive={false}
-                  connectNulls
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex items-center justify-center h-full text-tcip-muted text-[12px]">
-            No data. Configure mapping + predictions above, then compute.
-          </div>
-        )}
-      </div>
-
-      <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">
-          Phenology milestones for {trait || "the selected trait"} (onset + percentile crossings per
-          plant): {onset.length} rows
-        </div>
-        {onset.length > 0 ? (
-          <div className="overflow-auto max-h-96">
-            <table className="w-full text-[11px]">
-              <thead className="sticky top-0 bg-tcip-panel">
-                <tr className="border-b border-tcip-border">
-                  <th className="tcip-th">Plant ID</th>
-                  <th className="tcip-th">Accession</th>
-                  <th className="tcip-th">N points</th>
-                  <th className="tcip-th">Validity</th>
-                  {milestoneColumns.map((c) => (
-                    <th key={c} className="tcip-th">
-                      {c}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {onset.map((r) => {
-                  // Gate the derivation itself (matching the setOnset([]) pattern used above)
-                  // rather than a banner, so a plant with any unclassified/missing date shows as
-                  // such, not silently blank milestone cells with no explanation.
-                  const rowValid = r.n_dates_unclassified === 0 && r.n_dates_missing_images === 0;
-                  // "Valid" alone doesn't distinguish real detection data from a plant that was fully
-                  // classified/observed but never had a single detection (before emergence, or a
-                  // genuinely empty scene): that reads as no observations, not blank cells next
-                  // to a reassuring "valid".
-                  const neverObserved = rowValid && r.n_observed_dates === 0;
-                  return (
-                    <tr key={r.plant_id} className="border-t border-tcip-border first:border-t-0">
-                      <td className="py-1.5 pr-3 font-mono">{r.plant_id}</td>
-                      <td className="pr-3">{r.accession ?? "—"}</td>
-                      <td className="pr-3 tabular-nums">{r.n_dates}</td>
-                      <td className="pr-3">
-                        {neverObserved ? (
-                          <span
-                            className="text-tcip-muted"
-                            title="Fully classified and fully observed, but no detections on any date, so there is nothing to derive milestones from."
-                          >
-                            no observations
-                          </span>
-                        ) : rowValid && provisional ? (
-                          // Coverage is complete, but the measurement behind these dates has no
-                          // validated operating point. The banner announcing that sits two panels
-                          // up and scrolls out of view, so the row must say so where it is read:
-                          // a phenology date beside a plain "valid" would be an unearned precision claim.
-                          <span
-                            className="text-tcip-fp"
-                            title="Coverage is complete, but the operating point behind these dates is not validated on disk: provisional, not a deliverable phenotype."
-                          >
-                            provisional
-                          </span>
-                        ) : rowValid ? (
-                          <span className="text-tcip-muted">valid</span>
-                        ) : (
-                          <span
-                            className="text-tcip-fp"
-                            title={`${r.n_dates_unclassified} unclassified date(s), ${r.n_dates_missing_images} missing-image date(s)`}
-                          >
-                            incomplete
-                          </span>
-                        )}
-                      </td>
-                      {milestoneColumns.map((c) => {
-                        const date = r[c] as string | null;
-                        const bound = r[`${c}_bound`] as string | null;
-                        // A left-censored crossing means the first observation already met the
-                        // target, so the true date is only an upper bound; a right-censored one
-                        // means the last observation still hadn't, so the true date (if any) is
-                        // after this one, a lower bound. Rendering either as a plain date is a
-                        // precision claim the data does not support.
-                        const marker =
-                          bound === "left_censored"
-                            ? {
-                                symbol: "≤",
-                                className: "text-tcip-fp",
-                                title:
-                                  "Left-censored: the first observation already met this target, so the true date is at or before this one.",
-                              }
-                            : bound === "right_censored"
-                              ? {
-                                  symbol: ">",
-                                  className: "text-tcip-fp",
-                                  title:
-                                    "Right-censored: the last observation still hadn't met this target, so the true date, if any, is after this one.",
-                                }
-                              : bound === "interpolated"
-                                ? {
-                                    symbol: "~",
-                                    className: "text-tcip-muted",
-                                    title: "Interpolated between two observed dates.",
-                                  }
-                                : null;
-                        return (
-                          <td key={c} className="pr-3 tabular-nums">
-                            {date ?? "—"}
-                            {date && marker && (
-                              <span className={`ml-1 ${marker.className}`} title={marker.title}>
-                                {marker.symbol}
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="text-[11px] text-tcip-muted">Run the compute step to populate.</div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }
