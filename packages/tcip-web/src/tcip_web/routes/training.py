@@ -52,13 +52,13 @@ def _historical_training_runs() -> list[dict]:
     on a run that isn't live means the process died -> surfaced as ``interrupted``.
 
     Delegates the actual state/current_epoch reconstruction to
-    ``tcip_mcp.experiments.reconstruct_run_status``: this used to duplicate that logic and
-    assumed the experiment directory name always equaled the real ``run_id``, which a fresh-id
-    relaunch format violates. A directory whose ``status.json`` never stamped ``run_id`` still
-    resolves correctly through the shared resolver's exact-match strategy: defaulting to
-    ``d.name`` here means the lookup is for the directory's own name, which trivially matches
-    itself, and now additionally gets ``current_epoch`` populated from ``metrics.jsonl`` (the old
-    inline classification here never did). The inline fallback below is reached only when
+    ``tcip_mcp.experiments.reconstruct_run_status``, the single implementation of
+    experiment-directory-to-``run_id`` resolution. A fresh-id relaunch's experiment directory
+    name does not necessarily equal the real ``run_id``; a directory whose ``status.json`` never
+    stamped ``run_id`` still resolves correctly through the shared resolver's exact-match
+    strategy: defaulting to ``d.name`` here means the lookup is for the directory's own name,
+    which trivially matches itself, and ``current_epoch`` is populated from ``metrics.jsonl`` via
+    that same resolver. The inline fallback below is reached only when
     ``reconstruct_run_status`` itself returns ``None`` or resolves to a *different* directory than
     the one being iterated (a malformed/unreadable ``status.json``, or a genuine identity
     anomaly), a narrower, degenerate case, not the common case of a directory whose ``status.json``
