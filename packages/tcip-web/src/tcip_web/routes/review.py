@@ -416,7 +416,7 @@ def _apply_gt_mutation(
     "checked this image for missed objects, found none" attestation) matches none of the branches
     below and always no-ops, GT is never mutated by sweeping.
 
-    Provenance (``reviewer`` = ``user:<name>``, ``now_iso`` = UTC): an accepted prediction **carries**
+    Provenance (``reviewer`` = ``user:<name>``, ``now_iso`` = UTC): an accepted prediction carries
     its ``created_by``/``created_at`` into GT (origin travels) and gets ``accepted_by``/``accepted_at``
     with its ``score`` dropped (it is ground truth now); a reviewer-drawn edit is stamped
     ``created_by`` = reviewer.
