@@ -62,6 +62,21 @@ def test_doctor_flags_the_field_session_bug_family(tmp_path):
     assert "IMG_A" not in out.replace("IMG_A.JPG is negative", "")  # confirmed negative is clean
 
 
+def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
+    """A dropped trait spec reads identically to no trait at all from the registry alone;
+    doctor.py is where the agent catches the difference at session start."""
+    root = _project(tmp_path)
+    specs_dir = root / ".tcip" / "state" / "trait_specs"
+    specs_dir.mkdir(parents=True)
+    (specs_dir / "unicorn.yml").write_text(
+        "name: unicorn\ndelivers: [unicorn_horn_length]\n", encoding="utf-8")
+
+    res = _run(root)
+    assert res.returncode == 2  # errors present
+    assert "unicorn.yml" in res.stdout
+    assert "unicorn_horn_length" in res.stdout
+
+
 def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     """A bespoke run's source snapshot that failed to capture a declared file is
     self-describing (``missing``/``snapshot_errors``); doctor.py surfaces it rather than the
