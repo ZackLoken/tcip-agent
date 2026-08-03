@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tcip_mcp.web_client import VALID_PANELS
 from tcip_web.app import app
 
 
@@ -46,7 +47,9 @@ class TestPostPanelEventRoute:
         assert "error" in body
 
     def test_all_valid_panels(self, client: TestClient) -> None:
-        for panel in ("annotate", "review", "training", "tuning", "inference", "results"):
+        # Iterates the shared set the tool and the route both validate against, so a panel added
+        # there is covered here without a third copy of the list drifting out of step.
+        for panel in sorted(VALID_PANELS):
             resp = client.post(
                 f"/api/events/{panel}",
                 json={"event_type": "test", "data": {"ok": True}},
