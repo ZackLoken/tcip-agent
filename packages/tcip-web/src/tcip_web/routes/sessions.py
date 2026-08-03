@@ -78,6 +78,12 @@ class ImageEventPayload(BaseModel):
     annotations_added_delta: int = 0         # new annotations created during this slice
     final_annotation_count: int              # boxes + polygons after the slice
     loaded_annotation_count: Optional[int] = None  # only set on first load
+    # Where this image's own image_status.json entry lives, so a read-time classification of
+    # this session's time (new annotation / review / negative confirmation) can look it up later.
+    # Optional: a caller with no dataset context in hand still gets recorded, just unclassifiable.
+    dataset_root: Optional[str] = None
+    subject: Optional[str] = None
+    date: Optional[str] = None
 
 
 @router.post("/image_event")
@@ -107,6 +113,11 @@ def image_event(payload: ImageEventPayload) -> dict:
 
         if payload.loaded_annotation_count is not None and "loaded_annotation_count" not in img:
             img["loaded_annotation_count"] = int(payload.loaded_annotation_count)
+
+        if payload.dataset_root:
+            img["dataset_root"] = payload.dataset_root
+            img["subject"] = payload.subject
+            img["date"] = payload.date
 
         img["session_seconds"] = round(
             float(img.get("session_seconds", 0.0)) + max(0.0, payload.session_seconds_delta),
@@ -184,7 +195,10 @@ def end_session(payload: EndSessionPayload) -> dict:
 
 @router.get("/load")
 def load_sessions(project_root: str) -> dict:
-    return _read(_stats_path(project_root))
+    data = _read(_stats_path(project_root))
+    for s in data.get("sessions", []):
+        s.update(_classify_session_seconds(s))
+    return data
 
 
 # ── helpers ────────────────────────────────────────────────────────────
@@ -204,13 +218,63 @@ def _new_session_entry(user: str = "") -> dict[str, Any]:
 
 
 def _refresh_session_aggregate(s: dict[str, Any]) -> None:
+    # total_time_seconds is every image with real session time, negative confirmation and pure
+    # review included, not just images that gained a new annotation; avg_seconds_per_annotation
+    # keeps its own narrower time sum so it stays a per-new-annotation figure, not diluted by time
+    # that produced no new annotation.
     images = s.get("images", {})
     images_with_adds = [v for v in images.values() if v.get("annotations_added", 0) > 0]
-    total_seconds = round(sum(v.get("session_seconds", 0.0) for v in images_with_adds), 2)
+    total_seconds = round(sum(v.get("session_seconds", 0.0) for v in images.values()), 2)
+    annotation_seconds = sum(v.get("session_seconds", 0.0) for v in images_with_adds)
     total_adds = sum(int(v.get("annotations_added", 0)) for v in images.values())
     s["images_annotated"] = len(images_with_adds)
     s["total_annotations"] = total_adds
     s["total_time_seconds"] = total_seconds
     s["avg_seconds_per_annotation"] = (
-        round(total_seconds / total_adds, 2) if total_adds > 0 else 0.0
+        round(annotation_seconds / total_adds, 2) if total_adds > 0 else 0.0
     )
+
+
+def _status_bucket_for(cache: dict[str, dict[str, str]], dataset_root: str,
+                       subject: str | None, date: str | None) -> dict[str, str]:
+    """One (dataset_root, subject, date) bucket of image_name -> status, read at most once per
+    call to :func:`_classify_session_seconds` regardless of how many images in a session share it."""
+    from tcip_mcp.dataset_layout import image_status_path, normalize_status_store, status_bucket
+
+    key = f"{dataset_root}\0{subject or ''}\0{date or ''}"
+    if key not in cache:
+        store = normalize_status_store(read_json(image_status_path(dataset_root), default={}))
+        cache[key] = store.get(status_bucket(subject or "", date), {})
+    return cache[key]
+
+
+def _classify_session_seconds(s: dict[str, Any]) -> dict[str, float]:
+    """This session's time, split into new-annotation / review / negative-confirmation seconds,
+    read fresh against image_status.json's current state rather than frozen at image_event time:
+    a breeder often confirms a negative as a separate, later action from just leaving the image, so
+    a write-time snapshot would misclassify time on an image not yet marked negative when the event
+    fired. An image with no dataset_root recorded (an older entry, or a caller with none to give)
+    falls back to review time, unclassifiable further.
+    """
+    images = s.get("images", {})
+    cache: dict[str, dict[str, str]] = {}
+    negative_seconds = review_seconds = annotation_seconds = 0.0
+    for name, img in images.items():
+        seconds = img.get("session_seconds", 0.0)
+        if img.get("annotations_added", 0) > 0:
+            annotation_seconds += seconds
+            continue
+        dataset_root = img.get("dataset_root")
+        status = (
+            _status_bucket_for(cache, dataset_root, img.get("subject"), img.get("date")).get(name)
+            if dataset_root else None
+        )
+        if status == "negative":
+            negative_seconds += seconds
+        else:
+            review_seconds += seconds
+    return {
+        "negative_confirmation_seconds": round(negative_seconds, 2),
+        "review_seconds": round(review_seconds, 2),
+        "new_annotation_seconds": round(annotation_seconds, 2),
+    }
