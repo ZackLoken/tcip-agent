@@ -130,6 +130,9 @@ export const api = {
         model_names: string[];
         subjects_by_date: Record<string, string[]>;
         models_by_date: Record<string, string[]>;
+        // date -> model -> the dir that model's predictions for that date live in, resolved by
+        // the backend's own layout resolver. Index it; never reassemble the path here.
+        prediction_dirs: Record<string, Record<string, string>>;
       }>(`/api/dataset/tree?${q({ dataset_root })}`),
 
     listImages: (dataset_root: string, date: string) =>
