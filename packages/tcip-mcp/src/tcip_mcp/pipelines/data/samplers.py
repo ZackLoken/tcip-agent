@@ -17,9 +17,9 @@ from tcip_mcp.pipelines.data.datasets import BaseDataset
 def _target_class_id(target: dict, class_key: str | None = None) -> int | None:
     """Class id for a sample's target, honoring an explicit ``class_key`` or task defaults.
 
-    Replaces the previously-hardcoded ``label``/``ranks``/``labels`` detection: a dataset
-    that names its class field differently can pass ``class_key`` instead of silently
-    bucketing every sample as class 0. Returns None when no class is found.
+    A dataset that names its class field differently than the ``label``/``ranks``/``labels``
+    defaults below can pass ``class_key`` instead of silently bucketing every sample as class 0.
+    Returns None when no class is found.
 
     Detection/instance-seg tensor ``labels`` are 1-indexed (cid + 1, background = 0)
     while ``class_distribution`` keys are 0-indexed cids, so that fallback branch shifts
