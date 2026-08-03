@@ -73,7 +73,7 @@ class GuiState(BaseModel):
     the browser owns navigation / view / mode / class / review-filter state and
     keeps its own copy (the FE merges snapshots rather than replacing), so those
     fields here are advisory. Training-run / inference-job / class-registry state
-    that used to live here was removed: the corresponding tabs own it directly.
+    lives with the corresponding tabs, not here.
     """
 
     active_tab: str = "annotate"  # annotate|review|training|tuning|inference|results|meta
