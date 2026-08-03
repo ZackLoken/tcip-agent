@@ -37,6 +37,14 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 PORT_FILE_RELATIVE = Path(".tcip") / "state" / "web_port.txt"
 
+# Every panel a pushed event may target: one per GUI tab, plus "app", the app-level channel for
+# steering the GUI itself (open a project, focus a tab). The MCP tool that pushes and the web
+# backend that receives both validate against this one set, so neither can drift into accepting
+# a panel the other rejects.
+VALID_PANELS = frozenset(
+    {"app", "annotate", "review", "training", "tuning", "inference", "results", "meta"}
+)
+
 
 def resolve_web_host() -> str:
     return os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)
