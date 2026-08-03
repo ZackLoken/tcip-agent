@@ -179,12 +179,10 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
     assert sidecar["id_map"] == {"dormant": 0, "elongated": 1}
 
 
-def test_web_worker_forces_untiled_for_instance_seg(tmp_path, monkeypatch):
-    """An instance_seg checkpoint launched with the GUI's tile checkbox checked can crash with a
-    raw traceback: tiled inference can't carry masks through the cross-tile merge. The GUI's
-    checkbox has no "unset" state, so (unlike the MCP door's run_inference, which can refuse an
-    explicit tile=True) this door always forces untiled for instance_seg instead, with a
-    warning, rather than ever refusing."""
+def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, monkeypatch):
+    """An instance_seg checkpoint launched with the GUI's tile checkbox checked runs tiled as
+    requested: tiled inference now threads masks through the cross-tile reconstruction/merge, so
+    this door no longer needs to silently override the breeder's own checkbox choice."""
     pytest.importorskip("fastapi")
     from PIL import Image
 
@@ -222,7 +220,6 @@ def test_web_worker_forces_untiled_for_instance_seg(tmp_path, monkeypatch):
     _worker(job)
 
     assert job.status == "completed"        # no crash
-    assert captured["tile"] is False         # masks survive: forced untiled regardless of the checkbox
-    assert job.tile is False
-    assert job.tile_source == "default"      # platform, not the breeder, decided this run's tiling
-    assert job.warning and "instance_seg" in job.warning
+    assert captured["tile"] is True          # the breeder's own checkbox choice is honored
+    assert job.tile is True
+    assert job.tile_source == "explicit"     # never silently overridden to "default" anymore
