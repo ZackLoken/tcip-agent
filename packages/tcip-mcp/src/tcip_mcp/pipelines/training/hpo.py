@@ -14,11 +14,23 @@ Facts (not a recipe, the agent chooses):
 from __future__ import annotations
 
 import logging
+import os
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+# Ray is one cluster per process, shared by every concurrent sweep, so its lifetime is
+# refcounted rather than owned by whichever sweep happened to start first.
+_ray_lifecycle = threading.Lock()
+_active_searches = 0
+_ray_started_here = False
+
+_RAY_DASHBOARD_STATE = Path(".tcip") / "state" / "ray_dashboard.json"
 
 # Native samplers (BasicVariantGenerator), no extra dependency. ``grid`` becomes a grid
 # over the discrete axes of the space; ``random`` samples them.
@@ -183,6 +195,98 @@ def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
     return {"cpu": 1.0, "gpu": gpu}
 
 
+def ray_dashboard_state_path() -> Path:
+    """Where a running cluster's dashboard URL is written down, under the platform root."""
+    from tcip_mcp.project_paths import resolve_state
+
+    return resolve_state(_RAY_DASHBOARD_STATE)
+
+
+def _publish_ray_dashboard(dashboard_url: str | None) -> None:
+    """Record the dashboard of the cluster this process just started.
+
+    ``ray.init()`` reports the dashboard as a bare ``host:port``; what is written down is a
+    fetchable URL, so every reader agrees on one form. The pid is the initiating process,
+    which is what tells a later reader (in any process) whether the cluster is still up.
+    """
+    if not dashboard_url:
+        logger.info("Ray started without a dashboard; no URL to publish")
+        return
+    from datetime import datetime, timezone
+
+    from tcip_mcp.utils.atomic_io import atomic_write_json
+
+    try:
+        atomic_write_json(ray_dashboard_state_path(), {
+            "url": f"http://{dashboard_url}",
+            "pid": os.getpid(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except OSError:
+        logger.warning("could not record the Ray dashboard URL", exc_info=True)
+
+
+def _clear_ray_dashboard() -> None:
+    """Drop the recorded dashboard so a torn-down cluster's URL is never served."""
+    try:
+        ray_dashboard_state_path().unlink(missing_ok=True)
+    except OSError:
+        logger.warning("could not clear the recorded Ray dashboard URL", exc_info=True)
+
+
+def read_ray_dashboard() -> dict | None:
+    """The live Ray dashboard's ``{url, pid, started_at}``, or ``None`` if none is up.
+
+    Ray's dashboard is its own OS process on a real port, so any process on the machine can
+    serve its URL once it has been written down: an agent-launched sweep initializes Ray
+    inside the MCP server, and the web backend reads the same file. A recorded URL whose
+    initiating process is gone is stale, since that process's exit takes the cluster with it.
+    """
+    import psutil
+
+    from tcip_mcp.utils.atomic_io import read_json
+
+    state = read_json(ray_dashboard_state_path(), default=None)
+    if not isinstance(state, dict) or not state.get("url"):
+        return None
+    pid = state.get("pid")
+    if not isinstance(pid, int) or not psutil.pid_exists(pid):
+        return None
+    return state
+
+
+@contextmanager
+def _ray_session(ray: Any) -> Iterator[None]:
+    """Keep Ray up for the duration of one sweep, shutting it down only when the last
+    concurrent sweep leaves and only if this module is what started it.
+
+    Two conditions, both required. The count is what makes a finishing sweep leave a
+    still-running sibling's cluster alone; the ownership flag is what keeps a sweep running
+    inside a process that initialized Ray for its own reasons (a notebook, an embedding
+    application) from tearing that cluster down. The lock covers both, so the
+    check-then-init and the decrement-then-shutdown sequences cannot interleave.
+    """
+    global _active_searches, _ray_started_here
+
+    with _ray_lifecycle:
+        if not ray.is_initialized():
+            context = ray.init(include_dashboard=True, dashboard_host="127.0.0.1",
+                               log_to_driver=False, ignore_reinit_error=True,
+                               configure_logging=False)
+            _ray_started_here = True
+            _publish_ray_dashboard(context.dashboard_url)
+        _active_searches += 1
+    try:
+        yield
+    finally:
+        with _ray_lifecycle:
+            _active_searches -= 1
+            if _active_searches == 0 and _ray_started_here:
+                _ray_started_here = False
+                _clear_ray_dashboard()
+                ray.shutdown()
+
+
 def tune_search(
     objective_fn: Callable[[dict, Callable[[float], None]], Any],
     param_space: dict | None = None,
@@ -264,11 +368,7 @@ def tune_search(
         run_kwargs["storage_path"] = Path(storage_path).resolve().as_posix()
         run_kwargs["name"] = study_name
 
-    started = not ray.is_initialized()
-    if started:
-        ray.init(include_dashboard=False, log_to_driver=False,
-                 ignore_reinit_error=True, configure_logging=False)
-    try:
+    with _ray_session(ray):
         tuner = tune.Tuner(
             trainable,
             param_space=space,
@@ -280,9 +380,6 @@ def tune_search(
             run_config=tune.RunConfig(**run_kwargs),
         )
         results = tuner.fit()
-    finally:
-        if started:
-            ray.shutdown()
 
     all_trials = []
     for r in results:
