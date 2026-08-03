@@ -113,9 +113,20 @@ class OrdinalHead(BaseHead):
         cum_probs = torch.cumprod(probs, dim=-1)
         # Predicted rank = number of thresholds exceeded
         predicted_ranks = (cum_probs > 0.5).sum(dim=-1)
+        # Per-instance confidence: the marginal probability mass CORN's own cumulative outputs
+        # imply at the predicted rank, P(Y=k) = P(Y>=k) - P(Y>=k+1), from the extended sequence
+        # P(Y>=0)=1, P(Y>=k)=cum_probs[:,k-1] for k=1..num_ranks-1, P(Y>=num_ranks)=0 - the CORN
+        # analog of ClassificationHead.decode's confs = probs.max(dim=-1).values (probability mass
+        # at the argmax), not an invented heuristic.
+        batch = cum_probs.shape[0]
+        p_ge = torch.cat(
+            [cum_probs.new_ones((batch, 1)), cum_probs, cum_probs.new_zeros((batch, 1))], dim=-1)
+        p_eq = p_ge[:, :-1] - p_ge[:, 1:]  # [B, num_ranks], marginal P(Y=k)
+        confidences = p_eq.gather(1, predicted_ranks.unsqueeze(-1).long()).squeeze(-1)
         return {
             "ranks": predicted_ranks,
             "cumulative_probs": cum_probs,
+            "confidences": confidences,
         }
 
 
