@@ -12,6 +12,27 @@ export interface TrainingRunSummary {
   external?: boolean; // reconstructed from experiment records: running in another process
 }
 
+export interface TrainingRunDetail {
+  run_id?: string;
+  status?: string;
+  epoch?: number | null;
+  best_metric?: number | null;
+  output_dir?: string | null;
+  error?: string;
+  /** Set only while a TensorBoard this backend started is still serving the run. */
+  tensorboard_url?: string | null;
+}
+
+export interface TensorboardLaunch {
+  url?: string;
+  port?: number;
+  pid?: number;
+  logdir?: string;
+  /** Present instead of a url when the process died during startup; `output` is what it wrote. */
+  error?: string;
+  output?: string;
+}
+
 export interface MetricRow {
   epoch?: number;
   step?: number;
@@ -29,6 +50,12 @@ export const trainingApi = {
     }),
 
   listRuns: () => getJson<{ runs: TrainingRunSummary[] }>("/api/training/runs"),
+
+  getRun: (run_id: string) =>
+    getJson<TrainingRunDetail>(`/api/training/runs/${encodeURIComponent(run_id)}`),
+
+  launchTensorboard: (run_id: string) =>
+    postJson<TensorboardLaunch>(`/api/training/runs/${encodeURIComponent(run_id)}/tensorboard`, {}),
 
   getMetrics: (project_root: string, run_id: string) =>
     getJson<{ metrics: MetricRow[]; exists: boolean }>(
