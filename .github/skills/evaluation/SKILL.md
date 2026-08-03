@@ -12,8 +12,8 @@ description: "Model evaluation methods, metrics interpretation, failure triage, 
 | Detection | mAP@50 | mAP@50:95, precision, recall |
 | Instance Segmentation | mask mAP@50 | box mAP, mask quality (IoU distribution) |
 | Classification | Accuracy | F1 (macro/weighted), confusion matrix, per-class precision/recall |
-| Regression | RMSE | R², MAE, residual distribution |
-| Ordinal | Quadratic weighted κ | Adjacent accuracy, confusion matrix |
+| Regression | RMSE | R², MAE |
+| Ordinal | Quadratic weighted κ | MAE, rank accuracy |
 
 These are labeled comparability metrics: a fixed-convention number (mAP@50 = AP at IoU 0.5) that
 lets runs be compared on the same ruler. They do not govern the phenotype. The criterion that
@@ -24,8 +24,9 @@ criterion per trait/data; keep mAP@50 alongside only as the comparability label 
 / the derive-don't-pin rail). There is no single mandated "primary" metric per task.
 
 Detection/instance-seg metrics (`coco_detection_metrics`) are aggregate only; no per-class AP
-today. Per-class precision/recall/F1 is real for classification/ordinal (`evaluate_model`).
-Change detection is not a built task type; see README's Roadmap.
+today. Per-class precision/recall/F1 is real for classification (`evaluate_model`); ordinal and
+regression get only the scalar metrics in the table above, no per-class breakdown. Change
+detection is not a built task type; see README's Roadmap.
 
 ## Tools
 
@@ -76,7 +77,8 @@ When comparing models:
 2. Same evaluation set
 3. Compare using the metric that governs this trait/task's phenotype (see Metrics by Task Type
    above), not necessarily the labeled comparability metric
-4. For classification/ordinal, check per-class performance; overall accuracy can hide
-   class-specific failures; for detection, check per-image FP/FN patterns instead (see
-   Failure Triage above; there's no per-class AP today)
+4. For classification, check per-class performance; overall accuracy can hide class-specific
+   failures; for ordinal, check quadratic weighted kappa alongside rank accuracy, since exact-rank
+   accuracy alone can hide a model that's frequently off by one rank; for detection, check
+   per-image FP/FN patterns instead (see Failure Triage above; there's no per-class AP today)
 5. Use `compare_experiments` for side-by-side analysis
