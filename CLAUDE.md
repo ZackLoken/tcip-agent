@@ -241,7 +241,7 @@ shapes with the GUI's own symbology. See the `visual-analysis` skill.
 ## Commands
 
 ```bash
-conda activate tcip-agent          # Python 3.11; torch installs CPU by default (see environment.yml)
+conda activate tcip-agent          # Python 3.11; torch installs CUDA (cu126) by default, runs fine without a GPU too (see environment.yml)
 pytest tests/ -v --tb=short
 ruff check .
 python scripts/list_tools.py       # current MCP tool list/count (don't hardcode counts in docs)
