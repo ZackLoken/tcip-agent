@@ -192,7 +192,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
     # Re-selecting the same (root, subject, date) within a session resumes at the persisted
     # position instead of clobbering it back to image 0. The first select of a fresh process
     # (the auto-open on app load) starts at image 0 rather than resurfacing a prior session's
-    # position: a stale resume there previously landed a freshly opened project on image 3/112.
+    # position.
     global _selected_this_session
     prev = store.state.dataset
     same_identity = (
