@@ -107,8 +107,8 @@ def update_trait_spec_fields(trait_name: str, fields: dict, provenance_entries: 
     """Update one or more fields on an already-registered trait's spec, recording who asserted
     the change and how firmly.
 
-    Before this tool, a trait spec was authored by hand-writing YAML directly, no audited
-    record, no re-validation. This refuses if the trait has no existing spec file (creating a new
+    Hand-editing a trait spec's YAML directly bypasses the audit record and skips re-validation.
+    This refuses if the trait has no existing spec file (creating a new
     trait is a separate, still-manual authoring step) or if the merged result would fail the same
     crops.yml cross-check every config-authored spec already goes through. Returns the updated
     spec.
