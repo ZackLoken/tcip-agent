@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { api } from "@/api/client";
 import {
   inferenceApi,
   openInferenceStream,
@@ -28,21 +29,10 @@ export function InferenceTab() {
   const [models, setModels] = useState<RegisteredModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelPath, setModelPath] = useState<string>("");
-  const [imagesDir, setImagesDir] = useState<string>("");
-  const [outputDir, setOutputDir] = useState<string>("");
+  const [dates, setDates] = useState<string[]>([]);
+  const [datesError, setDatesError] = useState<string | null>(null);
+  const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [tile, setTile] = useState<boolean>(true);
-  const [postprocess, setPostprocess] = useState<"nms" | "nmm">("nms");
-  // These start unset, not frozen literals: a value is sent only once the breeder explicitly
-  // overrides it. Left unset, the backend derives conf/iou from resolution.py's own defaults and
-  // tile_size/overlap from the checkpoint's persisted training geometry (resolve_tile_geometry),
-  // instead of a GUI run silently diverging from the MCP door's count on the same checkpoint.
-  // Kept behind "Advanced (override)" below so surfacing them doesn't invite overriding by default.
-  const [conf, setConf] = useState<number | undefined>(undefined);
-  const [iou, setIou] = useState<number | undefined>(undefined);
-  const [sliceH, setSliceH] = useState<number | undefined>(undefined);
-  const [sliceW, setSliceW] = useState<number | undefined>(undefined);
-  const [overlap, setOverlap] = useState<number | undefined>(undefined);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<InferenceJob | null>(null);
@@ -67,6 +57,27 @@ export function InferenceTab() {
   useEffect(() => {
     refreshModels();
   }, [refreshModels]);
+
+  const refreshDates = useCallback(() => {
+    if (!datasetRoot) return;
+    void api.dataset
+      .tree(datasetRoot)
+      .then((t) => {
+        setDates(t.dates_with_images);
+        setSelectedDates((prev) => prev.filter((d) => t.dates_with_images.includes(d)));
+        setDatesError(null);
+      })
+      .catch((e) => {
+        setDates([]);
+        setDatesError(
+          `Could not load this dataset's dates: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+  }, [datasetRoot]);
+
+  useEffect(() => {
+    refreshDates();
+  }, [refreshDates]);
 
   const refreshJobs = useCallback(
     () =>
@@ -118,45 +129,55 @@ export function InferenceTab() {
     return () => streamRef.current?.();
   }, [activeJobId]);
 
-  function prefillFromDataset() {
-    if (!datasetRoot || !dataset.date) return;
-    setImagesDir(`${datasetRoot}/images/${dataset.date}`);
-    setOutputDir(`${datasetRoot}/predictions/live/${dataset.date}/detect`);
+  function toggleDate(date: string) {
+    setSelectedDates((prev) =>
+      prev.includes(date) ? prev.filter((d) => d !== date) : [...prev, date],
+    );
   }
 
   async function onLaunch() {
-    if (!modelPath || !imagesDir || !outputDir) return;
-    try {
-      const res = await inferenceApi.launch({
-        checkpoint_path: modelPath,
-        images_dir: imagesDir,
-        output_dir: outputDir,
-        tile,
-        conf,
-        iou,
-        slice_h: sliceH,
-        slice_w: sliceW,
-        overlap,
-        postprocess,
-      });
-      if (res.job_id) {
-        const stub: InferenceJob = {
-          job_id: res.job_id,
-          status: "pending",
-          done: 0,
-          total: 0,
-          images_dir: imagesDir,
-          output_dir: outputDir,
-          error: null,
-          warning: null,
-        };
-        setJobs((prev) => [stub, ...prev]);
-        setActiveJob(stub);
+    const model = models.find((m) => m.checkpoint_path === modelPath);
+    if (!model || !datasetRoot || selectedDates.length === 0) return;
+    // One job per date: each date is its own prediction bucket, and the jobs table already
+    // reports them one per row.
+    for (const date of selectedDates) {
+      try {
+        const res = await inferenceApi.launch({
+          checkpoint_path: model.checkpoint_path,
+          dataset_root: datasetRoot,
+          model_name: model.name,
+          date,
+          tile,
+        });
+        if (res.job_id) {
+          const stub: InferenceJob = {
+            job_id: res.job_id,
+            status: "pending",
+            done: 0,
+            total: 0,
+            images_dir: res.images_dir,
+            output_dir: res.output_dir,
+            error: null,
+            warning: null,
+          };
+          setJobs((prev) => [stub, ...prev]);
+          setActiveJob(stub);
+          if (res.bucket_redirected) {
+            useStore
+              .getState()
+              .pushToast(
+                `${date}: the requested bucket has review verdicts, so this run writes to ${res.output_dir}.`,
+                "info",
+              );
+          }
+        }
+      } catch (e) {
+        useStore
+          .getState()
+          .pushToast(
+            `Inference launch failed for ${date}: ${e instanceof Error ? e.message : String(e)}`,
+          );
       }
-    } catch (e) {
-      useStore
-        .getState()
-        .pushToast(`Inference launch failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -187,7 +208,7 @@ export function InferenceTab() {
         )}
         {models.length > 0 ? (
           <select
-            className="tcip-select w-full mb-2"
+            className="tcip-select w-full mb-3"
             value={modelPath}
             onChange={(e) => setModelPath(e.target.value)}
           >
@@ -200,151 +221,68 @@ export function InferenceTab() {
             ))}
           </select>
         ) : (
-          <input
-            className="tcip-input w-full mb-2"
-            placeholder="Path to .pt checkpoint"
-            value={modelPath}
-            onChange={(e) => setModelPath(e.target.value)}
-          />
+          !modelsError &&
+          projectRoot && (
+            <p className="text-[11px] text-tcip-muted mb-3">
+              No model is registered for this project yet. Train one, or ask the agent in the
+              terminal to register a checkpoint, and it will appear here.
+            </p>
+          )
         )}
 
-        <label className="tcip-label mb-1">Images directory</label>
-        <input
-          className="tcip-input w-full mb-1"
-          value={imagesDir}
-          onChange={(e) => setImagesDir(e.target.value)}
-          placeholder="…/Valley_Farm/images/2-11-26"
-        />
-        <button className="tcip-btn text-[11px] mb-3" onClick={prefillFromDataset}>
-          Prefill from current dataset
-        </button>
-
-        <label className="tcip-label mb-1">Output directory (YOLO txt)</label>
-        <input
-          className="tcip-input w-full mb-3"
-          value={outputDir}
-          onChange={(e) => setOutputDir(e.target.value)}
-          placeholder="…/Valley_Farm/predictions/live/2-11-26/detect"
-        />
+        <label className="tcip-label mb-1">Capture dates</label>
+        {datesError && (
+          <div className="text-[11px] text-tcip-fp mb-1">
+            {datesError}{" "}
+            <button className="tcip-btn text-[11px] ml-1" onClick={refreshDates}>
+              Retry
+            </button>
+          </div>
+        )}
+        {!datasetRoot ? (
+          <p className="text-[11px] text-tcip-muted mb-3">
+            No project is open. Open one from the top bar to choose which dates to run on.
+          </p>
+        ) : dates.length === 0 ? (
+          !datesError && (
+            <p className="text-[11px] text-tcip-muted mb-3">
+              This dataset has no capture dates yet. Ingest images (or ask the agent in the terminal
+              to) before running inference.
+            </p>
+          )
+        ) : (
+          <div className="mb-3 max-h-48 overflow-auto border border-tcip-border rounded p-2 flex flex-col gap-1">
+            {dates.map((d) => (
+              <label key={d} className="flex items-center gap-2 text-[12px]">
+                <input
+                  type="checkbox"
+                  checked={selectedDates.includes(d)}
+                  onChange={() => toggleDate(d)}
+                />
+                {d}
+              </label>
+            ))}
+          </div>
+        )}
 
         <div className="flex items-center gap-3 mb-3">
           <label className="flex items-center gap-2 text-[12px]">
             <input type="checkbox" checked={tile} onChange={(e) => setTile(e.target.checked)} />
             Tiled inference
           </label>
-          <label className="flex items-center gap-1 text-[12px] text-tcip-muted">
-            Tile merge
-            <select
-              className="tcip-select text-[12px]"
-              value={postprocess}
-              disabled={!tile}
-              title="How boxes from adjacent tiles are combined. NMM unions a box split across a seam; NMS suppresses overlaps."
-              onChange={(e) => setPostprocess(e.target.value === "nmm" ? "nmm" : "nms")}
-            >
-              <option value="nms">NMS (suppress)</option>
-              <option value="nmm">NMM (merge seams)</option>
-            </select>
-          </label>
         </div>
 
-        <div className="mb-3">
-          <button
-            type="button"
-            className="text-[11px] text-tcip-muted underline"
-            onClick={() => setShowAdvanced((v) => !v)}
-          >
-            {showAdvanced ? "Hide" : "Show"} advanced (override, unvalidated)
-          </button>
-          <p className="text-[11px] text-tcip-muted mt-1">
-            Left blank, conf/IoU come from the platform&apos;s own defaults and tile size/overlap
-            are derived from this checkpoint&apos;s own training geometry; the same operating point
-            the agent-facing door resolves. Setting a value here overrides that derivation and is
-            not a validated operating point.
-          </p>
-          {showAdvanced && (
-            <div className="grid grid-cols-2 gap-2 mt-2 text-[11px] text-tcip-muted">
-              <label className="flex flex-col gap-1">
-                Conf
-                <input
-                  className="tcip-input w-full"
-                  type="number"
-                  step="0.05"
-                  min="0"
-                  max="1"
-                  placeholder="derived"
-                  value={conf ?? ""}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    setConf(Number.isFinite(v) ? v : undefined);
-                  }}
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                IoU
-                <input
-                  className="tcip-input w-full"
-                  type="number"
-                  step="0.05"
-                  min="0"
-                  max="1"
-                  placeholder="derived"
-                  value={iou ?? ""}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    setIou(Number.isFinite(v) ? v : undefined);
-                  }}
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                Slice H
-                <input
-                  className="tcip-input w-full"
-                  type="number"
-                  placeholder="from checkpoint"
-                  value={sliceH ?? ""}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    setSliceH(Number.isFinite(v) ? v : undefined);
-                  }}
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                Slice W
-                <input
-                  className="tcip-input w-full"
-                  type="number"
-                  placeholder="from checkpoint"
-                  value={sliceW ?? ""}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    setSliceW(Number.isFinite(v) ? v : undefined);
-                  }}
-                />
-              </label>
-              <label className="col-span-2 flex flex-col gap-1">
-                Overlap
-                <input
-                  className="tcip-input w-full"
-                  type="number"
-                  step="0.05"
-                  min="0"
-                  max="0.9"
-                  placeholder="from checkpoint"
-                  value={overlap ?? ""}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    setOverlap(Number.isFinite(v) ? v : undefined);
-                  }}
-                />
-              </label>
-            </div>
-          )}
-        </div>
+        <p className="text-[11px] text-tcip-muted mb-3">
+          Conf/IoU come from the platform&apos;s own defaults, tile size/overlap from this
+          checkpoint&apos;s own training geometry, and predictions land in this dataset&apos;s
+          prediction dir for the model and date: the same operating point and layout the
+          agent-facing door resolves, so a run here and a run there cannot diverge.
+        </p>
 
         <button
           className="tcip-btn-primary w-full"
           onClick={onLaunch}
-          disabled={!modelPath || !imagesDir || !outputDir}
+          disabled={!modelPath || selectedDates.length === 0}
         >
           ▶&nbsp;&nbsp;Launch inference
         </button>
