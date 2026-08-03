@@ -553,9 +553,10 @@ def run_inference(
         predictor, tile_size=tile_size, overlap=overlap)
     geometry_warning = None
     if tile_size_source == "derived" and resolved_tile_bool and resolved_tile != DEFAULT_TILE_SIZE:
-        # Loud, not just provenance: counts change vs the old pinned 640 for this checkpoint.
-        logger.info("tile_size %d derived from the checkpoint's training geometry "
-                    "(was pinned %d before derivation existed)", resolved_tile, DEFAULT_TILE_SIZE)
+        # Loud, not just provenance: this differs from the default, and a different tile_size
+        # shifts the object count.
+        logger.info("tile_size %d derived from the checkpoint's training geometry, "
+                    "differing from the default %d", resolved_tile, DEFAULT_TILE_SIZE)
     elif tile_size_source == "default" and resolved_tile_bool:
         geometry_warning = (
             "checkpoint carries no training tile geometry; using default "
