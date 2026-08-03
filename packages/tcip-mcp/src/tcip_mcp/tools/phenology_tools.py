@@ -522,6 +522,7 @@ def compute_phenology(
             ),
             "positive_class_assessed": False,
             "n_plants": len(rows),
+            "n_images_unmapped": result["n_images_unmapped"],
         }
 
     # Measurement-integrity gate (the numerator's validity): the phenotype rests on the
