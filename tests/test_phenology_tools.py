@@ -172,6 +172,38 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
     assert out_csv.exists()
 
 
+def test_compute_phenology_reports_n_images_unmapped_when_never_assessed(tmp_path: Path) -> None:
+    """The measurement-integrity guard's early return (no bucket anywhere classified the trait's
+    positive class) must disclose n_images_unmapped the same way the success path does -- both
+    read it off the same per_plant_phenology result, so an early refusal is not missing a field
+    a later success would have carried."""
+    d1 = tmp_path / "2026-02-11"
+    d1.mkdir(parents=True)
+    _write_op_sidecar(d1, validated=True, id_map=ID_MAP)
+    # No P1_a.json written under d1 -- the mapping names it but nothing was ever inferred for it,
+    # so the only date on record is missing, never classified.
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [
+            {"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"},
+            {"stem": "P1_b", "accession_name": "acc-9"},  # no plot_name -> unmapped
+        ],
+    })
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+
+    res = compute_phenology(
+        trait="catkin",
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1)},
+        output_csv_path=str(out_csv),
+    )
+
+    assert "error" in res
+    assert res["positive_class_assessed"] is False
+    assert res["n_images_unmapped"] == 1
+    assert not out_csv.exists()
+
+
 def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path: Path) -> None:
     """A genuinely-validated classifier_operating_point.json calibrated for a
     different trait/experiment must not validate an unrelated delivery -- classifier_pred_dirs is a
