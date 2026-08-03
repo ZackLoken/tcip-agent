@@ -1,8 +1,43 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 
 import { metaApi, type FrictionReport, type Retrospective } from "@/api/meta";
 import { sessionsApi, type SessionEntry } from "@/api/sessions";
+import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { useStore } from "@/store";
+
+// Sized to this panel's own typography rather than the markdown renderer's defaults, and links
+// open in a new tab so a retrospective can never navigate the app away from unsaved GUI state.
+const MARKDOWN_COMPONENTS: Components = {
+  h1: ({ children }) => <div className="tcip-heading mt-2 mb-1">{children}</div>,
+  h2: ({ children }) => <div className="tcip-heading mt-2 mb-1">{children}</div>,
+  h3: ({ children }) => (
+    <div className="text-[11px] font-semibold text-tcip-fg mt-2 mb-1">{children}</div>
+  ),
+  p: ({ children }) => <p className="text-[11px] leading-4 my-1">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc pl-4 text-[11px] leading-4 my-1">{children}</ul>,
+  ol: ({ children }) => (
+    <ol className="list-decimal pl-4 text-[11px] leading-4 my-1">{children}</ol>
+  ),
+  li: ({ children }) => <li className="my-0.5">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold text-tcip-fg">{children}</strong>,
+  em: ({ children }) => <em className="italic text-tcip-muted">{children}</em>,
+  code: ({ children }) => <code className="font-mono text-[10px] text-tcip-fg">{children}</code>,
+  pre: ({ children }) => (
+    <pre className="text-[10px] leading-4 overflow-auto my-1 whitespace-pre-wrap">{children}</pre>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-tcip-border pl-2 text-tcip-muted">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="my-2 border-tcip-border" />,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-tcip-accent underline">
+      {children}
+    </a>
+  ),
+};
 
 function fmtDuration(seconds: number): string {
   const s = Math.round(seconds);
@@ -50,6 +85,15 @@ export function MetaTab() {
     void refresh();
   }, [refresh]);
 
+  // A session with no image entries touched nothing: the backend drops an image entry that ends up
+  // with no time, no adds and no final count, so an empty `images` map is the honest "nothing
+  // happened" signal. Zero new annotation records is not, since confirming a negative and
+  // reviewing an existing label are both real effort that adds no record.
+  const shownSessions = useMemo(
+    () => sessions.filter((s) => Object.keys(s.images ?? {}).length > 0),
+    [sessions],
+  );
+
   return (
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <div className="flex items-center gap-3">
@@ -60,8 +104,13 @@ export function MetaTab() {
         {error && <div className="text-[11px] text-tcip-fp">{error}</div>}
       </div>
 
-      <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">Friction reports: {reports.length} shown</div>
+      <CollapsibleSection
+        className="tcip-panel p-4"
+        title="Friction reports"
+        right={`${reports.length} shown`}
+        storageKey="tcip.meta.frictionOpen"
+        defaultOpen
+      >
         {reports.length > 0 ? (
           <div className="flex flex-col gap-2">
             {reports.map((r) => (
@@ -87,10 +136,15 @@ export function MetaTab() {
         ) : (
           <div className="text-[11px] text-tcip-muted">No friction reports yet.</div>
         )}
-      </div>
+      </CollapsibleSection>
 
-      <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">Retrospectives: {retros.length} shown</div>
+      <CollapsibleSection
+        className="tcip-panel p-4"
+        title="Retrospectives"
+        right={`${retros.length} shown`}
+        storageKey="tcip.meta.retrospectivesOpen"
+        defaultOpen
+      >
         {retros.length > 0 ? (
           <div className="flex flex-col gap-3">
             {retros.map((rt) => (
@@ -102,18 +156,25 @@ export function MetaTab() {
                   <span className="font-semibold text-tcip-fg">{rt.project_id}</span>
                   <span className="font-mono">{rt.modified}</span>
                 </div>
-                <pre className="text-[11px] mt-1 whitespace-pre-wrap leading-4">{rt.content}</pre>
+                <div className="mt-1">
+                  <ReactMarkdown components={MARKDOWN_COMPONENTS}>{rt.content}</ReactMarkdown>
+                </div>
               </div>
             ))}
           </div>
         ) : (
           <div className="text-[11px] text-tcip-muted">No retrospectives yet.</div>
         )}
-      </div>
+      </CollapsibleSection>
 
-      <div className="tcip-panel p-4">
-        <div className="tcip-heading mb-3">Annotation sessions: {sessions.length} recorded</div>
-        {sessions.length > 0 ? (
+      <CollapsibleSection
+        className="tcip-panel p-4"
+        title="Annotation sessions"
+        right={`${shownSessions.length} recorded`}
+        storageKey="tcip.meta.sessionsOpen"
+        defaultOpen
+      >
+        {shownSessions.length > 0 ? (
           <table className="w-full text-[11px]">
             <thead>
               <tr className="border-b border-tcip-border">
@@ -126,7 +187,7 @@ export function MetaTab() {
               </tr>
             </thead>
             <tbody>
-              {sessions.map((s, i) => (
+              {shownSessions.map((s, i) => (
                 <tr
                   key={`${s.started}-${i}`}
                   className="border-t border-tcip-border first:border-t-0"
@@ -148,7 +209,7 @@ export function MetaTab() {
             No annotation sessions yet; they're recorded automatically while you annotate.
           </div>
         )}
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }
