@@ -7,6 +7,7 @@ import { classesApi, subjectColor, type AttributeDef } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
+import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -1516,6 +1517,10 @@ function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
     }
   };
 
+  // Open until the user collapses it, and never re-keyed on the active image: for many traits this
+  // is the only way to record a rating, so it must not be hidden when an image loads.
+  const [ratingsOpen, setRatingsOpen] = useState(true);
+
   // Manually dismissible (unlike the legends, this panel holds real inputs, so hover-to-reveal
   // would fight the user reaching into it). Re-opens on a fresh selection so a stale dismiss can't
   // hide the one shape you're now trying to edit.
@@ -1568,10 +1573,13 @@ function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
         <p className="mb-2 text-tcip-muted">Select a shape to set its attributes.</p>
       )}
 
-      <div className="mt-2 border-t border-tcip-border pt-2">
-        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-tcip-muted">
-          Image-level ratings
-        </div>
+      <CollapsibleSection
+        className="mt-2 rounded border border-tcip-border bg-tcip-bg/60 p-2"
+        title="Ratings for this whole image"
+        caption="Applies to the whole image, not to any shape."
+        open={ratingsOpen}
+        onToggle={() => setRatingsOpen((o) => !o)}
+      >
         {imageAnnotations.length === 0 && (
           <p className="mb-1 text-tcip-muted">None on this image.</p>
         )}
@@ -1606,7 +1614,7 @@ function AttributePanel({ selectedBoxIdx }: { selectedBoxIdx: number | null }) {
         >
           + Rating for {activeSubject ?? "…"}
         </button>
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }
