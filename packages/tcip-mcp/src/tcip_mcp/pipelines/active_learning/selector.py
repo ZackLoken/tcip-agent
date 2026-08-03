@@ -55,6 +55,23 @@ def _confidence_values(pred: dict) -> list[float]:
     return values
 
 
+def unscoreable(predictions: list[dict]) -> list[dict]:
+    """Predictions with no confidence-bearing signal at all: not detection-shaped (no ``scores``
+    key, checked by presence, not truthiness) and no ``*_confidences`` head output. A regression
+    head's point estimate is the deliberate case, it has no distributional output to derive a
+    legitimate confidence from (unlike an ordinal head's CORN cumulative probabilities, which do
+    carry one). Checking ``scores`` by key presence, not truthiness, matters: a genuine detection
+    negative (``scores: []``, zero boxes found) is a complete, unambiguous signal, not a gap; it
+    must stay excluded here, the same way :func:`auto_accept`/:func:`review_queue` already exclude
+    it, not get swept in as if the architecture couldn't express confidence.
+    Neither :func:`auto_accept` nor :func:`review_queue` can partition a genuinely unscoreable
+    prediction on confidence, so a caller must route it explicitly (e.g. into review) rather than
+    let it silently vanish from every output.
+    """
+    return [pred for pred in predictions
+            if "scores" not in pred and not _confidence_values(pred)]
+
+
 def auto_accept(
     predictions: list[dict],
     *,
