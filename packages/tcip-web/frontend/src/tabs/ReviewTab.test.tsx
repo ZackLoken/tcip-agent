@@ -139,6 +139,7 @@ beforeEach(() => {
   vi.spyOn(resultsApi, "traits").mockResolvedValue({
     traits: ["catkin"],
     milestone_fractions_by_trait: { catkin: [0.5, 0.95] },
+    invalid_specs: [],
   });
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
   // per-case to exercise the >3-band path.
