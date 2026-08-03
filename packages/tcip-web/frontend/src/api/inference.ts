@@ -184,9 +184,11 @@ export const resultsApi = {
   // computing for from the project's registry instead of assuming one. Each trait's declared
   // milestone fractions come along, so the tab can tell what there is to compute for it.
   traits: (project_root: string) =>
-    getJson<{ traits: string[]; milestone_fractions_by_trait: Record<string, number[]> }>(
-      `/api/results/traits?project_root=${encodeURIComponent(project_root)}`,
-    ),
+    getJson<{
+      traits: string[];
+      milestone_fractions_by_trait: Record<string, number[]>;
+      invalid_specs: { file: string; reason: string }[];
+    }>(`/api/results/traits?project_root=${encodeURIComponent(project_root)}`),
 
   buildPlantMapping: (body: {
     images_root: string;
