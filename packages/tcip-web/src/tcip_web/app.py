@@ -11,10 +11,12 @@ static-file serving, and health/index.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from tcip_mcp.web_client import VALID_PANELS
 from tcip_web.paths import is_loopback_host, origin_allowed
 
 logger = logging.getLogger(__name__)
@@ -141,12 +144,13 @@ async def state_ws(websocket: WebSocket) -> None:
 
 # ── Panel event hub (replaces .tcip/events/ file bridge) ──
 
-# "app" is the app-level channel the agent uses to steer the GUI ("look here"): set the
-# active project, navigate a tab, select an image. The tab panels stay data-scoped.
-VALID_PANELS = {"app", "annotate", "review", "training", "tuning", "inference", "results"}
-
 # Recent events per panel, kept in memory for replay on reconnect.
 _recent_events: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=64))
+# Per-event identity, so a browser can tell an event it has already acted on (dismissed a
+# banner, say) from a new one with the same text. The timestamp keeps ids distinct across a
+# backend restart, which the counter alone would not: it restarts at 0 while browsers keep
+# their dismissals.
+_event_counter = itertools.count(1)
 # Open WebSocket subscribers per panel.
 _panel_subscribers: dict[str, set[WebSocket]] = defaultdict(set)
 
@@ -244,6 +248,7 @@ async def post_panel_event(panel: str, event: PanelEvent):
         "panel": panel,
         "event_type": event.event_type,
         "data": event.data,
+        "event_id": f"{datetime.now(timezone.utc).isoformat()}#{next(_event_counter)}",
     }
     _recent_events[panel].append(payload)
     # Agent focus events also update the advisory GuiState slice, so gui.json (what the
