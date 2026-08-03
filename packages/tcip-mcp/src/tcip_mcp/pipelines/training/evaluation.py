@@ -353,8 +353,8 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     governs nothing on its own; a count trait's derived center-match tolerance is what the phenotype
     and checkpoint selection rest on.
 
-    ``localization`` is no longer authored, it is derived once, the first time real GT is
-    available for a trait with no recorded kind (via ``derivations.derive_localization_kind``),
+    ``localization`` is derived once, the first time real GT is available for a trait with no
+    recorded kind (via ``derivations.derive_localization_kind``),
     persisted through ``traits.write_trait_spec_fields`` with ``data_derived_at_runtime``
     provenance, and read from the recorded value on every later call. A recorded kind is also
     cheaply re-checked against what the current data would derive, every real call, divergence
@@ -645,10 +645,10 @@ def pick_count_unbiased(sweep: dict) -> float | None:
     generally not the F1-max point (that optimizes matching, not count agreement).
 
     Aimed at the worst class rather than the pooled bias so the pick and the gate optimize
-    the same thing. With two classes of opposite sign the two objectives coincide, which is why the
-    first draft of this fix left the pick pooled, but that reasoning does not survive a third class:
-    a conf can buy pooled balance by trading one class's over-count against another's under-count and
-    be strictly worse for the worst class than a conf on the same curve that the gate would accept
+    the same thing. With two classes of opposite sign the two objectives coincide, but that does
+    not hold with a third class: a conf can buy pooled balance by trading one class's over-count
+    against another's under-count and be strictly worse for the worst class than a conf on the
+    same curve that the gate would accept
     (see ``test_pick_serves_the_worst_class_not_the_pooled_total``). Picking pooled there refuses a
     model that has a valid operating point, and tells the breeder to fix a model that is not broken.
     On a single-class reference the two objectives are the same number, so this changes no operating
@@ -657,8 +657,8 @@ def pick_count_unbiased(sweep: dict) -> float | None:
     The final ``-c["conf"]`` tie-break is a completion of the existing
     tie-break, not a new selection objective: when |bias| and F1 and |abs error| are all exactly
     tied across several confs, which happens on a reference filtered to a floor, since nothing
-    below the floor is visible to distinguish them, the lowest tied conf (e.g. the grid's seeded
-    0.0) used to win by default. That is generically the worst of the tied candidates in practice
+    below the floor is visible to distinguish them, defaulting to the lowest tied conf (e.g. the
+    grid's seeded 0.0) would be generically the worst of the tied candidates in practice
     (it admits the most low-confidence noise for no better count agreement) and, combined with the
     conf-censoring guard, could make a genuinely trustworthy pick read as censored merely because the
     tie resolved to the search floor. Preferring the highest tied conf breaks ties toward the most
