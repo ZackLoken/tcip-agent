@@ -27,7 +27,7 @@ def write_predictions_json(
     """Write a ``GenericPredictor`` detection result as a name-based per-image prediction file.
 
     ``result`` carries pixel-xyxy ``boxes``, 1-indexed ``labels`` (background=0), ``scores``, and
-    image ``width``/``height``. Each detection's numeric label is decoded to a **name** (its
+    image ``width``/``height``. Each detection's numeric label is decoded to a name (its
     ``subject``) via ``id_map`` (the run's *recorded* ``operating_point.json`` name→id map), so a
     prediction on disk carries the same names its labels do, and decode is never a fresh
     ``assign_class_ids``. Absent a recorded map, the raw 0-indexed id is used as the name (a degraded
