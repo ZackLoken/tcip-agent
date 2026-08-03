@@ -447,16 +447,22 @@ def list_traits(project_root: str) -> dict:
     ``milestone_fractions_by_trait`` carries each trait's declared milestone fractions verbatim
     rather than a derived category, so a surface can tell whether a trait has milestones to compute
     without the server deciding what that means for it.
+
+    ``invalid_specs`` names every spec file under this project's registry that failed to load and
+    why, so a breeder facing zero (or fewer than expected) traits can tell "nothing registered" from
+    "something is registered but broken" instead of the two reading identically.
     """
     _guard(project_root)
-    from tcip_mcp.traits import load_trait_specs
+    from tcip_mcp.traits import load_trait_specs_with_errors
 
-    specs = load_trait_specs(specs_dir=Path(project_root) / ".tcip" / "state" / "trait_specs")
+    specs, errors = load_trait_specs_with_errors(
+        specs_dir=Path(project_root) / ".tcip" / "state" / "trait_specs")
     return {
         "traits": sorted(spec.name for spec in specs),
         "milestone_fractions_by_trait": {
             spec.name: list(spec.milestone_fractions) for spec in specs
         },
+        "invalid_specs": errors,
     }
 
 
