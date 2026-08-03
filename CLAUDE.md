@@ -77,11 +77,22 @@ Your default failure mode is pushing through friction by guessing: filling
 blanks silently, treating an uncertain read as settled. In a scientific pipeline
 that silently corrupts results and compounds across sessions. So:
 
-- **Start a session** with `load_project_memory` (kind='reports' and kind='retrospectives')
-  to pick up open friction and prior context, then `inspect_project`, then run
-  `python scripts/doctor.py <project_root>`, which flags data-state inconsistencies
-  (unconfirmed negatives, registry pollution, provenance smells) that code reads miss.
-  Report anything it finds via `claude_reports` before acting on the data.
+- **Scope the project-data ritual before running it.** A session about platform/codebase work
+  (no project data in play) skips `load_project_memory`/`inspect_project`/`doctor.py` entirely;
+  running it anyway just doctors an unrelated project's data. When the session is project-scoped,
+  don't trust the active-project marker (`workspace.py`'s `.active` file) as proof it names the
+  right project: it's written once, by `set_active_project` after `ingest_images`, then persists
+  untouched across every later session regardless of GUI state, so it can still point at a stale
+  prior project when the task at hand concerns a different one, or one not yet created. Confirm
+  the marker's project matches the task's actual subject (a name the user gave, or one the task
+  clearly implies) before running the ritual against it; if the task doesn't name or imply a
+  project, ask which one applies rather than assume the marker is right. Check cheaply, with
+  `view_gui_state` (reads the marker plus that project's live `gui.json`, no `doctor.py`/
+  `inspect_project` cost), not by running the very ritual this is meant to gate. Once scoped:
+  `load_project_memory` (kind='reports' and kind='retrospectives') to pick up open friction and
+  prior context, then `inspect_project`, then run `python scripts/doctor.py <project_root>`, which
+  flags data-state inconsistencies (unconfirmed negatives, registry pollution, provenance smells)
+  that code reads miss. Report anything it finds via `claude_reports` before acting on the data.
 - **Surface friction with `claude_reports` the moment you hit it**: missing tool,
   ambiguous data, missing path, unclear domain concept, an op that failed 2–3×, a
   decision needing human judgment, or behavior that surprised you. The free-text
