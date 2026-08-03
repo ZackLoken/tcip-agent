@@ -23,7 +23,7 @@ def _pick_port(host: str, requested: int) -> int:
     """Return ``requested`` if free on ``host``, else an OS-assigned free port.
 
     Probes the *actual* bind host: a port free on 127.0.0.1 can be taken on the interface
-    we're about to bind (and vice-versa), so the old always-127.0.0.1 probe was wrong for
+    we're about to bind (and vice-versa), so probing anything else gives the wrong answer for
     a non-loopback ``TCIP_WEB_HOST``.
     """
     for candidate in (requested, 0):
