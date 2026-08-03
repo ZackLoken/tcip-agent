@@ -582,6 +582,24 @@ def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None
         return None
 
 
+def read_scale_sidecar(pred_dir: str | Path) -> dict | None:
+    """The bucket's ``resolve_scale.json`` stamp, or ``None`` if absent/unreadable (never raises).
+
+    A file distinct from ``operating_point.json``: the physical-scale dimension
+    (:func:`tcip_mcp.pipelines.measurement.mask_geometry.resolve_scale`) has no production writer
+    folding it into the count operating point today, and is structurally independent from it anyway
+    (a physical scale is a fact about the imagery, not a count calibration), the same reasoning that
+    keeps ``classifier_operating_point.json`` its own file rather than a field inside this one.
+    """
+    p = Path(pred_dir) / "resolve_scale.json"
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def _sidecar_reference(
     sidecar: dict | None, *, param_key: str = "conf", validation_kind: str = "annotations",
 ) -> str:
@@ -762,6 +780,64 @@ def reconcile_tile_size_validity(pred_dirs: list[str] | tuple[str, ...]) -> dict
         validated = VALIDATED_EXPLICIT_GEOMETRY
     else:
         validated = VALIDATED_PERSISTED_GEOMETRY
+    return {"operative": True, "validated": validated, "per_bucket": per_bucket,
+            "unvalidated_buckets": unvalidated}
+
+
+def reconcile_scale_validity(
+    pred_dirs: list[str] | tuple[str, ...], *, capture_id: str | None = None,
+    asserted: str | None = None,
+) -> dict:
+    """Floor the physical-scale dimension across every prediction bucket's ``resolve_scale.json``.
+
+    Structurally the sidecar-reading counterpart of :func:`reconcile_tile_size_validity`, but the two
+    dimensions differ in what "not operative" means: tiling is legitimately absent from an untiled
+    run (that bucket's own ``operating_point.json`` records it as non-gating, read straight from a
+    file every bucket always has), so an untiled bucket is skipped rather than floored. A physical
+    scale has no such always-present file to read "not applicable" from: whether it is relevant at
+    all is a fact about the *trait* (does the delivery carry a dimensional value), which only the
+    caller (holding the results) can know. A caller that calls this at all has already decided the
+    dimension is relevant, so once called, a bucket with no readable ``resolve_scale.json`` floors
+    the whole dimension exactly as a missing ``operating_point.json`` floors the count operating
+    point, never silently skipped the way an untiled bucket's tile_size is.
+
+    ``capture_id``, when given, is the delivery's own requested scope. A bucket's recorded scale may
+    itself be scoped to a single capture (``resolve_scale``'s own ``capture_id``, real for a handheld
+    standoff that varies image to image within one dataset): a caller-supplied ``capture_id`` that
+    disagrees with a bucket's recorded one must not silently validate, the same principle
+    :func:`bind_classifier_validity` applies to a trait mismatch, so that bucket floors to
+    ``VALIDATED_FALSE`` even though its own sidecar says validated. A bucket whose scale was never
+    capture-scoped (recorded ``capture_id`` is ``None``) applies to any capture, since nothing in it
+    claims to be capture-specific. A caller that passes no ``capture_id`` is not asking for
+    cross-capture scoping to be checked at all, so no bucket is floored on this basis.
+
+    ``asserted``, mirroring :func:`reconcile_operating_point_validity`, may only lower the on-disk
+    result, never raise it: a caller string can never launder an ungrounded scale into a shippable one.
+
+    Returns ``{operative, validated, per_bucket, unvalidated_buckets}``, the same shape
+    :func:`reconcile_tile_size_validity` returns. ``operative`` is False (``validated`` ``None``) only
+    when ``pred_dirs`` itself is empty, there is nothing to reconcile against.
+    """
+    if not pred_dirs:
+        return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": []}
+    accepted = accepted_references("physical")
+    per_bucket: dict[str, str] = {}
+    unvalidated: list[str] = []
+    refs: set[str] = set()
+    for d in pred_dirs:
+        sc = read_scale_sidecar(d)
+        ref = _sidecar_reference(sc, param_key="scale", validation_kind="physical")
+        if ref in accepted and capture_id is not None:
+            recorded = ((sc.get("operating_point") or {}).get("scale") or {}).get("capture_id")
+            if recorded is not None and recorded != capture_id:
+                ref = VALIDATED_FALSE
+        per_bucket[str(d)] = ref
+        if ref in accepted:
+            refs.add(ref)
+        else:
+            unvalidated.append(str(d))
+    on_disk = VALIDATED_FALSE if unvalidated or not refs else next(iter(refs))
+    validated = on_disk if _validity_rank(asserted) >= _validity_rank(on_disk) else VALIDATED_FALSE
     return {"operative": True, "validated": validated, "per_bucket": per_bucket,
             "unvalidated_buckets": unvalidated}
 
