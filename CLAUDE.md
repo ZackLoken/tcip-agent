@@ -242,7 +242,7 @@ shapes with the GUI's own symbology. See the `visual-analysis` skill.
 
 ```bash
 conda activate tcip-agent          # Python 3.11; torch installs CUDA (cu126) by default, runs fine without a GPU too (see environment.yml)
-pytest tests/ -v --tb=short
+pytest tests/ -n auto --tb=short   # -n auto: xdist parallelism across cores, same as CI; drop it for -v's ordered output
 ruff check .
 python scripts/list_tools.py       # current MCP tool list/count (don't hardcode counts in docs)
 # the full frontend gate, in CI order (.github/workflows/ci.yml): a partial run misses format:check/lint
