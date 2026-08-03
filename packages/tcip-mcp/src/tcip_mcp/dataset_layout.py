@@ -2,7 +2,7 @@
 image's ground-truth labels and model predictions live on disk.
 
 Canonical layout (the label tree mirrors ``images/<date>/`` so stem-pairing is trivial and capture
-dates never collide). Labels are **one file per image**, holding every subject's annotations by name;
+dates never collide). Labels are one file per image, holding every subject's annotations by name;
 the on-disk path carries no subject or task segment: those are properties of the records
 inside the file, resolved through the dataset's single class registry::
 
@@ -12,7 +12,7 @@ inside the file, resolved through the dataset's single class registry::
         predictions/<model>/<date>/<stem>.json   # model outputs
         classes.json                         # the nested registry: subjects -> attributes -> values
 
-The class registry lives **in the dataset** and travels with the labels: a name-based label
+The class registry lives in the dataset and travels with the labels: a name-based label
 (``subject``, attribute value) is undecodable without it. A second project opening the same image
 set reads the same names. This module is a pure *locator*: it never parses ``classes.json`` (its
 contents belong to :mod:`tcip_mcp.class_registry`); it only delegates to that module to list subjects.
@@ -167,7 +167,7 @@ def image_status_digest_path(dataset_root: str | Path) -> Path:
 
     Sibling of :func:`image_status_path`, stamped by the same writers at confirmation time with the
     subject's attribute-schema digest in effect (:func:`tcip_mcp.class_registry.attribute_schema_digest`).
-    Stamped **per image**, not per bucket: a bucket holds every image a human has ever touched under
+    Stamped per image, not per bucket: a bucket holds every image a human has ever touched under
     one subject/date, so a bucket-wide stamp would be silently overwritten by the next unrelated
     write to that bucket, un-quarantining a stale confirmation nobody re-reviewed. Lets a reader tell
     a confirmation made under a since-changed attribute schema from one still valid, see
