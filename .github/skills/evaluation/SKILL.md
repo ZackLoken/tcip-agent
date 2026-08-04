@@ -12,7 +12,7 @@ description: "Model evaluation methods, metrics interpretation, failure triage, 
 | Detection | mAP@50 | mAP@50:95, precision, recall |
 | Instance Segmentation | mask mAP@50 | box mAP, mask quality (IoU distribution) |
 | Classification | Accuracy | F1 (macro/weighted), confusion matrix, per-class precision/recall |
-| Regression | RMSE | R², MAE |
+| Regression | RMSE | R², CCC (Lin's concordance correlation), MAE |
 | Ordinal | Quadratic weighted κ | MAE, rank accuracy |
 
 These are labeled comparability metrics: a fixed-convention number (mAP@50 = AP at IoU 0.5) that
@@ -27,6 +27,12 @@ Detection/instance-seg metrics (`coco_detection_metrics`) are aggregate only; no
 today. Per-class precision/recall/F1 is real for classification (`evaluate_model`); ordinal and
 regression get only the scalar metrics in the table above, no per-class breakdown. Change
 detection is not a built task type; see README's Roadmap.
+
+R² and CCC ask related but distinct questions of a regression trait, and are not directly
+comparable numbers: R² is "how much better than trivially predicting this set's own mean" (overall
+predictive skill), unbounded below; CCC is bounded in [-1, 1] and explicitly decomposes into
+correlation (precision) and a separate bias/scale term (accuracy), the more standard lens in
+measurement-agreement/method-comparison contexts specifically because of that decomposition.
 
 ## Tools
 
