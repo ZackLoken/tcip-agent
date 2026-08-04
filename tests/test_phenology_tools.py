@@ -815,6 +815,192 @@ def test_resolve_classifier_operating_point_count_bias_tolerance_frac_source(mon
     assert res_trait["sweep_data"]["count_bias_tolerance_frac_source"] == "trait"
 
 
+# --------------------------------------------------------------------------
+# resolve_ordinal_operating_point / resolve_regression_operating_point: the ordinal/regression
+# calibration gates, mirroring resolve_classifier_operating_point's own test coverage shape.
+# --------------------------------------------------------------------------
+
+def _ordinal_items(prefix, true_ranks, pred_ranks, offset=0):
+    return [{"image_id": f"{prefix}{i + offset}", "true_rank": t, "predicted_rank": p}
+           for i, (t, p) in enumerate(zip(true_ranks, pred_ranks))]
+
+
+def _regression_items(prefix, true_values, pred_values, offset=0):
+    return [{"image_id": f"{prefix}{i + offset}", "true_value": t, "predicted_value": p}
+           for i, (t, p) in enumerate(zip(true_values, pred_values))]
+
+
+def test_resolve_ordinal_operating_point_passes_on_clean_disjoint_split() -> None:
+    from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
+
+    ranks = [0, 1, 2, 1, 0, 2, 1, 0, 2, 1] * 2  # 20 items, every rank represented repeatedly
+    cal = _ordinal_items("c", ranks, ranks)
+    hold = _ordinal_items("h", ranks, ranks)  # perfect agreement -> kappa=1.0
+
+    res = resolve_ordinal_operating_point(
+        "catkin", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
+        experiment_id=None)
+
+    assert res["passed"] is True, res
+    assert res["failures"] == []
+    assert res["sweep_data"]["criterion"] == "quadratic_weighted_kappa"
+    assert res["sweep_data"]["score"] == pytest.approx(1.0)
+    assert res["sweep_data"]["floor_source"] == "provisional_default"
+
+
+def test_resolve_ordinal_operating_point_fails_closed_on_non_disjoint_split() -> None:
+    from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
+
+    ranks = [0, 1, 2, 1, 0, 2, 1, 0, 2, 1] * 2
+    cal = _ordinal_items("shared", ranks, ranks)
+    hold = _ordinal_items("shared", ranks, ranks)  # identical image_ids -> not disjoint
+
+    res = resolve_ordinal_operating_point(
+        "catkin", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
+        experiment_id=None)
+
+    assert res["passed"] is False
+    assert "not_disjoint" in res["failures"]
+    assert res["validated_against"] == "false"
+
+
+def test_resolve_ordinal_operating_point_fails_closed_at_or_below_the_floor() -> None:
+    """A holdout with mostly-adjacent-rank disagreement scores well below the provisional
+    kappa floor (0.41) and must refuse, not merely score low."""
+    from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
+
+    true_ranks = [0, 1, 2] * 8
+    pred_ranks = [2, 0, 1] * 8  # every item off by a full rank, cyclically -> poor agreement
+    cal = _ordinal_items("c", true_ranks, true_ranks)
+    hold = _ordinal_items("h", true_ranks, pred_ranks)
+
+    res = resolve_ordinal_operating_point(
+        "catkin", criterion="quadratic_weighted_kappa", calibration_items=cal, holdout_items=hold,
+        experiment_id=None)
+
+    assert res["sweep_data"]["score"] is not None
+    assert res["sweep_data"]["score"] <= res["sweep_data"]["floor"]
+    assert res["passed"] is False
+    assert "compensating_error_floor_failed" in res["failures"]
+
+
+def test_resolve_ordinal_operating_point_fails_closed_on_missing_items() -> None:
+    from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
+
+    res = resolve_ordinal_operating_point(
+        "catkin", criterion="quadratic_weighted_kappa", calibration_items=None, holdout_items=None,
+        experiment_id=None)
+
+    assert res["passed"] is False
+    assert res["failures"] == ["no_calibration_or_holdout"]
+    assert res["validated_against"] == "false"
+
+
+def test_resolve_ordinal_operating_point_unknown_criterion_raises() -> None:
+    from tcip_mcp.pipelines.operating_point import resolve_ordinal_operating_point
+
+    with pytest.raises(ValueError, match="not a registered ordinal criterion"):
+        resolve_ordinal_operating_point(
+            "catkin", criterion="not_a_real_criterion",
+            calibration_items=[{"image_id": "c0", "true_rank": 0, "predicted_rank": 0}],
+            holdout_items=[{"image_id": "h0", "true_rank": 0, "predicted_rank": 0}],
+            experiment_id=None)
+
+
+def test_resolve_regression_operating_point_passes_on_clean_disjoint_split() -> None:
+    from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
+
+    values = [float(i) for i in range(20)]
+    cal = _regression_items("c", values, values)
+    hold = _regression_items("h", values, values)  # perfect fit -> r_squared=1.0
+
+    res = resolve_regression_operating_point(
+        "catkin", criterion="r_squared", calibration_items=cal, holdout_items=hold,
+        experiment_id=None)
+
+    assert res["passed"] is True, res
+    assert res["failures"] == []
+    assert res["sweep_data"]["criterion"] == "r_squared"
+    assert res["sweep_data"]["score"] == pytest.approx(1.0)
+    assert res["sweep_data"]["floor_source"] == "provisional_default"
+
+
+def test_resolve_regression_operating_point_fails_closed_on_non_disjoint_split() -> None:
+    from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
+
+    values = [float(i) for i in range(20)]
+    cal = _regression_items("shared", values, values)
+    hold = _regression_items("shared", values, values)
+
+    res = resolve_regression_operating_point(
+        "catkin", criterion="r_squared", calibration_items=cal, holdout_items=hold,
+        experiment_id=None)
+
+    assert res["passed"] is False
+    assert "not_disjoint" in res["failures"]
+    assert res["validated_against"] == "false"
+
+
+def test_resolve_regression_operating_point_fails_closed_at_or_below_the_floor() -> None:
+    """A holdout whose predictions carry no real relationship to the true values scores well below
+    the provisional skill floor (0.5) and must refuse."""
+    from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
+
+    true_values = [float(i) for i in range(20)]
+    cal = _regression_items("c", true_values, true_values)
+    hold = _regression_items("h", true_values, [10.0] * 20)  # constant prediction, no skill
+
+    res = resolve_regression_operating_point(
+        "catkin", criterion="r_squared", calibration_items=cal, holdout_items=hold,
+        experiment_id=None)
+
+    assert res["sweep_data"]["score"] is not None
+    assert res["sweep_data"]["score"] <= res["sweep_data"]["floor"]
+    assert res["passed"] is False
+    assert "compensating_error_floor_failed" in res["failures"]
+
+
+def test_resolve_regression_operating_point_fails_closed_on_missing_items() -> None:
+    from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
+
+    res = resolve_regression_operating_point(
+        "catkin", criterion="r_squared", calibration_items=[], holdout_items=[],
+        experiment_id=None)
+
+    assert res["passed"] is False
+    assert res["failures"] == ["no_calibration_or_holdout"]
+    assert res["validated_against"] == "false"
+
+
+def test_resolve_regression_operating_point_unknown_criterion_raises() -> None:
+    from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
+
+    with pytest.raises(ValueError, match="not a registered regression criterion"):
+        resolve_regression_operating_point(
+            "catkin", criterion="not_a_real_criterion",
+            calibration_items=[{"image_id": "c0", "true_value": 1.0, "predicted_value": 1.0}],
+            holdout_items=[{"image_id": "h0", "true_value": 1.0, "predicted_value": 1.0}],
+            experiment_id=None)
+
+
+def test_resolve_regression_operating_point_ccc_criterion_is_selectable() -> None:
+    """The criterion toolkit is genuinely dispatched, not hardcoded to r_squared: a caller who
+    states concordance_correlation_coefficient gets that statistic recorded, not silently ignored."""
+    from tcip_mcp.pipelines.operating_point import resolve_regression_operating_point
+
+    values = [float(i) for i in range(20)]
+    cal = _regression_items("c", values, values)
+    hold = _regression_items("h", values, values)  # perfect fit -> CCC=1.0 too
+
+    res = resolve_regression_operating_point(
+        "catkin", criterion="concordance_correlation_coefficient", calibration_items=cal,
+        holdout_items=hold, experiment_id=None)
+
+    assert res["sweep_data"]["criterion"] == "concordance_correlation_coefficient"
+    assert res["sweep_data"]["score"] == pytest.approx(1.0)
+    assert res["passed"] is True
+
+
 def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_reachable(
     tmp_path: Path,
 ) -> None:
@@ -966,3 +1152,112 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
     assert len(items) == 1
     assert items[0]["bbox"] == [105.0, 105.0, 145.0, 145.0]  # the catkin box, not bush's
     assert items[0]["is_true_positive"] is True  # catkin's own "elongated" attribute
+
+
+# --------------------------------------------------------------------------
+# calibrate_ordinal_regression_operating_point: an end-to-end run against a real trained
+# checkpoint, no pre-staged files (there is no staging mechanism for a CSV-sourced scalar trait,
+# unlike calibrate_classifier_operating_point's paired GT/prediction dirs).
+# --------------------------------------------------------------------------
+
+def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(tmp_path: Path) -> None:
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
+    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+    from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
+
+    images_dir = tmp_path / "images"
+    rows = []
+    for i in range(10):
+        _save_png(images_dir / f"img{i}.png", bright=(i % 3 == 0))
+        rows.append((f"img{i}", i % 3))
+    csv_path = tmp_path / "ranks.csv"
+    _write_csv(csv_path, rows, ("stem", "rank"))
+
+    dataset = build_dataset("ordinal", images_dir=str(images_dir), csv_path=str(csv_path), num_ranks=3)
+    loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("ordinal"))
+    model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = train(run, loader, val_loader=None, task="ordinal")
+    assert run.status == "completed", getattr(run, "error", run.status)
+
+    result = calibrate_ordinal_regression_operating_point(
+        trait_name="catkin", task="ordinal",
+        checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
+        images_dir=str(images_dir), csv_path=str(csv_path),
+        criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),
+    )
+
+    assert "error" not in result, result
+    assert result["criterion"] == "quadratic_weighted_kappa"
+    assert result["n_calibration_items"] + result["n_holdout_items"] == 10
+
+    sidecar_path = tmp_path / "calib" / "ordinal_operating_point.json"
+    assert sidecar_path.is_file()
+    sidecar = json.loads(sidecar_path.read_text())
+    assert sidecar["trait"] == "catkin"
+    assert sidecar["operating_point"]["ordinal"]["criterion"] == "quadratic_weighted_kappa"
+    assert sidecar["operating_point"]["ordinal"]["validated_against"] == result["validated_against"]
+    assert sidecar["validated"] == result["passed"]
+    assert "sweep_data" in sidecar and sidecar["sweep_data"]["criterion"] == "quadratic_weighted_kappa"
+
+
+def test_calibrate_ordinal_regression_operating_point_regression_e2e(tmp_path: Path) -> None:
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    from torch.utils.data import DataLoader
+
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
+    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+    from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
+
+    images_dir = tmp_path / "images"
+    rows = []
+    for i in range(10):
+        _save_png(images_dir / f"img{i}.png", bright=(i % 2 == 0))
+        rows.append((f"img{i}", float(i) / 10.0))
+    csv_path = tmp_path / "values.csv"
+    _write_csv(csv_path, rows, ("stem", "value"))
+
+    dataset = build_dataset("regression", images_dir=str(images_dir), csv_path=str(csv_path))
+    loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("regression"))
+    model_source = _model_source("build_bespoke_regressor")
+    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    run = train(run, loader, val_loader=None, task="regression")
+    assert run.status == "completed", getattr(run, "error", run.status)
+
+    result = calibrate_ordinal_regression_operating_point(
+        trait_name="catkin", task="regression",
+        checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
+        images_dir=str(images_dir), csv_path=str(csv_path),
+        criterion="r_squared", output_dir=str(tmp_path / "calib"),
+    )
+
+    assert "error" not in result, result
+    assert result["criterion"] == "r_squared"
+    assert result["n_calibration_items"] + result["n_holdout_items"] == 10
+
+    sidecar_path = tmp_path / "calib" / "regression_operating_point.json"
+    assert sidecar_path.is_file()
+    sidecar = json.loads(sidecar_path.read_text())
+    assert sidecar["trait"] == "catkin"
+    assert sidecar["operating_point"]["regression"]["criterion"] == "r_squared"
+    assert sidecar["operating_point"]["regression"]["validated_against"] == result["validated_against"]
+    assert sidecar["validated"] == result["passed"]
+    assert "sweep_data" in sidecar and sidecar["sweep_data"]["criterion"] == "r_squared"
+
+
+def test_calibrate_ordinal_regression_operating_point_unknown_task_returns_error(tmp_path: Path) -> None:
+    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+
+    result = calibrate_ordinal_regression_operating_point(
+        trait_name="catkin", task="classification", checkpoint_path="m.pt",
+        images_dir=str(tmp_path), csv_path=str(tmp_path / "x.csv"), criterion="r_squared",
+        output_dir=str(tmp_path / "calib"),
+    )
+    assert "error" in result
