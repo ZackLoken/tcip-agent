@@ -13,6 +13,7 @@ per-plant fraction → crossings).
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 from typing import Any, Callable
@@ -412,6 +413,174 @@ def calibrate_classifier_operating_point(
         "failures": result["failures"],
         "n_calibration_items": len(cal_items),
         "n_holdout_items": len(hold_items),
+    }
+
+
+def _scalar_predictions(predictor, image_source, stems: list[str], suffix: str) -> dict[str, float]:
+    """Run ``predictor`` over ``stems``' images and pull each image's single scalar prediction.
+
+    ``suffix`` is the agent-authored bespoke model's own output-key convention for this task
+    (``"_ranks"`` for ordinal, ``"_values"`` for regression, an ``OrdinalHead``/``RegressionHead``
+    decode output prefixed ``head{i}_`` by the model's own ``forward()``), scanned the same
+    key-suffix way ``active_learning.selector._confidence_values`` scans ``*_confidences``, never a
+    hardcoded ``head0_`` name: the platform does not fix how many heads a bespoke model carries.
+    Only the first matching key per prediction is used; a model with more than one head emitting the
+    same suffix has no single scalar this function can disambiguate, that is a bespoke-model design
+    question outside this calibration path's scope.
+    """
+    if not stems:
+        return {}
+    results = predictor.predict_batch([image_source[s] for s in stems])
+    out: dict[str, float] = {}
+    for stem, pred in zip(stems, results):
+        for key, val in pred.items():
+            if key.endswith(suffix) and isinstance(val, list) and val:
+                out[stem] = float(val[0])
+                break
+    return out
+
+
+_ORDINAL_REGRESSION_TASKS = {
+    "ordinal": {"true_key": "true_rank", "pred_key": "predicted_rank", "suffix": "_ranks"},
+    "regression": {"true_key": "true_value", "pred_key": "predicted_value", "suffix": "_values"},
+}
+
+
+@mcp.tool()
+@audited
+def calibrate_ordinal_regression_operating_point(
+    trait_name: str,
+    task: str,
+    checkpoint_path: str,
+    images_dir: str,
+    csv_path: str,
+    criterion: str,
+    output_dir: str,
+    experiment_id: str | None = None,
+    group_by: str = "tile_prefix",
+    group_key_map: dict[str, str] | None = None,
+    seed: int = 0,
+    holdout_ratio: float = 0.5,
+) -> dict:
+    """Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a
+    disjoint held-out split.
+
+    Unlike :func:`calibrate_classifier_operating_point` (which reads pre-staged per-image
+    prediction JSON via ``_classification_items``), there is no such staging mechanism for a
+    CSV-sourced scalar trait (``OrdinalDataset``/``RegressionDataset`` are one CSV row per image
+    stem, no bbox/geometry concept applies), so this runs live inference directly, mirroring
+    ``inference_tools._calibrate_operating_point``'s pattern instead: a locked cal/holdout split
+    (``resolve_locked_cal_holdout_split``, dataset-shape-agnostic, a plain stems list + identity
+    hash) of the CSV's own stems, the predictor run live over each side, then the same-rigor
+    calibration gate (``operating_point.resolve_ordinal_operating_point``/
+    ``resolve_regression_operating_point``: disjointness, train-disjointness, a derived
+    compensating-error floor on a holdout-only criterion score), stamped into
+    ``<output_dir>/ordinal_operating_point.json`` or ``regression_operating_point.json``, a file
+    distinct from every other operating-point sidecar (see
+    ``resolution.read_ordinal_operating_point_sidecar``/``read_regression_operating_point_sidecar``).
+
+    Args:
+        trait_name: The registered trait whose rank/value prediction is being calibrated.
+        task: ``"ordinal"`` or ``"regression"``, dispatches which criterion toolkit, item shape and
+            sidecar file apply.
+        checkpoint_path: The trained checkpoint to calibrate.
+        images_dir: Directory holding the CSV's images.
+        csv_path: The ``(stem, value)`` CSV ``OrdinalDataset``/``RegressionDataset`` reads.
+        criterion: Which registered criterion to calibrate against (``operating_point.
+            ORDINAL_CRITERIA``/``REGRESSION_CRITERIA``), required, no default: which statistic is
+            scientifically appropriate for this trait's calibration is a CV-scientist judgment call
+            the caller makes explicitly, never a platform-prescribed default.
+        output_dir: Where to write the sidecar.
+        experiment_id: The checkpoint's own training-run id, if known, gates train-disjointness the
+            same way the detector/classifier calibration paths do. ``None`` (a foreign/unregistered
+            checkpoint) skips that check rather than failing closed.
+        group_by / group_key_map / seed / holdout_ratio: The locked cal/holdout split's grouping
+            policy, same semantics as ``run_inference``'s own calibration arguments; only the first
+            call for this CSV's identity draws the split.
+    """
+    if task not in _ORDINAL_REGRESSION_TASKS:
+        return {"error": f"task must be one of {sorted(_ORDINAL_REGRESSION_TASKS)}, got {task!r}"}
+
+    from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tcip_mcp.pipelines.operating_point import (
+        resolve_ordinal_operating_point,
+        resolve_regression_operating_point,
+    )
+    from tcip_mcp.pipelines.resolution import csv_dataset_hash
+    from tcip_mcp.traits import TraitUnknownError, get_trait
+    from tcip_mcp.utils.atomic_io import atomic_write_json
+
+    try:
+        get_trait(trait_name)
+    except TraitUnknownError as e:
+        return {"error": str(e)}
+
+    shape = _ORDINAL_REGRESSION_TASKS[task]
+    is_ordinal = task == "ordinal"
+
+    true_by_stem: dict[str, float] = {}
+    with open(csv_path, newline="") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        for row in reader:
+            if len(row) >= 2:
+                value = int(row[1].strip()) if is_ordinal else float(row[1].strip())
+                true_by_stem[row[0].strip()] = value
+
+    logical = list_logical_images(images_dir)
+    stems = sorted(s for s in true_by_stem if s in logical)
+    if not stems:
+        return {"error": f"no stem in {csv_path!r} has a matching image under {images_dir!r}"}
+
+    identity_hash = csv_dataset_hash(csv_path)
+    try:
+        locked = resolve_locked_cal_holdout_split(
+            stems, identity_hash=identity_hash, group_by=group_by, group_key_map=group_key_map,
+            seed=seed, holdout_ratio=holdout_ratio,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+    cal_stems, hold_stems = locked["calibration"], locked["holdout"]
+
+    predictor = build_predictor(checkpoint_path)
+    cal_pred = _scalar_predictions(predictor, logical, cal_stems, shape["suffix"])
+    hold_pred = _scalar_predictions(predictor, logical, hold_stems, shape["suffix"])
+
+    def _items(sub_stems: list[str], preds: dict[str, float]) -> list[dict]:
+        cast = int if is_ordinal else float
+        return [{"image_id": s, shape["true_key"]: true_by_stem[s], shape["pred_key"]: cast(preds[s])}
+                for s in sub_stems if s in preds]
+
+    cal_items = _items(cal_stems, cal_pred)
+    hold_items = _items(hold_stems, hold_pred)
+
+    resolver = resolve_ordinal_operating_point if is_ordinal else resolve_regression_operating_point
+    result = resolver(
+        trait_name, criterion=criterion, calibration_items=cal_items, holdout_items=hold_items,
+        experiment_id=experiment_id,
+    )
+
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(out / f"{task}_operating_point.json", {
+        "operating_point": {task: {"validated_against": result["validated_against"],
+                                   "criterion": criterion}},
+        "validated": result["passed"],
+        "failures": result["failures"],
+        "sweep_data": result["sweep_data"],
+        "experiment_id": experiment_id,
+        "trait": trait_name,
+    })
+    return {
+        "output_dir": str(out),
+        "validated_against": result["validated_against"],
+        "passed": result["passed"],
+        "failures": result["failures"],
+        "n_calibration_items": len(cal_items),
+        "n_holdout_items": len(hold_items),
+        "criterion": criterion,
     }
 
 
