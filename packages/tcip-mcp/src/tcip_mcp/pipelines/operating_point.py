@@ -40,11 +40,14 @@ from tcip_mcp.pipelines.resolution import (
 )
 from tcip_mcp.pipelines.training.evaluation import (
     classes_with_evidence,
+    concordance_correlation_coefficient,
     gt_class_avg_size,
     gt_class_typical_count,
     mean_of_present_counts,
     pick_count_unbiased,
     pick_f1_max,
+    quadratic_weighted_kappa,
+    r_squared,
     sweep_operating_point,
 )
 from tcip_mcp.traits import COUNT_OBJECTIVES, COUNT_UNBIASED, DETECTION_F1, PRESENCE, get_trait
@@ -93,6 +96,35 @@ _PROVISIONAL_KAPPA_FLOOR = 0.41
 # expert's call. This value is a provisional, platform-chosen placeholder used only when a trait
 # hasn't authored `TraitSpec.count_bias_tolerance_frac` (None), see that field's docstring.
 _PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC = 0.01
+
+# The compensating-error criterion toolkits for the ordinal/regression calibration gates
+# (:func:`resolve_ordinal_operating_point`/:func:`resolve_regression_operating_point`), a small,
+# discoverable, growable set of named statistics rather than one hardcoded "the" criterion: which
+# statistic is scientifically appropriate for a given trait's calibration is a CV-scientist judgment
+# call the caller makes explicitly (the ``criterion`` argument, required, no default), never a
+# platform prescription. Register a new criterion here (a function of ``(pred, gt)`` returning
+# ``float | None``) rather than widening either function's own logic to special-case a new statistic.
+ORDINAL_CRITERIA: dict[str, Callable[[Any, Any], float | None]] = {
+    "quadratic_weighted_kappa": quadratic_weighted_kappa,
+}
+REGRESSION_CRITERIA: dict[str, Callable[[Any, Any], float | None]] = {
+    "r_squared": r_squared,
+    "concordance_correlation_coefficient": concordance_correlation_coefficient,
+}
+
+# The same provisional-platform-default shape as `_PROVISIONAL_KAPPA_FLOOR`, and literally the same
+# statistic: ordinal's only currently-registered criterion (`quadratic_weighted_kappa`) is exactly
+# the classifier path's own kappa. Used only when a trait hasn't authored
+# `TraitSpec.ordinal_agreement_floor` (None), see that field's docstring.
+_PROVISIONAL_ORDINAL_AGREEMENT_FLOOR = 0.41
+
+# The same provisional-platform-default shape, for whichever regression criterion a calibration
+# actually used. A plain "explains meaningfully more than half the addressable skill/agreement"
+# default, not a cited statistical convention: R² and CCC have different scales/conventions (see
+# `TraitSpec.regression_skill_floor`'s docstring), so this single number is a rough placeholder for
+# either, until a trait authors its own floor paired with its own criterion choice. Used only when a
+# trait hasn't authored `TraitSpec.regression_skill_floor` (None).
+_PROVISIONAL_REGRESSION_SKILL_FLOOR = 0.5
 
 
 def _effective_count_bias_tolerance(tolerance_frac: float, typical_count: float, n: int) -> float:
@@ -1093,3 +1125,185 @@ def resolve_classifier_operating_point(
         "validated_against": validated_reference if passed else VALIDATED_FALSE,
         "passed": passed, "failures": failures, "sweep_data": sweep_data,
     }
+
+
+def _resolve_scalar_operating_point(
+    trait_name: str,
+    *,
+    criterion: str,
+    criteria: dict[str, Callable[[Any, Any], float | None]],
+    true_key: str,
+    pred_key: str,
+    floor_field: str,
+    provisional_floor: float,
+    calibration_items: list[dict] | None,
+    holdout_items: list[dict] | None,
+    experiment_id: str | None,
+    validated_reference: str,
+) -> dict:
+    """Shared calibration-gate mechanics for :func:`resolve_ordinal_operating_point` and
+    :func:`resolve_regression_operating_point`.
+
+    Both validate a per-*image* scalar prediction (one rank or one continuous value per image,
+    unlike the classifier path's per-instance, bbox-matched items: ``OrdinalDataset``/
+    ``RegressionDataset`` are one CSV row per image stem, no bbox/geometry concept applies here)
+    against a locked cal/holdout split the same way, disjointness, train-disjointness, then a
+    derived compensating-error floor on the *holdout-only* criterion score, differing only in which
+    criterion toolkit (``criteria``, ``ORDINAL_CRITERIA`` or ``REGRESSION_CRITERIA``) and which
+    ``TraitSpec`` floor field apply. ``criterion`` is validated by both public callers before this is
+    reached, this function trusts it is already a real key of ``criteria``.
+
+    The criterion score is computed on holdout only, never calibration, which would be evaluating a
+    criterion on the very data it was picked to look good on, not a validation of anything. A thin
+    holdout (fewer than 2 items) still gets a real, non-fabricated score attempt (some criteria are
+    defined, if noisy, on very few items; others return ``None``), it fails closed via the separate
+    ``insufficient_holdout_items``/``criterion_undefined`` failures below rather than by silently
+    substituting the calibration set.
+    """
+    trait = get_trait(trait_name)
+    if not calibration_items or not holdout_items:
+        return {
+            "validated_against": VALIDATED_FALSE, "passed": False,
+            "failures": ["no_calibration_or_holdout"],
+            "sweep_data": {"criterion": criterion,
+                           "note": "calibration requires both calibration and holdout items"},
+        }
+
+    cal_ids = {it["image_id"] for it in calibration_items if "image_id" in it}
+    hold_ids = {it["image_id"] for it in holdout_items if "image_id" in it}
+    disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
+    # Reuses the detection/classifier paths' own train-disjointness primitive as-is (it operates on
+    # stems/groups, no bbox involved), never a second implementation. Content-overlap duplication
+    # (`_content_overlap`) is deliberately not reused here: it exists for detection-instance-
+    # granularity content fingerprinting (several instances per image needing a bbox-based hash), and
+    # at whole-image granularity the `image_id`-based `disjoint` check above already covers the
+    # equivalent risk.
+    td = _train_disjointness(experiment_id, cal_ids, hold_ids)
+
+    import torch
+
+    holdout_true = torch.tensor([float(it[true_key]) for it in holdout_items])
+    holdout_pred = torch.tensor([float(it[pred_key]) for it in holdout_items])
+    score = criteria[criterion](holdout_pred, holdout_true)
+
+    floor_authored = getattr(trait, floor_field)
+    floor = floor_authored if floor_authored is not None else provisional_floor
+    floor_source = "trait" if floor_authored is not None else "provisional_default"
+    # score > 0.0 is the universal, domain-input-free minimum (better than the criterion's own
+    # trivial/chance baseline); floor is the trait's own authored bar, or the platform's provisional
+    # default, the same two-floor shape resolve_classifier_operating_point's kappa check uses.
+    compensating_error_ok = score is not None and score > 0.0 and score > floor
+
+    failures: list[str] = []
+    if not disjoint:
+        failures.append("not_disjoint")
+    if td["unresolvable"]:
+        failures.append("train_disjointness_unresolvable")
+    if td["leaked_groups"] or td["leaked_stems"]:
+        failures.append("train_disjointness_leaked")
+    if len(holdout_items) < 2:
+        failures.append("insufficient_holdout_items")
+    if score is None:
+        failures.append("criterion_undefined")
+    if not compensating_error_ok:
+        failures.append("compensating_error_floor_failed")
+    passed = not failures
+
+    sweep_data = {
+        "criterion": criterion, "score": score, "floor": floor, "floor_source": floor_source,
+        "disjoint": disjoint, "train_disjointness": td,
+        "n_calibration": len(calibration_items), "n_holdout": len(holdout_items),
+    }
+    return {
+        "validated_against": validated_reference if passed else VALIDATED_FALSE,
+        "passed": passed, "failures": failures, "sweep_data": sweep_data,
+    }
+
+
+def resolve_ordinal_operating_point(
+    trait_name: str,
+    *,
+    criterion: str,
+    calibration_items: list[dict] | None = None,
+    holdout_items: list[dict] | None = None,
+    experiment_id: str | None = None,
+    validated_reference: str = VALIDATED_HELD_OUT,
+) -> dict:
+    """Ordinal-mode calibration gate for a trait's rank prediction.
+
+    ``criterion`` is required, no default: which compensating-error statistic is scientifically
+    appropriate for a given trait's calibration is a CV-scientist judgment call the caller makes
+    explicitly (see ``ORDINAL_CRITERIA`` for the registered toolkit), never a platform-prescribed
+    "the" statistic. Raises ``ValueError`` immediately, before any other work, when ``criterion``
+    names no registered ordinal criterion.
+
+    Each item in ``calibration_items``/``holdout_items`` is one image's rank prediction:
+    ``{"image_id": str, "true_rank": int, "predicted_rank": int}`` (``OrdinalDataset`` is one CSV
+    row per image stem, no bbox/geometry concept applies). Returns the same structurally-distinct
+    shape :func:`resolve_classifier_operating_point` does: ``{"validated_against", "passed",
+    "failures", "sweep_data"}``, never a shape a generic writer could mistake for the count
+    operating point's ``conf`` param. Callers write this into ``ordinal_operating_point.json`` via
+    :func:`tcip_mcp.pipelines.resolution.reconcile_ordinal_validity`.
+
+    See :func:`_resolve_scalar_operating_point` for the shared calibration mechanics (disjointness,
+    train-disjointness, the holdout-only criterion score, the compensating-error floor).
+    """
+    if criterion not in ORDINAL_CRITERIA:
+        raise ValueError(
+            f"criterion {criterion!r} is not a registered ordinal criterion "
+            f"({sorted(ORDINAL_CRITERIA)}); register a new criterion function in ORDINAL_CRITERIA "
+            "before calibrating with it.")
+    if validated_reference not in accepted_references("annotations"):
+        raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
+                         f"got {validated_reference!r}")
+    return _resolve_scalar_operating_point(
+        trait_name, criterion=criterion, criteria=ORDINAL_CRITERIA,
+        true_key="true_rank", pred_key="predicted_rank", floor_field="ordinal_agreement_floor",
+        provisional_floor=_PROVISIONAL_ORDINAL_AGREEMENT_FLOOR,
+        calibration_items=calibration_items, holdout_items=holdout_items,
+        experiment_id=experiment_id, validated_reference=validated_reference,
+    )
+
+
+def resolve_regression_operating_point(
+    trait_name: str,
+    *,
+    criterion: str,
+    calibration_items: list[dict] | None = None,
+    holdout_items: list[dict] | None = None,
+    experiment_id: str | None = None,
+    validated_reference: str = VALIDATED_HELD_OUT,
+) -> dict:
+    """Regression-mode calibration gate for a trait's continuous-value prediction.
+
+    ``criterion`` is required, no default: ``r_squared`` and ``concordance_correlation_coefficient``
+    (see ``REGRESSION_CRITERIA``) measure genuinely different things at different scales/conventions
+    (R²: overall predictive skill vs. a trivial mean baseline, unbounded below; CCC: a bounded
+    precision/accuracy decomposition, the standard measurement-agreement lens), so the caller states
+    which one this calibration is judged against, never a platform default. Raises ``ValueError``
+    immediately, before any other work, when ``criterion`` names no registered regression criterion.
+
+    Each item in ``calibration_items``/``holdout_items`` is one image's value prediction:
+    ``{"image_id": str, "true_value": float, "predicted_value": float}`` (``RegressionDataset`` is
+    one CSV row per image stem, no bbox/geometry concept applies). Returns the same structurally-
+    distinct shape :func:`resolve_classifier_operating_point` does: ``{"validated_against", "passed",
+    "failures", "sweep_data"}``. Callers write this into ``regression_operating_point.json`` via
+    :func:`tcip_mcp.pipelines.resolution.reconcile_regression_validity`.
+
+    See :func:`_resolve_scalar_operating_point` for the shared calibration mechanics.
+    """
+    if criterion not in REGRESSION_CRITERIA:
+        raise ValueError(
+            f"criterion {criterion!r} is not a registered regression criterion "
+            f"({sorted(REGRESSION_CRITERIA)}); register a new criterion function in "
+            "REGRESSION_CRITERIA before calibrating with it.")
+    if validated_reference not in accepted_references("annotations"):
+        raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
+                         f"got {validated_reference!r}")
+    return _resolve_scalar_operating_point(
+        trait_name, criterion=criterion, criteria=REGRESSION_CRITERIA,
+        true_key="true_value", pred_key="predicted_value", floor_field="regression_skill_floor",
+        provisional_floor=_PROVISIONAL_REGRESSION_SKILL_FLOOR,
+        calibration_items=calibration_items, holdout_items=holdout_items,
+        experiment_id=experiment_id, validated_reference=validated_reference,
+    )
