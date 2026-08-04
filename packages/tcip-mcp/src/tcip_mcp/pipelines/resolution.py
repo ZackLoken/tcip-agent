@@ -18,6 +18,7 @@ Pure stdlib, no torch, safe to import anywhere.
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -384,6 +385,32 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     return h.hexdigest()[:16]
 
 
+def csv_dataset_hash(csv_path: str | Path) -> str:
+    """A content-addressed hash identifying a CSV-sourced GT identity (``OrdinalDataset``/
+    ``RegressionDataset``'s ``(stem, value)`` rows), the same content-addressed principle as
+    :func:`dataset_hash` (which is hardcoded to a directory of per-image JSON label files and is not
+    reusable as-is for a single flat CSV).
+
+    Rows are sorted by stem before hashing so row order in the file doesn't spuriously change the
+    identity; two CSVs with the same (stem, value) pairs hash equal regardless of how they were
+    written.
+    """
+    rows: list[tuple[str, str]] = []
+    with open(csv_path, newline="") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        for row in reader:
+            if len(row) >= 2:
+                rows.append((row[0].strip(), row[1].strip()))
+    h = hashlib.sha256()
+    for stem, value in sorted(rows):
+        h.update(stem.encode("utf-8"))
+        h.update(b"\0")
+        h.update(value.encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
 _FINGERPRINT_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
 
@@ -582,6 +609,38 @@ def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None
         return None
 
 
+def read_ordinal_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
+    """The bucket's ``ordinal_operating_point.json`` stamp, or ``None`` if absent/unreadable.
+
+    A file distinct from ``operating_point.json``/``classifier_operating_point.json``: the ordinal
+    compensating-error dimension is structurally independent from both, same reasoning as
+    :func:`read_classifier_operating_point_sidecar`, a generic writer must not conflate these
+    dimensions.
+    """
+    p = Path(pred_dir) / "ordinal_operating_point.json"
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def read_regression_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
+    """The bucket's ``regression_operating_point.json`` stamp, or ``None`` if absent/unreadable.
+
+    A file distinct from every other operating-point sidecar, same reasoning as
+    :func:`read_classifier_operating_point_sidecar`/:func:`read_ordinal_operating_point_sidecar`.
+    """
+    p = Path(pred_dir) / "regression_operating_point.json"
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def read_scale_sidecar(pred_dir: str | Path) -> dict | None:
     """The bucket's ``resolve_scale.json`` stamp, or ``None`` if absent/unreadable (never raises).
 
@@ -717,6 +776,38 @@ def reconcile_classifier_validity(
     return _reconcile_validity(
         pred_dirs, asserted=asserted,
         read_sidecar=read_classifier_operating_point_sidecar, param_key="classifier",
+        validation_kind="annotations",
+    )
+
+
+def reconcile_ordinal_validity(
+    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+) -> dict:
+    """Floor the ordinal compensating-error validity against every bucket's
+    ``ordinal_operating_point.json``.
+
+    Structurally the same reconciliation :func:`reconcile_classifier_validity` performs for the
+    classifier dimension, the same shared mechanism, parameterized to a different sidecar file and
+    param key. A bucket with no persisted ordinal-calibration run floors to ``false``: there is no
+    legitimate way to earn an ordinal-validated stamp without one.
+    """
+    return _reconcile_validity(
+        pred_dirs, asserted=asserted,
+        read_sidecar=read_ordinal_operating_point_sidecar, param_key="ordinal",
+        validation_kind="annotations",
+    )
+
+
+def reconcile_regression_validity(
+    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+) -> dict:
+    """Floor the regression compensating-error validity against every bucket's
+    ``regression_operating_point.json``. Same shape as :func:`reconcile_ordinal_validity`, for the
+    regression dimension's own sidecar/param key.
+    """
+    return _reconcile_validity(
+        pred_dirs, asserted=asserted,
+        read_sidecar=read_regression_operating_point_sidecar, param_key="regression",
         validation_kind="annotations",
     )
 
