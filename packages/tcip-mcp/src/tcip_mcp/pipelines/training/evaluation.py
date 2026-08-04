@@ -900,6 +900,34 @@ def r_squared(pred_values: torch.Tensor, gt_values: torch.Tensor) -> float | Non
     return 1.0 - ss_res / ss_tot
 
 
+def concordance_correlation_coefficient(pred_values: torch.Tensor, gt_values: torch.Tensor) -> float | None:
+    """Lin's concordance correlation coefficient: agreement between ``pred_values`` and
+    ``gt_values`` as precision (Pearson correlation) times an accuracy/bias penalty, the standard
+    measurement-agreement statistic (as opposed to :func:`r_squared`'s "variance explained beyond
+    the trivial mean baseline", a more general ML-model-skill question). A prediction that is
+    perfectly correlated with GT but systematically offset (a constant bias, or a scale != 1) scores
+    high on correlation alone but low here, exactly the failure mode this statistic is meant to
+    surface. ``None`` when undefined: no items, or either series has zero variance (the correlation
+    term, and this statistic's denominator, are undefined).
+
+    ``CCC = 2*r*sigma_pred*sigma_gt / (sigma_pred^2 + sigma_gt^2 + (mean_pred - mean_gt)^2)``, with
+    ``r`` the Pearson correlation and ``sigma`` the population (not sample) standard deviation, so
+    this and :func:`r_squared` are computed over the same population-statistics convention.
+    """
+    pred = pred_values.detach().cpu().float()
+    gt = gt_values.detach().cpu().float()
+    n = gt.numel()
+    if n == 0:
+        return None
+    pred_mean, gt_mean = pred.mean(), gt.mean()
+    pred_var = ((pred - pred_mean) ** 2).mean().item()
+    gt_var = ((gt - gt_mean) ** 2).mean().item()
+    if pred_var == 0.0 or gt_var == 0.0:
+        return None
+    covariance = ((pred - pred_mean) * (gt - gt_mean)).mean().item()
+    return (2.0 * covariance) / (pred_var + gt_var + (pred_mean.item() - gt_mean.item()) ** 2)
+
+
 def ordinal_metrics(pred_ranks: torch.Tensor, gt_ranks: torch.Tensor) -> dict:
     pred = pred_ranks.detach().cpu().float()
     gt = gt_ranks.detach().cpu().float()
