@@ -189,6 +189,86 @@ def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowled
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
 
 
+# ── export_aggregated_csv wired to the ordinal/regression sidecar producer ────
+
+def _scalar_bucket(tmp_path, name, task, *, validated, ref=VALIDATED_HELD_OUT, criterion="r_squared"):
+    d = tmp_path / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{task}_operating_point.json").write_text(json.dumps({
+        "validated": validated,
+        "operating_point": {task: {"validated_against": ref if validated else VALIDATED_FALSE,
+                                   "criterion": criterion}},
+    }), encoding="utf-8")
+    return str(d)
+
+
+def test_export_aggregated_csv_ordinal_trait_ships_when_sidecar_validated(tmp_path):
+    # An ordinal trait with a genuinely validated sidecar (calibrate_ordinal_regression_operating_point's
+    # producer) ships as validated, not floored to VALIDATED_FALSE by the unconditional no-producer path.
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    bucket = _scalar_bucket(tmp_path, "preds", "ordinal", validated=True)
+    out = tmp_path / "o.csv"
+    export_aggregated_csv([{"plant_id": "p1", "value": 2, "observations": 3}], str(out),
+                          trait_name="ripening_stage", measurement_validated=VALIDATED_HELD_OUT,
+                          pred_dirs=[bucket], task="ordinal")
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+
+
+def test_export_aggregated_csv_regression_trait_ships_when_sidecar_validated(tmp_path):
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    bucket = _scalar_bucket(tmp_path, "preds", "regression", validated=True)
+    out = tmp_path / "o.csv"
+    export_aggregated_csv([{"plant_id": "p1", "value": 4.2, "observations": 3}], str(out),
+                          trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
+                          pred_dirs=[bucket], task="regression")
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+
+
+def test_export_aggregated_csv_ordinal_trait_floors_on_missing_sidecar(tmp_path):
+    # A bucket with no ordinal_operating_point.json floors to false and refuses (never trusts a
+    # caller-asserted measurement_validated string), the same reconcile-from-disk discipline the
+    # count operating point already has.
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    bucket = tmp_path / "preds"
+    bucket.mkdir()
+    with pytest.raises(ValueError, match="unvalidated measurement"):
+        export_aggregated_csv([{"plant_id": "p1", "value": 2, "observations": 3}],
+                              str(tmp_path / "o.csv"), trait_name="ripening_stage",
+                              measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)],
+                              task="ordinal")
+
+
+def test_export_aggregated_csv_regression_trait_floors_on_a_failed_sidecar(tmp_path):
+    # A sidecar that exists but is stamped unvalidated (the calibration ran and refused) must also
+    # refuse, not just an entirely-missing sidecar.
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    bucket = _scalar_bucket(tmp_path, "preds", "regression", validated=False)
+    with pytest.raises(ValueError, match="unvalidated measurement"):
+        export_aggregated_csv([{"plant_id": "p1", "value": 4.2, "observations": 3}],
+                              str(tmp_path / "o.csv"), trait_name="fruit_diameter",
+                              measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)],
+                              task="regression")
+
+
+def test_export_aggregated_csv_rejects_an_unrecognized_task(tmp_path):
+    # A typo'd task must raise, not silently fall through to reconciling pred_dirs against the
+    # count operating point's own sidecar (a different dimension, wrong validity determination).
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    bucket = _scalar_bucket(tmp_path, "preds", "ordinal", validated=True)
+    with pytest.raises(ValueError, match="task must be"):
+        export_aggregated_csv([{"plant_id": "p1", "value": 2, "observations": 3}],
+                              str(tmp_path / "o.csv"), trait_name="ripening_stage",
+                              measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)],
+                              task="oridnal")
+
+
 # ── tabulate_counts reads the run's resolved validity, not a caller string ─
 
 def test_tabulate_counts_refuses_unvalidated_run(tmp_path, monkeypatch):
