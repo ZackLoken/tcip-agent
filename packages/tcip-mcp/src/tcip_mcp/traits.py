@@ -157,6 +157,28 @@ class TraitSpec:
     # applies as the real operative floor until a trait sets its own, the gate is never satisfied by
     # the bare mathematical minimum `kappa > 0` alone once the platform default is in effect.
     classifier_agreement_floor: float | None = None
+    # Min acceptable value for whichever ordinal compensating-error criterion calibration actually
+    # used (today only `quadratic_weighted_kappa` is registered in
+    # `operating_point.ORDINAL_CRITERIA`, but the field name does not bake that in, since the
+    # toolkit may grow further criteria). Same shape as `classifier_agreement_floor` above: `None`
+    # means "not yet authored for this trait", it needs the domain expert, not a value picked by the
+    # agent. Unlike `count_error_tolerance`'s dispersion term, an unauthored floor here does not skip
+    # the check: `operating_point.py`'s `_PROVISIONAL_ORDINAL_AGREEMENT_FLOOR` applies as the real
+    # operative floor until a trait sets its own.
+    ordinal_agreement_floor: float | None = None
+    # Min acceptable value for whichever regression skill/agreement criterion calibration actually
+    # used (`r_squared` or `concordance_correlation_coefficient`, `operating_point.
+    # REGRESSION_CRITERIA`), the regression counterpart to `ordinal_agreement_floor` above. `None`
+    # means "not yet authored for this trait"; `operating_point.py`'s
+    # `_PROVISIONAL_REGRESSION_SKILL_FLOOR` applies until a trait sets its own. Unlike
+    # `classifier_agreement_floor`'s single criterion (kappa), this platform offers more than one
+    # regression criterion with genuinely different scales/conventions (R² is unbounded below and
+    # measures skill relative to a trivial mean baseline; CCC is bounded in [-1, 1] and decomposes
+    # precision from bias), so a floor authored here is only meaningful paired with the criterion it
+    # was set against, whoever authors this value must decide the floor and the criterion together,
+    # an honest, documented limitation of a single scalar field, not a design this platform resolves
+    # further here.
+    regression_skill_floor: float | None = None
     # crops.yml controlled-vocab trait names this spec is authored to deliver, the anti-fabrication
     # anchor a config-loaded spec is cross-checked against (a spec can't claim a phenotype not in the vocab).
     delivers: tuple[str, ...] = ()
