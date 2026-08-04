@@ -23,6 +23,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     classification_metrics,
     coco_detection_metrics,
     compute_composite_objective,
+    concordance_correlation_coefficient,
     effective_iou_type,
     gt_class_avg_size,
     ordinal_metrics,
@@ -378,6 +379,35 @@ def test_r_squared_empty_is_none():
 
 def test_r_squared_constant_gt_is_none():
     assert r_squared(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([5.0, 5.0, 5.0])) is None
+
+
+def test_concordance_correlation_coefficient_perfect_agreement_is_one():
+    ccc = concordance_correlation_coefficient(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0]))
+    assert ccc == pytest.approx(1.0)
+
+
+def test_concordance_correlation_coefficient_hand_computed():
+    # pred=[1,2,3], gt=[1,2,4] (the same pair test_regression_metrics uses), population statistics:
+    # pred_mean=2, gt_mean=7/3; pred_var=mean((pred-2)^2)=(1+0+1)/3=2/3;
+    # gt_var=mean((gt-7/3)^2)=((-4/3)^2+(-1/3)^2+(5/3)^2)/3=(16/9+1/9+25/9)/3=(42/9)/3=14/9;
+    # covariance=mean((pred-2)*(gt-7/3))=((-1)*(-4/3)+0*(-1/3)+1*(5/3))/3=(4/3+5/3)/3=1;
+    # CCC = 2*covariance / (pred_var+gt_var+(pred_mean-gt_mean)^2)
+    #     = 2*1 / (2/3+14/9+1/9) = 2 / (7/3) = 6/7.
+    ccc = concordance_correlation_coefficient(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 4.0]))
+    assert ccc == pytest.approx(6 / 7)
+
+
+def test_concordance_correlation_coefficient_empty_is_none():
+    assert concordance_correlation_coefficient(torch.tensor([]), torch.tensor([])) is None
+
+
+def test_concordance_correlation_coefficient_zero_variance_is_none():
+    # constant predictions against varying GT: pred_var=0, denominator undefined.
+    assert concordance_correlation_coefficient(
+        torch.tensor([2.0, 2.0, 2.0]), torch.tensor([1.0, 2.0, 3.0])) is None
+    # constant GT against varying predictions: gt_var=0, same undefined denominator.
+    assert concordance_correlation_coefficient(
+        torch.tensor([1.0, 2.0, 3.0]), torch.tensor([5.0, 5.0, 5.0])) is None
 
 
 def test_selection_value_prefers_objective_for_detection():
