@@ -224,6 +224,7 @@ def export_aggregated_csv(
     *,
     measurement_validated: str | None = None,
     pred_dirs: list[str] | None = None,
+    task: str | None = None,
     scale_capture_id: str | None = None,
     acknowledge_unvalidated: bool = False,
 ) -> str:
@@ -243,23 +244,32 @@ def export_aggregated_csv(
     ``tile_size`` too, the same operating point's other gating dimension: the tile edge scales the
     per-image counts this per-plant value aggregates, so a fabricated fallback with no persisted
     training geometry and no explicit caller override refuses here. Untiled buckets are never gated
-    on it. For a continuous/ordinal trait with no conf op-point
-    (``pred_dirs`` empty/omitted), ``measurement_validated`` is currently not honored: no on-disk
-    source exists yet for that dimension's validity, so the state floors to unvalidated
-    unconditionally; the only route to delivery is the explicit acknowledge below.
+    on it.
+
+    For an ordinal/regression trait, pass both ``pred_dirs`` (the buckets holding
+    ``ordinal_operating_point.json``/``regression_operating_point.json``, written by
+    ``calibrate_ordinal_regression_operating_point``) and ``task`` (``"ordinal"`` or
+    ``"regression"``), which dimension's sidecar to reconcile from is nothing this function can
+    infer from ``pred_dirs``/``value_key`` alone, the caller must state it explicitly rather than
+    have this door guess. ``pred_dirs`` given with no ``task`` still means a count trait (the prior,
+    unchanged behavior); ``pred_dirs`` empty/omitted with no ``task`` has no on-disk validity
+    producer at all, and floors to unvalidated unconditionally, the only route to delivery is the
+    explicit acknowledge below. An ordinal/regression delivery never gates on tile geometry or
+    physical scale, neither dimension applies to a per-image scalar prediction.
 
     When the aggregated values' own ``value_key`` implies a physical unit (``area_mm2``, a real
-    dimensional trait, see ``_resolve_units``) and ``pred_dirs`` is given, the delivery also gates on
-    the physical-scale dimension: each bucket's ``resolve_scale.json`` (see
-    ``tcip_mcp.pipelines.measurement.mask_geometry.resolve_scale``) is reconciled the same
-    floor-from-disk way the count operating point and tile geometry are, so a dimensional CSV can no
-    longer ship stamped validated while the scale that produced every mm/cm/m number in it was never
-    checked against a real physical reference. A count trait (no dimensional value_key) never
-    acquires this dimension, the "operative" framing tile_size already uses: a scale was never
-    relevant to what is being delivered, so nothing here manufactures a refusal over it.
-    ``scale_capture_id`` scopes that reconciliation to one capture when the delivery's physical scale
-    is itself capture-scoped (a handheld standoff that can vary image to image).
-    ``acknowledge_unvalidated`` ships a clearly-flagged provisional CSV stamped ``validated=false``.
+    dimensional trait, see ``_resolve_units``) and ``pred_dirs`` is given with no ``task`` (a count
+    trait), the delivery also gates on the physical-scale dimension: each bucket's
+    ``resolve_scale.json`` (see ``tcip_mcp.pipelines.measurement.mask_geometry.resolve_scale``) is
+    reconciled the same floor-from-disk way the count operating point and tile geometry are, so a
+    dimensional CSV can no longer ship stamped validated while the scale that produced every
+    mm/cm/m number in it was never checked against a real physical reference. A count trait (no
+    dimensional value_key) never acquires this dimension, the "operative" framing tile_size already
+    uses: a scale was never relevant to what is being delivered, so nothing here manufactures a
+    refusal over it. ``scale_capture_id`` scopes that reconciliation to one capture when the
+    delivery's physical scale is itself capture-scoped (a handheld standoff that can vary image to
+    image). ``acknowledge_unvalidated`` ships a clearly-flagged provisional CSV stamped
+    ``validated=false``.
 
     Args:
         results: Output from aggregate_per_plant().
@@ -268,12 +278,15 @@ def export_aggregated_csv(
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
         provenance: Optional producing-model stamp added as trailing columns.
-        measurement_validated: Honored only when ``pred_dirs`` is also given (floors the count
-            operating point's on-disk validity, never raises it). Ignored, not a delivery path, when
-            ``pred_dirs`` is empty, see the note above.
-        pred_dirs: Prediction buckets to reconcile the count operating point's validity from (count
-            traits); floored against ``measurement_validated``. Also the source buckets for the
-            physical-scale dimension when the results are dimensional.
+        measurement_validated: Honored only when ``pred_dirs`` is also given (floors the on-disk
+            validity, never raises it). Ignored, not a delivery path, when ``pred_dirs`` is empty,
+            see the note above.
+        pred_dirs: Prediction buckets to reconcile validity from: the count operating point (no
+            ``task``) or the ordinal/regression compensating-error gate (``task`` given); floored
+            against ``measurement_validated``. Also the source buckets for the physical-scale
+            dimension when the results are dimensional and no ``task`` is given.
+        task: ``None`` (a count trait, the prior behavior) or ``"ordinal"``/``"regression"``,
+            which on-disk sidecar dimension to reconcile ``pred_dirs`` against.
         scale_capture_id: The capture this delivery's physical scale must match, when the scale is
             capture-scoped; a bucket's sidecar recording a different capture floors to unvalidated.
         acknowledge_unvalidated: Write an unvalidated phenotype as a flagged provisional CSV.
@@ -285,15 +298,24 @@ def export_aggregated_csv(
         VALIDATED_FALSE,
         check_delivery_gate,
         reconcile_operating_point_validity,
+        reconcile_ordinal_validity,
+        reconcile_regression_validity,
         reconcile_scale_validity,
         reconcile_tile_size_validity,
     )
+
+    if task is not None and task not in ("ordinal", "regression"):
+        raise ValueError(f"task must be None, 'ordinal', or 'regression', got {task!r}")
 
     units = _resolve_units(trait_name, results)
 
     tile_recon = {"operative": False, "validated": None}
     scale_recon = {"operative": False, "validated": None}
-    if pred_dirs:
+    if pred_dirs and task == "ordinal":
+        state = reconcile_ordinal_validity(pred_dirs, asserted=measurement_validated)["validated"]
+    elif pred_dirs and task == "regression":
+        state = reconcile_regression_validity(pred_dirs, asserted=measurement_validated)["validated"]
+    elif pred_dirs:
         # A count trait: the measurement validity is the count operating point's, read from the
         # buckets' sidecars and floored against any caller assertion (never trusted from the string).
         state = reconcile_operating_point_validity(pred_dirs, asserted=measurement_validated)["validated"]
@@ -306,10 +328,10 @@ def export_aggregated_csv(
             # that produced it is a real gating dimension, reconciled from the buckets' own sidecars.
             scale_recon = reconcile_scale_validity(pred_dirs, capture_id=scale_capture_id)
     else:
-        # No on-disk source exists for a continuous/ordinal trait's measurement validity today, a
-        # bare caller-asserted `measurement_validated` string is never trusted on its own. The only
-        # route to delivery without a producer is the explicit acknowledge below; this never
-        # auto-sets it on the writer's own initiative.
+        # No on-disk source exists for a continuous/ordinal trait's measurement validity with no
+        # pred_dirs given, a bare caller-asserted `measurement_validated` string is never trusted on
+        # its own. The only route to delivery without a producer is the explicit acknowledge below;
+        # this never auto-sets it on the writer's own initiative.
         state = VALIDATED_FALSE
     flags: dict[str, str | None] = {"measurement": state}
     if tile_recon["operative"]:
