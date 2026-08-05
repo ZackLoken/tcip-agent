@@ -338,6 +338,13 @@ class TestRenderGridOverlay:
         out = render_grid_overlay(img_path, cols=4, rows=3)
         assert Path(out).is_file()
 
+    def test_grid_wider_than_alphabet(self, viz_dataset: Path):
+        from tcip_annotation.viz import render_grid_overlay
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        out = render_grid_overlay(img_path, cols=33, rows=4)
+        assert Path(out).is_file()
+
 
 class TestGridToPixel:
     def test_basic_conversion(self):
@@ -374,6 +381,42 @@ class TestGridToPixel:
 
         with pytest.raises(ValueError, match="Row"):
             grid_to_pixel("A9", 640, 480, cols=8, rows=6)
+
+
+class TestColumnLabels:
+    """Spreadsheet-style column labels shared by the grid renderer and cell parser."""
+
+    def test_round_trip_boundaries(self):
+        from tcip_annotation.sam_wrapper import column_index, column_label
+
+        expected = {0: "A", 25: "Z", 26: "AA", 27: "AB", 31: "AF", 32: "AG", 51: "AZ", 52: "BA"}
+        for idx, label in expected.items():
+            assert column_label(idx) == label
+            assert column_index(label) == idx
+
+    def test_multi_letter_cell_parses(self):
+        from tcip_annotation.sam_wrapper import grid_to_pixel
+
+        x, y = grid_to_pixel("AA1", 2700, 480, cols=27, rows=6)
+        assert x == pytest.approx(26.5 * 100)
+        assert y == pytest.approx(40)
+
+    def test_high_columns_do_not_alias(self):
+        # chr() past 'Z' labeled column 32 'a', which case folding silently parsed as column 0
+        from tcip_annotation.sam_wrapper import column_label, grid_to_pixel
+
+        cols = 40
+        labels = [column_label(c) for c in range(cols)]
+        assert len(set(labels)) == cols
+        for c, label in enumerate(labels):
+            x, _ = grid_to_pixel(f"{label}1", cols * 100, 480, cols=cols, rows=6)
+            assert x == pytest.approx((c + 0.5) * 100)
+
+    def test_out_of_range_hint_uses_column_labels(self):
+        from tcip_annotation.sam_wrapper import grid_to_pixel
+
+        with pytest.raises(ValueError, match="Use A-AD"):
+            grid_to_pixel("BA1", 640, 480, cols=30, rows=6)
 
 
 class TestSamPredictorCache:
@@ -458,6 +501,15 @@ class TestVisualizeGridOverlayTool:
 
         result = overlay_reference_grid(image_path="/nonexistent.jpg")
         assert "error" in result
+
+    def test_wide_grid_summary_labels(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import overlay_reference_grid
+
+        result = overlay_reference_grid(
+            image_path=str(viz_dataset / "images" / "img_001.jpg"), cols=33, rows=4,
+        )
+        assert "error" not in result
+        assert "'AG4'" in result["summary"]
 
 
 class TestProposeAnnotationsTool:
