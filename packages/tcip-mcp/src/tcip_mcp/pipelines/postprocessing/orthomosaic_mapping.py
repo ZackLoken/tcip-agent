@@ -50,9 +50,11 @@ class GeoreferencingError(ValueError):
 
 
 class UnsupportedRasterLayout(ValueError):
-    """A GeoTIFF's on-disk pixel layout, an internally tiled raster or planar (band-separate)
-    samples, isn't one :class:`OrthomosaicWindowReader` decodes. It only reads the strip-based,
-    contiguous-sample layout the mosaic this module was built for actually uses."""
+    """A GeoTIFF's on-disk pixel layout isn't one :class:`OrthomosaicWindowReader` decodes: an
+    internally tiled raster, planar (band-separate) samples, or a multi-page file whose first
+    page isn't the whole raster (e.g. a channel-last raster stored one row-block per page). It
+    only reads the strip-based, contiguous-sample, single-page layout the mosaic this module
+    was built for actually uses."""
 
 
 @dataclass
@@ -224,7 +226,11 @@ class OrthomosaicWindowReader:
 
     Only a strip-based raster with contiguous (chunky) samples is supported, the layout the
     orthomosaic this module was built for actually uses; an internally tiled TIFF or one with
-    planar (band-separate) samples raises :class:`UnsupportedRasterLayout`. Decoding also
+    planar (band-separate) samples raises :class:`UnsupportedRasterLayout`. The first page must
+    also be the whole raster: its shape is cross-checked against the file's series shape
+    (``image_utils._tiff_series_shape``, the raster's true shape), because a channel-last TIFF
+    stored one row-block per page makes ``pages[0]`` report a single row-block's shape, and
+    building from that would silently serve windows sliced from the wrong geometry. Decoding also
     depends on this environment having a working codec for the file's compression: LZW and JPEG
     need the optional ``imagecodecs`` package, which is not part of this environment.
 
@@ -242,6 +248,8 @@ class OrthomosaicWindowReader:
     def __init__(self, path: str | Path, *, strip_cache_capacity: int = 64):
         import tifffile
 
+        from tcip_mcp.pipelines.image_utils import _tiff_series_shape
+
         self._path = Path(path)
         self._tif = tifffile.TiffFile(str(self._path))
         page = self._tif.pages[0]
@@ -256,10 +264,29 @@ class OrthomosaicWindowReader:
                 f"{self._path}: planar (band-separate) sample layout; this reader only decodes "
                 "contiguous (chunky) samples."
             )
+        height = int(page.imagelength)
+        width = int(page.imagewidth)
+        num_channels = int(page.samplesperpixel)
+        series_shape = _tiff_series_shape(self._path)
+        if series_shape is None:
+            self._tif.close()
+            raise UnsupportedRasterLayout(
+                f"{self._path}: the file's series shape can't be read, so there is no way to "
+                "verify the first page spans the whole raster."
+            )
+        normalized = series_shape + (1,) if len(series_shape) == 2 else series_shape
+        if normalized != (height, width, num_channels):
+            self._tif.close()
+            raise UnsupportedRasterLayout(
+                f"{self._path}: first page's shape {(height, width, num_channels)} (H, W, C) "
+                f"disagrees with the raster's series shape {series_shape}: a multi-page layout "
+                "(e.g. a channel-last raster stored one row-block per page) whose pages this "
+                "reader's single-page strip decoding would misinterpret."
+            )
         self._page = page
-        self.height = int(page.imagelength)
-        self.width = int(page.imagewidth)
-        self.num_channels = int(page.samplesperpixel)
+        self.height = height
+        self.width = width
+        self.num_channels = num_channels
         self.dtype = page.dtype
         self._rows_per_strip = int(page.rowsperstrip)
         self._strip_cache: OrderedDict[int, np.ndarray] = OrderedDict()
