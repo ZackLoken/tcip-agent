@@ -12,6 +12,7 @@ from typing import Callable
 
 from tcip_annotation import Annotation, Point, Polygon, bbox_of, load_annotations_any
 from tcip_annotation.json_io import read_annotations as read_labels
+from tcip_annotation.sam_wrapper import column_label
 from tcip_annotation.viz import (
     render_candidates,
     render_canvas_state,
@@ -855,7 +856,8 @@ def overlay_reference_grid(
 ) -> dict:
     """Render image with a labeled grid overlay for spatial referencing.
 
-    Creates a grid with letter columns (A-H) and number rows (1-6).
+    Creates a grid with spreadsheet-style letter columns (A-Z, then AA,
+    AB, ...) and number rows.
     The agent can reference grid cells like 'B3' to indicate regions
     of interest, which can be converted to point prompts via
     segment_prompt's own grid_cells parameter (pass the same cols/rows
@@ -876,7 +878,7 @@ def overlay_reference_grid(
         "image_path": out,
         "summary": f"Grid overlay ({cols}x{rows}) rendered on {img.name}. "
                    f"Reference cells like 'A1' (top-left) to "
-                   f"'{chr(ord('A') + cols - 1)}{rows}' (bottom-right).",
+                   f"'{column_label(cols - 1)}{rows}' (bottom-right).",
         "cols": cols,
         "rows": rows,
     }
