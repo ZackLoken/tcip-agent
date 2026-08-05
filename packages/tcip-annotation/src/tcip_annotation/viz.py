@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+from tcip_annotation.sam_wrapper import column_label
 from tcip_annotation.utils import auto_orient_image, get_image_dimensions
 
 # 20-class color palette (RGB), consistent with the GUI annotation canvas
@@ -464,9 +465,10 @@ def render_grid_overlay(
 ) -> str:
     """Render image with a labeled grid overlay for spatial referencing.
 
-    The grid uses letter columns (A-H) and number rows (1-6). The agent
-    can reference cells like 'B3' or 'F5' to indicate object locations,
-    which are converted to pixel coordinates via grid_to_pixel().
+    The grid uses spreadsheet-style letter columns (A-Z, then AA, AB, ...)
+    and number rows. The agent can reference cells like 'B3' or 'F5' to
+    indicate object locations, which are converted to pixel coordinates
+    via grid_to_pixel().
 
     Args:
         image_path: Path to the source image.
@@ -504,7 +506,7 @@ def render_grid_overlay(
     # Label each cell at top-left corner
     for c in range(cols):
         for r in range(rows):
-            label = f"{chr(ord('A') + c)}{r + 1}"
+            label = f"{column_label(c)}{r + 1}"
             x = int(c * cell_w) + 3
             y = int(r * cell_h) + 2
             # Dark background for readability
