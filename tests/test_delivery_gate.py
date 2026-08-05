@@ -497,6 +497,104 @@ def test_export_predictions_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_
     assert (out / "a.json").exists()  # the honestly-flagged provisional bucket still wrote
 
 
+# ── the GUI inference worker gates the bucket it persists, same as export_predictions ──
+
+def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=None,
+                              slice_source="default"):
+    """Run the web Inference tab's own worker over one image and return ``(job, output_dir)``.
+
+    ``train_tile_size`` is the checkpoint's own persisted training geometry, absent when the
+    checkpoint recorded none; ``slice_source="explicit"`` is a caller-stated tile edge.
+    """
+    pytest.importorskip("fastapi")
+    from PIL import Image
+
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    class FakePredictor:
+        task = "detection"
+
+        def __init__(self, checkpoint_path=None, **kwargs):
+            pass
+
+        def predict_batch(self, paths, **kw):
+            return [{"image": p, "width": 100, "height": 100,
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
+                    for p in paths]
+
+    if train_tile_size is not None:
+        FakePredictor.train_tile_size = train_tile_size
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+
+    out_dir = tmp_path / "out"
+    job = InferenceJob(
+        job_id="gate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        output_dir=str(out_dir), tile=tile, tile_source="explicit", conf=0.25, iou=0.7,
+        slice_hw=(512, 512), overlap=0.2, slice_source=slice_source,
+    )
+    _worker(job)
+    return job, out_dir
+
+
+def _sidecar_tile_reference(out_dir):
+    op = json.loads((out_dir / "operating_point.json").read_text())["operating_point"]
+    return op["tile_size"]["validated_against"]
+
+
+def test_gui_inference_worker_refuses_a_fabricated_tile_scale(tmp_path, monkeypatch):
+    """The breeder's own door must be gated like every other door that persists a bucket: a tiled
+    run off a checkpoint with no persisted training geometry writes counts at a scale nothing
+    justifies, which export_predictions already refuses. The refusal has to reach the breeder as a
+    failed job carrying the reason, never a silent bucket plus an unvalidated sidecar."""
+    job, out_dir = _run_gui_inference_worker(tmp_path, monkeypatch, tile=True)
+    assert job.status == "failed"
+    assert "tile_size" in job.error
+    assert "training tile geometry" in job.error   # names what is missing, not just that it failed
+    assert not (out_dir / "operating_point.json").exists()
+    assert not (out_dir / "img.json").exists()     # nothing of the bucket was written
+    assert job.done == 0
+
+
+def test_gui_inference_worker_ships_when_the_tile_scale_has_a_real_basis(tmp_path, monkeypatch):
+    """The rail must admit valid work, not only reject invalid work: a tiled run whose tile edge
+    came from the checkpoint's own persisted training geometry writes its bucket and stamps the
+    real reference the scale cleared."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
+
+    job, out_dir = _run_gui_inference_worker(tmp_path, monkeypatch, tile=True, train_tile_size=224)
+    assert job.status == "completed"
+    assert job.error is None
+    assert (out_dir / "img.json").exists()
+    assert _sidecar_tile_reference(out_dir) == VALIDATED_PERSISTED_GEOMETRY
+
+
+def test_gui_inference_worker_ships_a_caller_stated_tile_geometry(tmp_path, monkeypatch):
+    """The launch payload's own tile-size override is the other real basis for the scale, and it
+    must clear the gate on the same terms the MCP door accepts an explicit tile_size on."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_EXPLICIT_GEOMETRY
+
+    job, out_dir = _run_gui_inference_worker(tmp_path, monkeypatch, tile=True,
+                                             slice_source="explicit")
+    assert job.status == "completed"
+    assert _sidecar_tile_reference(out_dir) == VALIDATED_EXPLICIT_GEOMETRY
+
+
+def test_gui_inference_worker_never_gates_an_untiled_run_on_tile_size(tmp_path, monkeypatch):
+    """An untiled run's tile_size was never operative, so a checkpoint with no persisted geometry
+    must still run: gating it would refuse work that was always fine."""
+    job, out_dir = _run_gui_inference_worker(tmp_path, monkeypatch, tile=False)
+    assert job.status == "completed"
+    assert (out_dir / "img.json").exists()
+    assert _sidecar_tile_reference(out_dir) is None  # never entered the gate at all
+
+
 # ── the same tile-geometry dimension, read from a written bucket's sidecar ──
 
 def _write_bucket(path, *, conf_ref, tile_size_prov=None, validated=None):
