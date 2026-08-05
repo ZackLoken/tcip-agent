@@ -299,6 +299,33 @@ def test_window_reader_refuses_tiled_tiff(tmp_path: Path) -> None:
         OrthomosaicWindowReader(path)
 
 
+def test_window_reader_refuses_multipage_row_block_tiff(tmp_path: Path) -> None:
+    """tifffile stores a plain channel-last N-band raster one row-block per page, so
+    ``pages[0]`` of this 64x80x5 raster describes a single row-block (height 80, width 5, one
+    sample), not the raster. A reader built from that page's shape would silently serve windows
+    sliced from the wrong geometry, so construction must refuse instead."""
+    arr = np.zeros((64, 80, 5), dtype=np.uint8)
+    path = tmp_path / "rowblock.tif"
+    tifffile.imwrite(str(path), arr)
+    with tifffile.TiffFile(str(path)) as tif:
+        assert len(tif.pages) > 1  # the layout under test, not a single-page file
+        assert tuple(tif.series[0].shape) == (64, 80, 5)
+    with pytest.raises(UnsupportedRasterLayout):
+        OrthomosaicWindowReader(path)
+
+
+def test_window_reader_accepts_single_page_grayscale(tmp_path: Path) -> None:
+    """A 1-sample raster's series shape is 2-D (H, W) while the page reports samplesperpixel=1;
+    the whole-raster cross-check must treat those as agreeing, not refuse a valid layout."""
+    arr = (np.arange(23 * 17, dtype=np.uint16) % 256).astype(np.uint8).reshape(23, 17)
+    path = tmp_path / "gray.tif"
+    tifffile.imwrite(str(path), arr, rowsperstrip=4)
+    with OrthomosaicWindowReader(path) as reader:
+        assert (reader.height, reader.width, reader.num_channels) == (23, 17, 1)
+        window = reader.read_window(3, 13, 2, 10)
+    assert np.array_equal(np.squeeze(window), arr[3:13, 2:10])
+
+
 # ── GeoTransform composes with plain floats (no bespoke point type) ─────
 
 
