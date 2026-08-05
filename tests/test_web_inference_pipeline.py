@@ -50,6 +50,10 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     captured = {}
 
     class FakePredictor:
+        # A tiled run clears the worker's tile-geometry delivery gate only on a real basis for the
+        # scale; this checkpoint persisted its own training geometry.
+        train_tile_size = 640
+
         def __init__(self, checkpoint_path=None, **kwargs):
             captured["checkpoint"] = checkpoint_path
             captured["kwargs"] = kwargs
@@ -199,6 +203,7 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
 
     class FakeInstanceSegPredictor:
         task = "instance_seg"
+        train_tile_size = 640  # a real basis for the tile scale, or the delivery gate refuses
 
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
