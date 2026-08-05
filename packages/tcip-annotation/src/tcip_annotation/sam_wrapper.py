@@ -16,6 +16,7 @@ Public API:
     predict_from_box(image_path, x1, y1, x2, y2, model_type)
     auto_mask(image_path, model_type, ...)
     grid_to_pixel(cell, img_w, img_h, cols, rows)
+    column_label(index) / column_index(label)
 
 The prompted predictors return polygon rings (a mask with two disjoint regions is two rings),
 via the shared :func:`tcip_annotation.mask_contours.mask_to_polygon_rings`, the same extractor the
@@ -29,6 +30,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -281,6 +283,34 @@ def auto_mask(
     return candidates
 
 
+def column_label(index: int) -> str:
+    """Spreadsheet-style label for 0-based column ``index``: A-Z, then AA, AB, ...
+
+    Bijective base-26, the scheme the grid overlay renders with; :func:`column_index` is the
+    inverse. A single ``chr`` past 'Z' walks into punctuation and then lowercase letters, and
+    case-insensitive parsing folds lowercase back onto columns 0-25, so labels beyond 26
+    columns must widen instead.
+    """
+    if index < 0:
+        raise ValueError(f"Column index must be non-negative, got {index}")
+    label = ""
+    n = index + 1
+    while n:
+        n, rem = divmod(n - 1, 26)
+        label = chr(ord("A") + rem) + label
+    return label
+
+
+def column_index(label: str) -> int:
+    """0-based column index for a spreadsheet-style ``label``; inverse of :func:`column_label`."""
+    if not label or not all("A" <= ch <= "Z" for ch in label):
+        raise ValueError(f"Invalid column label: {label!r}. Expected letters A-Z.")
+    n = 0
+    for ch in label:
+        n = n * 26 + (ord(ch) - ord("A") + 1)
+    return n - 1
+
+
 def grid_to_pixel(
     cell: str,
     img_w: int,
@@ -290,10 +320,11 @@ def grid_to_pixel(
 ) -> tuple[float, float]:
     """Convert a grid cell reference (e.g. 'B3') to pixel coordinates (cell center).
 
-    Grid uses letter columns (A-H) and number rows (1-6) by default.
+    Columns are spreadsheet-style letters (A-Z, then AA, AB, ...), rows are 1-based numbers,
+    matching the labels ``render_grid_overlay`` draws.
 
     Args:
-        cell: Grid reference like 'B3', 'D5'.
+        cell: Grid reference like 'B3', 'D5', 'AA2'.
         img_w: Image width in pixels.
         img_h: Image height in pixels.
         cols: Number of grid columns.
@@ -303,22 +334,19 @@ def grid_to_pixel(
         (x, y) center of the referenced cell in pixel coordinates.
     """
     cell = cell.strip().upper()
-    if len(cell) < 2:
+    match = re.fullmatch(r"([A-Z]+)([0-9]+)", cell)
+    if match is None:
         raise ValueError(f"Invalid cell reference: {cell!r}. Expected format like 'B3'.")
 
-    col_letter = cell[0]
-    row_str = cell[1:]
+    col_letters, row_str = match.groups()
 
-    col_idx = ord(col_letter) - ord("A")
-    if col_idx < 0 or col_idx >= cols:
+    col_idx = column_index(col_letters)
+    if col_idx >= cols:
         raise ValueError(
-            f"Column '{col_letter}' out of range. Use A-{chr(ord('A') + cols - 1)}."
+            f"Column '{col_letters}' out of range. Use A-{column_label(cols - 1)}."
         )
 
-    try:
-        row_idx = int(row_str) - 1
-    except ValueError:
-        raise ValueError(f"Invalid row number: {row_str!r}. Expected integer.")
+    row_idx = int(row_str) - 1
     if row_idx < 0 or row_idx >= rows:
         raise ValueError(f"Row {row_str} out of range. Use 1-{rows}.")
 
