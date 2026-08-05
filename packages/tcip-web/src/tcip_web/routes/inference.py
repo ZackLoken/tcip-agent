@@ -10,7 +10,8 @@ checkpoint through its own native SAHI-style tiling.
 The operating point (conf / NMS IoU / tiling / max_dets) is resolved through the same
 ``raw_operating_point`` bundle as the MCP door and its provenance is stamped alongside the
 predictions, so a GUI run and an agent run can't diverge on the count or hide an unvalidated
-operating point.
+operating point. A run whose tile scale has no persisted or caller-stated basis is refused by the
+shared delivery gate before anything is written, the same refusal ``export_predictions`` makes.
 """
 
 from __future__ import annotations
@@ -246,6 +247,24 @@ def _worker(job: InferenceJob) -> None:
             conf=job.conf, cross_tile_nms=job.iou, tiled=job.tile, tiled_source=job.tile_source,
             tile_size=resolved_tile, tile_size_source=tile_size_source, max_dets=job.max_dets,
         )
+
+        # Refuse a fabricated tile scale before the pass, the same gate export_predictions applies.
+        from tcip_mcp.pipelines.resolution import check_delivery_gate, tile_size_gate_flag
+
+        tile_ref = tile_size_gate_flag(op_bundle.to_provenance()["operating_point"])
+        gate = check_delivery_gate({"tile_size": tile_ref} if tile_ref is not None else {})
+        if not gate.ok:
+            job.status = "failed"
+            job.error = (
+                f"inference refused: unvalidated measurement dimension(s) {list(gate.unvalidated)}. "
+                f"This run tiles at {resolved_tile}px, a fabricated fallback: the checkpoint records "
+                "no training tile geometry and no tile size was stated for this run, so the counts "
+                "it would produce rest on a scale nothing justifies. Run untiled, or use a "
+                "checkpoint whose training tile geometry was persisted."
+            )
+            logger.warning("inference job %s refused by the delivery gate: %s",
+                           job.job_id, job.error)
+            return
 
         # Stamp the operating point next to the predictions so a GUI-produced set carries the same
         # provenance (and validated=false) the MCP door records: a phenotype's numbers are only as
