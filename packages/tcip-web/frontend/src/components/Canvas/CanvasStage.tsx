@@ -10,8 +10,23 @@ import Konva from "konva";
 
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { useOverviewBuild } from "@/hooks/useOverviewBuild";
+import { loadImage, type LoadedImage } from "@/lib/imageLoader";
+import { clampView } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
 import type { ViewState } from "@/store/types";
+
+/** One region serve drawn above the base image, positioned in image coords. */
+export interface CanvasRegion {
+  /** Stable identity (the coverage cell name); the bitmap cache is keyed on it. */
+  key: string;
+  url: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Called with the serve facts once this region's URL loads (served-at-native marking). */
+  onLoaded?: (facts: LoadedImage) => void;
+}
 
 export interface CanvasStageProps {
   imageUrl: string | null;
@@ -23,6 +38,12 @@ export interface CanvasStageProps {
   /** Auto-fit the image to the canvas once per image (default true). The Review tab sets this
    *  false so its zoom-to-detection view is not overridden by the fit. */
   autoFit?: boolean;
+  /** Cell-aligned region serves rendered above the base image while it is loading and after: a
+   *  region unmounts when dropped from this list; one whose URL changes keeps its last-loaded
+   *  bitmap on screen until the replacement finishes loading. */
+  regions?: CanvasRegion[];
+  /** The base serve's read facts: null while a load is in flight, then the loader's result. */
+  onBaseFacts?: (facts: LoadedImage | null) => void;
   /** Static shapes, rendered in the content layer (below the overlay). */
   children?: React.ReactNode;
   /** Cursor-following / transient shapes, rendered in a separate top layer so they
@@ -47,9 +68,12 @@ export function CanvasStage(props: CanvasStageProps) {
   const setView = useStore((s) => s.setView);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [baseError, setBaseError] = useState<string | null>(null);
+  const onBaseFactsRef = useRef(props.onBaseFacts);
+  onBaseFactsRef.current = props.onBaseFacts;
   // A load the server refused for want of overviews is a wait, not a failure: the build runs and
   // the image is requested again once the pyramid exists.
-  const overview = useOverviewBuild(props.imageUrl, props.imagePath ?? null, imgError);
+  const overview = useOverviewBuild(props.imageUrl, props.imagePath ?? null, baseError);
 
   // Track wrapper size: measure synchronously on mount too, so the first fit uses the real
   // canvas size immediately rather than waiting a frame for the ResizeObserver.
@@ -65,36 +89,86 @@ export function CanvasStage(props: CanvasStageProps) {
     return () => ro.disconnect();
   }, []);
 
-  // Load image
+  // Load the base image through the shared loader so the serve facts (served size, stretch
+  // provenance, refusal condition) arrive with the bitmap instead of needing a second request.
   useEffect(() => {
     if (!props.imageUrl) {
       setImg(null);
       setImgError(false);
+      setBaseError(null);
+      onBaseFactsRef.current?.(null);
       return;
     }
     // Drop the previous bitmap immediately, otherwise the new image's labels render
     // over the old photo for the seconds the fetch takes (misregistered symbology).
     setImg(null);
     setImgError(false);
-    const el = new Image();
-    el.crossOrigin = "anonymous";
-    el.onload = () => {
-      setImg(el);
-      setImgError(false);
-    };
-    // Distinguish a failed load (missing / access-denied / server error) from an
-    // empty canvas, otherwise overlays float on a blank stage with no explanation.
-    el.onerror = () => {
-      setImg(null);
-      setImgError(true);
-    };
-    el.src = props.imageUrl;
-    return () => {
-      el.onload = null;
-      el.onerror = null;
-      el.src = ""; // cancel the abandoned download; rapid flips otherwise queue every skip
-    };
+    setBaseError(null);
+    onBaseFactsRef.current?.(null);
+    const ac = new AbortController();
+    void loadImage(props.imageUrl, { signal: ac.signal }).then((res) => {
+      if (res.aborted) return;
+      setImg(res.ok ? res.image : null);
+      // Distinguish a failed load (missing / access-denied / server error) from an
+      // empty canvas, otherwise overlays float on a blank stage with no explanation.
+      setImgError(!res.ok);
+      setBaseError(res.imageError);
+      onBaseFactsRef.current?.(res);
+    });
+    return () => ac.abort(); // cancel the abandoned download; rapid flips otherwise queue every skip
   }, [props.imageUrl, overview.reloadToken]);
+
+  // Region bitmaps by key. A key dropped from the prop unmounts (and aborts an in-flight
+  // load); a key whose URL changed keeps the last-loaded bitmap until the replacement lands.
+  const [regionBitmaps, setRegionBitmaps] = useState<Map<string, HTMLImageElement>>(new Map());
+  const regionLoadsRef = useRef<Map<string, { url: string; ac: AbortController }>>(new Map());
+  const regionUrlsRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const regions = props.regions ?? [];
+    const keys = new Set(regions.map((r) => r.key));
+    for (const [key, load] of regionLoadsRef.current) {
+      if (!keys.has(key)) {
+        load.ac.abort();
+        regionLoadsRef.current.delete(key);
+      }
+    }
+    setRegionBitmaps((prev) => {
+      let next: Map<string, HTMLImageElement> | null = null;
+      for (const key of prev.keys()) {
+        if (!keys.has(key)) {
+          next = next ?? new Map(prev);
+          next.delete(key);
+          regionUrlsRef.current.delete(key);
+        }
+      }
+      return next ?? prev;
+    });
+    for (const region of regions) {
+      if (regionUrlsRef.current.get(region.key) === region.url) continue;
+      const inflight = regionLoadsRef.current.get(region.key);
+      if (inflight?.url === region.url) continue;
+      inflight?.ac.abort();
+      const ac = new AbortController();
+      regionLoadsRef.current.set(region.key, { url: region.url, ac });
+      void loadImage(region.url, { signal: ac.signal }).then((res) => {
+        if (res.aborted) return;
+        if (regionLoadsRef.current.get(region.key)?.url !== region.url) return;
+        regionLoadsRef.current.delete(region.key);
+        region.onLoaded?.(res);
+        if (res.ok && res.image) {
+          regionUrlsRef.current.set(region.key, region.url);
+          setRegionBitmaps((prev) => new Map(prev).set(region.key, res.image!));
+        }
+      });
+    }
+  }, [props.regions]);
+  useEffect(() => {
+    const loads = regionLoadsRef.current;
+    return () => {
+      for (const load of loads.values()) load.ac.abort();
+      loads.clear();
+    };
+  }, []);
 
   // Fit the image to the canvas once per image, not on every container resize. Refitting
   // on resize reset the user's zoom/pan, and when a reflow briefly reported a near-zero
@@ -132,7 +206,10 @@ export function CanvasStage(props: CanvasStageProps) {
   const pendingViewRef = useRef<ViewState | null>(null);
   const pendingBaseRef = useRef<ViewState | null>(null);
   const viewRafRef = useRef<number | null>(null);
-  const scheduleView = (v: ViewState) => {
+  // Every interactive write (wheel pan, wheel zoom, drag pan) passes through here, so the pan
+  // clamp lives at this one choke point; programmatic setView callers stay unclamped.
+  const scheduleView = (raw: ViewState) => {
+    const v = clampView(raw, dims, props.imgWidth, props.imgHeight);
     if (pendingViewRef.current == null) pendingBaseRef.current = useStore.getState().gui.view;
     pendingViewRef.current = v;
     if (viewRafRef.current != null) return;
@@ -364,6 +441,21 @@ export function CanvasStage(props: CanvasStageProps) {
           {img ? (
             <KonvaImage image={img} x={0} y={0} width={props.imgWidth} height={props.imgHeight} />
           ) : null}
+          {/* Region serves ride the same transform above the base bitmap, so cold loads
+              sharpen progressively while the base keeps rendering underneath. */}
+          {(props.regions ?? []).map((region) => {
+            const bitmap = regionBitmaps.get(region.key);
+            return bitmap ? (
+              <KonvaImage
+                key={region.key}
+                image={bitmap}
+                x={region.x}
+                y={region.y}
+                width={region.width}
+                height={region.height}
+              />
+            ) : null;
+          })}
         </Layer>
         <Layer
           listening={false}
