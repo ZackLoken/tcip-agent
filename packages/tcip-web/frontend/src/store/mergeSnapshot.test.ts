@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { recordLastTab } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
 import type { DatasetSelection, GuiState } from "@/store/types";
 
@@ -101,9 +102,10 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.dataset.date).toBe("2-11-26"); // unchanged
   });
 
-  it("adopts the whole persisted state on boot (fresh page load resumes the session)", () => {
-    // Fresh browser: no dataset yet, there is no local state to protect, so the first
-    // snapshot restores tab/mode/filters instead of leaving the Annotate defaults.
+  it("adopts the persisted state on boot, with the tab from the project's own record", () => {
+    // Boot adopts backend mode/filters/position; the tab is the client's per-project record,
+    // since the backend's active_tab only moves on agent focus events (stale, often Review).
+    localStorage.removeItem("tcip.lasttab./proj");
     useStore.setState({
       gui: snapshot({
         active_subject: null,
@@ -127,9 +129,30 @@ describe("mergeSnapshot ownership model", () => {
       }),
       1,
     );
-    expect(s().gui.active_tab).toBe("review");
+    expect(s().gui.active_tab).toBe("annotate"); // no record yet: first-open default
     expect(s().gui.mode).toBe("polygon");
     expect(s().gui.active_subject).toBe("bush");
     expect(s().gui.dataset.current_image_index).toBe(2);
+  });
+
+  it("boot hydration lands on the project's recorded last-used tab when one exists", () => {
+    recordLastTab("/proj", "training");
+    useStore.setState({
+      gui: snapshot({
+        active_subject: null,
+        dataset: dataset({
+          project_root: null,
+          dataset_root: null,
+          subject: null,
+          date: null,
+          image_list: [],
+          current_image_index: 0,
+        }),
+      }),
+      wsVersion: 0,
+    });
+    s().mergeSnapshot(snapshot({ active_tab: "review" }), 1);
+    expect(s().gui.active_tab).toBe("training");
+    localStorage.removeItem("tcip.lasttab./proj");
   });
 });
