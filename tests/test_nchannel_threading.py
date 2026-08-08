@@ -198,6 +198,66 @@ def test_band_normalization_stats_admits_underivable(tmp_path):
     assert band_normalization_stats([tmp_path / "missing.npy"], 5) is None
 
 
+def _strip_tiff_raster(path, *, height=24, width=20, channels=4):
+    """A small multi-band strip raster both band-normalization siblings can read: the exact one by
+    decoding it whole, the sampled one by reading pixel windows out of it."""
+    import numpy as np
+    import tifffile
+
+    arr = np.random.default_rng(5).integers(0, 255, size=(height, width, channels), dtype=np.uint8)
+    tifffile.imwrite(str(path), arr, rowsperstrip=6)
+    return arr
+
+
+def test_sampled_band_normalization_stats_over_full_coverage_match_the_exact_sibling(tmp_path):
+    """Reading every window of the grid is reading every pixel, so the sampled sibling lands on the
+    exact sibling's own numbers: the two differ in which pixels they read, never in the arithmetic
+    or the [0, 1] unit system they read them into.
+    """
+    from tcip_mcp.pipelines.derivations import (
+        band_normalization_stats,
+        band_normalization_stats_sampled,
+    )
+
+    path = tmp_path / "mosaic.tif"
+    arr = _strip_tiff_raster(path)
+
+    exact = band_normalization_stats([path], arr.shape[-1])
+    sampled = band_normalization_stats_sampled(
+        [path], arr.shape[-1], seed=1, window_size=8, max_windows_per_image=999)
+    assert exact is not None and sampled is not None
+    assert sampled.sampling.pixel_fraction == 1.0
+    assert sampled.mean == pytest.approx(exact[0], rel=1e-12, abs=1e-12)
+    assert sampled.std == pytest.approx(exact[1], rel=1e-12, abs=1e-12)
+
+
+def test_sampled_band_normalization_stats_records_the_windows_it_read(tmp_path):
+    from tcip_mcp.pipelines.derivations import band_normalization_stats_sampled
+
+    path = tmp_path / "mosaic.tif"
+    arr = _strip_tiff_raster(path)
+    kwargs = {"seed": 4, "window_size": 8, "max_windows_per_image": 3}
+
+    sampled = band_normalization_stats_sampled([path], arr.shape[-1], **kwargs)
+    assert sampled is not None
+    assert len(sampled.sampling.windows) == 3
+    assert {label for label, _ in sampled.sampling.windows} == {str(path)}
+    covered = sum(r.width * r.height for _, r in sampled.sampling.windows)
+    assert sampled.sampling.pixel_fraction == pytest.approx(
+        covered / (arr.shape[0] * arr.shape[1]))
+    assert sampled.sampling.seed == 4
+
+    repeat = band_normalization_stats_sampled([path], arr.shape[-1], **kwargs)
+    assert repeat == sampled
+
+
+def test_sampled_band_normalization_stats_admit_underivable(tmp_path):
+    from tcip_mcp.pipelines.derivations import band_normalization_stats_sampled
+
+    assert band_normalization_stats_sampled(
+        [tmp_path / "missing.npy"], 5, seed=1, window_size=8, max_windows_per_image=2) is None
+
+
 def test_build_dataset_sets_expected_channels(tmp_path):
     from PIL import Image
 
