@@ -8,12 +8,14 @@ import numpy as np
 import torch
 from PIL import Image
 
+from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import (
     BandGroupIncomplete,
     BandGroupRef,
     MANIFEST_EXT,
     read_band_group_manifest,
 )
+from tcip_mcp.pipelines.raster_source import Rect
 
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
@@ -134,22 +136,6 @@ def _channels_from_shape(shape: tuple[int, ...]) -> int:
     return int(shape[0]) if shape[0] < shape[-1] else int(shape[-1])
 
 
-def _tiff_series_shape(path: Path) -> tuple[int, ...] | None:
-    """Header-only TIFF series shape (no pixel decode); ``None`` if it can't be read this way.
-
-    ``tif.series[0].shape``, not ``pages[0]``: a channel-last TIFF stores each row-block as its
-    own page, so ``pages[0]`` of a 24x40x5 raster is ``(40, 5)``. Shared by ``image_dimensions``
-    and ``derivations.probe_channels`` so a full pixel read is never paid just to learn the shape.
-    """
-    try:
-        import tifffile
-
-        with tifffile.TiffFile(str(path)) as tif:
-            return tuple(int(x) for x in tif.series[0].shape)
-    except Exception:  # noqa: BLE001, fall through to a full read rather than guess
-        return None
-
-
 def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int = 3) -> tuple[int, int]:
     """``(width, height)`` as ``load_image`` will decode it, without decoding pixels where possible.
 
@@ -161,18 +147,21 @@ def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int = 3) -
 
     A :class:`BandGroupRef` reads its dims from one sibling band file (a group's members share one
     spatial frame by construction, which is what makes stacking them into ``[H, W, C]`` valid).
+
+    Which decode a source routes to is ``raster_source.photographic_container``'s decision, the
+    same one :func:`load_image` delegates to, never a second predicate here that could drift.
     """
     if isinstance(path, BandGroupRef):
         one_band = next(iter(path.bands.values()))
         return image_dimensions(one_band, 1)
     path = Path(path)
     ext = path.suffix.lower()
-    if num_channels in (1, 3, 4) and ext not in (".npy", ".npz", ".tif", ".tiff"):
+    if raster_source.photographic_container(path, num_channels):
         from tcip_annotation.utils import get_image_dimensions
 
         return get_image_dimensions(str(path))  # header-only, EXIF-aware
     if ext in (".tif", ".tiff"):
-        shape = _tiff_series_shape(path)
+        shape = raster_source.tiff_series_shape(path)
         if shape is not None:
             if len(shape) == 2:
                 return int(shape[1]), int(shape[0])
@@ -244,22 +233,15 @@ def load_image(path: "str | Path | BandGroupRef", num_channels: int = 3):
     pipeline keeps working), or an ``[H, W, C]`` ndarray for multi-band inputs
     (``.npy`` / ``.npz`` / multi-band GeoTIFF, or a :class:`BandGroupRef`). An RGB file requested
     as 1 channel is converted to grayscale; as 3, kept RGB.
-    """
-    if isinstance(path, BandGroupRef):
-        return load_multiband(path, num_channels)
-    path = Path(path)
-    ext = path.suffix.lower()
-    if num_channels in (1, 3, 4) and ext not in (".npy", ".npz", ".tif", ".tiff"):
-        mode = {1: "L", 3: "RGB", 4: "RGBA"}[num_channels]
-        # EXIF-orient before convert so the returned frame matches get_image_dimensions()
-        # (both apply auto_orient_image). Labels are authored in this upright frame; without
-        # this the loader would denormalize upright coords against the raw sensor frame and
-        # scatter every box (Orientation-6 JPEGs differ 5712×4284 ↔ 4284×5712).
-        from tcip_annotation.utils import auto_orient_image
 
-        return auto_orient_image(Image.open(path)).convert(mode)
-    # >4 channels, or a numpy/GeoTIFF container -> multi-band array.
-    return load_multiband(path, num_channels)
+    Reads through ``raster_source``: which backend decodes a source is that module's own dispatch,
+    so a frame this returns and one ``image_dimensions`` measures can never come from two
+    different decisions.
+    """
+    with raster_source.open_raster(path, num_channels) as src:
+        if isinstance(src, raster_source.PhotographicSource):
+            return src.image
+        return src.read_region(Rect(0, 0, src.width, src.height))[0]
 
 
 def load_multiband(path: "str | Path | BandGroupRef", num_channels: int) -> np.ndarray:
@@ -268,29 +250,10 @@ def load_multiband(path: "str | Path | BandGroupRef", num_channels: int) -> np.n
     A :class:`BandGroupRef` decodes each sibling file (each already a supported single-band
     source) and stacks them into one ``[H, W, C]`` array in the manifest's declared band order:
     the one place virtual (in-memory) stacking happens; never written back to disk.
-    """
-    if isinstance(path, BandGroupRef):
-        bands = [load_multiband(p, 1) for p in path.bands.values()]
-        return np.concatenate(bands, axis=-1)
-    path = Path(path)
-    ext = path.suffix.lower()
-    if ext == ".npy":
-        arr = np.load(str(path))
-    elif ext == ".npz":
-        npz = np.load(str(path))
-        arr = npz[npz.files[0]]
-    elif ext in (".tif", ".tiff"):
-        import tifffile
 
-        arr = tifffile.imread(str(path))
-    else:
-        raise ValueError(
-            f"Cannot load a {num_channels}-channel image from '{ext}'. "
-            "Use .npy/.npz or a multi-band GeoTIFF (.tif/.tiff)."
-        )
-    arr = np.asarray(arr)
-    if arr.ndim == 2:
-        arr = arr[:, :, None]
-    elif arr.ndim == 3 and arr.shape[0] == num_channels and arr.shape[2] != num_channels:
-        arr = np.transpose(arr, (1, 2, 0))  # channel-first -> channel-last
-    return arr
+    A photographic container (anything outside ``.npy`` / ``.npz`` / ``.tif`` / ``.tiff``) raises
+    ``ValueError`` at any channel count: band data is what this returns, and a PIL frame is
+    :func:`load_image`'s business.
+    """
+    with raster_source.open_array_source(path, num_channels) as src:
+        return src.read_region(Rect(0, 0, src.width, src.height))[0]
