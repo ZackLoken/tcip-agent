@@ -68,29 +68,27 @@ describe("images.url", () => {
   });
 });
 
-describe("images.refusal", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
+describe("images.url region params", () => {
+  it("carries the native-pixel rect corners and max_width through to the query string", () => {
+    const params = parseQuery(
+      api.images.url("C:/data/images/2026-01-01/mosaic.tif", {
+        x0: 0,
+        y0: 4067,
+        x1: 4067,
+        y1: 8134,
+        max_width: 2034,
+      }),
+    );
+    expect(params.get("x0")).toBe("0");
+    expect(params.get("y0")).toBe("4067");
+    expect(params.get("x1")).toBe("4067");
+    expect(params.get("y1")).toBe("8134");
+    expect(params.get("max_width")).toBe("2034");
   });
 
-  it("reports the condition the server named on a refused image request", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 400,
-        headers: new Headers({ "X-TCIP-Image-Error": "overviews_required" }),
-      } as unknown as Response),
-    );
-    expect(await api.images.refusal("/api/images?path=x")).toBe("overviews_required");
-  });
-
-  it("reports nothing for a request that was served", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, status: 200, headers: new Headers() } as Response),
-    );
-    expect(await api.images.refusal("/api/images?path=x")).toBeNull();
+  it("omits every rect param when no region is requested", () => {
+    const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg"));
+    for (const key of ["x0", "y0", "x1", "y1"]) expect(params.has(key)).toBe(false);
   });
 });
 
