@@ -6,8 +6,20 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 from PIL import Image
+
+
+def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
+    """A file's pixels and native size, the pair the pixel-in renderers take.
+
+    Stands in for whatever the calling tool would have read (``vision_tools._read_for_display``),
+    so a renderer test exercises the renderer and nothing else.
+    """
+    with Image.open(image_path) as im:
+        rgb = im.convert("RGB")
+        return np.asarray(rgb), rgb.size
 
 
 @pytest.fixture
@@ -72,13 +84,13 @@ class TestRenderDetections:
     def test_basic_render(self, viz_dataset: Path):
         from tcip_annotation.viz import render_detections
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
         boxes = [
             {"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0},
             {"x1": 300, "y1": 300, "x2": 400, "y2": 400, "class_id": 1},
         ]
         out = str(viz_dataset / "test_render.png")
-        result = render_detections(img_path, boxes, output_path=out)
+        result = render_detections(pixels, boxes, native_size=native, output_path=out)
         assert Path(result).is_file()
         rendered = Image.open(result)
         assert rendered.size[0] > 0
@@ -86,11 +98,12 @@ class TestRenderDetections:
     def test_with_class_names(self, viz_dataset: Path):
         from tcip_annotation.viz import render_detections
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
         boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
         out = str(viz_dataset / "test_names.png")
         result = render_detections(
-            img_path, boxes,
+            pixels, boxes,
+            native_size=native,
             class_names={0: "catkin", 1: "nut"},
             output_path=out,
         )
@@ -99,30 +112,70 @@ class TestRenderDetections:
     def test_with_confidence(self, viz_dataset: Path):
         from tcip_annotation.viz import render_detections
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
         boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0, "confidence": 0.95}]
         out = str(viz_dataset / "test_conf.png")
-        result = render_detections(img_path, boxes, output_path=out)
+        result = render_detections(pixels, boxes, native_size=native, output_path=out)
         assert Path(result).is_file()
+
+    def test_a_pil_frame_renders_the_same_as_its_own_pixels(self, viz_dataset: Path):
+        """Both input forms are drawn on, and the caller's own frame is never mutated."""
+        from tcip_annotation.viz import render_detections
+
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
+        boxes = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
+        frame = Image.fromarray(pixels, mode="RGB")
+        from_array = str(viz_dataset / "from_array.png")
+        from_pil = str(viz_dataset / "from_pil.png")
+        render_detections(pixels, boxes, native_size=native, output_path=from_array)
+        render_detections(frame, boxes, native_size=native, output_path=from_pil)
+
+        assert Path(from_array).read_bytes() == Path(from_pil).read_bytes()
+        assert np.array_equal(np.asarray(frame), pixels)  # the caller's frame is untouched
+
+    def test_pixels_that_are_not_uint8_rgb_are_refused(self, viz_dataset: Path):
+        from tcip_annotation.viz import render_detections
+
+        with pytest.raises(ValueError, match="uint8"):
+            render_detections(np.zeros((8, 8, 5), dtype=np.uint16), [], native_size=(8, 8))
+
+    def test_a_native_coordinate_lands_at_its_scaled_position(self, tmp_path: Path):
+        """Annotations are authored in the raster's own frame, so a renderer handed reduced pixels
+        places them by ``native_size``: the scaling the internal decode used to do."""
+        from tcip_annotation.viz import render_detections
+
+        native = (400, 200)
+        served = Image.new("RGB", (200, 100), (80, 80, 80))
+        out = str(tmp_path / "scaled.png")
+        render_detections(served, [{"x1": 100, "y1": 50, "x2": 300, "y2": 150, "class_id": 0}],
+                          native_size=native, output_path=out, conf_key=None)
+        px = Image.open(out).convert("RGB")
+
+        def red_at(xy):
+            r, g, _b = px.getpixel(xy)
+            return r - g
+
+        assert red_at((50, 50)) > 100     # the box edge at half of its native x
+        assert red_at((100, 50)) < 20     # nothing where the unscaled coordinate would have put it
 
 
 class TestRenderSegmentations:
     def test_basic_render(self, viz_dataset: Path):
         from tcip_annotation.viz import render_segmentations
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
         polys = [
             {"rings": [[(100, 100), (200, 100), (200, 200), (100, 200)]], "class_id": 0},
         ]
         out = str(viz_dataset / "test_seg.png")
-        result = render_segmentations(img_path, polys, output_path=out)
+        result = render_segmentations(pixels, polys, native_size=native, output_path=out)
         assert Path(result).is_file()
 
     def test_renders_every_ring_of_an_occlusion_split_instance(self, viz_dataset: Path):
         """An instance's rings all get drawn, and it is labelled once, not once per contour."""
         from tcip_annotation.viz import render_segmentations
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
         polys = [{"rings": [[(50, 50), (120, 50), (120, 150), (50, 150)],
                             [(300, 60), (380, 60), (380, 140), (300, 140)]],
                   "class_id": 0}]
@@ -130,8 +183,8 @@ class TestRenderSegmentations:
 
         both = str(viz_dataset / "seg_two_rings.png")
         first_only = str(viz_dataset / "seg_one_ring.png")
-        render_segmentations(img_path, polys, output_path=both)
-        render_segmentations(img_path, one_ring, output_path=first_only)
+        render_segmentations(pixels, polys, native_size=native, output_path=both)
+        render_segmentations(pixels, one_ring, native_size=native, output_path=first_only)
 
         # The second ring really is painted: the two renders differ.
         assert Path(both).read_bytes() != Path(first_only).read_bytes()
@@ -140,20 +193,21 @@ class TestRenderSegmentations:
         """The renderer's rail admits an entry with no drawable ring rather than raising."""
         from tcip_annotation.viz import render_segmentations
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
         out = str(viz_dataset / "seg_empty.png")
-        assert Path(render_segmentations(img_path, [{"class_id": 0}], output_path=out)).is_file()
+        assert Path(render_segmentations(pixels, [{"class_id": 0}], native_size=native,
+                                         output_path=out)).is_file()
 
 
 class TestRenderComparison:
     def test_basic_comparison(self, viz_dataset: Path):
         from tcip_annotation.viz import render_comparison
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
         gt = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
         pred = [{"x1": 110, "y1": 110, "x2": 210, "y2": 210, "class_id": 0, "confidence": 0.9}]
         out = str(viz_dataset / "test_comp.png")
-        result = render_comparison(img_path, gt, pred, output_path=out)
+        result = render_comparison(pixels, gt, pred, native_size=native, output_path=out)
         assert Path(result).is_file()
 
 
@@ -253,6 +307,68 @@ class TestVisualizeComparison:
         assert result["pred_count"] == 2
 
 
+class TestDisplayRead:
+    """The one decode the visualization tools render through."""
+
+    def test_a_large_source_is_read_down_to_the_artifact_bound(self, tmp_path: Path):
+        """The artifact bound is the read's target, not a resize after a whole decode; the native
+        frame the annotations live in is reported unchanged."""
+        from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
+        from tcip_mcp.tools.vision_tools import _display_for_path
+
+        images = tmp_path / "images"
+        images.mkdir()
+        path = images / "big.jpg"
+        Image.new("RGB", (VIZ_ARTIFACT_MAX_EDGE * 2, VIZ_ARTIFACT_MAX_EDGE)).save(path)
+
+        read = _display_for_path(str(path))
+        assert read.pixels.shape[:2] == (VIZ_ARTIFACT_MAX_EDGE // 2, VIZ_ARTIFACT_MAX_EDGE)
+        assert read.native_size == (VIZ_ARTIFACT_MAX_EDGE * 2, VIZ_ARTIFACT_MAX_EDGE)
+        assert read.scale == 0.5
+
+    def test_a_source_within_the_bound_is_read_at_native_resolution(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import _display_for_path
+
+        read = _display_for_path(str(viz_dataset / "images" / "img_001.jpg"))
+        assert read.pixels.shape[:2] == (480, 640)
+        assert read.scale == 1.0
+
+    def test_a_three_band_raster_that_is_not_8_bit_is_stretched_to_be_visible(self,
+                                                                             tmp_path: Path):
+        """Band count alone doesn't make a raster displayable: a 16-bit capture's values occupy a
+        sliver of their dtype's range, and passing them through unstretched renders it black."""
+        import tifffile
+
+        from tcip_mcp.tools.vision_tools import _display_for_path
+
+        images = tmp_path / "images"
+        images.mkdir()
+        path = images / "capture.tif"
+        arr = np.stack([np.linspace(100, 400, 12, dtype=np.uint16)] * 10)
+        tifffile.imwrite(str(path), np.stack([arr, arr + 50, arr + 90], axis=-1))
+
+        pixels = _display_for_path(str(path)).pixels
+        assert pixels.dtype == np.uint8
+        assert pixels.max() == 255
+
+    def test_a_region_read_reports_the_rect_it_served(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import _display_for_path
+
+        read = _display_for_path(str(viz_dataset / "images" / "img_001.jpg"),
+                                 region=(100.0, 50.0, 200.0, 150.0))
+        assert (read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1) == (100, 50, 300, 200)
+        assert read.pixels.shape[:2] == (150, 200)
+
+    def test_a_region_hanging_off_the_edge_is_clamped_into_the_raster(self, viz_dataset: Path):
+        """A human can pan past the image, so a viewport is clamped rather than refused."""
+        from tcip_mcp.tools.vision_tools import _display_for_path
+
+        read = _display_for_path(str(viz_dataset / "images" / "img_001.jpg"),
+                                 region=(500.0, 400.0, 400.0, 400.0))
+        assert (read.rect.x1, read.rect.y1) == (640, 480)
+        assert read.pixels.shape[:2] == (80, 140)
+
+
 class TestVisualizeDatasetSample:
     def test_sample(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import visualize
@@ -269,6 +385,37 @@ class TestVisualizeDatasetSample:
         (tmp_path / "images").mkdir()
         result = visualize("dataset", str(tmp_path), n=4)
         assert "error" in result
+
+    def test_an_unlabeled_multiband_sample_is_a_rendered_cell(self, tmp_path: Path, monkeypatch):
+        """Every grid cell is a rendered artifact, labels or not: the grid tiles renders, and a
+        raw source path in that list is one the tiler has to decode itself."""
+        import tifffile
+
+        from tcip_mcp.tools import vision_tools
+
+        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+        images = tmp_path / "images"
+        images.mkdir()
+        rng = np.random.default_rng(5)
+        src = images / "capture.tif"
+        tifffile.imwrite(str(src), rng.integers(0, 4096, size=(24, 20, 6)).astype(np.uint16))
+
+        tiled: list[list[str]] = []
+        real_grid = vision_tools.render_grid
+
+        def spy(image_paths, **kwargs):
+            tiled.append(list(image_paths))
+            return real_grid(image_paths, **kwargs)
+
+        monkeypatch.setattr(vision_tools, "render_grid", spy)
+        result = vision_tools.visualize("dataset", str(tmp_path), n=1)
+
+        assert "error" not in result
+        viz_dir = (tmp_path / ".tcip" / "artifacts" / "viz").resolve()
+        assert tiled and tiled[0]
+        for cell in tiled[0]:
+            assert Path(cell).parent == viz_dir     # a render, not the source or a temp preview
+            assert Path(cell).is_file()
 
 
 class TestVisualizeWorstPredictions:
@@ -293,7 +440,7 @@ class TestRenderCandidates:
     def test_basic_render(self, viz_dataset: Path):
         from tcip_annotation.viz import render_candidates
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
         candidates = [
             {
                 "candidate_id": 0,
@@ -312,14 +459,14 @@ class TestRenderCandidates:
                 "rings": [[(300, 300), (400, 300), (400, 400), (300, 400)]],
             },
         ]
-        out = render_candidates(img_path, candidates)
+        out = render_candidates(pixels, candidates, native_size=native)
         assert Path(out).is_file()
 
     def test_empty_candidates(self, viz_dataset: Path):
         from tcip_annotation.viz import render_candidates
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-        out = render_candidates(img_path, [])
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
+        out = render_candidates(pixels, [], native_size=native)
         assert Path(out).is_file()
 
 
@@ -327,22 +474,22 @@ class TestRenderGridOverlay:
     def test_basic(self, viz_dataset: Path):
         from tcip_annotation.viz import render_grid_overlay
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-        out = render_grid_overlay(img_path)
+        pixels, _native = _display(str(viz_dataset / "images" / "img_001.jpg"))
+        out = render_grid_overlay(pixels)
         assert Path(out).is_file()
 
     def test_custom_grid(self, viz_dataset: Path):
         from tcip_annotation.viz import render_grid_overlay
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-        out = render_grid_overlay(img_path, cols=4, rows=3)
+        pixels, _native = _display(str(viz_dataset / "images" / "img_001.jpg"))
+        out = render_grid_overlay(pixels, cols=4, rows=3)
         assert Path(out).is_file()
 
     def test_grid_wider_than_alphabet(self, viz_dataset: Path):
         from tcip_annotation.viz import render_grid_overlay
 
-        img_path = str(viz_dataset / "images" / "img_001.jpg")
-        out = render_grid_overlay(img_path, cols=33, rows=4)
+        pixels, _native = _display(str(viz_dataset / "images" / "img_001.jpg"))
+        out = render_grid_overlay(pixels, cols=33, rows=4)
         assert Path(out).is_file()
 
 
@@ -1034,13 +1181,14 @@ class TestFullPipelineIntegration:
         from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
+        pixels, native = _display(img_path)
 
         # Step 1: Render candidates
-        candidate_render = render_candidates(img_path, MOCK_CANDIDATES)
+        candidate_render = render_candidates(pixels, MOCK_CANDIDATES, native_size=native)
         assert Path(candidate_render).is_file()
 
         # Step 2: Render grid overlay (for correction reference)
-        grid_render = render_grid_overlay(img_path)
+        grid_render = render_grid_overlay(pixels)
         assert Path(grid_render).is_file()
 
         # Step 3: Cache candidates (simulating propose_annotations state save)
