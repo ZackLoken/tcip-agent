@@ -72,6 +72,7 @@ export function AnnotateToolbar({
   bandsInfo,
   bandSelection,
   onBandSelectionChange,
+  completeWarning,
 }: {
   onSave: () => void;
   saveDisabled: boolean;
@@ -82,6 +83,8 @@ export function AnnotateToolbar({
   bandsInfo?: ImageBandsResponse | null;
   bandSelection?: BandSelection | null;
   onBandSelectionChange?: (next: BandSelection) => void;
+  // Coverage facts worth stating when Complete is checked (warn, never block); null = nothing.
+  completeWarning?: () => string | null;
 }) {
   const dataset = useStore((s) => s.gui.dataset);
   const mode = useStore((s) => s.gui.mode);
@@ -181,6 +184,10 @@ export function AnnotateToolbar({
         ? "partial"
         : "unannotated";
     setImageStatus(currentImage, newStatus);
+    if (next) {
+      const warning = completeWarning?.();
+      if (warning) useStore.getState().pushToast(warning, "info");
+    }
     try {
       await classesApi.setImageStatus(
         dataset.project_root,
