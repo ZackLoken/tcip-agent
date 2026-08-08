@@ -6,7 +6,7 @@
     },
     "claude-context": {
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "@zilliz/claude-context-mcp@latest"],
+      "args": ["/c", "claude-context-mcp"],
       "env": {
         "EMBEDDING_PROVIDER": "Ollama",
         "OLLAMA_HOST": "http://127.0.0.1:11434",
