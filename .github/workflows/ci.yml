@@ -17,6 +17,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      # pip's cache keys wheels by exact version, so a runner-image libgdal bump (a new
+      # gdal==X pin) misses the cache and rebuilds; nothing stale can be served.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: pip-${{ runner.os }}-
+
       - name: Install CPU-only torch
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
@@ -46,6 +54,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # pip's cache keys wheels by exact version, so a runner-image libgdal bump (a new
+      # gdal==X pin) misses the cache and rebuilds; nothing stale can be served.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: pip-${{ runner.os }}-
 
       - name: Install CPU-only torch
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
