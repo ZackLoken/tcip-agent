@@ -267,7 +267,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 @mcp.tool()
 @audited
 def launch_training(
-    config: dict, output_dir: str, resume_from: str = "",
+    config: dict, output_dir: str = "", resume_from: str = "",
     max_wall_clock_seconds: float | None = None,
 ) -> dict:
     """Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder.
@@ -279,7 +279,9 @@ def launch_training(
 
     Args:
         config: Full training configuration dict with model_source, data, training sections.
-        output_dir: Directory for checkpoints and logs.
+        output_dir: Directory for checkpoints and logs. Empty defaults to the experiment store
+            (``<project>/.tcip/experiments``, the same base the experiment records use); a
+            relative path resolves against the project root, never the server process's cwd.
         resume_from: Optional path to a ``checkpoint_epoch_*.pt`` to resume from
             (restores model + optimizer + scheduler + scaler and continues).
         max_wall_clock_seconds: Optional hard timeout. If the training process hasn't exited on its
@@ -300,7 +302,13 @@ def launch_training(
     from tcip_mcp.pipelines.schemas import normalize_train_config
     config = normalize_train_config(config)
 
+    from tcip_mcp.experiments import experiments_dir
     from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.project_paths import resolve_output_path
+
+    # Training artifacts (weights, tensorboard, metrics) live with the project the run belongs
+    # to, same as its experiment record; only an absolute output_dir points anywhere else.
+    output_dir = str(resolve_output_path(output_dir) if output_dir else experiments_dir())
 
     data_cfg = config.get("data", {})
 
@@ -312,7 +320,6 @@ def launch_training(
     # trainer write exactly where the web metrics stream reads (``<base>/<run_id>/``), and gives
     # the subprocess a single directory to write into and the cancel sentinel to live in.
     run.output_dir = str(Path(output_dir) / run.run_id)
-    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
 
     # Auto-create experiment if not already tracked. Experiments are immutable:
     # reusing an id that already has a run would interleave metrics histories and
@@ -344,6 +351,9 @@ def launch_training(
     # because this file is written before config["experiment_id"] is guaranteed resolved in the
     # fresh-id-relaunch branch.
     from tcip_mcp.utils.atomic_io import atomic_write_json
+    # Created only after the experiment resolution above: under the default base this is the
+    # experiment record's own dir, and pre-creating it reads as an existing experiment there.
+    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     launch_config_path = Path(run.output_dir) / "launch_config.json"
     atomic_write_json(launch_config_path, config)
 
@@ -650,14 +660,15 @@ class _AccessTrackingConfig(dict):
 
 def hpo_root(output_dir: str = "") -> Path:
     """Where HPO sweeps live: ``output_dir`` when the caller named one, else ``.tcip/hpo``
-    under the platform state root.
+    under the platform state root. A relative ``output_dir`` resolves against the project
+    root, never the server process's cwd.
 
     The one resolver for that decision. Anything that has to find a sweep on disk (the
     Tuning routes included) calls this rather than rebuilding the same default.
     """
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.project_paths import project_root, resolve_output_path
 
-    return Path(output_dir) if output_dir else project_root() / ".tcip" / "hpo"
+    return resolve_output_path(output_dir) if output_dir else project_root() / ".tcip" / "hpo"
 
 
 def sweep_dir(study_name: str, output_dir: str = "") -> Path:
