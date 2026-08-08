@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Circle, Line, Rect, Text } from "react-konva";
 import Konva from "konva";
 
-import { api, IMAGE_MAX_WIDTH } from "@/api/client";
+import { api } from "@/api/client";
 import { classesApi, subjectColor, type AttributeDef } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
@@ -12,7 +12,12 @@ import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
-import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
+import {
+  compositeParams,
+  defaultBandSelection,
+  isPlainColourFrame,
+  type BandSelection,
+} from "@/lib/bandSelection";
 import {
   buildAnnotateShapes,
   computeViewport,
@@ -333,16 +338,22 @@ export function AnnotateTab() {
   const bandsInfo = useImageBands(imgPath);
   const [bandSelection, setBandSelection] = useState<BandSelection | null>(null);
   useEffect(() => {
-    if (bandsInfo && bandsInfo.band_count > 3) {
+    // An ordinary RGBA frame has four bands and no band choice to make: it displays as its own
+    // pixels, so no selection is seeded and the picker stays out of the way.
+    if (bandsInfo && bandsInfo.band_count > 3 && !isPlainColourFrame(bandsInfo)) {
       setBandSelection((prev) => prev ?? defaultBandSelection(bandsInfo.bands));
     } else {
       setBandSelection(null);
     }
   }, [bandsInfo]);
 
+  // Every request for this view (the canvas' own and the prefetcher's warm-up) carries one set
+  // of band params, so the two never warm and read different renders of the same image.
+  const composite = compositeParams(bandsInfo, bandSelection);
+
   // Image navigation (shared with TopBar + Review; honors the status filter).
   const nav = useImageNav();
-  usePrefetchAdjacentImages();
+  usePrefetchAdjacentImages(composite.bands, composite.stretch);
 
   // A box selection belongs to one image; leaving it drops the selection + any drag (and ends a
   // live freehand stream so it can't bleed vertices onto the next image).
@@ -1333,19 +1344,7 @@ export function AnnotateTab() {
     );
   }
 
-  const bandsParam =
-    bandsInfo && bandsInfo.band_count > 3 && bandSelection
-      ? `${bandSelection.r},${bandSelection.g},${bandSelection.b}`
-      : undefined;
-  const imageUrl = imgPath
-    ? api.images.url(
-        imgPath,
-        IMAGE_MAX_WIDTH,
-        undefined,
-        bandsParam,
-        bandsParam ? bandSelection?.stretch : undefined,
-      )
-    : null;
+  const imageUrl = imgPath ? api.images.url(imgPath, composite) : null;
 
   const renderLabels = annotateUi.visible;
   const hoveredIdx = annotateUi.hoveredPolygonIdx;
@@ -1365,6 +1364,7 @@ export function AnnotateTab() {
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
           imageUrl={imageUrl}
+          imagePath={imgPath}
           imgWidth={canvas.imgWidth}
           imgHeight={canvas.imgHeight}
           onStageRef={(st) => (stageRef.current = st)}
