@@ -45,25 +45,52 @@ function parseQuery(url: string): URLSearchParams {
 
 describe("images.url", () => {
   it("omits bands/stretch when not given, so a plain RGB request is unaffected", () => {
-    const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg", 4096));
+    const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg"));
     expect(params.get("path")).toBe("C:/data/images/2026-01-01/img1.jpg");
-    expect(params.get("max_width")).toBe("4096");
     expect(params.has("bands")).toBe(false);
     expect(params.has("stretch")).toBe(false);
   });
 
+  it("names no width, leaving the server's own display bound to apply", () => {
+    const params = parseQuery(api.images.url("C:/data/images/2026-01-01/img1.jpg"));
+    expect(params.has("max_width")).toBe(false);
+  });
+
   it("carries bands/stretch through to the query string when given", () => {
     const params = parseQuery(
-      api.images.url(
-        "C:/data/images/2026-01-01/img1.bandgroup",
-        4096,
-        undefined,
-        "Red,Green,Blue",
-        "minmax",
-      ),
+      api.images.url("C:/data/images/2026-01-01/img1.bandgroup", {
+        bands: "Red,Green,Blue",
+        stretch: "minmax",
+      }),
     );
     expect(params.get("bands")).toBe("Red,Green,Blue");
     expect(params.get("stretch")).toBe("minmax");
+  });
+});
+
+describe("images.refusal", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reports the condition the server named on a refused image request", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        headers: new Headers({ "X-TCIP-Image-Error": "overviews_required" }),
+      } as unknown as Response),
+    );
+    expect(await api.images.refusal("/api/images?path=x")).toBe("overviews_required");
+  });
+
+  it("reports nothing for a request that was served", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, status: 200, headers: new Headers() } as Response),
+    );
+    expect(await api.images.refusal("/api/images?path=x")).toBeNull();
   });
 });
 
