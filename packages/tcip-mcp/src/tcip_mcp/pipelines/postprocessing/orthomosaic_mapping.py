@@ -1,25 +1,22 @@
-"""Georeferencing and windowed pixel access for a whole-mosaic GeoTIFF.
+"""Georeferencing for a whole-mosaic GeoTIFF.
 
 A drone orthomosaic covers many plants in one raster (unlike every other image loader in this
 package, which assumes one file per plant), so mapping a detection to a real-world plant needs
-two things neither of which exist elsewhere in the codebase: reading the GeoTIFF's own
-georeferencing tags to turn a pixel location into a real-world coordinate, and reading a pixel
-window from a file too large to decode in one call.
+something no other module here does: reading the GeoTIFF's own georeferencing tags to turn a pixel
+location into a real-world coordinate.
 
-:class:`OrthomosaicGeoreference` resolves the pixel <-> real-world mapping; :class:`OrthomosaicWindowReader`
-serves cheap, repeated windowed reads of the pixel data itself. Both read the raster's own tags
-rather than assuming a CRS or zone: a rotated/sheared raster, or one whose CRS this module can't
-determine, is refused rather than silently mis-georeferenced (see :class:`RotatedRasterError` /
-:class:`GeoreferencingError`).
+:class:`OrthomosaicGeoreference` resolves that pixel <-> real-world mapping, reading the raster's
+own tags rather than assuming a CRS or zone: a rotated/sheared raster, or one whose CRS this module
+can't determine, is refused rather than silently mis-georeferenced (see
+:class:`RotatedRasterError` / :class:`GeoreferencingError`). Reading the pixels themselves is
+``pipelines.raster_source``'s job (:class:`~tcip_mcp.pipelines.raster_source.StripTiffSource` for a
+raster too large to decode whole).
 """
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-
-import numpy as np
 
 # GeoTIFF tag IDs this module reads (see the GeoTIFF spec; tifffile exposes each as a plain
 # TiffTag keyed by these codes, no prior art for any of them elsewhere in this codebase).
@@ -47,14 +44,6 @@ class GeoreferencingError(ValueError):
     """A GeoTIFF is missing (or carries an unusable form of) a tag this module needs to resolve
     a pixel's real-world coordinate: pixel scale, tiepoint, a geokey directory, or a projected
     CRS identified by that directory."""
-
-
-class UnsupportedRasterLayout(ValueError):
-    """A GeoTIFF's on-disk pixel layout isn't one :class:`OrthomosaicWindowReader` decodes: an
-    internally tiled raster, planar (band-separate) samples, or a multi-page file whose first
-    page isn't the whole raster (e.g. a channel-last raster stored one row-block per page). It
-    only reads the strip-based, contiguous-sample, single-page layout the mosaic this module
-    was built for actually uses."""
 
 
 @dataclass
@@ -214,148 +203,6 @@ class OrthomosaicGeoreference:
         native_x, native_y = self.pixel_to_native(pixel_x, pixel_y)
         lon, lat = self._to_wgs84.transform(native_x, native_y)
         return lat, lon
-
-
-class OrthomosaicWindowReader:
-    """Opens a whole-mosaic GeoTIFF once and serves cheap, repeated pixel-window reads.
-
-    Decodes only the strips a requested window actually overlaps, never the whole file, so one
-    instance composes with a tiling loop that requests many windows across the raster instead of
-    reopening/reparsing the file per tile. Use as a context manager or call :meth:`close`
-    explicitly; the underlying file handle stays open for the reader's lifetime.
-
-    Only a strip-based raster with contiguous (chunky) samples is supported, the layout the
-    orthomosaic this module was built for actually uses; an internally tiled TIFF or one with
-    planar (band-separate) samples raises :class:`UnsupportedRasterLayout`. The first page must
-    also be the whole raster: its shape is cross-checked against the file's series shape
-    (``image_utils._tiff_series_shape``, the raster's true shape), because a channel-last TIFF
-    stored one row-block per page makes ``pages[0]`` report a single row-block's shape, and
-    building from that would silently serve windows sliced from the wrong geometry. Decoding also
-    depends on this environment having a working codec for the file's compression: LZW and JPEG
-    need the optional ``imagecodecs`` package, which is not part of this environment.
-
-    A real orthomosaic's strips run the raster's full width at a small ``rowsperstrip``, so a
-    tiling loop that scans left to right across one row-band before advancing (``tile_positions``'
-    own order) requests the *same* strips again for every tile in that band. Decoded strips are
-    cached (an LRU keyed by strip index) so a strip already decoded to serve one window is sliced
-    from memory for the next, rather than re-read from disk and re-decoded; the cache is capped
-    well below the file's full strip count so it never approaches holding the whole raster, sized
-    generously for one row-band's worth of strips rather than tuned to this file's own strip
-    count. A caller whose access pattern isn't row-major still gets correct results, just fewer
-    cache hits.
-    """
-
-    def __init__(self, path: str | Path, *, strip_cache_capacity: int = 64):
-        import tifffile
-
-        from tcip_mcp.pipelines.image_utils import _tiff_series_shape
-
-        self._path = Path(path)
-        self._tif = tifffile.TiffFile(str(self._path))
-        page = self._tif.pages[0]
-        if page.is_tiled:
-            self._tif.close()
-            raise UnsupportedRasterLayout(
-                f"{self._path}: internally tiled TIFF; this reader only decodes strip-based rasters."
-            )
-        if page.planarconfig != 1:
-            self._tif.close()
-            raise UnsupportedRasterLayout(
-                f"{self._path}: planar (band-separate) sample layout; this reader only decodes "
-                "contiguous (chunky) samples."
-            )
-        height = int(page.imagelength)
-        width = int(page.imagewidth)
-        num_channels = int(page.samplesperpixel)
-        series_shape = _tiff_series_shape(self._path)
-        if series_shape is None:
-            self._tif.close()
-            raise UnsupportedRasterLayout(
-                f"{self._path}: the file's series shape can't be read, so there is no way to "
-                "verify the first page spans the whole raster."
-            )
-        normalized = series_shape + (1,) if len(series_shape) == 2 else series_shape
-        if normalized != (height, width, num_channels):
-            self._tif.close()
-            raise UnsupportedRasterLayout(
-                f"{self._path}: first page's shape {(height, width, num_channels)} (H, W, C) "
-                f"disagrees with the raster's series shape {series_shape}: a multi-page layout "
-                "(e.g. a channel-last raster stored one row-block per page) whose pages this "
-                "reader's single-page strip decoding would misinterpret."
-            )
-        self._page = page
-        self.height = height
-        self.width = width
-        self.num_channels = num_channels
-        self.dtype = page.dtype
-        self._rows_per_strip = int(page.rowsperstrip)
-        self._strip_cache: OrderedDict[int, np.ndarray] = OrderedDict()
-        self._strip_cache_capacity = strip_cache_capacity
-        self.strip_decode_count = 0  # cache misses actually decoded from disk; a caching test's probe
-
-    def close(self) -> None:
-        self._strip_cache.clear()
-        self._tif.close()
-
-    def __enter__(self) -> "OrthomosaicWindowReader":
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        self.close()
-
-    def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
-        """Decode and return the ``[y1-y0, x1-x0, num_channels]`` pixel window ``[y0:y1, x0:x1]``.
-
-        Raises ``ValueError`` for an empty or out-of-bounds window; a caller that wants a padded
-        edge tile clips the request to the raster's bounds first and pads the result separately
-        (mirrors ``image_utils.crop_pad_tile``, which this reader doesn't duplicate).
-        """
-        if not (0 <= y0 < y1 <= self.height) or not (0 <= x0 < x1 <= self.width):
-            raise ValueError(
-                f"window [{y0}:{y1}, {x0}:{x1}] is out of bounds for a "
-                f"{self.height}x{self.width} raster"
-            )
-        rps = self._rows_per_strip
-        strip0 = y0 // rps
-        strip1 = (y1 - 1) // rps
-        if strip0 == strip1:
-            block = self._decode_strip(strip0)
-            row_offset = strip0 * rps
-            # A copy, not a view: `block` is a cached, reused strip array, and a caller mutating
-            # its returned window must not corrupt what a later window reads back.
-            return np.array(block[y0 - row_offset : y1 - row_offset, x0:x1])
-        # A real orthomosaic's strips run the raster's full width, so slice each strip down to
-        # the requested x-range before concatenating: concatenating full-width strips just to
-        # discard everything outside x0:x1 copies orders of magnitude more data than the window
-        # itself needs. `np.concatenate` always allocates a new array, so this is a copy on its
-        # own, same as the single-strip branch's explicit one.
-        pieces = []
-        for strip_index in range(strip0, strip1 + 1):
-            strip = self._decode_strip(strip_index)
-            row_offset = strip_index * rps
-            row_lo = max(y0, row_offset) - row_offset
-            row_hi = min(y1, row_offset + strip.shape[0]) - row_offset
-            pieces.append(strip[row_lo:row_hi, x0:x1])
-        return np.concatenate(pieces, axis=0)
-
-    def _decode_strip(self, strip_index: int) -> np.ndarray:
-        """Return strip ``strip_index``'s decoded pixel rows, from the LRU cache if a previous
-        window already decoded it, decoding from disk only on a genuine miss.
-        """
-        cached = self._strip_cache.get(strip_index)
-        if cached is not None:
-            self._strip_cache.move_to_end(strip_index)
-            return cached
-        fh = self._page.parent.filehandle
-        fh.seek(self._page.dataoffsets[strip_index])
-        data = fh.read(self._page.databytecounts[strip_index])
-        segment, _position, _shape = self._page.decode(data, strip_index)
-        decoded = segment[0]
-        self._strip_cache[strip_index] = decoded
-        if len(self._strip_cache) > self._strip_cache_capacity:
-            self._strip_cache.popitem(last=False)
-        self.strip_decode_count += 1
-        return decoded
 
 
 # ── Per-detection plant assignment ──────────────────────────────────────
