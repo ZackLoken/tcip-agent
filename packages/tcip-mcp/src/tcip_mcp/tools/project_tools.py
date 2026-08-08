@@ -297,7 +297,9 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
 
     Args:
         project_path: Root directory of the project.
-        output_path: Destination path for the ZIP file. Defaults to ``<project_name>.tcip.zip``.
+        output_path: Destination path for the ZIP file. Defaults to ``<project_name>.tcip.zip``
+            beside the project in the workspace; a relative path resolves against the project
+            root, never the server process's cwd.
         include_models: Whether to include model checkpoints (can be large).
     """
     root = Path(project_path)
@@ -306,6 +308,10 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
 
     if not output_path:
         output_path = str(root.parent / f"{root.name}.tcip.zip")
+    else:
+        from tcip_mcp.project_paths import resolve_output_path
+
+        output_path = str(resolve_output_path(output_path))
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
