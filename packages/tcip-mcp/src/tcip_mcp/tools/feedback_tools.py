@@ -48,7 +48,8 @@ def materialize_review_dataset(
         review_state_dir: Directory holding the review state (``review/`` shards, or a
             ``review/`` shards).
         source_images_dir: Directory of the reviewed source images.
-        output_dir: Destination for the curated dataset (distinct from the source).
+        output_dir: Destination for the curated dataset (distinct from the source). A relative
+            path resolves against the project root, never the server process's cwd.
         experiment_id: Optional experiment to record the review-session lineage on.
         include_hard_negatives: Emit rejected-only images as empty-label backgrounds.
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
@@ -59,6 +60,9 @@ def materialize_review_dataset(
             ``subject`` can't attribute its negatives, and they are silently dropped rather than
             carried into the curated set.
     """
+    from tcip_mcp.project_paths import resolve_output_path
+
+    output_dir = str(resolve_output_path(output_dir))
     if not _review_state_exists(review_state_dir):
         return {"error": f"no review state (review/ shards) in {review_state_dir}"}
     if not Path(source_images_dir).is_dir():
