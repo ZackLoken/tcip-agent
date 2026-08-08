@@ -36,8 +36,8 @@ class WindowedRasterReader(Protocol):
     """The read surface a huge-raster tile source must expose for :meth:`GenericPredictor.
     predict_tiled_from_reader`: full-raster pixel dimensions, band count, and a windowed decode.
     Duck-typed rather than importing a concrete reader here, so this stays usable for any raster
-    too large to load whole, not just :class:`OrthomosaicWindowReader`
-    (``pipelines/postprocessing/orthomosaic_mapping.py``, its one implementation today).
+    too large to load whole, not just :class:`~tcip_mcp.pipelines.raster_source.StripTiffSource`
+    (``pipelines/raster_source.py``, its one implementation today).
     """
 
     height: int
@@ -367,10 +367,9 @@ class GenericPredictor:
 
         ``reader`` is duck-typed (see :class:`WindowedRasterReader`): anything exposing ``.height``,
         ``.width``, ``.num_channels``, and ``.read_window(y0, y1, x0, x1) -> ndarray[H, W, C]``
-        works, most directly ``OrthomosaicWindowReader``
-        (``pipelines/postprocessing/orthomosaic_mapping.py``), but this method itself has no
-        georeferencing concern and no import of that module: any huge non-georeferenced raster hits
-        the same memory problem and can reuse this.
+        works, most directly ``StripTiffSource`` (``pipelines/raster_source.py``), but this method
+        itself has no georeferencing concern and no import of that module: any huge
+        non-georeferenced raster hits the same memory problem and can reuse this.
 
         ``reader.num_channels`` must equal this model's ``in_chans``; a mismatch raises ``ValueError``
         rather than silently truncating or zero-padding the band count the model was trained on.
