@@ -13,13 +13,20 @@ const FOUR_BANDS = [
   { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
 ];
 
-function renderPicker(bandCount: number, selection: BandSelection, onChange = vi.fn()) {
+function renderPicker(
+  bandCount: number,
+  selection: BandSelection,
+  onChange = vi.fn(),
+  sampling: { sampled?: boolean; pixelFraction?: number } = {},
+) {
   render(
     <BandPicker
       bandCount={bandCount}
       bands={bandCount === 1 ? [FOUR_BANDS[0]] : FOUR_BANDS}
       selection={selection}
       onChange={onChange}
+      sampled={sampling.sampled}
+      pixelFraction={sampling.pixelFraction}
     />,
   );
   return onChange;
@@ -69,5 +76,48 @@ describe("BandPicker", () => {
       (o) => o.textContent,
     );
     expect(options).toEqual(["Min-Max", "Percent Clip"]);
+  });
+
+  it("says the band ranges came from a sample, and from how much of the raster", () => {
+    renderPicker(4, defaultBandSelection(FOUR_BANDS), vi.fn(), {
+      sampled: true,
+      pixelFraction: 0.1234,
+    });
+    expect(screen.getByText("stats from a 12% pixel sample")).toBeInTheDocument();
+  });
+
+  it("keeps a sliver of a sample readable rather than rounding it to zero", () => {
+    renderPicker(4, defaultBandSelection(FOUR_BANDS), vi.fn(), {
+      sampled: true,
+      pixelFraction: 0.0001,
+    });
+    expect(screen.getByText("stats from a 0.01% pixel sample")).toBeInTheDocument();
+  });
+
+  it("names a transparency band as one, so it is not offered as a colour to look at", () => {
+    const bands = [
+      ...FOUR_BANDS.slice(0, 3),
+      { name: "3", wavelength_nm: null, dtype: "uint8", min: 0, max: 255, interpretation: "alpha" },
+    ];
+    render(
+      <BandPicker
+        bandCount={4}
+        bands={bands}
+        selection={defaultBandSelection(bands)}
+        onChange={vi.fn()}
+      />,
+    );
+    const options = Array.from(screen.getByLabelText("R band").querySelectorAll("option")).map(
+      (o) => o.textContent,
+    );
+    expect(options[3]).toBe("3 (alpha)");
+  });
+
+  it("says nothing when the reported ranges are the raster's own exact bounds", () => {
+    renderPicker(4, defaultBandSelection(FOUR_BANDS), vi.fn(), {
+      sampled: false,
+      pixelFraction: 1,
+    });
+    expect(screen.queryByText(/pixel sample/)).not.toBeInTheDocument();
   });
 });
