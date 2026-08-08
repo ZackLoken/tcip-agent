@@ -1074,3 +1074,20 @@ describe("ReviewTab band picker (progressive disclosure)", () => {
     });
   });
 });
+
+describe("ReviewTab zoom-to-detection clamping", () => {
+  it("clamps the zoomed view so no gap opens between the image edge and the canvas", async () => {
+    // A detection near the image corner: centering it unclamped would push the image's edge
+    // away from the canvas edge and open a gap on both axes.
+    matchesSpy.mockResolvedValue(matchesRes([det()])); // bbox [10,10,50,50] in a 1000x800 image
+    render(<ReviewTab />);
+    await waitFor(() => expect(useStore.getState().review.matches).not.toBeNull());
+    await waitFor(() => expect(useStore.getState().gui.view.scale).toBeGreaterThan(1));
+
+    const v = useStore.getState().gui.view;
+    // At this scale the image exceeds the canvas on both axes, so offsets stay at or
+    // below zero (image edge pinned to the canvas edge, no gap).
+    expect(v.offset_x).toBeLessThanOrEqual(0);
+    expect(v.offset_y).toBeLessThanOrEqual(0);
+  });
+});
