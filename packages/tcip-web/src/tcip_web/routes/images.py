@@ -35,13 +35,31 @@ from tcip_web.paths import assert_path_allowed
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
-_CACHE_MAX_FILES = 500
-"""Rendered variants the disk cache holds before evicting the least recently used.
+_CACHE_BUDGET_DIVISOR = 20
+"""The rendered-variant cache's byte budget is the cache volume's free space divided by this.
 
 The decode, orient, resize and encode pipeline costs seconds of CPU per large frame and the
 browser cache only covers one session, so a cold request (fresh session, refresh, prefetch) is a
-sendfile instead of a re-render. About 500 files at a few MB each.
+sendfile instead of a re-render. Cell-aligned region serving stores one entry per cell view
+rather than a handful per raster, so a fixed file count no longer tracks what the cache costs;
+bytes do. A twentieth of free space keeps the cache an order of magnitude away from ever filling
+the volume while still holding thousands of cell-sized JPEGs on any workstation disk; the
+divisor is that headroom rationale, not a measured optimum.
 """
+
+_cache_budget_bytes: "int | None" = None
+
+
+def _cache_byte_budget(cache_dir: Path) -> int:
+    """The cache's byte budget: free space on the cache volume over
+    :data:`_CACHE_BUDGET_DIVISOR`, read once per process so eviction pressure cannot
+    ratchet the budget down as the cache itself consumes space."""
+    global _cache_budget_bytes
+    if _cache_budget_bytes is None:
+        import shutil
+
+        _cache_budget_bytes = shutil.disk_usage(cache_dir).free // _CACHE_BUDGET_DIVISOR
+    return _cache_budget_bytes
 
 _STATS_SEED = 0
 """The seed every sampled read of a raster's display bounds uses.
@@ -143,16 +161,49 @@ def _render_cache_dir() -> Path:
     return base
 
 
+# Per-directory (known total at last walk, bytes written since), so a miss burst on a
+# large cache pays a per-file directory walk only when the budget could have been crossed.
+_cache_accounting: dict[str, tuple[int, int]] = {}
+
+
+def _note_cache_write(cache_dir: Path, nbytes: int) -> None:
+    key = str(cache_dir)
+    known, unaccounted = _cache_accounting.get(key, (0, 0))
+    _cache_accounting[key] = (known, unaccounted + nbytes)
+
+
 def _evict_lru(cache_dir: Path) -> None:
-    """Drop the least recently used rendered variants, each with the headers stored beside it."""
+    """Drop least recently used rendered variants until the cache fits its byte budget,
+    each with the headers stored beside it. Walks the directory only when writes since
+    the last accounting could have crossed the budget."""
     try:
-        files = [p for p in cache_dir.iterdir() if p.is_file() and p.suffix == ".jpg"]
-        if len(files) <= _CACHE_MAX_FILES:
+        budget = _cache_byte_budget(cache_dir)
+        key = str(cache_dir)
+        accounted = _cache_accounting.get(key)
+        if accounted is not None and sum(accounted) <= budget:
             return
-        files.sort(key=lambda p: p.stat().st_mtime)
-        for p in files[: len(files) - _CACHE_MAX_FILES]:
-            p.unlink()
-            p.with_suffix(".json").unlink(missing_ok=True)
+        entries: list[tuple[float, Path, int]] = []
+        total = 0
+        for p in cache_dir.iterdir():
+            if not (p.is_file() and p.suffix == ".jpg"):
+                continue
+            st = p.stat()
+            size = st.st_size
+            try:
+                size += p.with_suffix(".json").stat().st_size
+            except OSError:
+                pass
+            entries.append((st.st_mtime, p, size))
+            total += size
+        if total > budget:
+            entries.sort(key=lambda e: e[0])
+            for _mtime, p, size in entries:
+                p.unlink()
+                p.with_suffix(".json").unlink(missing_ok=True)
+                total -= size
+                if total <= budget:
+                    break
+        _cache_accounting[key] = (total, 0)
     except OSError:
         pass
 
@@ -601,6 +652,7 @@ def serve_image(
         tmp.write_bytes(data)
         tmp.replace(cached)
         cached_headers.write_text(json.dumps(extra), encoding="utf-8")
+        _note_cache_write(cache_dir, len(data) + cached_headers.stat().st_size)
         _evict_lru(cache_dir)
     except OSError:
         pass  # cache is best-effort; the response below is already rendered
