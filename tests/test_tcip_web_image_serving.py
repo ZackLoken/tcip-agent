@@ -617,3 +617,57 @@ def test_a_deep_zoom_region_within_the_cap_is_served_without_overviews(
     served = _served(client.get("/api/images", params={
         "path": str(path), "x0": 0, "y0": 0, "x1": 256, "y1": 64}))
     assert served.shape == (64, 256, 3)
+
+
+# ── Rendered-variant cache: byte-budget LRU ──────────────────────────────────────────────
+
+
+def _cache_entry(cache_dir: Path, name: str, size: int, mtime: float) -> Path:
+    """One rendered variant on disk: the JPEG plus its header sidecar, backdated."""
+    jpg = cache_dir / f"{name}.jpg"
+    jpg.write_bytes(b"\xff" * size)
+    (cache_dir / f"{name}.json").write_text("{}", encoding="utf-8")
+    import os
+
+    os.utime(jpg, (mtime, mtime))
+    return jpg
+
+
+def test_eviction_respects_the_byte_budget_and_keeps_the_newest(tmp_path: Path, monkeypatch):
+    """Least recently used entries go first, each with its sidecar, until the cache's
+    total bytes fit the budget."""
+    sidecar = len("{}")
+    monkeypatch.setattr(images_route, "_cache_budget_bytes", 2 * (1000 + sidecar))
+    for i, mtime in enumerate([100.0, 200.0, 300.0, 400.0]):
+        _cache_entry(tmp_path, f"entry{i}", 1000, mtime)
+
+    images_route._evict_lru(tmp_path)
+
+    kept = sorted(p.name for p in tmp_path.glob("*.jpg"))
+    assert kept == ["entry2.jpg", "entry3.jpg"]
+    assert sorted(p.stem for p in tmp_path.glob("*.json")) == ["entry2", "entry3"]
+
+
+def test_a_cache_within_budget_is_left_alone(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(images_route, "_cache_budget_bytes", 10_000)
+    for i in range(3):
+        _cache_entry(tmp_path, f"entry{i}", 1000, 100.0 + i)
+    images_route._evict_lru(tmp_path)
+    assert len(list(tmp_path.glob("*.jpg"))) == 3
+
+
+def test_the_budget_derives_once_per_process_from_free_space(tmp_path: Path, monkeypatch):
+    import collections
+    import shutil
+
+    usage = collections.namedtuple("usage", "total used free")
+    monkeypatch.setattr(images_route, "_cache_budget_bytes", None)
+    monkeypatch.setattr(shutil, "disk_usage", lambda _p: usage(100, 20, 80_000))
+    first = images_route._cache_byte_budget(tmp_path)
+    assert first == 80_000 // images_route._CACHE_BUDGET_DIVISOR
+
+    def _no_more_reads(_path):
+        raise AssertionError("the budget must not be re-derived after the first read")
+
+    monkeypatch.setattr(shutil, "disk_usage", _no_more_reads)
+    assert images_route._cache_byte_budget(tmp_path) == first
