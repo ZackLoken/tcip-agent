@@ -470,68 +470,131 @@ class TestRenderCandidates:
         assert Path(out).is_file()
 
 
+def _uniform_cells(width: int, height: int, tile: int) -> list:
+    """The clamped reference cells for a frame, the list every cells-in consumer takes."""
+    from tcip_mcp.pipelines.reference_grid import reference_cells
+
+    return reference_cells(width, height, tile, clamp=True)
+
+
 class TestRenderGridOverlay:
     def test_basic(self, viz_dataset: Path):
         from tcip_annotation.viz import render_grid_overlay
 
-        pixels, _native = _display(str(viz_dataset / "images" / "img_001.jpg"))
-        out = render_grid_overlay(pixels)
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
+        out = render_grid_overlay(pixels, _uniform_cells(*native, 80), native_size=native)
         assert Path(out).is_file()
 
-    def test_custom_grid(self, viz_dataset: Path):
+    def test_cell_dicts_accepted(self, viz_dataset: Path):
+        """The renderer takes the same plain dicts the coverage route serves."""
         from tcip_annotation.viz import render_grid_overlay
 
-        pixels, _native = _display(str(viz_dataset / "images" / "img_001.jpg"))
-        out = render_grid_overlay(pixels, cols=4, rows=3)
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
+        cells = [{"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
+                 for c in _uniform_cells(*native, 160)]
+        out = render_grid_overlay(pixels, cells, native_size=native)
         assert Path(out).is_file()
 
     def test_grid_wider_than_alphabet(self, viz_dataset: Path):
         from tcip_annotation.viz import render_grid_overlay
 
         pixels, _native = _display(str(viz_dataset / "images" / "img_001.jpg"))
-        out = render_grid_overlay(pixels, cols=33, rows=4)
+        out = render_grid_overlay(pixels, _uniform_cells(3300, 400, 100),
+                                  native_size=(3300, 400))
         assert Path(out).is_file()
+
+    def test_empty_cells_refused(self, viz_dataset: Path):
+        from tcip_annotation.viz import render_grid_overlay
+
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
+        with pytest.raises(ValueError, match="empty"):
+            render_grid_overlay(pixels, [], native_size=native)
+
+    def test_lines_land_on_supplied_cell_boundaries(self, tmp_path: Path):
+        """The renderer draws the caller's own cell rects: on a clamped 100x80 grid at
+        tile 64 the interior boundaries sit at 64, not at the uniform division (50/40) a
+        renderer that split the frame evenly by cell count would draw."""
+        from tcip_annotation.viz import render_grid_overlay
+
+        pixels = np.zeros((80, 100, 3), dtype=np.uint8)
+        out = render_grid_overlay(pixels, _uniform_cells(100, 80, 64),
+                                  native_size=(100, 80),
+                                  output_path=str(tmp_path / "grid.png"))
+        arr = np.asarray(Image.open(out))
+        yellow = (arr[:, :, 0] > 200) & (arr[:, :, 1] > 200) & (arr[:, :, 2] < 80)
+        assert yellow[:, 64].sum() >= 60, "no vertical line on the supplied boundary x=64"
+        assert yellow[64, :].sum() >= 75, "no horizontal line on the supplied boundary y=64"
+        # Away from the true boundaries and the A1 label, the uniform-division positions
+        # (x=50, y=40) hold no line.
+        assert yellow[25:60, 50].sum() == 0, "a line at x=50 is the uniform division"
+        assert yellow[40, 25:60].sum() == 0, "a line at y=40 is the uniform division"
+        # The outer boundaries render inside the frame: a far edge scaling to the frame
+        # size must pin to the last pixel row/column, not clip away.
+        assert yellow[:, 0].sum() >= 60, "no left outer boundary at x=0"
+        assert yellow[0, :].sum() >= 75, "no top outer boundary at y=0"
+        assert yellow[:, 99].sum() >= 60, "no right outer boundary at x=99"
+        assert yellow[79, :].sum() >= 75, "no bottom outer boundary at y=79"
 
 
 class TestGridToPixel:
     def test_basic_conversion(self):
         from tcip_annotation.sam_wrapper import grid_to_pixel
 
-        # A1 should be top-left cell center
-        x, y = grid_to_pixel("A1", 640, 480, cols=8, rows=6)
-        assert x == pytest.approx(640 / 8 / 2)  # center of first col
-        assert y == pytest.approx(480 / 6 / 2)  # center of first row
+        # A1 is the top-left cell's center
+        x, y = grid_to_pixel("A1", _uniform_cells(640, 480, 80))
+        assert x == pytest.approx(40)
+        assert y == pytest.approx(40)
 
     def test_bottom_right(self):
         from tcip_annotation.sam_wrapper import grid_to_pixel
 
-        x, y = grid_to_pixel("H6", 640, 480, cols=8, rows=6)
-        assert x == pytest.approx(640 - 640 / 8 / 2)
-        assert y == pytest.approx(480 - 480 / 6 / 2)
+        x, y = grid_to_pixel("H6", _uniform_cells(640, 480, 80))
+        assert x == pytest.approx(600)
+        assert y == pytest.approx(440)
 
     def test_case_insensitive(self):
         from tcip_annotation.sam_wrapper import grid_to_pixel
 
-        x1, y1 = grid_to_pixel("b3", 640, 480)
-        x2, y2 = grid_to_pixel("B3", 640, 480)
-        assert x1 == x2
-        assert y1 == y2
+        cells = _uniform_cells(640, 480, 80)
+        assert grid_to_pixel(" b3 ", cells) == grid_to_pixel("B3", cells)
 
-    def test_invalid_column(self):
+    def test_clamped_edge_cell_center_is_its_own(self):
+        """A truncated edge cell's center is its clipped rect's, not a uniform cell's."""
         from tcip_annotation.sam_wrapper import grid_to_pixel
 
-        with pytest.raises(ValueError, match="Column"):
-            grid_to_pixel("Z1", 640, 480, cols=8, rows=6)
+        x, y = grid_to_pixel("B2", _uniform_cells(100, 80, 64))
+        assert x == pytest.approx((64 + 100) / 2)
+        assert y == pytest.approx((64 + 80) / 2)
 
-    def test_invalid_row(self):
+    def test_cell_dicts_accepted(self):
+        """The lookup takes the same plain dicts the coverage route serves."""
         from tcip_annotation.sam_wrapper import grid_to_pixel
 
-        with pytest.raises(ValueError, match="Row"):
-            grid_to_pixel("A9", 640, 480, cols=8, rows=6)
+        cells = [{"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
+                 for c in _uniform_cells(640, 480, 80)]
+        assert grid_to_pixel("C2", cells) == (200.0, 120.0)
+
+    def test_unknown_column_names_the_valid_range(self):
+        from tcip_annotation.sam_wrapper import grid_to_pixel
+
+        with pytest.raises(ValueError, match="Use A1 through H6"):
+            grid_to_pixel("Z1", _uniform_cells(640, 480, 80))
+
+    def test_unknown_row_names_the_valid_range(self):
+        from tcip_annotation.sam_wrapper import grid_to_pixel
+
+        with pytest.raises(ValueError, match="Use A1 through H6"):
+            grid_to_pixel("A9", _uniform_cells(640, 480, 80))
+
+    def test_malformed_reference_is_invalid(self):
+        from tcip_annotation.sam_wrapper import grid_to_pixel
+
+        with pytest.raises(ValueError, match="Invalid cell reference"):
+            grid_to_pixel("3B", _uniform_cells(640, 480, 80))
 
 
 class TestColumnLabels:
-    """Spreadsheet-style column labels shared by the grid renderer and cell parser."""
+    """Spreadsheet-style column labels shared by the grid geometry and cell lookup."""
 
     def test_round_trip_boundaries(self):
         from tcip_annotation.sam_wrapper import column_index, column_label
@@ -544,9 +607,9 @@ class TestColumnLabels:
     def test_multi_letter_cell_parses(self):
         from tcip_annotation.sam_wrapper import grid_to_pixel
 
-        x, y = grid_to_pixel("AA1", 2700, 480, cols=27, rows=6)
+        x, y = grid_to_pixel("AA1", _uniform_cells(2700, 480, 100))
         assert x == pytest.approx(26.5 * 100)
-        assert y == pytest.approx(40)
+        assert y == pytest.approx(50)
 
     def test_high_columns_do_not_alias(self):
         # chr() past 'Z' labeled column 32 'a', which case folding silently parsed as column 0
@@ -555,15 +618,16 @@ class TestColumnLabels:
         cols = 40
         labels = [column_label(c) for c in range(cols)]
         assert len(set(labels)) == cols
+        cells = _uniform_cells(cols * 100, 480, 100)
         for c, label in enumerate(labels):
-            x, _ = grid_to_pixel(f"{label}1", cols * 100, 480, cols=cols, rows=6)
+            x, _ = grid_to_pixel(f"{label}1", cells)
             assert x == pytest.approx((c + 0.5) * 100)
 
     def test_out_of_range_hint_uses_column_labels(self):
         from tcip_annotation.sam_wrapper import grid_to_pixel
 
-        with pytest.raises(ValueError, match="Use A-AD"):
-            grid_to_pixel("BA1", 640, 480, cols=30, rows=6)
+        with pytest.raises(ValueError, match="Use A1 through AD6"):
+            grid_to_pixel("BA1", _uniform_cells(3000, 600, 100))
 
 
 class TestSamPredictorCache:
@@ -632,7 +696,10 @@ class TestSamPredictorCache:
 
 
 class TestVisualizeGridOverlayTool:
-    def test_basic(self, viz_dataset: Path):
+    def test_derived_default_echoes_geometry(self, viz_dataset: Path):
+        """With no tile_size the tool derives the pointing grain and still echoes the full
+        geometry, so the caller can hand it straight to segment_prompt."""
+        from tcip_mcp.pipelines.reference_grid import derive_pointing_tile_size
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
@@ -640,6 +707,20 @@ class TestVisualizeGridOverlayTool:
         )
         assert "error" not in result
         assert Path(result["image_path"]).is_file()
+        assert result["width"] == 640
+        assert result["height"] == 480
+        assert result["tile_size"] == derive_pointing_tile_size(640, 480)
+        assert result["overlap"] == 0.0
+        assert result["cols"] >= 1 and result["rows"] >= 1
+
+    def test_explicit_tile_size_echoes_back(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import overlay_reference_grid
+
+        result = overlay_reference_grid(
+            image_path=str(viz_dataset / "images" / "img_001.jpg"), tile_size=80,
+        )
+        assert "error" not in result
+        assert result["tile_size"] == 80
         assert result["cols"] == 8
         assert result["rows"] == 6
 
@@ -649,14 +730,24 @@ class TestVisualizeGridOverlayTool:
         result = overlay_reference_grid(image_path="/nonexistent.jpg")
         assert "error" in result
 
+    def test_invalid_tile_size_is_an_error(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import overlay_reference_grid
+
+        result = overlay_reference_grid(
+            image_path=str(viz_dataset / "images" / "img_001.jpg"), tile_size=0,
+        )
+        assert "error" in result
+        assert "tile_size" in result["error"]
+
     def test_wide_grid_summary_labels(self, viz_dataset: Path):
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
-            image_path=str(viz_dataset / "images" / "img_001.jpg"), cols=33, rows=4,
+            image_path=str(viz_dataset / "images" / "img_001.jpg"), tile_size=20,
         )
         assert "error" not in result
-        assert "'AG4'" in result["summary"]
+        assert result["cols"] == 32
+        assert "'AF24'" in result["summary"]
 
 
 class TestProposeAnnotationsTool:
@@ -908,7 +999,7 @@ class TestSamPredictFromGrid:
         result = segment_prompt(
             image_path=img_path,
             grid_cells=["B2"],
-            cols=8, rows=6,
+            tile_size=80,
             engine_params={"model_type": SAM_TEST_MODEL},
         )
         assert "error" not in result
@@ -1188,7 +1279,8 @@ class TestFullPipelineIntegration:
         assert Path(candidate_render).is_file()
 
         # Step 2: Render grid overlay (for correction reference)
-        grid_render = render_grid_overlay(pixels)
+        grid_render = render_grid_overlay(pixels, _uniform_cells(*native, 80),
+                                          native_size=native)
         assert Path(grid_render).is_file()
 
         # Step 3: Cache candidates (simulating propose_annotations state save)
@@ -1230,7 +1322,7 @@ class TestGridCellToSamPrompt:
             result = segment_prompt(
                 image_path=img_path,
                 grid_cells=["A1", "D3"],
-                cols=8, rows=6,
+                tile_size=80,
             )
 
         # Should have called predict_from_points (2 points â†’ multi-point)
@@ -1261,17 +1353,17 @@ class TestGridCellToSamPrompt:
             segment_prompt(
                 image_path=img_path,
                 grid_cells=["C4"],
-                cols=8, rows=6,
+                tile_size=80,
             )
 
         assert mock_predict.called
-        # Verify the coordinates are reasonable for C4 on 640x480
+        # Verify the coordinates are reasonable for C4 on 640x480 at tile 80
         call_args = mock_predict.call_args
         x = call_args[0][1]  # positional: image_path, x, y
         y = call_args[0][2]
-        # C = column 2 (0-indexed), cell center x = (2+0.5)*640/8 = 200
+        # C = column 2 (0-indexed), cell center x = (2 + 0.5) * 80 = 200
         assert abs(x - 200.0) < 1.0
-        # 4 = row 3 (0-indexed), cell center y = (3+0.5)*480/6 = 280
+        # 4 = row 3 (0-indexed), cell center y = (3 + 0.5) * 80 = 280
         assert abs(y - 280.0) < 1.0
 
     def test_invalid_grid_cell_returns_error(self, viz_dataset: Path):
@@ -1279,24 +1371,24 @@ class TestGridCellToSamPrompt:
         from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
-        result = segment_prompt(image_path=img_path, grid_cells=["Z9"], cols=8, rows=6)
+        result = segment_prompt(image_path=img_path, grid_cells=["Z9"], tile_size=80)
         assert "error" in result
         assert "Invalid grid cell" in result["error"]
 
-    def test_grid_cells_without_cols_and_rows_is_refused(self, viz_dataset: Path):
-        """A cell name means nothing without its grid: resolving 'B3' against an assumed 8x6 when the
-        breeder rendered another grid picks the wrong pixel silently, so the call is refused."""
+    def test_grid_cells_without_tile_size_is_refused(self, viz_dataset: Path):
+        """A cell name means nothing without its grid: resolving 'B3' against an assumed
+        grid when the overlay rendered another picks the wrong pixel silently, so the
+        call is refused."""
         from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
-        for kwargs in ({}, {"cols": 10}, {"rows": 8}):
-            result = segment_prompt(image_path=img_path, grid_cells=["B3"], **kwargs)
-            assert "error" in result, kwargs
-            assert "cols and rows" in result["error"]
+        result = segment_prompt(image_path=img_path, grid_cells=["B3"])
+        assert "error" in result
+        assert "tile_size" in result["error"]
 
     def test_grid_cells_resolve_against_the_callers_own_grid(self, viz_dataset: Path):
-        """The cells are resolved with the caller's cols/rows, the grid overlay_reference_grid
-        actually rendered, not the wrapper's own 8x6 signature default."""
+        """The cells are resolved with the caller's tile_size, the grid
+        overlay_reference_grid actually rendered, never a derived default."""
         from tcip_mcp.tools.annotation_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
@@ -1304,13 +1396,35 @@ class TestGridCellToSamPrompt:
             mock_predict.return_value = [
                 [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)],
             ]
-            segment_prompt(image_path=img_path, grid_cells=["C4"], cols=10, rows=8)
+            segment_prompt(image_path=img_path, grid_cells=["C4"], tile_size=64)
 
         x, y = mock_predict.call_args[0][1], mock_predict.call_args[0][2]
-        # C4 on a 10x8 grid over 640x480: x = (2+0.5)*640/10 = 160, y = (3+0.5)*480/8 = 210;
-        # the 8x6 reading of the same cell would be (200, 280).
+        # C4 at tile 64 over 640x480: x = (2 + 0.5) * 64 = 160, y = (3 + 0.5) * 64 = 224;
+        # the derived-default grid's reading of the same cell lands elsewhere.
         assert abs(x - 160.0) < 1.0
-        assert abs(y - 210.0) < 1.0
+        assert abs(y - 224.0) < 1.0
+
+    def test_echoed_geometry_round_trips_from_the_overlay(self, viz_dataset: Path):
+        """A legitimate call with the overlay's own echoed geometry succeeds end to end,
+        and the resolved center is the rendered grid's own cell center."""
+        from tcip_mcp.tools.annotation_tools import segment_prompt
+        from tcip_mcp.tools.vision_tools import overlay_reference_grid
+
+        img_path = str(viz_dataset / "images" / "img_001.jpg")
+        overlay = overlay_reference_grid(image_path=img_path)
+        assert "error" not in overlay
+        with patch("tcip_annotation.sam_wrapper.predict_from_point") as mock_predict:
+            mock_predict.return_value = [
+                [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)],
+            ]
+            result = segment_prompt(
+                image_path=img_path, grid_cells=["B2"],
+                tile_size=overlay["tile_size"], overlap=overlay["overlap"],
+            )
+        assert "error" not in result
+        ts = overlay["tile_size"]
+        assert mock_predict.call_args[0][1] == pytest.approx(1.5 * ts)
+        assert mock_predict.call_args[0][2] == pytest.approx(1.5 * ts)
 
     def test_no_prompts_returns_error(self, viz_dataset: Path):
         """Calling with no prompts at all should error."""
