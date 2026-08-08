@@ -16,8 +16,9 @@ raster pass:
                                       gated by the same measurement-integrity door every other
                                       count delivery goes through
 
-See ``pipelines.postprocessing.orthomosaic_mapping``/``pipelines.inference.generic_predictor``
-for the primitives this composes; neither tool implements new CV capability, both wire
+See ``pipelines.postprocessing.orthomosaic_mapping`` (georeferencing), ``pipelines.raster_source``
+(windowed pixel reads) and ``pipelines.inference.generic_predictor`` (the tiled pass) for the
+primitives this composes; neither tool implements new CV capability, both wire
 already-built pieces together for an agent (or the breeder via the GUI) to actually invoke.
 """
 
@@ -54,8 +55,9 @@ def run_orthomosaic_inference(
 ) -> dict:
     """Tiled detection/instance_seg inference over a whole georeferenced orthomosaic.
 
-    Sources tiles from :class:`OrthomosaicWindowReader` (windowed, strip-cached reads) rather
-    than decoding the raster whole, so this reaches a raster too large to load into memory (a
+    Sources tiles from :class:`~tcip_mcp.pipelines.raster_source.StripTiffSource` (windowed,
+    strip-cached reads, its cache sized from this run's own tile geometry) rather than
+    decoding the raster whole, so this reaches a raster too large to load into memory (a
     real 90 GB, 141130x239921px, 4-band mosaic tiles in ~11.5 minutes). Always tiled: there is
     no untiled option, the whole point of this tool is a raster too large for one. Works for
     ``instance_seg`` the same as ``detection``: a checkpoint's masks thread through
@@ -120,9 +122,10 @@ def run_orthomosaic_inference(
         return {"error": f"raster_path not found: {raster_path}"}
 
     from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_writable_bucket
-    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.project_paths import resolve_output_path, resolve_state
 
-    out_path = Path(output_dir)
+    # A relative output_dir resolves against the project root, never the server process's cwd.
+    out_path = resolve_output_path(output_dir)
     parent, base_name = out_path.parent, out_path.name
     review_state_dir = resolve_state(Path(".tcip") / "state")
     try:
@@ -176,9 +179,13 @@ def run_orthomosaic_inference(
         return {"error": gate.reason, "tile_size_validated": tile_ref}
     tile_size_validated = gate.stamp.get("tile_size")
 
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicWindowReader
+    from tcip_mcp.pipelines.raster_source import StripTiffSource
 
-    with OrthomosaicWindowReader(raster_path) as reader:
+    # The tile geometry this pass will actually walk sizes the strip cache, so a row-major scan
+    # decodes each strip once instead of re-reading it for every tile in the band.
+    with StripTiffSource(
+        raster_path, tile_size=resolved_tile, overlap=resolved_overlap,
+    ) as reader:
         result = predictor.predict_tiled_from_reader(
             reader, tile_size=resolved_tile, overlap=resolved_overlap,
             tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
@@ -299,7 +306,8 @@ def deliver_orthomosaic_plant_counts(
             not a promise this tool re-trusts it against a different file on disk).
         plant_csv_paths: One or more plant-locations CSVs (columns ``plot_name``,
             ``accession_name``, ``WGS84_centroid_x/y``, …).
-        output_csv_path: Where to write the delivered per-plant CSV.
+        output_csv_path: Where to write the delivered per-plant CSV. A relative path resolves
+            against the project root, never the server process's cwd.
         trait_name: Name of the trait being measured (a CSV column value, not validated against
             the trait registry, count traits carry no physical unit to cross-check).
         crop: Crop species name.
@@ -314,6 +322,9 @@ def deliver_orthomosaic_plant_counts(
             is unvalidated, stamping the un-validated dimension ``false`` so the
             un-trustworthiness travels downstream.
     """
+    from tcip_mcp.project_paths import resolve_output_path
+
+    output_csv_path = str(resolve_output_path(output_csv_path))
     pred_dir = Path(predictions_dir)
     if not pred_dir.is_dir():
         return {"error": f"predictions_dir not found: {predictions_dir}"}
