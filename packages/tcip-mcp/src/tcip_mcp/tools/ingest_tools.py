@@ -2,7 +2,7 @@
 
 ``ingest_images`` is the missing structuring primitive. It copies (or moves) raw
 images into the canonical layout (``images/<YYYY-MM-DD>/<stem><ext>``) under a
-workspace project, bucketing by EXIF capture date. It does not annotate, split,
+workspace project, bucketing by the capture date each file states. It does not annotate, split,
 choose a task, or write ``classes.json``; those are later steps in the project-setup
 arc (see ``.github/skills/project-setup``). Keeping it thin is deliberate: one
 auditable primitive the agent composes, instead of improvising file ops per project.
@@ -28,36 +28,106 @@ UNDATED_BUCKET = "undated"
 _DT_ORIGINAL = 0x9003  # EXIF DateTimeOriginal tag id
 _EXIF_IFD = 0x8769  # Exif sub-IFD offset tag
 
+# The container families a capture date can be asked of, by extension: EXIF in a photographic file,
+# raster metadata in a GDAL-readable one. Every other ingestible extension is neither.
+_PHOTOGRAPHIC_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".heic"}
+_GDAL_EXTS = {".tif", ".tiff"}
 
-def _exif_iso_date(path: Path) -> str | None:
-    """EXIF ``DateTimeOriginal`` → ISO ``YYYY-MM-DD``, or ``None``.
+# The spellings a capture-date value arrives in: the colon form EXIF's DateTimeOriginal and TIFF's
+# DateTime tag are specified to use, and the ISO forms a stitching engine's own item is written in.
+_DATE_FORMATS = ("%Y:%m:%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
 
-    EXIF stores the colon-date ``YYYY:MM:DD HH:MM:SS`` form. Reads via the public
-    ``Image.getexif()`` + Exif sub-IFD so it works across formats (JPEG, TIFF, HEIC). PIL is
-    lazy-imported so tool startup stays fast; any read failure degrades to ``None`` (→ the
-    ``undated/`` bucket) rather than raising.
-    """
+# Default-domain raster metadata items observed to name a capture date, matched case-insensitively
+# in this order: a Sentera-stitched orthomosaic writes ``capture_date``.
+_GDAL_DATE_ITEMS = ("capture_date",)
+
+
+def _iso_date(raw: object) -> str | None:
+    """A capture-date value in any spelling this reads → ISO ``YYYY-MM-DD``; ``None`` if none fit."""
     from datetime import datetime
 
+    text = str(raw).strip()
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
+    """EXIF ``DateTimeOriginal`` from a photographic container, and why it could not be read.
+
+    Reads via the public ``Image.getexif()`` + Exif sub-IFD so it works across formats (JPEG, PNG,
+    HEIC). ``Image.open`` decodes the header only and never the pixels, so a file whose header and
+    EXIF block read is reported as stating a date or as stating none, whatever its pixel data later
+    turns out to be. PIL is lazy-imported so tool startup stays fast.
+    """
     from PIL import Image
 
-    raw = None
     try:
         with Image.open(path) as im:
             exif = im.getexif()
             try:
                 sub = exif.get_ifd(_EXIF_IFD)
-            except Exception:
-                sub = {}
-            raw = sub.get(_DT_ORIGINAL)
-    except Exception:
-        return None
+            except Exception as exc:
+                return None, f"EXIF block could not be read: {exc}"
+    except Exception as exc:
+        return None, f"image header could not be read: {exc}"
+    raw = sub.get(_DT_ORIGINAL)
     if raw is None:
-        return None
+        return None, None
+    iso = _iso_date(raw)
+    if iso is None:
+        return None, f"EXIF DateTimeOriginal {str(raw)!r} is not a date this reads"
+    return iso, None
+
+
+def _gdal_capture_date(path: Path) -> tuple[str | None, str | None]:
+    """The capture date a GDAL-readable raster's metadata states, and why it could not be read.
+
+    Asks the TIFF ``DateTime`` tag first, then an EXIF IFD if the container exposes one, then the
+    stitching-engine items of :data:`_GDAL_DATE_ITEMS` in the default metadata domain, which is
+    where an orthomosaic states the day it was flown. Metadata only: no pixels are read. GDAL is
+    lazy-imported so tool startup stays fast.
+    """
+    from osgeo import gdal
+
+    gdal.UseExceptions()
     try:
-        return datetime.strptime(str(raw), "%Y:%m:%d %H:%M:%S").strftime("%Y-%m-%d")
-    except (ValueError, TypeError):
-        return None
+        ds = gdal.OpenEx(str(path), gdal.OF_RASTER | gdal.OF_READONLY)
+        raw = ds.GetMetadataItem("TIFFTAG_DATETIME")
+        if not raw:
+            raw = ds.GetMetadata("EXIF").get("EXIF_DateTimeOriginal")
+        if not raw:
+            items = {k.lower(): v for k, v in ds.GetMetadata().items()}
+            raw = next((items[name] for name in _GDAL_DATE_ITEMS if items.get(name)), None)
+        ds = None  # GDAL closes the dataset when the last reference to it drops
+    except RuntimeError as exc:
+        return None, f"raster metadata could not be read: {exc}"
+    if not raw:
+        return None, None
+    iso = _iso_date(raw)
+    if iso is None:
+        return None, f"capture date {str(raw)!r} is not a date this reads"
+    return iso, None
+
+
+def _capture_iso_date(path: Path) -> tuple[str | None, str | None]:
+    """``(ISO YYYY-MM-DD or None, why it could not be read or None)`` for one file.
+
+    Both ``None`` is the readable-but-undated fact: the container was read and states no capture
+    date (a photo with no EXIF date, a raster with no date item, an array file with nowhere to put
+    one). A reason is the different fact that the container itself could not be read this far, so
+    whether it states a date is unknown. Neither outcome stops the file being ingested; the reason
+    is what ``ingest_images`` reports so the difference stays visible.
+    """
+    ext = path.suffix.lower()
+    if ext in _PHOTOGRAPHIC_EXTS:
+        return _photographic_capture_date(path)
+    if ext in _GDAL_EXTS:
+        return _gdal_capture_date(path)
+    return None, None
 
 
 def _iter_source_images(source: str, recursive: bool):
@@ -83,12 +153,18 @@ def _validate_bucket_literal(date_from: str) -> None:
         raise ValueError(f"invalid date_from literal bucket: {date_from!r}")
 
 
-def _bucket_for(path: Path, date_from: str) -> str:
+def _bucket_for(path: Path, date_from: str) -> tuple[str, str | None]:
+    """The bucket ``path`` lands in, and why its own capture date could not be read.
+
+    Only ``"exif"`` asks the file anything at all; the other two modes name the bucket from the
+    caller's own argument and open nothing, so they never have a reason to report.
+    """
     if date_from == "exif":
-        return _exif_iso_date(path) or UNDATED_BUCKET
+        iso, unreadable = _capture_iso_date(path)
+        return iso or UNDATED_BUCKET, unreadable
     if date_from == "none":
-        return UNDATED_BUCKET
-    return date_from  # validated literal bucket
+        return UNDATED_BUCKET, None
+    return date_from, None  # validated literal bucket
 
 
 @mcp.tool()
@@ -102,7 +178,7 @@ def ingest_images(
     recursive: bool = True,
     detect_band_groups: bool = False,
 ) -> dict:
-    """Copy raw images into a structured project, bucketed by EXIF capture date.
+    """Copy raw images into a structured project, bucketed by the capture date each file states.
 
     Turns a raw folder (or glob) of photos into the canonical layout
     (``images/<YYYY-MM-DD>/<stem><ext>``) under a workspace project. Copies by
@@ -110,15 +186,21 @@ def ingest_images(
     Refuses to overwrite an existing image (records the collision and skips it).
     Does not annotate, split, choose a task, or write ``classes.json``.
 
+    The capture date never gates ingestion: a file whose date cannot be read is copied and counted
+    like any other, lands in ``undated/``, and is listed in ``unreadable_dates`` so the difference
+    between a file that states no date and one that could not be asked stays visible.
+
     Args:
         source: Folder (or glob) of raw images, anywhere on disk.
         name: Project slug (``{crop}_{trait}_{site}``); the destination folder is
             ``<TCIP_WORKSPACE>/<name>/`` unless ``project_path`` overrides it.
         project_path: Absolute destination path instead of ``workspace/<name>``.
         copy: Copy (True, default) or move (False) the source images.
-        date_from: ``"exif"`` (per-image ``DateTimeOriginal`` → ISO date, missing →
-            ``undated/``), ``"none"`` (all → ``undated/``), or a literal bucket name
-            (all → ``images/<literal>/``, e.g. a known ISO capture date).
+        date_from: ``"exif"`` (each file's own capture date → ISO date, missing →
+            ``undated/``; a photo's EXIF ``DateTimeOriginal``, a raster's own date metadata),
+            ``"none"`` (all → ``undated/``), or a literal bucket name
+            (all → ``images/<literal>/``, e.g. a known ISO capture date). Only ``"exif"``
+            opens a file at all, and only its header.
         recursive: Recurse into source subfolders.
         detect_band_groups: After copying, run the band-group correlation strategies
             (``pipelines.data.band_groups``) over each touched bucket, writing a ``.bandgroup``
@@ -127,7 +209,9 @@ def ingest_images(
             ``False``; a project with no such capture pays nothing for this pass.
 
     Returns a manifest: ``{project_path, name, image_root, total, found, copied,
-    moved, buckets, undated, skipped_collisions, errors, move, band_groups}``.
+    moved, buckets, undated, skipped_collisions, errors, unreadable_dates, move, band_groups}``,
+    where ``unreadable_dates`` names each ingested file whose capture date could not be read and
+    the reason.
     """
     try:
         _validate_bucket_literal(date_from)
@@ -154,6 +238,7 @@ def ingest_images(
     moved = 0
     skipped_collisions: list[dict] = []
     errors: list[dict] = []
+    unreadable_dates: list[dict] = []
     touched_buckets: set[str] = set()
     # Collisions are keyed by stem within a bucket (case-insensitively): labels and
     # predictions pair to an image by stem alone (see dataset_layout), so two sources with
@@ -161,7 +246,7 @@ def ingest_images(
     placed: set[tuple[str, str]] = set()
 
     for src_path in sources:
-        bucket = _bucket_for(src_path, date_from)
+        bucket, date_unreadable = _bucket_for(src_path, date_from)
         stem_key = (bucket, src_path.stem.lower())
         dest = dataset_layout.image_path(dest_root, bucket, src_path.stem, src_path.suffix)
         if stem_key in placed or dest.exists():
@@ -202,6 +287,9 @@ def ingest_images(
 
         placed.add(stem_key)
         touched_buckets.add(bucket)
+        if date_unreadable:
+            unreadable_dates.append({"source": str(src_path), "dest": str(dest),
+                                     "bucket": bucket, "reason": date_unreadable})
         if bucket == UNDATED_BUCKET:
             undated += 1
         else:
@@ -231,6 +319,7 @@ def ingest_images(
         "undated": undated,
         "skipped_collisions": skipped_collisions,
         "errors": errors,
+        "unreadable_dates": unreadable_dates,
         "move": not copy,
         "tcip_dir": scaffold["tcip_dir"],
         "band_groups": band_groups_result,
