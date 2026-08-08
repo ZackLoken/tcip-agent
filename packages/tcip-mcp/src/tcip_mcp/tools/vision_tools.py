@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable, NamedTuple
 
 from tcip_annotation import Annotation, Point, Polygon, bbox_of, load_annotations_any
 from tcip_annotation.json_io import read_annotations as read_labels
@@ -17,7 +17,6 @@ from tcip_annotation.viz import (
     render_candidates,
     render_canvas_state,
     render_comparison,
-    render_confusion_examples,
     render_detections,
     render_grid,
     render_grid_overlay,
@@ -25,80 +24,119 @@ from tcip_annotation.viz import (
 )
 
 from tcip_mcp.audit import audited
+from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.server import mcp
 
-
-def _materialize_if_needed(source) -> str:
-    """The real path to hand a (photographic-only) renderer for an already-resolved image source.
-
-    A plain photographic file (jpg/png/heic/bmp) is returned unchanged. So is an ordinary
-    photographic-shaped GeoTIFF (1/3/4 bands, a real, pre-existing supported format PIL decodes
-    in true color, unchanged from before band-group support existed). Only a genuinely
-    non-standard source (a ``.bandgroup``-grouped capture, or a raster whose band count PIL's own
-    1/3/4-channel modes don't cover: npy/npz, or a >4-band GeoTIFF) decodes through the
-    channel-aware ``image_utils`` and is materialized to a throwaway 8-bit RGB preview (first three
-    bands, independently min-max stretched; a single band is repeated across channels) under
-    ``.tcip/artifacts/viz/_band_previews/``. Never a measurement artifact, visualization only.
-    """
-    from tcip_mcp.pipelines import image_utils
-    from tcip_mcp.pipelines.derivations import probe_channels
-
-    if isinstance(source, Path):
-        ext = source.suffix.lower()
-        if ext not in (".npy", ".npz", ".tif", ".tiff"):
-            return str(source)
-        if ext in (".tif", ".tiff") and probe_channels(source) in (1, 3, 4):
-            # A photographic-shaped GeoTIFF: PIL decodes it directly, same as any other
-            # supported format: no synthetic stretch for what is really an ordinary image.
-            return str(source)
-
-    n = probe_channels(source)
-    arr = image_utils.load_multiband(source, n)
-    return _band_preview_png(arr, source.stem)
-
-
-def _band_preview_png(arr, stem: str) -> str:
+if TYPE_CHECKING:
     import numpy as np
-    from PIL import Image as _Image
 
-    from tcip_mcp.pipelines.band_stats import stretch_band
-
-    n_bands = arr.shape[-1]
-    idxs = [0, 1, 2] if n_bands >= 3 else [0, 0, 0]
-    rgb = np.stack([stretch_band(arr[:, :, i], "minmax", arr.dtype) for i in idxs], axis=-1)
-
-    from tcip_mcp.project_paths import resolve_state
-
-    out_dir = resolve_state(Path(".tcip") / "artifacts" / "viz" / "_band_previews")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{stem}.png"
-    _Image.fromarray(rgb, mode="RGB").save(out_path)
-    return str(out_path)
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.raster_source import Rect
 
 
-def _resolve_render_path(images_dir, stem: str) -> str | None:
-    """The real path to hand a renderer for ``stem`` in ``images_dir``; ``None`` if ``stem``
-    isn't a resolvable logical image (missing, or a stale band-group manifest)."""
+class DisplayRead(NamedTuple):
+    """Display pixels for a renderer, with the frame facts that place annotations on them.
+
+    ``pixels`` is uint8 RGB; ``rect`` is the region of the raster they were read from and ``scale``
+    the served resolution as a fraction of native, the pair a renderer drawing a crop needs;
+    ``native_size`` is the raster's own ``(width, height)``, the frame annotation coordinates are
+    measured in.
+    """
+
+    pixels: np.ndarray
+    rect: Rect
+    scale: float
+    native_size: tuple[int, int]
+
+
+def _bounded_target(rect: Rect, max_edge: int) -> tuple[int, int] | None:
+    """The aspect-preserving output size that holds ``rect``'s longest edge to ``max_edge``;
+    ``None`` when the region already fits and reads at native resolution."""
+    edge = max(rect.width, rect.height)
+    if edge <= max_edge:
+        return None
+    k = max_edge / edge
+    return max(1, round(rect.width * k)), max(1, round(rect.height * k))
+
+
+def _clamped_rect(region: tuple[float, float, float, float], width: int, height: int) -> Rect:
+    """An ``(x, y, w, h)`` region as a non-empty rect inside a ``width`` x ``height`` raster.
+
+    A viewport can hang off any edge of the image (the human pans past it), so it is clamped here
+    rather than refused: what the raster layer will not serve is an out-of-bounds or empty read.
+    """
+    from tcip_mcp.pipelines.raster_source import Rect
+
+    def clamp(v: float, low: int, high: int) -> int:
+        return max(low, min(int(v), high))
+
+    x0 = clamp(region[0], 0, width - 1)
+    y0 = clamp(region[1], 0, height - 1)
+    return Rect(x0, y0,
+                clamp(x0 + region[2], x0 + 1, width), clamp(y0 + region[3], y0 + 1, height))
+
+
+def _read_for_display(source: "str | Path | BandGroupRef", *,
+                      max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
+                      region: tuple[float, float, float, float] | None = None) -> DisplayRead:
+    """Read ``source`` as display pixels a renderer can draw on.
+
+    The one decode every visualization tool goes through: the raster layer serves the region (an
+    ``(x, y, w, h)`` rectangle in the raster's own grid, or the whole frame) at or under
+    ``max_edge``, so an overview-bearing raster costs a reduced read rather than a whole decode
+    and nothing is ever materialized to a temp file.
+
+    An 8-bit raster at 1/3/4 bands already holds display values, so it keeps its own pixels
+    (grayscale repeated, alpha dropped) with no stretch, the plain-RGB reading a viewer is served:
+    an ordinary photograph or RGB GeoTIFF must never reach the agent as a synthetic
+    reinterpretation of its colors. Every other raster has no 8-bit reading of its own, so its
+    first three bands are composited and independently min-max stretched. Both readings go through
+    the shared ``composite_display_rgb``.
+    """
+    from tcip_mcp.pipelines.band_stats import composite_display_rgb
+    from tcip_mcp.pipelines.derivations import probe_channels
+    from tcip_mcp.pipelines.raster_source import Rect, open_raster
+
+    with open_raster(source, probe_channels(source)) as raster:
+        native = (int(raster.width), int(raster.height))
+        rect = (Rect(0, 0, raster.width, raster.height) if region is None
+                else _clamped_rect(region, raster.width, raster.height))
+        pixels, spec = raster.read_region(rect, target_size=_bounded_target(rect, max_edge))
+    bands = int(pixels.shape[-1])
+    idxs = [0, 1, 2] if bands >= 3 else [0, 0, 0]
+    plain = bands in (1, 3, 4) and pixels.dtype == "uint8"
+    return DisplayRead(composite_display_rgb(pixels, idxs, "none" if plain else "minmax"),
+                       rect, spec.scale, native)
+
+
+def _display_for_stem(images_dir: str | Path, stem: str) -> DisplayRead | None:
+    """Display pixels for ``stem`` in ``images_dir``; ``None`` if ``stem`` isn't a resolvable
+    logical image (missing, or a stale band-group manifest)."""
     from tcip_mcp.pipelines import image_utils
 
     try:
         source = image_utils.resolve_image_source(images_dir, stem)
     except (FileNotFoundError, image_utils.BandGroupIncomplete):
         return None
-    return _materialize_if_needed(source)
+    return _read_for_display(source)
 
 
-def _renderable_path(image_path: str) -> str:
-    """As ``_resolve_render_path``, for a caller that already has a path rather than a
-    ``(dir, stem)`` pair. Falls back to ``image_path`` unchanged when it isn't resolvable through
-    the enumeration primitive (e.g. a path outside any recognized ``images/`` layout); the
-    caller's own not-a-file / not-found handling surfaces the real error instead of this silently
-    swallowing it.
+def _display_for_path(image_path: str, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
+                      region: tuple[float, float, float, float] | None = None) -> DisplayRead:
+    """As ``_display_for_stem``, for a caller that already has a path rather than a
+    ``(dir, stem)`` pair. A path the enumeration primitive doesn't resolve (one outside any
+    recognized ``images/`` layout) is read as itself, so the caller's own not-a-file handling
+    surfaces the real error instead of this swallowing it.
     """
+    from tcip_mcp.pipelines import image_utils
+
     img = Path(image_path)
-    out = _resolve_render_path(img.parent, img.stem)
-    return out if out is not None else image_path
+    try:
+        source = image_utils.resolve_image_source(img.parent, img.stem)
+    except (FileNotFoundError, image_utils.BandGroupIncomplete):
+        source = img
+    return _read_for_display(source, max_edge=max_edge, region=region)
 
 
 def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
@@ -231,11 +269,11 @@ def _viz_annotations(
     idx, index = _subject_indexer()
 
     n_points = _n_points(anns)
-    render_path = _renderable_path(image_path)
+    read = _display_for_path(image_path)
     if task == "detect":
         shapes = _boxable(anns)
-        out = render_detections(render_path, [_box_dict(a, index) for a in shapes],
-                                class_names=_name_map(idx))
+        out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
+                                native_size=read.native_size, class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} detections on {img.name}"
         if shapes:
             from collections import Counter
@@ -244,8 +282,8 @@ def _viz_annotations(
         summary += _point_note(n_points)
     else:
         shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
-        out = render_segmentations(render_path, [_poly_dict(a, index) for a in shapes],
-                                   class_names=_name_map(idx))
+        out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
+                                   native_size=read.native_size, class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} segmentation masks on {img.name}" + _point_note(n_points)
 
     return {
@@ -285,16 +323,16 @@ def _viz_predictions(
     idx, index = _subject_indexer()
 
     n_points = _n_points(preds)
-    render_path = _renderable_path(image_path)
+    read = _display_for_path(image_path)
     if task == "detect":
         shapes = _boxable(preds)
-        out = render_detections(render_path, [_box_dict(a, index) for a in shapes],
-                                class_names=_name_map(idx))
+        out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
+                                native_size=read.native_size, class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} predictions on {img.name}" + _point_note(n_points)
     else:
         shapes = [a for a in preds if isinstance(a.geometry, Polygon)]
-        out = render_segmentations(render_path, [_poly_dict(a, index) for a in shapes],
-                                   class_names=_name_map(idx))
+        out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
+                                   native_size=read.native_size, class_names=_name_map(idx))
         summary = f"Rendered {len(shapes)} prediction masks on {img.name}" + _point_note(n_points)
 
     return {
@@ -353,8 +391,9 @@ def _viz_comparison(
     else:
         tp, fp, fn = 0, 0, len(gt)
 
-    out = render_comparison(_renderable_path(image_path), gt_dicts, pred_dicts, matches=[],
-                            class_names=_name_map(idx))
+    read = _display_for_path(image_path)
+    out = render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
+                            matches=[], class_names=_name_map(idx))
 
     return {
         "image_path": out,
@@ -411,13 +450,20 @@ def render_failure_cases(
     if not worst_items:
         return {"summary": "No prediction errors found", "image_path": None}
 
-    # Build failure case data for render_confusion_examples
-    failure_cases = []
+    from tcip_mcp.project_paths import resolve_state
+
+    out_dir = resolve_state(Path(".tcip") / "artifacts" / "viz" / "failures").resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # One GT-vs-prediction render per case, titled in the same pass so a case that can't be
+    # resolved drops its title with it.
+    case_paths: list[str] = []
+    titles: list[str] = []
     img_dir = Path(images_dir)
     for item in worst_items:
         stem = item["stem"]
-        img_path = _resolve_render_path(img_dir, stem)
-        if not img_path:
+        read = _display_for_stem(img_dir, stem)
+        if read is None:
             continue
 
         idx, index = _subject_indexer()
@@ -432,21 +478,15 @@ def render_failure_cases(
         if pred_file.is_file():
             pred_dicts = [_box_dict(a, index) for a in _boxable(read_labels(str(pred_file)))]
 
-        failure_cases.append({
-            "image": stem,
-            "image_path": img_path,
-            "gt_boxes": gt_dicts,
-            "pred_boxes": pred_dicts,
-            "error_score": item["error_score"],
-        })
-
-    # Render individual failure cases
-    case_paths = render_confusion_examples(failure_cases, images_dir=images_dir)
+        out = str(out_dir / f"failure_{len(case_paths):03d}_{stem}.png")
+        render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
+                          class_names=_name_map(idx), output_path=out)
+        case_paths.append(out)
+        titles.append(f"{stem} (err={item['error_score']:.1f})")
 
     # Render grid of all failure cases
     grid_path = None
     if case_paths:
-        titles = [f"{fc['image']} (err={fc['error_score']:.1f})" for fc in failure_cases[:len(case_paths)]]
         grid_path = render_grid(case_paths, titles=titles, cols=min(4, len(case_paths)))
 
     return {
@@ -500,22 +540,24 @@ def _viz_dataset_sample(
                 fmt = detect_format(str(label_path))
             except ValueError:
                 label_path = None  # unrecognized store: render the image without labels
-        render_path = _materialize_if_needed(source)
+        read = _read_for_display(source)
         if label_path is not None:
             idx, index = _subject_indexer()
             anns = load_annotations_any(str(label_path), fmt=fmt, file_name=rep_path.name)
             if task == "detect":
                 shapes = _boxable(anns)
-                out = render_detections(render_path, [_box_dict(a, index) for a in shapes],
-                                        class_names=_name_map(idx))
+                out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
+                                        native_size=read.native_size, class_names=_name_map(idx))
             else:
                 shapes = [a for a in anns if isinstance(a.geometry, Polygon)]
-                out = render_segmentations(render_path, [_poly_dict(a, index) for a in shapes],
+                out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
+                                           native_size=read.native_size,
                                            class_names=_name_map(idx))
             titles.append(f"{stem} ({len(shapes)})")
         else:
-            # No annotations: just use raw image
-            out = render_path
+            # An unlabeled sample renders too, with nothing drawn on it: the grid tiles rendered
+            # artifacts, so every cell has to be one.
+            out = render_detections(read.pixels, [], native_size=read.native_size)
             titles.append(f"{stem} (no labels)")
 
         rendered_paths.append(out)
@@ -583,7 +625,8 @@ def propose_annotations(
             "candidates": [],
         }
 
-    out = render_candidates(_renderable_path(image_path), candidates)
+    read = _display_for_path(image_path)
+    out = render_candidates(read.pixels, candidates, native_size=read.native_size)
 
     # Resolve state via the platform root, not a CWD-relative path, so the
     # handoff to accept_proposals survives CWD != project root. The envelope records the engine so
@@ -701,8 +744,9 @@ def accept_proposals(
 
     # Render final result for QA
     idx, index = _subject_indexer()
-    out = render_detections(_renderable_path(image_path), [_box_dict(a, index) for a in proposals],
-                            class_names=_name_map(idx))
+    read = _display_for_path(image_path)
+    out = render_detections(read.pixels, [_box_dict(a, index) for a in proposals],
+                            native_size=read.native_size, class_names=_name_map(idx))
 
     note = (f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
             f"predictions (created_by={engine!r}) for review, not ground truth.")
@@ -731,9 +775,10 @@ def capture_live_canvas(
 
     The GUI continuously pushes its canvas state (image, viewport, classes, and the
     display-resolved shapes with the exact colors/tags it renders, including unsaved edits and
-    an in-progress drawing) to ``.tcip/state/canvas_live.json``. This tool renders that state
-    over the full-resolution image and returns the artifact path for ``view_image``, plus the
-    classes schema, review legend, per-tag/per-creator counts, and the state's age.
+    an in-progress drawing) to ``.tcip/state/canvas_live.json``. This tool reads the region being
+    shown at up to ``max_edge``, renders that state over it, and returns the artifact path for
+    ``view_image``, plus the classes schema, review legend, per-tag/per-creator counts, and the
+    state's age.
 
     Args:
         refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting
@@ -791,10 +836,16 @@ def capture_live_canvas(
         sdoc.get("image_path") == state.get("image_path") and sdoc.get("tab") == state.get("tab")
     )
     shapes = (sdoc.get("shapes") or []) if shapes_valid else []
-    out = render_canvas_state(
-        _renderable_path(src_image), shapes, viewport=state.get("viewport"),
-        crop_to_viewport=crop_to_viewport, max_edge=max_edge,
-    )
+    viewport = state.get("viewport")
+    # Read exactly the region being rendered: the human's viewport is a rectangle in the image's
+    # own grid, so a raster far too large to decode whole is still capturable.
+    region = None
+    if crop_to_viewport and viewport and viewport.get("w") and viewport.get("h"):
+        region = (float(viewport.get("x", 0)), float(viewport.get("y", 0)),
+                  float(viewport["w"]), float(viewport["h"]))
+    read = _display_for_path(src_image, max_edge=max_edge, region=region)
+    out = render_canvas_state(read.pixels, shapes,
+                              origin=(read.rect.x0, read.rect.y0), scale=read.scale)
 
     now = _time.time()
     tag_counts: dict[str, int] = {}
@@ -825,7 +876,7 @@ def capture_live_canvas(
         "dirty": state.get("dirty"),
         "project_root": state.get("project_root"),
         "viewport": state.get("viewport"),
-        "cropped_to_viewport": bool(crop_to_viewport and state.get("viewport")),
+        "cropped_to_viewport": region is not None,
         "classes": state.get("classes") or [],
         "legend": state.get("legend"),
         "counts": state.get("counts"),
@@ -868,7 +919,7 @@ def overlay_reference_grid(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    out = render_grid_overlay(_renderable_path(image_path), cols=cols, rows=rows)
+    out = render_grid_overlay(_display_for_path(image_path).pixels, cols=cols, rows=rows)
 
     return {
         "image_path": out,
