@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -101,7 +101,7 @@ from tcip_web.routes import register_all as _register_routes  # noqa: E402  (nee
 _register_routes(app)
 
 # ── State snapshot + WS ──
-from tcip_web.state import store as _gui_store  # noqa: E402  (needs `app`)
+from tcip_web.state import TAB_NAMES, store as _gui_store  # noqa: E402  (needs `app`)
 _state_watchers: set[WebSocket] = set()
 
 
@@ -124,6 +124,21 @@ _gui_store.subscribe(_broadcast_state_snapshot)
 @app.get("/api/state")
 def get_state() -> dict:
     return _gui_store.snapshot()
+
+
+class ActiveTabPayload(BaseModel):
+    active_tab: str
+
+
+@app.post("/api/state/tab")
+async def set_active_tab(payload: ActiveTabPayload) -> dict:
+    """Record which tab the browser is actually showing, so ``gui.json`` (and everything
+    that reads it, like ``view_gui_state``) tracks what the human sees."""
+    if payload.active_tab not in TAB_NAMES:
+        raise HTTPException(
+            400, f"unknown tab: {payload.active_tab!r}; valid tabs: {list(TAB_NAMES)}")
+    await _gui_store.mutate({"active_tab": payload.active_tab})
+    return {"status": "ok", "active_tab": payload.active_tab}
 
 
 @app.websocket("/ws/state")
