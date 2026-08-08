@@ -9,11 +9,15 @@ import { Image as KonvaImage, Layer, Stage } from "react-konva";
 import Konva from "konva";
 
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
+import { useOverviewBuild } from "@/hooks/useOverviewBuild";
 import { useStore } from "@/store";
 import type { ViewState } from "@/store/types";
 
 export interface CanvasStageProps {
   imageUrl: string | null;
+  /** The image's own path, which the server needs to build the overviews a refused load names.
+   *  Omitted, a refused load stays a plain load error. */
+  imagePath?: string | null;
   imgWidth: number;
   imgHeight: number;
   /** Auto-fit the image to the canvas once per image (default true). The Review tab sets this
@@ -43,6 +47,9 @@ export function CanvasStage(props: CanvasStageProps) {
   const setView = useStore((s) => s.setView);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [imgError, setImgError] = useState(false);
+  // A load the server refused for want of overviews is a wait, not a failure: the build runs and
+  // the image is requested again once the pyramid exists.
+  const overview = useOverviewBuild(props.imageUrl, props.imagePath ?? null, imgError);
 
   // Track wrapper size: measure synchronously on mount too, so the first fit uses the real
   // canvas size immediately rather than waiting a frame for the ResizeObserver.
@@ -87,7 +94,7 @@ export function CanvasStage(props: CanvasStageProps) {
       el.onerror = null;
       el.src = ""; // cancel the abandoned download; rapid flips otherwise queue every skip
     };
-  }, [props.imageUrl]);
+  }, [props.imageUrl, overview.reloadToken]);
 
   // Fit the image to the canvas once per image, not on every container resize. Refitting
   // on resize reset the user's zoom/pan, and when a reflow briefly reported a near-zero
@@ -379,12 +386,39 @@ export function CanvasStage(props: CanvasStageProps) {
           </Layer>
         )}
       </Stage>
-      {imgError && (
+      {overview.building && (
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none p-4"
+          data-testid="overview-building"
+        >
+          <div className="max-w-sm rounded-md border border-tcip-border bg-tcip-panel/95 px-4 py-3 text-center text-[12px] text-tcip-fg">
+            <p className="font-semibold">Preparing this image for display</p>
+            <p className="mt-1 text-tcip-muted">
+              It is larger than the server serves in one read, so a reduced-resolution copy is being
+              built. This runs once per image; it opens normally afterwards.
+            </p>
+            <div className="mt-2 h-1 w-full overflow-hidden rounded bg-tcip-bg">
+              <div
+                className="h-full bg-tcip-accent"
+                style={{ width: `${Math.round(overview.progress * 100)}%` }}
+              />
+            </div>
+            <p className="mt-1 font-mono text-tcip-muted">{Math.round(overview.progress * 100)}%</p>
+          </div>
+        </div>
+      )}
+      {imgError && !overview.building && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
           <div className="max-w-sm rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-4 py-3 text-center text-[12px] text-tcip-fp">
-            Could not load this image: it may be missing, or its path is outside the location(s)
-            this server is configured to serve images from. Check the path, or ask whoever set up
-            this project where its images should live.
+            {overview.error ? (
+              <>Could not prepare this image for display: {overview.error}</>
+            ) : (
+              <>
+                Could not load this image: it may be missing, or its path is outside the location(s)
+                this server is configured to serve images from. Check the path, or ask whoever set
+                up this project where its images should live.
+              </>
+            )}
           </div>
         </div>
       )}
