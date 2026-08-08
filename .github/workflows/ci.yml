@@ -21,9 +21,12 @@ jobs:
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install GDAL (system libgdal + version-matched bindings; PyPI gdal has no wheels)
+        # Preinstalled numpy + --no-build-isolation: an isolated build omits the gdal_array
+        # numpy bridge, which fails only at runtime (_gdal_array ImportError).
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libgdal-dev
-          pip install "gdal==$(gdal-config --version)"
+          pip install numpy setuptools wheel
+          pip install "gdal==$(gdal-config --version)" --no-build-isolation
 
       - name: Install packages
         run: |
@@ -48,9 +51,12 @@ jobs:
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install GDAL (system libgdal + version-matched bindings; PyPI gdal has no wheels)
+        # Preinstalled numpy + --no-build-isolation: an isolated build omits the gdal_array
+        # numpy bridge, which fails only at runtime (_gdal_array ImportError).
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libgdal-dev
-          pip install "gdal==$(gdal-config --version)"
+          pip install numpy setuptools wheel
+          pip install "gdal==$(gdal-config --version)" --no-build-isolation
 
       - name: Install packages
         run: |
