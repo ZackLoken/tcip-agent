@@ -24,7 +24,7 @@ The agent can visually inspect images using `view_image` after rendering annotat
 | `render_failure_cases` | Grid of top-K failure cases |
 | `propose_annotations` | Engine-proposed candidate masks rendered with numbered overlay (`engine='sam'` default) |
 | `accept_proposals` | Stage classified candidates as predictions (created_by=<engine>) for human review |
-| `overlay_reference_grid` | Labeled grid overlay for spatial referencing |
+| `overlay_reference_grid` | Labeled reference-grid overlay (square native-pixel cells); echoes its grid geometry (`tile_size`, `overlap`, `cols`, `rows`, `width`, `height`) for `segment_prompt(grid_cells=...)` |
 | `capture_live_canvas` | The human's live GUI canvas: their image, viewport, and unsaved shapes in the GUI's own symbology (+ classes schema, TP/FP/FN legend on Review) |
 
 `visualize` is one tool with a `source` of `annotations` / `predictions` / `dataset`
@@ -93,13 +93,16 @@ When inspecting rendered annotations/predictions, evaluate:
 
 ## Rendering Details
 
-- Images resized to max 1024px longest edge for manageable renders
+- Images resized to the artifact bound (`display_bounds.VIZ_ARTIFACT_MAX_EDGE`, 1024px longest
+  edge) for manageable renders; the reference grid's derived cell size targets this bound
 - 20-class color palette consistent across all visualizations
 - GT boxes: green outline. Prediction boxes: red outline
 - Match lines: yellow center-to-center connections
 - Labels include class name and confidence score where applicable
 - Candidate masks: numbered with colored semi-transparent fills
-- Grid overlay: yellow lines with A1–H6 cell labels
+- Grid overlay: yellow lines on the true cell boundaries (edge cells clip to the frame), with
+  spreadsheet-style cell labels ('A1' top-left); labels decimate where a rendered cell is too
+  small to hold one legibly
 
 ## Vision-Guided Auto-Labeling
 
