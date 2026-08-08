@@ -130,7 +130,9 @@ def preflight_config_route(payload: ConfigPayload) -> dict:
 
 class LaunchPayload(BaseModel):
     config: dict[str, Any]
-    output_dir: str
+    # Empty defers to launch_training's own default (the project's experiment store), so a
+    # client that names no directory can never land a run in the server process's cwd.
+    output_dir: str = ""
 
 
 @router.post("/launch")
