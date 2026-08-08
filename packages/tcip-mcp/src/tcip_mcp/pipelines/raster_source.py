@@ -1,9 +1,10 @@
 """Raster reading: one open-and-read surface for every image source this platform decodes.
 
-There is a backend per kind of source (a photographic frame through PIL, a TIFF whole or strip by
-strip, a numpy container, a group of sibling single-band files), and each serves pixel regions
-through the same small surface, so a caller that wants one window of a 90 GB orthomosaic and a
-caller that wants a whole 4-band capture compose the same way.
+There is a backend per kind of source (a photographic frame through PIL, a GDAL-readable raster
+served windowed through GDAL's block cache, a numpy container, a group of sibling single-band
+files, and a whole tifffile decode for the stacked multi-page layouts GDAL misreads), and each
+serves pixel regions through the same small surface, so a caller that wants one window of a 90 GB
+orthomosaic and a caller that wants a whole 4-band capture compose the same way.
 
 :func:`open_raster` picks the backend from the source itself. The channel count a caller passes is
 a routing hint (which PIL mode to decode a photograph in, which axis order a numpy/TIFF array
@@ -14,7 +15,6 @@ exactly as it sits on disk, and checking that is the caller's own job.
 from __future__ import annotations
 
 import logging
-import math
 import os
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -33,13 +33,13 @@ ARRAY_CONTAINER_EXTS = (".npy", ".npz", ".tif", ".tiff")
 
 _PIL_MODES = {1: "L", 3: "RGB", 4: "RGBA"}
 
-# The strip cache a caller that supplies no tiling geometry gets: a plain bound on resident strips
-# for an access pattern this module cannot know, not a figure derived from any file.
-DEFAULT_STRIP_CACHE_CAPACITY = 64
-
 # Provisional platform budget, not derived from a measurement: the share of the host's physical RAM
 # the decoded-pixel caches here may hold, leaving the model, tile batch and OS the rest.
 _RAM_BUDGET_FRACTION = 0.25
+
+# GDAL's block cache's share of that budget; the pooled registry of open sources budgets against
+# the remainder. An even split: no measurement yet favors either consumer over the other.
+_GDAL_CACHE_SHARE = 0.5
 
 # Used only when psutil cannot be imported: a deliberately low assumed host size, so a host whose
 # real memory can't be read is under-budgeted rather than over.
@@ -47,13 +47,40 @@ _ASSUMED_TOTAL_RAM_BYTES = 8 * 1024 ** 3
 
 _total_ram_bytes: int | None = None
 
+_gdal_module = None
 
-class UnsupportedRasterLayout(ValueError):
-    """A TIFF's on-disk pixel layout isn't one :class:`StripTiffSource` decodes: an internally
-    tiled raster, planar (band-separate) samples, or a multi-page file whose first page isn't the
-    whole raster (e.g. a channel-last raster stored one row-block per page). It reads only the
-    strip-based, contiguous-sample, single-page layout; :func:`open_raster` sends every other
-    layout to a whole decode instead."""
+
+def _gdal():
+    """``osgeo.gdal``, imported and configured exactly once: exceptions enabled, since without
+    them ``gdal.OpenEx`` returns ``None`` instead of saying what failed. Lazy so importing this
+    module never pays the GDAL import."""
+    global _gdal_module
+    if _gdal_module is None:
+        from osgeo import gdal
+
+        gdal.UseExceptions()
+        _gdal_module = gdal
+    return _gdal_module
+
+
+def configure_gdal_cache() -> None:
+    """Hand GDAL's block cache its share of this module's memory budget.
+
+    Called once at each process entry point (the MCP server's ``main``, the web backend's app
+    startup), never at source construction: the cache is process-global, and a per-open call
+    would re-decide a process-wide fact on every read path.
+    """
+    _gdal().SetCacheMax(int(_memory_budget_bytes() * _GDAL_CACHE_SHARE))
+
+
+def open_gdal_dataset(path: str | Path):
+    """A read-only GDAL dataset for ``path``, with GDAL's own failure wrapped in this layer's
+    error naming the file."""
+    gdal = _gdal()
+    try:
+        return gdal.OpenEx(str(path), gdal.OF_RASTER | gdal.OF_READONLY)
+    except Exception as exc:  # noqa: BLE001, GDAL raises bare RuntimeError
+        raise ValueError(f"GDAL cannot open raster '{path}': {exc}") from exc
 
 
 @dataclass(frozen=True)
@@ -131,9 +158,10 @@ class ReadSpec:
     """How a read was served: which backend decoded it, the served resolution as a fraction of the
     raster's native resolution, and the resampling that produced it.
 
-    Every backend here serves full resolution only, so ``scale`` is always 1.0 and ``resample``
-    always ``None``; the fields carry the parameters of an overview read for a source that serves
-    one.
+    A plain read serves full resolution: ``scale`` 1.0, ``resample`` ``None``. A read with a
+    ``target_size`` records the requested output/region ratio and the resampling algorithm that
+    was requested; which overview level GDAL satisfied a reduced read from is not observable
+    through RasterIO and is not claimed here.
     """
 
     backend: str
@@ -149,6 +177,12 @@ class RasterSource(Protocol):
     silently clipped array, so a caller that wants an edge tile clips to the raster's own bounds
     and pads the result itself (``image_utils.pad_tile``). The pixels are always a copy: mutating
     them can never corrupt what a later read returns.
+
+    ``target_size`` (output ``(width, height)``) serves the same rectangle resampled to that size;
+    it must preserve the rectangle's aspect ratio to within the rounding of fitting either edge
+    (``ValueError`` otherwise), and the returned :class:`ReadSpec` records the requested scale and
+    resampling. :meth:`read_window` is the same read in the row-first argument order the tiled
+    inference loop uses.
     """
 
     width: int
@@ -157,7 +191,10 @@ class RasterSource(Protocol):
     dtype: np.dtype
     resident_bytes: int
 
-    def read_region(self, rect: Rect) -> tuple[np.ndarray, ReadSpec]: ...
+    def read_region(self, rect: Rect, *,
+                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]: ...
+
+    def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray: ...
 
     def close(self) -> None: ...
 
@@ -180,6 +217,16 @@ class _ClosableSource:
     def _release(self) -> None:
         """Drop whatever this backend holds open. Called once, by :meth:`close`."""
 
+    def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
+        """The pixel window ``[y0:y1, x0:x1]``, in the row-first argument order the tiled
+        inference loop uses.
+
+        ``read_window`` orders rows first while :class:`Rect` orders x first; the flip between the
+        two conventions happens exactly here and nowhere else.
+        """
+        region, _spec = self.read_region(Rect(x0, y0, x1, y1))
+        return region
+
     def __enter__(self):
         return self
 
@@ -197,37 +244,148 @@ def _check_region(rect: Rect, height: int, width: int) -> None:
         )
 
 
+def _check_target_size(rect: Rect, target_size: tuple[int, int]) -> tuple[int, int]:
+    """Validate a ``(width, height)`` output size against ``rect`` and return it as ints.
+
+    The target must preserve the region's aspect ratio to within the rounding of fitting either
+    edge; a distorting target raises ``ValueError``, since a resample here must never silently
+    change a raster's geometry (a caller that wants a distortion resizes the returned pixels
+    itself).
+    """
+    out_w, out_h = int(target_size[0]), int(target_size[1])
+    if out_w <= 0 or out_h <= 0:
+        raise ValueError(f"target_size must be positive, got {out_w}x{out_h}")
+    fit_h = max(1, round(rect.height * out_w / rect.width))
+    fit_w = max(1, round(rect.width * out_h / rect.height))
+    if out_h != fit_h and out_w != fit_w:
+        raise ValueError(
+            f"target_size {out_w}x{out_h} does not preserve the aspect ratio of the "
+            f"{rect.width}x{rect.height} region it resamples"
+        )
+    return out_w, out_h
+
+
+def _area_downsample(region: np.ndarray, out_w: int, out_h: int) -> np.ndarray:
+    """``region`` resampled to ``out_h`` x ``out_w`` rows x cols by pixel-area averaging: cv2's
+    ``INTER_AREA``, the one area resampler used for every backend that resamples in memory."""
+    import cv2
+
+    out = cv2.resize(region, (out_w, out_h), interpolation=cv2.INTER_AREA)
+    return out if out.ndim == 3 else out[:, :, None]
+
+
+def _serve_region(region: np.ndarray, rect: Rect, backend: str,
+                  target_size: tuple[int, int] | None) -> tuple[np.ndarray, ReadSpec]:
+    """The read tail every in-memory backend shares: the native copy as-is, or area-downsampled to
+    an aspect-preserving ``target_size`` with the :class:`ReadSpec` recording the requested
+    scale."""
+    if target_size is None:
+        return region, ReadSpec(backend)
+    out_w, out_h = _check_target_size(rect, target_size)
+    return (_area_downsample(region, out_w, out_h),
+            ReadSpec(backend, scale=out_w / rect.width, resample="area"))
+
+
+def channel_first_reinterpreted(shape: tuple[int, ...], num_channels: int) -> bool:
+    """Whether a channel-last reading of a 3-D ``shape`` is instead taken as channel-first: the
+    leading axis matches the caller's expected band count while the trailing one does not, the one
+    shape where channel-first is unambiguous against what the caller asked for.
+
+    The single predicate behind ``_channel_last``'s transpose, :func:`tiff_frame`'s header
+    measurement, and the TIFF dispatch's whole-decode routing, so a raster can never be measured
+    through one reading and decoded through another.
+    """
+    return len(shape) == 3 and shape[0] == num_channels and shape[2] != num_channels
+
+
 def _channel_last(arr: np.ndarray, num_channels: int) -> np.ndarray:
     """A decoded array as ``[H, W, C]``, using the caller's expected band count to tell a
     channel-first raster from a channel-last one.
 
-    A 2-D array gains a trailing axis of 1. A 3-D array is transposed only when its first axis
-    matches the expected count and its last axis does not, the one shape where channel-first is
-    unambiguous against what the caller asked for; every other shape is returned as decoded, so a
-    count that disagrees with the file never reshapes its pixels.
+    A 2-D array gains a trailing axis of 1. A 3-D array is transposed only when
+    :func:`channel_first_reinterpreted` says its shape reads channel-first against the expected
+    count; every other shape is returned as decoded, so a count that disagrees with the file never
+    reshapes its pixels.
     """
     arr = np.asarray(arr)
     if arr.ndim == 2:
         return arr[:, :, None]
-    if arr.ndim == 3 and arr.shape[0] == num_channels and arr.shape[2] != num_channels:
+    if arr.ndim == 3 and channel_first_reinterpreted(arr.shape, num_channels):
         return np.transpose(arr, (1, 2, 0))
     return arr
 
 
-def tiff_series_shape(path: str | Path) -> tuple[int, ...] | None:
-    """Header-only TIFF series shape (no pixel decode); ``None`` if it can't be read this way.
+def _tiff_series_probe(path: str | Path) -> tuple[tuple[int, ...], str] | None:
+    """Header-only TIFF series shape and axes string; ``None`` if the header can't be read.
 
-    ``tif.series[0].shape``, not ``pages[0]``: a channel-last TIFF stores each row-block as its own
-    page, so ``pages[0]`` of a 24x40x5 raster is ``(40, 5)``. Shared by ``image_utils`` and
-    ``derivations.probe_channels`` so a full pixel read is never paid just to learn the shape.
+    ``tif.series[0]``, not ``pages[0]``: a channel-last TIFF stores each row-block as its own
+    page, so ``pages[0]`` of a 24x40x5 raster is ``(40, 5)``.
     """
     try:
         import tifffile
 
         with tifffile.TiffFile(str(path)) as tif:
-            return tuple(int(x) for x in tif.series[0].shape)
+            series = tif.series[0]
+            return tuple(int(x) for x in series.shape), str(series.axes)
     except Exception:  # noqa: BLE001, fall through to a full read rather than guess
         return None
+
+
+def tiff_series_shape(path: str | Path) -> tuple[int, ...] | None:
+    """Header-only TIFF series shape (no pixel decode); ``None`` if it can't be read this way.
+
+    Shared with ``derivations.probe_channels`` so a full pixel read is never paid just to learn
+    the shape.
+    """
+    probe = _tiff_series_probe(path)
+    return probe[0] if probe is not None else None
+
+
+def _series_frame(shape: tuple[int, ...], axes: str) -> tuple[int, int, int] | None:
+    """A TIFF series' frame as ``(height, width, channels)``; ``None`` for an axes layout with no
+    single-frame reading (the one-page-per-band or one-page-per-row-block stacks tifffile writes,
+    which only a whole tifffile decode reads correctly)."""
+    if len(axes) != len(shape):
+        return None
+    if axes == "YX":
+        return (shape[0], shape[1], 1)
+    if axes == "YXS":
+        return (shape[0], shape[1], shape[2])
+    if axes == "SYX":  # planar (band-separate) samples report channel-first
+        return (shape[1], shape[2], shape[0])
+    return None
+
+
+def tiff_frame(path: str | Path, num_channels: int) -> tuple[int, int, int] | None:
+    """The ``(height, width, channels)`` frame this module's TIFF dispatch will serve ``path`` in
+    at ``num_channels``, from the header alone; ``None`` when the header can't be read and only a
+    decode can answer.
+
+    The same axes normalization and channel-first reading the dispatch itself applies
+    (:func:`_series_frame`, :func:`channel_first_reinterpreted`), so a frame measured here and
+    pixels decoded later come from one set of rules: an axes-normalizable series serves in its own
+    frame unless the channel-first reinterpretation sends it to the whole decode (which
+    transposes); a stacked multi-page series serves whole in tifffile's raw reading.
+    """
+    probe = _tiff_series_probe(path)
+    if probe is None:
+        return None
+    shape, axes = probe
+    frame = _series_frame(shape, axes)
+    if frame is None:
+        # The whole-decode route: tifffile.imread returns the raw series shape and _channel_last
+        # applies the same reinterpretation to it.
+        if len(shape) == 2:
+            return (shape[0], shape[1], 1)
+        if len(shape) != 3:
+            return None
+        if channel_first_reinterpreted(shape, num_channels):
+            return (shape[1], shape[2], shape[0])
+        return (shape[0], shape[1], shape[2])
+    # A planar (SYX) series is channel-first by its own header: no reinterpretation applies.
+    if axes != "SYX" and channel_first_reinterpreted(frame, num_channels):
+        return (frame[1], frame[2], frame[0])
+    return frame
 
 
 class _ArraySource(_ClosableSource):
@@ -250,10 +408,11 @@ class _ArraySource(_ClosableSource):
     def resident_bytes(self) -> int:
         return int(self._array.nbytes)
 
-    def read_region(self, rect: Rect) -> tuple[np.ndarray, ReadSpec]:
+    def read_region(self, rect: Rect, *,
+                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
         _check_region(rect, self.height, self.width)
-        region = self._array[rect.y0:rect.y1, rect.x0:rect.x1]
-        return np.array(region), ReadSpec(self._backend)
+        region = np.array(self._array[rect.y0:rect.y1, rect.x0:rect.x1])
+        return _serve_region(region, rect, self._backend, target_size)
 
     def _release(self) -> None:
         self._array = None
@@ -291,22 +450,24 @@ class PhotographicSource(_ClosableSource):
     def resident_bytes(self) -> int:
         return int(self.width * self.height * self.num_channels * self.dtype.itemsize)
 
-    def read_region(self, rect: Rect) -> tuple[np.ndarray, ReadSpec]:
+    def read_region(self, rect: Rect, *,
+                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
         _check_region(rect, self.height, self.width)
         if self._frame is None:
             frame = np.asarray(self.image)
             self._frame = frame[:, :, None] if frame.ndim == 2 else frame
-        region = self._frame[rect.y0:rect.y1, rect.x0:rect.x1]
-        return np.array(region), ReadSpec("photographic")
+        region = np.array(self._frame[rect.y0:rect.y1, rect.x0:rect.x1])
+        return _serve_region(region, rect, "photographic", target_size)
 
     def _release(self) -> None:
         self._frame = None
 
 
 class TiffWholeSource(_ArraySource):
-    """A TIFF decoded whole by ``tifffile.imread``, for every layout :class:`StripTiffSource`
-    cannot serve: internally tiled, planar (band-separate), and the multi-page layouts tifffile
-    writes for a channel-last N-band raster or a plain ``[C, H, W]`` stack."""
+    """A TIFF decoded whole by ``tifffile.imread``, only for the layouts GDAL's first-IFD data
+    model misreads (the stacked multi-page files tifffile itself writes: a channel-last raster one
+    row-block per page, a plain ``[C, H, W]`` stack one band per page) and for the shapes a whole
+    decode reinterprets channel-first; every single-dataset layout is :class:`GdalSource`'s."""
 
     _backend = "tiff_whole"
 
@@ -351,10 +512,11 @@ class BandGroupSource(_ClosableSource):
 
     Each member is opened on its own through :func:`open_array_source` and decodes exactly as it
     would alone; a region is every member's own region concatenated on the channel axis, in the
-    manifest's declared band order. The group's frame is its first band's, the same frame
-    ``image_utils.image_dimensions`` reports for a group; a member covering a different extent is
-    refused at open rather than cropped or resampled to fit, since the pixels of a group whose
-    bands disagree on the frame cannot be stacked into one raster.
+    manifest's declared band order, and a ``target_size`` read is each member's own resampled read
+    (the returned spec carries the members' scale and resampling). The group's frame is its first
+    band's, the same frame ``image_utils.image_dimensions`` reports for a group; a member covering
+    a different extent is refused at open rather than cropped or resampled to fit, since the
+    pixels of a group whose bands disagree on the frame cannot be stacked into one raster.
     """
 
     def __init__(self, ref: BandGroupRef, num_channels: int):
@@ -379,211 +541,103 @@ class BandGroupSource(_ClosableSource):
     def resident_bytes(self) -> int:
         return sum(int(m.resident_bytes) for m in self._members)
 
-    def read_region(self, rect: Rect) -> tuple[np.ndarray, ReadSpec]:
-        bands = [m.read_region(rect)[0] for m in self._members]
-        return np.concatenate(bands, axis=-1), ReadSpec("band_group")
+    def read_region(self, rect: Rect, *,
+                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
+        reads = [m.read_region(rect, target_size=target_size) for m in self._members]
+        member_spec = reads[0][1]
+        return (np.concatenate([pixels for pixels, _spec in reads], axis=-1),
+                ReadSpec("band_group", scale=member_spec.scale, resample=member_spec.resample))
 
     def _release(self) -> None:
         for member in self._members:
             member.close()
 
 
-class StripTiffSource(_ClosableSource):
-    """Opens a strip-based TIFF once and serves cheap, repeated pixel-window reads from it.
+class GdalSource(_ClosableSource):
+    """A GDAL-readable raster (today: .tif/.tiff) opened read-only and served windowed.
 
-    Decodes only the strips a requested window actually overlaps, never the whole file, so one
-    instance composes with a tiling loop that requests many windows across a raster far too large
-    to decode whole, instead of reopening and reparsing the file per tile. Use as a context manager
-    or call :meth:`close`; the file handle stays open for the source's lifetime.
+    Regions decode through GDAL's own block cache (budgeted per process by
+    :func:`configure_gdal_cache`), so repeated windows over a raster far too large to decode whole
+    cost only the blocks they touch. A ``target_size`` read asks RasterIO for the reduced buffer
+    directly (``resample_alg=Average``), which GDAL serves from the nearest overview level at or
+    above the requested resolution when the raster carries one (see ``pipelines.overviews``).
 
-    Only a strip-based raster with contiguous (chunky) samples is served: an internally tiled TIFF
-    or one with planar (band-separate) samples raises :class:`UnsupportedRasterLayout`. The first
-    page must also be the whole raster, cross-checked against the file's series shape
-    (:func:`tiff_series_shape`), because a channel-last TIFF stored one row-block per page makes
-    ``pages[0]`` report a single row-block's shape, and windows sliced from that geometry would be
-    silently wrong. Decoding depends on a working codec for the file's compression: LZW and JPEG
-    come from ``imagecodecs``.
+    A single-band palette-color raster (``GCI_PaletteIndex``) is expanded through its own color
+    table to uint8 RGB, the same pixels PIL's palette decode produced, and reports three
+    channels; a ``target_size`` read of one expands at native resolution first and
+    area-downsamples the RGB, since palette indices must never be resampled.
 
-    A real orthomosaic's strips run the raster's full width at a small ``rowsperstrip``, so a
-    tiling loop that scans left to right across one row-band before advancing (``tile_positions``'
-    own order) requests the same strips again for every tile in that band. Decoded strips are
-    cached (an LRU keyed by strip index) so a strip already decoded to serve one window is sliced
-    from memory for the next rather than re-read and re-decoded. The capacity is
-    ``strip_cache_capacity`` when given; otherwise it is derived from the tiling geometry
-    (``tile_size`` plus ``overlap`` or ``stride``, see :func:`derive_strip_cache_capacity`), which
-    is what holds a row-major scan to one decode per strip; with neither it is
-    :data:`DEFAULT_STRIP_CACHE_CAPACITY`. A caller whose access pattern isn't row-major still gets
-    correct results, just fewer cache hits.
+    ``band_interpretations`` names each served channel's GDAL color interpretation (lowercase,
+    e.g. ``("red", "green", "blue", "alpha")``; ``"undefined"`` when the file declares none), so
+    a consumer can tell an alpha band from a spectral one. Only this backend carries the
+    attribute; read it with ``getattr(src, "band_interpretations", None)``.
+
+    A GDAL dataset handle is not thread-safe: one instance must never be shared across concurrent
+    threads.
     """
 
-    def __init__(self, path: str | Path, *, strip_cache_capacity: int | None = None,
-                 tile_size: int | None = None, overlap: float | None = None,
-                 stride: int | None = None):
-        import tifffile
+    _backend = "gdal"
 
+    def __init__(self, path: str | Path):
+        gdal = _gdal()
         self.path = Path(path)
-        self._tif = tifffile.TiffFile(str(self.path))
-        page = self._tif.pages[0]
-        if page.is_tiled:
-            self._tif.close()
-            raise UnsupportedRasterLayout(
-                f"{self.path}: internally tiled TIFF; this source only decodes strip-based rasters."
-            )
-        if page.planarconfig != 1:
-            self._tif.close()
-            raise UnsupportedRasterLayout(
-                f"{self.path}: planar (band-separate) sample layout; this source only decodes "
-                "contiguous (chunky) samples."
-            )
-        height = int(page.imagelength)
-        width = int(page.imagewidth)
-        num_channels = int(page.samplesperpixel)
-        series_shape = tiff_series_shape(self.path)
-        if series_shape is None:
-            self._tif.close()
-            raise UnsupportedRasterLayout(
-                f"{self.path}: the file's series shape can't be read, so there is no way to "
-                "verify the first page spans the whole raster."
-            )
-        normalized = series_shape + (1,) if len(series_shape) == 2 else series_shape
-        if normalized != (height, width, num_channels):
-            self._tif.close()
-            raise UnsupportedRasterLayout(
-                f"{self.path}: first page's shape {(height, width, num_channels)} (H, W, C) "
-                f"disagrees with the raster's series shape {series_shape}: a multi-page layout "
-                "(e.g. a channel-last raster stored one row-block per page) whose pages this "
-                "source's single-page strip decoding would misinterpret."
-            )
-        self._page = page
-        self.height = height
-        self.width = width
-        self.num_channels = num_channels
-        self.dtype = page.dtype
-        self._rows_per_strip = int(page.rowsperstrip)
-        self._strip_cache: OrderedDict[int, np.ndarray] = OrderedDict()
-        self.strip_cache_capacity = self._resolve_capacity(
-            strip_cache_capacity, tile_size, overlap, stride)
-        self.strip_decode_count = 0  # cache misses actually decoded from disk; a caching probe
+        self._ds = open_gdal_dataset(self.path)
+        self.width = int(self._ds.RasterXSize)
+        self.height = int(self._ds.RasterYSize)
+        self.num_channels = int(self._ds.RasterCount)
+        band = self._ds.GetRasterBand(1)
+        from osgeo import gdal_array
 
-    def _resolve_capacity(self, strip_cache_capacity: int | None, tile_size: int | None,
-                          overlap: float | None, stride: int | None) -> int:
-        """The number of decoded strips this source keeps resident.
-
-        An explicit ``strip_cache_capacity`` is honored as given. A tiling geometry derives one
-        (:func:`derive_strip_cache_capacity`), which is then held to this process's memory budget:
-        a derivation over the budget is capped, with a warning naming the re-decode amplification
-        the cap costs, never silently clamped and never refused.
-        """
-        if strip_cache_capacity is not None:
-            return int(strip_cache_capacity)
-        if tile_size is None:
-            return DEFAULT_STRIP_CACHE_CAPACITY
-        derived = derive_strip_cache_capacity(
-            self._rows_per_strip, int(tile_size), overlap=overlap, stride=stride)
-        budget = _memory_budget_bytes()
-        capped = max(1, int(budget // max(1, self._strip_bytes())))
-        if derived > capped:
-            logger.warning(
-                "%s: a %d-strip cache for %dpx tiles needs %.2f GiB, over this process's %.2f GiB "
-                "budget; capping at %d strips, which re-decodes strips about %.1fx over the scan.",
-                self.path, derived, int(tile_size), derived * self._strip_bytes() / 1024 ** 3,
-                budget / 1024 ** 3, capped, derived / capped,
-            )
-            return capped
-        return derived
-
-    def _strip_bytes(self) -> int:
-        """Decoded size of one strip. A file whose ``rowsperstrip`` exceeds its own height stores
-        fewer rows than it declares."""
-        rows = min(self._rows_per_strip, self.height)
-        return int(rows * self.width * self.num_channels * self.dtype.itemsize)
+        self.dtype = np.dtype(gdal_array.GDALTypeCodeToNumericTypeCode(band.DataType))
+        self._palette_lut: np.ndarray | None = None
+        if (self.num_channels == 1 and band.DataType == gdal.GDT_Byte
+                and band.GetColorInterpretation() == gdal.GCI_PaletteIndex):
+            table = band.GetRasterColorTable()
+            if table is not None:
+                # A 256-entry LUT whatever the table declares: a Byte index can reach 255.
+                lut = np.zeros((256, 3), dtype=np.uint8)
+                for i in range(min(256, int(table.GetCount()))):
+                    lut[i] = table.GetColorEntry(i)[:3]
+                self._palette_lut = lut
+                self.num_channels = 3
+                self.dtype = np.dtype("uint8")
+        if self._palette_lut is not None:
+            self.band_interpretations = ("red", "green", "blue")
+        else:
+            self.band_interpretations = tuple(
+                gdal.GetColorInterpretationName(
+                    self._ds.GetRasterBand(i + 1).GetRasterColorInterpretation()).lower()
+                for i in range(self.num_channels))
 
     @property
     def resident_bytes(self) -> int:
-        return int(self.strip_cache_capacity * self._strip_bytes())
+        # Handle-only: decoded blocks live in GDAL's own block cache (configure_gdal_cache's
+        # share of the budget), not in this process's pooled accounting.
+        return 0
+
+    def read_region(self, rect: Rect, *,
+                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
+        _check_region(rect, self.height, self.width)
+        if self._palette_lut is not None:
+            indices = self._ds.ReadAsArray(rect.x0, rect.y0, rect.width, rect.height)
+            return _serve_region(self._palette_lut[indices], rect, self._backend, target_size)
+        kwargs = {}
+        scale, resample = 1.0, None
+        if target_size is not None:
+            out_w, out_h = _check_target_size(rect, target_size)
+            kwargs = {"buf_xsize": out_w, "buf_ysize": out_h,
+                      "resample_alg": _gdal().GRIORA_Average}
+            scale, resample = out_w / rect.width, "average"
+        arr = self._ds.ReadAsArray(rect.x0, rect.y0, rect.width, rect.height, **kwargs)
+        if arr.ndim == 2:
+            arr = arr[:, :, None]
+        else:
+            # GDAL returns [C, H, W]; contiguous copy in the platform's [H, W, C] order.
+            arr = np.ascontiguousarray(np.transpose(arr, (1, 2, 0)))
+        return arr, ReadSpec(self._backend, scale=scale, resample=resample)
 
     def _release(self) -> None:
-        self._strip_cache.clear()
-        self._tif.close()
-
-    def read_region(self, rect: Rect) -> tuple[np.ndarray, ReadSpec]:
-        return self.read_window(rect.y0, rect.y1, rect.x0, rect.x1), ReadSpec("strip_tiff")
-
-    def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
-        """Decode and return the ``[y1-y0, x1-x0, num_channels]`` pixel window ``[y0:y1, x0:x1]``.
-
-        Raises ``ValueError`` for an empty or out-of-bounds window; a caller that wants a padded
-        edge tile clips the request to the raster's bounds first and pads the result separately
-        (mirrors ``image_utils.crop_pad_tile``, which this source doesn't duplicate).
-
-        A window spanning several strips is assembled from each strip sliced down to the requested
-        x-range first: a real orthomosaic's strips run the raster's full width, so concatenating
-        whole strips and discarding everything outside ``x0:x1`` would copy orders of magnitude
-        more data than the window itself needs.
-        """
-        _check_region(Rect(x0, y0, x1, y1), self.height, self.width)
-        rps = self._rows_per_strip
-        strip0 = y0 // rps
-        strip1 = (y1 - 1) // rps
-        if strip0 == strip1:
-            block = self._decode_strip(strip0)
-            row_offset = strip0 * rps
-            # A copy, not a view: `block` is a cached, reused strip array, and a caller mutating
-            # its returned window must not corrupt what a later window reads back.
-            return np.array(block[y0 - row_offset : y1 - row_offset, x0:x1])
-        # np.concatenate always allocates, so the multi-strip branch copies on its own.
-        pieces = []
-        for strip_index in range(strip0, strip1 + 1):
-            strip = self._decode_strip(strip_index)
-            row_offset = strip_index * rps
-            row_lo = max(y0, row_offset) - row_offset
-            row_hi = min(y1, row_offset + strip.shape[0]) - row_offset
-            pieces.append(strip[row_lo:row_hi, x0:x1])
-        return np.concatenate(pieces, axis=0)
-
-    def _decode_strip(self, strip_index: int) -> np.ndarray:
-        """Return strip ``strip_index``'s decoded pixel rows, from the LRU cache if a previous
-        window already decoded it, decoding from disk only on a genuine miss.
-        """
-        cached = self._strip_cache.get(strip_index)
-        if cached is not None:
-            self._strip_cache.move_to_end(strip_index)
-            return cached
-        fh = self._page.parent.filehandle
-        fh.seek(self._page.dataoffsets[strip_index])
-        data = fh.read(self._page.databytecounts[strip_index])
-        segment, _position, _shape = self._page.decode(data, strip_index)
-        decoded = segment[0]
-        self._strip_cache[strip_index] = decoded
-        if len(self._strip_cache) > self.strip_cache_capacity:
-            self._strip_cache.popitem(last=False)
-        self.strip_decode_count += 1
-        return decoded
-
-
-def derive_strip_cache_capacity(rows_per_strip: int, tile_size: int, *,
-                                overlap: float | None = None, stride: int | None = None) -> int:
-    """Strips to keep resident so a row-major tile scan decodes each strip once.
-
-    One tile row-band spans ``ceil(tile_size / rows_per_strip)`` strips, and the next band starts
-    ``stride`` rows further down, so it re-reads the ``ceil((tile_size - stride) / rows_per_strip)``
-    strips the overlap keeps in view: holding both means no strip is decoded twice. ``stride``
-    defaults to ``tiling.compute_stride(tile_size, overlap)``, the stride the tiler itself walks,
-    never a second formula for it.
-    """
-    if stride is None:
-        if overlap is None:
-            raise ValueError(
-                "deriving a strip cache capacity needs the tiling geometry: pass overlap (or the "
-                "stride it produces) alongside tile_size, or pass strip_cache_capacity outright."
-            )
-        from tcip_mcp.pipelines.data.tiling import compute_stride
-
-        stride = compute_stride(int(tile_size), float(overlap))
-    rows_per_strip = max(1, int(rows_per_strip))
-    band = math.ceil(int(tile_size) / rows_per_strip)
-    carried = math.ceil(max(0, int(tile_size) - int(stride)) / rows_per_strip)
-    return max(1, band + carried)
+        self._ds = None
 
 
 def _memory_budget_bytes() -> int:
@@ -602,6 +656,12 @@ def _memory_budget_bytes() -> int:
                 _ASSUMED_TOTAL_RAM_BYTES / 1024 ** 3,
             )
     return int(_total_ram_bytes * _RAM_BUDGET_FRACTION)
+
+
+def _pool_budget_bytes() -> int:
+    """The pooled registry's budget: what the memory budget leaves after GDAL's block-cache
+    share."""
+    return int(_memory_budget_bytes() * (1.0 - _GDAL_CACHE_SHARE))
 
 
 def photographic_container(source: "str | Path | BandGroupRef", num_channels: int) -> bool:
@@ -642,20 +702,38 @@ def open_array_source(source: "str | Path | BandGroupRef", num_channels: int) ->
 
 
 def _open_tiff(path: Path, num_channels: int) -> RasterSource:
-    """The windowed strip backend when the file's layout supports it, else a whole decode.
+    """GDAL first; tifffile's own header read cross-checks that GDAL sees the whole raster.
 
-    :class:`StripTiffSource` refuses every layout it cannot serve, so its own constructor is the
-    layout probe and there is no second implementation of those rules to drift from it. A raster
-    whose shape a whole decode would read channel-first goes whole as well, so ``load_multiband``
-    and ``image_dimensions`` keep reporting the same frame for it.
+    GDAL reads a TIFF's first IFD as the dataset, which misreads the stacked multi-page layouts
+    tifffile itself writes (a channel-last raster one row-block per page, a ``[C, H, W]`` stack
+    one band per page), so GDAL's frame is checked against the file's own axes-normalized series
+    shape (:func:`_series_frame`) and any disagreement, including an axes layout with no
+    single-frame reading, decodes whole through tifffile. An unreadable series header routes to
+    GDAL alone: tifffile could not decode such a file either. A raster whose shape a whole decode
+    would reinterpret channel-first (:func:`channel_first_reinterpreted`) also decodes whole, so
+    ``load_multiband`` and ``image_dimensions`` keep reporting the same frame for it.
     """
     try:
-        source = StripTiffSource(path)
-    except UnsupportedRasterLayout:
-        return TiffWholeSource(path, num_channels)
-    if source.height == num_channels and source.num_channels != num_channels:
-        source.close()
-        return TiffWholeSource(path, num_channels)
+        source = GdalSource(path)
+    except ValueError:
+        # GDAL cannot open it; tifffile's whole decode is the only reader left with a claim.
+        if _tiff_series_probe(path) is not None:
+            return TiffWholeSource(path, num_channels)
+        raise
+    # The raw band count, not the served one: a palette raster serves as three expanded channels
+    # while the file's own header (what tifffile reports) still says one band.
+    gdal_frame = (source.height, source.width, int(source._ds.RasterCount))
+    probe = _tiff_series_probe(path)
+    if probe is not None:
+        shape, axes = probe
+        series_frame = _series_frame(shape, axes)
+        if series_frame is None or series_frame != gdal_frame:
+            source.close()
+            return TiffWholeSource(path, num_channels)
+        # A planar (SYX) series is channel-first by its own header: no reinterpretation applies.
+        if axes != "SYX" and channel_first_reinterpreted(gdal_frame, num_channels):
+            source.close()
+            return TiffWholeSource(path, num_channels)
     return source
 
 
@@ -704,12 +782,16 @@ def pooled_source(source: "str | Path | BandGroupRef", num_channels: int) -> Ras
 
     The pool keeps recently used sources open so a caller that revisits the same raster does not
     reopen and reparse it, and evicts least-recently-used sources (closing them) once what it holds
-    exceeds this module's memory budget. It belongs to the process that filled it: a forked worker
+    exceeds this module's pool budget. It belongs to the process that filled it: a forked worker
     (a DataLoader's, say) finds it empty rather than reusing handles the parent owns.
 
     A caller must not close what this returns; the pool owns it. Nothing in the pipeline reads
     through the pool: the ``image_utils`` loaders open and close their own sources, so no caller's
     memory profile depends on it.
+
+    A GDAL dataset handle is not thread-safe, so this pool must never vend one
+    :class:`GdalSource` to two concurrent threads; a threaded consumer needs thread-keyed pooling
+    or a per-source lock before it can read through here.
     """
     global _POOL_PID, _POOL_BYTES
     pid = os.getpid()
@@ -727,7 +809,7 @@ def pooled_source(source: "str | Path | BandGroupRef", num_channels: int) -> Ras
     opened = open_raster(source, num_channels)
     _POOL[key] = opened
     _POOL_BYTES += int(opened.resident_bytes)
-    budget = _memory_budget_bytes()
+    budget = _pool_budget_bytes()
     while len(_POOL) > 1 and _POOL_BYTES > budget:
         _evicted_key, evicted = _POOL.popitem(last=False)
         _POOL_BYTES -= int(evicted.resident_bytes)
