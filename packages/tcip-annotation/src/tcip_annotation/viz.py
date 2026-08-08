@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw, ImageFont
-from tcip_annotation.sam_wrapper import column_label
 from tcip_annotation.utils import auto_orient_image
 
 if TYPE_CHECKING:
@@ -442,63 +441,77 @@ def render_candidates(
 
 def render_grid_overlay(
     image: "Image.Image | np.ndarray",
-    cols: int = 8,
-    rows: int = 6,
+    cells: list,
+    *,
+    native_size: tuple[int, int],
     output_path: str | None = None,
 ) -> str:
-    """Render display pixels with a labeled grid overlay for spatial referencing.
+    """Render display pixels with the caller's labeled reference-grid cells overlaid.
 
-    The grid uses spreadsheet-style letter columns (A-Z, then AA, AB, ...)
-    and number rows. The agent can reference cells like 'B3' or 'F5' to
-    indicate object locations, which are converted to pixel coordinates
-    via grid_to_pixel(). The grid divides the rendered frame proportionally, so a cell names the
-    same fraction of the image whatever resolution the pixels were read at, and no native size is
-    needed here.
+    ``cells`` is the caller's own cell list, each entry a mapping or an object carrying
+    ``name`` plus the half-open native-pixel rect ``x0, y0, x1, y1`` (see
+    ``sam_wrapper.cell_fields``, the shape tcip-mcp's reference grid computes and its
+    coverage route serves). Rects scale by the rendered/native ratio like the other
+    renderers, so the lines land on the true cell boundaries, which under a clamped grid
+    are non-uniform at the edges.
+
+    Boundaries always draw. A cell's name draws only when the rendered cell is at least
+    24 px on its short edge and wide enough to hold the label's own backing box: below
+    the edge floor the 14 px label covers the cell instead of labeling it, and a label
+    wider than its cell runs into the neighbor's. The floor is a display concern of this
+    renderer alone, not a platform constant.
 
     Args:
         image: Display pixels (uint8 RGB array or PIL image).
-        cols: Number of grid columns (default 8, labeled A-H).
-        rows: Number of grid rows (default 6, labeled 1-6).
+        cells: The grid's cells, names plus native-pixel rects.
+        native_size: The raster's own (width, height) the cell rects are measured in.
         output_path: Where to save.
 
     Returns:
         Output path to the rendered image.
     """
+    from tcip_annotation.sam_wrapper import cell_fields
+
+    if not cells:
+        raise ValueError("cells is empty: there is no grid to render")
     output_path = output_path or _default_output("grid_overlay")
 
     img = _rgb_frame(image)
     rw, rh = img.size
+    sx, sy = _get_scale(native_size[0], native_size[1], rw, rh)
     draw = ImageDraw.Draw(img)
 
-    cell_w = rw / cols
-    cell_h = rh / rows
-
-    grid_color = (255, 255, 0, 128)  # semi-transparent yellow
+    grid_color = (255, 255, 0)
     label_color = (255, 255, 0)
+    label_min_edge = 24
 
     font = _try_font(14)
 
-    # Draw vertical lines
-    for c in range(cols + 1):
-        x = int(c * cell_w)
-        draw.line([(x, 0), (x, rh)], fill=grid_color, width=1)
+    scaled = [(name, x0 * sx, y0 * sy, x1 * sx, y1 * sy)
+              for name, x0, y0, x1, y1 in map(cell_fields, cells)]
 
-    # Draw horizontal lines
-    for r in range(rows + 1):
-        y = int(r * cell_h)
-        draw.line([(0, y), (rw, y)], fill=grid_color, width=1)
+    for _name, x0, y0, x1, y1 in scaled:
+        # A far edge that scales to the frame size lands one past the last pixel row or
+        # column and PIL clips the whole line; pin it inside so the outer boundary renders.
+        rx1 = min(x1, rw - 1)
+        ry1 = min(y1, rh - 1)
+        draw.line([(x0, y0), (x0, ry1)], fill=grid_color, width=1)
+        draw.line([(rx1, y0), (rx1, ry1)], fill=grid_color, width=1)
+        draw.line([(x0, y0), (rx1, y0)], fill=grid_color, width=1)
+        draw.line([(x0, ry1), (rx1, ry1)], fill=grid_color, width=1)
 
-    # Label each cell at top-left corner
-    for c in range(cols):
-        for r in range(rows):
-            label = f"{column_label(c)}{r + 1}"
-            x = int(c * cell_w) + 3
-            y = int(r * cell_h) + 2
-            # Dark background for readability
-            bbox = font.getbbox(label)
-            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            draw.rectangle([x - 1, y - 1, x + tw + 3, y + th + 3], fill=(0, 0, 0, 180))
-            draw.text((x + 1, y), label, fill=label_color, font=font)
+    for name, x0, y0, x1, y1 in scaled:
+        if min(x1 - x0, y1 - y0) < label_min_edge:
+            continue
+        bbox = font.getbbox(name)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if tw + 6 > x1 - x0:
+            continue
+        x = int(x0) + 3
+        y = int(y0) + 2
+        # Dark background for readability
+        draw.rectangle([x - 1, y - 1, x + tw + 3, y + th + 3], fill=(0, 0, 0))
+        draw.text((x + 1, y), name, fill=label_color, font=font)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path)
