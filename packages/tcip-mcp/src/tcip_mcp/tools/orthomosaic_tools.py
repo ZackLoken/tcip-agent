@@ -55,10 +55,10 @@ def run_orthomosaic_inference(
 ) -> dict:
     """Tiled detection/instance_seg inference over a whole georeferenced orthomosaic.
 
-    Sources tiles from :class:`~tcip_mcp.pipelines.raster_source.StripTiffSource` (windowed,
-    strip-cached reads, its cache sized from this run's own tile geometry) rather than
-    decoding the raster whole, so this reaches a raster too large to load into memory (a
-    real 90 GB, 141130x239921px, 4-band mosaic tiles in ~11.5 minutes). Always tiled: there is
+    Sources tiles from the windowed raster layer (:func:`~tcip_mcp.pipelines.raster_source.
+    open_raster`, GDAL-backed for a GeoTIFF, its decoded blocks held in GDAL's own budgeted
+    cache) rather than decoding the raster whole, so this reaches a raster too large to load
+    into memory (a real 90 GB, 141130x239921px, 4-band mosaic). Always tiled: there is
     no untiled option, the whole point of this tool is a raster too large for one. Works for
     ``instance_seg`` the same as ``detection``: a checkpoint's masks thread through
     ``predict_tiled_from_reader`` in its tile-local-patch shape, and
@@ -179,13 +179,11 @@ def run_orthomosaic_inference(
         return {"error": gate.reason, "tile_size_validated": tile_ref}
     tile_size_validated = gate.stamp.get("tile_size")
 
-    from tcip_mcp.pipelines.raster_source import StripTiffSource
+    from tcip_mcp.pipelines.raster_source import open_raster
 
-    # The tile geometry this pass will actually walk sizes the strip cache, so a row-major scan
-    # decodes each strip once instead of re-reading it for every tile in the band.
-    with StripTiffSource(
-        raster_path, tile_size=resolved_tile, overlap=resolved_overlap,
-    ) as reader:
+    # The model's own in_chans is the channel routing hint; the reader's real band count is
+    # checked against it inside predict_tiled_from_reader before any tile is read.
+    with open_raster(raster_path, predictor.in_chans) as reader:
         result = predictor.predict_tiled_from_reader(
             reader, tile_size=resolved_tile, overlap=resolved_overlap,
             tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
