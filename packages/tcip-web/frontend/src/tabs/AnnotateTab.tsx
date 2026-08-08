@@ -7,17 +7,24 @@ import { classesApi, subjectColor, type AttributeDef } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
+import { CoverageMinimap } from "@/components/Canvas/CoverageMinimap";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
+import { useCoverageGrid } from "@/hooks/useCoverageGrid";
+import { useCoverageTracking } from "@/hooks/useCoverageTracking";
 import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
+import { useRegionServes } from "@/hooks/useRegionServes";
 import {
   compositeParams,
   defaultBandSelection,
   isPlainColourFrame,
   type BandSelection,
 } from "@/lib/bandSelection";
+import { stepUnsweptCell, type GridCell } from "@/lib/coverage";
+import type { LoadedImage } from "@/lib/imageLoader";
+import { zoomToRect } from "@/lib/viewGeometry";
 import {
   buildAnnotateShapes,
   computeViewport,
@@ -122,6 +129,9 @@ interface AnnotationShapesProps {
   selectedBoxIdx: number | null;
   selectedPointIdx: number | null;
   hoveredIdx: number | null;
+  hoveredBoxIdx: number | null;
+  hoveredDerivedIdx: number | null;
+  hoveredPointIdx: number | null;
   draggingIdx: number | undefined;
   renderLabels: boolean;
   boxStroke: number;
@@ -146,6 +156,9 @@ const AnnotationShapes = memo(function AnnotationShapes({
   selectedBoxIdx,
   selectedPointIdx,
   hoveredIdx,
+  hoveredBoxIdx,
+  hoveredDerivedIdx,
+  hoveredPointIdx,
   draggingIdx,
   renderLabels,
   boxStroke,
@@ -162,7 +175,8 @@ const AnnotationShapes = memo(function AnnotationShapes({
   if (!renderLabels) return null;
   return (
     <>
-      {/* Boxes (only the active subject in box mode) */}
+      {/* Boxes (only the active subject in box mode). The legend carries the standing
+          symbology; a shape is named on the canvas only while selected or hovered. */}
       {mode === "box" &&
         boxes.map((b, i) =>
           b.subject === activeSubject ? (
@@ -173,6 +187,7 @@ const AnnotationShapes = memo(function AnnotationShapes({
               width={boxStroke}
               labelSize={labelSize}
               label={b.subject}
+              showLabel={i === selectedBoxIdx || i === hoveredBoxIdx}
               selected={i === selectedBoxIdx}
               handleR={selVertR}
             />
@@ -194,6 +209,7 @@ const AnnotationShapes = memo(function AnnotationShapes({
               width={boxStroke}
               labelSize={labelSize}
               label={p.subject}
+              showLabel={i === hoveredDerivedIdx}
               dashed
             />
           ) : null,
@@ -219,6 +235,7 @@ const AnnotationShapes = memo(function AnnotationShapes({
             showVertices={showVerts}
             labelSize={labelSize}
             label={p.subject}
+            showLabel={selected || hovered}
           />
         );
       })}
@@ -246,6 +263,7 @@ const AnnotationShapes = memo(function AnnotationShapes({
             lineW={scaleLineW * 1.6}
             labelSize={labelSize}
             label={p.subject}
+            showLabel={selected || i === hoveredPointIdx}
           />
         );
       })}
@@ -256,6 +274,7 @@ const AnnotationShapes = memo(function AnnotationShapes({
 export function AnnotateTab() {
   const dataset = useStore((s) => s.gui.dataset);
   const view = useStore((s) => s.gui.view);
+  const setView = useStore((s) => s.setView);
   const mode = useStore((s) => s.gui.mode);
   const activeSubject = useStore((s) => s.gui.active_subject);
   const predRef = useStore((s) => s.gui.pred_reference);
@@ -300,6 +319,11 @@ export function AnnotateTab() {
   // Box editing (mirrors polygon vertex editing): a selected box shows handles; a press on
   // one starts a corner-resize / move drag. selectedBoxIdx is cleared on image change below.
   const [selectedBoxIdx, setSelectedBoxIdx] = useState<number | null>(null);
+  // Hover indices for hover-only labels, one per shape kind the canvas draws; each is written
+  // only on a transition (see processMoveRef), so a plain move re-renders nothing.
+  const [hoveredBoxIdx, setHoveredBoxIdx] = useState<number | null>(null);
+  const [hoveredDerivedIdx, setHoveredDerivedIdx] = useState<number | null>(null);
+  const [hoveredPointIdx, setHoveredPointIdx] = useState<number | null>(null);
   const boxDragRef = useRef<{ idx: number; drag: EditDrag } | null>(null);
   // Index of the point being dragged. A point has no vertices, so repositioning it is the whole
   // edit: one undo snapshot is taken when the drag starts (see onDown), like a box/vertex drag.
@@ -355,10 +379,89 @@ export function AnnotateTab() {
   const nav = useImageNav();
   usePrefetchAdjacentImages(composite.bands, composite.stretch);
 
+  // ── Coverage: lattice, region serves, session accumulation ────────────────
+  // Gated on the base serve's read facts: a base already at native needs none of it.
+  const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
+  const coverageGrid = useCoverageGrid(imgPath, baseFacts, canvas.imgWidth, canvas.imgHeight);
+  const coverageViewing = useMemo(
+    () => ({
+      bands: composite.bands,
+      stretch: composite.stretch,
+      stats_source: baseFacts?.statsSource ?? null,
+      display_bounds: baseFacts?.displayBounds ?? null,
+      base_served_size: baseFacts?.servedSize
+        ? `${baseFacts.servedSize.w}x${baseFacts.servedSize.h}`
+        : null,
+    }),
+    [composite.bands, composite.stretch, baseFacts],
+  );
+  const coverage = useCoverageTracking({
+    imagePath: imgPath,
+    datasetRoot: dataset.dataset_root,
+    subject: dataset.subject,
+    date: dataset.date,
+    grid: coverageGrid.grid,
+    cells: coverageGrid.cells,
+    view,
+    imgW: canvas.imgWidth,
+    imgH: canvas.imgHeight,
+    viewing: coverageViewing,
+  });
+  const regions = useRegionServes({
+    imagePath: imgPath,
+    imgW: canvas.imgWidth,
+    imgH: canvas.imgHeight,
+    view,
+    cells: coverageGrid.cells,
+    tileSize: coverageGrid.grid?.tile_size ?? null,
+    baseFacts,
+    composite,
+    onCellServedAtNative: coverage.noteServedAtNative,
+  });
+  const coverageMultiCell = coverageGrid.cells.length > 1;
+
+  function jumpToCell(cell: GridCell) {
+    const host = measureCanvasHost();
+    if (!host || !coverageGrid.grid) return;
+    // Half the cell stride per axis; the lattice pins overlap to 0, so stride = tile size.
+    const pad = coverageGrid.grid.tile_size / 2;
+    setView(
+      zoomToRect(
+        { x0: cell.x0, y0: cell.y0, x1: cell.x1, y1: cell.y1 },
+        { host, imgW: canvas.imgWidth, imgH: canvas.imgHeight, padX: pad, padY: pad },
+      ),
+    );
+  }
+
+  function stepCoverageCell(delta: 1 | -1) {
+    if (!coverageMultiCell) return;
+    const host = measureCanvasHost();
+    if (!host) return;
+    const v = useStore.getState().gui.view;
+    const viewport = computeViewport(v, host, canvas.imgWidth, canvas.imgHeight);
+    const center = viewport
+      ? { x: viewport.x + viewport.w / 2, y: viewport.y + viewport.h / 2 }
+      : { x: canvas.imgWidth / 2, y: canvas.imgHeight / 2 };
+    const target = stepUnsweptCell(coverageGrid.cells, coverage.swept, center, delta);
+    if (!target) {
+      useStore
+        .getState()
+        .pushToast(
+          `All ${coverageGrid.cells.length} grid cells are swept at the working zoom.`,
+          "info",
+        );
+      return;
+    }
+    jumpToCell(target);
+  }
+
   // A box selection belongs to one image; leaving it drops the selection + any drag (and ends a
   // live freehand stream so it can't bleed vertices onto the next image).
   useEffect(() => {
     setSelectedBoxIdx(null);
+    setHoveredBoxIdx(null);
+    setHoveredDerivedIdx(null);
+    setHoveredPointIdx(null);
     boxDragRef.current = null;
     pointDragRef.current = null;
     streamingRef.current = false;
@@ -732,7 +835,10 @@ export function AnnotateTab() {
     // Closing always ends a live stream: a double-click's leading clicks re-arm streaming,
     // and a stale flag would immediately stream a fresh polygon from the next mouse move.
     streamingRef.current = false;
-    if (commitCurrentPolygon()) incrementAnnotationsAdded(1);
+    if (commitCurrentPolygon()) {
+      incrementAnnotationsAdded(1);
+      coverage.noteAuthoringCommit();
+    }
   }
 
   // Flush telemetry + any unsaved edits when the tab unmounts (e.g. switching to
@@ -827,6 +933,9 @@ export function AnnotateTab() {
       },
       when: () => !isLocked,
     },
+    // Coverage cell navigation, multi-cell grids only: previous/next unswept cell.
+    { keys: "[", action: () => stepCoverageCell(-1), when: () => coverageMultiCell },
+    { keys: "]", action: () => stepCoverageCell(1), when: () => coverageMultiCell },
     { keys: "0", action: () => selectSubjectByIndex(0) },
     { keys: "1", action: () => selectSubjectByIndex(1) },
     { keys: "2", action: () => selectSubjectByIndex(2) },
@@ -1089,6 +1198,38 @@ export function AnnotateTab() {
       const hover = findHoveredPolygon([ix, iy], canvas.polygons, polygonBboxes);
       if (hover !== annotateUi.hoveredPolygonIdx) setHoveredPolygon(hover);
     }
+
+    // Box and derived-box hover join the same pass, with the box itself as the prefilter;
+    // state writes only on transitions, so a plain move re-renders nothing.
+    if (mode === "box") {
+      let hoverBox: number | null = null;
+      for (let i = canvas.boxes.length - 1; i >= 0; i--) {
+        const b = canvas.boxes[i];
+        if (b.subject === activeSubject && ix >= b.x1 && ix <= b.x2 && iy >= b.y1 && iy <= b.y2) {
+          hoverBox = i;
+          break;
+        }
+      }
+      let hoverDerived: number | null = null;
+      if (hoverBox === null) {
+        for (let i = canvas.polygons.length - 1; i >= 0; i--) {
+          if (canvas.polygons[i].subject !== activeSubject) continue;
+          const bb = polygonBboxes[i];
+          if (bb && ix >= bb[0] && iy >= bb[1] && ix <= bb[2] && iy <= bb[3]) {
+            hoverDerived = i;
+            break;
+          }
+        }
+      }
+      if (hoverBox !== hoveredBoxIdx) setHoveredBoxIdx(hoverBox);
+      if (hoverDerived !== hoveredDerivedIdx) setHoveredDerivedIdx(hoverDerived);
+    }
+
+    // Point hover: the proximity check is the whole hit test, same radius as the grab target.
+    if (mode === "point") {
+      const hover = findHitPoint([ix, iy], canvas.points, POINT_HIT_CANVAS / (view.scale || 1));
+      if (hover !== hoveredPointIdx) setHoveredPointIdx(hover);
+    }
   };
 
   const onMove = (ix: number, iy: number) => {
@@ -1144,6 +1285,7 @@ export function AnnotateTab() {
       if (box.x2 - box.x1 > MIN_BOX_SIDE && box.y2 - box.y1 > MIN_BOX_SIDE) {
         addBox(box);
         incrementAnnotationsAdded(1);
+        coverage.noteAuthoringCommit();
       }
       setDrawing(null);
     }
@@ -1173,6 +1315,7 @@ export function AnnotateTab() {
         attributes: {},
       });
       incrementAnnotationsAdded(1);
+      coverage.noteAuthoringCommit();
       return;
     }
     if (mode !== "polygon") return;
@@ -1384,6 +1527,7 @@ export function AnnotateTab() {
         bandsInfo={bandsInfo}
         bandSelection={bandSelection}
         onBandSelectionChange={setBandSelection}
+        completeWarning={coverage.completeWarning}
       />
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
@@ -1391,6 +1535,8 @@ export function AnnotateTab() {
           imagePath={imgPath}
           imgWidth={canvas.imgWidth}
           imgHeight={canvas.imgHeight}
+          regions={regions}
+          onBaseFacts={setBaseFacts}
           onStageRef={(st) => (stageRef.current = st)}
           onPixelDown={onDown}
           onPixelMove={onMove}
@@ -1442,6 +1588,9 @@ export function AnnotateTab() {
             selectedBoxIdx={selectedBoxIdx}
             selectedPointIdx={canvas.selectedPointIdx}
             hoveredIdx={hoveredIdx}
+            hoveredBoxIdx={hoveredBoxIdx}
+            hoveredDerivedIdx={hoveredDerivedIdx}
+            hoveredPointIdx={hoveredPointIdx}
             draggingIdx={draggingIdx}
             renderLabels={renderLabels}
             boxStroke={boxStroke}
@@ -1486,6 +1635,25 @@ export function AnnotateTab() {
         {!isLocked && <AttributePanel selectedBoxIdx={mode === "box" ? selectedBoxIdx : null} />}
 
         <AnnotateLegend />
+
+        {coverageMultiCell && coverageGrid.grid && (
+          <CoverageMinimap
+            imagePath={imgPath}
+            composite={composite}
+            grid={coverageGrid.grid}
+            cells={coverageGrid.cells}
+            swept={coverage.swept}
+            sweptVersion={coverage.version}
+            viewport={(() => {
+              const host = measureCanvasHost();
+              const vp = host
+                ? computeViewport(view, host, canvas.imgWidth, canvas.imgHeight)
+                : null;
+              return vp ? { x0: vp.x, y0: vp.y, x1: vp.x + vp.w, y1: vp.y + vp.h } : null;
+            })()}
+            onJump={jumpToCell}
+          />
+        )}
       </div>
     </div>
   );
@@ -1760,6 +1928,7 @@ const BoxOverlay = memo(function BoxOverlay({
   width,
   labelSize,
   label,
+  showLabel,
   selected,
   handleR,
   dashed,
@@ -1769,6 +1938,8 @@ const BoxOverlay = memo(function BoxOverlay({
   width: number;
   labelSize: number;
   label: string;
+  /** Labels are hover/selection-only; the legend is the standing symbology reference. */
+  showLabel?: boolean;
   selected?: boolean;
   handleR?: number;
   dashed?: boolean;
@@ -1804,7 +1975,7 @@ const BoxOverlay = memo(function BoxOverlay({
             strokeWidth={width * 0.6}
           />
         ))}
-      <HaloLabel x={box.x1} y={box.y1} text={label} fill={stroke} size={labelSize} />
+      {showLabel && <HaloLabel x={box.x1} y={box.y1} text={label} fill={stroke} size={labelSize} />}
     </>
   );
 });
@@ -1817,6 +1988,7 @@ const PolygonOverlay = memo(function PolygonOverlay({
   showVertices,
   labelSize,
   label,
+  showLabel,
 }: {
   polygon: PolygonShape;
   stroke: string;
@@ -1825,6 +1997,7 @@ const PolygonOverlay = memo(function PolygonOverlay({
   showVertices: boolean;
   labelSize: number;
   label: string;
+  showLabel?: boolean;
 }) {
   // Every ring of the annotation draws, in the instance's own stroke: the shape a reviewer confirms
   // is all of it, not the first contour. Selection/hover styling is shared, so touching any part
@@ -1852,7 +2025,7 @@ const PolygonOverlay = memo(function PolygonOverlay({
           )),
         )}
       {/* One label per annotation, not per ring: a two-part shape is one annotation. */}
-      <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={labelSize} />
+      {showLabel && <HaloLabel x={x0} y={y0} text={label} fill={stroke} size={labelSize} />}
     </>
   );
 });
@@ -1875,6 +2048,7 @@ const PointOverlay = memo(function PointOverlay({
   lineW,
   labelSize,
   label,
+  showLabel,
 }: {
   point: PointShape;
   stroke: string;
@@ -1884,6 +2058,7 @@ const PointOverlay = memo(function PointOverlay({
   lineW: number;
   labelSize: number;
   label: string;
+  showLabel?: boolean;
 }) {
   const { x, y } = point;
   const ticks: [number, number, number, number][] = [
@@ -1898,7 +2073,9 @@ const PointOverlay = memo(function PointOverlay({
         <Line key={`t-${i}`} points={[x1, y1, x2, y2]} stroke={stroke} strokeWidth={lineW} />
       ))}
       <Circle x={x} y={y} radius={coreR} fill={stroke} stroke="#ffffff" strokeWidth={lineW * 0.6} />
-      <HaloLabel x={x + tickOuter} y={y} text={label} fill={stroke} size={labelSize} />
+      {showLabel && (
+        <HaloLabel x={x + tickOuter} y={y} text={label} fill={stroke} size={labelSize} />
+      )}
     </>
   );
 });
