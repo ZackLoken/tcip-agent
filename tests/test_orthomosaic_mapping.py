@@ -18,7 +18,7 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     pixel_to_native,
     read_geotransform,
 )
-from tcip_mcp.pipelines.raster_source import StripTiffSource
+from tcip_mcp.pipelines.raster_source import open_raster
 
 # UTM zone 15N: real projected CRS the confirmed orthomosaic uses. Central meridian is
 # -93 degrees exactly, which gives an independently hand-verifiable reference point below.
@@ -213,8 +213,8 @@ def _windowed_multiband_tiff(path: Path, *, height: int = 96, width: int = 96,
                               channels: int = 4, rowsperstrip: int = 12) -> np.ndarray:
     """A small multi-band raster with real pixel content (not all-zero, so a from-scratch
     detector's convolutions see something), decodable by both ``load_multiband`` (the full-array
-    path) and :class:`StripTiffSource` (the windowed path): strip-based, contiguous
-    samples, no compression.
+    path) and the windowed raster layer (``open_raster``): strip-based, contiguous samples, no
+    compression.
     """
     rng = np.random.default_rng(0)
     arr = rng.integers(0, 255, size=(height, width, channels), dtype=np.uint8)
@@ -270,7 +270,7 @@ def test_predict_tiled_from_reader_matches_full_array_predict_tiled(tmp_path: Pa
     full_result = full.predict_tiled(str(path), tile_size=TILE, overlap=0.2)
 
     windowed = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
-    with StripTiffSource(path) as reader:
+    with open_raster(path, arr.shape[-1]) as reader:
         win_result = windowed.predict_tiled_from_reader(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
 
@@ -316,7 +316,7 @@ def test_predict_tiled_from_reader_and_predict_tiled_produce_matching_tiled_mask
     full_result = full.predict_tiled(str(path), tile_size=TILE, overlap=0.2)
 
     windowed = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
-    with StripTiffSource(path) as reader:
+    with open_raster(path, 3) as reader:
         win_result = windowed.predict_tiled_from_reader(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
 
@@ -345,7 +345,7 @@ def test_predict_tiled_from_reader_require_masks_false_carries_no_masks_key(tmp_
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
 
     predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
-    with StripTiffSource(path) as reader:
+    with open_raster(path, 3) as reader:
         result = predictor.predict_tiled_from_reader(
             reader, tile_size=TILE, overlap=0.2, require_masks=False)
     assert "masks" not in result
@@ -367,7 +367,7 @@ def test_predict_tiled_from_reader_tiled_mask_polygon_exports_at_correct_offset(
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
 
     predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
-    with StripTiffSource(path) as reader:
+    with open_raster(path, 3) as reader:
         result = predictor.predict_tiled_from_reader(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
     assert result["count"] > 0, "fixture assumes at least one surviving detection"
