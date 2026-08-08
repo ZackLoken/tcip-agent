@@ -67,4 +67,8 @@ def main() -> None:
     from tcip_mcp.project_paths import pin_project_root
 
     pin_project_root()
+    # Size GDAL's block cache once per process, at the entry point, never at source construction.
+    from tcip_mcp.pipelines.raster_source import configure_gdal_cache
+
+    configure_gdal_cache()
     mcp.run(transport="stdio")
