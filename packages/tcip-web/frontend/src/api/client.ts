@@ -5,6 +5,8 @@
 
 import { asJson } from "@/api/http";
 import type { CanvasStateBody } from "@/lib/canvasSync";
+import type { CoverageGridResponse } from "@/lib/coverage";
+import type { CoveragePostBody, CoverageRecord } from "@/lib/coverageTracker";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import type {
   Annotation,
@@ -14,6 +16,7 @@ import type {
   MatchesResponse,
   PredictionReference,
   ReviewImageStatus,
+  TabName,
 } from "@/store/types";
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -198,28 +201,26 @@ export const api = {
   },
 
   images: {
-    // The served width is the server's own display bound unless a caller names a narrower one:
-    // the number lives there, with the rest of the display caps, not in three callers here.
+    /** An image serve URL. The served width is the server's own display bound unless a caller
+     *  names a narrower max_width; x0/y0/x1/y1 (all four or none) request a half-open
+     *  native-pixel region of the raster. */
     url: (
       path: string,
-      opts: { max_width?: number; quality?: number; bands?: string; stretch?: string } = {},
+      opts: {
+        max_width?: number;
+        quality?: number;
+        bands?: string;
+        stretch?: string;
+        x0?: number;
+        y0?: number;
+        x1?: number;
+        y1?: number;
+      } = {},
     ) => `/api/images?${q({ path, ...opts })}`,
 
     // Per-band symbology plus the one fact that gates the band picker's visibility
     // (band_count > 3), never shown for a standard RGB dataset.
     bands: (path: string) => call<ImageBandsResponse>(`/api/images/bands?${q({ path })}`),
-
-    /** The condition the server named when it refused an image request, or null when it was not
-     *  refused for a reason a client can act on. A DOM `Image` reports only that a load failed, so
-     *  the same URL is asked again here to read the refusal off the response. */
-    refusal: async (url: string): Promise<string | null> => {
-      try {
-        const resp = await fetch(url);
-        return resp.ok ? null : resp.headers.get("X-TCIP-Image-Error");
-      } catch {
-        return null;
-      }
-    },
 
     // Build the reduced-resolution pyramid a whole view of an oversized raster is served from.
     // One build per raster: a request for one already running joins it.
@@ -231,6 +232,33 @@ export const api = {
 
     overviewJob: (job_id: string) =>
       call<OverviewJob>(`/api/images/overviews/status?${q({ job_id })}`),
+  },
+
+  coverage: {
+    // The coverage lattice for one raster, cells included. The one geometry implementation lives
+    // server-side: clients index the served cells and never re-derive them.
+    grid: (path: string) => call<CoverageGridResponse>(`/api/coverage/grid?${q({ path })}`),
+
+    // The stored per-image record for a (subject, date) bucket; date omitted = dateless bucket.
+    // The route wraps the record as {coverage}; unwrapped here so consumers get the bare record.
+    get: (path: string, subject: string, date: string | null) =>
+      call<{ coverage: CoverageRecord | null }>(`/api/coverage?${q({ path, subject, date })}`).then(
+        (body) => body.coverage,
+      ),
+
+    // Union-merged server-side on a matching grid; a mismatched grid replaces the record.
+    push: (body: CoveragePostBody) =>
+      call<{ status: string }>("/api/coverage", { method: "POST", body: JSON.stringify(body) }),
+  },
+
+  state: {
+    // Mirror the active tab into the backend GUI state (debounced by the caller) so
+    // view_gui_state reports the tab the human actually sees.
+    tab: (active_tab: TabName) =>
+      call<{ status: string }>("/api/state/tab", {
+        method: "POST",
+        body: JSON.stringify({ active_tab }),
+      }),
   },
 
   annotate: {
