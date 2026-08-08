@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { api, IMAGE_MAX_WIDTH } from "@/api/client";
+import { api } from "@/api/client";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useStore } from "@/store";
 
@@ -9,8 +9,11 @@ import { useStore } from "@/store";
  * head start. A cold image costs the server a multi-second render (first visit ever);
  * prefetching hides that behind the time spent reviewing the current frame, and also
  * populates the server's disk cache for later sessions.
+ *
+ * `bands`/`stretch` are the canvas' own request params (see `compositeParams`): warming any
+ * other render of the image warms a cache entry the canvas will never ask for.
  */
-export function usePrefetchAdjacentImages(): void {
+export function usePrefetchAdjacentImages(bands?: string, stretch?: string): void {
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const date = useStore((s) => s.gui.dataset.date);
   const imageList = useStore((s) => s.gui.dataset.image_list);
@@ -35,9 +38,9 @@ export function usePrefetchAdjacentImages(): void {
     const t = setTimeout(() => {
       for (const name of targets) {
         const img = new Image();
-        img.src = api.images.url(`${datasetRoot}/images/${date}/${name}`, IMAGE_MAX_WIDTH);
+        img.src = api.images.url(`${datasetRoot}/images/${date}/${name}`, { bands, stretch });
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [datasetRoot, date, imageList, currentIndex, filteredIndices]);
+  }, [datasetRoot, date, imageList, currentIndex, filteredIndices, bands, stretch]);
 }
