@@ -1,7 +1,13 @@
 import { create } from "zustand";
 
 import { subjectColor, type AttributeDef, type ImageStatus, type Registry } from "@/api/classes";
-import { datasetKey, loadDatasetUi, saveDatasetUi } from "@/lib/datasetUiState";
+import {
+  datasetKey,
+  loadDatasetUi,
+  loadLastTab,
+  recordLastTab,
+  saveDatasetUi,
+} from "@/lib/datasetUiState";
 import type {
   Annotation,
   Box,
@@ -67,10 +73,29 @@ export interface CanvasState {
   selectedPointIdx: number | null;
   undoStack: CanvasSnapshot[];
   redoStack: CanvasSnapshot[];
+  // True when the canvas content differs from the last save (compared by content, so a
+  // net-zero edit like draw-then-delete is clean, not "changed").
   dirty: boolean;
+  // Serialized content of the last save/load: the baseline dirty is computed against.
+  savedSignature: string;
   // Which image's labels the canvas holds: status writes must not read shapes that
   // still belong to the previous image (or a failed load) mid-flip.
   loadedImagePath: string | null;
+}
+
+/** The saved-content fields only: selection, undo stacks and draft state don't make a save. */
+function contentSignature(c: {
+  boxes: Box[];
+  polygons: PolygonShape[];
+  points: PointShape[];
+  imageAnnotations: Annotation[];
+}): string {
+  return JSON.stringify([c.boxes, c.polygons, c.points, c.imageAnnotations]);
+}
+
+/** Recompute dirty from content vs the saved baseline (drags skip this per tick; see dragVertex). */
+function withContentDirty(c: CanvasState): CanvasState {
+  return { ...c, dirty: contentSignature(c) !== c.savedSignature };
 }
 
 interface CanvasSnapshot {
@@ -95,6 +120,7 @@ const EMPTY_CANVAS: CanvasState = {
   undoStack: [],
   redoStack: [],
   dirty: false,
+  savedSignature: contentSignature({ boxes: [], polygons: [], points: [], imageAnnotations: [] }),
   loadedImagePath: null,
 };
 
@@ -355,6 +381,8 @@ export interface AppState {
   updateImageAnnotation: (idx: number, ann: Annotation) => void;
   deleteImageAnnotation: (idx: number) => void;
   markClean: () => void;
+  /** Settle dirty from content after a drag (drags flag it per tick without comparing). */
+  recomputeDirty: () => void;
 
   /** Review helpers. */
   setMatches: (matches: MatchesResponse | null) => void;
@@ -420,23 +448,10 @@ export const useStore = create<AppState>()((set, get) => ({
       banners: { ...s.banners, dismissed: new Set(s.banners.dismissed).add(id) },
     })),
 
-  // Default open: the rail is the breeder's front door to the agent. Guarded:
-  // this runs at module init, and blocked-storage browsers throw on access.
-  terminalOpen: (() => {
-    try {
-      return localStorage.getItem("tcip.terminal_open") !== "0";
-    } catch {
-      return true;
-    }
-  })(),
-  setTerminalOpen: (terminalOpen) => {
-    try {
-      localStorage.setItem("tcip.terminal_open", terminalOpen ? "1" : "0");
-    } catch {
-      /* preference just won't persist */
-    }
-    set({ terminalOpen });
-  },
+  // Always closed on open, never restored across sessions: the canvas is the front door;
+  // the rail opens on demand (the toggle, or an agent send via sendToAgentTerminal).
+  terminalOpen: false,
+  setTerminalOpen: (terminalOpen) => set({ terminalOpen }),
 
   pendingTerminalMessage: null,
   sendToAgentTerminal: (text) => {
@@ -487,6 +502,8 @@ export const useStore = create<AppState>()((set, get) => ({
       return {
         gui: {
           ...s.gui,
+          // Land on the project's last-used tab; a project never opened before gets Annotate.
+          active_tab: loadLastTab(sel.project_root) ?? "annotate",
           dataset: { ...sel, current_image_index: index },
           review: restored?.review ?? s.gui.review,
         },
@@ -518,14 +535,13 @@ export const useStore = create<AppState>()((set, get) => ({
         inDs.date !== local.dataset.date ||
         inDs.subject !== local.dataset.subject;
 
-      // Boot hydration: the browser has no dataset yet (fresh load / project open), so
-      // there is no local state to protect; adopt the persisted tab/mode/filters too,
-      // so a refresh resumes where the session left off instead of resetting to Annotate.
-      // active_subject is client-owned and absent from the backend snapshot; default it null.
+      // Boot hydration: no local dataset to protect, so adopt the persisted mode/filters/position;
+      // the tab is the client's per-project record (backend active_tab only moves on agent focus).
       if (!local.dataset.dataset_root) {
         return {
           gui: {
             ...incoming,
+            active_tab: loadLastTab(incoming.dataset.project_root) ?? "annotate",
             active_subject: incoming.active_subject ?? null,
             pred_reference: null,
           },
@@ -558,7 +574,12 @@ export const useStore = create<AppState>()((set, get) => ({
     }),
 
   setWsStatus: (wsStatus) => set({ wsStatus }),
-  setActiveTab: (active_tab) => set((s) => ({ gui: { ...s.gui, active_tab } })),
+  setActiveTab: (active_tab) =>
+    set((s) => {
+      // Write-through so the next open of this project resumes on the tab last worked in.
+      if (s.gui.dataset.project_root) recordLastTab(s.gui.dataset.project_root, active_tab);
+      return { gui: { ...s.gui, active_tab } };
+    }),
   setView: (view) => set((s) => ({ gui: { ...s.gui, view } })),
   setMode: (mode) => set((s) => ({ gui: { ...s.gui, mode } })),
   setActiveSubject: (active_subject) => set((s) => ({ gui: { ...s.gui, active_subject } })),
@@ -647,23 +668,29 @@ export const useStore = create<AppState>()((set, get) => ({
     })),
 
   loadLabelsIntoCanvas: (labels) =>
-    set(() => ({
-      canvas: {
-        imgWidth: labels.img_width,
-        imgHeight: labels.img_height,
+    set(() => {
+      const content = {
         boxes: labels.boxes.slice(),
         polygons: labels.polygons.slice(),
         points: labels.points.slice(),
         imageAnnotations: labels.imageAnnotations.slice(),
-        currentPolygon: [],
-        selectedPolygonIdx: null,
-        selectedPointIdx: null,
-        undoStack: [],
-        redoStack: [],
-        dirty: false,
-        loadedImagePath: labels.image_path || null,
-      },
-    })),
+      };
+      return {
+        canvas: {
+          imgWidth: labels.img_width,
+          imgHeight: labels.img_height,
+          ...content,
+          currentPolygon: [],
+          selectedPolygonIdx: null,
+          selectedPointIdx: null,
+          undoStack: [],
+          redoStack: [],
+          dirty: false,
+          savedSignature: contentSignature(content),
+          loadedImagePath: labels.image_path || null,
+        },
+      };
+    }),
 
   clearCanvas: () => set({ canvas: EMPTY_CANVAS }),
 
@@ -689,7 +716,7 @@ export const useStore = create<AppState>()((set, get) => ({
       const last = s.canvas.undoStack[s.canvas.undoStack.length - 1];
       if (!last) return s;
       return {
-        canvas: {
+        canvas: withContentDirty({
           ...s.canvas,
           undoStack: s.canvas.undoStack.slice(0, -1),
           redoStack: [...s.canvas.redoStack, snapshot(s.canvas)],
@@ -699,8 +726,7 @@ export const useStore = create<AppState>()((set, get) => ({
           imageAnnotations: last.imageAnnotations,
           selectedPolygonIdx: last.selectedPolygonIdx,
           selectedPointIdx: last.selectedPointIdx,
-          dirty: true,
-        },
+        }),
       };
     }),
 
@@ -709,7 +735,7 @@ export const useStore = create<AppState>()((set, get) => ({
       const last = s.canvas.redoStack[s.canvas.redoStack.length - 1];
       if (!last) return s;
       return {
-        canvas: {
+        canvas: withContentDirty({
           ...s.canvas,
           undoStack: [...s.canvas.undoStack, snapshot(s.canvas)],
           redoStack: s.canvas.redoStack.slice(0, -1),
@@ -719,14 +745,15 @@ export const useStore = create<AppState>()((set, get) => ({
           imageAnnotations: last.imageAnnotations,
           selectedPolygonIdx: last.selectedPolygonIdx,
           selectedPointIdx: last.selectedPointIdx,
-          dirty: true,
-        },
+        }),
       };
     }),
 
   addBox: (box) => {
     get().pushUndo();
-    set((s) => ({ canvas: { ...s.canvas, boxes: [...s.canvas.boxes, box], dirty: true } }));
+    set((s) => ({
+      canvas: withContentDirty({ ...s.canvas, boxes: [...s.canvas.boxes, box] }),
+    }));
   },
 
   updateBox: (idx, box) => {
@@ -734,25 +761,24 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => {
       const next = s.canvas.boxes.slice();
       next[idx] = box;
-      return { canvas: { ...s.canvas, boxes: next, dirty: true } };
+      return { canvas: withContentDirty({ ...s.canvas, boxes: next }) };
     });
   },
 
   deleteBox: (idx) => {
     get().pushUndo();
     set((s) => ({
-      canvas: {
+      canvas: withContentDirty({
         ...s.canvas,
         boxes: s.canvas.boxes.filter((_, i) => i !== idx),
-        dirty: true,
-      },
+      }),
     }));
   },
 
   addPolygon: (polygon) => {
     get().pushUndo();
     set((s) => ({
-      canvas: { ...s.canvas, polygons: [...s.canvas.polygons, polygon], dirty: true },
+      canvas: withContentDirty({ ...s.canvas, polygons: [...s.canvas.polygons, polygon] }),
     }));
   },
 
@@ -761,10 +787,12 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => {
       const next = s.canvas.polygons.slice();
       next[idx] = polygon;
-      return { canvas: { ...s.canvas, polygons: next, dirty: true } };
+      return { canvas: withContentDirty({ ...s.canvas, polygons: next }) };
     });
   },
 
+  // The drag actions fire per mousemove: a per-tick content compare would re-serialize the
+  // whole canvas at pointer rate, so they flag dirty and the release calls recomputeDirty.
   dragVertex: (polygonIdx, ringIdx, vertexIdx, point) =>
     set((s) => {
       const poly = s.canvas.polygons[polygonIdx];
@@ -793,7 +821,9 @@ export const useStore = create<AppState>()((set, get) => ({
       let sel = s.canvas.selectedPolygonIdx;
       if (sel === idx) sel = null;
       else if (sel !== null && sel > idx) sel = sel - 1;
-      return { canvas: { ...s.canvas, polygons: polys, selectedPolygonIdx: sel, dirty: true } };
+      return {
+        canvas: withContentDirty({ ...s.canvas, polygons: polys, selectedPolygonIdx: sel }),
+      };
     });
   },
 
@@ -802,7 +832,9 @@ export const useStore = create<AppState>()((set, get) => ({
 
   addPoint: (point) => {
     get().pushUndo();
-    set((s) => ({ canvas: { ...s.canvas, points: [...s.canvas.points, point], dirty: true } }));
+    set((s) => ({
+      canvas: withContentDirty({ ...s.canvas, points: [...s.canvas.points, point] }),
+    }));
   },
 
   updatePoint: (idx, point) => {
@@ -810,7 +842,7 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => {
       const next = s.canvas.points.slice();
       next[idx] = point;
-      return { canvas: { ...s.canvas, points: next, dirty: true } };
+      return { canvas: withContentDirty({ ...s.canvas, points: next }) };
     });
   },
 
@@ -830,7 +862,7 @@ export const useStore = create<AppState>()((set, get) => ({
       let sel = s.canvas.selectedPointIdx;
       if (sel === idx) sel = null;
       else if (sel !== null && sel > idx) sel = sel - 1;
-      return { canvas: { ...s.canvas, points, selectedPointIdx: sel, dirty: true } };
+      return { canvas: withContentDirty({ ...s.canvas, points, selectedPointIdx: sel }) };
     });
   },
 
@@ -857,13 +889,12 @@ export const useStore = create<AppState>()((set, get) => ({
     ]);
     get().pushUndo();
     set((s) => ({
-      canvas: {
+      canvas: withContentDirty({
         ...s.canvas,
         currentPolygon: [],
         // A hand-drawn shape is one contour: one ring (the canvas never draws a second by hand).
         polygons: [...s.canvas.polygons, { rings: [clamped], subject, attributes: {} }],
-        dirty: true,
-      },
+      }),
     }));
     return true;
   },
@@ -871,11 +902,10 @@ export const useStore = create<AppState>()((set, get) => ({
   addImageAnnotation: (subject) => {
     get().pushUndo();
     set((s) => ({
-      canvas: {
+      canvas: withContentDirty({
         ...s.canvas,
         imageAnnotations: [...s.canvas.imageAnnotations, { subject, attributes: {} }],
-        dirty: true,
-      },
+      }),
     }));
   },
 
@@ -884,22 +914,27 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => {
       const next = s.canvas.imageAnnotations.slice();
       next[idx] = ann;
-      return { canvas: { ...s.canvas, imageAnnotations: next, dirty: true } };
+      return { canvas: withContentDirty({ ...s.canvas, imageAnnotations: next }) };
     });
   },
 
   deleteImageAnnotation: (idx) => {
     get().pushUndo();
     set((s) => ({
-      canvas: {
+      canvas: withContentDirty({
         ...s.canvas,
         imageAnnotations: s.canvas.imageAnnotations.filter((_, i) => i !== idx),
-        dirty: true,
-      },
+      }),
     }));
   },
 
-  markClean: () => set((s) => ({ canvas: { ...s.canvas, dirty: false } })),
+  // A save re-baselines: the just-saved content is what future edits compare against.
+  markClean: () =>
+    set((s) => ({
+      canvas: { ...s.canvas, dirty: false, savedSignature: contentSignature(s.canvas) },
+    })),
+
+  recomputeDirty: () => set((s) => ({ canvas: withContentDirty(s.canvas) })),
 
   setMatches: (matches) => set((s) => ({ review: { ...s.review, matches } })),
   setReviewLoading: (loading) => set((s) => ({ review: { ...s.review, loading } })),
