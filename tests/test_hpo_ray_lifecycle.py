@@ -130,8 +130,12 @@ def _patch_aiohttp_availability(monkeypatch, available: bool) -> None:
 
 
 def _run_one_search() -> dict:
+    from pathlib import Path
+
     from tcip_mcp.pipelines.training.hpo import tune_search
 
+    # The autouse fixture pins TCIP_PROJECT_ROOT to each test's own tmp dir; storing there
+    # keeps every fake sweep inside the test's isolated platform state root.
     return tune_search(
         objective_fn=lambda config, report: None,
         param_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
@@ -139,6 +143,7 @@ def _run_one_search() -> dict:
         search_alg="random",
         scheduler=None,
         resources_per_trial={"cpu": 1.0, "gpu": 0.0},
+        storage_path=str(Path(os.environ["TCIP_PROJECT_ROOT"]) / "hpo"),
     )
 
 
