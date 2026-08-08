@@ -167,6 +167,31 @@ def test_capture_hook_appends_and_never_raises(tmp_path, monkeypatch):
     agent_learning_capture.main()
 
 
+def test_capture_hook_stamps_the_workspace_active_project(tmp_path, monkeypatch):
+    """Entries pool in one platform-level file, so each stamps which workspace project was
+    adopted at session end; no marker stamps None rather than guessing."""
+    from tcip_web import agent_learning_capture
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".active").write_text("hazelnut_catkins_valley-farm\n", encoding="utf-8")
+    monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
+    monkeypatch.setattr(sys, "stdin",
+                        io.StringIO(json.dumps({"session_id": "s2", "cwd": str(tmp_path)})))
+    agent_learning_capture.main()
+
+    cap = tmp_path / ".tcip" / "learning_capture.jsonl"
+    entry = json.loads(cap.read_text(encoding="utf-8").strip())
+    assert entry["active_project"] == "hazelnut_catkins_valley-farm"
+
+    (workspace / ".active").unlink()
+    monkeypatch.setattr(sys, "stdin",
+                        io.StringIO(json.dumps({"session_id": "s3", "cwd": str(tmp_path)})))
+    agent_learning_capture.main()
+    entries = [json.loads(line) for line in cap.read_text(encoding="utf-8").splitlines()]
+    assert entries[-1]["active_project"] is None
+
+
 def test_materialize_absolutizes_sessionend_capture_hook():
     from tcip_web.terminal import _materialize_fence_settings
 
