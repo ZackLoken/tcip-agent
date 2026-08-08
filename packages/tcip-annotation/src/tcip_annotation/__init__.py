@@ -33,11 +33,9 @@ from tcip_annotation.mask_contours import mask_to_polygon_rings
 from tcip_annotation.annotation_engine import AnnotationEngine
 from tcip_annotation.review_engine import ReviewEngine, ReviewDetection, ReviewContext
 
-# SAM wrapper: lazy-import safe (requires segment-anything optional dep)
-try:
-    from tcip_annotation.sam_wrapper import auto_mask, grid_to_pixel
-except ImportError:
-    pass
+# sam_wrapper's heavy engine imports all live inside function bodies, so importing from
+# it is always safe; the grid-cell helpers are pure lookups over caller-supplied cells.
+from tcip_annotation.sam_wrapper import auto_mask, cell_fields, grid_to_pixel
 
 __all__ = [
     "Annotation",
@@ -65,9 +63,11 @@ __all__ = [
     "point_in_polygon",
     # Mask -> polygon rings (shared by SAM-assisted labeling and prediction export)
     "mask_to_polygon_rings",
+    # Grid-cell helpers (pure lookups, no SAM dependency)
+    "cell_fields",
+    "grid_to_pixel",
     # SAM wrapper
     "auto_mask",
-    "grid_to_pixel",
     # Engines
     "AnnotationEngine",
     "ReviewEngine",
