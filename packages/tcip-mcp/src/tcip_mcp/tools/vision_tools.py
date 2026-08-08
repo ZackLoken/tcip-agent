@@ -62,15 +62,11 @@ def _band_preview_png(arr, stem: str) -> str:
     import numpy as np
     from PIL import Image as _Image
 
+    from tcip_mcp.pipelines.band_stats import stretch_band
+
     n_bands = arr.shape[-1]
     idxs = [0, 1, 2] if n_bands >= 3 else [0, 0, 0]
-    channels = []
-    for i in idxs:
-        band = arr[:, :, i].astype(np.float64)
-        lo, hi = float(band.min()), float(band.max())
-        stretched = (band - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(band)
-        channels.append(stretched.astype(np.uint8))
-    rgb = np.stack(channels, axis=-1)
+    rgb = np.stack([stretch_band(arr[:, :, i], "minmax", arr.dtype) for i in idxs], axis=-1)
 
     from tcip_mcp.project_paths import resolve_state
 
