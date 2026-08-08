@@ -32,8 +32,9 @@ const IDLE: OverviewBuildState = { building: false, progress: 0, error: null, re
  *
  * A raster past the server's display bound has no resolution a whole view can be served at until
  * its reduced-resolution pyramid exists; the server refuses such a request naming that condition
- * rather than decoding the raster whole. A DOM `Image` sees only that the load failed, so the URL
- * is asked again here to read which condition it was, and only that one starts a build.
+ * in X-TCIP-Image-Error. `imageError` is that already-read condition from the shared image
+ * loader's failed load (null while loading or served), so no second request is made here; only
+ * the overviews condition starts a build.
  *
  * One build is started per image URL: a build that fails is reported, never retried in a loop, and
  * one whose reported progress stops moving for `STALL_MS` is reported too rather than polled on.
@@ -41,7 +42,7 @@ const IDLE: OverviewBuildState = { building: false, progress: 0, error: null, re
 export function useOverviewBuild(
   imageUrl: string | null,
   imagePath: string | null,
-  failed: boolean,
+  imageError: string | null,
 ): OverviewBuildState {
   const [state, setState] = useState<OverviewBuildState>(IDLE);
   const attempted = useRef<string | null>(null);
@@ -51,7 +52,7 @@ export function useOverviewBuild(
   }, [imageUrl]);
 
   useEffect(() => {
-    if (!failed || !imageUrl || !imagePath) return;
+    if (imageError !== "overviews_required" || !imageUrl || !imagePath) return;
     if (attempted.current === imageUrl) return;
     attempted.current = imageUrl;
 
@@ -107,9 +108,8 @@ export function useOverviewBuild(
       }, POLL_MS);
     };
 
+    setState((s) => ({ ...s, building: true, progress: 0, error: null }));
     void (async () => {
-      if ((await api.images.refusal(imageUrl)) !== "overviews_required" || cancelled) return;
-      setState((s) => ({ ...s, building: true, progress: 0, error: null }));
       try {
         const job = await api.images.buildOverviews(imagePath);
         if (cancelled) return;
@@ -138,7 +138,7 @@ export function useOverviewBuild(
       cancelled = true;
       if (timer != null) clearTimeout(timer);
     };
-  }, [failed, imageUrl, imagePath]);
+  }, [imageError, imageUrl, imagePath]);
 
   return state;
 }
