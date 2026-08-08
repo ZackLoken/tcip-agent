@@ -9,7 +9,7 @@ location into a real-world coordinate.
 own tags rather than assuming a CRS or zone: a rotated/sheared raster, or one whose CRS this module
 can't determine, is refused rather than silently mis-georeferenced (see
 :class:`RotatedRasterError` / :class:`GeoreferencingError`). Reading the pixels themselves is
-``pipelines.raster_source``'s job (:class:`~tcip_mcp.pipelines.raster_source.StripTiffSource` for a
+``pipelines.raster_source``'s job (:class:`~tcip_mcp.pipelines.raster_source.GdalSource` for a
 raster too large to decode whole).
 """
 
