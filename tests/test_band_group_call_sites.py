@@ -165,39 +165,34 @@ def test_focus_annotate_lands_on_the_grouped_capture_by_manifest_name(grouped_da
 # ── vision_tools.py ─────────────────────────────────────────────────────────────────────
 
 
-def test_renderable_path_materializes_a_preview_for_a_group(grouped_dataset):
+def test_display_read_composites_a_group_into_rgb_pixels(grouped_dataset):
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.vision_tools import _renderable_path
+    from tcip_mcp.tools.vision_tools import _display_for_path
 
     manifest = image_dir(grouped_dataset, "2026-04-01") / "capture_001.bandgroup"
-    out = _renderable_path(str(manifest))
-    assert out != str(manifest)
-    assert Path(out).is_file()
-    assert Path(out).suffix == ".png"
+    read = _display_for_path(str(manifest))
+    assert read.pixels.shape == (16, 16, 3)
+    assert read.pixels.dtype == np.uint8
+    assert read.native_size == (16, 16)
 
+
+def test_display_read_of_a_plain_photo_is_the_files_own_pixels(grouped_dataset):
+    """A photographic file is read, never stretched: what the renderer draws on is what the
+    file holds."""
     from PIL import Image
-    with Image.open(out) as im:
-        assert im.mode == "RGB"
-        assert im.size == (16, 16)
 
-
-def test_renderable_path_is_unchanged_for_a_plain_photo(grouped_dataset):
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.tools.vision_tools import _renderable_path
+    from tcip_mcp.tools.vision_tools import _display_for_path
 
     plain = image_dir(grouped_dataset, "2026-04-01") / "plain_002.jpg"
-    assert _renderable_path(str(plain)) == str(plain)
+    read = _display_for_path(str(plain))
+    assert np.array_equal(read.pixels, np.asarray(Image.open(plain).convert("RGB")))
 
 
-def test_materialize_if_needed_unchanged_for_a_plain_3band_rgb_geotiff(tmp_path):
-    """_materialize_if_needed must not route every recognized-but-non-jpg/png extension
-    (including an ordinary 3-band RGB .tif, a pre-existing supported format) through a synthetic
-    per-channel min-max stretch before rendering. A plain 3-band RGB GeoTIFF must render through
-    the unchanged path, with PIL decoding it to the same pixel values, not a per-channel-stretched
-    reinterpretation."""
-    from PIL import Image
-
-    from tcip_mcp.tools.vision_tools import _materialize_if_needed
+def test_display_read_of_a_plain_3band_rgb_geotiff_keeps_its_true_colors(tmp_path):
+    """An ordinary 3-band RGB .tif is a real, pre-existing supported format: it must reach the
+    renderer as its own pixels, not as a synthetic per-channel min-max stretch of them."""
+    from tcip_mcp.tools.vision_tools import _display_for_path
 
     d = tmp_path / "images"
     d.mkdir()
@@ -210,33 +205,28 @@ def test_materialize_if_needed_unchanged_for_a_plain_3band_rgb_geotiff(tmp_path)
     path = d / "plain_rgb.tif"
     tifffile.imwrite(str(path), rgb, photometric="rgb")
 
-    out = _materialize_if_needed(path)
-    assert out == str(path)  # unchanged path, no synthetic preview materialized
-
-    decoded = np.asarray(Image.open(path).convert("RGB"))
-    assert np.array_equal(decoded, rgb)  # true colors, no per-channel stretch applied
+    assert np.array_equal(_display_for_path(str(path)).pixels, rgb)
 
 
-def test_materialize_if_needed_still_stretches_a_genuinely_multiband_geotiff(tmp_path):
-    """The scoping in the fix above must not swallow the real non-standard case: a >4-band
-    GeoTIFF still routes through the channel-aware materialized preview."""
-    from PIL import Image
-
-    from tcip_mcp.tools.vision_tools import _materialize_if_needed
+def test_display_read_still_stretches_a_genuinely_multiband_geotiff(tmp_path):
+    """The scoping above must not swallow the real non-standard case: a raster with more bands
+    than any true-color reading covers is composited to three display bands and stretched."""
+    from tcip_mcp.tools.vision_tools import _display_for_path
 
     d = tmp_path / "images"
     d.mkdir()
-    arr = np.zeros((5, 10, 6), dtype=np.uint16)
+    # Per-band value levels plus a within-band gradient, so a min-max stretch has something to
+    # span and its result is distinguishable from the raw values.
+    arr = np.zeros((10, 12, 6), dtype=np.uint16)
     for i in range(6):
-        arr[:, :, i] = (i + 1) * 100
+        arr[:, :, i] = (i + 1) * 100 + np.linspace(0, 300, 12, dtype=np.uint16)[None, :]
     path = d / "multiband.tif"
     tifffile.imwrite(str(path), arr)
 
-    out = _materialize_if_needed(path)
-    assert out != str(path)
-    assert Path(out).suffix == ".png"
-    with Image.open(out) as im:
-        assert im.mode == "RGB"
+    pixels = _display_for_path(str(path)).pixels
+    assert pixels.shape == (10, 12, 3)      # three display bands out of six
+    assert pixels.dtype == np.uint8
+    assert (pixels.min(), pixels.max()) == (0, 255)   # each band stretched across the range
 
 
 def test_visualize_annotations_on_a_grouped_capture(grouped_dataset):
