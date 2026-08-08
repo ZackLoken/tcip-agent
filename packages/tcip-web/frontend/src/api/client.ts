@@ -67,14 +67,6 @@ export interface SaveLabelsBody {
 
 export type SaveResult = { status: "ok"; base_mtime: string | null } | { status: "conflict" };
 
-/**
- * Cap the width of the image served to the canvas. A 20MP drone frame is ~5500px wide;
- * capping bounds GPU texture memory + decode time while staying oversampled at fit-zoom
- * (narrower images are served untouched). It is a quality/perf tradeoff: at extreme
- * zoom the image softens. Raise it, or set it undefined (full-res), to tune.
- */
-export const IMAGE_MAX_WIDTH = 4096;
-
 /** One band's symbology, as `GET /api/images/bands` reports it: a declared name where the
  *  source has one (else its 0-index as a string), the sensor's own wavelength when known. */
 export interface ImageBandInfo {
@@ -83,11 +75,34 @@ export interface ImageBandInfo {
   dtype: string;
   min: number;
   max: number;
+  /** What the band holds ("red", "alpha", and the rest), where the server read it from the file.
+   *  Absent where nothing knows, which is not the same as a band with no interpretation. */
+  interpretation?: string;
 }
 
 export interface ImageBandsResponse {
   band_count: number;
   bands: ImageBandInfo[];
+  /** Whether the reported ranges came from part of the raster's pixels rather than all of them.
+   *  Absent for the <=3-band early return, which reports no per-band stats at all. */
+  sampled?: boolean;
+  /** The share of the raster's pixels those stats were read from (1.0 when they are exact). */
+  pixel_fraction?: number;
+  /** The seed that chose the sample, so the same numbers can be reproduced. */
+  seed?: number;
+  /** Present when the ranges were read off an overview level instead of native pixels: the
+   *  served/native resolution ratio they were read at. Those bounds describe display scale. */
+  overview_scale?: number;
+}
+
+/** A raster's overview build, as the build/status endpoints report it. Without the pyramid, a
+ *  raster past the server's display bound has no resolution a whole view can be served at. */
+export interface OverviewJob {
+  job_id: string;
+  path: string;
+  status: "pending" | "running" | "completed" | "failed";
+  progress: number;
+  error: string | null;
 }
 
 export interface ProjectSummary {
@@ -183,12 +198,39 @@ export const api = {
   },
 
   images: {
-    url: (path: string, max_width?: number, quality?: number, bands?: string, stretch?: string) =>
-      `/api/images?${q({ path, max_width, quality, bands, stretch })}`,
+    // The served width is the server's own display bound unless a caller names a narrower one:
+    // the number lives there, with the rest of the display caps, not in three callers here.
+    url: (
+      path: string,
+      opts: { max_width?: number; quality?: number; bands?: string; stretch?: string } = {},
+    ) => `/api/images?${q({ path, ...opts })}`,
 
     // Per-band symbology plus the one fact that gates the band picker's visibility
     // (band_count > 3), never shown for a standard RGB dataset.
     bands: (path: string) => call<ImageBandsResponse>(`/api/images/bands?${q({ path })}`),
+
+    /** The condition the server named when it refused an image request, or null when it was not
+     *  refused for a reason a client can act on. A DOM `Image` reports only that a load failed, so
+     *  the same URL is asked again here to read the refusal off the response. */
+    refusal: async (url: string): Promise<string | null> => {
+      try {
+        const resp = await fetch(url);
+        return resp.ok ? null : resp.headers.get("X-TCIP-Image-Error");
+      } catch {
+        return null;
+      }
+    },
+
+    // Build the reduced-resolution pyramid a whole view of an oversized raster is served from.
+    // One build per raster: a request for one already running joins it.
+    buildOverviews: (path: string) =>
+      call<OverviewJob>("/api/images/overviews", {
+        method: "POST",
+        body: JSON.stringify({ path }),
+      }),
+
+    overviewJob: (job_id: string) =>
+      call<OverviewJob>(`/api/images/overviews/status?${q({ job_id })}`),
   },
 
   annotate: {
