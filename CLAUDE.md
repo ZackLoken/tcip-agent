@@ -280,6 +280,12 @@ longer fragments `.tcip/`.
   bloat, not tool shortage. Add a tool only for an audit seam, long-running
   infrastructure, or domain knowledge the agent lacks.
 - Crop traits are controlled vocabulary in `.github/skills/crops/`; verify there before asserting.
+- Search with both engines: the claude-context semantic index (`mcp__claude-context__search_code`)
+  alongside grep, and give subagent briefs the same instruction. Semantic search finds
+  concept-shaped matches (consumers of a mechanism, "anything else that re-derives this") that a
+  literal grep misses; grep stays the authority for exact file:line citations. The index is
+  rebuilt at each phase/session end, so it reflects the last committed state and lags uncommitted
+  worktree edits; freshly written code is grep-only.
 - Match surrounding code style. (Comment/emphasis style is a global rule, see global `CLAUDE.md`;
   this bullet is this repo's own elaboration of it, not a duplicate; read both.)
 - **Every piece of prose this repo ships is for whoever reads it next, never a changelog of the work
