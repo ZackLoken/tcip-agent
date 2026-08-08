@@ -1,13 +1,12 @@
 """The raster reading layer: which backend serves which source, and what each one guarantees.
 
-Covers the factory's dispatch, the windowed strip backend's pixel and caching behavior, the
-copy-on-return and bounds contracts every backend shares, the strip-cache capacity derivation, and
-the process-local pool of open sources.
+Covers the factory's dispatch (GDAL-first with the tifffile series cross-check), the windowed
+GDAL backend's pixel behavior, the copy-on-return, bounds and target-size contracts every backend
+shares, and the process-local pool of open sources.
 """
 
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
 
@@ -16,18 +15,7 @@ import pytest
 import tifffile
 
 from tcip_mcp.pipelines import raster_source
-from tcip_mcp.pipelines.raster_source import (
-    BandGroupSource,
-    NpySource,
-    NpzSource,
-    PhotographicSource,
-    Rect,
-    StripTiffSource,
-    TiffWholeSource,
-    UnsupportedRasterLayout,
-    derive_strip_cache_capacity,
-    open_raster,
-)
+from tcip_mcp.pipelines.raster_source import Rect, TiffWholeSource, open_raster
 
 
 @pytest.fixture(autouse=True)
@@ -58,6 +46,15 @@ def _write_striped_tiff(path: Path, arr: np.ndarray, *, rowsperstrip: int) -> No
     tifffile.imwrite(str(path), arr, **kwargs)
 
 
+def _write_planar_tiff(path: Path, arr: np.ndarray, *, rowsperstrip: int = 8) -> None:
+    """A genuine planar (band-separate) file: tifffile takes the pixels channel-first."""
+    extrasamples = ["unassalpha"] * (arr.shape[-1] - 3) if arr.shape[-1] > 3 else None
+    kwargs = {"photometric": "rgb", "planarconfig": "separate", "rowsperstrip": rowsperstrip}
+    if extrasamples:
+        kwargs["extrasamples"] = extrasamples
+    tifffile.imwrite(str(path), np.moveaxis(arr, -1, 0), **kwargs)
+
+
 # ── One source per backend ───────────────────────────────────────────────
 
 
@@ -69,15 +66,15 @@ def _photographic(tmp_path: Path):
     return path, 3
 
 
-def _strip_tiff(tmp_path: Path):
-    path = tmp_path / "strip.tif"
+def _gdal_tiff(tmp_path: Path):
+    path = tmp_path / "striped.tif"
     _write_striped_tiff(path, _distinctive_array(23, 17), rowsperstrip=4)
     return path, 3
 
 
 def _whole_tiff(tmp_path: Path):
-    """A channel-last 5-band raster: tifffile stores it one row-block per page, which the strip
-    backend refuses, so the factory sends it to the whole decode."""
+    """A channel-last 5-band raster: tifffile stores it one row-block per page, a stacked layout
+    GDAL's first-IFD data model misreads, so the factory sends it to the whole decode."""
     path = tmp_path / "multipage.tif"
     tifffile.imwrite(str(path), _distinctive_array(20, 14, channels=5))
     return path, 5
@@ -108,13 +105,14 @@ def _band_group(tmp_path: Path):
     return read_band_group_manifest(manifest), 2
 
 
+# Expected backends by attribute name, resolved at test time.
 _BACKENDS = {
-    "band_group": (_band_group, BandGroupSource),
-    "npy": (_npy, NpySource),
-    "npz": (_npz, NpzSource),
-    "photographic": (_photographic, PhotographicSource),
-    "strip_tiff": (_strip_tiff, StripTiffSource),
-    "tiff_whole": (_whole_tiff, TiffWholeSource),
+    "band_group": (_band_group, "BandGroupSource"),
+    "gdal_tiff": (_gdal_tiff, "GdalSource"),
+    "npy": (_npy, "NpySource"),
+    "npz": (_npz, "NpzSource"),
+    "photographic": (_photographic, "PhotographicSource"),
+    "tiff_whole": (_whole_tiff, "TiffWholeSource"),
 }
 
 
@@ -123,10 +121,10 @@ _BACKENDS = {
 
 @pytest.mark.parametrize("name", sorted(_BACKENDS))
 def test_open_raster_picks_the_backend_each_source_needs(tmp_path: Path, name: str) -> None:
-    build, expected = _BACKENDS[name]
+    build, expected_name = _BACKENDS[name]
     source, num_channels = build(tmp_path)
     with open_raster(source, num_channels) as src:
-        assert isinstance(src, expected)
+        assert isinstance(src, getattr(raster_source, expected_name))
 
 
 def test_a_photographic_extension_at_a_count_pil_has_no_mode_for_refuses(tmp_path: Path) -> None:
@@ -137,37 +135,63 @@ def test_a_photographic_extension_at_a_count_pil_has_no_mode_for_refuses(tmp_pat
         open_raster(source, 5)
 
 
-@pytest.mark.parametrize("layout", ["multipage", "tiled", "planar"])
-def test_a_tiff_layout_the_strip_backend_refuses_still_reads_whole(tmp_path: Path, layout: str) -> None:
-    """Every layout ``StripTiffSource`` will not serve routes to the whole decode and returns
-    exactly what ``tifffile.imread`` does, rather than being refused outright."""
-    arr = _distinctive_array(32, 40, channels=5 if layout == "multipage" else 3)
+@pytest.mark.parametrize("layout", ["striped", "tiled", "planar"])
+def test_single_dataset_tiff_layouts_are_served_windowed(tmp_path: Path, layout: str) -> None:
+    """Striped, internally tiled, and planar (band-separate) single-dataset TIFFs all read
+    through the windowed GDAL backend, and the pixels served are the source array's own
+    regardless of the on-disk layout."""
+    arr = _distinctive_array(32, 40, channels=3)
     path = tmp_path / f"{layout}.tif"
-    if layout == "multipage":
-        tifffile.imwrite(str(path), arr)
+    if layout == "striped":
+        _write_striped_tiff(path, arr, rowsperstrip=8)
     elif layout == "tiled":
         tifffile.imwrite(str(path), arr, photometric="rgb", tile=(16, 16))
     else:
-        tifffile.imwrite(str(path), arr, photometric="rgb", planarconfig="separate", rowsperstrip=8)
+        _write_planar_tiff(path, arr)
 
-    with open_raster(path, arr.shape[-1]) as src:
+    with open_raster(path, 3) as src:
+        assert isinstance(src, raster_source.GdalSource)
+        region, spec = src.read_region(Rect(0, 0, src.width, src.height))
+    assert np.array_equal(region, arr)
+    assert (spec.backend, spec.scale, spec.resample) == ("gdal", 1.0, None)
+
+
+def test_a_planar_raster_read_at_a_mismatched_count_still_reads_as_stored(tmp_path: Path) -> None:
+    """A planar file is channel-first by its own header (tifffile's SYX series axes), so its real
+    frame and band count survive whatever channel count the caller routes with; it must be served
+    windowed in that frame, never whole-decoded into the raw band-first array."""
+    arr = _distinctive_array(32, 40, channels=4)
+    path = tmp_path / "planar4.tif"
+    _write_planar_tiff(path, arr)
+
+    with open_raster(path, 3) as src:
+        assert (src.width, src.height, src.num_channels) == (40, 32, 4)
+        region, _spec = src.read_region(Rect(0, 0, 40, 32))
+    assert np.array_equal(region, arr)
+
+
+def test_a_stacked_multipage_tiff_still_reads_whole(tmp_path: Path) -> None:
+    """The multi-page stacks tifffile writes (one row-block or one band per page) have no
+    single-frame GDAL reading, so they decode whole and return exactly what ``tifffile.imread``
+    does, rather than being refused or served from the first page's wrong geometry."""
+    path, num_channels = _whole_tiff(tmp_path)
+    with tifffile.TiffFile(str(path)) as tif:
+        assert len(tif.pages) > 1  # the layout under test, not a single-page file
+    with open_raster(path, num_channels) as src:
         assert isinstance(src, TiffWholeSource)
         region, _spec = src.read_region(Rect(0, 0, src.width, src.height))
     assert np.array_equal(region, tifffile.imread(str(path)))
 
 
-def test_a_shape_the_whole_decode_would_transpose_is_not_served_by_strips(tmp_path: Path) -> None:
+def test_a_shape_the_whole_decode_would_transpose_is_not_served_windowed(tmp_path: Path) -> None:
     """``load_multiband`` reads a channel-first-looking shape into channel-last order and
-    ``image_dimensions`` applies the same heuristic to the header, so a raster the heuristic fires
-    on has to go whole; served by strips it would report one frame and measure as another."""
+    ``image_dimensions`` applies the same reading to the header, so a raster the reinterpretation
+    fires on has to go whole; served windowed it would report one frame and measure as another."""
     from tcip_mcp.pipelines.image_utils import image_dimensions
 
     path = tmp_path / "three_row.tif"
     arr = _distinctive_array(3, 20, channels=4)
     tifffile.imwrite(str(path), arr, photometric="rgb", extrasamples=["unassalpha"], rowsperstrip=1)
-
-    with StripTiffSource(path) as strip:
-        assert (strip.height, strip.num_channels) == (3, 4)  # the strip backend would serve it
 
     with open_raster(path, 3) as src:
         assert isinstance(src, TiffWholeSource)
@@ -175,17 +199,25 @@ def test_a_shape_the_whole_decode_would_transpose_is_not_served_by_strips(tmp_pa
     assert region.shape == (20, 4, 3)
     assert image_dimensions(path, 3) == (4, 20)
 
-    # At the count the heuristic leaves alone, the windowed backend serves it as it always did.
+    # At the count the reinterpretation leaves alone, the windowed backend serves it as stored.
     with open_raster(path, 4) as src:
-        assert isinstance(src, StripTiffSource)
+        assert isinstance(src, raster_source.GdalSource)
+        assert (src.height, src.width, src.num_channels) == (3, 20, 4)
 
 
-def test_every_read_here_is_served_at_full_resolution(tmp_path: Path) -> None:
-    """No backend in this module serves an overview, so every ``ReadSpec`` says so."""
-    source, num_channels = _strip_tiff(tmp_path)
+def test_an_unreadable_tiff_fails_naming_the_file(tmp_path: Path) -> None:
+    path = tmp_path / "broken.tif"
+    path.write_bytes(b"II*\x00garbage that is not a real tiff")
+    with pytest.raises(ValueError, match=r"broken\.tif"):
+        open_raster(path, 3)
+
+
+def test_a_plain_read_serves_full_resolution(tmp_path: Path) -> None:
+    """Without a ``target_size`` every read is native resolution and the ``ReadSpec`` says so."""
+    source, num_channels = _gdal_tiff(tmp_path)
     with open_raster(source, num_channels) as src:
         _region, spec = src.read_region(Rect(0, 0, 4, 4))
-    assert (spec.backend, spec.scale, spec.resample) == ("strip_tiff", 1.0, None)
+    assert (spec.backend, spec.scale, spec.resample) == ("gdal", 1.0, None)
 
 
 # ── The contracts every backend shares ───────────────────────────────────
@@ -225,7 +257,7 @@ def test_read_window_full_extent_matches_source(tmp_path: Path) -> None:
     arr = _distinctive_array(23, 17)
     path = tmp_path / "win.tif"
     _write_striped_tiff(path, arr, rowsperstrip=4)
-    with StripTiffSource(path) as source:
+    with open_raster(path, 3) as source:
         assert source.height == 23
         assert source.width == 17
         assert source.num_channels == 3
@@ -233,20 +265,24 @@ def test_read_window_full_extent_matches_source(tmp_path: Path) -> None:
     assert np.array_equal(window, arr)
 
 
-def test_read_window_spans_multiple_internal_strips(tmp_path: Path) -> None:
+def test_read_window_is_rows_first_and_matches_the_numpy_slice(tmp_path: Path) -> None:
+    """``read_window(y0, y1, x0, x1)`` is exactly ``arr[y0:y1, x0:x1]``: the row-first argument
+    order the tiled inference loop uses, against ``Rect``'s x-first order, on a deliberately
+    asymmetric window a silent transposition could not survive."""
     arr = _distinctive_array(23, 17)
     path = tmp_path / "win.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=4)  # strips at rows 0,4,8,12,16,20
-    with StripTiffSource(path) as source:
-        window = source.read_window(3, 13, 2, 10)  # spans strip boundaries at rows 4,8,12
+    _write_striped_tiff(path, arr, rowsperstrip=4)
+    with open_raster(path, 3) as source:
+        window = source.read_window(3, 13, 2, 10)
+    assert window.shape == (10, 8, 3)
     assert np.array_equal(window, arr[3:13, 2:10])
 
 
 def test_read_window_partial_edge_window(tmp_path: Path) -> None:
-    arr = _distinctive_array(23, 17)  # 23 rows at rowsperstrip=4: the last strip holds 3 rows
+    arr = _distinctive_array(23, 17)
     path = tmp_path / "win.tif"
     _write_striped_tiff(path, arr, rowsperstrip=4)
-    with StripTiffSource(path) as source:
+    with open_raster(path, 3) as source:
         window = source.read_window(19, 23, 10, 17)
     assert np.array_equal(window, arr[19:23, 10:17])
 
@@ -255,19 +291,19 @@ def test_read_window_out_of_bounds_raises(tmp_path: Path) -> None:
     arr = _distinctive_array(10, 10)
     path = tmp_path / "win.tif"
     _write_striped_tiff(path, arr, rowsperstrip=4)
-    with StripTiffSource(path) as source:
+    with open_raster(path, 3) as source:
         with pytest.raises(ValueError):
             source.read_window(0, 11, 0, 10)
 
 
-def test_windowed_and_whole_decodes_of_one_strip_tiff_agree(tmp_path: Path) -> None:
+def test_windowed_and_whole_decodes_of_one_tiff_agree(tmp_path: Path) -> None:
     """The load-bearing equivalence between the two TIFF backends: the same file assembled from
     windowed reads, decoded whole, and read by tifffile itself must be the same pixels."""
     arr = _distinctive_array(23, 17)
     path = tmp_path / "win.tif"
     _write_striped_tiff(path, arr, rowsperstrip=4)
 
-    with StripTiffSource(path) as source:
+    with open_raster(path, 3) as source:
         bands = [source.read_window(y0, min(y0 + 5, 23), 0, 17) for y0 in range(0, 23, 5)]
     assembled = np.concatenate(bands, axis=0)
 
@@ -278,173 +314,136 @@ def test_windowed_and_whole_decodes_of_one_strip_tiff_agree(tmp_path: Path) -> N
     assert np.array_equal(decoded, tifffile.imread(str(path)))
 
 
-def test_read_window_caches_strips_across_a_row_band(tmp_path: Path) -> None:
-    """The access pattern a real tiling loop produces: many windows at the same ``y0``, scanning
-    across the width, each spanning the same handful of strips as its row-band neighbours. Each
-    strip must be decoded from disk once, not once per window that touches it.
-    """
-    height, width, rowsperstrip, tile = 64, 200, 8, 20
-    arr = _distinctive_array(height, width)
-    path = tmp_path / "win.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=rowsperstrip)
-    with StripTiffSource(path) as source:
-        y0, y1 = 8, 24  # spans strips 1..2 (rows 8-15, 16-23) exactly
-        windows = [
-            source.read_window(y0, y1, x0, min(x0 + tile, width))
-            for x0 in range(0, width, tile)
-        ]
-        assert len(windows) > 3  # a real row-band, not a single tile
-        assert source.strip_decode_count == 2  # the row-band's two strips, decoded exactly once
-        for window, x0 in zip(windows, range(0, width, tile)):
-            x1 = min(x0 + tile, width)
-            assert np.array_equal(window, arr[y0:y1, x0:x1])
-
-        # Advancing to the next row-band's own strips (3, 4) is still a genuine miss for both.
-        source.read_window(y1, y1 + (y1 - y0), 0, tile)
-        assert source.strip_decode_count == 4
-
-
 def test_read_window_returns_a_copy_not_a_cached_view(tmp_path: Path) -> None:
-    """A caller that mutates its returned window must not corrupt what a later window, served
-    from the same cached strip, reads back."""
+    """A caller that mutates its returned window must not corrupt what a later read of the same
+    window, served from whatever cache the backend keeps, reads back."""
     arr = _distinctive_array(23, 17)
     path = tmp_path / "win.tif"
     _write_striped_tiff(path, arr, rowsperstrip=4)
-    with StripTiffSource(path) as source:
+    with open_raster(path, 3) as source:
         first = source.read_window(0, 4, 0, 17)
         first[:] = 255
         second = source.read_window(0, 4, 0, 17)
     assert np.array_equal(second, arr[0:4, 0:17])
 
 
-def test_strip_source_refuses_tiled_tiff(tmp_path: Path) -> None:
-    arr = _distinctive_array(64, 64)
-    path = tmp_path / "tiled.tif"
-    tifffile.imwrite(str(path), arr, photometric="rgb", tile=(16, 16))
-    with pytest.raises(UnsupportedRasterLayout):
-        StripTiffSource(path)
-
-
-def test_strip_source_refuses_multipage_row_block_tiff(tmp_path: Path) -> None:
-    """tifffile stores a plain channel-last N-band raster one row-block per page, so ``pages[0]``
-    of this 64x80x5 raster describes a single row-block (height 80, width 5, one sample), not the
-    raster. A source built from that page's shape would silently serve windows sliced from the
-    wrong geometry, so construction must refuse instead."""
-    arr = np.zeros((64, 80, 5), dtype=np.uint8)
-    path = tmp_path / "rowblock.tif"
-    tifffile.imwrite(str(path), arr)
-    with tifffile.TiffFile(str(path)) as tif:
-        assert len(tif.pages) > 1  # the layout under test, not a single-page file
-        assert tuple(tif.series[0].shape) == (64, 80, 5)
-    with pytest.raises(UnsupportedRasterLayout):
-        StripTiffSource(path)
-
-
-def test_strip_source_accepts_single_page_grayscale(tmp_path: Path) -> None:
-    """A 1-sample raster's series shape is 2-D (H, W) while the page reports samplesperpixel=1;
-    the whole-raster cross-check must treat those as agreeing, not refuse a valid layout."""
+def test_a_single_band_raster_serves_with_a_trailing_channel_axis(tmp_path: Path) -> None:
     arr = (np.arange(23 * 17, dtype=np.uint16) % 256).astype(np.uint8).reshape(23, 17)
     path = tmp_path / "gray.tif"
     tifffile.imwrite(str(path), arr, rowsperstrip=4)
-    with StripTiffSource(path) as source:
+    with open_raster(path, 1) as source:
         assert (source.height, source.width, source.num_channels) == (23, 17, 1)
         window = source.read_window(3, 13, 2, 10)
-    assert np.array_equal(np.squeeze(window), arr[3:13, 2:10])
+    assert window.shape == (10, 8, 1)
+    assert np.array_equal(np.squeeze(window, -1), arr[3:13, 2:10])
 
 
-# ── Strip cache capacity ─────────────────────────────────────────────────
+def test_a_palette_tiff_expands_through_its_color_table_like_pil(tmp_path: Path) -> None:
+    """A palette-color TIFF must serve the colors its own table names, exactly the pixels PIL's
+    palette decode produced, never the raw one-band table indices."""
+    from PIL import Image
+
+    indices = (np.arange(23 * 17, dtype=np.uint16) % 256).astype(np.uint8).reshape(23, 17)
+    img = Image.fromarray(indices, mode="P")
+    palette = []
+    for i in range(256):
+        palette += [i, 255 - i, (i * 7) % 256]
+    img.putpalette(palette)
+    path = tmp_path / "palette.tif"
+    img.save(str(path))
+
+    expected = np.asarray(img.convert("RGB"))
+    with open_raster(path, 3) as src:
+        region, _spec = src.read_region(Rect(0, 0, src.width, src.height))
+        window = src.read_window(3, 13, 2, 10)
+        # Pixel identity first: it is the measurement claim, whatever backend served it.
+        assert np.array_equal(region, expected)
+        assert np.array_equal(window, expected[3:13, 2:10])
+        assert isinstance(src, raster_source.GdalSource)
+        assert (src.num_channels, src.dtype) == (3, np.dtype("uint8"))
 
 
-def test_derive_strip_cache_capacity_holds_a_band_and_what_the_overlap_carries() -> None:
-    from tcip_mcp.pipelines.data.tiling import compute_stride
+def test_band_interpretations_name_each_served_channel(tmp_path: Path) -> None:
+    """A consumer (the web serving layer) tells an alpha band from a spectral one through the
+    file's own declared color interpretations, never by guessing from the channel count; a
+    palette source reports the three channels its expansion actually serves."""
+    from PIL import Image
 
-    # 640px tiles over 8-row strips: 80 strips per row-band, plus the 16 the 0.2 overlap re-reads.
-    assert derive_strip_cache_capacity(8, 640, overlap=0.2) == 96
-    assert derive_strip_cache_capacity(8, 640, stride=compute_stride(640, 0.2)) == 96
-    # No overlap carries nothing forward: the row-band's own strips are the whole requirement.
-    assert derive_strip_cache_capacity(8, 640, overlap=0.0) == 80
+    rgba_path = tmp_path / "rgba.tif"
+    _write_striped_tiff(rgba_path, _distinctive_array(8, 8, channels=4), rowsperstrip=4)
+    with open_raster(rgba_path, 4) as src:
+        assert src.band_interpretations == ("red", "green", "blue", "alpha")
 
-
-def test_deriving_a_capacity_without_a_geometry_refuses() -> None:
-    with pytest.raises(ValueError, match="tiling geometry"):
-        derive_strip_cache_capacity(8, 640)
-
-
-def test_a_tile_geometry_sizes_the_cache_and_an_explicit_capacity_wins(tmp_path: Path) -> None:
-    arr = _distinctive_array(64, 40)
-    path = tmp_path / "cap.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=1)
-
-    with StripTiffSource(path, tile_size=32, overlap=0.2) as derived:
-        assert derived.strip_cache_capacity == derive_strip_cache_capacity(1, 32, overlap=0.2)
-    with StripTiffSource(path, strip_cache_capacity=7, tile_size=32, overlap=0.2) as explicit:
-        assert explicit.strip_cache_capacity == 7
-    with StripTiffSource(path) as hintless:
-        assert hintless.strip_cache_capacity == raster_source.DEFAULT_STRIP_CACHE_CAPACITY
+    indices = (np.arange(64, dtype=np.uint16) % 256).astype(np.uint8).reshape(8, 8)
+    img = Image.fromarray(indices, mode="P")
+    img.putpalette([v for i in range(256) for v in (i, 255 - i, (i * 7) % 256)])
+    palette_path = tmp_path / "palette.tif"
+    img.save(str(palette_path))
+    with open_raster(palette_path, 3) as src:
+        assert src.num_channels == 3
+        assert src.band_interpretations == ("red", "green", "blue")
 
 
-def test_a_derived_capacity_over_the_memory_budget_is_capped_and_says_so(
-    tmp_path: Path, monkeypatch, caplog,
-) -> None:
-    """A geometry needing more memory than the budget allows is served at the cap, with the
-    re-decode cost that buys named in the log, never silently clamped and never refused."""
-    arr = _distinctive_array(64, 40)
-    path = tmp_path / "cap.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=1)
-    strip_bytes = 40 * 3
-    monkeypatch.setattr(raster_source, "_memory_budget_bytes", lambda: 4 * strip_bytes)
-
-    with caplog.at_level(logging.WARNING, logger="tcip_mcp.pipelines.raster_source"):
-        with StripTiffSource(path, tile_size=32, overlap=0.2) as source:
-            assert source.strip_cache_capacity == 4
-    assert "capping at 4 strips" in caplog.text
-
-    # An explicit capacity is the caller's own call, budget or not.
-    with StripTiffSource(path, strip_cache_capacity=40) as explicit:
-        assert explicit.strip_cache_capacity == 40
+def test_a_raster_serves_its_own_dtype(tmp_path: Path) -> None:
+    arr = (np.arange(64, dtype=np.uint16) * 500).reshape(8, 8)
+    path = tmp_path / "u16.tif"
+    tifffile.imwrite(str(path), arr, rowsperstrip=4)
+    with open_raster(path, 1) as src:
+        assert src.dtype == np.dtype("uint16")
+        region, _spec = src.read_region(Rect(0, 0, 8, 8))
+    assert region.dtype == np.dtype("uint16")
+    assert np.array_equal(region[:, :, 0], arr)
 
 
-def _row_major_scan(source: StripTiffSource, tile_size: int, stride: int) -> None:
-    """Read every tile of a row-major sliding-window scan, the order a tiled inference pass walks."""
-    from tcip_mcp.pipelines.data.tiling import tile_positions
-
-    for tile_x, tile_y in tile_positions(source.height, source.width, tile_size, stride):
-        source.read_window(tile_y, min(tile_y + tile_size, source.height),
-                           tile_x, min(tile_x + tile_size, source.width))
+# ── target_size reads ────────────────────────────────────────────────────
 
 
-def _amplification_raster(tmp_path: Path) -> tuple[Path, int]:
-    """A raster whose tile row-band needs more strips than the hint-less default cache holds:
-    one row per strip, and a width of several tiles so a band is really re-scanned."""
-    path = tmp_path / "scan.tif"
-    _write_striped_tiff(path, _distinctive_array(100, 300), rowsperstrip=1)
-    return path, 100
+def test_a_target_size_read_downsamples_through_gdal(tmp_path: Path) -> None:
+    """A GDAL-served ``target_size`` read returns the reduced buffer directly, with the
+    ``ReadSpec`` recording the requested scale and average resampling; at an exact 2x decimation
+    every output pixel is its 2x2 block's mean."""
+    arr = _distinctive_array(32, 40)
+    path = tmp_path / "down.tif"
+    _write_striped_tiff(path, arr, rowsperstrip=8)
+    with open_raster(path, 3) as src:
+        region, spec = src.read_region(Rect(0, 0, 40, 32), target_size=(20, 16))
+    assert region.shape == (16, 20, 3)
+    assert (spec.backend, spec.scale, spec.resample) == ("gdal", 0.5, "average")
+    blocks = arr.reshape(16, 2, 20, 2, 3).mean(axis=(1, 3))
+    assert np.allclose(region, blocks, atol=1.0)
 
 
-def test_a_row_major_scan_at_a_derived_capacity_decodes_each_strip_once(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.data.tiling import compute_stride
+def test_a_target_size_read_downsamples_an_array_backend_by_area(tmp_path: Path) -> None:
+    """A backend with no overview machinery slices native and area-downsamples, recording the
+    same requested scale with its own resampling name."""
+    arr = _distinctive_array(32, 40, channels=5)
+    path = tmp_path / "bands.npy"
+    np.save(str(path), arr)
+    with open_raster(path, 5) as src:
+        region, spec = src.read_region(Rect(0, 0, 40, 32), target_size=(20, 16))
+    assert region.shape == (16, 20, 5)
+    assert (spec.backend, spec.scale, spec.resample) == ("npy", 0.5, "area")
+    blocks = arr.reshape(16, 2, 20, 2, 5).mean(axis=(1, 3))
+    assert np.allclose(region, blocks, atol=1.0)
 
-    path, strip_count = _amplification_raster(tmp_path)
-    with StripTiffSource(path, tile_size=100, overlap=0.2) as source:
-        _row_major_scan(source, 100, compute_stride(100, 0.2))
-        assert source.strip_decode_count == strip_count
 
-
-def test_the_same_scan_re_decodes_strips_at_a_capacity_the_row_band_outgrows(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.data.tiling import compute_stride
-
-    path, strip_count = _amplification_raster(tmp_path)
-    with StripTiffSource(path, strip_cache_capacity=64) as source:
-        assert source.strip_cache_capacity < strip_count  # the row-band cannot fit in the cache
-        _row_major_scan(source, 100, compute_stride(100, 0.2))
-        assert source.strip_decode_count > strip_count
+@pytest.mark.parametrize("name", ["gdal_tiff", "npy"])
+def test_a_distorting_target_size_refuses(tmp_path: Path, name: str) -> None:
+    """``target_size`` must preserve the region's aspect ratio: a resample in this layer never
+    silently changes a raster's geometry."""
+    build, _ = _BACKENDS[name]
+    source, num_channels = build(tmp_path)
+    with open_raster(source, num_channels) as src:
+        with pytest.raises(ValueError, match="aspect ratio"):
+            src.read_region(Rect(0, 0, src.width, src.height),
+                            target_size=(src.width, max(1, src.height // 3)))
 
 
 # ── The process-local pool of open sources ───────────────────────────────
 
 
 def test_the_pool_serves_one_open_source_per_file_and_channel_count(tmp_path: Path) -> None:
-    path, _ = _strip_tiff(tmp_path)
+    path, _ = _gdal_tiff(tmp_path)
     first = raster_source.pooled_source(path, 3)
     assert raster_source.pooled_source(path, 3) is first
     assert raster_source.pooled_source(path, 1) is not first
@@ -460,7 +459,7 @@ def test_the_pool_key_changes_when_a_band_member_is_rewritten(tmp_path: Path) ->
 
 
 def test_a_forked_worker_starts_with_an_empty_pool(tmp_path: Path, monkeypatch) -> None:
-    path, _ = _strip_tiff(tmp_path)
+    path, _ = _gdal_tiff(tmp_path)
     parent_source = raster_source.pooled_source(path, 3)
     monkeypatch.setattr(os, "getpid", lambda: 424242)
     child_source = raster_source.pooled_source(path, 3)
@@ -470,17 +469,26 @@ def test_a_forked_worker_starts_with_an_empty_pool(tmp_path: Path, monkeypatch) 
 
 
 def test_the_pool_evicts_the_least_recently_used_source_over_budget(tmp_path: Path, monkeypatch) -> None:
-    first_path, _ = _strip_tiff(tmp_path)
-    second_path = tmp_path / "other.tif"
-    _write_striped_tiff(second_path, _distinctive_array(23, 17), rowsperstrip=4)
+    first_path, num_channels = _npy(tmp_path)
+    second_path = tmp_path / "other.npy"
+    np.save(str(second_path), _distinctive_array(18, 11, channels=5))
 
-    first = raster_source.pooled_source(first_path, 3)
+    first = raster_source.pooled_source(first_path, num_channels)
     monkeypatch.setattr(raster_source, "_memory_budget_bytes", lambda: 1)
-    second = raster_source.pooled_source(second_path, 3)
+    second = raster_source.pooled_source(second_path, num_channels)
 
     assert first.closed
     assert not second.closed
-    assert raster_source.pooled_source(first_path, 3) is not first
+    assert raster_source.pooled_source(first_path, num_channels) is not first
+
+
+def test_a_gdal_source_accounts_no_resident_pixels(tmp_path: Path) -> None:
+    """A GDAL source holds only a dataset handle; its decoded blocks live in GDAL's own budgeted
+    block cache, so the pool accounts it at zero resident bytes rather than double-counting."""
+    path, _ = _gdal_tiff(tmp_path)
+    with open_raster(path, 3) as src:
+        assert isinstance(src, raster_source.GdalSource)
+        assert src.resident_bytes == 0
 
 
 # ── Reads that were always valid and must stay so ────────────────────────
