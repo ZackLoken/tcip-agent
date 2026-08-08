@@ -898,34 +898,51 @@ def capture_live_canvas(
 @audited
 def overlay_reference_grid(
     image_path: str,
-    cols: int = 8,
-    rows: int = 6,
+    tile_size: int | None = None,
+    overlap: float = 0.0,
 ) -> dict:
-    """Render image with a labeled grid overlay for spatial referencing.
+    """Render image with a labeled reference-grid overlay for spatial referencing.
 
-    Creates a grid with spreadsheet-style letter columns (A-Z, then AA,
-    AB, ...) and number rows.
-    The agent can reference grid cells like 'B3' to indicate regions
-    of interest, which can be converted to point prompts via
-    segment_prompt's own grid_cells parameter (pass the same cols/rows
-    this overlay was rendered with).
+    The grid lives in the raster's native pixel frame: square cells of ``tile_size``
+    native pixels named spreadsheet-style ('A1' top-left; letter columns A-Z then AA,
+    AB, ..., 1-based number rows). When ``tile_size`` is omitted it derives from the
+    image dims and the artifact bound (``reference_grid.derive_pointing_tile_size``) so
+    the rendered labels stay legible. Every response echoes the full grid geometry
+    (``tile_size``, ``overlap``, ``cols``, ``rows``, ``width``, ``height``): pass the
+    echoed ``tile_size``/``overlap`` to ``segment_prompt(grid_cells=...)`` so a cell name
+    resolves against the grid that was actually rendered.
 
     Args:
         image_path: Absolute path to the image file.
-        cols: Number of grid columns (default 8, labeled A-H).
-        rows: Number of grid rows (default 6, labeled 1-6).
+        tile_size: Cell edge in native pixels; omitted derives a legible default.
+        overlap: Cell overlap as a fraction of tile_size, training tiling's semantics.
     """
+    from tcip_mcp.pipelines.reference_grid import (
+        derive_pointing_tile_size,
+        grid_geometry,
+        reference_cells,
+    )
+
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    out = render_grid_overlay(_display_for_path(image_path).pixels, cols=cols, rows=rows)
+    display = _display_for_path(image_path)
+    w, h = display.native_size
+    if tile_size is None:
+        tile_size = derive_pointing_tile_size(w, h)
+    try:
+        cells = reference_cells(w, h, tile_size, overlap, clamp=True)
+    except ValueError as e:
+        return {"error": str(e)}
+    out = render_grid_overlay(display.pixels, cells, native_size=(w, h))
 
+    geometry = grid_geometry(w, h, tile_size, overlap)
+    last = f"{column_label(geometry['cols'] - 1)}{geometry['rows']}"
     return {
         "image_path": out,
-        "summary": f"Grid overlay ({cols}x{rows}) rendered on {img.name}. "
-                   f"Reference cells like 'A1' (top-left) to "
-                   f"'{column_label(cols - 1)}{rows}' (bottom-right).",
-        "cols": cols,
-        "rows": rows,
+        "summary": f"Reference grid ({geometry['cols']}x{geometry['rows']}, tile_size "
+                   f"{tile_size}) rendered on {img.name}. Reference cells like 'A1' "
+                   f"(top-left) to '{last}' (bottom-right).",
+        **geometry,
     }
