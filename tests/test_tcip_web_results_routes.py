@@ -531,6 +531,23 @@ def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_pat
                        json={**body, "payload": "milestones", "filename": "x.csv"}).status_code == 200
 
 
+def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The browser download is the breeder's copy; the delivery itself belongs to the project,
+    so the identical bytes land in <project>/results_export/ and the write is audited."""
+    body = _phenology_fixture(tmp_path, validated=True)
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "catkin_delivery.csv"})
+    assert resp.status_code == 200
+    saved = tmp_path / "results_export" / "catkin_delivery.csv"
+    assert resp.headers["X-TCIP-Saved-To"] == str(saved)
+    assert saved.read_bytes() == resp.content
+    audit = (tmp_path / ".tcip" / "audit.jsonl").read_text(encoding="utf-8")
+    assert "results.export_csv" in audit
+    assert "catkin_delivery.csv" in audit
+
+
 def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     client: TestClient, tmp_path: Path,
 ) -> None:
