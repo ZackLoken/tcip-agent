@@ -186,17 +186,18 @@ def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
     client: TestClient, grouped_dataset: Path, monkeypatch,
 ):
     """/api/images/bands must not do a full pixel decode for ordinary RGB, only for genuine
-    multi-band sources. Spy on load_image (the full-decode call the per-band min/max/dtype loop
-    needs) and assert it's never called for a plain 3-band photo."""
-    from tcip_mcp.pipelines import image_utils
+    multi-band sources. Spy on the raster factory itself (every decode route opens a source
+    through it) and assert nothing opens one for a plain 3-band photo."""
+    from tcip_mcp.pipelines import raster_source
 
     called = []
 
     def _fail_if_called(*a, **kw):
         called.append(1)
-        raise AssertionError("load_image should not be called for a plain <=3-band source")
+        raise AssertionError("no raster should be opened for a plain <=3-band source")
 
-    monkeypatch.setattr(image_utils, "load_image", _fail_if_called)
+    monkeypatch.setattr(raster_source, "open_raster", _fail_if_called)
+    monkeypatch.setattr(raster_source, "open_array_source", _fail_if_called)
 
     plain = grouped_dataset / "images" / "2026-05-01" / "plain_002.jpg"
     resp = client.get("/api/images/bands", params={"path": str(plain)})
