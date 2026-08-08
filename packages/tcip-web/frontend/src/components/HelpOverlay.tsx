@@ -24,6 +24,7 @@ const ANNOTATE: Shortcut[] = [
   { key: "Enter", desc: "Close current polygon (or double-click)" },
   { key: "Delete", desc: "Delete the selected polygon, box or point" },
   { key: "←  →", desc: "Prev / Next image" },
+  { key: "[  ]", desc: "Prev / Next unswept grid cell (large rasters with a coverage grid)" },
 ];
 
 // Verdicts write ground truth: keep in sync with ReviewTab's button titles.
