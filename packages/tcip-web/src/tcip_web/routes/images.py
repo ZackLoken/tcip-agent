@@ -66,9 +66,6 @@ def _checked(path: str) -> Path:
     return src
 
 
-_VALID_STRETCHES = {"minmax", "percent_clip", "none"}
-
-
 def _parse_band_tokens(raw: str) -> list[str]:
     tokens = [t.strip() for t in raw.split(",") if t.strip()]
     if len(tokens) != 3:
@@ -93,27 +90,6 @@ def _band_index(token: str, declared_names: "list[str] | None", total_bands: int
     return idx
 
 
-def _stretch_band(band, mode: str, orig_dtype):
-    import numpy as np
-
-    raw = band.astype(np.float64)
-    if mode == "none":
-        # No data-range stretch: scale by the dtype's own max (integer rasters) or assume an
-        # already-[0,1]-ish float source, the same scale pil_to_tensor applies for training.
-        if np.issubdtype(orig_dtype, np.integer):
-            denom = float(np.iinfo(orig_dtype).max) or 1.0
-        else:
-            denom = float(raw.max()) or 1.0
-        out = raw / denom * 255.0
-    elif mode == "percent_clip":
-        lo, hi = np.percentile(raw, [2.0, 98.0])
-        out = (raw - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(raw)
-    else:  # minmax (default): this composite's own data range, independently per band
-        lo, hi = float(raw.min()), float(raw.max())
-        out = (raw - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(raw)
-    return np.clip(out, 0, 255).astype(np.uint8)
-
-
 def _composite_bands(source, band_tokens: "list[str] | None", stretch: str) -> Image.Image:
     """Decode ``source`` (a plain multi-band raster or a ``BandGroupRef``), select 3 bands (by
     declared band name when the source has one, else by 0-index), stretch each independently, and
@@ -122,6 +98,7 @@ def _composite_bands(source, band_tokens: "list[str] | None", stretch: str) -> I
     """
     import numpy as np
 
+    from tcip_mcp.pipelines.band_stats import stretch_band
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.image_utils import load_image
@@ -139,7 +116,7 @@ def _composite_bands(source, band_tokens: "list[str] | None", stretch: str) -> I
     else:
         idxs = [_band_index(t, declared_names, total_bands) for t in band_tokens]
 
-    channels = [_stretch_band(arr[:, :, i], stretch, arr.dtype) for i in idxs]
+    channels = [stretch_band(arr[:, :, i], stretch, arr.dtype) for i in idxs]
     rgb = np.stack(channels, axis=-1)
     return Image.fromarray(rgb, mode="RGB")
 
@@ -173,9 +150,11 @@ def serve_image(
     ``bands``/``stretch``) lets the browser revalidate with a cheap 304; the disk cache makes a
     cold request (fresh session, page refresh, prefetch) a sendfile instead of a re-render.
     """
+    from tcip_mcp.pipelines.band_stats import STRETCH_MODES
+
     src = _checked(path)
-    if stretch not in _VALID_STRETCHES:
-        raise HTTPException(400, f"stretch must be one of {sorted(_VALID_STRETCHES)}, got {stretch!r}")
+    if stretch not in STRETCH_MODES:
+        raise HTTPException(400, f"stretch must be one of {sorted(STRETCH_MODES)}, got {stretch!r}")
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
     from tcip_mcp.pipelines.image_utils import resolve_image_source
@@ -277,6 +256,7 @@ def get_bands(path: str = Query(...)) -> dict:
     """
     import numpy as np
 
+    from tcip_mcp.pipelines.band_stats import band_ranges
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.image_utils import load_image, resolve_image_source
@@ -301,13 +281,14 @@ def get_bands(path: str = Query(...)) -> dict:
         names = [str(i) for i in range(arr.shape[-1])]
         wavelengths = {}
 
+    ranges = band_ranges(arr)
     bands = [
         {
             "name": name,
             "wavelength_nm": wavelengths.get(name),
             "dtype": str(arr[:, :, i].dtype),
-            "min": float(arr[:, :, i].min()),
-            "max": float(arr[:, :, i].max()),
+            "min": ranges[i].minimum,
+            "max": ranges[i].maximum,
         }
         for i, name in enumerate(names)
     ]
