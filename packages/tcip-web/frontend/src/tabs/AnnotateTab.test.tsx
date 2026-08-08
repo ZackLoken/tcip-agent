@@ -255,16 +255,23 @@ describe("AnnotateTab save/load race", () => {
 });
 
 describe("AnnotateTab subject rendering", () => {
-  it("renders a box with the subject-derived colour and the subject-name label", async () => {
-    useStore.getState().setRegistry({ catkin: {} });
+  it("renders a box with the subject-derived colour, named on selection", async () => {
+    useStore.getState().setRegistry({ tip: {} });
+    useStore.setState((s) => ({ gui: { ...s.gui, active_subject: "tip" } }));
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
-    act(addBox);
-    // Colour is GUI-local (name-derived), and the label is the subject name, no integer id.
-    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("catkin"));
-    expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "catkin");
+    act(() =>
+      useStore
+        .getState()
+        .addBox({ x1: 10, y1: 10, x2: 50, y2: 50, subject: "tip", attributes: {} }),
+    );
+    // Colour is GUI-local (name-derived); the label is the subject name, no integer id, and
+    // appears on selection (labels are hover/selection-only; the legend is the standing key).
+    expect(screen.getByTestId("k-rect")).toHaveAttribute("data-stroke", subjectColor("tip"));
+    fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
+    expect(screen.getAllByTestId("k-text")[0]).toHaveAttribute("data-text", "tip");
   });
 
   it("box mode draws an active-subject polygon's read-only derived box (dashed, no handles), never a stored box", async () => {
@@ -335,18 +342,17 @@ describe("AnnotateTab subject rendering", () => {
     expect(core).toHaveAttribute("data-fill", subjectColor("tip"));
     // ...with four radial ticks (the mark that reads as a location, not a tiny shape)...
     expect(screen.getAllByTestId("k-line")).toHaveLength(4);
-    // ...and no box of any kind.
+    // ...and no box of any kind. (Naming on selection/hover is covered by the label tests.)
     expect(screen.queryAllByTestId("k-rect")).toHaveLength(0);
-    expect(screen.getAllByTestId("k-text").some((t) => t.getAttribute("data-text") === "tip")).toBe(
-      true,
-    );
   });
 
   it("polygon mode draws every ring of an occlusion-split shape, labelled once", async () => {
-    // A catkin behind a branch loads as one annotation with two disjoint regions. Drawing only the
-    // first would show the breeder part of the object and let them confirm it as the whole.
-    useStore.getState().setRegistry({ catkin: {} });
-    useStore.setState((s) => ({ gui: { ...s.gui, mode: "polygon" as const } }));
+    // An organ behind a branch loads as one annotation with two disjoint regions. Drawing only
+    // the first would show the breeder part of the object and let them confirm it as the whole.
+    useStore.getState().setRegistry({ tip: {} });
+    useStore.setState((s) => ({
+      gui: { ...s.gui, mode: "polygon" as const, active_subject: "tip" },
+    }));
     const rings: [number, number][][] = [
       [
         [0, 0],
@@ -362,7 +368,7 @@ describe("AnnotateTab subject rendering", () => {
     loadSpy.mockImplementation((imagePath) =>
       Promise.resolve({
         ...labelsFor(imagePath),
-        polygons: [{ rings, subject: "catkin", attributes: {} }],
+        polygons: [{ rings, subject: "tip", attributes: {} }],
       }),
     );
     render(<AnnotateTab />);
@@ -375,10 +381,12 @@ describe("AnnotateTab subject rendering", () => {
       "0,0,10,0,10,10",
       "40,40,60,40,60,60",
     ]);
-    // Both parts wear the annotation's own colour, and it is named once (HaloLabel = halo + fill).
-    expect(lines.every((l) => l.getAttribute("data-stroke") === subjectColor("catkin"))).toBe(true);
+    // Both parts wear the annotation's own colour...
+    expect(lines.every((l) => l.getAttribute("data-stroke") === subjectColor("tip"))).toBe(true);
+    // ...and selecting it names the annotation once, not once per ring (HaloLabel = halo + fill).
+    fireEvent.click(screen.getByTestId("canvas-stage"), { clientX: 8, clientY: 5 });
     expect(
-      screen.getAllByTestId("k-text").filter((t) => t.getAttribute("data-text") === "catkin"),
+      screen.getAllByTestId("k-text").filter((t) => t.getAttribute("data-text") === "tip"),
     ).toHaveLength(2);
   });
 });
@@ -764,5 +772,113 @@ describe("clicks outside the image extent are inert", () => {
     fireEvent.mouseMove(stage, { clientX: 500, clientY: 400 });
     await nextFrame();
     expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+});
+
+describe("AnnotateTab labels show on selection or hover only", () => {
+  // The legend is the standing symbology reference; a committed shape is named on the canvas
+  // only while it is selected or hovered, for every shape kind.
+  const stage = () => screen.getByTestId("canvas-stage");
+  const frame = () => act(async () => void (await new Promise((r) => setTimeout(r, 25))));
+  const labelsNamed = (name: string) =>
+    screen.queryAllByTestId("k-text").filter((t) => t.getAttribute("data-text") === name);
+
+  function setupSubject(mode: "box" | "polygon" | "point") {
+    useStore.getState().setRegistry({ tip: {} });
+    useStore.setState((s) => ({ gui: { ...s.gui, mode, active_subject: "tip" } }));
+  }
+
+  it("a box is unlabelled at rest, labelled while hovered, labelled while selected", async () => {
+    setupSubject("box");
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(() =>
+      useStore
+        .getState()
+        .addBox({ x1: 10, y1: 10, x2: 50, y2: 50, subject: "tip", attributes: {} }),
+    );
+
+    expect(labelsNamed("tip")).toHaveLength(0);
+
+    fireEvent.mouseMove(stage(), { clientX: 30, clientY: 30 });
+    await frame();
+    expect(labelsNamed("tip").length).toBeGreaterThan(0);
+
+    fireEvent.mouseMove(stage(), { clientX: 500, clientY: 500 });
+    await frame();
+    expect(labelsNamed("tip")).toHaveLength(0);
+
+    fireEvent.mouseDown(stage(), { clientX: 30, clientY: 30, button: 0 }); // press inside selects
+    await flush();
+    expect(labelsNamed("tip").length).toBeGreaterThan(0);
+  });
+
+  it("a polygon is unlabelled at rest, labelled while hovered, labelled while selected", async () => {
+    setupSubject("polygon");
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({
+        ...labelsFor(imagePath),
+        polygons: [
+          {
+            rings: [
+              [
+                [100, 100],
+                [300, 100],
+                [300, 300],
+                [100, 300],
+              ],
+            ] as [number, number][][],
+            subject: "tip",
+            attributes: {},
+          },
+        ],
+      }),
+    );
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    expect(labelsNamed("tip")).toHaveLength(0);
+
+    fireEvent.mouseMove(stage(), { clientX: 200, clientY: 200 });
+    await frame();
+    expect(labelsNamed("tip").length).toBeGreaterThan(0);
+
+    fireEvent.mouseMove(stage(), { clientX: 500, clientY: 500 });
+    await frame();
+    expect(labelsNamed("tip")).toHaveLength(0);
+
+    fireEvent.click(stage(), { clientX: 200, clientY: 200 }); // click inside selects
+    await flush();
+    expect(labelsNamed("tip").length).toBeGreaterThan(0);
+  });
+
+  it("a point is unlabelled at rest, labelled while hovered, labelled while selected", async () => {
+    setupSubject("point");
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({
+        ...labelsFor(imagePath),
+        points: [{ x: 100, y: 100, subject: "tip", attributes: {} }],
+      }),
+    );
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    expect(labelsNamed("tip")).toHaveLength(0);
+
+    fireEvent.mouseMove(stage(), { clientX: 102, clientY: 101 });
+    await frame();
+    expect(labelsNamed("tip").length).toBeGreaterThan(0);
+
+    fireEvent.mouseMove(stage(), { clientX: 500, clientY: 500 });
+    await frame();
+    expect(labelsNamed("tip")).toHaveLength(0);
+
+    fireEvent.mouseDown(stage(), { clientX: 100, clientY: 100, button: 0 }); // press selects
+    fireEvent.mouseUp(stage(), { clientX: 100, clientY: 100 });
+    await flush();
+    expect(labelsNamed("tip").length).toBeGreaterThan(0);
   });
 });
