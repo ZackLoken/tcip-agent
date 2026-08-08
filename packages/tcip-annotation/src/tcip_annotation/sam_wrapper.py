@@ -15,7 +15,7 @@ Public API:
     predict_from_points(image_path, points, labels, model_type)
     predict_from_box(image_path, x1, y1, x2, y2, model_type)
     auto_mask(image_path, model_type, ...)
-    grid_to_pixel(cell, img_w, img_h, cols, rows)
+    grid_to_pixel(cell, cells) / cell_fields(cell)
     column_label(index) / column_index(label)
 
 The prompted predictors return polygon rings (a mask with two disjoint regions is two rings),
@@ -311,45 +311,44 @@ def column_index(label: str) -> int:
     return n - 1
 
 
-def grid_to_pixel(
-    cell: str,
-    img_w: int,
-    img_h: int,
-    cols: int = 8,
-    rows: int = 6,
-) -> tuple[float, float]:
-    """Convert a grid cell reference (e.g. 'B3') to pixel coordinates (cell center).
+def cell_fields(cell: Any) -> tuple[str, float, float, float, float]:
+    """``(name, x0, y0, x1, y1)`` from one grid cell, however the caller shipped it.
 
-    Columns are spreadsheet-style letters (A-Z, then AA, AB, ...), rows are 1-based numbers,
-    matching the labels ``render_grid_overlay`` draws.
-
-    Args:
-        cell: Grid reference like 'B3', 'D5', 'AA2'.
-        img_w: Image width in pixels.
-        img_h: Image height in pixels.
-        cols: Number of grid columns.
-        rows: Number of grid rows.
-
-    Returns:
-        (x, y) center of the referenced cell in pixel coordinates.
+    The cell shape both packages exchange: a mapping (what a JSON route serves) or an
+    object with attributes (tcip-mcp's ``reference_grid.Cell``), carrying ``name`` plus
+    the half-open native-pixel rect ``x0, y0, x1, y1``. One accessor so the renderer and
+    the name lookup can never read the shape differently.
     """
-    cell = cell.strip().upper()
-    match = re.fullmatch(r"([A-Z]+)([0-9]+)", cell)
-    if match is None:
+    if isinstance(cell, dict):
+        return (str(cell["name"]), float(cell["x0"]), float(cell["y0"]),
+                float(cell["x1"]), float(cell["y1"]))
+    return (str(cell.name), float(cell.x0), float(cell.y0),
+            float(cell.x1), float(cell.y1))
+
+
+def grid_to_pixel(cell: str, cells: "list[Any]") -> tuple[float, float]:
+    """Resolve a grid cell reference (e.g. 'B3') to the named cell's center in native pixels.
+
+    ``cells`` is the caller's own cell list (see :func:`cell_fields` for the accepted
+    shapes), the same list the overlay was rendered with: a cell name means nothing
+    without the grid that produced it. Matching is case-insensitive and
+    whitespace-stripped. A name not in the grid raises ValueError naming the grid's valid
+    range.
+    """
+    wanted = cell.strip().upper()
+    if re.fullmatch(r"[A-Z]+[0-9]+", wanted) is None:
         raise ValueError(f"Invalid cell reference: {cell!r}. Expected format like 'B3'.")
+    if not cells:
+        raise ValueError("cells is empty: there is no grid to resolve a cell name against")
 
-    col_letters, row_str = match.groups()
-
-    col_idx = column_index(col_letters)
-    if col_idx >= cols:
-        raise ValueError(
-            f"Column '{col_letters}' out of range. Use A-{column_label(cols - 1)}."
-        )
-
-    row_idx = int(row_str) - 1
-    if row_idx < 0 or row_idx >= rows:
-        raise ValueError(f"Row {row_str} out of range. Use 1-{rows}.")
-
-    cell_w = img_w / cols
-    cell_h = img_h / rows
-    return (col_idx + 0.5) * cell_w, (row_idx + 0.5) * cell_h
+    max_col = max_row = -1
+    for c in cells:
+        name, x0, y0, x1, y1 = cell_fields(c)
+        if name.strip().upper() == wanted:
+            return (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        parsed = re.fullmatch(r"([A-Z]+)([0-9]+)", name.strip().upper())
+        if parsed is not None:
+            max_col = max(max_col, column_index(parsed.group(1)))
+            max_row = max(max_row, int(parsed.group(2)))
+    hint = f" Use A1 through {column_label(max_col)}{max_row}." if max_col >= 0 else ""
+    raise ValueError(f"Cell '{wanted}' is not in this grid.{hint}")
