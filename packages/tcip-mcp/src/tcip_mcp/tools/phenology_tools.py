@@ -48,7 +48,8 @@ def build_plant_mapping(
         plant_csv_paths: One or more plant-locations CSVs (columns ``plot_name``,
             ``accession_name``, ``WGS84_centroid_x/y``, …).
         output_mapping_path: Where to persist the mapping JSON (e.g.
-            ``<project>/.tcip/state/plant_mapping.json``).
+            ``<project>/.tcip/state/plant_mapping.json``). A relative path resolves against
+            the project root, never the server process's cwd.
         dates: Optional subset of date folders to map (default: all under ``images_root``).
         nn_tolerance_m: Nearest-neighbour tolerance (m). ``None`` (default) derives it from the
             plot's grid pitch (pitch/6) so the match radius stays within half a grid cell; an
@@ -58,7 +59,9 @@ def build_plant_mapping(
     and the persisted path, not the full per-image mapping (that lives in the JSON).
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tcip_mcp.project_paths import resolve_output_path
 
+    output_mapping_path = str(resolve_output_path(output_mapping_path))
     root = Path(images_root)
     if not root.is_dir():
         return {"error": f"images_root not found: {images_root}"}
@@ -395,7 +398,9 @@ def calibrate_classifier_operating_point(
         experiment_id=experiment_id,
     )
 
-    out = Path(output_dir)
+    from tcip_mcp.project_paths import resolve_output_path
+
+    out = resolve_output_path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     atomic_write_json(out / "classifier_operating_point.json", {
         "operating_point": {"classifier": {"validated_against": result["validated_against"],
@@ -562,7 +567,9 @@ def calibrate_ordinal_regression_operating_point(
         experiment_id=experiment_id,
     )
 
-    out = Path(output_dir)
+    from tcip_mcp.project_paths import resolve_output_path
+
+    out = resolve_output_path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     atomic_write_json(out / f"{task}_operating_point.json", {
         "operating_point": {task: {"validated_against": result["validated_against"],
@@ -623,7 +630,8 @@ def compute_phenology(
         predictions_by_date: ``{date: predictions_dir}``, each dir holds per-image COCO/JSON
             prediction files (``<stem>.json``) from the state classifier.
         output_csv_path: Where to write the delivered per-plant CSV (e.g.
-            ``<phenology_prefix>_phenology.csv``).
+            ``<phenology_prefix>_phenology.csv``). A relative path resolves against the
+            project root, never the server process's cwd.
         classifier_pred_dirs: Bucket(s) carrying the trait's classifier-validity stamp
             (``classifier_operating_point.json``, written by ``calibrate_classifier_operating_point``)
 , reconciled from disk, never trusted from a caller-asserted string. ``None``
@@ -652,8 +660,10 @@ def compute_phenology(
     ``n_dates_missing_images``) but carry no fabricated milestone dates for that plant (see
     CLAUDE.md's measurement-integrity invariant).
     """
+    from tcip_mcp.project_paths import resolve_output_path
     from tcip_mcp.traits import TraitUnknownError, get_trait
 
+    output_csv_path = str(resolve_output_path(output_csv_path))
     try:
         spec = get_trait(trait)
     except TraitUnknownError as e:
