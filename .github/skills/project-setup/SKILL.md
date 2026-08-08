@@ -1,6 +1,6 @@
 ---
 name: project-setup
-description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers project naming, ingest_images (EXIF date bucketing), translating a goal into a trait/task/classes.json, SAM-assisted bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
+description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers project naming, ingest_images (capture-date bucketing), translating a goal into a trait/task/classes.json, SAM-assisted bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
 ---
 
 # Project setup: from raw photos to a trainable project
@@ -47,13 +47,17 @@ ingest_images(source="<raw folder or glob>", name="{crop}_{trait}_{site}")
 
 - Copies by default (originals are left byte-identical); pass `copy=False` only when
   the human explicitly wants the source moved.
-- Buckets by EXIF `DateTimeOriginal` → ISO `YYYY-MM-DD`; images with no EXIF date go
-  to `images/undated/`. Override with `date_from="none"` (all undated) or a literal ISO
-  date (`date_from="2026-02-11"`) when you know the capture date the camera didn't record.
+- Buckets by the capture date each file itself states → ISO `YYYY-MM-DD`: a photo's EXIF
+  `DateTimeOriginal`, a raster's own date metadata (its `DateTime` tag, an EXIF IFD, or a
+  stitching engine's capture-date item). A file that states none goes to `images/undated/`.
+  Override with `date_from="none"` (all undated) or a literal ISO date
+  (`date_from="2026-02-11"`) when you know the capture date the camera didn't record.
 - Never overwrites: a stem collision (two source files → same bucket+stem) is skipped
   and reported in `skipped_collisions`. Relay the manifest to the human:
-  `{total, buckets, undated, skipped_collisions}`, especially any collisions or a large
-  `undated` count (a sign the photos lack EXIF and dates may need `date_from`).
+  `{total, buckets, undated, skipped_collisions, unreadable_dates}`, especially any
+  collisions, a large `undated` count (dates may need `date_from`), and `unreadable_dates`,
+  which separates files whose container could not be read at all from files that simply
+  state no date. Every file is ingested either way; the date never gates ingestion.
 
 `ingest_images` does not annotate, split, choose a task, or write `classes.json`; the
 next steps do. After it, `inspect_project` reports the capture dates and image count.
