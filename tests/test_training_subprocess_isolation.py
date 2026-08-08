@@ -677,3 +677,47 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
     )
     assert result["n_trials"] == 4
     assert result["best_value"] is not None
+
+
+def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, monkeypatch):
+    """Ray Tune refuses to run while TUNE_RESULT_DIR or RAY_AIR_LOCAL_CACHE_DIR is set anywhere
+    in the environment, even though storage_path alone decides where trial results land. A
+    machine that still carries such a redirect must get a working sweep, stored under the
+    caller's storage_path, with the variables left in the environment exactly as they were."""
+    import os
+
+    pytest.importorskip("ray")
+    from tcip_mcp.pipelines.training.hpo import tune_search
+
+    machine_scratch = str(tmp_path / "machine_scratch")
+    monkeypatch.setenv("TUNE_RESULT_DIR", machine_scratch)
+    monkeypatch.setenv("RAY_AIR_LOCAL_CACHE_DIR", machine_scratch)
+
+    def obj(config, report):
+        report((config["x"] - 2.0) ** 2)
+
+    result = tune_search(
+        obj,
+        param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
+        metric="objective", mode="min", num_samples=2,
+        search_alg="random", scheduler="none",
+        resources_per_trial={"cpu": 1.0, "gpu": 0.0},
+        storage_path=str(tmp_path / "sweep_store"),
+    )
+    assert result["n_trials"] == 2
+    assert result["best_value"] is not None
+    assert (tmp_path / "sweep_store").is_dir()
+    assert os.environ["TUNE_RESULT_DIR"] == machine_scratch
+    assert os.environ["RAY_AIR_LOCAL_CACHE_DIR"] == machine_scratch
+
+
+def test_tune_search_refuses_to_run_without_a_storage_path():
+    """Trial results land where the caller says; with no storage_path Ray would fall back to a
+    home-directory default outside any project, so the call refuses and names the resolver."""
+    from tcip_mcp.pipelines.training.hpo import tune_search
+
+    with pytest.raises(ValueError, match="storage_path"):
+        tune_search(
+            objective_fn=lambda config, report: report(0.0),
+            param_space={"x": {"type": "uniform", "low": 0.0, "high": 1.0}},
+        )
