@@ -11,7 +11,7 @@ import {
 import { Circle, Line, Rect, Text } from "react-konva";
 import type Konva from "konva";
 
-import { api, IMAGE_MAX_WIDTH } from "@/api/client";
+import { api } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
 import { resultsApi, type RegisteredModel } from "@/api/inference";
 import { BandPicker } from "@/components/BandPicker";
@@ -40,7 +40,12 @@ import {
   type CanvasStateBody,
 } from "@/lib/canvasSync";
 import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
-import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
+import {
+  compositeParams,
+  defaultBandSelection,
+  isPlainColourFrame,
+  type BandSelection,
+} from "@/lib/bandSelection";
 import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/datasetUiState";
 import {
   annotationGeometry,
@@ -145,12 +150,18 @@ export function ReviewTab() {
   const bandsInfo = useImageBands(imgPath);
   const [bandSelection, setBandSelection] = useState<BandSelection | null>(null);
   useEffect(() => {
-    if (bandsInfo && bandsInfo.band_count > 3) {
+    // An ordinary RGBA frame has four bands and no band choice to make: it displays as its own
+    // pixels, so no selection is seeded and the picker stays out of the way.
+    if (bandsInfo && bandsInfo.band_count > 3 && !isPlainColourFrame(bandsInfo)) {
       setBandSelection((prev) => prev ?? defaultBandSelection(bandsInfo.bands));
     } else {
       setBandSelection(null);
     }
   }, [bandsInfo]);
+
+  // Every request for this view (the canvas' own and the prefetcher's warm-up) carries one set of
+  // band params, so the two never warm and read different renders of the same image.
+  const composite = compositeParams(bandsInfo, bandSelection);
 
   // One GT dir + one prediction dir now (the detect/segment split is gone); a unified label file
   // holds every subject's box and polygon annotations together.
@@ -369,7 +380,7 @@ export function ReviewTab() {
     isNavigable,
     order: priorityOrder,
   });
-  usePrefetchAdjacentImages();
+  usePrefetchAdjacentImages(composite.bands, composite.stretch);
   // User-tunable symbology colours (persisted + shared with the status bar); legend swatches
   // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
   const [reviewColors, setReviewColors] = useReviewColors();
@@ -1101,19 +1112,7 @@ export function ReviewTab() {
     },
   ]);
 
-  const bandsParam =
-    bandsInfo && bandsInfo.band_count > 3 && bandSelection
-      ? `${bandSelection.r},${bandSelection.g},${bandSelection.b}`
-      : undefined;
-  const imageUrl = imgPath
-    ? api.images.url(
-        imgPath,
-        IMAGE_MAX_WIDTH,
-        undefined,
-        bandsParam,
-        bandsParam ? bandSelection?.stretch : undefined,
-      )
-    : null;
+  const imageUrl = imgPath ? api.images.url(imgPath, composite) : null;
   const imgW = matches?.img_width ?? 0;
   const imgH = matches?.img_height ?? 0;
 
@@ -1492,6 +1491,9 @@ export function ReviewTab() {
                   bands={bandsInfo.bands}
                   selection={bandSelection}
                   onChange={setBandSelection}
+                  sampled={bandsInfo.sampled}
+                  pixelFraction={bandsInfo.pixel_fraction}
+                  overviewScale={bandsInfo.overview_scale}
                 />
               </>
             )}
@@ -1502,6 +1504,7 @@ export function ReviewTab() {
       <div className="relative flex-1 flex flex-col min-h-0">
         <CanvasStage
           imageUrl={imageUrl}
+          imagePath={imgPath}
           autoFit={false}
           imgWidth={imgW}
           imgHeight={imgH}
