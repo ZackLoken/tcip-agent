@@ -11,7 +11,7 @@
  */
 
 import type { ImageStatus } from "@/api/classes";
-import type { DatasetSelection, ReviewFilters } from "@/store/types";
+import type { DatasetSelection, ReviewFilters, TabName } from "@/store/types";
 
 export interface DatasetUiState {
   index: number;
@@ -43,6 +43,38 @@ export function loadDatasetUi(key: string): DatasetUiState | null {
   try {
     const raw = sessionStorage.getItem(UI_PREFIX + key);
     return raw ? (JSON.parse(raw) as DatasetUiState) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Last-used tab per project: localStorage, cross-session on purpose (unlike the blobs above);
+// no record means a first-ever open, which lands on Annotate.
+const TAB_PREFIX = "tcip.lasttab.";
+
+const TAB_NAMES: readonly TabName[] = [
+  "annotate",
+  "review",
+  "training",
+  "tuning",
+  "inference",
+  "results",
+  "meta",
+];
+
+export function recordLastTab(projectRoot: string, tab: TabName): void {
+  try {
+    localStorage.setItem(TAB_PREFIX + projectRoot, tab);
+  } catch {
+    /* private mode / disabled storage: the tab just won't restore */
+  }
+}
+
+export function loadLastTab(projectRoot: string | null): TabName | null {
+  if (!projectRoot) return null;
+  try {
+    const raw = localStorage.getItem(TAB_PREFIX + projectRoot);
+    return raw && (TAB_NAMES as readonly string[]).includes(raw) ? (raw as TabName) : null;
   } catch {
     return null;
   }
