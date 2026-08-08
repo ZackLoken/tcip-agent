@@ -40,6 +40,10 @@ async def _lifespan(_app: FastAPI):
     Their worker threads don't survive, so rehydrated non-terminal entries surface as
     'interrupted' (a record, not a resumable job; see ``jobstore``).
     """
+    # Size GDAL's block cache once per process, at the entry point, never at source construction.
+    from tcip_mcp.pipelines.raster_source import configure_gdal_cache
+
+    configure_gdal_cache()
     try:
         from tcip_web.routes import inference, tuning
 
