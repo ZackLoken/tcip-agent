@@ -880,6 +880,13 @@ export function AnnotateTab() {
   // True between the start/stop clicks of a freehand (Stream mode) polygon.
   const streamingRef = useRef(false);
 
+  // Presses/clicks outside the image extent are inert for every tool: they author nothing
+  // and change no selection. In-progress gestures still clamp to the edge on move/release.
+  const outsideImage = (ix: number, iy: number) =>
+    canvas.imgWidth > 0 &&
+    canvas.imgHeight > 0 &&
+    (ix < 0 || iy < 0 || ix > canvas.imgWidth || iy > canvas.imgHeight);
+
   const onDown = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     if (isLocked) return;
     if (ev.evt.button !== 0) return; // right-button drags must not fabricate boxes
@@ -887,6 +894,7 @@ export function AnnotateTab() {
     // fires no trailing click, so without this the stale flag would swallow the next click
     // (e.g. an outside click meant to deselect), forcing a second click.
     didDragRef.current = false;
+    if (outsideImage(ix, iy)) return;
     if (mode === "point") {
       // A press on an existing point selects it and picks it up; the whole mark is the handle.
       // Missing every point does nothing here: the click (see onClick) places a new one, so a
@@ -1105,18 +1113,21 @@ export function AnnotateTab() {
       pointDragRef.current = null;
       // didDragRef stays set: the trailing click of this release must not place a second point
       // on top of the one just moved (onClick consumes and clears the flag).
+      useStore.getState().recomputeDirty(); // the drag flagged dirty per tick without comparing
       canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
       return;
     }
     if (boxDragRef.current) {
       boxDragRef.current = null;
       didDragRef.current = false;
+      useStore.getState().recomputeDirty();
       // The drag suppressed full pushes; the settled geometry ships now.
       canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
       return;
     }
     if (annotateUi.draggingVertex) {
       useStore.getState().setDraggingVertex(null);
+      useStore.getState().recomputeDirty();
       return;
     }
     if (mode === "box" && drawing) {
@@ -1141,6 +1152,7 @@ export function AnnotateTab() {
   const onClick = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     if (isLocked) return;
     if (ev.evt.button !== 0) return;
+    if (outsideImage(ix, iy)) return;
     if (mode === "point") {
       if (didDragRef.current) {
         didDragRef.current = false; // the trailing click of a point select/drag release
@@ -1178,9 +1190,19 @@ export function AnnotateTab() {
         streamingRef.current = false; // pause: closing is double-click's job, same as always
         return;
       }
-      if (canvas.currentPolygon.length === 0 && canvas.selectedPolygonIdx !== null) {
-        selectPolygon(null); // one click = one action: deselect first, stream on the next click
-        return;
+      // Selection parity with Stream off: when no polygon is in progress, a click on an
+      // existing polygon selects it, and empty space deselects before anything streams.
+      if (canvas.currentPolygon.length === 0) {
+        for (let pi = 0; pi < canvas.polygons.length; pi++) {
+          if (pointInRings([ix, iy], canvas.polygons[pi].rings)) {
+            selectPolygon(pi);
+            return;
+          }
+        }
+        if (canvas.selectedPolygonIdx !== null) {
+          selectPolygon(null); // one click = one action: deselect first, stream on the next click
+          return;
+        }
       }
       if (canvas.currentPolygon.length === 0 && !requireSubject()) return;
       const [sx, sy] = snapImagePoint(ix, iy);
@@ -1219,8 +1241,9 @@ export function AnnotateTab() {
     }
   };
 
-  const onDoubleClick = (_ix: number, _iy: number) => {
+  const onDoubleClick = (ix: number, iy: number) => {
     if (isLocked) return;
+    if (outsideImage(ix, iy)) return;
     if (mode !== "polygon") return;
     streamingRef.current = false; // a double-click ends laying even when too short to close
     if (canvas.currentPolygon.length >= 3) {
@@ -1231,6 +1254,7 @@ export function AnnotateTab() {
   const onContextMenu = (ix: number, iy: number, ev: Konva.KonvaEventObject<MouseEvent>) => {
     ev.evt.preventDefault();
     if (isLocked) return;
+    if (outsideImage(ix, iy)) return;
     // Point mode: right-click deletes the point under the cursor (a box's right-click delete,
     // scoped to one coordinate). Nothing under the cursor just clears the selection.
     if (mode === "point") {
