@@ -103,19 +103,22 @@ Full workflow:
 4. Agent `view_image` on the staged result → visual QA pass
 
 Corrective loop (for missed objects):
-1. `overlay_reference_grid(image_path)` → labeled grid (A1–H6) for spatial reference
+1. `overlay_reference_grid(image_path)` → labeled reference grid ('A1' top-left) for spatial reference
 2. Agent `view_image` → identifies missed regions by grid cell
-3. `segment_prompt(image_path, grid_cells=["B3", "D5"], cols=8, rows=6)` → the engine segments at
-   those locations
+3. `segment_prompt(image_path, grid_cells=["B3", "D5"], tile_size=<echoed>)` → the engine segments
+   at those locations
 4. Save new annotations via `save_annotations`
 
 Grid cell system:
-- `overlay_reference_grid(image_path, cols=, rows=)` renders the grid (8 × 6 unless you say otherwise)
-  and echoes the `cols`/`rows` it used
+- `overlay_reference_grid(image_path, tile_size=, overlap=)` renders square cells of `tile_size`
+  native pixels (omitted, it derives a legible default from the image dims) and echoes the full
+  grid geometry back in every response: `tile_size`, `overlap`, `cols`, `rows`, `width`, `height`
 - Agent references cells like "B3" or "F5" instead of pixel coordinates
-- A cell name is meaningless without its grid, so `segment_prompt(grid_cells=...)` requires the same
-  `cols`/`rows` that rendered the overlay you read the cells off; it refuses rather than assume a grid
-- `grid_to_pixel()` in `sam_wrapper.py` converts to center pixel coords
+- A cell name is meaningless without its grid, so `segment_prompt(grid_cells=...)` requires the
+  explicit `tile_size` (plus `overlap` if nonzero) the overlay echoed; it refuses rather than
+  assume a grid, and recomputes the identical cells through the shared reference-grid geometry
+- `grid_to_pixel()` in `sam_wrapper.py` looks a cell name up in a supplied cell list and returns
+  its center pixel coords
 
 | Tool | Role | Phase |
 |------|------|-------|
