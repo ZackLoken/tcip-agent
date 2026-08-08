@@ -36,6 +36,19 @@ def project_root() -> Path:
     return Path(override) if override else Path.cwd()
 
 
+def resolve_output_path(path: "str | Path") -> Path:
+    """An output-artifact path (weights, prediction buckets, delivery CSVs, curated datasets)
+    anchored to the platform state root.
+
+    An absolute path is the caller's own explicit choice and is returned unchanged. A relative
+    path resolves against :func:`project_root`, never the process cwd: the MCP server and the web
+    backend both run with a cwd unrelated to any project (the repo root), so a relative output
+    path means inside the project, not wherever the server process happens to have been launched.
+    """
+    p = Path(path)
+    return p if p.is_absolute() else project_root() / p
+
+
 def resolve_state(path: Path) -> Path:
     """Resolve a platform-state path against the pinned root, at use time.
 
