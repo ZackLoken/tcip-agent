@@ -478,6 +478,9 @@ export function AnnotateToolbar({
                 bands={bandsInfo.bands}
                 selection={bandSelection}
                 onChange={onBandSelectionChange}
+                sampled={bandsInfo.sampled}
+                pixelFraction={bandsInfo.pixel_fraction}
+                overviewScale={bandsInfo.overview_scale}
               />
             </>
           )}
