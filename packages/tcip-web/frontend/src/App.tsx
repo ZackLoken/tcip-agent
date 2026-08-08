@@ -11,8 +11,10 @@ import { TabBanner } from "@/components/TabBanner";
 import { Toasts } from "@/components/Toasts";
 import { TopBar } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
+import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
+import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
 import { applyReviewFocus, type ReviewFocusData } from "@/lib/reviewFocus";
 import { openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
@@ -69,10 +71,21 @@ function App() {
   const setRegistry = useStore((s) => s.setRegistry);
   const setImageStatuses = useStore((s) => s.setImageStatuses);
   const endedSessionForRoot = useRef<string | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     stateSocket.connect();
     return () => stateSocket.close();
+  }, []);
+
+  // Every active_tab writer converges here; the backend GUI state follows what is on screen.
+  useActiveTabSync();
+
+  // Browser ctrl+wheel zoom stays off inside the app; iframe-embedded tools (TensorBoard, Ray)
+  // receive wheel events inside their own documents and keep it.
+  useEffect(() => {
+    if (!rootRef.current) return;
+    return attachCtrlWheelGuard(rootRef.current);
   }, []);
 
   // Subscribe to agent panel pushes for every tab: a "banner" event becomes that tab's note
@@ -297,7 +310,7 @@ function App() {
   ]);
 
   return (
-    <div className="h-full flex flex-col bg-tcip-bg text-tcip-fg">
+    <div ref={rootRef} className="h-full flex flex-col bg-tcip-bg text-tcip-fg">
       <TopBar />
       {/* Only Annotate / Review / Results need an imagery dataset+date; the rest
           (Training / Tuning / Inference / Meta) are reachable without one; being
