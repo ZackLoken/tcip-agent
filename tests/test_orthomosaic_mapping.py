@@ -1,4 +1,6 @@
-"""Unit tests for the orthomosaic georeferencing and windowed-reading pipeline module."""
+"""Orthomosaic georeferencing, per-detection plant assignment, and the tiled inference pass that
+sources its tiles from a windowed raster read (the reading layer itself: test_raster_source.py).
+"""
 
 from __future__ import annotations
 
@@ -12,12 +14,11 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     GeoreferencingError,
     GeoTransform,
     OrthomosaicGeoreference,
-    OrthomosaicWindowReader,
     RotatedRasterError,
-    UnsupportedRasterLayout,
     pixel_to_native,
     read_geotransform,
 )
+from tcip_mcp.pipelines.raster_source import StripTiffSource
 
 # UTM zone 15N: real projected CRS the confirmed orthomosaic uses. Central meridian is
 # -93 degrees exactly, which gives an independently hand-verifiable reference point below.
@@ -190,142 +191,6 @@ def test_pixel_to_wgs84_central_meridian_known_reference(tmp_path: Path) -> None
     assert lon == pytest.approx(-93.0, abs=1e-6)
 
 
-# ── Windowed reads ──────────────────────────────────────────────────────
-
-
-def _distinctive_array(height: int, width: int, channels: int = 3) -> np.ndarray:
-    """Each pixel encodes its own row/col so a returned sub-array can be checked exactly."""
-    arr = np.zeros((height, width, channels), dtype=np.uint8)
-    for row in range(height):
-        for col in range(width):
-            arr[row, col, 0] = row % 256
-            arr[row, col, 1] = col % 256
-            if channels > 2:
-                arr[row, col, 2] = (row + col) % 256
-    return arr
-
-
-def _write_striped_tiff(path: Path, arr: np.ndarray, *, rowsperstrip: int) -> None:
-    extrasamples = ["unassalpha"] * (arr.shape[-1] - 3) if arr.shape[-1] > 3 else None
-    kwargs = {"photometric": "rgb", "rowsperstrip": rowsperstrip}
-    if extrasamples:
-        kwargs["extrasamples"] = extrasamples
-    tifffile.imwrite(str(path), arr, **kwargs)
-
-
-def test_read_window_full_extent_matches_source(tmp_path: Path) -> None:
-    arr = _distinctive_array(23, 17)
-    path = tmp_path / "win.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=4)
-    with OrthomosaicWindowReader(path) as reader:
-        assert reader.height == 23
-        assert reader.width == 17
-        assert reader.num_channels == 3
-        window = reader.read_window(0, 23, 0, 17)
-    assert np.array_equal(window, arr)
-
-
-def test_read_window_spans_multiple_internal_strips(tmp_path: Path) -> None:
-    arr = _distinctive_array(23, 17)
-    path = tmp_path / "win.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=4)  # strips at rows 0,4,8,12,16,20
-    with OrthomosaicWindowReader(path) as reader:
-        window = reader.read_window(3, 13, 2, 10)  # spans strip boundaries at rows 4,8,12
-    assert np.array_equal(window, arr[3:13, 2:10])
-
-
-def test_read_window_partial_edge_window(tmp_path: Path) -> None:
-    arr = _distinctive_array(23, 17)  # 23 rows, rowsperstrip=4 -> last strip is a partial 3-row strip
-    path = tmp_path / "win.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=4)
-    with OrthomosaicWindowReader(path) as reader:
-        window = reader.read_window(19, 23, 10, 17)
-    assert np.array_equal(window, arr[19:23, 10:17])
-
-
-def test_read_window_out_of_bounds_raises(tmp_path: Path) -> None:
-    arr = _distinctive_array(10, 10)
-    path = tmp_path / "win.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=4)
-    with OrthomosaicWindowReader(path) as reader:
-        with pytest.raises(ValueError):
-            reader.read_window(0, 11, 0, 10)
-
-
-def test_read_window_caches_strips_across_a_row_band(tmp_path: Path) -> None:
-    """The access pattern a real tiling loop actually produces: many windows at the same ``y0``,
-    scanning across the width, each spanning the same handful of strips as its row-band neighbours.
-    Each strip must be decoded from disk once, not once per window that touches it.
-    """
-    height, width, rowsperstrip, tile = 64, 200, 8, 20
-    arr = _distinctive_array(height, width)
-    path = tmp_path / "win.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=rowsperstrip)
-    with OrthomosaicWindowReader(path) as reader:
-        y0, y1 = 8, 24  # spans strips 1..2 (rows 8-15, 16-23) exactly
-        windows = [
-            reader.read_window(y0, y1, x0, min(x0 + tile, width))
-            for x0 in range(0, width, tile)
-        ]
-        assert len(windows) > 3  # a real row-band, not a single tile
-        assert reader.strip_decode_count == 2  # the row-band's two strips, decoded exactly once
-        for window, x0 in zip(windows, range(0, width, tile)):
-            x1 = min(x0 + tile, width)
-            assert np.array_equal(window, arr[y0:y1, x0:x1])
-
-        # Advancing to the next row-band's own strips (3, 4) is still a genuine miss for both.
-        reader.read_window(y1, y1 + (y1 - y0), 0, tile)
-        assert reader.strip_decode_count == 4
-
-
-def test_read_window_returns_a_copy_not_a_cached_view(tmp_path: Path) -> None:
-    """A caller that mutates its returned window must not corrupt what a later window, served
-    from the same cached strip, reads back."""
-    arr = _distinctive_array(23, 17)
-    path = tmp_path / "win.tif"
-    _write_striped_tiff(path, arr, rowsperstrip=4)
-    with OrthomosaicWindowReader(path) as reader:
-        first = reader.read_window(0, 4, 0, 17)
-        first[:] = 255
-        second = reader.read_window(0, 4, 0, 17)
-    assert np.array_equal(second, arr[0:4, 0:17])
-
-
-def test_window_reader_refuses_tiled_tiff(tmp_path: Path) -> None:
-    arr = _distinctive_array(64, 64)
-    path = tmp_path / "tiled.tif"
-    tifffile.imwrite(str(path), arr, photometric="rgb", tile=(16, 16))
-    with pytest.raises(UnsupportedRasterLayout):
-        OrthomosaicWindowReader(path)
-
-
-def test_window_reader_refuses_multipage_row_block_tiff(tmp_path: Path) -> None:
-    """tifffile stores a plain channel-last N-band raster one row-block per page, so
-    ``pages[0]`` of this 64x80x5 raster describes a single row-block (height 80, width 5, one
-    sample), not the raster. A reader built from that page's shape would silently serve windows
-    sliced from the wrong geometry, so construction must refuse instead."""
-    arr = np.zeros((64, 80, 5), dtype=np.uint8)
-    path = tmp_path / "rowblock.tif"
-    tifffile.imwrite(str(path), arr)
-    with tifffile.TiffFile(str(path)) as tif:
-        assert len(tif.pages) > 1  # the layout under test, not a single-page file
-        assert tuple(tif.series[0].shape) == (64, 80, 5)
-    with pytest.raises(UnsupportedRasterLayout):
-        OrthomosaicWindowReader(path)
-
-
-def test_window_reader_accepts_single_page_grayscale(tmp_path: Path) -> None:
-    """A 1-sample raster's series shape is 2-D (H, W) while the page reports samplesperpixel=1;
-    the whole-raster cross-check must treat those as agreeing, not refuse a valid layout."""
-    arr = (np.arange(23 * 17, dtype=np.uint16) % 256).astype(np.uint8).reshape(23, 17)
-    path = tmp_path / "gray.tif"
-    tifffile.imwrite(str(path), arr, rowsperstrip=4)
-    with OrthomosaicWindowReader(path) as reader:
-        assert (reader.height, reader.width, reader.num_channels) == (23, 17, 1)
-        window = reader.read_window(3, 13, 2, 10)
-    assert np.array_equal(np.squeeze(window), arr[3:13, 2:10])
-
-
 # ── GeoTransform composes with plain floats (no bespoke point type) ─────
 
 
@@ -348,7 +213,7 @@ def _windowed_multiband_tiff(path: Path, *, height: int = 96, width: int = 96,
                               channels: int = 4, rowsperstrip: int = 12) -> np.ndarray:
     """A small multi-band raster with real pixel content (not all-zero, so a from-scratch
     detector's convolutions see something), decodable by both ``load_multiband`` (the full-array
-    path) and :class:`OrthomosaicWindowReader` (the windowed path): strip-based, contiguous
+    path) and :class:`StripTiffSource` (the windowed path): strip-based, contiguous
     samples, no compression.
     """
     rng = np.random.default_rng(0)
@@ -405,7 +270,7 @@ def test_predict_tiled_from_reader_matches_full_array_predict_tiled(tmp_path: Pa
     full_result = full.predict_tiled(str(path), tile_size=TILE, overlap=0.2)
 
     windowed = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
-    with OrthomosaicWindowReader(path) as reader:
+    with StripTiffSource(path) as reader:
         win_result = windowed.predict_tiled_from_reader(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
 
@@ -451,7 +316,7 @@ def test_predict_tiled_from_reader_and_predict_tiled_produce_matching_tiled_mask
     full_result = full.predict_tiled(str(path), tile_size=TILE, overlap=0.2)
 
     windowed = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
-    with OrthomosaicWindowReader(path) as reader:
+    with StripTiffSource(path) as reader:
         win_result = windowed.predict_tiled_from_reader(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
 
@@ -480,7 +345,7 @@ def test_predict_tiled_from_reader_require_masks_false_carries_no_masks_key(tmp_
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
 
     predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
-    with OrthomosaicWindowReader(path) as reader:
+    with StripTiffSource(path) as reader:
         result = predictor.predict_tiled_from_reader(
             reader, tile_size=TILE, overlap=0.2, require_masks=False)
     assert "masks" not in result
@@ -502,7 +367,7 @@ def test_predict_tiled_from_reader_tiled_mask_polygon_exports_at_correct_offset(
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
 
     predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
-    with OrthomosaicWindowReader(path) as reader:
+    with StripTiffSource(path) as reader:
         result = predictor.predict_tiled_from_reader(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
     assert result["count"] > 0, "fixture assumes at least one surviving detection"
