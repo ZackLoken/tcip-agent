@@ -37,6 +37,30 @@ def _make_image(path: Path, exif_date: str | None = None) -> None:
         img.save(path)
 
 
+def _make_raster(path: Path, **metadata: str) -> None:
+    """Write a tiny GeoTIFF carrying ``metadata`` in GDAL's default metadata domain, where a
+    stitching engine writes an orthomosaic's own capture date."""
+    from osgeo import gdal
+
+    gdal.UseExceptions()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ds = gdal.GetDriverByName("GTiff").Create(str(path), 8, 8, 3, gdal.GDT_Byte)
+    for key, value in metadata.items():
+        ds.SetMetadataItem(key, value)
+    ds = None
+
+
+def _make_tagged_tiff(path: Path, datetime_tag: str) -> None:
+    """Write a tiny TIFF whose DateTime tag (306) states ``datetime_tag``, the standard tag rather
+    than any one engine's metadata item."""
+    import numpy as np
+    import tifffile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tifffile.imwrite(str(path), np.zeros((8, 8, 3), np.uint8),
+                     extratags=[(306, "s", 0, datetime_tag, True)])
+
+
 # ── workspace resolver ──────────────────────────────────────────────────
 
 
@@ -114,6 +138,109 @@ def test_ingest_exif_buckets_and_undated(tmp_path):
     assert (proj / "images" / "undated" / "no_exif.png").is_file()
     # .tcip scaffolding created (the sessions/ event log was retired with its tools)
     assert (proj / ".tcip" / "config.toml").is_file()
+
+
+def test_ingest_buckets_a_raster_by_the_capture_date_its_metadata_states(tmp_path):
+    """A raster states its capture date in raster metadata, not in EXIF: an orthomosaic lands in a
+    real date bucket the same as a photo does."""
+    src = tmp_path / "raw"
+    _make_raster(src / "mosaic.tif", capture_date="2025-09-16")
+
+    manifest = ingest_images(source=str(src), name="proj_raster_date")
+
+    assert manifest["buckets"] == {"2025-09-16": 1}
+    assert manifest["undated"] == 0
+    assert manifest["unreadable_dates"] == []
+    assert (Path(manifest["project_path"]) / "images" / "2025-09-16" / "mosaic.tif").is_file()
+
+
+def test_ingest_buckets_a_tiff_by_its_own_datetime_tag(tmp_path):
+    src = tmp_path / "raw"
+    _make_tagged_tiff(src / "plot.tif", "2026:04:05 08:00:00")
+
+    manifest = ingest_images(source=str(src), name="proj_tiff_tag")
+
+    assert manifest["buckets"] == {"2026-04-05": 1}
+    assert manifest["unreadable_dates"] == []
+
+
+def test_ingest_leaves_a_raster_that_states_no_date_undated_and_unreported(tmp_path):
+    """Read, and it says nothing about when it was captured: a fact, not a failure."""
+    src = tmp_path / "raw"
+    _make_raster(src / "plain.tif")
+
+    manifest = ingest_images(source=str(src), name="proj_raster_undated")
+
+    assert manifest["undated"] == 1
+    assert manifest["buckets"] == {}
+    assert manifest["unreadable_dates"] == []
+
+
+def test_ingest_leaves_a_photo_without_an_exif_date_undated_and_unreported(tmp_path):
+    src = tmp_path / "raw"
+    _make_image(src / "no_exif.png")
+
+    manifest = ingest_images(source=str(src), name="proj_photo_undated")
+
+    assert manifest["undated"] == 1
+    assert manifest["unreadable_dates"] == []
+
+
+@pytest.mark.parametrize("name", ["broken.jpg", "broken.tif"])
+def test_ingest_still_ingests_a_file_whose_capture_date_cannot_be_read(tmp_path, name):
+    """The probe never gates ingestion: an unreadable container is copied and counted like any
+    other, buckets undated, and is named in the report so the difference from a file that simply
+    states no date stays visible."""
+    src = tmp_path / "raw"
+    src.mkdir(parents=True)
+    (src / name).write_bytes(b"this is not an image at all")
+
+    manifest = ingest_images(source=str(src), name="proj_unreadable")
+
+    assert manifest["copied"] == 1
+    assert manifest["total"] == 1
+    assert manifest["undated"] == 1
+    assert manifest["errors"] == []
+    assert (Path(manifest["project_path"]) / "images" / "undated" / name).is_file()
+
+    assert len(manifest["unreadable_dates"]) == 1
+    entry = manifest["unreadable_dates"][0]
+    assert entry["source"].endswith(name)
+    assert entry["bucket"] == "undated"
+    assert entry["reason"]
+
+
+def test_ingest_reports_an_exif_date_it_cannot_read_as_a_date(tmp_path):
+    src = tmp_path / "raw"
+    _make_image(src / "odd.jpg", exif_date="whenever")
+
+    manifest = ingest_images(source=str(src), name="proj_odd_exif")
+
+    assert manifest["undated"] == 1
+    assert len(manifest["unreadable_dates"]) == 1
+    assert "whenever" in manifest["unreadable_dates"][0]["reason"]
+
+
+@pytest.mark.parametrize("date_from", ["none", "2026-05-15"])
+def test_a_date_mode_that_names_its_own_bucket_opens_no_file(tmp_path, monkeypatch, date_from):
+    """Only the per-file mode reads a file; the modes that name the bucket from the caller's own
+    argument never open one, so an unreadable file costs nothing and reports nothing."""
+    src = tmp_path / "raw"
+    _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
+    (src / "broken.tif").write_bytes(b"this is not an image at all")
+
+    import PIL.Image
+    from osgeo import gdal
+
+    opened: list[str] = []
+    monkeypatch.setattr(PIL.Image, "open", lambda *a, **k: opened.append("pil"))
+    monkeypatch.setattr(gdal, "OpenEx", lambda *a, **k: opened.append("gdal"))
+
+    manifest = ingest_images(source=str(src), name="proj_no_open", date_from=date_from)
+
+    assert opened == []
+    assert manifest["copied"] == 2
+    assert manifest["unreadable_dates"] == []
 
 
 def test_ingest_copies_leave_originals_byte_identical(tmp_path):
