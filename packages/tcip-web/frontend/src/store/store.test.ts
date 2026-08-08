@@ -217,6 +217,58 @@ describe("toasts", () => {
   });
 });
 
+describe("content-based dirty tracking", () => {
+  beforeEach(() => {
+    s().clearCanvas();
+  });
+
+  const box = { x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} };
+
+  it("drawing a shape and deleting it again leaves the canvas clean", () => {
+    loadOnePolygon();
+    s().addBox(box);
+    expect(s().canvas.dirty).toBe(true);
+    s().deleteBox(0);
+    expect(s().canvas.dirty).toBe(false);
+  });
+
+  it("undoing back to the loaded content leaves the canvas clean", () => {
+    loadOnePolygon();
+    s().addBox(box);
+    s().undo();
+    expect(s().canvas.dirty).toBe(false);
+    s().redo();
+    expect(s().canvas.dirty).toBe(true);
+  });
+
+  it("a save re-baselines: deleting a saved shape then undoing it is clean again", () => {
+    s().addBox(box);
+    s().markClean();
+    s().deleteBox(0);
+    expect(s().canvas.dirty).toBe(true);
+    s().undo();
+    expect(s().canvas.dirty).toBe(false);
+  });
+
+  it("a genuine change stays dirty", () => {
+    loadOnePolygon();
+    s().addBox(box);
+    s().deleteBox(0);
+    s().addBox({ ...box, x2: 6 });
+    expect(s().canvas.dirty).toBe(true);
+  });
+
+  it("recomputeDirty settles a drag that returned a vertex to its origin", () => {
+    loadOnePolygon();
+    const [ox, oy] = RING_A[1];
+    s().dragVertex(0, 0, 1, [42, 7]);
+    expect(s().canvas.dirty).toBe(true); // drags flag without content compare; release settles it
+    s().dragVertex(0, 0, 1, [ox, oy]);
+    s().recomputeDirty();
+    expect(s().canvas.dirty).toBe(false);
+  });
+});
+
 describe("agent activity", () => {
   it("pushAgentActivity records the event and increments seq", () => {
     s().pushAgentActivity("annotate", "labels_written", { stem: "IMG_1" });
