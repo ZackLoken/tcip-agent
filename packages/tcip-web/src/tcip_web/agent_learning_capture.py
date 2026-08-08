@@ -1,11 +1,13 @@
 """SessionEnd capture hook: the soft backstop for the self-learning loop.
 
-Appends a session-boundary record to ``<project>/.tcip/learning_capture.jsonl`` so a session's
-existence is captured even when the agent recorded nothing. It sits alongside the project's other
-learning records, ``.tcip/reports/`` and ``.tcip/retrospectives/``, and the distill worksheet
-(``scripts/distill_learnings.py``) gathers all three for review. Nothing is promoted anywhere: a
-project's record stays with the project. The genuine learnings still come from the agent following
-the ``self-improvement`` skill; this only guarantees a record exists.
+Appends a session-boundary record to ``<cwd>/.tcip/learning_capture.jsonl``, and the terminal
+pins its sessions' cwd to the repo root, so records from every project's sessions pool in one
+platform-level file: this capture feeds platform improvement, not any one project's record.
+Each entry stamps the workspace's active project (when one is adopted) so a distill pass can
+group entries by project without sharding the file. The genuine learnings still come from the
+agent following the ``self-improvement`` skill and the per-project ``.tcip/reports/`` and
+``.tcip/retrospectives/``, which ``scripts/distill_learnings.py`` gathers from each project;
+this only guarantees a record of the session exists.
 
 Non-blocking + best-effort: any error is swallowed and the hook exits 0. A capture backstop must
 never break the agent's session (a SessionEnd hook that errors would surface as a failure).
@@ -28,12 +30,19 @@ def main() -> None:
         cwd = payload.get("cwd") or "."
         d = Path(cwd) / ".tcip"
         d.mkdir(parents=True, exist_ok=True)
+        try:
+            from tcip_mcp.workspace import read_active_project
+
+            active_project = read_active_project()
+        except Exception:
+            active_project = None
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "session_id": payload.get("session_id"),
             "reason": payload.get("reason"),
-            "note": "session ended; run scripts/distill_learnings.py to review this project's "
-                    "reports and retrospectives",
+            "active_project": active_project,
+            "note": "session ended; run scripts/distill_learnings.py to review the workspace "
+                    "projects' reports and retrospectives",
         }
         with (d / "learning_capture.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
