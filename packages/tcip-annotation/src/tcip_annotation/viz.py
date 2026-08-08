@@ -3,6 +3,13 @@
 All functions return the output file path for consumption by view_image.
 Default output directory: .tcip/artifacts/viz/
 
+The renderers take display pixels, never a path: whoever holds the raster decodes it, bounds its
+resolution and composites its bands, so a renderer never has to know how a multi-band or
+overview-bearing raster reads. Annotation coordinates stay in the raster's own full-resolution
+frame, so a renderer handed reduced pixels also takes the ``native_size`` those coordinates are in
+and scales them itself. ``render_grid`` is the exception: it tiles already-rendered artifacts and
+so takes their paths.
+
 Coordinates: functions accept pixel coordinates.
 """
 
@@ -10,10 +17,14 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw, ImageFont
 from tcip_annotation.sam_wrapper import column_label
-from tcip_annotation.utils import auto_orient_image, get_image_dimensions
+from tcip_annotation.utils import auto_orient_image
+
+if TYPE_CHECKING:
+    import numpy as np
 
 # 20-class color palette (RGB), consistent with the GUI annotation canvas
 COLOR_PALETTE: list[tuple[int, int, int]] = [
@@ -39,9 +50,6 @@ COLOR_PALETTE: list[tuple[int, int, int]] = [
     (255, 128, 255),   # pink
 ]
 
-MAX_RENDER_EDGE = 1024
-
-
 def _viz_base() -> Path:
     """The ``.tcip`` base for viz output. Honors ``TCIP_PROJECT_ROOT`` (the platform-state root the
     MCP server / web backend pin to the active project) so renders land under the project, not the
@@ -64,16 +72,26 @@ def _default_output(func_name: str, suffix: str = ".png") -> str:
     return str(viz_dir / f"{ts}_{us:06d}_{func_name}{suffix}")
 
 
-def _load_and_resize(image_path: str) -> Image.Image:
-    """Load image, apply EXIF orientation, and resize if larger than MAX_RENDER_EDGE."""
-    img = Image.open(image_path)
-    img = auto_orient_image(img)
-    img = img.convert("RGB")
-    w, h = img.size
-    if max(w, h) > MAX_RENDER_EDGE:
-        scale = MAX_RENDER_EDGE / max(w, h)
-        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-    return img
+def _rgb_frame(image: "Image.Image | np.ndarray") -> Image.Image:
+    """The caller's display pixels as an RGB frame this module can draw on.
+
+    A ``uint8 [H, W, 3]`` array or any PIL image; the returned frame is always a new one, so
+    drawing on it can never mutate what the caller passed. An array of another dtype or channel
+    count is refused rather than coerced: the only reading that would rescue it is a display
+    stretch or a band selection, and those belong to whoever read the raster and knows its bounds.
+    """
+    if isinstance(image, Image.Image):
+        return image.convert("RGB")
+
+    import numpy as np
+
+    arr = np.asarray(image)
+    if arr.dtype != np.uint8 or arr.ndim != 3 or arr.shape[2] != 3:
+        raise ValueError(
+            f"a renderer takes uint8 [H, W, 3] display pixels or a PIL image, got "
+            f"{arr.shape} {arr.dtype}"
+        )
+    return Image.fromarray(arr, mode="RGB")
 
 
 def _get_scale(orig_w: int, orig_h: int, render_w: int, render_h: int) -> tuple[float, float]:
@@ -97,19 +115,22 @@ def _try_font(size: int = 12) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def render_detections(
-    image_path: str,
+    image: "Image.Image | np.ndarray",
     boxes: list[dict],
+    *,
+    native_size: tuple[int, int],
     class_names: dict[int, str] | None = None,
     output_path: str | None = None,
     line_width: int = 2,
     conf_key: str | None = "confidence",
 ) -> str:
-    """Draw bounding boxes on image. Returns output path.
+    """Draw bounding boxes on display pixels. Returns output path.
 
     Args:
-        image_path: Path to the source image.
-        boxes: List of dicts with x1, y1, x2, y2, class_id (pixel coords).
+        image: Display pixels (uint8 RGB array or PIL image).
+        boxes: List of dicts with x1, y1, x2, y2, class_id (pixel coords in the native frame).
                Optionally include 'confidence' for score display.
+        native_size: ``(width, height)`` of the frame ``boxes`` are measured in.
         class_names: Mapping from class_id to display name.
         output_path: Where to save. Defaults to .tcip/artifacts/viz/.
         line_width: Box outline width in pixels.
@@ -118,8 +139,8 @@ def render_detections(
     output_path = output_path or _default_output("detections")
     class_names = class_names or {}
 
-    orig_w, orig_h = get_image_dimensions(image_path)
-    img = _load_and_resize(image_path)
+    orig_w, orig_h = native_size
+    img = _rgb_frame(image)
     draw = ImageDraw.Draw(img)
     font = _try_font(12)
     sx, sy = _get_scale(orig_w, orig_h, img.size[0], img.size[1])
@@ -150,19 +171,22 @@ def render_detections(
 
 
 def render_segmentations(
-    image_path: str,
+    image: "Image.Image | np.ndarray",
     polygons: list[dict],
+    *,
+    native_size: tuple[int, int],
     class_names: dict[int, str] | None = None,
     output_path: str | None = None,
     alpha: float = 0.3,
 ) -> str:
-    """Draw filled polygons on image. Returns output path.
+    """Draw filled polygons on display pixels. Returns output path.
 
     Args:
-        image_path: Path to the source image.
-        polygons: List of dicts with 'rings' (list of rings, each a list of (x,y) pixel tuples;
-                  an occlusion-split instance is more than one ring, drawn as one instance) and
-                  'class_id'.
+        image: Display pixels (uint8 RGB array or PIL image).
+        polygons: List of dicts with 'rings' (list of rings, each a list of (x,y) pixel tuples in
+                  the native frame; an occlusion-split instance is more than one ring, drawn as one
+                  instance) and 'class_id'.
+        native_size: ``(width, height)`` of the frame the rings are measured in.
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
         alpha: Fill transparency (0=transparent, 1=opaque).
@@ -170,8 +194,8 @@ def render_segmentations(
     output_path = output_path or _default_output("segmentations")
     class_names = class_names or {}
 
-    orig_w, orig_h = get_image_dimensions(image_path)
-    img = _load_and_resize(image_path)
+    orig_w, orig_h = native_size
+    img = _rgb_frame(image)
     overlay = img.copy()
     draw = ImageDraw.Draw(overlay)
     font = _try_font(12)
@@ -201,9 +225,11 @@ def render_segmentations(
 
 
 def render_comparison(
-    image_path: str,
+    image: "Image.Image | np.ndarray",
     gt_boxes: list[dict],
     pred_boxes: list[dict],
+    *,
+    native_size: tuple[int, int],
     matches: list[dict] | None = None,
     class_names: dict[int, str] | None = None,
     output_path: str | None = None,
@@ -211,9 +237,10 @@ def render_comparison(
     """Overlay GT (green) vs predictions (red) with optional match lines.
 
     Args:
-        image_path: Path to the source image.
-        gt_boxes: Ground truth boxes (x1, y1, x2, y2, class_id).
-        pred_boxes: Prediction boxes (x1, y1, x2, y2, class_id, confidence).
+        image: Display pixels (uint8 RGB array or PIL image).
+        gt_boxes: Ground truth boxes (x1, y1, x2, y2, class_id) in the native frame.
+        pred_boxes: Prediction boxes (x1, y1, x2, y2, class_id, confidence) in the native frame.
+        native_size: ``(width, height)`` of the frame the boxes are measured in.
         matches: Matched pairs from compute_matches (score_predictions detail=True).
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
@@ -221,8 +248,8 @@ def render_comparison(
     output_path = output_path or _default_output("comparison")
     class_names = class_names or {}
 
-    orig_w, orig_h = get_image_dimensions(image_path)
-    img = _load_and_resize(image_path)
+    orig_w, orig_h = native_size
+    img = _rgb_frame(image)
     draw = ImageDraw.Draw(img)
     font = _try_font(11)
     sx, sy = _get_scale(orig_w, orig_h, img.size[0], img.size[1])
@@ -329,69 +356,25 @@ def render_grid(
     return output_path
 
 
-def render_confusion_examples(
-    worst_predictions: list[dict],
-    images_dir: str | None = None,
-    output_dir: str | None = None,
-) -> list[str]:
-    """Render the worst prediction cases for visual failure analysis.
-
-    Args:
-        worst_predictions: From get_worst_predictions, a list of dicts
-            with 'image', 'gt_boxes', 'pred_boxes', optional 'error_type'.
-        images_dir: Directory containing source images.
-        output_dir: Where to save renders. Defaults to .tcip/artifacts/viz/failures/.
-
-    Returns:
-        List of output paths (one per failure case).
-    """
-    output_dir = output_dir or str((_viz_base() / "artifacts" / "viz" / "failures").resolve())
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-    paths: list[str] = []
-    for i, wp in enumerate(worst_predictions):
-        img_name = wp.get("image", f"case_{i}")
-        img_path = wp.get("image_path")
-        if not img_path and images_dir:
-            # Try common extensions
-            for ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
-                candidate = Path(images_dir) / f"{img_name}{ext}"
-                if candidate.is_file():
-                    img_path = str(candidate)
-                    break
-
-        if not img_path or not Path(img_path).is_file():
-            continue
-
-        out = str(Path(output_dir) / f"failure_{i:03d}_{Path(img_name).stem}.png")
-        render_comparison(
-            image_path=img_path,
-            gt_boxes=wp.get("gt_boxes", []),
-            pred_boxes=wp.get("pred_boxes", []),
-            matches=wp.get("matches"),
-            output_path=out,
-        )
-        paths.append(out)
-
-    return paths
-
-
 def render_candidates(
-    image_path: str,
+    image: "Image.Image | np.ndarray",
     candidates: list[dict],
+    *,
+    native_size: tuple[int, int],
     output_path: str | None = None,
     alpha: float = 0.35,
 ) -> str:
-    """Render numbered proposal-engine candidate masks on image for agent review.
+    """Render numbered proposal-engine candidate masks on display pixels for agent review.
 
     Each candidate is drawn as a semi-transparent colored polygon with a
     large numbered label. Colors cycle through the palette. Engine-agnostic.
     Every ring of a candidate is drawn: an occlusion-split proposal must look split, not whole.
 
     Args:
-        image_path: Path to the source image.
+        image: Display pixels (uint8 RGB array or PIL image).
         candidates: Neutral candidate dicts, each with candidate_id, bbox, rings, area, score
-            (SAM populates these via its proposer adapter).
+            (SAM populates these via its proposer adapter); coordinates in the native frame.
+        native_size: ``(width, height)`` of the frame the candidates are measured in.
         output_path: Where to save. Defaults to .tcip/artifacts/viz/.
         alpha: Fill transparency (0=transparent, 1=opaque).
 
@@ -400,8 +383,8 @@ def render_candidates(
     """
     output_path = output_path or _default_output("candidates")
 
-    orig_w, orig_h = get_image_dimensions(image_path)
-    img = _load_and_resize(image_path)
+    orig_w, orig_h = native_size
+    img = _rgb_frame(image)
     rw, rh = img.size
     sx, sy = _get_scale(orig_w, orig_h, rw, rh)
 
@@ -458,20 +441,22 @@ def render_candidates(
 
 
 def render_grid_overlay(
-    image_path: str,
+    image: "Image.Image | np.ndarray",
     cols: int = 8,
     rows: int = 6,
     output_path: str | None = None,
 ) -> str:
-    """Render image with a labeled grid overlay for spatial referencing.
+    """Render display pixels with a labeled grid overlay for spatial referencing.
 
     The grid uses spreadsheet-style letter columns (A-Z, then AA, AB, ...)
     and number rows. The agent can reference cells like 'B3' or 'F5' to
     indicate object locations, which are converted to pixel coordinates
-    via grid_to_pixel().
+    via grid_to_pixel(). The grid divides the rendered frame proportionally, so a cell names the
+    same fraction of the image whatever resolution the pixels were read at, and no native size is
+    needed here.
 
     Args:
-        image_path: Path to the source image.
+        image: Display pixels (uint8 RGB array or PIL image).
         cols: Number of grid columns (default 8, labeled A-H).
         rows: Number of grid rows (default 6, labeled 1-6).
         output_path: Where to save.
@@ -481,7 +466,7 @@ def render_grid_overlay(
     """
     output_path = output_path or _default_output("grid_overlay")
 
-    img = _load_and_resize(image_path)
+    img = _rgb_frame(image)
     rw, rh = img.size
     draw = ImageDraw.Draw(img)
 
@@ -562,14 +547,14 @@ def _draw_path(draw, pts, color, width: int, dashed: bool, closed: bool) -> None
 
 
 def render_canvas_state(
-    image_path: str,
+    image: "Image.Image | np.ndarray",
     shapes: list[dict],
-    viewport: dict | None = None,
-    crop_to_viewport: bool = True,
-    max_edge: int = 1600,
+    *,
+    origin: tuple[float, float],
+    scale: float,
     output_path: str | None = None,
 ) -> str:
-    """Render the live GUI canvas: display-resolved shapes over the (EXIF-upright) image.
+    """Render the live GUI canvas: display-resolved shapes over the pixels the human is viewing.
 
     ``shapes`` come from the canvas-state push, each already carrying the exact symbology the
     GUI rendered: ``{kind: box|polygon|polyline|point, xyxy|points (pixel), color '#hex', fill?,
@@ -577,31 +562,19 @@ def render_canvas_state(
     ``point`` carries one coordinate in ``points`` and draws as the GUI's mark (a core with radial
     ticks); it is never widened into a box, which would show the agent an extent the annotation
     does not claim.
-    With ``crop_to_viewport`` and a ``viewport`` (``{x, y, w, h}`` image coords), the output is
-    exactly the visible region (full native resolution, downscaled only past ``max_edge``).
+
+    ``image`` is whatever region of the raster the caller read (the human's viewport, or the whole
+    frame), ``origin`` is that region's top-left corner in the raster's own full-resolution grid
+    and ``scale`` is the served resolution as a fraction of native. Shape coordinates arrive in
+    the native grid and are placed by those two, so the caller reads exactly the pixels it wants
+    shown rather than this decoding a whole raster to crop it.
     """
     if output_path is None:
         output_path = _default_output("canvas", suffix=".jpg")
 
-    img = Image.open(image_path)
-    img = auto_orient_image(img).convert("RGB")
-    full_w, full_h = img.size
-
-    # Crop to the viewport (clamped); shape coords shift by the crop origin.
-    ox, oy = 0.0, 0.0
-    if crop_to_viewport and viewport:
-        vx = max(0.0, min(float(viewport.get("x", 0)), full_w - 1))
-        vy = max(0.0, min(float(viewport.get("y", 0)), full_h - 1))
-        vw = max(8.0, min(float(viewport.get("w", full_w)), full_w - vx))
-        vh = max(8.0, min(float(viewport.get("h", full_h)), full_h - vy))
-        img = img.crop((int(vx), int(vy), int(vx + vw), int(vy + vh)))
-        ox, oy = float(int(vx)), float(int(vy))
-
-    w, h = img.size
-    k = 1.0
-    if max(w, h) > max_edge:
-        k = max_edge / max(w, h)
-        img = img.resize((max(1, int(w * k)), max(1, int(h * k))), Image.LANCZOS)
+    img = _rgb_frame(image)
+    ox, oy = float(origin[0]), float(origin[1])
+    k = float(scale)
 
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
