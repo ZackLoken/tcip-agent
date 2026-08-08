@@ -433,6 +433,17 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     body = buf.getvalue()
     filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+    # The browser download lands wherever the breeder's browser puts it; the delivery itself
+    # belongs to the project, so the same bytes are written to <project>/results_export/, audited.
+    saved_path = Path(payload.project_root) / "results_export" / Path(filename).name
+    saved_path.parent.mkdir(parents=True, exist_ok=True)
+    saved_path.write_text(body, encoding="utf-8", newline="")
+    _audit(payload.project_root, "results.export_csv", {
+        "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),
+        "rows": len(rows),
+    })
+    headers["X-TCIP-Saved-To"] = str(saved_path)
     return Response(content=body, media_type="text/csv", headers=headers)
 
 
