@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 STATE_FILENAME = "gui.json"
 PERSIST_DEBOUNCE_SECONDS = 0.5
 
+TAB_NAMES = ("annotate", "review", "training", "tuning", "inference", "results", "meta")
+"""The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
+validates against. The frontend's ``TabName`` union (store/types.ts) mirrors this tuple."""
+
 
 # ── Pydantic state model ────────────────────────────────────────────────
 
@@ -76,7 +80,7 @@ class GuiState(BaseModel):
     lives with the corresponding tabs, not here.
     """
 
-    active_tab: str = "annotate"  # annotate|review|training|tuning|inference|results|meta
+    active_tab: str = "annotate"  # one of TAB_NAMES
     dataset: DatasetSelection = Field(default_factory=DatasetSelection)
     view: ViewState = Field(default_factory=ViewState)
     mode: str = "box"  # box|polygon|point
