@@ -124,7 +124,7 @@ def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, tmp_pa
     assert _meta(tmp_path)["image_path"] == "C:/img/b.jpg"
 
 
-# ── renderer: crop math + two-pass draw + tolerance ─────────────────────────
+# ── renderer: origin/scale placement + two-pass draw + tolerance ────────────
 
 def _make_image(tmp_path: Path) -> str:
     p = tmp_path / "img.jpg"
@@ -132,21 +132,57 @@ def _make_image(tmp_path: Path) -> str:
     return str(p)
 
 
-def test_render_crops_to_viewport(tmp_path):
-    from tcip_annotation.viz import render_canvas_state
-    img = _make_image(tmp_path)
-    out = render_canvas_state(img, SHAPES, viewport={"x": 50, "y": 0, "w": 100, "h": 100},
-                              output_path=str(tmp_path / "out.jpg"))
-    assert Image.open(out).size == (100, 100)   # exactly the visible region
+def _pixels(image_path: str, region=None, scale: float = 1.0):
+    """The pixels a caller reads for the canvas render: a region of the image at ``scale``.
+
+    Stands in for the raster read ``capture_live_canvas`` performs, so a renderer test exercises
+    placement and nothing else.
+    """
+    import numpy as np
+
+    with Image.open(image_path) as im:
+        frame = im.convert("RGB")
+        if region is not None:
+            frame = frame.crop(region)
+        if scale != 1.0:
+            frame = frame.resize((max(1, round(frame.width * scale)),
+                                  max(1, round(frame.height * scale))), Image.LANCZOS)
+        return np.asarray(frame)
 
 
-def test_render_full_frame_and_downscale(tmp_path):
+def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(tmp_path):
+    """A shape's native coordinate lands where the crop origin puts it, not where it sat in the
+    full frame: the placement the viewport read replaced the renderer's own crop with."""
     from tcip_annotation.viz import render_canvas_state
     img = _make_image(tmp_path)
-    out = render_canvas_state(img, SHAPES, viewport={"x": 50, "y": 0, "w": 100, "h": 100},
-                              crop_to_viewport=False, max_edge=100,
-                              output_path=str(tmp_path / "full.jpg"))
-    assert Image.open(out).size == (100, 50)    # full frame, downscaled to max_edge
+    shapes = [{"kind": "point", "points": [[100, 50]], "color": "#FF0000"}]
+    out = render_canvas_state(_pixels(img, region=(50, 0, 150, 100)), shapes,
+                              origin=(50, 0), scale=1.0,
+                              output_path=str(tmp_path / "crop.png"))
+    px = Image.open(out).convert("RGB")
+    assert px.size == (100, 100)                        # exactly the region handed in
+
+    def r_at(xy):
+        return px.getpixel(xy)[0] - px.getpixel(xy)[1]
+
+    assert r_at((50, 50)) > 40      # native x=100 minus origin x=50
+    assert r_at((95, 50)) < 10      # nothing near where the unshifted coordinate would have hit
+
+
+def test_render_scales_a_shape_with_the_pixels_it_is_drawn_on(tmp_path):
+    from tcip_annotation.viz import render_canvas_state
+    img = _make_image(tmp_path)
+    shapes = [{"kind": "point", "points": [[100, 50]], "color": "#FF0000"}]
+    out = render_canvas_state(_pixels(img, scale=0.5), shapes, origin=(0, 0), scale=0.5,
+                              output_path=str(tmp_path / "half.png"))
+    px = Image.open(out).convert("RGB")
+    assert px.size == (100, 50)
+
+    def r_at(xy):
+        return px.getpixel(xy)[0] - px.getpixel(xy)[1]
+
+    assert r_at((50, 25)) > 40      # native (100, 50) at half resolution
+    assert r_at((90, 25)) < 10
 
 
 def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
@@ -156,7 +192,8 @@ def test_render_two_pass_fill_does_not_erase_outlines(tmp_path):
         {"kind": "box", "xyxy": [20, 20, 80, 80], "color": "#00FF00"},          # green outline
         {"kind": "box", "xyxy": [10, 10, 90, 90], "color": "#FF0000", "fill": True},  # later red fill over it
     ]
-    out = render_canvas_state(img, shapes, output_path=str(tmp_path / "overlap.png"))
+    out = render_canvas_state(_pixels(img), shapes, origin=(0, 0), scale=1.0,
+                              output_path=str(tmp_path / "overlap.png"))
     px = Image.open(out).convert("RGB").getpixel((50, 20))  # a point on the green outline
     assert px[1] > px[0]  # outline survives the later overlapping fill (green-dominant)
 
@@ -171,7 +208,7 @@ def test_render_draws_a_point_shape_and_never_widens_it_to_a_box(tmp_path):
     from tcip_annotation.viz import render_canvas_state
     img = _make_image(tmp_path)
     shapes = [{"kind": "point", "points": [[100, 50]], "color": "#FF0000", "label": "tip"}]
-    out = render_canvas_state(img, shapes, crop_to_viewport=False,
+    out = render_canvas_state(_pixels(img), shapes, origin=(0, 0), scale=1.0,
                               output_path=str(tmp_path / "point.png"))
     px = Image.open(out).convert("RGB")
 
@@ -188,7 +225,8 @@ def test_render_tolerates_malformed_shapes(tmp_path):
     img = _make_image(tmp_path)
     bad = [{"kind": "box"}, {"kind": "polygon", "points": [[1, 1]]}, "junk",
            {"kind": "box", "xyxy": [10, 10, 40, 40], "color": "not-a-color"}]
-    out = render_canvas_state(img, bad, output_path=str(tmp_path / "bad.jpg"))
+    out = render_canvas_state(_pixels(img), bad, origin=(0, 0), scale=1.0,
+                              output_path=str(tmp_path / "bad.jpg"))
     assert Path(out).is_file()                  # renders what it can, never raises
 
 
@@ -234,6 +272,57 @@ def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
     assert res["state_age_seconds"] >= 0
     assert res["shapes_missing"] is False
     assert res["project_root"] == str(tmp_path)
+
+
+def test_capture_live_canvas_renders_exactly_the_viewport_region(tmp_path, monkeypatch):
+    """The tool reads the visible rectangle and renders that, so the artifact is the region the
+    human sees rather than the whole frame."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    img = _make_image(tmp_path)
+    _write_state(tmp_path, img)
+    sd = tmp_path / ".tcip" / "state"
+    live = json.loads((sd / "canvas_live.json").read_text())
+    live["viewport"] = {"x": 50, "y": 0, "w": 100, "h": 100}
+    (sd / "canvas_live.json").write_text(json.dumps(live))
+
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    res = capture_live_canvas(refresh=False)
+    assert res["cropped_to_viewport"] is True
+    assert Image.open(res["image_path"]).size == (100, 100)
+
+
+def test_capture_live_canvas_full_frame_downscales_to_max_edge(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    img = _make_image(tmp_path)
+    _write_state(tmp_path, img)
+
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    res = capture_live_canvas(refresh=False, crop_to_viewport=False, max_edge=100)
+    assert res["cropped_to_viewport"] is False
+    assert Image.open(res["image_path"]).size == (100, 50)
+
+
+def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
+    tmp_path, monkeypatch,
+):
+    """A raster PIL has no true-color mode for is composited in memory for the render: the capture
+    path writes no throwaway preview file beside the artifact."""
+    import numpy as np
+    import tifffile
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    images = tmp_path / "images"
+    images.mkdir()
+    rng = np.random.default_rng(3)
+    src = images / "capture.tif"
+    tifffile.imwrite(str(src), rng.integers(0, 4096, size=(100, 200, 6)).astype(np.uint16))
+    _write_state(tmp_path, str(src))
+
+    from tcip_mcp.tools.vision_tools import capture_live_canvas
+    res = capture_live_canvas(refresh=False)
+    assert "error" not in res
+    assert Image.open(res["image_path"]).mode == "RGB"
+    assert not (tmp_path / ".tcip" / "artifacts" / "viz" / "_band_previews").exists()
 
 
 def test_capture_live_canvas_identity_stale_shapes_do_not_render(tmp_path, monkeypatch):
