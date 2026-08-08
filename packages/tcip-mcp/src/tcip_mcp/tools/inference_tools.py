@@ -800,7 +800,8 @@ def export_predictions(
     Args:
         checkpoint_path: Path to model .pt checkpoint.
         images_dir: Directory containing input images.
-        output_dir: Directory for output .json prediction files.
+        output_dir: Directory for output .json prediction files. A relative path resolves
+            against the project root, never the server process's cwd.
         conf_threshold: Minimum confidence score.
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
@@ -831,11 +832,11 @@ def export_predictions(
         resolve_prediction_bucket,
         resolve_writable_bucket,
     )
-    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.project_paths import resolve_output_path, resolve_state
 
     # Resolve the writable bucket before the (expensive) inference so a verdict-blocked overwrite
     # fails fast; verdicts live under the pinned project's ``.tcip/state``.
-    out_path = Path(output_dir)
+    out_path = resolve_output_path(output_dir)
     parent, base_name = out_path.parent, out_path.name
     review_state_dir = resolve_state(Path(".tcip") / "state")
 
@@ -997,7 +998,8 @@ def tabulate_counts(
     Args:
         checkpoint_path: Path to model .pt checkpoint.
         images_dir: Directory containing input images.
-        output_path: Path for the output CSV file.
+        output_path: Path for the output CSV file. A relative path resolves against the
+            project root, never the server process's cwd.
         conf_threshold: Minimum confidence score.
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
@@ -1017,6 +1019,9 @@ def tabulate_counts(
         acknowledge_unvalidated: Write the count CSV even when the operating point is unvalidated,
             stamping it ``measurement_validated=false`` so the un-trustworthiness travels downstream.
     """
+    from tcip_mcp.project_paths import resolve_output_path
+
+    output_path = str(resolve_output_path(output_path))
     result = run_inference(
         checkpoint_path=checkpoint_path,
         images_dir=images_dir,
