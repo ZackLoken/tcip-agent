@@ -109,7 +109,7 @@ space, and budget; no method is welded in. Match them to the problem; the defaul
 | `search_alg` | `random` / `grid` (native), or a backend when installed: `optuna`, `bayesopt`, `hyperopt`, `nevergrad`, `ax`, `hebo`, `zoopt`, `bohb`. An uninstalled pick errors clearly (never silently swapped). |
 | `scheduler` | `asha`, `hyperband`, `bohb` (pair with the `bohb` searcher), `pbt`, `median`, or `none`. `grace_period` / `reduction_factor` tune the halving schedulers. |
 | `available_search_algs()` / `available_schedulers()` | the live menu on *this* machine (probes which backends import); call it rather than assuming. |
-| `tune_search(objective_fn, param_space, …)` | the seam under `run_hpo`: bring your own `objective_fn(config, report)` (call `report(value)` each step) with any `metric`/`mode`, and it drives the same searcher/scheduler machinery for a search that isn't a training sweep. |
+| `tune_search(objective_fn, param_space, …)` | the seam under `run_hpo`: bring your own `objective_fn(config, report)` (call `report(value)` each step) with any `metric`/`mode`, and it drives the same searcher/scheduler machinery for a search that isn't a training sweep. `storage_path` is required (trial results land where you say, never Ray's home-directory default); `run_hpo` resolves it to the project's own `.tcip/hpo`. |
 
 Trials run under the base config's regime (same augmentation / imbalance handling) so the winning
 hyperparameters transfer to `launch_training`. `warm_start` seeds a known-good point;
