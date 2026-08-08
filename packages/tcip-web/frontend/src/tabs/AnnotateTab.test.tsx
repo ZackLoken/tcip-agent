@@ -616,3 +616,153 @@ describe("AnnotateTab band-composite wiring", () => {
     expect(url).toContain("stretch=minmax");
   });
 });
+
+// The CanvasStage mock forwards clientX/Y as image-pixel coords, so these drive the real
+// pointer state machine against a 1000x800 image.
+const POLY_A = {
+  rings: [
+    [
+      [10, 10],
+      [200, 10],
+      [200, 200],
+      [10, 200],
+    ] as [number, number][],
+  ],
+  subject: "subject_a",
+  attributes: {},
+};
+const POLY_B = {
+  rings: [
+    [
+      [300, 300],
+      [400, 300],
+      [400, 400],
+      [300, 400],
+    ] as [number, number][],
+  ],
+  subject: "subject_a",
+  attributes: {},
+};
+
+function seedPolygons(polygons: (typeof POLY_A)[]) {
+  useStore.getState().loadLabelsIntoCanvas({
+    image_path: "C:/data/images/2026-01-01/img1.jpg",
+    img_width: 1000,
+    img_height: 800,
+    boxes: [],
+    polygons,
+    points: [],
+    imageAnnotations: [],
+  });
+}
+
+const nextFrame = () =>
+  act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+
+async function renderPolygonCanvas(polygons: (typeof POLY_A)[] = [POLY_A, POLY_B]) {
+  render(<AnnotateTab />);
+  await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+  await flush();
+  act(() => {
+    useStore.getState().setMode("polygon");
+    seedPolygons(polygons);
+  });
+  return screen.getByTestId("canvas-stage");
+}
+
+describe("click-selection parity across the Snap/Stream toggles", () => {
+  it("a click on a polygon selects it with Stream on, never starts a new one", async () => {
+    const stage = await renderPolygonCanvas();
+    act(() => useStore.getState().setStream(true));
+    fireEvent.click(stage, { clientX: 50, clientY: 50 });
+    expect(useStore.getState().canvas.selectedPolygonIdx).toBe(0);
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+
+  it("a click on another polygon switches the selection with Stream on", async () => {
+    const stage = await renderPolygonCanvas();
+    act(() => {
+      useStore.getState().setStream(true);
+      useStore.getState().selectPolygon(0);
+    });
+    fireEvent.click(stage, { clientX: 350, clientY: 350 });
+    expect(useStore.getState().canvas.selectedPolygonIdx).toBe(1);
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+
+  it("with Stream on, empty space deselects first and a later click still streams", async () => {
+    const stage = await renderPolygonCanvas();
+    act(() => {
+      useStore.getState().setStream(true);
+      useStore.getState().selectPolygon(0);
+    });
+    fireEvent.click(stage, { clientX: 600, clientY: 600 });
+    expect(useStore.getState().canvas.selectedPolygonIdx).toBeNull();
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+    fireEvent.click(stage, { clientX: 600, clientY: 600 });
+    expect(useStore.getState().canvas.currentPolygon).toEqual([[600, 600]]);
+  });
+
+  it("a click on a polygon selects it with Snap on", async () => {
+    const stage = await renderPolygonCanvas();
+    act(() => useStore.getState().setSnap(true));
+    fireEvent.click(stage, { clientX: 50, clientY: 50 });
+    expect(useStore.getState().canvas.selectedPolygonIdx).toBe(0);
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+});
+
+describe("clicks outside the image extent are inert", () => {
+  it("box mode: a press-drag from outside authors no box", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    const stage = screen.getByTestId("canvas-stage");
+    fireEvent.mouseDown(stage, { clientX: 1200, clientY: -50 });
+    fireEvent.mouseMove(stage, { clientX: -100, clientY: 900 });
+    await nextFrame();
+    fireEvent.mouseUp(stage, { clientX: -100, clientY: 900 });
+    expect(useStore.getState().canvas.boxes).toHaveLength(0);
+  });
+
+  it("point mode: an outside click places no point", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(() => useStore.getState().setMode("point"));
+    fireEvent.click(screen.getByTestId("canvas-stage"), { clientX: 1200, clientY: 400 });
+    expect(useStore.getState().canvas.points).toHaveLength(0);
+  });
+
+  it("polygon mode: an outside click starts no polygon", async () => {
+    const stage = await renderPolygonCanvas([]);
+    fireEvent.click(stage, { clientX: 1200, clientY: 400 });
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+
+  it("polygon mode: an outside click adds no vertex to a polygon in progress", async () => {
+    const stage = await renderPolygonCanvas([]);
+    fireEvent.click(stage, { clientX: 600, clientY: 600 });
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(1);
+    fireEvent.click(stage, { clientX: 1200, clientY: 400 });
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(1);
+  });
+
+  it("an outside click does not drop an existing selection", async () => {
+    const stage = await renderPolygonCanvas();
+    fireEvent.click(stage, { clientX: 50, clientY: 50 });
+    expect(useStore.getState().canvas.selectedPolygonIdx).toBe(0);
+    fireEvent.click(stage, { clientX: 1050, clientY: 400 });
+    expect(useStore.getState().canvas.selectedPolygonIdx).toBe(0);
+  });
+
+  it("with Stream on, an outside click starts no stream and later moves lay nothing", async () => {
+    const stage = await renderPolygonCanvas([]);
+    act(() => useStore.getState().setStream(true));
+    fireEvent.click(stage, { clientX: 1200, clientY: 400 });
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+    fireEvent.mouseMove(stage, { clientX: 500, clientY: 400 });
+    await nextFrame();
+    expect(useStore.getState().canvas.currentPolygon).toHaveLength(0);
+  });
+});
