@@ -594,10 +594,12 @@ class GdalSource(_ClosableSource):
                 and band.GetColorInterpretation() == gdal.GCI_PaletteIndex):
             table = band.GetRasterColorTable()
             if table is not None:
-                # A 256-entry LUT whatever the table declares: a Byte index can reach 255.
-                lut = np.zeros((256, 3), dtype=np.uint8)
-                for i in range(min(256, int(table.GetCount()))):
-                    lut[i] = table.GetColorEntry(i)[:3]
+                lut = self._tiff_colormap_lut()
+                if lut is None:
+                    # A container with no readable ColorMap tag: GDAL's converted entries.
+                    lut = np.zeros((256, 3), dtype=np.uint8)
+                    for i in range(min(256, int(table.GetCount()))):
+                        lut[i] = table.GetColorEntry(i)[:3]
                 self._palette_lut = lut
                 self.num_channels = 3
                 self.dtype = np.dtype("uint8")
@@ -608,6 +610,33 @@ class GdalSource(_ClosableSource):
                 gdal.GetColorInterpretationName(
                     self._ds.GetRasterBand(i + 1).GetRasterColorInterpretation()).lower()
                 for i in range(self.num_channels))
+
+    def _tiff_colormap_lut(self) -> "np.ndarray | None":
+        """The palette as the file's own ColorMap tag states it, high byte per 16-bit entry.
+
+        The tag's 16-bit entries carry the 8-bit palette scaled by 256 (PIL) or 257 (the TIFF
+        specification's full-range convention), and the high byte recovers the original value
+        exactly under either scaling. GDAL's converted color-table entries are not used because
+        the conversion changed across GDAL versions (3.8 truncate-divides by 257, off by one
+        against PIL's decode; 3.12 agrees with the high byte), measured on both.
+        ``None`` when the tag cannot be read; the caller falls back to GDAL's entries.
+        """
+        try:
+            import tifffile
+
+            with tifffile.TiffFile(str(self.path)) as tif:
+                cmap = tif.pages[0].tags.get("ColorMap")
+                if cmap is None:
+                    return None
+                raw = np.asarray(cmap.value)
+        except Exception:  # noqa: BLE001, any unreadable tag falls back to GDAL's table
+            return None
+        if raw.ndim != 2 or raw.shape[0] < 3:
+            return None
+        lut = np.zeros((256, 3), dtype=np.uint8)
+        n = min(256, raw.shape[1])
+        lut[:n] = (raw[:3, :n].astype(np.uint16) >> 8).astype(np.uint8).T
+        return lut
 
     @property
     def resident_bytes(self) -> int:
