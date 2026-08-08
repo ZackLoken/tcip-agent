@@ -91,14 +91,14 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
 
     seen_sources = []
-    from tcip_mcp.pipelines import image_utils
-    real_load_multiband = image_utils.load_multiband
+    from tcip_mcp.pipelines import raster_source
+    real_open_raster = raster_source.open_raster
 
-    def _spy_load_multiband(path, num_channels):
-        seen_sources.append(path)
-        return real_load_multiband(path, num_channels)
+    def _spy_open_raster(source, num_channels):
+        seen_sources.append(source)
+        return real_open_raster(source, num_channels)
 
-    monkeypatch.setattr(image_utils, "load_multiband", _spy_load_multiband)
+    monkeypatch.setattr(raster_source, "open_raster", _spy_open_raster)
 
     bundle, dataset_hash, n_excluded = _calibrate_operating_point(
         predictor, "catkin", str(labels_dir), str(images_dir),
@@ -111,9 +111,8 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     assert bundle is not None
     assert dataset_hash
 
-    # Both grouped captures really were decoded as BandGroupRefs through the channel-aware
-    # loader (never a stringified stand-in the predictor's own Path(...) would silently
-    # mis-resolve), and each stacked to its declared 2 bands.
+    # Both grouped captures really were opened as BandGroupRefs through the channel-aware reading
+    # layer, never a stringified stand-in the predictor's own Path(...) would mis-resolve.
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
     grouped = [s for s in seen_sources if isinstance(s, BandGroupRef)]
