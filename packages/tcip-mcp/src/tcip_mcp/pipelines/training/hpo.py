@@ -32,6 +32,10 @@ _ray_started_here = False
 
 _RAY_DASHBOARD_STATE = Path(".tcip") / "state" / "ray_dashboard.json"
 
+# Ray Tune raises on these deprecated variables' mere presence; storage_path alone decides
+# where trial results land, so a sweep drops them for its duration and restores them after.
+_ENV_VARS_RAY_TUNE_REFUSES = ("TUNE_RESULT_DIR", "RAY_AIR_LOCAL_CACHE_DIR")
+
 # Native samplers (BasicVariantGenerator), no extra dependency. ``grid`` becomes a grid
 # over the discrete axes of the space; ``random`` samples them.
 _NATIVE_SEARCH = {"random", "grid", "variant_generator", "", None}
@@ -323,6 +327,11 @@ def tune_search(
         max_concurrent: trials to run at once (default 1, safe for single-GPU training).
         warm_start: seed the search with ``baseline_params`` (or the default baseline).
         storage_path: where Ray persists trial results (also the TensorBoard logdir root).
+            Required: trial results land where the caller says, never Ray's own
+            home-directory default. ``run_hpo`` resolves it for a training sweep (the
+            project's own ``.tcip/hpo``); a bespoke search names its own directory. Accepts
+            a local path today; Ray's ``storage_path`` also takes a cloud URI, the seam a
+            central store would use.
         resources_per_trial: Ray resource request per trial (``{"cpu": ..., "gpu": ...}``, GPU as
             a fraction for sharing). Omit to derive one from the host's real GPU count and
             ``max_concurrent``, an explicit value always wins over the derivation.
@@ -330,6 +339,14 @@ def tune_search(
     Returns dict with ``best_params``, ``best_value``, ``n_trials``, ``all_trials``,
     ``search_alg``, ``scheduler``, ``study_name`` (+ ``warm_start``/``baseline_params``).
     """
+    if not storage_path:
+        raise ValueError(
+            "tune_search needs storage_path: trial results are persisted where the caller "
+            "says, never Ray's own home-directory default. run_hpo resolves it for a "
+            "training sweep (the project's own .tcip/hpo via hpo_root/sweep_dir); a bespoke "
+            "search names its own directory."
+        )
+
     import ray
     from ray import tune
 
@@ -366,23 +383,37 @@ def tune_search(
 
     trainable = tune.with_resources(trainable, resources=resources)
 
-    run_kwargs: dict[str, Any] = {"verbose": 0}
-    if storage_path:
-        run_kwargs["storage_path"] = Path(storage_path).resolve().as_posix()
-        run_kwargs["name"] = study_name
+    run_kwargs: dict[str, Any] = {
+        "verbose": 0,
+        "storage_path": Path(storage_path).resolve().as_posix(),
+        "name": study_name,
+    }
 
-    with _ray_session(ray):
-        tuner = tune.Tuner(
-            trainable,
-            param_space=space,
-            tune_config=tune.TuneConfig(
-                num_samples=num_samples, search_alg=searcher, scheduler=sched,
-                max_concurrent_trials=tune_max, metric=metric, mode=mode,
-                reuse_actors=False,
-            ),
-            run_config=tune.RunConfig(**run_kwargs),
-        )
-        results = tuner.fit()
+    removed_env: dict[str, str] = {}
+    for var in _ENV_VARS_RAY_TUNE_REFUSES:
+        value = os.environ.pop(var, None)
+        if value is not None:
+            removed_env[var] = value
+            logger.warning(
+                "ignoring %s=%s for this sweep: Ray deprecated the variable and refuses to "
+                "run while it is set; trial results go to storage_path (%s).",
+                var, value, run_kwargs["storage_path"],
+            )
+    try:
+        with _ray_session(ray):
+            tuner = tune.Tuner(
+                trainable,
+                param_space=space,
+                tune_config=tune.TuneConfig(
+                    num_samples=num_samples, search_alg=searcher, scheduler=sched,
+                    max_concurrent_trials=tune_max, metric=metric, mode=mode,
+                    reuse_actors=False,
+                ),
+                run_config=tune.RunConfig(**run_kwargs),
+            )
+            results = tuner.fit()
+    finally:
+        os.environ.update(removed_env)
 
     all_trials = []
     for r in results:
@@ -405,6 +436,5 @@ def tune_search(
         "warm_start": warm_start,
         "baseline_params": (baseline_params or get_default_baseline_params()) if warm_start else None,
     }
-    if storage_path:
-        result["tensorboard_logdir"] = f"{run_kwargs['storage_path']}/{study_name}"
+    result["tensorboard_logdir"] = f"{run_kwargs['storage_path']}/{study_name}"
     return result
