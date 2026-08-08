@@ -22,6 +22,7 @@ from tcip_mcp.pipelines.band_stats import (
     BandRange,
     band_ranges,
     clip_bounds,
+    composite_display_rgb,
     full_scale_denominator,
     sampled_band_ranges,
     stretch_band,
@@ -101,6 +102,58 @@ def test_stretch_band_refuses_a_mode_it_does_not_implement():
         stretch_band(BANDS["uint8"], "bogus", BANDS["uint8"].dtype)
 
 
+# ── Stretching against bounds read from somewhere wider than the band in hand ────────────
+
+
+def _derived_bounds(band, mode, orig_dtype) -> tuple[float, float]:
+    """The ``(low, high)`` a mode reads off the band itself, written out independently of the
+    primitive: what passing bounds in has to reproduce exactly."""
+    raw = band.astype(np.float64)
+    if mode == "none":
+        if np.issubdtype(orig_dtype, np.integer):
+            return 0.0, float(np.iinfo(orig_dtype).max) or 1.0
+        return 0.0, float(raw.max()) or 1.0
+    if mode == "percent_clip":
+        lo, hi = np.percentile(raw, list(DISPLAY_CLIP_PERCENTILES))
+        return float(lo), float(hi)
+    return float(raw.min()), float(raw.max())
+
+
+@pytest.mark.parametrize("mode", STRETCH_MODES)
+@pytest.mark.parametrize("name", sorted(BANDS))
+def test_bounds_in_stretch_reproduces_the_stretch_that_derives_its_own_bounds(name, mode):
+    band = BANDS[name]
+    assert np.array_equal(stretch_band(band, mode, band.dtype, _derived_bounds(band, mode,
+                                                                              band.dtype)),
+                          stretch_band(band, mode, band.dtype))
+
+
+@pytest.mark.parametrize("mode", STRETCH_MODES)
+def test_a_region_stretched_against_the_whole_bands_bounds_matches_that_bands_own_stretch(mode):
+    """The property region serving needs: two regions of one raster stretched against one bounds
+    pair are the pixels that raster's whole-view stretch would have shown there."""
+    band = BANDS["uint16"]
+    bounds = _derived_bounds(band, mode, band.dtype)
+    whole = stretch_band(band, mode, band.dtype, bounds)
+    assert np.array_equal(stretch_band(band[:3], mode, band.dtype, bounds), whole[:3])
+    assert np.array_equal(stretch_band(band[3:], mode, band.dtype, bounds), whole[3:])
+
+
+def test_a_none_stretch_of_an_integer_band_keeps_its_dtype_ceiling_whatever_bounds_say():
+    band = BANDS["uint16"]
+    assert np.array_equal(stretch_band(band, "none", band.dtype, (0.0, 100.0)),
+                          stretch_band(band, "none", band.dtype))
+
+
+def test_a_none_stretch_of_a_float_band_divides_by_the_maximum_it_is_handed():
+    """A float raster has no dtype ceiling, so a region renders against the sampled maximum of the
+    whole raster instead of against its own local one."""
+    band = BANDS["float32"]
+    sampled_max = float(band.max()) * 2.0
+    expected = np.clip(band.astype(np.float64) / sampled_max * 255.0, 0, 255).astype(np.uint8)
+    assert np.array_equal(stretch_band(band, "none", band.dtype, (0.0, sampled_max)), expected)
+
+
 def test_band_ranges_reports_each_bands_own_exact_min_and_max():
     arr = np.stack([np.full((4, 3), 7, dtype=np.uint16),
                     np.arange(12, dtype=np.uint16).reshape(4, 3)], axis=-1)
@@ -138,36 +191,87 @@ def _multiband_strip_tiff(path: Path, *, height: int = 24, width: int = 20,
     return arr
 
 
-@pytest.mark.parametrize("mode", STRETCH_MODES)
-@pytest.mark.parametrize("tokens,idxs", [(None, [0, 1, 2]), (["3", "0", "1"], [3, 0, 1])])
-def test_the_served_band_composite_is_the_display_expression_band_for_band(
-    tmp_path: Path, mode, tokens, idxs,
-):
-    """The RGB the band-composite route hands its JPEG encoder, band selection included, is the
-    display expression's own pixels: what a viewer is served is unchanged by routing the stretch
-    through the shared primitive."""
-    from tcip_web.routes.images import _composite_bands
+def test_the_multiband_render_input_is_the_preview_expression_band_for_band(tmp_path: Path):
+    """Same check for the pixels the visualization tools hand a renderer for a multi-band raster:
+    the first three bands through the preview expression, composited in memory."""
+    from tcip_mcp.tools.vision_tools import _display_for_path
 
     path = tmp_path / "capture.tif"
-    arr = _multiband_strip_tiff(path)
+    arr = _multiband_strip_tiff(path, channels=6)
+    expected = np.stack([_preview_renderer_stretch(arr[:, :, i]) for i in (0, 1, 2)], axis=-1)
+    assert np.array_equal(_display_for_path(str(path)).pixels, expected)
+
+
+# ── The shared band-select, stretch and stack composite ─────────────────────────────────
+
+
+def _multiband_array(channels: int = 4, dtype="uint16") -> np.ndarray:
+    """A small multi-band array with a different value level per band, so a band selection that
+    reorders or repeats bands is visible in the composite."""
+    rng = np.random.default_rng(21)
+    arr = rng.integers(0, 4096, size=(6, 5, channels))
+    return (arr + np.arange(channels) * 17).astype(dtype)
+
+
+@pytest.mark.parametrize("mode", STRETCH_MODES)
+@pytest.mark.parametrize("idxs", [[0, 1, 2], [3, 0, 1], [2, 2, 2]])
+def test_the_composite_is_each_selected_band_through_the_display_expression(mode, idxs):
+    arr = _multiband_array()
     expected = np.stack([_composite_route_stretch(arr[:, :, i], mode, arr.dtype) for i in idxs],
                         axis=-1)
-    assert np.array_equal(np.asarray(_composite_bands(path, tokens, mode)), expected)
+    assert np.array_equal(composite_display_rgb(arr, idxs, mode), expected)
 
 
-def test_the_band_preview_render_is_the_preview_expression_band_for_band(tmp_path: Path,
-                                                                        monkeypatch):
-    """Same check for the throwaway multi-band preview the visualization tools materialize: its
-    written pixels are the preview expression's own."""
-    from PIL import Image
+def test_the_composite_is_uint8_rgb_whatever_the_sources_dtype():
+    for dtype in ("uint8", "uint16", "float32"):
+        out = composite_display_rgb(_multiband_array(dtype=dtype), [0, 1, 2], "minmax")
+        assert out.dtype == np.uint8
+        assert out.shape == (6, 5, 3)
 
-    from tcip_mcp.tools.vision_tools import _band_preview_png
 
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    arr = _multiband_strip_tiff(tmp_path / "unused.tif")
-    written = np.asarray(Image.open(_band_preview_png(arr, "capture")))
-    expected = np.stack([_preview_renderer_stretch(arr[:, :, i]) for i in (0, 1, 2)], axis=-1)
-    assert np.array_equal(written, expected)
+def test_a_composite_of_a_2d_array_reads_it_as_one_band():
+    band = BANDS["uint16"]
+    out = composite_display_rgb(band, [0, 0, 0], "minmax")
+    assert out.shape == band.shape + (3,)
+    assert np.array_equal(out[:, :, 0], _composite_route_stretch(band, "minmax", band.dtype))
+
+
+def test_a_composite_stretches_each_band_against_the_bounds_it_is_handed():
+    arr = _multiband_array()
+    bounds = [(100.0, 900.0), (0.0, 4095.0), (2000.0, 2100.0)]
+    raw = arr.astype(np.float64)
+    expected = np.stack(
+        [np.clip((raw[:, :, i] - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+         for i, (lo, hi) in zip([1, 2, 3], bounds)], axis=-1)
+    assert np.array_equal(composite_display_rgb(arr, [1, 2, 3], "percent_clip", bounds), expected)
+
+
+def test_a_none_composite_of_an_integer_source_divides_by_that_dtypes_ceiling():
+    arr = _multiband_array(dtype="uint16")
+    expected = np.clip(arr[:, :, :3].astype(np.float64) / 65535.0 * 255.0, 0, 255).astype(np.uint8)
+    assert np.array_equal(composite_display_rgb(arr, [0, 1, 2], "none"), expected)
+
+
+def test_a_none_composite_of_a_float_source_divides_by_each_bands_own_maximum():
+    arr = _multiband_array(dtype="float32")
+    raw = arr.astype(np.float64)
+    expected = np.stack([np.clip(raw[:, :, i] / float(raw[:, :, i].max()) * 255.0, 0, 255)
+                         for i in range(3)], axis=-1).astype(np.uint8)
+    assert np.array_equal(composite_display_rgb(arr, [0, 1, 2], "none"), expected)
+
+
+def test_a_composite_refuses_a_selection_it_cannot_display():
+    arr = _multiband_array()
+    with pytest.raises(ValueError, match="3 bands"):
+        composite_display_rgb(arr, [0, 1], "minmax")
+    with pytest.raises(ValueError, match="out of range"):
+        composite_display_rgb(arr, [0, 1, 9], "minmax")
+    with pytest.raises(ValueError, match="out of range"):
+        composite_display_rgb(arr, [0, 1, -1], "minmax")
+    with pytest.raises(ValueError, match="one \\(low, high\\) pair"):
+        composite_display_rgb(arr, [0, 1, 2], "minmax", [(0.0, 1.0)])
+    with pytest.raises(ValueError, match="stretch mode"):
+        composite_display_rgb(arr, [0, 1, 2], "bogus")
 
 
 # ── Sampled ranges: read through the windowed raster layer, never a full decode ──────────
@@ -177,13 +281,14 @@ def test_sampled_band_ranges_read_through_the_windowed_backend(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     with raster_source.open_raster(path, arr.shape[-1]) as src:
-        assert isinstance(src, raster_source.StripTiffSource)
+        assert isinstance(src, raster_source.GdalSource)
 
 
 def test_sampled_band_ranges_over_full_coverage_equal_the_exact_ranges(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
-    sampled = sampled_band_ranges(path, arr.shape[-1], seed=3, window_size=8, max_windows=999)
+    sampled = sampled_band_ranges(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
+                                  reservoir_size=4096)
     assert sampled.sampling.pixel_fraction == 1.0
     assert sampled.ranges == band_ranges(arr)
 
@@ -191,7 +296,8 @@ def test_sampled_band_ranges_over_full_coverage_equal_the_exact_ranges(tmp_path:
 def test_partial_sampled_band_ranges_are_the_exact_ranges_of_the_windows_recorded(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
-    sampled = sampled_band_ranges(path, arr.shape[-1], seed=11, window_size=8, max_windows=3)
+    sampled = sampled_band_ranges(path, arr.shape[-1], seed=11, window_size=8, max_windows=3,
+                                  reservoir_size=4096)
 
     assert len(sampled.sampling.windows) == 3
     assert 0.0 < sampled.sampling.pixel_fraction < 1.0
@@ -207,7 +313,7 @@ def test_partial_sampled_band_ranges_are_the_exact_ranges_of_the_windows_recorde
 def test_sampled_band_ranges_repeat_exactly_for_the_same_seed(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
-    kwargs = {"seed": 11, "window_size": 8, "max_windows": 3}
+    kwargs = {"seed": 11, "window_size": 8, "max_windows": 3, "reservoir_size": 4096}
     assert (sampled_band_ranges(path, arr.shape[-1], **kwargs)
             == sampled_band_ranges(path, arr.shape[-1], **kwargs))
 
@@ -215,8 +321,78 @@ def test_sampled_band_ranges_repeat_exactly_for_the_same_seed(tmp_path: Path):
 def test_sampled_band_ranges_label_says_the_numbers_are_a_sample(tmp_path: Path):
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
-    sampled = sampled_band_ranges(path, arr.shape[-1], seed=11, window_size=8, max_windows=3)
+    sampled = sampled_band_ranges(path, arr.shape[-1], seed=11, window_size=8, max_windows=3,
+                                  reservoir_size=4096)
     assert sampled.sampling.label.startswith("sampled from 3 pixel window(s), seed 11")
+
+
+# ── Clip bounds off the sampled pass: the same walk, a bounded reservoir ────────────────
+
+
+def test_sampled_clip_bounds_are_exact_when_the_reservoir_holds_every_pixel_walked(tmp_path: Path):
+    """A reservoir at least as large as the pixels the windows cover keeps all of them, so the cut
+    points are that band's own percentiles and not an estimate of them."""
+    path = tmp_path / "mosaic.tif"
+    arr = _multiband_strip_tiff(path)
+    sampled = sampled_band_ranges(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
+                                  reservoir_size=arr.shape[0] * arr.shape[1])
+
+    assert sampled.sampling.pixel_fraction == 1.0
+    assert sampled.clip_sample_size == arr.shape[0] * arr.shape[1]
+    assert sampled.percentiles == DISPLAY_CLIP_PERCENTILES
+    assert sampled.clip_bounds == [clip_bounds(arr[:, :, i]) for i in range(arr.shape[-1])]
+
+
+def test_sampled_clip_bounds_answer_the_percentiles_they_were_asked_for(tmp_path: Path):
+    path = tmp_path / "mosaic.tif"
+    arr = _multiband_strip_tiff(path)
+    sampled = sampled_band_ranges(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
+                                  reservoir_size=arr.shape[0] * arr.shape[1],
+                                  percentiles=(10.0, 90.0))
+
+    assert sampled.percentiles == (10.0, 90.0)
+    assert sampled.clip_bounds == [clip_bounds(arr[:, :, i], (10.0, 90.0))
+                                   for i in range(arr.shape[-1])]
+
+
+def test_the_clip_reservoir_holds_at_most_the_size_it_was_given(tmp_path: Path):
+    """The bound that lets one seeded pass describe a raster of any size: the values the cut points
+    are read off never outgrow the reservoir, however many pixels the windows cover."""
+    path = tmp_path / "mosaic.tif"
+    arr = _multiband_strip_tiff(path, height=200, width=160, channels=3, rowsperstrip=20)
+    sampled = sampled_band_ranges(path, arr.shape[-1], seed=5, window_size=40, max_windows=999,
+                                  reservoir_size=500)
+
+    assert sampled.sampling.pixel_fraction == 1.0
+    assert sampled.clip_sample_size == 500
+
+    # The estimate off 500 of 32000 pixels is not the exact cut point; it lands inside the band's
+    # own neighbouring quantiles rather than at an arbitrary value.
+    for i, (low, high) in enumerate(sampled.clip_bounds):
+        band = arr[:, :, i].astype(np.float64)
+        assert np.percentile(band, 0.5) <= low <= np.percentile(band, 5.0)
+        assert np.percentile(band, 95.0) <= high <= np.percentile(band, 99.5)
+
+
+def test_sampled_clip_bounds_repeat_exactly_for_the_same_seed(tmp_path: Path):
+    path = tmp_path / "mosaic.tif"
+    arr = _multiband_strip_tiff(path, height=200, width=160, channels=3, rowsperstrip=20)
+    kwargs = {"window_size": 40, "max_windows": 4, "reservoir_size": 300}
+    first = sampled_band_ranges(path, arr.shape[-1], seed=5, **kwargs)
+    again = sampled_band_ranges(path, arr.shape[-1], seed=5, **kwargs)
+    other = sampled_band_ranges(path, arr.shape[-1], seed=6, **kwargs)
+
+    assert first.clip_sample_size == 300  # the reservoir replaced, it did not just fill
+    assert first == again
+    assert first.clip_bounds != other.clip_bounds
+
+
+def test_sampled_band_ranges_refuses_a_reservoir_it_cannot_fill(tmp_path: Path):
+    path = tmp_path / "mosaic.tif"
+    arr = _multiband_strip_tiff(path)
+    with pytest.raises(ValueError, match="reservoir_size must be positive"):
+        sampled_band_ranges(path, arr.shape[-1], seed=3, window_size=8, max_windows=999,
+                            reservoir_size=0)
 
 
 # ── The window sampler the sampled statistics are drawn with ────────────────────────────
