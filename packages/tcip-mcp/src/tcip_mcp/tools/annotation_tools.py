@@ -485,8 +485,8 @@ def segment_prompt(
     points: list[dict] | None = None,
     box: dict | None = None,
     grid_cells: list[str] | None = None,
-    cols: int | None = None,
-    rows: int | None = None,
+    tile_size: int | None = None,
+    overlap: float = 0.0,
     engine: str = "sam",
     engine_params: dict | None = None,
 ) -> dict:
@@ -498,10 +498,12 @@ def segment_prompt(
 
     Provide point prompts, a box prompt, or grid-cell references (e.g. ['B3', 'D5'], converted to
     foreground point prompts). A cell name means nothing without the grid that produced it, so
-    ``grid_cells`` requires ``cols``/``rows``, the same dimensions the overlay whose cells are being
-    named was rendered with (``overlay_reference_grid`` echoes its ``cols``/``rows`` back for exactly
-    this). There is no default grid to fall back on: guessing one resolves 'B3' to a pixel in a grid
-    nobody looked at. The segmentation method is a capability, not a hardcode: 'sam' is the built-in
+    ``grid_cells`` requires an explicit ``tile_size``, the geometry the overlay whose cells are
+    being named was rendered with (``overlay_reference_grid`` echoes ``tile_size`` and ``overlap``
+    back for exactly this). There is no default grid to fall back on: guessing one resolves 'B3' to
+    a pixel in a grid nobody looked at. The cells recompute here through the same
+    ``reference_grid.reference_cells`` the overlay drew, so the resolved centers are the rendered
+    cells' own. The segmentation method is a capability, not a hardcode: 'sam' is the built-in
     SAM2 reference engine; the agent can bring another prompted-segmentation engine behind the same
     seam (a dotted 'module:factory').
 
@@ -510,8 +512,9 @@ def segment_prompt(
         points: List of point prompts, each with x, y, and label (1=fg, 0=bg).
         box: Box prompt with x1, y1, x2, y2 in pixel coordinates.
         grid_cells: List of grid cell references like ['B3', 'D5']. Each is a foreground point.
-        cols: Columns of the grid the cells were read off. Required with ``grid_cells``.
-        rows: Rows of the grid the cells were read off. Required with ``grid_cells``.
+        tile_size: Cell edge, in native pixels, of the grid the cells were read off. Required
+            with ``grid_cells``.
+        overlap: Overlap fraction of the grid the cells were read off.
         engine: Segmentation engine, 'sam' (built-in) or a dotted 'module:factory' the agent brings.
         engine_params: Engine-specific knobs forwarded to the engine (e.g. SAM's model_type).
     """
@@ -523,16 +526,23 @@ def segment_prompt(
         return {"error": "Provide either points, box, or grid_cells prompt"}
 
     if grid_cells is not None:
-        if cols is None or rows is None:
-            return {"error": "grid_cells requires cols and rows, the dimensions of the grid the "
-                             "cells were read off (overlay_reference_grid returns them). Without "
-                             "them a cell name resolves against a grid nobody rendered."}
+        if tile_size is None:
+            return {"error": "grid_cells requires tile_size, the cell edge of the grid the "
+                             "cells were read off (overlay_reference_grid echoes it back, with "
+                             "overlap). Without it a cell name resolves against a grid nobody "
+                             "rendered."}
         from tcip_annotation.sam_wrapper import grid_to_pixel
+
+        from tcip_mcp.pipelines.reference_grid import reference_cells
         w, h = _dims_for(image_path)
+        try:
+            cells = reference_cells(w, h, tile_size, overlap, clamp=True)
+        except ValueError as e:
+            return {"error": str(e)}
         points = []
         for cell in grid_cells:
             try:
-                cx, cy = grid_to_pixel(cell, w, h, cols=cols, rows=rows)
+                cx, cy = grid_to_pixel(cell, cells)
                 points.append({"x": cx, "y": cy, "label": 1})
             except ValueError as e:
                 return {"error": f"Invalid grid cell {cell!r}: {e}"}
