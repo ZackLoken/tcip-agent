@@ -1,0 +1,263 @@
+"""View-coverage routes: grid serving against the shared geometry, the per-image record's
+merge semantics, its bucketing and refusals, and the audited write (routes/coverage.py)."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
+
+from tcip_web.app import app
+from tcip_web.routes import coverage as coverage_route
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_audit_coalescing():
+    """The per-process audit-coalescing set must not leak notes across tests."""
+    coverage_route._audited_coverage_keys.clear()
+    yield
+    coverage_route._audited_coverage_keys.clear()
+
+
+@pytest.fixture
+def dated_dataset(tmp_path: Path) -> tuple[Path, str]:
+    """A canonical dataset with one 100x80 image under a date bucket."""
+    img_dir = tmp_path / "ds" / "images" / "2026-03-01"
+    img_dir.mkdir(parents=True)
+    path = img_dir / "plot.tif"
+    Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(path)
+    return tmp_path / "ds", str(path)
+
+
+def _post_body(image_path: str, cells: list[str], grid: dict, **overrides) -> dict:
+    body = {
+        "image_path": image_path,
+        "subject": "bush",
+        "date": "2026-03-01",
+        "grid": grid,
+        "cells_served_at_native": cells,
+        "viewing": {"bands": None, "stretch": "minmax", "stats_source": "none",
+                    "base_served_size": "100x80", "display_bounds": None},
+    }
+    body.update(overrides)
+    return body
+
+
+def _grid(client: TestClient, path: str, tile_size: int | None = None) -> dict:
+    params = {"path": path}
+    if tile_size is not None:
+        params["tile_size"] = tile_size
+    resp = client.get("/api/coverage/grid", params=params)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+class TestGridRoute:
+    def test_grid_equals_reference_cells(self, client, dated_dataset):
+        from tcip_mcp.pipelines.reference_grid import grid_geometry, reference_cells
+
+        _root, path = dated_dataset
+        got = _grid(client, path, tile_size=64)
+        assert {k: got[k] for k in ("width", "height", "tile_size", "overlap", "cols", "rows")} \
+            == grid_geometry(100, 80, 64)
+        assert got["cells"] == [
+            {"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
+            for c in reference_cells(100, 80, 64, clamp=True)
+        ]
+
+    def test_tile_size_omitted_derives_the_coverage_lattice(self, client, dated_dataset):
+        from tcip_mcp.pipelines.reference_grid import derive_coverage_tile_size
+
+        _root, path = dated_dataset
+        got = _grid(client, path)
+        assert got["tile_size"] == derive_coverage_tile_size(100, 80)
+        assert got["cols"] == 1 and got["rows"] == 1
+
+    def test_overlap_is_refused_naming_the_partition_contract(self, client, dated_dataset):
+        _root, path = dated_dataset
+        resp = client.get("/api/coverage/grid",
+                          params={"path": path, "tile_size": 64, "overlap": 0.2})
+        assert resp.status_code == 400
+        assert "exact-partition" in resp.json()["detail"]
+
+    def test_served_cells_are_accepted_verbatim_across_packages(self, client, dated_dataset,
+                                                                tmp_path):
+        """The cell dicts the route serves feed render_grid_overlay and grid_to_pixel
+        unchanged: the one shape both packages document."""
+        from tcip_annotation.sam_wrapper import grid_to_pixel
+        from tcip_annotation.viz import render_grid_overlay
+
+        _root, path = dated_dataset
+        cells = _grid(client, path, tile_size=64)["cells"]
+        assert grid_to_pixel("B2", cells) == ((64 + 100) / 2, (64 + 80) / 2)
+        out = render_grid_overlay(np.zeros((80, 100, 3), dtype=np.uint8), cells,
+                                  native_size=(100, 80),
+                                  output_path=str(tmp_path / "overlay.png"))
+        assert Path(out).is_file()
+
+
+class TestCoverageRecord:
+    def test_post_get_roundtrip(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = client.post("/api/coverage", json=_post_body(path, ["A1", "B2"], grid))
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["replaced"] is False
+        assert body["cells_served_at_native"] == 2
+        assert body["total_cells"] == 4
+
+        got = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"})
+        assert got.status_code == 200
+        record = got.json()["coverage"]
+        assert record["cells_served_at_native"] == ["A1", "B2"]
+        assert record["grid"]["tile_size"] == 64
+        assert record["viewing"]["base_served_size"] == "100x80"
+        assert record["updated_at"]
+
+    def test_matching_grid_union_merges(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        client.post("/api/coverage", json=_post_body(path, ["A1"], grid))
+        resp = client.post("/api/coverage", json=_post_body(path, ["B1", "A1"], grid))
+        assert resp.json()["replaced"] is False
+        record = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert record["cells_served_at_native"] == ["A1", "B1"]
+
+    def test_mismatched_grid_replaces_wholesale_and_flags(self, client, dated_dataset):
+        _root, path = dated_dataset
+        client.post("/api/coverage",
+                    json=_post_body(path, ["A1"], _grid(client, path, tile_size=64)))
+        resp = client.post("/api/coverage",
+                           json=_post_body(path, ["A1"], _grid(client, path, tile_size=100)))
+        assert resp.json()["replaced"] is True
+        record = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert record["grid"]["tile_size"] == 100
+        assert record["cells_served_at_native"] == ["A1"]
+
+    def test_subject_is_required(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = client.post("/api/coverage", json=_post_body(path, ["A1"], grid, subject=None))
+        assert resp.status_code == 400
+        assert "subject" in resp.json()["detail"]
+        assert client.get("/api/coverage", params={"path": path}).status_code == 400
+
+    def test_date_must_be_explicit(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        body = _post_body(path, ["A1"], grid)
+        del body["date"]
+        resp = client.post("/api/coverage", json=body)
+        assert resp.status_code == 400
+        assert "date" in resp.json()["detail"]
+
+    def test_explicit_null_date_is_the_dateless_bucket(self, client, tmp_path):
+        """A non-dated dataset passes date null and lands under the subject-only bucket."""
+        from tcip_mcp.dataset_layout import view_coverage_path
+
+        img_dir = tmp_path / "flat" / "images"
+        img_dir.mkdir(parents=True)
+        path = img_dir / "frame.tif"
+        Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(path)
+        grid = _grid(TestClient(app), str(path), tile_size=64)
+        resp = TestClient(app).post("/api/coverage",
+                                    json=_post_body(str(path), ["A1"], grid, date=None))
+        assert resp.status_code == 200, resp.text
+        store = json.loads(view_coverage_path(tmp_path / "flat").read_text(encoding="utf-8"))
+        assert list(store) == ["bush"]
+
+    def test_cells_outside_the_grid_are_refused(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = client.post("/api/coverage", json=_post_body(path, ["Z9"], grid))
+        assert resp.status_code == 400
+        assert "Z9" in resp.json()["detail"]
+
+    def test_swept_cells_merge_independently_of_served(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        client.post("/api/coverage",
+                    json=_post_body(path, ["A1"], grid, cells_swept=["A1", "B1"]))
+        resp = client.post("/api/coverage",
+                           json=_post_body(path, [], grid, cells_swept=["A2"]))
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["cells_swept"] == 3
+        record = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert record["cells_swept"] == ["A1", "A2", "B1"]
+        assert record["cells_served_at_native"] == ["A1"]
+
+    def test_a_post_may_carry_either_fact_alone(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = client.post("/api/coverage", json=_post_body(path, [], grid,
+                                                            cells_swept=["B2"]))
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["cells_served_at_native"] == 0
+        assert resp.json()["cells_swept"] == 1
+
+    def test_working_scale_bar_round_trips_in_viewing(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        viewing = {"bands": None, "stretch": "minmax", "stats_source": "none",
+                   "base_served_size": "100x80", "display_bounds": None,
+                   "working_scale_bar": {
+                       "value": 0.125,
+                       "source": "minimum view scale at annotation-authoring events"}}
+        client.post("/api/coverage",
+                    json=_post_body(path, [], grid, cells_swept=["A1"], viewing=viewing))
+        record = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert record["viewing"]["working_scale_bar"]["value"] == 0.125
+
+    def test_mismatched_grid_replaces_both_facts(self, client, dated_dataset):
+        _root, path = dated_dataset
+        client.post("/api/coverage",
+                    json=_post_body(path, ["A1"], _grid(client, path, tile_size=64),
+                                    cells_swept=["B1"]))
+        resp = client.post("/api/coverage",
+                           json=_post_body(path, [], _grid(client, path, tile_size=100),
+                                           cells_swept=["A1"]))
+        assert resp.json()["replaced"] is True
+        record = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert record["cells_served_at_native"] == []
+        assert record["cells_swept"] == ["A1"]
+
+    def test_unknown_swept_cell_is_refused(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = client.post("/api/coverage", json=_post_body(path, [], grid,
+                                                            cells_swept=["Q7"]))
+        assert resp.status_code == 400
+        assert "Q7" in resp.json()["detail"]
+
+    def test_audit_coalesces_to_one_entry_per_image(self, client, dated_dataset):
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        client.post("/api/coverage", json=_post_body(path, ["A1"], grid))
+        client.post("/api/coverage", json=_post_body(path, ["B1"], grid))
+        audit = root / ".tcip" / "audit.jsonl"
+        entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()
+                   if json.loads(line)["tool"] == "gui_view_coverage"]
+        assert len(entries) == 1
+        assert entries[0]["arguments"]["image_name"] == "plot.tif"
+
+
+def test_view_coverage_path_locator(tmp_path):
+    from tcip_mcp.dataset_layout import view_coverage_path
+
+    assert view_coverage_path(tmp_path) == tmp_path / ".tcip" / "state" / "view_coverage.json"
