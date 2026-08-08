@@ -141,9 +141,9 @@ Also working now: tiled detection/instance_seg inference over a single georefere
 too large to load into memory (confirmed against a real 90.7 GB, 141130x239921px, 4-band drone
 survey file), instead of the one-photo-per-plant path above. `OrthomosaicGeoreference` reads a
 GeoTIFF's own tags to turn a pixel into a real-world coordinate (refusing cleanly, never guessing,
-on a rotated raster or one whose CRS it can't determine), and `raster_source.StripTiffSource` serves
-strip-cached windowed reads so the raster is never decoded whole; tiling the real file above takes
-about 11.5 minutes end to end. `predict_tiled_from_reader` runs the same tiled-inference core the
+on a rotated raster or one whose CRS it can't determine), and `raster_source.GdalSource` serves
+windowed reads through GDAL's budgeted block cache (overview-aware when the raster carries an
+`.ovr` pyramid) so the raster is never decoded whole. `predict_tiled_from_reader` runs the same tiled-inference core the
 per-photo path uses, including `instance_seg` masks (kept as small tile-local patches with a
 full-raster offset, not one full-raster-sized array per detection). Each detection resolves to a
 real-world coordinate and is matched to the nearest plant in a plant-locations CSV
