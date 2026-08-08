@@ -18,12 +18,13 @@ import { BandPicker } from "@/components/BandPicker";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
-import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
+import { useCoverageGrid } from "@/hooks/useCoverageGrid";
 import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
+import { useRegionServes } from "@/hooks/useRegionServes";
 import {
   applyEditDrag,
   clampShapeToImage,
@@ -40,6 +41,8 @@ import {
   type CanvasStateBody,
 } from "@/lib/canvasSync";
 import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
+import type { LoadedImage } from "@/lib/imageLoader";
+import { zoomToRect } from "@/lib/viewGeometry";
 import {
   compositeParams,
   defaultBandSelection,
@@ -381,6 +384,26 @@ export function ReviewTab() {
     order: priorityOrder,
   });
   usePrefetchAdjacentImages(composite.bands, composite.stretch);
+
+  // Region serves for large rasters: when zoom passes the base bitmap's resolution, the
+  // viewport's coverage cells stream in above it (display only; no accumulation on this tab).
+  const [baseFacts, setBaseFacts] = useState<LoadedImage | null>(null);
+  const regionGrid = useCoverageGrid(
+    imgPath,
+    baseFacts,
+    matches?.img_width ?? 0,
+    matches?.img_height ?? 0,
+  );
+  const regions = useRegionServes({
+    imagePath: imgPath,
+    imgW: matches?.img_width ?? 0,
+    imgH: matches?.img_height ?? 0,
+    view,
+    cells: regionGrid.cells,
+    tileSize: regionGrid.grid?.tile_size ?? null,
+    baseFacts,
+    composite,
+  });
   // User-tunable symbology colours (persisted + shared with the status bar); legend swatches
   // open a picker. Changing TP here recolours the TP count in the bottom toolbar too.
   const [reviewColors, setReviewColors] = useReviewColors();
@@ -526,18 +549,20 @@ export function ReviewTab() {
   function zoomToDetection(bbox: [number, number, number, number] | undefined) {
     if (!bbox) return;
     const [x1, y1, x2, y2] = bbox;
+    // The detection's own width/height as the per-axis pad reproduces the 3x fit; the offset
+    // clamp zoomToRect applies is a deliberate change (an edge detection now pins to the edge).
     const dw = Math.max(1, x2 - x1);
     const dh = Math.max(1, y2 - y1);
-    const wrapper = document.querySelector("[data-canvas-host]") as HTMLElement | null;
-    const cw = wrapper?.clientWidth ?? 1200;
-    const ch = wrapper?.clientHeight ?? 800;
-    // Clamp to the wheel ladder's range: beyond MAX_SCALE the wheel goes dead/jumpy.
-    const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(cw / (dw * 3), ch / (dh * 3))));
-    setView({
-      scale,
-      offset_x: cw / 2 - ((x1 + x2) / 2) * scale,
-      offset_y: ch / 2 - ((y1 + y2) / 2) * scale,
-    });
+    // Dims come from the store's freshest matches: the render closure's copy is one image stale
+    // at this moment (applyMatches installs, then zooms).
+    const m = useStore.getState().review.matches;
+    const host = measureCanvasHost() ?? { w: 1200, h: 800 };
+    setView(
+      zoomToRect(
+        { x0: x1, y0: y1, x1: x2, y1: y2 },
+        { host, imgW: m?.img_width ?? 0, imgH: m?.img_height ?? 0, padX: dw, padY: dh },
+      ),
+    );
   }
 
   useEffect(() => {
@@ -1508,6 +1533,8 @@ export function ReviewTab() {
           autoFit={false}
           imgWidth={imgW}
           imgHeight={imgH}
+          regions={regions}
+          onBaseFacts={setBaseFacts}
           onPixelDown={edit ? onEditDown : drawingMiss ? onMissDown : undefined}
           onPixelMove={edit ? onEditMove : drawingMiss ? onMissMove : undefined}
           onPixelUp={edit ? onEditUp : drawingMiss ? onMissUp : undefined}
