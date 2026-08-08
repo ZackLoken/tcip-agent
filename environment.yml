@@ -15,7 +15,8 @@ name: tcip-agent
 channels:
   - conda-forge
 dependencies:
-  - python>=3.11,<3.13
+  # 3.12 exactly: the pinned Windows GDAL wheel below is cp312-only.
+  - python=3.12.*
   - nodejs>=20
   - pip
   - pip:
@@ -26,6 +27,8 @@ dependencies:
       - pillow>=9.0
       - tifffile>=2023.1
       - imagecodecs>=2023.1  # LZW/JPEG decode for compressed multi-band GeoTIFF (e.g. a drone orthomosaic)
+      # Windows GDAL from cgohlke's geospatial-wheels (self-contained DLLs): conda-forge gdal drags in an MKL numpy that conflicts with pip torch's own OpenMP DLLs, and PyPI gdal is sdist-only. Linux/CI installs against system libgdal instead (.github/workflows/ci.yml).
+      - GDAL @ https://github.com/cgohlke/geospatial-wheels/releases/download/v2026.2.26/GDAL-3.12.2-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'
       - pyproj>=3.5
       - shapely>=2.0
       - pyyaml>=6.0
