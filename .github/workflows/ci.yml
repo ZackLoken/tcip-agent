@@ -20,6 +20,11 @@ jobs:
       - name: Install CPU-only torch
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
+      - name: Install GDAL (system libgdal + version-matched bindings; PyPI gdal has no wheels)
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libgdal-dev
+          pip install "gdal==$(gdal-config --version)"
+
       - name: Install packages
         run: |
           pip install mypy
@@ -41,6 +46,11 @@ jobs:
 
       - name: Install CPU-only torch
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install GDAL (system libgdal + version-matched bindings; PyPI gdal has no wheels)
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libgdal-dev
+          pip install "gdal==$(gdal-config --version)"
 
       - name: Install packages
         run: |
