@@ -252,7 +252,7 @@ shapes with the GUI's own symbology. See the `visual-analysis` skill.
 ## Commands
 
 ```bash
-conda activate tcip-agent          # Python 3.11; torch installs CUDA (cu126) by default, runs fine without a GPU too (see environment.yml)
+conda activate tcip-agent          # Python 3.12; torch installs CUDA (cu126) by default, runs fine without a GPU too (see environment.yml)
 pytest tests/ -n 4 --tb=short      # bounded xdist parallelism; -n auto's full-core fan-out starves this suite's real Ray/TensorBoard subprocess tests of their shared port range and can hang
 ruff check .
 python scripts/list_tools.py       # current MCP tool list/count (don't hardcode counts in docs)
