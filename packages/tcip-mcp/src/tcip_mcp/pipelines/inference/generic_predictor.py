@@ -36,8 +36,9 @@ class WindowedRasterReader(Protocol):
     """The read surface a huge-raster tile source must expose for :meth:`GenericPredictor.
     predict_tiled_from_reader`: full-raster pixel dimensions, band count, and a windowed decode.
     Duck-typed rather than importing a concrete reader here, so this stays usable for any raster
-    too large to load whole, not just :class:`~tcip_mcp.pipelines.raster_source.StripTiffSource`
-    (``pipelines/raster_source.py``, its one implementation today).
+    too large to load whole, not just the ``pipelines/raster_source.py`` backends (each of which
+    exposes this surface; :class:`~tcip_mcp.pipelines.raster_source.GdalSource` is the one a huge
+    GeoTIFF opens as).
     """
 
     height: int
@@ -367,7 +368,7 @@ class GenericPredictor:
 
         ``reader`` is duck-typed (see :class:`WindowedRasterReader`): anything exposing ``.height``,
         ``.width``, ``.num_channels``, and ``.read_window(y0, y1, x0, x1) -> ndarray[H, W, C]``
-        works, most directly ``StripTiffSource`` (``pipelines/raster_source.py``), but this method
+        works, most directly ``GdalSource`` (``pipelines/raster_source.py``), but this method
         itself has no georeferencing concern and no import of that module: any huge
         non-georeferenced raster hits the same memory problem and can reuse this.
 
