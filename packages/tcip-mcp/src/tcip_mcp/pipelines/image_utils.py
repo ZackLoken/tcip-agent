@@ -161,15 +161,10 @@ def image_dimensions(path: "str | Path | BandGroupRef", num_channels: int = 3) -
 
         return get_image_dimensions(str(path))  # header-only, EXIF-aware
     if ext in (".tif", ".tiff"):
-        shape = raster_source.tiff_series_shape(path)
-        if shape is not None:
-            if len(shape) == 2:
-                return int(shape[1]), int(shape[0])
-            if len(shape) == 3:
-                # Same channel-first heuristic load_multiband applies, so both agree.
-                if shape[0] == num_channels and shape[2] != num_channels:
-                    return int(shape[2]), int(shape[1])
-                return int(shape[1]), int(shape[0])
+        # The frame the TIFF dispatch's own backend will serve, from one shared set of rules.
+        frame = raster_source.tiff_frame(path, num_channels)
+        if frame is not None:
+            return int(frame[1]), int(frame[0])
     arr = load_multiband(path, num_channels)
     return int(arr.shape[1]), int(arr.shape[0])
 
