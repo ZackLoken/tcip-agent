@@ -58,6 +58,9 @@ const FOUR_BANDS: ImageBandsResponse = {
     { name: "Red", wavelength_nm: 650, dtype: "uint16", min: 0, max: 65535 },
     { name: "NIR", wavelength_nm: 840, dtype: "uint16", min: 0, max: 65535 },
   ],
+  sampled: false,
+  pixel_fraction: 1.0,
+  seed: 0,
 };
 
 const THREE_BANDS: ImageBandsResponse = {
