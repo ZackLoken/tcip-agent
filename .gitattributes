@@ -1,2 +1,16 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# One line-ending policy for every clone, independent of core.autocrlf: text files are LF in
+# the repository and in the working tree. CI (linux) and prettier both expect LF; without this,
+# per-machine autocrlf settings smudge checkouts to CRLF and the local format gate fails on
+# files nobody touched.
+* text=auto eol=lf
+
+# Binary content never gets ending conversion; explicit, not left to detection.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tif binary
+*.tiff binary
+*.npy binary
+*.npz binary
+*.zip binary
+*.ico binary
