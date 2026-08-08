@@ -11,11 +11,13 @@ Heavy deps (PIL/numpy/tifffile) are imported lazily so this stays cheap to impor
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.raster_source import WindowSampling
 
 
 def probe_channels(image_path: "str | Path | BandGroupRef") -> int:
@@ -26,7 +28,8 @@ def probe_channels(image_path: "str | Path | BandGroupRef") -> int:
     never assumed, since a group's members are independent files with no shared header to trust.
     """
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.image_utils import _channels_from_shape, _tiff_series_shape
+    from tcip_mcp.pipelines.image_utils import _channels_from_shape
+    from tcip_mcp.pipelines.raster_source import tiff_series_shape
 
     if isinstance(image_path, BandGroupRef):
         return sum(probe_channels(p) for p in image_path.bands.values())
@@ -42,7 +45,7 @@ def probe_channels(image_path: "str | Path | BandGroupRef") -> int:
             arr = z[list(z.files)[0]]
         return int(arr.shape[-1]) if arr.ndim == 3 else 1
     if ext in (".tif", ".tiff"):
-        shape = _tiff_series_shape(path)  # header-only; no pixel decode when this succeeds
+        shape = tiff_series_shape(path)  # header-only; no pixel decode when this succeeds
         if shape is not None:
             return _channels_from_shape(shape)
         import numpy as np
@@ -398,29 +401,115 @@ def band_normalization_stats(
 
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
-    # Accumulate over exactly the tensor the dataset yields, pil_to_tensor decides the [0, 1]
-    # scaling from dtype, so re-deriving a scale here would put the statistics in a different unit
-    # system than the pixels the detector normalizes (a float raster silently off by its own max).
-    # Pixel-weighted, so rasters of different sizes compose into one dataset statistic.
-    sums = np.zeros(num_channels, dtype=np.float64)
-    sqs = np.zeros(num_channels, dtype=np.float64)
-    pixels = 0
+    moments = _BandMoments(num_channels)
     for path in list(image_paths)[:max_images]:
         try:
             arr = pil_to_tensor(load_image(path, num_channels)).numpy().astype(np.float64)
         except Exception:  # noqa: BLE001, an unreadable raster is skipped, not fatal
             continue
-        if arr.shape[0] != num_channels:
+        moments.add(arr)
+    return moments.result()
+
+
+class _BandMoments:
+    """Pixel-weighted per-band first and second moments over [0, 1] tensor pixels.
+
+    The arithmetic :func:`band_normalization_stats` and :func:`band_normalization_stats_sampled`
+    share, so the exact statistic and the sampled one can only ever differ in which pixels they
+    read, never in how those pixels are composed into a mean and a standard deviation.
+    """
+
+    def __init__(self, num_channels: int):
+        import numpy as np
+
+        self.num_channels = int(num_channels)
+        self.sums = np.zeros(self.num_channels, dtype=np.float64)
+        self.sqs = np.zeros(self.num_channels, dtype=np.float64)
+        self.pixels = 0
+
+    def add(self, tensor_pixels) -> None:
+        """Accumulate one ``[C, H, W]`` float64 block, skipping a block whose band count disagrees
+        with this accumulator's (its pixels are not the same bands)."""
+        if tensor_pixels.shape[0] != self.num_channels:
+            return
+        flat = tensor_pixels.reshape(self.num_channels, -1)
+        self.sums += flat.sum(axis=1)
+        self.sqs += (flat ** 2).sum(axis=1)
+        self.pixels += flat.shape[1]
+
+    def result(self) -> tuple[list[float], list[float]] | None:
+        """Per-band ``(mean, std)``, or ``None`` when no pixels were accumulated at all."""
+        import numpy as np
+
+        if not self.pixels:
+            return None
+        mean = self.sums / self.pixels
+        var = np.maximum(self.sqs / self.pixels - mean ** 2, 0.0)
+        return [float(m) for m in mean], [float(s) for s in np.sqrt(var)]
+
+
+@dataclass(frozen=True)
+class SampledNormalizationStats:
+    """Per-band ``(mean, std)`` in [0, 1] tensor units over a sample of a dataset's pixels.
+
+    ``sampling`` names the windows read, the seed that chose them and the pixel fraction they
+    cover. A caller passes ``mean``/``std`` to ``build_detector`` through
+    ``model_source.builder_kwargs`` and carries ``sampling`` into the same provenance record, since
+    these numbers describe a sample of the rasters and not all of their pixels.
+    """
+
+    mean: list[float]
+    std: list[float]
+    sampling: WindowSampling
+
+
+def band_normalization_stats_sampled(
+    image_paths: Sequence[str | Path], num_channels: int, *, seed: int, window_size: int,
+    max_windows_per_image: int, max_images: int = 50,
+) -> SampledNormalizationStats | None:
+    """Per-band ``(mean, std)`` in [0, 1] over seeded pixel windows of this dataset's rasters.
+
+    The windowed sibling of :func:`band_normalization_stats`: the same statistic in the same unit
+    system, for a source whose full decode is unaffordable (an orthomosaic, say). Each raster is
+    opened through ``raster_source`` and only ``max_windows_per_image`` windows of ``window_size``
+    pixels are read from it, chosen by ``raster_source.sample_windows`` from ``seed``; a
+    ``max_windows_per_image`` covering every cell of a raster's grid reads all of it and gives the
+    exact sibling's own answer.
+
+    Pixels are scaled by ``image_utils.pil_to_tensor``, the same call the exact sibling and the
+    dataset itself make, never a scale re-derived here. ``seed`` has no default: a sampled
+    statistic is reproducible only when the caller states what chose the sample. Returns ``None``
+    when no raster could be read, the honest underivable the exact sibling returns.
+    """
+    import numpy as np
+
+    from tcip_mcp.pipelines import raster_source
+    from tcip_mcp.pipelines.image_utils import pil_to_tensor
+
+    moments = _BandMoments(num_channels)
+    read: list[tuple[str, raster_source.Rect]] = []
+    covered = 0
+    total = 0
+    for path in list(image_paths)[:max_images]:
+        try:
+            with raster_source.open_raster(path, num_channels) as src:
+                total += src.width * src.height
+                label = str(getattr(path, "manifest_path", path))
+                for rect in raster_source.sample_windows(
+                        src.width, src.height, seed=seed, window_size=window_size,
+                        max_windows=max_windows_per_image):
+                    moments.add(pil_to_tensor(src.read_region(rect)[0]).numpy().astype(np.float64))
+                    read.append((label, rect))
+                    covered += rect.width * rect.height
+        except Exception:  # noqa: BLE001, an unreadable raster is skipped, not fatal
             continue
-        flat = arr.reshape(num_channels, -1)
-        sums += flat.sum(axis=1)
-        sqs += (flat ** 2).sum(axis=1)
-        pixels += flat.shape[1]
-    if not pixels:
+    stats = moments.result()
+    if stats is None:
         return None
-    mean = sums / pixels
-    var = np.maximum(sqs / pixels - mean ** 2, 0.0)
-    return [float(m) for m in mean], [float(s) for s in np.sqrt(var)]
+    mean, std = stats
+    sampling = raster_source.WindowSampling(
+        tuple(read), int(seed), covered / total if total else 0.0)
+    return SampledNormalizationStats(mean, std, sampling)
 
 
 def derive_cross_tile_nms(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
