@@ -12,6 +12,7 @@ from tcip_web.routes import (
     annotate,
     canvas,
     classes,
+    coverage,
     dataset,
     fs,
     images,
@@ -40,6 +41,7 @@ def register_all(app: FastAPI) -> None:
     app.include_router(results.router)
     app.include_router(tuning.router)
     app.include_router(classes.router)
+    app.include_router(coverage.router)
     app.include_router(sessions.router)
     app.include_router(meta.router)
     app.include_router(canvas.router)
