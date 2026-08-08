@@ -947,6 +947,24 @@ def test_state_snapshot_available(client: TestClient) -> None:
     assert "dataset" in body
 
 
+def test_state_tab_push_mutates_the_store(client: TestClient) -> None:
+    from tcip_web.state import TAB_NAMES
+
+    assert "review" in TAB_NAMES
+    resp = client.post("/api/state/tab", json={"active_tab": "review"})
+    assert resp.status_code == 200
+    assert client.get("/api/state").json()["active_tab"] == "review"
+    client.post("/api/state/tab", json={"active_tab": "annotate"})
+
+
+def test_state_tab_push_rejects_unknown_tabs(client: TestClient) -> None:
+    before = client.get("/api/state").json()["active_tab"]
+    resp = client.post("/api/state/tab", json={"active_tab": "dashboard"})
+    assert resp.status_code == 400
+    assert "dashboard" in resp.json()["detail"]
+    assert client.get("/api/state").json()["active_tab"] == before
+
+
 # ── /api/fs (folder browser) ───────────────────────────────────────────────
 
 
