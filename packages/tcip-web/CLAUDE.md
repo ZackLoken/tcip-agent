@@ -44,3 +44,7 @@ config.
   403 on escape is the rail working, not a bug to route around.
 - Review save formats mirror the annotation-engine's `{json, coco}` scope (see
   `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option the backend can't read.
+- The GUI follows minimalist design without dropping functionality (Zack's standing preference):
+  prefer nesting related actions into one structure (a menu, a split button, a grouped control)
+  over adding sibling buttons, and combine existing buttons into nested structures where the
+  grouping is natural. Density of controls is a cost; capability is not the thing to cut.
