@@ -329,6 +329,30 @@ def get_augmentation_preset(name: str, image_size: tuple[int, int] = (640, 640))
     return presets[name]
 
 
+def recorded_resize(config: dict | str | None) -> tuple[int, int] | None:
+    """The fixed ``(width, height)`` an augmentation config resizes every sample to, or ``None``
+    when it pins no size.
+
+    Resolved by building the config's own chain (:func:`build_augmentation`, which resolves a preset
+    name string through :func:`get_augmentation_preset` and applies the same float/list/dict/bool
+    parameter conventions) and reading the last :class:`Resize` in it, never by re-reading the config
+    here: a preset name is not a ``[w, h]`` pair, and a ``resize`` entry can legitimately be a list,
+    a kwargs dict, or ``True``. An unbuildable config raises from the builder rather than being
+    reported as "no resize", so a caller about to reproduce a training input geometry hears about it.
+
+    Only the deterministic :class:`Resize` counts. :class:`RandomResizedCrop` also fixes the tensor
+    size it emits, but its per-sample crop scale is drawn at random, so the input geometry it
+    produced is not reproducible outside training and is not reported here.
+    """
+    if not config:
+        return None
+    sizes = [t.size for t in build_augmentation(config).transforms if isinstance(t, Resize)]
+    if not sizes:
+        return None
+    width, height = sizes[-1]
+    return int(width), int(height)
+
+
 def build_augmentation(config: dict | str) -> Compose:
     """Build an augmentation pipeline from a config dict or a preset name.
 
