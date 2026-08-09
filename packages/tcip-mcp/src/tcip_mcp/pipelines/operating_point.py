@@ -435,9 +435,9 @@ def _train_disjointness(experiment_id: str | None, cal_ids: set, hold_ids: set) 
         # train_stems are per-region identities, not bare stems; only a same-source reference is
         # caught here (region-level overlap against the reserved test area is not checked yet).
         train_source_stems = {stem_of_spatial_identity(s) for s in train_stems}
-        leaked_groups = sorted(train_source_stems & set(cal_hold_stems))
+        spatial_leaked_groups = sorted(train_source_stems & set(cal_hold_stems))
         return {
-            "checked": True, "unresolvable": False, "leaked_groups": leaked_groups,
+            "checked": True, "unresolvable": False, "leaked_groups": spatial_leaked_groups,
             "leaked_stems": [], "group_check": "spatial_strip",
         }
 
