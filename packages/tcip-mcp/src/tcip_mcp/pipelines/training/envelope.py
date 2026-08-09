@@ -191,9 +191,12 @@ class TrainContext:
     def calibrate(self, trait_name: str, **kwargs: Any) -> Any:
         """Resolve the trait's operating point (conf/tile/max_dets) from record sweeps, the derived,
         held-out-validated point, not a pin. Pass calibration_records/holdout_records (kwargs mirror
-        ``resolve_operating_point``). Defaults ``experiment_id`` to this run's own id, so the
-        train-disjointness gate checks the calibration/holdout images against the training split
-        this exact run drew, a caller-supplied ``experiment_id`` still wins.
+        ``resolve_operating_point``, including ``tiled``: pass it explicitly, stating whether the
+        pass that produced your records actually tiled, the same fact ``staged_conf_floor`` below
+        is for conf; omitting it raises, ``resolve_operating_point`` has no predictor in scope to
+        derive it from and refuses to guess). Defaults ``experiment_id`` to this run's own id, so
+        the train-disjointness gate checks the calibration/holdout images against the training
+        split this exact run drew, a caller-supplied ``experiment_id`` still wins.
 
         ``staged_conf_floor`` (pass it, or this can never validate): the confidence threshold
         your own inference pass floored detections to when it produced ``calibration_records``/
