@@ -166,7 +166,97 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
     assert td_leak["leaked_groups"] == [train_group]
 
 
-# ===========================================================================
+# a spatial split's manifest never reads as a bare-stem leak, and _train_disjointness still
+# catches a genuine same-source reference.
+
+def test_train_disjointness_named_group_by_output_unchanged(tmp_path, monkeypatch):
+    """Byte-identical to the pre-spatial-split behavior: a tile_prefix split.json is untouched
+    by the spatial_strip branch in _train_disjointness."""
+    from tcip_mcp.pipelines.operating_point import _train_disjointness
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_named"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "split.json").write_text(
+        json.dumps({"train": ["srcA_0_0", "srcA_0_1", "srcB_0_0"], "group_by": "tile_prefix"}),
+        encoding="utf-8",
+    )
+    result = _train_disjointness("exp_named", {"srcB_0_0"}, set())
+    # leaked_stems stays empty here: a named group_by resolves every train and reference stem,
+    # so nothing falls through to the exact-stem fallback; leaked_groups is the real signal.
+    assert result == {
+        "checked": True, "unresolvable": False,
+        "leaked_groups": ["srcB"], "leaked_stems": [], "group_check": "performed",
+    }
+
+
+def test_train_disjointness_spatial_strip_detects_same_source_leak(tmp_path, monkeypatch):
+    from tcip_mcp.pipelines.operating_point import _train_disjointness
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_spatial"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "split.json").write_text(json.dumps({
+        "train": ["mosaic::strip_x_1"],
+        "val": ["mosaic::strip_x_0"], "group_by": "spatial_strip",
+    }), encoding="utf-8")
+
+    # A reference drawn from the same source is a real leak: region-scoping aside, the trained
+    # pixels and the reference still share one source image.
+    leaked = _train_disjointness("exp_spatial", {"mosaic"}, set())
+    assert leaked["group_check"] == "spatial_strip"
+    assert leaked["leaked_groups"] == ["mosaic"]
+    assert leaked["unresolvable"] is False
+
+    clean = _train_disjointness("exp_spatial", {"other_mosaic"}, set())
+    assert clean["leaked_groups"] == []
+
+
+def _big_single_source(root: Path, width: int, height: int) -> tuple[Path, Path, str]:
+    from torchvision.utils import save_image
+
+    images_dir, labels_dir = root / "images", root / "labels"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    stem = "mosaic"
+    save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
+    boxes = [Annotation(subject="catkin", geometry=BBox(x, y, x + 20, y + 20))
+            for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
+    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
+    return images_dir, labels_dir, stem
+
+
+def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
+    """The manifest for a spatial split lists per-region identities, not the bare stem: the
+    identity mechanism is provenance for a future region-aware reader, not something today's
+    disjointness gate depends on (it already resolves a same-source reference correctly by
+    mapping an identity back to its stem, per the other test in this section) - but the bare
+    stem must still never appear as a member on its own, and a different-source reference
+    must still read clean end to end through the real training-launch path."""
+    from tcip_mcp.experiments import create_experiment, experiments_dir
+    from tcip_mcp.pipelines.operating_point import _train_disjointness
+    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+
+    create_experiment("exp_spatial_e2e", {})
+    _persist_split_manifest("exp_spatial_e2e", train_ds, val_ds, data_cfg)
+    split = json.loads((experiments_dir() / "exp_spatial_e2e" / "split.json").read_text())
+    assert split["group_by"] == "spatial_strip"
+    assert stem not in split["train"]  # the bare stem itself is never a member
+    assert all("::strip_" in s for s in split["train"])
+
+    clean = _train_disjointness("exp_spatial_e2e", {"a_different_mosaic"}, set())
+    assert clean["leaked_groups"] == []
+
+
 # review-confirmation image ids are stemmed, matching training stems.
 # ===========================================================================
 
