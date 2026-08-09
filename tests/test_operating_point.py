@@ -206,7 +206,7 @@ def test_resolve_operating_point_validated_with_holdout():
 def test_resolve_operating_point_overlapping_holdout_not_validated():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # same image ids in calibration and holdout -> not a real held-out split -> not validated
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=_records("c"), holdout_records=_records("c"))
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
@@ -219,7 +219,7 @@ def test_resolve_operating_point_missing_image_ids_fails_closed():
     # closed) merely because empty id-sets make `disjoint` trivially True.
     recs = [{"width": 400, "height": 400, "gt": [_ann(100, 100)],
              "dt": [_ann(100, 100, score=0.9)]}]  # no image_id key
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=recs, holdout_records=recs)
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
@@ -233,7 +233,7 @@ def test_resolve_operating_point_biased_holdout_is_unshippable():
     biased_hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
                                 shift=5.0, miss_pattern=[3] * N_IMAGES, fp_pattern=[0] * N_IMAGES,
                                 score=0.9)
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=cal, holdout_records=biased_hold,
                                 staged_conf_floor=0.01)
     # measured on the disjoint split but failed (bias > tolerance) -> not validated, firewall holds
@@ -244,7 +244,7 @@ def test_resolve_operating_point_biased_holdout_is_unshippable():
 
 def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records())
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records())
     assert b.get("conf").validated_against == "false"
     assert not b.is_shippable
 
@@ -255,7 +255,7 @@ def test_resolve_operating_point_content_clone_holdout_is_false():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # Same GT content as calibration (only image_id differs, no shift) -> disjoint by image_id but
     # the holdout can't function as an independent check; the content-overlap gate must refuse it.
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=_records("c"), holdout_records=_records("h"))
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -277,7 +277,7 @@ def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch)
             "dt": [_ann(100, 100, score=0.9), _ann(300, 300, score=0.6)]}]
     hold = [{"width": 400, "height": 400, "image_id": "a_0_3", "gt": [_ann(100, 100 + 5)],
              "dt": [_ann(100, 100, score=0.9)]}]
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, experiment_id="exp1")
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -291,7 +291,7 @@ def test_resolve_operating_point_train_disjointness_unresolvable_when_split_miss
     # A known experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
     # experiment_id=None case (a foreign/unregistered checkpoint).
     cal, hold = _good_cal_holdout()
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="does-not-exist")
     conf = b.get("conf")
@@ -369,7 +369,7 @@ def test_resolve_operating_point_derived_tile_size_is_shippable():
 def test_resolve_operating_point_no_gt_placeholder_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
-    b = resolve_operating_point("catkin", dataset_hash="hX")
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="hX")
     with pytest.raises(UnvalidatedOperatingPointError):
         _ = b.value("conf")  # firewall
     assert b.get("conf").unvalidated_value(acknowledge_unvalidated=True) == 0.5
@@ -386,7 +386,7 @@ def _overlap_records(idp="d"):
 
 def test_resolve_operating_point_derives_cross_tile_nms_from_gt():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_overlap_records())
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_overlap_records())
     p = b.get("cross_tile_nms")
     assert p.source == "derived"
     assert p.requires_validation is False  # a statistic from this dataset's own spread needs no validation
@@ -398,7 +398,7 @@ def test_resolve_operating_point_derives_cross_tile_nms_from_gt():
 def test_resolve_operating_point_explicit_cross_tile_nms_not_labeled_derived():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # An explicit override is honest even when overlapping GT was present to derive from.
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=_overlap_records(), cross_tile_nms=0.55)
     p = b.get("cross_tile_nms")
     assert p.source == "explicit"
@@ -410,37 +410,35 @@ def test_resolve_operating_point_explicit_cross_tile_nms_not_labeled_derived():
 def test_resolve_operating_point_cross_tile_nms_honest_default_when_underivable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # No GT at all -> honest default, never a derivation label on an underived number.
-    p_no_gt = resolve_operating_point("catkin", dataset_hash="h1").get("cross_tile_nms")
+    p_no_gt = resolve_operating_point("catkin", tiled=True, dataset_hash="h1").get("cross_tile_nms")
     assert p_no_gt.source == "default"
     assert "neighbor-IoU" not in p_no_gt.derived_from
     # Sparse, non-overlapping GT is likewise underivable -> still an honest default.
-    p_sparse = resolve_operating_point("catkin", dataset_hash="h1",
+    p_sparse = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                        calibration_records=_records("c")).get("cross_tile_nms")
     assert p_sparse.source == "default"
 
 
 def test_resolve_operating_point_tile_size_derived():
     """A bare truthy tile_size with no source claim must not be inferred as "derived"
-    unconditionally (`if tile_size: derived(...)`): a fabricated fallback value (e.g. the
-    checkpoint had no persisted geometry, and 640 was substituted one layer up) could otherwise be
-    stamped "derived from persisted training geometry" when nothing was actually derived. The
-    caller must say which it was via ``tile_size_source``; omitting it is honestly "default"."""
+    unconditionally (`if tile_size: derived(...)`): a caller-passed number with no real basis
+    (``tile_size_source`` not "explicit"/"derived") is discarded entirely, never carried forward as
+    if it meant something. The caller must say which it was via ``tile_size_source``; omitting it
+    means there is no basis to trust, not "a default value of 640"."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import UnvalidatedOperatingPointError
 
-    b_no_claim = resolve_operating_point("catkin", dataset_hash="h1", tile_size=640)
+    b_no_claim = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", tile_size=640)
     assert b_no_claim.get("tile_size").source == "default"
-    # A "default"-sourced tile_size, when tiled (the default here, tiled wasn't specified), is a
-    # real, firewalled unvalidated dimension: ._raw still carries the stored 640, but .value
-    # correctly refuses it (the same firewall conf's own uncalibrated default already enforces),
-    # since "no source claim" is exactly the fabricated-fallback case this check exists to close.
-    assert b_no_claim.get("tile_size")._raw == 640
+    # A "default"-sourced tile_size, when tiled, is a firewalled unvalidated dimension: the
+    # caller's raw 640 is discarded, never fabricated into a trustworthy value.
+    assert b_no_claim.get("tile_size")._raw is None
     assert b_no_claim.get("tile_size").is_shippable is False
     with pytest.raises(UnvalidatedOperatingPointError):
         _ = b_no_claim.get("tile_size").value
 
     b_derived = resolve_operating_point(
-        "catkin", dataset_hash="h1", tile_size=640, tile_size_source="derived")
+        "catkin", tiled=True, dataset_hash="h1", tile_size=640, tile_size_source="derived")
     assert b_derived.get("tile_size").source == "derived"
     assert b_derived.get("tile_size").value == 640
 
