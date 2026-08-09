@@ -216,3 +216,60 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
     ds2 = build_dataset("classification", images_dir=str(cls_dir), csv_path=str(csv_path),
                         num_classes=2, tiling={"enabled": True})
     assert ds2.num_samples == 2  # plain classification dataset
+
+
+# TiledDetectionDataset keep_regions
+# --------------------------------------------------------------------------
+
+def test_tile_within_extent_and_rect_contains_tile():
+    assert tiling.tile_within_extent(0, 0, 64, 100, 100) is True
+    assert tiling.tile_within_extent(50, 0, 64, 100, 100) is False  # 50+64 > 100
+    assert tiling.rect_contains_tile((0, 0, 128, 128), 0, 0, 64) is True
+    assert tiling.rect_contains_tile((0, 0, 128, 128), 100, 0, 64) is False  # 100+64 > 128
+
+
+def test_keep_regions_none_is_byte_identical_to_before(tmp_path):
+    """The default (no keep_regions) builds the exact same index as before this parameter
+    existed: every current caller of TiledDetectionDataset omits it."""
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
+
+    images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
+    base = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
+    plain = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
+    explicit_none = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=None)
+    assert plain.tile_entries == explicit_none.tile_entries
+    assert plain.tiles_dropped_past_extent == explicit_none.tiles_dropped_past_extent == 0
+    assert plain.tiles_dropped_outside_regions == explicit_none.tiles_dropped_outside_regions == 0
+
+
+def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
+
+    images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
+    base = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
+    full = TiledDetectionDataset(base, tile_size=64, overlap=0.2)
+    left_half = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(0, 0, 128, 256)])
+
+    assert 0 < left_half.num_samples < full.num_samples
+    for _stem, tx, ty in left_half.tile_entries:
+        assert tx + 64 <= 128  # fully inside the left-half region, never straddling it
+    assert left_half.tiles_dropped_outside_regions == full.num_samples - left_half.num_samples
+    assert left_half.tiles_dropped_past_extent == 0  # every tile in a 256x256 image is in-extent
+
+
+def test_keep_regions_two_views_share_one_base_and_partition_disjointly(tmp_path):
+    """The mechanism a spatial train/val split uses: two TiledDetectionDataset instances over one
+    shared base, complementary keep_regions, no tile common to both."""
+    pytest.importorskip("torch")
+    from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
+
+    images_dir, labels_dir = _det_dataset(tmp_path, n=1, size=256)
+    base = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")
+    left = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(0, 0, 128, 256)])
+    right = TiledDetectionDataset(base, tile_size=64, overlap=0.2, keep_regions=[(128, 0, 256, 256)])
+
+    assert left.num_samples > 0 and right.num_samples > 0
+    assert set(left.tile_entries).isdisjoint(set(right.tile_entries))
+    assert left.base is base and right.base is base  # one shared base, not two separate builds
