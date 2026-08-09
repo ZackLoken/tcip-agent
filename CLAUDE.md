@@ -107,15 +107,13 @@ Never state a fact about this codebase you have not just executed or read. Not "
 not "this would fail before the fix", not "nothing calls this". Run it, grep it, or say you did not.
 A claim about *purpose* ("X exists as a fallback for Y") is checked by testing its premise, not by
 running the code. This is the single most repeated failure here: every wrong claim shipped felt like
-settled reasoning at the time.
-
-A domain or workflow fact generalizes only when confirmed representative, not from one example.
-One docstring's illustrative number, one sample project's device, one dataset's capture setup
+settled reasoning at the time. The same failure mode applies to domain and workflow facts, not just
+code: one docstring's illustrative number, one sample project's device, one dataset's capture setup
 describes that one instance, not the platform's general case. The imagery this platform ingests spans
 many vendors and capture rigs (phone, DSLR, GoPro, drone, and more) and many identity/geolocation
 workflows (GNSS+sequence, barcode/QR, others); do not infer "how the platform's imagery generally
-works" from a single code comment or one project's setup. Ask, or check with the domain expert, before
-generalizing, the same failure mode as the rule above, aimed at real-world workflows instead of code.
+works" from a single code comment or one project's setup. Ask, or check with the domain expert,
+before generalizing.
 
 A test that guards a fix must be observed failing without it. Extract the baseline and run the
 new test against it (`python scripts/prove_test_fails_before.py <testfile> -k <expr>`): the baseline
@@ -163,9 +161,9 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   toolkit, docs that match the code) and must guide the breeder without stranding them. The
   breeder's only surface is the browser GUI, and their clarity and flow through it are the product
   from their side, same weight as the agent's own reasoning surface.
-- **A subject is not a trait.** `subject` names an object class that must be isolated: every
-  prior `campaign`/`annotation_type`/segment-sense `trait` name is unified to `subject` end to
-  end, backend and web layer. On disk, labels are one file per image
+- **A subject is not a trait.** `subject` names an object class that must be isolated: old code
+  or docs may still say `campaign` or `annotation_type` — pre-rename terms for `subject`, backend
+  and web layer alike. On disk, labels are one file per image
   (`annotations/<date>/<stem>.json`, see `dataset_layout.py`) holding every subject's annotation
   records by name; `subject` is a field inside each record, resolved through the dataset's
   `classes.json` registry, not a path segment. Sometimes a subject is a trait's own object
@@ -192,12 +190,10 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
 - **Confirm before destructive/outward actions** (deleting labels, overwriting
   weights, exporting deliverables). Approval for one doesn't extend to the next.
 - **No backward compatibility. The platform is pre-release and has no users.** Every migration path,
-  fallback, quarantine or "legacy" shim is dead weight resting on a false premise: that someone's
-  data is at risk. Before writing one, ask whether the data it accommodates can exist yet; the
-  answer is no. Delete such code on sight rather than preserving it. Two different things wear the
-  word: TCIP's own history (delete it) and other tools' formats or browser APIs (interop, keep it,
-  but do not call it legacy). Do not trust a "legacy" label in a docstring; check the callers, since
-  the label is often wrong.
+  fallback, quarantine, or "legacy" shim protects data that cannot exist yet; delete such code on
+  sight rather than preserving it. Two different things wear the word "legacy": TCIP's own history
+  (delete it) and other tools' formats or browser APIs (interop, keep it, but do not call it legacy).
+  Do not trust a "legacy" label in a docstring; check the callers, since the label is often wrong.
   This rule expires the moment that premise stops being true: the first time a breeder has a
   real project with real annotations/experiments/models on a schema this platform later changes.
   From that point, a schema/format change needs an actual migration path (this file's job then is to
