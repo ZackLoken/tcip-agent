@@ -23,11 +23,6 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
     DEFAULT_MAX_DETS,
     DEFAULT_NMS_IOU,
-    # Not read directly in this module (resolve_tile_size_param owns the fallback), but kept as an
-    # explicit re-export, test_golden_consolidated_operating_point_defaults pins OP.DEFAULT_TILE_SIZE
-    # as proof this module carries no second, private copy of the constant.
-    DEFAULT_TILE_SIZE as DEFAULT_TILE_SIZE,
-    DEFAULT_TILED,
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
     VALIDATED_REVIEW_CONFIRMED,
@@ -52,10 +47,8 @@ from tcip_mcp.pipelines.training.evaluation import (
 )
 from tcip_mcp.traits import COUNT_OBJECTIVES, COUNT_UNBIASED, DETECTION_F1, PRESENCE, get_trait
 
-# The non-count operating-point fallbacks all resolve to resolution.py's single source of truth
-# (DEFAULT_TILED / DEFAULT_TILE_SIZE / DEFAULT_NMS_IOU / DEFAULT_MAX_DETS / DEFAULT_CONF) so the same
-# model+images can't give a different count by entry door. cross_tile_nms shares the NMS-IoU knob (a
-# distribution derivation refines it); the conf placeholder is only ever read via unvalidated_value().
+# The non-count operating-point fallbacks resolve to resolution.py's single source of truth
+# (DEFAULT_NMS_IOU / DEFAULT_MAX_DETS / DEFAULT_CONF); tile_size/tiled carry no such constant.
 
 # Count-objective -> (picker, derivation label), the currently implemented capability catalog, not
 # a closed vocabulary (traits._spec_from_config does not validate count_objective against this; a
@@ -570,6 +563,13 @@ def resolve_operating_point(
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
                          f"got {validated_reference!r}")
+    if tiled is None:
+        raise ValueError(
+            "resolve_operating_point requires an explicit tiled=<bool>: this function is pure over "
+            "records and carries no predictor to derive it from. The caller (which has a predictor "
+            "in scope) must resolve it first, typically `predictor.train_tile_size is not None`, "
+            "and pass that concrete bool here; never a silently-defaulted value."
+        )
     trait = get_trait(trait_name)
     # "not yet authored for this trait" falls back to the platform's provisional interim fraction,
     # the same shape resolve_classifier_operating_point resolves its own kappa floor with.
@@ -889,14 +889,11 @@ def resolve_operating_point(
             derived_from="trait default (no GT for this dataset)")
 
     # --- structural facts / distribution statistics / documented-default params ---
-    # tile_size is resolved before it's needed to know whether tiling is actually operative, a
-    # gating dimension only when tiled, the same shared construction resolve_tile_size_param() also
-    # gives raw_operating_point (the uncalibrated door), so the two doors can't drift into
-    # disagreeing about when a tile scale is trustworthy.
-    resolved_tiled = DEFAULT_TILED if tiled is None else bool(tiled)
+    # tile_size uses the same shared resolve_tile_size_param() raw_operating_point also calls.
+    resolved_tiled = bool(tiled)  # already a concrete bool: the None-check above raised otherwise
     params["tile_size"] = resolve_tile_size_param(
         tile_size, tiled=resolved_tiled, tile_size_source=tile_size_source)
-    if tiled is not None and tiled_source == "explicit":
+    if tiled_source == "explicit":
         params["tiled"] = ResolvedParam(
             "tiled", resolved_tiled, source="explicit", derived_from="caller override")
     else:
