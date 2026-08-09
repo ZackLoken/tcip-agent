@@ -89,6 +89,26 @@ config = {
 }
 ```
 
+## Samplers
+
+The top-level `sampler` config key picks the train loader's sampling strategy by name
+(`build_sampler` in `pipelines/data/samplers.py`). Registered names: `random` (the default:
+plain DataLoader shuffle), `class_balanced`, `oversample`, `weighted_random` (imbalance
+handling, weights auto-computed from the dataset's class distribution), and `tile_locality`.
+
+`tile_locality` matters for windowed tiled training on full-width strip-layout rasters:
+there a fully shuffled tile order forces the same strips to be decoded over and over, since
+every tile in a row shares its row's strips and the block cache evicts them between visits.
+It keeps each reading process inside contiguous bands of tile rows (band height derived at
+construction from the per-reader GDAL cache share and the source's row byte cost) while
+still shuffling sources, bands, and tiles within a band each epoch. Under multi-worker
+loading it deals bands onto per-worker lanes and interleaves them in batches, matching the
+DataLoader's round-robin batch dispatch, so every worker keeps its own banded read stream.
+It consumes the loader context (`num_workers`, and `batch_size` when workers > 1) and
+requires a tiled dataset over at least one windowed source; it refuses anything else,
+naming why. Whole-frame training and whole-decode sources gain nothing from it; keep
+`random` there.
+
 ## Tools
 
 | Tool | Purpose |
