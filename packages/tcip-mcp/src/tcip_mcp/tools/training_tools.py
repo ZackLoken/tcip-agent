@@ -691,7 +691,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
 
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.generic_trainer import (
-        create_run, task_collate, seeded_loader_kwargs,
+        create_run, task_collate, seeded_loader_kwargs, stamp_effective_data_geometry,
     )
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from torch.utils.data import DataLoader
@@ -701,7 +701,9 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         report(float("inf"))
         return
 
-    data_cfg = merged.get("data", {})
+    # setdefault, not get: the geometry stamp below mutates this dict and must land in the
+    # resolved-config snapshot written from merged.
+    data_cfg = merged.setdefault("data", {})
     train_cfg = merged.get("training", {})
     task = model_source.get("task") or data_cfg.get("task", "detection")
 
@@ -721,12 +723,18 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
 
         # Auto-val gives the val_loader that the composite objective / the scheduler need.
         train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
-        sampler = build_sampler(merged.get("sampler", "random"), train_ds)
+        # Stamped before training so a pruned/failed trial's resolved-config snapshot still
+        # records the geometry the trial actually trained on.
+        stamp_effective_data_geometry(data_cfg, train_ds)
         batch_size = train_cfg.get("batch_size", config.get("batch_size", 4))
         num_workers = train_cfg.get("num_workers", 0)
+        # Built after the loader context is known: a sampler whose read order depends on the
+        # worker regime and batching consumes both.
+        sampler = build_sampler(merged.get("sampler", "random"), train_ds,
+                                num_workers=num_workers, batch_size=batch_size)
         # run.config's seed is create_run-resolved (auto-drawn if base_config left it unset),
         # read it off run.config, not merged, so the loader is seeded with the value actually used.
-        loader_kwargs = seeded_loader_kwargs(run.config.get("seed"))
+        loader_kwargs = seeded_loader_kwargs(run.config.get("seed"), num_workers=num_workers)
         train_loader = DataLoader(
             train_ds, batch_size=batch_size, shuffle=(sampler is None),
             sampler=sampler, collate_fn=task_collate(task), num_workers=num_workers,
@@ -1077,7 +1085,9 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
     never sink a launch.
     """
     def _stems(ds) -> list[str]:
-        return sorted(getattr(ds, "stems", None) or getattr(ds, "_stems", []) or [])
+        # set(): a tiled dataset's ``stems`` repeats one entry per tile, and a manifest member
+        # list is a set of units, never a per-example list.
+        return sorted(set(getattr(ds, "stems", None) or getattr(ds, "_stems", []) or []))
 
     try:
         from tcip_mcp.experiments import experiments_dir, record_artifact
@@ -1090,27 +1100,29 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
             dh = dataset_hash(labels_dir)
         split = data_cfg.get("split", {})
         resolved_group_by = split.get("resolved_group_by")
+        # A spatial_strip split's members are per-region identities, never the bare stem;
+        # _auto_train_val already computed and stashed them (the dataset only knows tile positions).
+        spatial = split.get("spatial_manifest") if resolved_group_by == "spatial_strip" else None
+        train_members = spatial["train_identities"] if spatial else _stems(train_ds)
+        val_members = (spatial["val_identities"] if spatial
+                       else (_stems(val_ds) if val_ds is not None else []))
         manifest = {
-            "train": _stems(train_ds),
-            "val": _stems(val_ds) if val_ds is not None else [],
+            "train": train_members,
+            "val": val_members,
             "seed": int(split.get("seed", 42)),
             "dataset_hash": dh,
             "dataset_id": dataset_id,
             "dataset_fingerprint": dataset_fingerprint,
-            # The actually resolved grouping (not the requested string), "explicit_map" when
-            # ``_auto_train_val`` resolved a caller group_key_map, "external" for the two-directory
-            # explicit-val path (no computed grouping at all), the named strategy otherwise, or None
-            # when no split manifest logic ran. The train-disjointness gate (operating_point.py)
-            # reads this to recompute the training run's own group keys, a missing/None value here
-            # fails that check closed rather than guessing a policy.
+            # The actually resolved grouping ("explicit_map"/"external"/a named strategy/
+            # "spatial_strip"/None); _train_disjointness recomputes group keys from this.
             "group_by": resolved_group_by,
         }
         if resolved_group_by == "explicit_map" and split.get("group_key_map"):
-            # The map itself, without it, _train_disjointness has a policy name
-            # but no way to actually compute group keys for stems outside this run, which is what
-            # made the group_key_map capability effectively unusable (exercising it permanently
-            # blocked that model's later calibration).
+            # The map itself: without it _train_disjointness has a policy name but no way to
+            # compute group keys for stems outside this run.
             manifest["group_key_map"] = split["group_key_map"]
+        if spatial:
+            manifest["spatial"] = spatial
         exp_dir = experiments_dir() / experiment_id
         if exp_dir.is_dir():
             path = exp_dir / "split.json"
@@ -1184,6 +1196,100 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
     except Exception as exc:  # noqa: BLE001, an unbuildable batch is a caller decision, not a crash
         logger.info("could not build a real batch to smoke task %r: %s", task, exc)
         return None, f"{type(exc).__name__}: {exc}"
+
+
+def _spatial_single_source_split(
+    stem: str, data_cfg: dict, tiling: dict, base, split_cfg: dict, transforms,
+) -> tuple:
+    """A train/val split over one detection source's own tile lattice, by disjoint pixel strips.
+
+    Called only from ``_auto_train_val``'s single-source branch: there is no second stem to hold
+    out whole, but a tiled source has many tiles, and :func:`~tcip_mcp.pipelines.data.splits.
+    spatial_strip_split` can hold out disjoint, buffered regions of them. ``base`` is the
+    already-built (untiled) ``DetectionDataset`` for this one source, reused for every view (its
+    construction, and the class/subject/id-map resolution inside it, cost nothing extra to
+    share). A test region is derived and reserved alongside train/val (excluded from both, so it
+    is genuinely held out) but no dataset is built for it: nothing downstream consumes a third
+    dataset from this function today, so only its geometry and kept-tile count are recorded,
+    material a later block-aware calibration mechanism can consume without recomputing the split.
+    Returns ``(train_ds, val_ds)``, or ``None`` when the extent is unknown or no strip layout can
+    populate both train and val, in which case the caller falls back to training without
+    validation.
+    """
+    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset, tile_kwargs_from_tiling
+    from tcip_mcp.pipelines.data.splits import image_extent_from_labels, spatial_strip_split
+
+    extent = image_extent_from_labels(data_cfg.get("labels_dir", ""), stem)
+    if extent is None:
+        logger.warning(
+            "Spatial train/val split for %r skipped: its label file carries no width/height; "
+            "training without validation.", stem,
+        )
+        return None
+    width, height = extent
+
+    raw_kwargs = tile_kwargs_from_tiling(tiling)
+    # keep_regions is this function's own to set from the derived split, never inherited from
+    # the caller's tiling dict (which has no meaningful keep_regions in a single-source launch).
+    tile_kwargs = {k: v for k, v in raw_kwargs.items() if k != "keep_regions"}
+    # Matches TiledDetectionDataset.__init__'s own defaults: the geometry below must agree with
+    # what the datasets built further down actually resolve to.
+    tile_size = tile_kwargs.get("tile_size", 224)
+    overlap = tile_kwargs.get("overlap", 0.2)
+    val_ratio = float(split_cfg.get("val_ratio", 0.2))
+    test_ratio = float(split_cfg.get("test_ratio", 0.1))
+    train_ratio = 1.0 - val_ratio - test_ratio
+    seed = int(split_cfg.get("seed", 42))
+
+    try:
+        spatial = spatial_strip_split(
+            width, height, tile_size, overlap,
+            fractions=(train_ratio, val_ratio, test_ratio), seed=seed, buffer=tiling.get("buffer"),
+        )
+    except ValueError as exc:
+        logger.warning(
+            "Spatial train/val split for %r could not be derived (%s); training without "
+            "validation.", stem, exc,
+        )
+        return None
+
+    train_ds = TiledDetectionDataset(
+        base, transforms=transforms, keep_regions=spatial.regions["train"], **tile_kwargs)
+    val_ds = TiledDetectionDataset(
+        base, transforms=None, keep_regions=spatial.regions["val"], **tile_kwargs)
+    if train_ds.num_samples == 0 or val_ds.num_samples == 0:
+        logger.warning(
+            "Spatial train/val split for %r yielded an empty side after tile filtering; "
+            "training without validation.", stem,
+        )
+        return None
+
+    def _identities(ds) -> list[str]:
+        return sorted({spatial.identity_for(s, tx, ty) for s, tx, ty in ds.tile_entries} - {None})
+
+    split_cfg["resolved_group_by"] = "spatial_strip"
+    split_cfg["spatial_manifest"] = {
+        "train_identities": _identities(train_ds), "val_identities": _identities(val_ds),
+        "test_region": spatial.regions.get("test", []),
+        "kept_test_tiles": spatial.kept_tiles.get("test", 0),
+        "width": spatial.width, "height": spatial.height, "tile_size": spatial.tile_size,
+        "overlap": spatial.overlap, "axis": spatial.axis, "buffer": spatial.buffer,
+        "seed": spatial.seed, "requested_fractions": dict(zip(spatial.split_names,
+                                                               spatial.requested_fractions)),
+        "realized_fractions": spatial.realized_fractions,
+        "realized_discard_fraction": spatial.realized_discard_fraction,
+        "kept_train_tiles": spatial.kept_tiles.get("train", 0),
+        "kept_val_tiles": spatial.kept_tiles.get("val", 0),
+        "tiles_dropped_past_extent": spatial.tiles_dropped_past_extent,
+        "tiles_dropped_outside_regions": spatial.tiles_dropped_outside_regions,
+    }
+    logger.info(
+        "Spatial train/val split for %r: %d train / %d val tiles (axis=%s, "
+        "realized_fractions=%s, realized_discard_fraction=%.3f).",
+        stem, train_ds.num_samples, val_ds.num_samples, spatial.axis,
+        spatial.realized_fractions, spatial.realized_discard_fraction,
+    )
+    return train_ds, val_ds
 
 
 def _auto_train_val(task: str, data_cfg: dict, transforms):
@@ -1287,18 +1393,23 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
 
     if len(stems) < 2:
-        return full_ds, None
+        # A single source can't hold out a whole stem, but a tiled detection source can still
+        # hold out disjoint pixel blocks of its own tile lattice, see _spatial_single_source_split.
+        split_cfg = data_cfg.setdefault("split", {})
+        if task == "detection" and tiling and tiling.get("enabled", True):
+            spatial_ds = _spatial_single_source_split(
+                stems[0], data_cfg, tiling, full_ds, split_cfg, transforms)
+            if spatial_ds is not None:
+                return spatial_ds
+        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
 
-    # setdefault (not get): the resolved grouping is written back into data_cfg["split"] below
-    # so _persist_split_manifest (called separately, after this returns) can record what was
-    # actually used, the same "write the effective value back" pattern the tiling geometry
-    # above uses.
+    # setdefault (not get): the resolved grouping is written back so a later
+    # _persist_split_manifest call can record what was actually used.
     split_cfg = data_cfg.setdefault("split", {})
     group_by = split_cfg.get("group_by", "tile_prefix")
     group_key_map = split_cfg.get("group_key_map")
-    # Deliberately outside any try/except: a malformed grouping policy is a caller-config
-    # error, not a runtime split failure, and must reach the caller rather than degrade
-    # silently to "training without validation" like the failures handled below.
+    # Deliberately outside any try/except: a malformed grouping policy is a caller-config error
+    # and must reach the caller, not degrade silently like the failures handled below.
     group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
     split_cfg["resolved_group_by"] = "explicit_map" if group_key_map else group_by
 
@@ -1317,8 +1428,28 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
             splits=(1.0 - val_ratio, val_ratio, 0.0), seed=seed,
         )
         train_stems, val_stems = parts["train"], parts["val"]
+        if (not val_stems or not train_stems) and group_by != "stem" and not group_key_map:
+            # Too few *groups* under the requested policy starved val (e.g. two sources whose
+            # tile-prefix collapses to one group); retry at stem-level grouping before giving up.
+            stem_key_fn = resolve_group_key_fn("stem", stems)
+            retry_parts = group_balanced_split(
+                stems, annotation_counts=annotation_counts, group_key_fn=stem_key_fn,
+                splits=(1.0 - val_ratio, val_ratio, 0.0), seed=seed,
+            )
+            if retry_parts["train"] and retry_parts["val"]:
+                logger.info(
+                    "Auto train/val split for %s: group_by=%r left val empty (too few groups); "
+                    "retried at stem-level grouping.", task, group_by,
+                )
+                parts = retry_parts
+                train_stems, val_stems = parts["train"], parts["val"]
+                split_cfg["resolved_group_by"] = "stem"
         if not val_stems or not train_stems:
-            return full_ds, None
+            logger.warning(
+                "Auto train/val split for %s: no grouping policy could populate both sides; "
+                "training without validation.", task,
+            )
+            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
 
         if task == "classification":
             stem_to_label = dict(zip(getattr(full_ds, "_stems", []), getattr(full_ds, "_labels", [])))
