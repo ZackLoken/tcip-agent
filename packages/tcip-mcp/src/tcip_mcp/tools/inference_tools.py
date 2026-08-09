@@ -16,8 +16,6 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
     DEFAULT_MAX_DETS,
     DEFAULT_NMS_IOU,
-    DEFAULT_TILE_SIZE,
-    DEFAULT_TILED,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,6 +92,7 @@ def resolve_decode_id_map(predictor, images_dir: str | None) -> dict | None:
 def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                                tile, tile_size, overlap, tile_batch_size,
                                global_nms_iou, postprocess, cross_tile_nms, max_dets,
+                               tile_resize=None,
                                tile_size_source="default", tiled_source="default",
                                group_by="tile_prefix", group_key_map=None, experiment_id=None,
                                seed=0, holdout_ratio=0.5):
@@ -108,7 +107,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     ``export_predictions`` writes.
 
     The count-unbiased center-match sweep + held-out bias check run the same predictor path the
-    delivery will use (same tile/tile_size/overlap/nms/postprocess) over a disjoint, locked
+    delivery will use (same tile/tile_size/tile_resize/overlap/nms/postprocess) over a disjoint, locked
     cal/holdout split of the labeled dir (``resolve_locked_cal_holdout_split``: group-coherent,
     seeded, and stable across calls, not a fresh lexicographic cut every time), at a floor conf so
     hesitant detections survive to be swept, so the resolved conf is validated in the regime it
@@ -195,7 +194,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         results = predictor.predict_batch(
             [stem_to_image[s] for s in sub_stems], tile=tile, tile_size=tile_size,
             overlap=overlap, tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
-            postprocess=postprocess,
+            postprocess=postprocess, tile_resize=tile_resize,
         )
         recs = []
         for s, r in zip(sub_stems, results):
@@ -438,18 +437,24 @@ def run_inference(
         images_dir: Directory containing images to process.
         conf_threshold: Minimum confidence score.
         device: Device to use ('cuda' or 'cpu').
-        tile: Enable tiled (SAHI-style) detection inference. ``None`` (default) is a documented
-            default, not silently ``False``/``True``, its provenance is stamped
-            ``"default"`` vs ``"explicit"`` so a caller who deliberately chose one way is
-            distinguishable from one who left it unset. Works for ``instance_seg`` too: each tiled
-            result's ``masks`` (see ``GenericPredictor.predict_tiled``) are a tile-local patch plus
-            its full-image-space offset, never the untiled path's dense full-image array, a
-            downstream reader of ``results[i]["masks"]`` must not assume the two shapes are
-            interchangeable.
+        tile: Enable tiled (SAHI-style) detection inference. ``None`` (default) derives it from the
+            checkpoint's own training tile geometry (``predictor.train_tile_size is not None``), not
+            a fixed default, its provenance is stamped ``"default"`` vs ``"explicit"`` so a caller
+            who deliberately chose one way is distinguishable from one who left it unset. Works for
+            ``instance_seg`` too: each tiled result's ``masks`` (see
+            ``GenericPredictor.predict_tiled``) are a tile-local patch plus its full-image-space
+            offset, never the untiled path's dense full-image array, a downstream reader of
+            ``results[i]["masks"]`` must not assume the two shapes are interchangeable.
         tile_size: Sliding-window tile edge (px). ``None`` (default) derives it from the
             checkpoint's training tile geometry so inference matches the trained scale; a value
-            overrides. A checkpoint with no persisted geometry falls back to 640 with a warning,
-            stamped unvalidated so a delivery gate downstream refuses to build a phenotype on it.
+            overrides. A checkpoint that trained untiled on frames that all shared one square size
+            derives the edge from that frame instead (``"native_ratio"``), and each tile is run
+            through the resize that run's own augmentation config recorded, so the model sees a tile
+            the way it saw a training frame; that edge is a real basis to tile at but never an
+            independently validated one, so it comes back with a warning and a delivery door refuses
+            it unless acknowledged. A checkpoint with none of those has no real basis to tile at: if
+            ``tile`` ends up ``True`` with no resolvable ``tile_size``, this refuses (names the
+            missing basis) rather than fabricate one.
         overlap: Fractional tile overlap (stride = tile_size*(1-overlap)). ``None`` derives from the
             checkpoint (else 0.2).
         tile_batch_size: Tiles per forward batch.
@@ -487,27 +492,24 @@ def run_inference(
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
 
-    # Resolve the tiled bool once, here, so every behavioral and provenance site
-    # below reads the same resolved value, a caller who left ``tile`` unset gets DEFAULT_TILED
-    # behavior everywhere, and the original None-or-bool is never passed further as a live value
-    # (that would make e.g. predict_batch dispatch on falsy None and silently run untiled).
-    tiled_source = "explicit" if tile is not None else "default"
-    resolved_tile_bool = DEFAULT_TILED if tile is None else tile
-
     if dry_run:
-        # Report the effective operating point without loading the model or running inference, so the
-        # agent can see what conf/NMS/tiling will govern the object count before committing to a run.
+        # No model load here: an unset ``tile`` is a pending derivation (the checkpoint decides
+        # it), not a fabricated default, like tile_size/overlap already report.
+        if tile is None:
+            tiled_dry: bool | str = "pending-checkpoint-derivation"
+            tiled_source_dry = "pending-checkpoint-derivation"
+            cross_tile_nms_dry: float | None | str = "pending-checkpoint-derivation"
+        else:
+            tiled_dry, tiled_source_dry = tile, "explicit"
+            cross_tile_nms_dry = global_nms_iou if tile else None
         return {
             "dry_run": True,
             "checkpoint_path": checkpoint_path,
             "operating_point": {
                 "conf": conf_threshold,
-                "cross_tile_nms": global_nms_iou if resolved_tile_bool else None,
-                "tiled": resolved_tile_bool,
-                "tiled_source": tiled_source,
-                # The checkpoint isn't loaded in a dry run, so neither value is
-                # actually "derived" yet, an explicit value is known; an unset one is only a
-                # pending derivation (or the fabricated default, if the checkpoint has none).
+                "cross_tile_nms": cross_tile_nms_dry,
+                "tiled": tiled_dry,
+                "tiled_source": tiled_source_dry,
                 "tile_size": tile_size if tile_size is not None else "pending-checkpoint-derivation",
                 "overlap": overlap if overlap is not None else "pending-checkpoint-derivation",
                 "max_dets": max_dets,
@@ -523,9 +525,8 @@ def run_inference(
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tcip_mcp.pipelines.resolution import dataset_hash, raw_operating_point
 
-    # Thread NMS IoU + the full-frame detection cap into the model so they govern which boxes exist
-    # (torchvision's own in-model thresholds), not just cross-tile merge, else nms_iou has no
-    # effect on an untiled run and dense scenes truncate at the framework default.
+    # NMS IoU + the full-frame detection cap govern which boxes exist (in-model thresholds), not
+    # just cross-tile merge, else nms_iou would have no effect on an untiled run.
     predictor = build_predictor(
         checkpoint_path=checkpoint_path,
         device=device,
@@ -534,39 +535,53 @@ def run_inference(
         max_dets=max_dets,
     )
 
-    # Producing-model identity resolved before calibration, not after: the calibration's
-    # train-disjointness gate needs the checkpoint's own experiment_id to check the cal/holdout
-    # images against that run's training split. sha is cached (never re-hashed per call).
+    # Resolve the tiled bool now the checkpoint's own persisted training geometry is in hand: an
+    # unset ``tile`` gets the checkpoint's own tiled-or-not regime, never a fixed platform default.
+    tiled_source = "explicit" if tile is not None else "default"
+    resolved_tile_bool = (
+        getattr(predictor, "train_tile_size", None) is not None) if tile is None else tile
+
+    # Identity resolved before calibration: its train-disjointness gate needs the checkpoint's
+    # experiment_id. sha is cached (never re-hashed per call).
     from tcip_mcp.model_registry import resolve_model_identity
 
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
 
-    # Derive the tile geometry from the checkpoint's training geometry unless the caller
-    # pinned it, so a tiled run doesn't silently infer at a different scale than it trained at
-    # (which shifts the object count, the phenotype). The shared resolver is a pure
-    # fact-return, it never refuses, so the warn-and-proceed policy for this exploratory path
-    # lives here, distinct from the delivery-gating path's refuse policy in
-    # ``run_full_frame_evaluation``.
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+    # Derive tile geometry from training geometry unless the caller pinned it. Pure fact-return,
+    # never refuses; the warn-and-proceed policy for this exploratory path lives here.
+    from tcip_mcp.pipelines.inference.predictor import (
+        native_ratio_tile_resize, resolve_tile_geometry,
+    )
 
     resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
         predictor, tile_size=tile_size, overlap=overlap)
+    if resolved_tile_bool and resolved_tile is None:
+        # Tiling was requested but nothing justifies a scale: refuse rather than fabricate one.
+        return {"error": (
+            f"tile_size could not be resolved for {checkpoint_path}: this checkpoint carries no "
+            "persisted training tile geometry, no tile_size was given explicitly, and its untiled "
+            "training frame yields no tile edge either (none recorded, or a rectangular one, which "
+            "no single square edge reproduces the scale of on both axes), so tiled inference has no "
+            "real basis to run at. Pass tile_size explicitly, retrain with tile geometry persisted, "
+            "or leave tile unset/False to run untiled."
+        )}
+    # The tile as the training chain would have handed it to the model, only when tiling: an untiled
+    # run reads no tile geometry, so an unreadable recorded augmentation config must not sink it.
+    tile_resize = native_ratio_tile_resize(predictor, tile_size_source) if resolved_tile_bool else None
     geometry_warning = None
-    if tile_size_source == "derived" and resolved_tile_bool and resolved_tile != DEFAULT_TILE_SIZE:
-        # Loud, not just provenance: this differs from the default, and a different tile_size
-        # shifts the object count.
-        logger.info("tile_size %d derived from the checkpoint's training geometry, "
-                    "differing from the default %d", resolved_tile, DEFAULT_TILE_SIZE)
-    elif tile_size_source == "default" and resolved_tile_bool:
+    if tile_size_source == "derived":
+        logger.info("tile_size %d derived from the checkpoint's training geometry", resolved_tile)
+    elif resolved_tile_bool and tile_size_source == "native_ratio":
+        resize_note = "" if tile_resize is None else (
+            f", each tile run through its recorded train-time resize {tuple(tile_resize)}")
         geometry_warning = (
-            "checkpoint carries no training tile geometry; using default "
-            f"{DEFAULT_TILE_SIZE}, counts may not match training scale. Retrain (geometry now "
-            "persisted) or pass tile_size explicitly."
+            f"tile_size {resolved_tile} came from this checkpoint's own uniform untiled training "
+            f"frame{resize_note}: a real basis to tile at, never an independently validated one. "
+            "The counts here rest on it, and a delivery door refuses them unless it is acknowledged."
         )
         logger.warning(geometry_warning)
-    # overlap_source == "default" is expected and unremarkable for a model with no persisted
-    # overlap analog, only tile_size's absence changes the object count's scale, so only
-    # tile_size's default fallback is worth a warning.
+    # overlap_source == "default" is unremarkable (no persisted overlap analog); only tile_size's
+    # absence changes the object count's scale.
 
     if image_paths is None:
         if images_dir is None:
@@ -588,6 +603,7 @@ def run_inference(
             bundle, cal_hash, n_excluded_incomplete_attribute = _calibrate_operating_point(
                 predictor, trait, calibration_labels_dir, cal_images,
                 tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
+                tile_resize=tile_resize,
                 tile_size_source=tile_size_source, tiled_source=tiled_source,
                 tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
                 cross_tile_nms=(global_nms_iou if global_nms_iou != DEFAULT_NMS_IOU else None),
@@ -714,6 +730,7 @@ def run_inference(
     results = predictor.predict_batch(
         image_paths, tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
         tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
+        tile_resize=tile_resize,
     )
     total_detections = sum(r["count"] for r in results)
 
@@ -751,12 +768,154 @@ def run_inference(
     return out
 
 
+def _export_predictions_raster(
+    *, checkpoint_path: str, raster_path: str, out: Path, resolution, device: str | None,
+    conf_threshold: float, tile_size: int | None, overlap: float | None, tile_batch_size: int,
+    global_nms_iou: float, max_dets: int, postprocess: str, require_masks: bool,
+    experiment_id: str | None, acknowledge_unvalidated: bool,
+) -> dict:
+    """The windowed-raster regime of :func:`export_predictions`: tiled detection/instance_seg
+    inference over a whole georeferenced (or merely huge) raster too large to decode whole, sourced
+    from the windowed raster layer (:func:`~tcip_mcp.pipelines.raster_source.open_raster`) rather
+    than an ordinary directory of per-image captures. Always tiled: there is no untiled option, the
+    whole point of this regime is a raster too large for one. ``out``/``resolution`` are the bucket
+    :func:`export_predictions` already resolved (immutability/redirect), shared with the ordinary
+    regime rather than a second implementation of that check.
+
+    Persists one prediction bucket: since there is no natural directory-of-per-plant-images shape
+    for a whole-raster capture, "one image" is the whole raster, so the bucket holds exactly one
+    ``<raster stem>.json`` prediction file (in full-raster pixel space) plus the same
+    ``operating_point.json`` sidecar convention every other bucket carries.
+
+    This is the raw, detect-and-persist step: the persisted operating point is never stamped
+    validated here (conf has no per-dataset calibration for a raster source), a validated per-plant
+    count is earned later, at delivery (``deliver_orthomosaic_plant_counts``). The tile_size gate
+    runs pre-pass (before the always-expensive tiled pass) and is the one dimension this step
+    refuses to write unacknowledged. Unlike the ordinary regime (which can
+    fall back to running untiled), this regime always tiles, so a checkpoint with no persisted
+    geometry and no explicit override has no real basis to tile at *at all*: that refusal is
+    unconditional, never overridable via ``acknowledge_unvalidated`` (there is no value to
+    provisionally proceed with), distinct from a real-but-unvalidated tile scale, which the gate
+    below does admit when acknowledged.
+    """
+    from tcip_mcp.model_registry import resolve_model_identity
+    from tcip_mcp.pipelines.inference.predictor import (
+        build_predictor, native_ratio_tile_resize, resolve_tile_geometry,
+    )
+
+    predictor = build_predictor(
+        checkpoint_path=checkpoint_path, device=device, score_threshold=conf_threshold,
+        nms_iou=global_nms_iou, max_dets=max_dets,
+    )
+    identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
+
+    resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
+        predictor, tile_size=tile_size, overlap=overlap)
+    if resolved_tile is None:
+        return {"error": (
+            f"tile_size could not be resolved for {checkpoint_path}: this checkpoint carries no "
+            "persisted training tile geometry and no tile_size was given explicitly, so this "
+            "always-tiled regime has no real basis to run at. Pass tile_size explicitly, or "
+            "retrain with tile geometry persisted."
+        )}
+    # Resolved before the raster is opened, so an unreadable recorded augmentation config refuses
+    # here rather than partway through an expensive pass.
+    tile_resize = native_ratio_tile_resize(predictor, tile_size_source)
+
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE, check_delivery_gate, raw_operating_point, tile_size_gate_flag,
+    )
+
+    # Always tiled (a raster too large to load whole has no untiled alternative); every input the
+    # gate needs is already resolved, so it runs here, before the expensive raster pass.
+    op_bundle = raw_operating_point(
+        conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=True, tile_size=resolved_tile,
+        max_dets=max_dets, tile_size_source=tile_size_source, tiled_source="default",
+    )
+    op_provenance = op_bundle.to_provenance()["operating_point"]
+
+    tile_ref = tile_size_gate_flag(op_provenance)
+    tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
+    gate = check_delivery_gate(tile_flags, acknowledge_unvalidated=acknowledge_unvalidated)
+    if not gate.ok:
+        return {"error": gate.reason, "tile_size_validated": tile_ref}
+    tile_size_validated = gate.stamp.get("tile_size")
+
+    from tcip_mcp.pipelines.raster_source import open_raster
+
+    # The model's own in_chans is the channel routing hint; the reader's real band count is
+    # checked against it inside predict_tiled before any tile is read.
+    with open_raster(raster_path, predictor.in_chans) as reader:
+        result = predictor.predict_tiled(
+            reader, tile_size=resolved_tile, overlap=resolved_overlap,
+            tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
+            postprocess=postprocess, require_masks=require_masks, source_label=str(raster_path),
+            tile_resize=tile_resize,
+        )
+
+    # No images_dir for a raster source: a foreign checkpoint with no recorded id_map decodes to
+    # the raw 0-indexed id as its name, the same honest degraded fallback documented elsewhere.
+    id_map = resolve_decode_id_map(predictor, None)
+
+    from datetime import datetime, timezone
+
+    out.mkdir(parents=True, exist_ok=True)
+    sha = identity["sha256"]
+    producer = f"model:{Path(checkpoint_path).stem}" + (f"@{sha[:12]}" if sha else "")
+    pred_path = out / f"{Path(raster_path).stem}.json"
+    write_predictions_json(pred_path, result, created_by=producer, id_map=id_map)
+    has_masks = bool(result.get("masks"))
+
+    produced_at = datetime.now(timezone.utc).isoformat()
+    op_stamp = {
+        "operating_point": op_provenance,
+        "id_map": id_map,
+        "validated": bool(op_bundle.is_shippable) and tile_size_validated != VALIDATED_FALSE,
+        "tile_size_validated": tile_size_validated,
+        "shippable_issues": op_bundle.shippable_issues(),
+        "checkpoint": Path(checkpoint_path).stem,
+        "checkpoint_sha256": sha,
+        "experiment_id": identity["experiment_id"],
+        "images_dir": None,
+        "raster_path": str(raster_path),
+        "produced_at": produced_at,
+    }
+    if has_masks:
+        op_stamp["mask_binarize"] = mask_binarize_provenance()
+    from tcip_mcp.utils.atomic_io import atomic_write_json
+
+    atomic_write_json(out / "operating_point.json", op_stamp)
+
+    exp_id = identity["experiment_id"]
+    if exp_id:
+        try:
+            from tcip_mcp.experiments import update_lineage
+
+            update_lineage(exp_id, predictions=str(out))
+        except Exception:
+            logger.warning("could not link predictions into experiment lineage", exc_info=True)
+
+    response = {
+        "image_count": 1, "output_dir": str(out), "files": [str(pred_path)],
+        "bucket_redirected": resolution.redirected,
+        "requested_output_dir": str(out) if resolution.redirected else None,
+        "operating_point": op_provenance,
+        "validated": op_stamp["validated"],
+        "tile_size_validated": tile_size_validated,
+        "conf_source": "default",
+        "checkpoint_sha256": sha,
+        "experiment_id": exp_id,
+        "tiles": result.get("tiles"),
+    }
+    return response
+
+
 @mcp.tool()
 @audited
 def export_predictions(
     checkpoint_path: str,
-    images_dir: str,
-    output_dir: str,
+    images_dir: str | None = None,
+    output_dir: str = "",
     conf_threshold: float = DEFAULT_CONF,
     device: str | None = None,
     tile: bool | None = None,
@@ -772,24 +931,45 @@ def export_predictions(
     experiment_id: str | None = None,
     overwrite: bool = False,
     acknowledge_unvalidated: bool = False,
+    raster_path: str | None = None,
+    require_masks: bool = True,
 ) -> dict:
-    """Run inference and save predictions as per-image COCO/JSON files.
+    """Run inference and save predictions as COCO/JSON prediction file(s).
 
-    Routes through ``run_inference`` so this delivery door resolves the same firewalled
-    operating point (conf/NMS/tiling/max_dets) rather than building a bare predictor of its own,
-    which would truncate the count at the framework default and ship labels with no provenance.
-    Writes ``<stem>.json`` per image plus an ``operating_point.json`` stamp beside them.
+    Two source regimes, sharing one bucket-resolution/immutability/gate/lineage contract so a
+    breeder or agent has one door regardless of capture shape:
 
-    ``run_inference`` itself never refuses on an unvalidated dimension, it is the shared,
-    honestly-stamped raw substrate every delivery door (this one included) builds on, the same
-    contract an uncalibrated ``conf`` already has there. This tool is the one that actually
-    persists a prediction bucket other doors treat as ground truth, so it is where the refusal
-    belongs: a tiled run whose tile_size fell back to the fabricated default (no persisted
-    training geometry, no explicit override) refuses to write here unless
-    ``acknowledge_unvalidated=True``, the same gate ``tabulate_counts``/``compute_phenology``/
-    the web results routes/``export_aggregated_csv`` already apply, via the same shared
-    :func:`tcip_mcp.pipelines.resolution.tile_size_gate_flag`. An untiled run's tile_size is
-    never operative and can't manufacture a refusal.
+    - ``images_dir`` (an ordinary directory of per-image captures, the common case): routes through
+      ``run_inference`` so this door resolves the same firewalled operating point (conf/NMS/tiling/
+      max_dets) rather than building a bare predictor of its own, which would truncate the count at
+      the framework default and ship labels with no provenance. Writes ``<stem>.json`` per image.
+    - ``raster_path`` (a single raster, georeferenced or not, potentially too large to decode
+      whole): sources tiles from the windowed raster layer instead
+      (:func:`~tcip_mcp.pipelines.raster_source.open_raster`), always tiled (there is no untiled
+      option for a raster too large to decode whole), and writes exactly one ``<raster stem>.json``
+      prediction file (in full-raster pixel space), since there is no natural
+      directory-of-per-plant-images shape for a whole-raster capture. Conf has no per-dataset
+      calibration for this regime (``trait``/``calibration_labels_dir`` are not accepted with it); a
+      validated per-plant count is earned later, at delivery (``deliver_orthomosaic_plant_counts``).
+
+    Provide exactly one of ``images_dir``/``raster_path``. Both regimes write the same
+    ``operating_point.json`` stamp convention beside the prediction file(s), so downstream code that
+    reads a bucket's sidecar generically needs no special case for which regime produced it.
+
+    Neither regime's underlying pass (``run_inference``, or the raster pass) ever refuses on an
+    unvalidated dimension on its own, each is the shared, honestly-stamped raw substrate this door
+    builds on, the same contract an uncalibrated ``conf`` already has. This tool is the one that
+    actually persists a prediction bucket other doors treat as ground truth, so it is where the
+    refusal belongs: a tiled run whose tile_size has no real basis (no persisted training geometry,
+    no explicit override) refuses to write here unless ``acknowledge_unvalidated=True``, the same
+    gate ``tabulate_counts``/``compute_phenology``/the web results routes/``export_aggregated_csv``
+    already apply, via the same shared :func:`tcip_mcp.pipelines.resolution.tile_size_gate_flag`.
+    Both regimes gate before the (expensive) pass runs: the ``raster_path`` regime uses the
+    predictor that pass then reuses; the ``images_dir`` regime sniffs the checkpoint's own stamped
+    config (no weights load, never raises on a missing/unreadable checkpoint) to resolve the same
+    geometry ``run_inference`` will, then re-checks against ``run_inference``'s own real result
+    after the pass as the authoritative gate. An untiled run's tile_size is never operative and
+    can't manufacture a refusal.
 
     A prediction bucket (``output_dir``) that already carries review verdicts is immutable: by
     default the export is redirected to a fresh run-scoped bucket (``<dir>@r2``, ``@r3``, next
@@ -799,24 +979,27 @@ def export_predictions(
 
     Args:
         checkpoint_path: Path to model .pt checkpoint.
-        images_dir: Directory containing input images.
-        output_dir: Directory for output .json prediction files. A relative path resolves
+        images_dir: Directory containing input images (mutually exclusive with ``raster_path``).
+        output_dir: Directory for output .json prediction file(s). A relative path resolves
             against the project root, never the server process's cwd.
         conf_threshold: Minimum confidence score.
         device: Device to use.
-        tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
-            ``run_inference`` unresolved, see its own ``tile`` doc: a documented default distinct
-            from an explicit choice, not silently ``False``. Works for ``instance_seg`` too; masks
-            reach ``write_predictions_json`` either way, tiled or untiled, in whichever of the two
-            coordinate shapes ``run_inference`` produced.
+        tile: Tiled (SAHI-style) inference for small dense objects (``images_dir`` regime only;
+            ``raster_path`` is always tiled). ``None`` (default) forwards to ``run_inference``
+            unresolved, see its own ``tile`` doc: a documented default distinct from an explicit
+            choice, not silently ``False``. Works for ``instance_seg`` too; masks reach
+            ``write_predictions_json`` either way, tiled or untiled, in whichever of the two
+            coordinate shapes the producing pass produced.
         tile_size: Sliding-window tile edge (px).
         overlap: Fractional tile overlap.
         tile_batch_size: Tiles per forward batch.
         global_nms_iou: Cross-tile NMS IoU.
         max_dets: Full-frame detection cap.
         postprocess: Cross-tile merge, "nms" or "nmm".
-        trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``).
-        calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
+        trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``,
+            ``images_dir`` regime only).
+        calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating
+            point (``images_dir`` regime only).
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
         experiment_id: The run that produced the checkpoint, for provenance (forwarded to
             ``run_inference``; see its own doc for the best-effort resolution when omitted).
@@ -825,7 +1008,29 @@ def export_predictions(
         acknowledge_unvalidated: Write the bucket even when tile_size (a tiled run only) has no
             real basis, stamping ``tile_size_validated=false`` on the sidecar so the
             un-trustworthiness travels with it rather than writing silently.
+        raster_path: A single raster, georeferenced or not, potentially too large to decode whole
+            (mutually exclusive with ``images_dir``); see the regime description above.
+        require_masks: Collect masks for an ``instance_seg`` checkpoint (``raster_path`` regime
+            only; ignored for ``images_dir``, which always carries masks via ``run_inference``).
     """
+    if not output_dir:
+        return {"error": "output_dir is required"}
+    if images_dir is None and raster_path is None:
+        return {"error": "Provide either images_dir or raster_path"}
+    if images_dir is not None and raster_path is not None:
+        return {"error": "Provide only one of images_dir or raster_path, not both"}
+    if raster_path is not None and (trait or calibration_labels_dir):
+        return {"error": "trait/calibration_labels_dir calibration is not supported for a "
+                         "raster_path export; deliver a calibrated per-plant count via "
+                         "deliver_orthomosaic_plant_counts instead."}
+    if raster_path is not None:
+        # The images_dir regime gets this for free from run_inference's own check; this regime
+        # builds its predictor directly, so a missing file would otherwise raise uncaught.
+        if not Path(checkpoint_path).is_file():
+            return {"error": f"Checkpoint not found: {checkpoint_path}"}
+        if not Path(raster_path).is_file():
+            return {"error": f"raster_path not found: {raster_path}"}
+
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.prediction_buckets import (
         BucketHasVerdicts,
@@ -840,7 +1045,8 @@ def export_predictions(
     parent, base_name = out_path.parent, out_path.name
     review_state_dir = resolve_state(Path(".tcip") / "state")
 
-    # A canonical predictions/<model>/<date> output_dir redirects by varying the model segment, like its other writers; a bespoke path keeps the old last-segment redirect.
+    # A canonical predictions/<model>/<date> output_dir redirects by varying the model segment.
+    # A bespoke path keeps the old last-segment redirect.
     canonical_dataset_root = None
     if parent.name and parent.parent.name == "predictions":
         candidate_root = parent.parent.parent
@@ -864,6 +1070,43 @@ def export_predictions(
         )
         return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": suggested}
 
+    if raster_path is not None:
+        return _export_predictions_raster(
+            checkpoint_path=checkpoint_path, raster_path=raster_path, out=out,
+            resolution=resolution, device=device, conf_threshold=conf_threshold,
+            tile_size=tile_size, overlap=overlap, tile_batch_size=tile_batch_size,
+            global_nms_iou=global_nms_iou, max_dets=max_dets, postprocess=postprocess,
+            require_masks=require_masks, experiment_id=experiment_id,
+            acknowledge_unvalidated=acknowledge_unvalidated,
+        )
+
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE, check_delivery_gate, resolve_tile_size_param, tile_size_gate_flag,
+    )
+
+    # Gate before the (expensive) pass where possible, matching the raster_path regime: a light,
+    # weights-free config sniff resolves the same tile geometry run_inference itself will.
+    from types import SimpleNamespace
+
+    from tcip_mcp.model_registry import read_checkpoint_data_config
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+
+    data_cfg = read_checkpoint_data_config(checkpoint_path)
+    tiling_cfg = data_cfg.get("tiling") or {}
+    stub = SimpleNamespace(
+        train_tile_size=tiling_cfg.get("tile_size"), train_overlap=tiling_cfg.get("overlap"),
+        train_native_size=data_cfg.get("train_native_size"))
+    pre_tile, pre_tile_source, _pre_overlap, _pre_overlap_source = resolve_tile_geometry(
+        stub, tile_size=tile_size, overlap=overlap)
+    pre_tiled = (stub.train_tile_size is not None) if tile is None else tile
+    pre_param = resolve_tile_size_param(pre_tile, tiled=pre_tiled, tile_size_source=pre_tile_source)
+    pre_tile_ref = tile_size_gate_flag({"tile_size": pre_param.to_provenance()})
+    pre_gate = check_delivery_gate(
+        {"tile_size": pre_tile_ref} if pre_tile_ref is not None else {},
+        acknowledge_unvalidated=acknowledge_unvalidated)
+    if not pre_gate.ok:
+        return {"error": pre_gate.reason, "tile_size_validated": pre_tile_ref}
+
     result = run_inference(
         checkpoint_path=checkpoint_path, images_dir=images_dir, conf_threshold=conf_threshold,
         device=device, tile=tile, tile_size=tile_size, overlap=overlap,
@@ -875,8 +1118,8 @@ def export_predictions(
     if "error" in result:
         return result
 
-    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, check_delivery_gate, tile_size_gate_flag
-
+    # Re-checked against the real predictor's own resolution: the sniff above is an early
+    # opt-out, this stays the authoritative gate.
     tile_ref = tile_size_gate_flag(result.get("operating_point"))
     tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
     gate = check_delivery_gate(tile_flags, acknowledge_unvalidated=acknowledge_unvalidated)
@@ -900,13 +1143,8 @@ def export_predictions(
         written.append(str(out_json))
         has_masks = has_masks or bool(r.get("masks"))
 
-    # Stamp the operating point + producing-model identity beside the delivered labels. ``validated``
-    # is derived from the run's resolved bundle (true only when a held-out calibration passed),
-    # never hardcoded, or a passing calibration would be recorded as unvalidated (and vice versa).
-    # tile_size is a second gating dimension of the same operating point with no column of its own:
-    # a bucket that only reached this write through acknowledge_unvalidated floors the whole stamp,
-    # otherwise a bucket whose counts were produced at a fabricated tile edge would read validated on
-    # its only stamp.
+    # ``validated`` is derived from the run's resolved bundle, never hardcoded. tile_size gates the
+    # same stamp: a write reached only via acknowledge_unvalidated floors it to unvalidated.
     op_stamp = {"operating_point": result.get("operating_point"),
                "id_map": id_map,
                "validated": bool(result.get("validated", False)) and tile_size_validated != VALIDATED_FALSE,
@@ -949,9 +1187,8 @@ def export_predictions(
                 "conf_source": result.get("conf_source"),
                 "checkpoint_sha256": sha,
                 "experiment_id": exp_id}
-    # The run's warnings (a fabricated tile scale, a CPU-bound workload) belong on this door's own
-    # response too, otherwise the reason a delivered bucket ran in the regime it did is visible only
-    # in the server log.
+    # The run's warnings (a CPU-bound workload) belong on this door's own response too, otherwise
+    # the reason a delivered bucket ran in the regime it did is visible only in the server log.
     if result.get("warning"):
         response["warning"] = result["warning"]
     return response
@@ -989,11 +1226,11 @@ def tabulate_counts(
     of the run's own resolved bundle is validated (not a caller string), or
     ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional CSV stamped
     ``measurement_validated=false``. Calibrate per dataset (``trait`` + ``calibration_labels_dir``)
-    to reach a validated conf. A tiled run's ``tile_size`` gates the same way, a fabricated
-    640 fallback with no persisted training geometry and no explicit caller override refuses here
-    too (closing the asymmetry with ``run_full_frame_evaluation``, which already refuses outright
-    for that same case); pass an explicit ``tile_size`` or retrain with tile geometry persisted to
-    reach a validated tile scale. An untiled run is never gated on tile_size at all.
+    to reach a validated conf. A tiled run's ``tile_size`` gates the same way, a run with no
+    persisted training geometry and no explicit caller override refuses here too (closing the
+    asymmetry with ``run_full_frame_evaluation``, which already refuses outright for that same
+    case); pass an explicit ``tile_size`` or retrain with tile geometry persisted to reach a
+    validated tile scale. An untiled run is never gated on tile_size at all.
 
     Args:
         checkpoint_path: Path to model .pt checkpoint.
@@ -1061,11 +1298,8 @@ def tabulate_counts(
         op_ref = VALIDATED_FALSE
     flags = {"operating_point": op_ref}
 
-    # tile_size gates the same way, closing the asymmetry with run_full_frame_evaluation (which
-    # already refuses outright for a checkpoint with no persisted tile geometry), a fabricated 640
-    # fallback is exactly as untrustworthy for a delivered count as an uncalibrated conf. The flag
-    # is resolved by the shared tile_size_gate_flag, the same one every other delivery door uses, and
-    # is None (never entering the gate) for a run where tiling was not operative.
+    # tile_size gates the same way (closing the asymmetry with run_full_frame_evaluation): a
+    # no-basis tile scale is as untrustworthy for a count as an uncalibrated conf; None if untiled.
     tile_ref = tile_size_gate_flag(op)
     if tile_ref is not None:
         flags["tile_size"] = tile_ref
@@ -1113,9 +1347,8 @@ def tabulate_counts(
         "checkpoint_sha256": result.get("checkpoint_sha256"),
         "experiment_id": result.get("experiment_id"),
     }
-    # run_inference's own warnings (a fabricated tile scale, a CPU-bound workload) are surfaced
-    # here too, so a count CSV (the count is the phenotype for a count trait) never ships with the
-    # regime it ran in disclosed only in the server log.
+    # run_inference's own warnings (a CPU-bound workload) are surfaced here too, so a count CSV
+    # never ships with the regime it ran in disclosed only in the server log.
     if result.get("warning"):
         out["warning"] = result["warning"]
     return out
