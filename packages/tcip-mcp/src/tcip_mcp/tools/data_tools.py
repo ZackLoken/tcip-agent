@@ -186,6 +186,10 @@ def make_splits(
     materialize: bool = False,
     copy_files: bool = True,
     subject: str | None = None,
+    spatial: bool = False,
+    tile_size: int | None = None,
+    overlap: float | None = None,
+    buffer: int | None = None,
 ) -> dict:
     """Compute a leakage-free, annotation-stratified train/val/test split.
 
@@ -221,7 +225,29 @@ def make_splits(
             can't recover the subject from its own path, so an image a human confirmed negative
             is silently dropped from the materialized set (reads as an unconfirmed empty label)
             unless this is passed. Only relevant with `materialize=True`.
+        spatial: Derive a within-image train/val/test split over one source's own tile lattice
+            (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`) instead of grouping
+            whole source images. Requires ``tile_size``/``overlap`` and a folder holding exactly
+            one labeled image; refuses otherwise, naming a training run's own automatic route
+            (``data.tiling`` in the run config, which derives this the same way when a run's
+            dataset turns out to be single-source) as the alternative for the common multi-source
+            case. Ignores ``group_by``/``group_key_map``/``stratify_foreground``/``copy_files``/
+            ``subject``, and is not compatible with ``materialize`` (there is one source image,
+            not a set of files to lay out into a split tree); ``train_ratio``/``val_ratio``/
+            ``test_ratio`` still apply, a zero ratio drops that side entirely.
+        tile_size: Tile edge in pixels, required when ``spatial=True``.
+        overlap: Tile overlap fraction, required when ``spatial=True``.
+        buffer: Minimum pixel gap kept at every boundary between two differently-assigned
+            regions, ``spatial=True`` only. Defaults to ``tile_size`` (see
+            :func:`spatial_strip_split`).
     """
+    if spatial:
+        return _make_spatial_split(
+            folder_path, tile_size=tile_size, overlap=overlap,
+            fractions=(train_ratio, val_ratio, test_ratio),
+            seed=seed, buffer=buffer, output_path=output_path, materialize=materialize,
+        )
+
     if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
         return {"error": "Ratios must sum to 1.0"}
     if not Path(folder_path).is_dir():
@@ -325,6 +351,95 @@ def make_splits(
         result["structure"] = f"{out_dir}/{{train,val,test}}/{{images,labels}}/"
 
     return result
+
+
+def _make_spatial_split(
+    folder_path: str, *, tile_size: int | None, overlap: float | None,
+    fractions: tuple[float, float, float], seed: int, buffer: int | None,
+    output_path: str | None, materialize: bool,
+) -> dict:
+    """``make_splits(spatial=True)``'s body: a within-image train/val/test split for one source.
+
+    No dataset is constructed here (this tool never builds a ``TiledDetectionDataset``), so the
+    tile lattice is the pure geometry :func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`
+    describes; a training run's own manifest (``_persist_split_manifest``) instead reads the
+    identities off its actually-constructed datasets, which can differ when the run also drops
+    tiles for reasons this tool has no way to apply (e.g. ``skip_empty``).
+    """
+    if tile_size is None or overlap is None:
+        return {"error": "spatial=True requires tile_size and overlap; a training run's own "
+                         "automatic route (data.tiling in the run config) derives these from the "
+                         "run's tiling geometry instead."}
+    if materialize:
+        return {"error": "spatial=True does not support materialize: there is one source image, "
+                         "not a set of files to lay out into a split tree."}
+    if not Path(folder_path).is_dir():
+        return {"error": f"Directory not found: {folder_path}"}
+
+    from tcip_mcp.pipelines.data.splits import image_extent_from_labels, spatial_strip_split
+    from tcip_mcp.pipelines.data.tiling import tile_positions, tile_within_extent
+
+    scan = _scan_dataset(folder_path)
+    image_map = {Path(p).stem: p for p in scan["images"]}
+    label_map = {Path(p).stem: p for p in scan["labels"]}
+    stems = sorted(set(image_map) & set(label_map))
+    if len(stems) != 1:
+        return {"error": f"spatial=True requires a single-stem folder ({len(stems)} found); use "
+                         "the non-spatial grouped split for a multi-source folder, or a training "
+                         "run's own automatic route."}
+    stem = stems[0]
+    labels_root = Path(label_map[stem]).parent
+    extent = image_extent_from_labels(labels_root, stem)
+    if extent is None:
+        return {"error": f"{stem}'s label file carries no width/height; cannot derive a spatial "
+                         "split without the image extent."}
+    width, height = extent
+
+    try:
+        split = spatial_strip_split(
+            width, height, tile_size, overlap, fractions=fractions, seed=seed, buffer=buffer,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    lattice = tile_positions(height, width, split.tile_size, split.stride)
+    in_extent = [(tx, ty) for tx, ty in lattice
+                if tile_within_extent(tx, ty, split.tile_size, width, height)]
+    ids: dict[str, set[str]] = {name: set() for name in split.regions}
+    for tx, ty in in_extent:
+        name = split.split_name_for(tx, ty)
+        if name is not None:
+            ids[name].add(split.identity_for(stem, tx, ty))
+
+    spatial_manifest = {
+        f"{name}_identities": sorted(ids[name]) for name in split.regions
+    }
+    spatial_manifest.update({
+        "width": split.width, "height": split.height, "tile_size": split.tile_size,
+        "overlap": split.overlap, "axis": split.axis, "buffer": split.buffer,
+        "seed": split.seed,
+        "requested_fractions": dict(zip(split.split_names, split.requested_fractions)),
+        "realized_fractions": split.realized_fractions,
+        "realized_discard_fraction": split.realized_discard_fraction,
+        "kept_tiles": split.kept_tiles,
+        "tiles_dropped_past_extent": split.tiles_dropped_past_extent,
+        "tiles_dropped_outside_regions": split.tiles_dropped_outside_regions,
+    })
+
+    out_dir = Path(output_path) if output_path else Path(folder_path) / "splits"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name in split.regions:
+        (out_dir / f"{name}.json").write_text(json.dumps(sorted(ids[name]), indent=2))
+    (out_dir / "split_manifest.json").write_text(json.dumps(
+        {"seed": seed, "group_by": "spatial_strip", "spatial": spatial_manifest}, indent=2))
+
+    return {
+        "splits": {name: len(ids[name]) for name in split.regions},
+        "seed": seed,
+        "group_by": "spatial_strip",
+        "spatial": spatial_manifest,
+        "manifest_dir": str(out_dir),
+    }
 
 
 def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
