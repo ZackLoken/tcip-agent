@@ -32,7 +32,6 @@ export function InferenceTab() {
   const [dates, setDates] = useState<string[]>([]);
   const [datesError, setDatesError] = useState<string | null>(null);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
-  const [tile, setTile] = useState<boolean>(true);
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<InferenceJob | null>(null);
@@ -147,7 +146,6 @@ export function InferenceTab() {
           dataset_root: datasetRoot,
           model_name: model.name,
           date,
-          tile,
         });
         if (res.job_id) {
           const stub: InferenceJob = {
@@ -265,18 +263,12 @@ export function InferenceTab() {
           </div>
         )}
 
-        <div className="flex items-center gap-3 mb-3">
-          <label className="flex items-center gap-2 text-[12px]">
-            <input type="checkbox" checked={tile} onChange={(e) => setTile(e.target.checked)} />
-            Tiled inference
-          </label>
-        </div>
-
         <p className="text-[11px] text-tcip-muted mb-3">
-          Conf/IoU come from the platform&apos;s own defaults, tile size/overlap from this
-          checkpoint&apos;s own training geometry, and predictions land in this dataset&apos;s
-          prediction dir for the model and date: the same operating point and layout the
-          agent-facing door resolves, so a run here and a run there cannot diverge.
+          Conf/IoU come from the platform&apos;s own defaults, and whether this run tiles (and at
+          what size/overlap) comes from this checkpoint&apos;s own training geometry, and
+          predictions land in this dataset&apos;s prediction dir for the model and date: the same
+          operating point and layout the agent-facing door resolves, so a run here and a run there
+          cannot diverge.
         </p>
 
         <button
