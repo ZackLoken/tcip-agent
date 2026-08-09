@@ -204,24 +204,35 @@ def test_tile_size_explicit_caller_override_is_shippable():
     assert p.value == 512
 
 
-def test_tile_size_fabricated_default_is_not_shippable():
-    # A checkpoint with no persisted geometry and no explicit override fabricates a fallback (640)
-    # with no real basis, so it is now firewalled the same shape conf is.
+def test_tile_size_no_basis_is_not_shippable():
+    # A checkpoint with no persisted geometry and no explicit override has no real basis for a tile
+    # scale at all: no fallback number is fabricated, and the dimension is firewalled like conf is.
     from tcip_mcp.pipelines.resolution import resolve_tile_size_param
 
-    p = resolve_tile_size_param(640, tiled=True, tile_size_source="default")
+    p = resolve_tile_size_param(None, tiled=True, tile_size_source="unavailable")
     assert p.requires_validation is True and p.validation_kind == "geometry"
     assert p.validated_against == VALIDATED_FALSE
     assert p.is_shippable is False
     with pytest.raises(UnvalidatedOperatingPointError):
         _ = p.value
-    assert p.unvalidated_value(acknowledge_unvalidated=True) == 640
+    assert p.unvalidated_value(acknowledge_unvalidated=True) is None
 
 
-def test_raw_operating_point_fabricated_tiled_default_surfaces_its_own_shippable_issue():
-    # tile_size must participate in shippable_issues() regardless of source: a fabricated 640
-    # fallback must not be silently shippable engineering trivia. It surfaces its own named issue,
-    # independent of (and in addition to) conf's own always-unvalidated raw-path issue.
+def test_tile_size_native_ratio_is_a_real_basis_but_never_shippable():
+    # A real basis to tile at all (a checkpoint's own uniform untiled training size), but never an
+    # accepted geometry reference on its own: always floors to unvalidated, unlike derived/explicit.
+    from tcip_mcp.pipelines.resolution import resolve_tile_size_param
+
+    p = resolve_tile_size_param(300, tiled=True, tile_size_source="native_ratio")
+    assert p.requires_validation is True and p.validation_kind == "geometry"
+    assert p.validated_against == VALIDATED_FALSE
+    assert p.is_shippable is False
+    assert p.unvalidated_value(acknowledge_unvalidated=True) == 300
+
+
+def test_raw_operating_point_no_basis_tiled_default_surfaces_its_own_shippable_issue():
+    # tile_size must participate in shippable_issues() regardless of source: a no-basis fallback
+    # (the caller's raw 640 is discarded either way) must not be silently shippable trivia.
     from tcip_mcp.pipelines.resolution import raw_operating_point
 
     b = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=640, max_dets=1000)
