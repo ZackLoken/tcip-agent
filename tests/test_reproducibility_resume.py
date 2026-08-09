@@ -192,7 +192,8 @@ def test_resume_from_checkpoint_without_rng_state_degrades_gracefully(tmp_path):
 
 def test_seeded_loader_kwargs_reproducible_shuffle():
     """The platform's own DataLoader construction sites are seeded: two loaders built
-    from the same seed shuffle identically; an unseeded run stays honestly unseeded."""
+    from the same seed shuffle identically; an unseeded run stays honestly unseeded
+    (a worker init fn, but no generator)."""
     from tcip_mcp.pipelines.training.generic_trainer import seeded_loader_kwargs
 
     kw1 = seeded_loader_kwargs(42)
@@ -201,7 +202,41 @@ def test_seeded_loader_kwargs_reproducible_shuffle():
     perm2 = torch.randperm(10, generator=kw2["generator"])
     assert torch.equal(perm1, perm2)
 
-    assert seeded_loader_kwargs(None) == {}
+    assert "generator" not in seeded_loader_kwargs(None)
+
+
+def test_loader_worker_init_fn_is_picklable():
+    """Windows spawn pickles worker_init_fn to every DataLoader worker, so a closure here
+    breaks every num_workers > 0 run on this platform. Seeded and unseeded runs alike must
+    hand out a picklable init fn."""
+    import pickle
+
+    from tcip_mcp.pipelines.training.generic_trainer import seeded_loader_kwargs
+
+    for seed in (42, None):
+        fn = seeded_loader_kwargs(seed)["worker_init_fn"]
+        assert pickle.loads(pickle.dumps(fn)) is not None
+
+
+def test_loader_worker_init_configures_gdal_cache_and_seeds(monkeypatch):
+    """Every spawned worker starts on GDAL's stock cache default, so the init fn must apply
+    the platform budget in the worker; per-worker numpy/random seeding applies only when the
+    run is seeded."""
+    from tcip_mcp.pipelines import raster_source
+    from tcip_mcp.pipelines.training.generic_trainer import seeded_loader_kwargs
+
+    calls: list[str] = []
+    monkeypatch.setattr(raster_source, "configure_gdal_cache",
+                        lambda share=1.0: calls.append("cache"))
+
+    seeded_loader_kwargs(7)["worker_init_fn"](worker_id=1)
+    first = (random.random(), float(np.random.rand()))
+    seeded_loader_kwargs(7)["worker_init_fn"](worker_id=1)
+    again = (random.random(), float(np.random.rand()))
+    assert first == again
+
+    seeded_loader_kwargs(None)["worker_init_fn"](worker_id=0)
+    assert calls == ["cache", "cache", "cache"]
 
 
 def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
