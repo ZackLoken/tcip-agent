@@ -3,7 +3,7 @@
 Locks that instance_seg's masks travel end to end instead of being silently dropped:
 ``check_model_contract`` requires them for instance_seg, ``GenericPredictor._format_detection``
 carries them (soft, unbinarized, full-image coordinates) for the untiled path, tiled inference
-(``predict_tiled``/``predict_tiled_from_reader``) threads them through the cross-tile
+(``predict_tiled``, either of its two source kinds) threads them through the cross-tile
 reconstruction/merge too (see ``tests/test_orthomosaic_mapping.py`` for the tiled-shape and
 windowed-reader coverage), and ``write_predictions_json`` converts a mask (either coordinate shape)
 to a real (possibly multi-ring) ``Polygon`` via ``resolve_binarize_threshold``, never a second
@@ -148,7 +148,7 @@ def test_predict_tiled_instance_seg_reaches_real_tiling_path(tmp_path):
     p = _bare_predictor("instance_seg")
     missing = tmp_path / "missing.jpg"
     with pytest.raises(FileNotFoundError):
-        p.predict_tiled(str(missing))
+        p.predict_tiled(str(missing), tile_size=TILE)
 
 
 def test_predict_tiled_detection_reaches_real_tiling_path(tmp_path):
@@ -157,7 +157,7 @@ def test_predict_tiled_detection_reaches_real_tiling_path(tmp_path):
     p = _bare_predictor("detection")
     missing = tmp_path / "missing.jpg"
     with pytest.raises(FileNotFoundError):
-        p.predict_tiled(str(missing))
+        p.predict_tiled(str(missing), tile_size=TILE)
 
 
 def test_predict_tiled_require_masks_false_reaches_real_tiling_path_for_instance_seg(tmp_path):
@@ -165,7 +165,7 @@ def test_predict_tiled_require_masks_false_reaches_real_tiling_path_for_instance
     path: the boxes-only opt-out is a lighter-weight rail, not a different one."""
     p = _bare_predictor("instance_seg")
     with pytest.raises(FileNotFoundError):
-        p.predict_tiled(str(tmp_path / "missing.jpg"), require_masks=False)
+        p.predict_tiled(str(tmp_path / "missing.jpg"), tile_size=TILE, require_masks=False)
 
 
 # --------------------------------------------------------------------------
@@ -180,7 +180,11 @@ TILE = 64
 def instance_seg_ckpt(tmp_path_factory) -> str:
     """A real bespoke instance_seg (Mask R-CNN) checkpoint, built once and only read afterwards:
     these tests exercise reachable tool/eval paths, so a stub predictor would assume the very
-    dispatch under test."""
+    dispatch under test. Stamps its own persisted training tile geometry (``config["data"]
+    ["tiling"]``), matching a real tile-trained checkpoint, so the tests below that leave ``tile``
+    unset genuinely exercise the tiled default derived from *this* checkpoint's own geometry, not a
+    platform-wide fallback (an untrained-tiled checkpoint has no such basis and would derive
+    untiled instead, see ``resolve_tile_geometry``)."""
     from tcip_mcp.pipelines.model_build import build_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_instance_seg",
@@ -188,7 +192,11 @@ def instance_seg_ckpt(tmp_path_factory) -> str:
                     "task": "instance_seg"}
     model = build_model({"model_source": model_source})
     ckpt = tmp_path_factory.mktemp("instance_seg_ckpt") / "model_best.pt"
-    torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    torch.save({
+        "model_source": model_source, "model_state_dict": model.state_dict(),
+        "config": {"model_source": model_source,
+                  "data": {"tiling": {"tile_size": TILE, "overlap": 0.2}}},
+    }, str(ckpt))
     return str(ckpt)
 
 
@@ -218,9 +226,10 @@ def test_predict_tiled_require_masks_false_returns_boxes_only(instance_seg_ckpt,
 
 
 def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
-    """DEFAULT_TILED is True: an unset ``tile`` now behaves for instance_seg exactly as it does for
-    plain detection (tiled inference threads masks through the cross-tile merge instead of being
-    refused outright), and each result's masks are the tiled (patch + offset) shape."""
+    """The fixture's own persisted training tile geometry derives an unset ``tile`` to True: instance_seg
+    behaves exactly as plain detection does (tiled inference threads masks through the cross-tile
+    merge instead of being refused outright), and each result's masks are the tiled (patch + offset)
+    shape."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu",
