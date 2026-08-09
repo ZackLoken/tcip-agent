@@ -14,6 +14,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -23,10 +24,11 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 
+from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
 from tcip_mcp.pipelines.image_utils import (
-    IMAGE_EXTS, crop_pad_tile, image_dimensions, list_logical_images, load_image, pil_to_tensor,
-    resolve_image_source,
+    IMAGE_EXTS, crop_pad_tile, image_dimensions, list_logical_images, load_image, pad_tile,
+    pil_to_tensor, resolve_image_source, to_pil_if_faithful,
 )
 
 logger = logging.getLogger(__name__)
@@ -596,14 +598,12 @@ class BaseImageDataset(BaseDataset):
         if self.transforms is not None and isinstance(img, Image.Image):
             return self.transforms(img, target)
         if self.transforms is not None and not BaseImageDataset._warned_ndarray_transforms:
-            # The augmentation pipeline is PIL-only, so a multi-band raster trains unaugmented
-            # while the run's config records augmentation as applied. Say so once: a silent
-            # divergence between what the config claims and what the model saw is a provenance
-            # break, not a detail.
+            # Warned once: config claiming augmentation the model never saw is a provenance break.
             BaseImageDataset._warned_ndarray_transforms = True
             logger.warning(
-                "augmentation is configured but skipped for multi-band (ndarray) images: the "
-                "transform pipeline is PIL-only. This run trains those images unaugmented."
+                "augmentation is configured but skipped for images whose dtype or band count "
+                "PIL cannot represent faithfully (e.g. uint16 or 5-band pixels): the transform "
+                "pipeline is PIL-only. This run trains those images unaugmented."
             )
         return pil_to_tensor(img), target
 
@@ -738,14 +738,51 @@ class DetectionDataset(BaseImageDataset):
 # Tiled Detection (SAHI-style sliding window)
 # ====================================================================
 
+def _validated_keep_regions(
+    keep_regions: "Sequence[tuple[int, int, int, int]] | None",
+) -> list[tuple[int, int, int, int]] | None:
+    """``keep_regions`` as int 4-tuples, or ``None`` when no filter was asked for.
+
+    A malformed rect refuses by name rather than silently keeping or dropping tiles it never
+    described. An empty sequence is a real filter that keeps nothing, distinct from ``None``.
+    """
+    if keep_regions is None:
+        return None
+    regions: list[tuple[int, int, int, int]] = []
+    for region in keep_regions:
+        vals = tuple(int(v) for v in region)
+        if len(vals) != 4:
+            raise ValueError(
+                f"keep region {region!r} must be a half-open pixel rect (x0, y0, x1, y1)")
+        x0, y0, x1, y1 = vals
+        if x1 <= x0 or y1 <= y0:
+            raise ValueError(
+                f"keep region {vals!r} has no extent: half-open needs x0 < x1 and y0 < y1")
+        regions.append(vals)
+    return regions
+
+
 class TiledDetectionDataset(BaseImageDataset):
     """Wrap a ``DetectionDataset`` and expand each source image into native-resolution
     tiles with labels clipped/remapped to tile space.
 
-    Tile membership is computed at ``__init__`` (header-only image sizes + the YOLO
-    txt) so the dataset can return one sample per tile index. ``__getitem__`` decodes
-    the source image once, crops the tile, zero-pads border crops to ``tile_size``,
-    and emits the same target dict shape as ``DetectionDataset``.
+    Tile membership is computed at ``__init__`` without decoding pixels. Sources whose backend
+    opens without a decode (``raster_source.opens_windowed``: a GDAL-served raster, a
+    memory-mapped ``.npy``) are opened through the process source pool, so their dims come from
+    the open source and layout refusals surface here; every other container keeps a header-only
+    dimension probe, and its refusals surface at first read. ``__getitem__`` reads a windowed
+    stem one tile window at a time through the pool, and a whole-decode stem by decoding once
+    and cropping; both zero-pad border tiles to ``tile_size`` and emit the same target dict
+    shape as ``DetectionDataset``. The dataset itself never holds an open source object, so it
+    pickles into spawned DataLoader workers.
+
+    ``keep_regions``, when given, is a sequence of half-open pixel rects ``(x0, y0, x1, y1)``
+    in each image's own full-resolution frame: only tiles whose rect lies fully inside one of
+    them are indexed (an empty sequence keeps none). Tiles overhanging the image extent are
+    dropped first and counted in ``tiles_dropped_past_extent``, since they can never lie inside
+    a rect clipped to the image; tiles no rect contains count in
+    ``tiles_dropped_outside_regions``. Without ``keep_regions`` both counts stay 0 and
+    overhanging tiles are kept, zero-padded, as always.
     """
 
     task_type = "detection"
@@ -759,9 +796,11 @@ class TiledDetectionDataset(BaseImageDataset):
         dedup_iou: float = 0.8,
         skip_empty: bool = False,
         transforms: Any = None,
+        keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
     ) -> None:
         from tcip_mcp.pipelines.data.tiling import (
-            compute_stride, tile_positions, clip_boxes_to_tile, dedup_boxes,
+            compute_stride, tile_positions, clipped_boxes_per_tile, dedup_boxes,
+            tile_within_extent, rect_contains_tile,
         )
         from tcip_mcp.pipelines.derivations import char_sizes_from_boxes, derive_sliver_frac
 
@@ -777,8 +816,12 @@ class TiledDetectionDataset(BaseImageDataset):
         self.transforms = transforms
         self.stride = compute_stride(tile_size, overlap)
         self._index: list[dict] = []
-        # (w, h) this index was built against, per stem, asserted again at decode time.
-        self._decoded_frame: dict[str, tuple[int, int]] = {}
+        # Per-stem frame facts this index was built against (plain values only; a RasterSource
+        # attribute would break pickling into spawned workers), asserted again at decode time.
+        self._source_frames: dict[str, dict[str, Any]] = {}
+        regions = _validated_keep_regions(keep_regions)
+        self.tiles_dropped_past_extent = 0
+        self.tiles_dropped_outside_regions = 0
 
         # Pass 1: read every image's upright dims + full-image-px boxes, and accumulate GT box sizes
         # so the seam-sliver cutoff is derived from this dataset's class-average object size, not a
@@ -791,9 +834,24 @@ class TiledDetectionDataset(BaseImageDataset):
         gt_boxes_per_image: list[list[tuple[float, float, float, float]]] = []
         for stem in base.stems:
             img_source = resolve_image_source(base.images_dir, stem)
-            # Measured the way __getitem__ will decode it: PIL's header read misreports a
-            # multi-band raster's axes, which would clip labels in a frame the tiles never use.
-            w, h = image_dimensions(img_source, self.expected_channels)
+            windowed = raster_source.opens_windowed(img_source, self.expected_channels)
+            if windowed:
+                # Header-only open, so an unreadable layout refuses now rather than at step N of
+                # an epoch, and the dims are the served source's own.
+                src = raster_source.pooled_source(img_source, self.expected_channels)
+                w, h = int(src.width), int(src.height)
+                channels = int(src.num_channels)
+                itemsize: int | None = int(np.dtype(src.dtype).itemsize)
+            else:
+                # A whole-decode backend keeps the header probe (measured the way __getitem__
+                # decodes it): opening it here would hold every source's pixels resident.
+                w, h = image_dimensions(img_source, self.expected_channels)
+                channels = int(self.expected_channels)
+                itemsize = None
+            self._source_frames[stem] = {
+                "width": int(w), "height": int(h), "channels": channels,
+                "dtype_itemsize": itemsize, "windowed": windowed,
+            }
             # The frame the boxes were actually drawn in, recorded in the label file itself. The
             # annotation stack measures with PIL, which reports a 40x24x5 GeoTIFF as 5x40, so on a
             # multi-band raster the authored frame and the decoded frame genuinely disagree, and
@@ -821,7 +879,6 @@ class TiledDetectionDataset(BaseImageDataset):
                 gt_boxes_per_image.append(
                     [(x1, y1, x2 - x1, y2 - y1) for x1, y1, x2, y2 in fb.tolist()])
             stems_data.append((stem, fb, fl, w, h))
-            self._decoded_frame[stem] = (int(w), int(h))
 
         char_sizes = char_sizes_from_boxes(gt_boxes_per_image)
         self.class_avg_size = float(np.mean(char_sizes)) if char_sizes else 0.0
@@ -842,10 +899,21 @@ class TiledDetectionDataset(BaseImageDataset):
         self.sliver_frac = sliver_frac
         self.min_box_size = sliver_frac * self.class_avg_size
 
-        # Pass 2: tile using the derived sliver cutoff.
+        # Pass 2: tile using the derived sliver cutoff, boxes clipped in bulk per stem.
         for stem, fb, fl, w, h in stems_data:
-            for tile_x, tile_y in tile_positions(h, w, tile_size, self.stride):
-                tb, tl = clip_boxes_to_tile(fb, fl, tile_x, tile_y, tile_size, self.min_box_size)
+            positions = tile_positions(h, w, tile_size, self.stride)
+            if regions is not None:
+                kept: list[tuple[int, int]] = []
+                for tile_x, tile_y in positions:
+                    if not tile_within_extent(tile_x, tile_y, tile_size, w, h):
+                        self.tiles_dropped_past_extent += 1
+                    elif any(rect_contains_tile(r, tile_x, tile_y, tile_size) for r in regions):
+                        kept.append((tile_x, tile_y))
+                    else:
+                        self.tiles_dropped_outside_regions += 1
+                positions = kept
+            per_tile = clipped_boxes_per_tile(fb, fl, positions, tile_size, self.min_box_size)
+            for (tile_x, tile_y), (tb, tl) in zip(positions, per_tile):
                 if len(tb) > 1:
                     tb, tl = dedup_boxes(tb, tl, dedup_iou)
                 if skip_empty and len(tb) == 0:
@@ -865,6 +933,19 @@ class TiledDetectionDataset(BaseImageDataset):
         return [e["stem"] for e in self._index]
 
     @property
+    def tile_entries(self) -> list[tuple[str, int, int]]:
+        """``(stem, tile_x, tile_y)`` per sample, in index order: the tile geometry a sampler
+        needs to order reads for locality without touching a pixel."""
+        return [(e["stem"], e["tile_x"], e["tile_y"]) for e in self._index]
+
+    @property
+    def source_frames(self) -> dict[str, dict[str, Any]]:
+        """Per-stem frame facts recorded when the index was built: ``width``, ``height``,
+        ``channels``, ``dtype_itemsize`` (``None`` where only a header probe ran, so no dtype was
+        read), and ``windowed`` (whether this source reads through a windowed backend)."""
+        return {stem: dict(info) for stem, info in self._source_frames.items()}
+
+    @property
     def class_distribution(self) -> dict[int, int]:
         counts: Counter[int] = Counter()
         for e in self._index:
@@ -872,23 +953,55 @@ class TiledDetectionDataset(BaseImageDataset):
                 counts[int(lab) - 1] += 1  # 0-indexed cid, matching DetectionDataset
         return dict(counts)
 
+    def _read_windowed_tile(self, stem: str, info: dict, tile_x: int, tile_y: int):
+        """One tile through the pooled windowed source, clipped to bounds and zero-padded; PIL
+        where the dtype has a faithful mode (so augmentation applies), else ndarray.
+
+        The recorded frame is checked against the pooled source's own dims: the pool keys on the
+        file's mtime and size, so a file replaced since the index was built opens fresh here, and
+        a dims disagreement means tiles cut from a frame the boxes were never clipped to. The
+        returned window's shape is also checked against the requested rect, the one witness left
+        against a decoder disagreeing with its own header. Refuse either way, don't reconcile.
+        """
+        src = raster_source.pooled_source(self._resolve_path(stem), self.expected_channels)
+        if (src.width, src.height) != (info["width"], info["height"]):
+            raise ValueError(
+                f"tiled dataset frame changed for stem {stem!r}: indexed at "
+                f"{info['width']}x{info['height']} but the source now opens as "
+                f"{src.width}x{src.height} at {self.expected_channels} channels. Cropping here "
+                f"would displace every box."
+            )
+        y0, y1 = tile_y, min(tile_y + self.tile_size, src.height)
+        x0, x1 = tile_x, min(tile_x + self.tile_size, src.width)
+        region, _spec = src.read_region(raster_source.Rect(x0, y0, x1, y1))
+        if region.shape[:2] != (y1 - y0, x1 - x0):
+            raise ValueError(
+                f"windowed read for stem {stem!r} returned {region.shape[0]}x{region.shape[1]} "
+                f"pixels for the {y1 - y0}x{x1 - x0} window at ({x0}, {y0}): the decoder "
+                f"disagrees with its own header, refusing to serve displaced pixels."
+            )
+        return to_pil_if_faithful(pad_tile(region, self.tile_size))
+
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         e = self._index[idx]
         stem = e["stem"]
-        # Channel-aware and EXIF-oriented (via load_image) so cropped pixels align with the tile
-        # geometry and the labels clipped in __init__.
-        img = self._open_image(stem)
-        w, h = self._image_size(img)
-        expected = self._decoded_frame.get(stem)
-        if expected is not None and (w, h) != expected:
-            # The index was built against this frame; if the file now decodes differently the tile
-            # would be cut from somewhere the boxes were never clipped to. Refuse, don't reconcile.
-            raise ValueError(
-                f"tiled dataset frame changed for stem {stem!r}: indexed at "
-                f"{expected[0]}x{expected[1]} but now decodes as {w}x{h} at "
-                f"{self.expected_channels} channels. Cropping here would displace every box."
-            )
-        tile = crop_pad_tile(img, e["tile_x"], e["tile_y"], self.tile_size, w, h)
+        info = self._source_frames[stem]
+        if info["windowed"]:
+            tile = self._read_windowed_tile(stem, info, e["tile_x"], e["tile_y"])
+        else:
+            # Channel-aware and EXIF-oriented (via load_image) so cropped pixels align with the
+            # tile geometry and the labels clipped in __init__.
+            img = self._open_image(stem)
+            w, h = self._image_size(img)
+            if (w, h) != (info["width"], info["height"]):
+                # If the file now decodes differently than the frame the index was built against,
+                # the tile would be cut where the boxes were never clipped. Refuse, don't reconcile.
+                raise ValueError(
+                    f"tiled dataset frame changed for stem {stem!r}: indexed at "
+                    f"{info['width']}x{info['height']} but now decodes as {w}x{h} at "
+                    f"{self.expected_channels} channels. Cropping here would displace every box."
+                )
+            tile = crop_pad_tile(img, e["tile_x"], e["tile_y"], self.tile_size, w, h)
         target = {
             "boxes": torch.tensor(e["boxes"], dtype=torch.float32).reshape(-1, 4),
             "labels": torch.tensor(e["labels"], dtype=torch.int64),
@@ -1390,11 +1503,21 @@ def _probe_num_channels(images_dir: str | Path | None, stems: list[str] | None,
         return default
 
 
+def tile_kwargs_from_tiling(tiling: dict) -> dict:
+    """The ``TiledDetectionDataset`` constructor kwargs a ``tiling`` config dict carries, keys
+    omitted so the class's own constructor defaults apply. Shared by ``build_dataset`` and any
+    caller that must resolve tiling geometry before construction (a spatial split derives its
+    block geometry at the same ``tile_size``/``overlap`` the dataset will actually use)."""
+    return {k: tiling[k] for k in
+            ("tile_size", "overlap", "sliver_frac", "dedup_iou", "skip_empty", "keep_regions")
+            if k in tiling}
+
+
 def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:
     """Factory: build a dataset by task type, or via a bespoke ``dataset_source`` builder.
 
     An optional ``tiling`` dict (``{enabled, tile_size, overlap, sliver_frac,
-    dedup_iou, skip_empty}``) wraps the detection dataset in a
+    dedup_iou, skip_empty, keep_regions}``) wraps the detection dataset in a
     :class:`TiledDetectionDataset`. Ignored for non-detection tasks.
 
     ``num_channels`` is derived by probing one sample raster when the caller does not pin it, so a
@@ -1444,10 +1567,7 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
         # measure frames at the band count the tiles will be decoded at. Stamping only the wrapper
         # afterwards left the index built at 3 channels and the tiles read at N.
         base.expected_channels = num_channels
-        tile_kwargs = {k: tiling[k] for k in
-                       ("tile_size", "overlap", "sliver_frac", "dedup_iou", "skip_empty")
-                       if k in tiling}
-        ds = TiledDetectionDataset(base, transforms=transforms, **tile_kwargs)
+        ds = TiledDetectionDataset(base, transforms=transforms, **tile_kwargs_from_tiling(tiling))
     else:
         if tiling and tiling.get("enabled", True) and task != "detection":
             logger.warning("tiling is only supported for task='detection'; ignoring for task=%r", task)
