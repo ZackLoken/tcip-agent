@@ -35,9 +35,8 @@ SOURCES = ("explicit", "derived", "default")
 VALIDATED_HELD_OUT = "held_out_annotations"          # a disjoint held-out split of this dataset's GT
 VALIDATED_REVIEW_CONFIRMED = "reviewer_confirmed_annotations"  # a breeder-confirmed output sample
 VALIDATED_PHYSICAL_MEASUREMENT = "physical_measurement"  # checked against a known physical dimension
-# A tile scale's own real basis for trust is either the checkpoint's own persisted training
-# geometry, or a caller's deliberate stated override (the same two bases run_full_frame_evaluation
-# already accepts on the delivery-gating path; only a fabricated no-basis fallback is untrustworthy).
+# A tile scale's own real basis for trust is the checkpoint's own persisted training geometry, or a
+# caller's deliberate stated override (the same two bases run_full_frame_evaluation already accepts).
 VALIDATED_PERSISTED_GEOMETRY = "persisted_training_geometry"
 VALIDATED_EXPLICIT_GEOMETRY = "explicit_caller_stated_geometry"
 VALIDATED_FALSE = "false"
@@ -73,8 +72,6 @@ VALIDATED_SHIPPABLE = (
 # same model+images can't give a different count by entry point.
 DEFAULT_CONF = 0.5
 DEFAULT_NMS_IOU = 0.3
-DEFAULT_TILED = True
-DEFAULT_TILE_SIZE = 640
 DEFAULT_OVERLAP = 0.2
 # A high full-frame detection cap so dense scenes (hundreds of objects) aren't silently truncated
 # at a framework default (torchvision 100 / ultralytics 300). Enforced after any tiled merge.
@@ -296,27 +293,37 @@ def resolve_tile_size_param(
     training geometry (``"derived"``), or a caller's deliberate explicit override (``"explicit"``,
     accepted on the same terms ``run_full_frame_evaluation`` already accepts an explicit value on:
     not cross-checked against the checkpoint's real training scale, but a stated decision, not a
-    guess). A bare ``"default"`` fallback (no persisted geometry, nothing explicit, the fabricated
-    640) has no basis and floors to unvalidated, closing the asymmetry with the delivery-gating path
-    (``run_full_frame_evaluation``), which already refuses outright for this exact case.
+    guess). ``"native_ratio"`` (a tile edge derived from a checkpoint's own uniform untiled training
+    size) is a real basis to tile at all but never an accepted geometry reference on its own, so it
+    floors to unvalidated exactly like the no-basis case. Any other source (``"unavailable"``, no
+    persisted geometry and nothing explicit) means nothing justifies a scale at all, so ``tile_size``
+    itself is ``None``: never a fabricated number, closing the asymmetry with the delivery-gating
+    path (``run_full_frame_evaluation``), which already refuses outright for this exact case.
     """
     if not tiled:
         return default("tile_size", None)
-    if tile_size and tile_size_source == "derived":
+    if tile_size_source == "derived" and tile_size is not None:
         return derived(
             "tile_size", int(tile_size), derived_from="persisted training tile geometry",
             requires_validation=True, validation_kind="geometry",
             validated_against=VALIDATED_PERSISTED_GEOMETRY,
         )
-    if tile_size and tile_size_source == "explicit":
+    if tile_size_source == "explicit" and tile_size is not None:
         return ResolvedParam(
             "tile_size", int(tile_size), source="explicit", derived_from="caller override",
             requires_validation=True, validation_kind="geometry",
             validated_against=VALIDATED_EXPLICIT_GEOMETRY,
         )
+    if tile_size_source == "native_ratio":
+        return ResolvedParam(
+            "tile_size", int(tile_size) if tile_size is not None else None, source="derived",
+            derived_from="native-size ratio (not an independently validated geometry basis)",
+            requires_validation=True, validation_kind="geometry", validated_against=VALIDATED_FALSE,
+        )
     return ResolvedParam(
-        "tile_size", int(tile_size or DEFAULT_TILE_SIZE), source="default",
-        derived_from="no persisted training geometry; fabricated fallback",
+        "tile_size", None, source="default",
+        derived_from="no persisted training geometry, no explicit override, and no basis to "
+                     "derive a tile edge from",
         requires_validation=True, validation_kind="geometry",
         validated_against=VALIDATED_FALSE,
     )
@@ -334,15 +341,15 @@ def raw_operating_point(
     giving a different count (the phenotype) for the same model + images by entry point.
 
     ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
-    geometry, ``explicit`` (caller override), or a ``default`` fallback, so a 224-train / 640-infer
-    scale mismatch is visible in the provenance rather than silent, and whether tiled inference's
-    tile_size has a real basis at all: see :func:`resolve_tile_size_param`, a tiled run with no
-    persisted/explicit basis is a real, gating-firewalled unvalidated dimension, not silently
-    shippable engineering trivia. ``tiled_source`` is the same provenance vocabulary for the boolean
-    itself: a caller that explicitly chose to tile (or not) stamps ``"explicit"``; a caller who passed
-    nothing gets ``"default"``. Both callers of this function
-    resolve their own bool once (``None`` sentinel -> ``DEFAULT_TILED`` internally) before reaching
-    here, so ``tiled`` itself is always a concrete bool.
+    geometry, ``explicit`` (caller override), or has no real basis at all (``"unavailable"``), so a
+    train/infer scale mismatch is visible in the provenance rather than silent, and whether tiled
+    inference's tile_size has a real basis at all: see :func:`resolve_tile_size_param`, a tiled run
+    with no persisted/explicit basis is a real, gating-firewalled unvalidated dimension (``tile_size``
+    itself ``None``, never a fabricated number), not silently shippable engineering trivia.
+    ``tiled_source`` is the same provenance vocabulary for the boolean itself: a caller that
+    explicitly chose to tile (or not) stamps ``"explicit"``; a caller who passed nothing gets
+    ``"default"``. Both callers of this function derive their own concrete ``tiled`` bool (no shared
+    fallback constant) before reaching here, so ``tiled`` itself is always a real bool, never ``None``.
     """
     tile_param = resolve_tile_size_param(tile_size, tiled=tiled, tile_size_source=tile_size_source)
     if tiled_source == "explicit":
