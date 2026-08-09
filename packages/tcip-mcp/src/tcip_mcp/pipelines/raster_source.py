@@ -63,14 +63,18 @@ def _gdal():
     return _gdal_module
 
 
-def configure_gdal_cache() -> None:
+def configure_gdal_cache(share: float = 1.0) -> None:
     """Hand GDAL's block cache its share of this module's memory budget.
 
     Called once at each process entry point (the MCP server's ``main``, the web backend's app
-    startup), never at source construction: the cache is process-global, and a per-open call
-    would re-decide a process-wide fact on every read path.
+    startup, the training subprocess, and each of its spawned DataLoader workers), never at
+    source construction: the cache is process-global, and a per-open call would re-decide a
+    process-wide fact on every read path. ``share`` scales the budget down for a process that
+    is one of several peers each holding their own GDAL cache (a DataLoader worker: pass
+    ``1 / num_workers`` so ``num_workers`` peers together still commit the platform's intended
+    budget rather than that amount each).
     """
-    _gdal().SetCacheMax(int(_memory_budget_bytes() * _GDAL_CACHE_SHARE))
+    _gdal().SetCacheMax(int(_memory_budget_bytes() * _GDAL_CACHE_SHARE * share))
 
 
 def open_gdal_dataset(path: str | Path):
@@ -448,7 +452,15 @@ class PhotographicSource(_ClosableSource):
 
     @property
     def resident_bytes(self) -> int:
-        return int(self.width * self.height * self.num_channels * self.dtype.itemsize)
+        """The peak this source can hold: the PIL frame plus the ndarray copy
+        :meth:`read_region` materializes from it on first use.
+
+        The pool records this value once, at insert, so it must never understate what the
+        source may later hold; counting both frames up front keeps the accounting honest
+        even when :meth:`read_region` is never called, where a value that grew after a
+        first read would silently exceed what the pool recorded.
+        """
+        return int(2 * self.width * self.height * self.num_channels * self.dtype.itemsize)
 
     def read_region(self, rect: Rect, *,
                     target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
@@ -730,8 +742,8 @@ def open_array_source(source: "str | Path | BandGroupRef", num_channels: int) ->
     )
 
 
-def _open_tiff(path: Path, num_channels: int) -> RasterSource:
-    """GDAL first; tifffile's own header read cross-checks that GDAL sees the whole raster.
+def _tiff_needs_whole_decode(source: GdalSource, num_channels: int) -> bool:
+    """Whether a GDAL-opened TIFF must instead decode whole through tifffile.
 
     GDAL reads a TIFF's first IFD as the dataset, which misreads the stacked multi-page layouts
     tifffile itself writes (a channel-last raster one row-block per page, a ``[C, H, W]`` stack
@@ -741,7 +753,26 @@ def _open_tiff(path: Path, num_channels: int) -> RasterSource:
     GDAL alone: tifffile could not decode such a file either. A raster whose shape a whole decode
     would reinterpret channel-first (:func:`channel_first_reinterpreted`) also decodes whole, so
     ``load_multiband`` and ``image_dimensions`` keep reporting the same frame for it.
+
+    Header reads only, never a pixel decode: :func:`opens_windowed` answers from this too.
     """
+    # The raw band count, not the served one: a palette raster serves as three expanded channels
+    # while the file's own header (what tifffile reports) still says one band.
+    gdal_frame = (source.height, source.width, int(source._ds.RasterCount))
+    probe = _tiff_series_probe(source.path)
+    if probe is None:
+        return False
+    shape, axes = probe
+    series_frame = _series_frame(shape, axes)
+    if series_frame is None or series_frame != gdal_frame:
+        return True
+    # A planar (SYX) series is channel-first by its own header: no reinterpretation applies.
+    return axes != "SYX" and channel_first_reinterpreted(gdal_frame, num_channels)
+
+
+def _open_tiff(path: Path, num_channels: int) -> RasterSource:
+    """GDAL first; tifffile's own header read cross-checks that GDAL sees the whole raster
+    (:func:`_tiff_needs_whole_decode` is the one place that check lives)."""
     try:
         source = GdalSource(path)
     except ValueError:
@@ -749,21 +780,40 @@ def _open_tiff(path: Path, num_channels: int) -> RasterSource:
         if _tiff_series_probe(path) is not None:
             return TiffWholeSource(path, num_channels)
         raise
-    # The raw band count, not the served one: a palette raster serves as three expanded channels
-    # while the file's own header (what tifffile reports) still says one band.
-    gdal_frame = (source.height, source.width, int(source._ds.RasterCount))
-    probe = _tiff_series_probe(path)
-    if probe is not None:
-        shape, axes = probe
-        series_frame = _series_frame(shape, axes)
-        if series_frame is None or series_frame != gdal_frame:
-            source.close()
-            return TiffWholeSource(path, num_channels)
-        # A planar (SYX) series is channel-first by its own header: no reinterpretation applies.
-        if axes != "SYX" and channel_first_reinterpreted(gdal_frame, num_channels):
-            source.close()
-            return TiffWholeSource(path, num_channels)
+    if _tiff_needs_whole_decode(source, num_channels):
+        source.close()
+        return TiffWholeSource(path, num_channels)
     return source
+
+
+def opens_windowed(source: "str | Path | BandGroupRef", num_channels: int) -> bool:
+    """Whether :func:`open_raster` would serve ``source`` through a backend that opens without
+    decoding pixels and reads windows on demand (a GDAL-served raster, a memory-mapped ``.npy``).
+
+    Every other backend decodes the whole raster at open (a photographic frame, an ``.npz``, a
+    stacked TIFF, a band group), so a caller deciding whether an eager open is affordable asks
+    here first. For a TIFF the answer needs GDAL's own header read; a probe source is opened and
+    closed again, header-only, never decoding pixels. A file no backend can open answers
+    ``False``: the open that would name the failure is the caller's to attempt.
+    """
+    if isinstance(source, BandGroupRef):
+        return False
+    path = Path(source)
+    if photographic_container(path, num_channels):
+        return False
+    ext = path.suffix.lower()
+    if ext == ".npy":
+        return True
+    if ext not in (".tif", ".tiff"):
+        return False
+    try:
+        probe = GdalSource(path)
+    except ValueError:
+        return False
+    try:
+        return not _tiff_needs_whole_decode(probe, num_channels)
+    finally:
+        probe.close()
 
 
 def open_raster(source: "str | Path | BandGroupRef", num_channels: int) -> RasterSource:
@@ -814,9 +864,9 @@ def pooled_source(source: "str | Path | BandGroupRef", num_channels: int) -> Ras
     exceeds this module's pool budget. It belongs to the process that filled it: a forked worker
     (a DataLoader's, say) finds it empty rather than reusing handles the parent owns.
 
-    A caller must not close what this returns; the pool owns it. Nothing in the pipeline reads
-    through the pool: the ``image_utils`` loaders open and close their own sources, so no caller's
-    memory profile depends on it.
+    A caller must not close what this returns; the pool owns it. The ``image_utils`` loaders open
+    and close their own sources; the tiled training dataset reads its windowed sources through
+    here so every tile of one raster shares one open handle.
 
     A GDAL dataset handle is not thread-safe, so this pool must never vend one
     :class:`GdalSource` to two concurrent threads; a threaded consumer needs thread-keyed pooling
