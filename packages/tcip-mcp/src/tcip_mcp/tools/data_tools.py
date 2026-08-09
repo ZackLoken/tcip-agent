@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
@@ -411,7 +412,7 @@ def _make_spatial_split(
         if name is not None:
             ids[name].add(split.identity_for(stem, tx, ty))
 
-    spatial_manifest = {
+    spatial_manifest: dict[str, Any] = {
         f"{name}_identities": sorted(ids[name]) for name in split.regions
     }
     spatial_manifest.update({
