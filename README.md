@@ -143,19 +143,20 @@ survey file), instead of the one-photo-per-plant path above. `OrthomosaicGeorefe
 GeoTIFF's own tags to turn a pixel into a real-world coordinate (refusing cleanly, never guessing,
 on a rotated raster or one whose CRS it can't determine), and `raster_source.GdalSource` serves
 windowed reads through GDAL's budgeted block cache (overview-aware when the raster carries an
-`.ovr` pyramid) so the raster is never decoded whole. `predict_tiled_from_reader` runs the same tiled-inference core the
-per-photo path uses, including `instance_seg` masks (kept as small tile-local patches with a
-full-raster offset, not one full-raster-sized array per detection). Each detection resolves to a
-real-world coordinate and is matched to the nearest plant in a plant-locations CSV
-(`assign_detections_to_plants`, honest `source`/`distance_m`, no fabricated confidence, an
-unmatched detection stays unmatched rather than being forced onto the nearest plant regardless of
-distance). Two MCP tools compose the whole path end to end the same way `build_plant_mapping` →
-`compute_phenology` do for the per-photo case: `run_orthomosaic_inference` (tile, persist a
-prediction bucket) and `deliver_orthomosaic_plant_counts` (map detections to plants, aggregate,
-deliver through the same measurement-integrity gate every other per-plant CSV goes through). Not
-yet built: a composed pipeline for a dimensional (not count) trait measured this way, and an
-automated smoke test against a real multi-gigabyte file (verified manually against the file
-above; the automated suite uses a synthetic fixture, since a real 90+ GB file can't live in CI).
+`.ovr` pyramid) so the raster is never decoded whole. `GenericPredictor.predict_tiled`'s windowed-
+reader source kind runs the same tiled-inference core the per-photo path uses, including
+`instance_seg` masks (kept as small tile-local patches with a full-raster offset, not one
+full-raster-sized array per detection). Each detection resolves to a real-world coordinate and is
+matched to the nearest plant in a plant-locations CSV (`assign_detections_to_plants`, honest
+`source`/`distance_m`, no fabricated confidence, an unmatched detection stays unmatched rather than
+being forced onto the nearest plant regardless of distance). Two MCP tools compose the whole path
+end to end the same way `build_plant_mapping` → `compute_phenology` do for the per-photo case:
+`export_predictions`'s `raster_path` regime (tile, persist a prediction bucket) and
+`deliver_orthomosaic_plant_counts` (map detections to plants, aggregate, deliver through the same
+measurement-integrity gate every other per-plant CSV goes through). Not yet built: a composed
+pipeline for a dimensional (not count) trait measured this way, and an automated smoke test against
+a real multi-gigabyte file (verified manually against the file above; the automated suite uses a
+synthetic fixture, since a real 90+ GB file can't live in CI).
 
 Trained ML models are the deliverable; classical image analysis (OpenCV, scikit-image) is
 available for the agent to compose as a situational bootstrapping assist, cheaply producing soft
