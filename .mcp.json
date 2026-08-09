@@ -5,8 +5,7 @@
       "args": ["run", "-n", "tcip-agent", "--no-capture-output", "python", "-m", "tcip_mcp"]
     },
     "claude-context": {
-      "command": "cmd",
-      "args": ["/c", "claude-context-mcp"],
+      "command": "C:\\Users\\zack\\anaconda3\\envs\\tcip-agent\\claude-context-mcp.cmd",
       "env": {
         "EMBEDDING_PROVIDER": "Ollama",
         "OLLAMA_HOST": "http://127.0.0.1:11434",
