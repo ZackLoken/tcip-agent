@@ -158,8 +158,8 @@ def export_detection_csv(
     ``operating_point.json`` sidecar and floored against ``measurement_validated`` (never trusted
     from the string alone). A bucket produced by a tiled run gates on its ``tile_size`` too, the same
     operating point's other gating dimension: the tile edge scales the per-image counts this CSV
-    reports, so a fabricated fallback with no persisted training geometry and no explicit caller
-    override refuses here. Untiled buckets are never gated on it. This CSV carries no dimensional
+    reports, so a run with no persisted training geometry and no explicit caller override refuses
+    here. Untiled buckets are never gated on it. This CSV carries no dimensional
     value (its rows are ``detection_count``/``avg_confidence``, never an area/length/diameter), so
     the physical-scale dimension (see ``export_aggregated_csv``'s gate on
     ``resolve_scale.json``/``reconcile_scale_validity``) is never operative here: there is nothing in
@@ -210,10 +210,8 @@ def export_detection_csv(
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
-    # The single measurement_validated column must reflect the floor across every gated dimension:
-    # with acknowledge_unvalidated a fabricated tile scale can still reach here, and stamping the
-    # count operating point's own (possibly real) reference alone would report a partially
-    # acknowledged-provisional delivery as fully validated.
+    # The column must reflect the floor across every gated dimension: with acknowledge_unvalidated
+    # an ungrounded tile scale can still reach here, misreporting a partial delivery as validated.
     stamp["measurement_validated"] = VALIDATED_FALSE if gate.unvalidated else gate.stamp["measurement"]
     fieldnames = ["image", "detection_count", "avg_confidence"] + _PROVENANCE_COLUMNS
 
