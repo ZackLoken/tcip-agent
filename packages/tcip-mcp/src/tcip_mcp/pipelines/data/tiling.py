@@ -66,6 +66,23 @@ def tile_positions(height: int, width: int, tile_size: int, stride: int) -> list
     return positions
 
 
+def tile_within_extent(tile_x: int, tile_y: int, tile_size: int, width: int, height: int) -> bool:
+    """Whether a tile's full rect fits inside the image's real (unpadded) extent.
+
+    ``tile_positions`` only excludes an origin that falls entirely in the padding region; a
+    tile whose origin is in-bounds can still extend past ``width``/``height`` on its far edge
+    (the case ``crop_pad_tile`` zero-pads). A caller that needs every kept tile fully real
+    (no synthetic padding pixels), such as a spatial train/val split, filters on this first.
+    """
+    return tile_x + tile_size <= width and tile_y + tile_size <= height
+
+
+def rect_contains_tile(rect: tuple[int, int, int, int], tile_x: int, tile_y: int, tile_size: int) -> bool:
+    """Whether a tile's rect lies fully inside a half-open pixel rect ``(x0, y0, x1, y1)``."""
+    x0, y0, x1, y1 = rect
+    return tile_x >= x0 and tile_y >= y0 and tile_x + tile_size <= x1 and tile_y + tile_size <= y1
+
+
 def clip_boxes_to_tile(
     boxes: np.ndarray, labels: np.ndarray, tile_x: int, tile_y: int,
     tile_size: int, min_box_size: float,
@@ -77,24 +94,76 @@ def clip_boxes_to_tile(
     from the class's average box size (a partial object counts unless it's a tiny sliver; see
     ``TiledDetectionDataset``), not a fixed fraction. Boxes fully inside the tile are always kept.
     """
+    boxes = np.asarray(boxes)
+    labels = np.asarray(labels)
     if len(boxes) == 0:
         return EMPTY_BOXES.copy(), EMPTY_LABELS.copy()
     tx2, ty2 = tile_x + tile_size, tile_y + tile_size
-    out_boxes, out_labels = [], []
-    for (bx1, by1, bx2, by2), lab in zip(boxes, labels):
-        ix1, iy1 = max(bx1, tile_x), max(by1, tile_y)
-        ix2, iy2 = min(bx2, tx2), min(by2, ty2)
-        iw, ih = ix2 - ix1, iy2 - iy1
-        if iw <= 0 or ih <= 0:
-            continue
-        clipped = bx1 < tile_x or by1 < tile_y or bx2 > tx2 or by2 > ty2
-        if clipped and (iw * ih) ** 0.5 < min_box_size:
-            continue
-        out_boxes.append([ix1 - tile_x, iy1 - tile_y, ix2 - tile_x, iy2 - tile_y])
-        out_labels.append(int(lab))
-    if not out_boxes:
+    ix1 = np.maximum(boxes[:, 0], tile_x)
+    iy1 = np.maximum(boxes[:, 1], tile_y)
+    ix2 = np.minimum(boxes[:, 2], tx2)
+    iy2 = np.minimum(boxes[:, 3], ty2)
+    iw, ih = ix2 - ix1, iy2 - iy1
+    visible = (iw > 0) & (ih > 0)
+    was_clipped = ((boxes[:, 0] < tile_x) | (boxes[:, 1] < tile_y)
+                   | (boxes[:, 2] > tx2) | (boxes[:, 3] > ty2))
+    # Negative extents are clamped before the size so an empty intersection never feeds sqrt;
+    # the clamp changes nothing kept, since only visible boxes survive the mask below.
+    char_size = (np.maximum(iw, 0) * np.maximum(ih, 0)) ** 0.5
+    keep = visible & ~(was_clipped & (char_size < min_box_size))
+    if not keep.any():
         return EMPTY_BOXES.copy(), EMPTY_LABELS.copy()
-    return np.asarray(out_boxes, dtype=np.float32), np.asarray(out_labels, dtype=np.int64)
+    out = np.stack([ix1[keep] - tile_x, iy1[keep] - tile_y,
+                    ix2[keep] - tile_x, iy2[keep] - tile_y], axis=1)
+    return out.astype(np.float32), labels[keep].astype(np.int64)
+
+
+def clipped_boxes_per_tile(
+    boxes: np.ndarray, labels: np.ndarray, positions: list[tuple[int, int]],
+    tile_size: int, min_box_size: float,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """:func:`clip_boxes_to_tile` for every position at once.
+
+    Result ``i`` equals ``clip_boxes_to_tile(boxes, labels, *positions[i], ...)`` exactly
+    (values, dtypes, ordering, fresh arrays), but the cost scales with the box-tile incidences
+    rather than positions times boxes: each box's candidate tile rows/columns come from one
+    ``searchsorted`` over the distinct origins, and only tiles with a candidate pay a clip call.
+    The candidate range is a strict superset of visibility, so :func:`clip_boxes_to_tile` stays
+    the one authority on what a tile keeps. ``positions`` is a :func:`tile_positions` result:
+    distinct origins on a regular grid.
+    """
+    n_pos = len(positions)
+    boxes = np.asarray(boxes)
+    labels = np.asarray(labels)
+    if n_pos == 0 or len(boxes) == 0:
+        return [(EMPTY_BOXES.copy(), EMPTY_LABELS.copy()) for _ in range(n_pos)]
+    xs = np.unique(np.asarray([p[0] for p in positions], dtype=np.int64))
+    ys = np.unique(np.asarray([p[1] for p in positions], dtype=np.int64))
+    # float64 holds every float32/float64 coordinate and every origin exactly, so these strict
+    # bounds agree with the clip's own visibility arithmetic instead of re-rounding it.
+    bx1 = boxes[:, 0].astype(np.float64)
+    by1 = boxes[:, 1].astype(np.float64)
+    bx2 = boxes[:, 2].astype(np.float64)
+    by2 = boxes[:, 3].astype(np.float64)
+    col_lo = np.searchsorted(xs, bx1 - tile_size, side="right")
+    col_hi = np.searchsorted(xs, bx2, side="left")
+    row_lo = np.searchsorted(ys, by1 - tile_size, side="right")
+    row_hi = np.searchsorted(ys, by2, side="left")
+    candidates: dict[tuple[int, int], list[int]] = {}
+    for i in range(len(boxes)):
+        for k in range(row_lo[i], row_hi[i]):
+            ty = int(ys[k])
+            for j in range(col_lo[i], col_hi[i]):
+                candidates.setdefault((int(xs[j]), ty), []).append(i)
+    results: list[tuple[np.ndarray, np.ndarray] | None] = [None] * n_pos
+    index_of = {(int(tx), int(ty)): m for m, (tx, ty) in enumerate(positions)}
+    for key, idxs in candidates.items():
+        m = index_of.get(key)
+        if m is None:
+            continue  # a grid cell tile_positions never emitted (dropped as pure padding)
+        results[m] = clip_boxes_to_tile(
+            boxes[idxs], labels[idxs], key[0], key[1], tile_size, min_box_size)
+    return [(EMPTY_BOXES.copy(), EMPTY_LABELS.copy()) if r is None else r for r in results]
 
 
 def _iou(a, b, area_a, area_b) -> float:
