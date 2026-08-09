@@ -10,6 +10,7 @@ early stopping, mixed precision, gradient accumulation, checkpoints.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -62,24 +63,110 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
         torch.backends.cudnn.benchmark = False
 
 
-def seeded_loader_kwargs(seed: int | None) -> dict:
-    """DataLoader kwargs (``generator``, ``worker_init_fn``) making shuffling and worker-process
-    randomness reproducible from ``seed``, the same value ``set_seed`` uses. ``{}`` when
-    ``seed`` is ``None``: an unseeded run stays unseeded end to end, honestly, rather than
-    silently becoming reproducible only in its loader while everything else stays random.
-    """
-    if seed is None:
-        return {}
-    seed = int(seed)
-    generator = torch.Generator()
-    generator.manual_seed(seed)
+def loader_worker_init(worker_id: int, seed: int | None = None,
+                       num_workers: int | None = None) -> None:
+    """DataLoader worker-process initializer, module-level so it pickles under Windows spawn
+    (a closure cannot, and spawn pickles ``worker_init_fn`` to every worker).
 
-    def _worker_init_fn(worker_id: int) -> None:
+    Always configures the platform GDAL cache budget: a spawned worker starts a fresh process
+    on GDAL's stock default, not the budget the parent configured. Scaled by ``num_workers``
+    (each worker gets ``1 / num_workers`` of the budget) so the fleet of workers together
+    commits what the platform intended, not that amount each; ``None`` (a caller that has not
+    been updated to pass it) keeps the pre-scaling full-budget behavior. Per-worker numpy/random
+    seeding applies only when the run is seeded.
+    """
+    from tcip_mcp.pipelines.raster_source import configure_gdal_cache
+
+    share = 1.0 / num_workers if num_workers else 1.0
+    configure_gdal_cache(share=share)
+    if seed is not None:
         worker_seed = (seed + worker_id) % (2**32)
         np.random.seed(worker_seed)
         random.seed(worker_seed)
 
-    return {"generator": generator, "worker_init_fn": _worker_init_fn}
+
+def seeded_loader_kwargs(seed: int | None, num_workers: int | None = None) -> dict:
+    """DataLoader kwargs wiring :func:`loader_worker_init` as the one ``worker_init_fn`` (every
+    run, seeded or not, so spawned workers get the platform GDAL cache budget, scaled by
+    ``num_workers`` when given) plus a seeded ``generator`` when ``seed`` is set, the same
+    value ``set_seed`` uses, making shuffling and worker randomness reproducible. An unseeded
+    run gets no generator: it stays unseeded end to end rather than silently becoming
+    reproducible only in its loader.
+    """
+    kwargs: dict = {
+        "worker_init_fn": functools.partial(
+            loader_worker_init, seed=None if seed is None else int(seed), num_workers=num_workers),
+    }
+    if seed is not None:
+        generator = torch.Generator()
+        generator.manual_seed(int(seed))
+        kwargs["generator"] = generator
+    return kwargs
+
+
+def stamp_effective_data_geometry(data_cfg: dict, train_ds: Any) -> dict:
+    """Record the input geometry ``train_ds`` actually serves into ``data_cfg``, in place.
+
+    ``data_cfg`` is the live ``config["data"]`` dict the run persists (checkpoints embed the
+    run config by reference; an HPO trial's resolved-config snapshot spreads the merged
+    config), so this must run after the dataset is built and before training starts.
+
+    A tiled train dataset (one carrying a ``tile_size``) stamps its effective
+    ``tile_size``/``overlap`` into the tiling record, filling in defaults the caller's config
+    omitted. An untiled one replaces the tiling record with ``{"enabled": False}`` outright,
+    never a merge: a requested-but-unrealized ``tile_size`` surviving in the persisted config
+    would read back as the frame the model trained on (predictor tile geometry, contract-dim
+    resolution, tiled-eval defaults).
+
+    ``train_native_size``: an untiled run whose training frames all share one size stamps
+    ``data_cfg["train_native_size"] = [width, height]``; mixed sizes stamp nothing, since
+    there is no single native frame to record. Tiled runs stamp nothing here either: their
+    native frame is the tile, and the stamped ``tile_size`` already carries it. Probing is
+    header-only for the common containers (``image_dimensions``) and needs the dataset's
+    source list; a dataset that exposes none cannot be probed, so nothing is stamped.
+
+    Returns the stamped facts, ``{"tiling": dict, "tiling_replaced": bool,
+    "train_native_size": [w, h] | None}``, so a caller can mirror the identical stamp into a
+    durable experiment record instead of re-deriving it.
+    """
+    eff_tile = getattr(train_ds, "tile_size", None)
+    if eff_tile is not None:
+        tiling = data_cfg.setdefault("tiling", {})
+        tiling["tile_size"] = int(eff_tile)
+        eff_overlap = getattr(train_ds, "overlap", None)
+        if eff_overlap is not None:
+            tiling["overlap"] = float(eff_overlap)
+        return {"tiling": tiling, "tiling_replaced": False, "train_native_size": None}
+
+    data_cfg["tiling"] = {"enabled": False}
+    native = _uniform_native_size(train_ds)
+    if native is not None:
+        data_cfg["train_native_size"] = list(native)
+    return {"tiling": data_cfg["tiling"], "tiling_replaced": True,
+            "train_native_size": list(native) if native is not None else None}
+
+
+def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
+    """The one ``(width, height)`` every training source shares, or ``None`` when sizes differ,
+    a source cannot be probed, or the dataset exposes no source list to probe."""
+    stems = getattr(train_ds, "stems", None)
+    resolve = getattr(train_ds, "_resolve_path", None)
+    if not stems or resolve is None:
+        return None
+    from tcip_mcp.pipelines.image_utils import image_dimensions
+
+    channels = getattr(train_ds, "expected_channels", 3)
+    size: tuple[int, int] | None = None
+    for stem in stems:
+        try:
+            dims = image_dimensions(resolve(stem), channels)
+        except (OSError, ValueError):
+            return None
+        if size is None:
+            size = (int(dims[0]), int(dims[1]))
+        elif (int(dims[0]), int(dims[1])) != size:
+            return None
+    return size
 
 
 # ====================================================================
