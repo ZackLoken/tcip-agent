@@ -118,7 +118,7 @@ def _gt_records(prefix, n, *, swap_classes, classes=(1, 2), offset=0.0):
 
 def test_review_door_refuses_a_class_compensating_reference_the_pooled_bias_calls_unbiased():
     b = resolve_operating_point_from_review(_two_class_review_state(swap_classes=True), "catkin",
-                                            staged_conf_floor=0.01, bucket_identities=[_IDENTITY])
+                                            tiled=True, staged_conf_floor=0.01, bucket_identities=[_IDENTITY])
     conf = b.params["conf"]
     sweep = conf.sweep
     hb = sweep["holdout_bias"]
@@ -138,7 +138,7 @@ def test_review_door_class_failure_has_its_own_breeder_message():
     # The named-failure vocabulary is exhaustive by construction (describe_review_validation raises
     # on a name it can't translate), so a new gate name without a message is a loud error here.
     b = resolve_operating_point_from_review(_two_class_review_state(swap_classes=True), "catkin",
-                                            staged_conf_floor=0.01, bucket_identities=[_IDENTITY])
+                                            tiled=True, staged_conf_floor=0.01, bucket_identities=[_IDENTITY])
     out = describe_review_validation(b, reviewed_image_count=N_IMAGES)
     assert out["validated"] is False
     assert "kind" in out["reason"].lower()
@@ -149,7 +149,7 @@ def test_review_door_class_failure_has_its_own_breeder_message():
 
 def test_review_door_still_validates_a_multi_class_reference_that_is_honest_per_class():
     b = resolve_operating_point_from_review(_two_class_review_state(swap_classes=False), "catkin",
-                                            staged_conf_floor=0.01, bucket_identities=[_IDENTITY])
+                                            tiled=True, staged_conf_floor=0.01, bucket_identities=[_IDENTITY])
     conf = b.params["conf"]
     assert conf.sweep["failures"] == []
     assert conf.sweep["per_class_count_bias_failures"] == []
@@ -161,7 +161,7 @@ def test_review_door_still_validates_a_multi_class_reference_that_is_honest_per_
 
 def test_gt_door_refuses_a_class_compensating_reference():
     b = resolve_operating_point(
-        "catkin", dataset_hash="h", staged_conf_floor=0.05,
+        "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
     sweep = b.params["conf"].sweep
@@ -172,7 +172,7 @@ def test_gt_door_refuses_a_class_compensating_reference():
 
 def test_gt_door_validates_the_same_geometry_called_correctly():
     b = resolve_operating_point(
-        "catkin", dataset_hash="h", staged_conf_floor=0.05,
+        "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=False),
         holdout_records=_gt_records("hold", 4, swap_classes=False, offset=5000.0))
     assert b.params["conf"].sweep["failures"] == []
@@ -185,7 +185,7 @@ def test_single_class_reference_is_unaffected_by_the_conditioning():
     # a rail that fail-closed the only trait the platform ships would be worse than the hole.
     cal = _gt_records("cal", 4, swap_classes=False, classes=(1, 1))
     hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)
-    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].sweep
     hb = sweep["holdout_bias"]
@@ -209,7 +209,7 @@ def test_a_class_the_holdout_never_carries_cannot_be_validated_by_its_absence():
     # can see reads bias 0.0, and the reference was stamped validated on no class-2 evidence.
     cal = _gt_records("cal", 4, swap_classes=True)
     hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)
-    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].sweep
     assert sweep["per_class_count_bias_failures"] == []   # the holdout has nothing to fail on
@@ -258,7 +258,7 @@ def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
     # it) surfaces that this reference has almost no real evidence backing that mean.
     cal = _sparse_class_calibration("cal", 4, offset=0.0)
     hold = _sparse_class_records("hold", 20, offset=5000.0)
-    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].sweep
     c2 = sweep["holdout_bias"]["per_class"]["2"]
@@ -275,7 +275,7 @@ def test_holdout_class_coverage_admits_a_reference_that_evidences_every_class():
     # class, including one whose objects the model correctly finds on only some images.
     cal = _gt_records("cal", 4, swap_classes=False)
     hold = _gt_records("hold", 4, swap_classes=False, offset=5000.0)
-    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     assert b.params["conf"].sweep["holdout_missing_classes"] == []
     assert b.params["conf"].sweep["failures"] == []
@@ -288,7 +288,7 @@ def test_missing_class_failure_has_its_own_breeder_message():
     # rather than a hand-built bundle; the review door reaches the same message through the same
     # lookup, but which images its locked split holds back is not the fixture's to choose.
     b = resolve_operating_point(
-        "catkin", dataset_hash="h", staged_conf_floor=0.05,
+        "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0))
     out = describe_review_validation(b, reviewed_image_count=N_IMAGES)
@@ -301,7 +301,7 @@ def test_per_class_keys_survive_the_sweep_artifact_round_trip():
     # so the gate's per-class breakdown is only reconstructable later if its keys are JSON-stable:
     # int keys would come back as strings and silently stop matching an in-memory read.
     b = resolve_operating_point(
-        "catkin", dataset_hash="h", staged_conf_floor=0.05,
+        "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
     path = Path(os.environ["TCIP_PROJECT_ROOT"]) / "sweep.json"
@@ -394,7 +394,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total():
     # this same picked conf (each bias magnitude was exactly 1.0, clearing a tolerance of 1.0 via
     # ``<=``); the relative tolerance does not, because none of them was ever a trustworthy
     # 1%-relative claim at this reference's actual density.
-    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=recs, holdout_records=build("h", 5000.0))
     assert b.params["conf"]._raw == pytest.approx(0.4)  # still the worst-class-aware pick
     assert "count_bias_exceeds_tolerance" in b.params["conf"].sweep["failures"]        # pooled
@@ -458,7 +458,7 @@ def test_pick_serves_the_worst_class_not_the_pooled_total_admits_it_when_dense_e
     assert max(abs(s["count_bias_mean"]) for s in at[0.4]["per_class"].values()) == pytest.approx(1.0)
     assert pick_count_unbiased(sweep) == pytest.approx(0.4)
 
-    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=recs, holdout_records=build("h", 5000.0))
     assert b.params["conf"].value == pytest.approx(0.4)
     assert b.params["conf"].sweep["failures"] == []
@@ -541,7 +541,7 @@ def test_per_class_stamped_tolerance_reflects_the_floor_not_just_the_fraction_te
     not inferred indirectly from a pass/fail outcome an unrelated SE term could also explain.
     """
     b = resolve_operating_point(
-        "catkin", dataset_hash="h", staged_conf_floor=0.05,
+        "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_floor_matters_records("c", 0.0),
         holdout_records=_floor_matters_records("h", 5000.0))
     sweep = b.params["conf"].sweep
@@ -582,7 +582,7 @@ def test_a_class_present_on_exactly_one_holdout_image_cannot_be_validated_by_it_
             recs.append({"image_id": f"{prefix}{i}", "gt": gt, "dt": dt})
         return recs
 
-    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=build("c", 0.0), holdout_records=build("h", 5000.0))
     sweep = b.params["conf"].sweep
     assert sweep["holdout_bias"]["per_class"]["2"]["n_present"] == 1
@@ -607,7 +607,7 @@ def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_
     """
     cal = _gt_records("cal", 4, swap_classes=True)  # classes 1 and 2 both evidenced in calibration
     hold = _gt_records("hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0)  # holdout: only 1
-    b = resolve_operating_point("catkin", dataset_hash="h", staged_conf_floor=0.05,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
                                 calibration_records=cal, holdout_records=hold)
     sweep = b.params["conf"].sweep
     assert "2" not in sweep["holdout_bias"]["per_class"]  # not present at all -- no n_present==0 key
@@ -627,7 +627,7 @@ def test_sweep_summary_surfaces_per_class_tolerance_and_typical_count():
     from tcip_mcp.tools.inference_tools import _sweep_summary
 
     b = resolve_operating_point(
-        "catkin", dataset_hash="h", staged_conf_floor=0.05,
+        "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
     sweep = b.params["conf"].sweep
