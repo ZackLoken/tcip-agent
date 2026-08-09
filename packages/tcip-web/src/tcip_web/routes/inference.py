@@ -34,7 +34,6 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_MAX_DETS,
     DEFAULT_NMS_IOU,
     DEFAULT_OVERLAP,
-    DEFAULT_TILED,
 )
 from tcip_web.paths import assert_path_allowed
 
@@ -55,17 +54,16 @@ class InferenceJob:
     checkpoint_path: str
     images_dir: str
     output_dir: str
-    tile: bool
     conf: float
     iou: float
     slice_hw: tuple[int, int]
     overlap: float
     max_dets: int = DEFAULT_MAX_DETS
     postprocess: str = "nms"  # cross-tile merge: "nms" suppresses, "nmm" unions seam-split boxes
-    # The generic tile toggle: whether the caller explicitly chose to tile, or it fell back
-    # to DEFAULT_TILED, threaded into raw_operating_point's tiled_source so the sidecar's
-    # provenance can tell the two apart, same as the MCP door's run_inference already does for its
-    # own `tile` param.
+    # The caller's own tile choice, unresolved: None means "derive from the checkpoint's own
+    # training geometry", resolved in the worker once the predictor is built (never here).
+    tile: Optional[bool] = None
+    # Whether the caller explicitly chose `tile`, threaded into raw_operating_point's tiled_source.
     tile_source: str = "default"
     # Whether slice_hw was the breeder's explicit override or should be re-derived from the
     # checkpoint's own persisted training geometry (resolve_tile_geometry).
@@ -168,7 +166,7 @@ def rehydrate() -> None:
                 checkpoint_path="",
                 images_dir=s.get("images_dir", ""),
                 output_dir=s.get("output_dir", ""),
-                tile=False,
+                tile=None,  # a dead job's own tile choice is never read again; honest, not fabricated
                 conf=0.0,
                 iou=0.0,
                 slice_hw=(0, 0),
@@ -230,10 +228,15 @@ def _worker(job: InferenceJob) -> None:
             max_dets=job.max_dets,     # transforms it (see its own docstring).
         )
 
-        # Derive tile_size/overlap from the checkpoint's own persisted training geometry:
-        # the same resolver run_inference uses, so the GUI door can't silently diverge
-        # from the MCP door on the object count's scale for the same checkpoint. An explicit
-        # caller-chosen tile size (job.tile_source == "explicit") still wins over the derivation.
+        # Resolve the tiled bool now the checkpoint's own training geometry is in hand: an unset
+        # job.tile gets the checkpoint's own tiled-or-not regime, never a fixed platform default.
+        resolved_tile_bool = (
+            getattr(predictor, "train_tile_size", None) is not None
+            if job.tile is None else job.tile
+        )
+
+        # Derive tile_size/overlap from the checkpoint's own persisted training geometry: the same
+        # resolver run_inference uses. job.slice_source == "explicit" still wins over the derivation.
         from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
 
         resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
@@ -244,23 +247,25 @@ def _worker(job: InferenceJob) -> None:
         # Resolve the operating point through the same firewalled bundle as the MCP door: conf is a
         # documented default with no per-dataset GT, so it is unvalidated and stamped validated=false.
         op_bundle = raw_operating_point(
-            conf=job.conf, cross_tile_nms=job.iou, tiled=job.tile, tiled_source=job.tile_source,
-            tile_size=resolved_tile, tile_size_source=tile_size_source, max_dets=job.max_dets,
+            conf=job.conf, cross_tile_nms=job.iou, tiled=resolved_tile_bool,
+            tiled_source=job.tile_source, tile_size=resolved_tile,
+            tile_size_source=tile_size_source, max_dets=job.max_dets,
         )
 
-        # Refuse a fabricated tile scale before the pass, the same gate export_predictions applies.
+        # Refuse an ungrounded tile scale before the pass, the same gate export_predictions applies.
         from tcip_mcp.pipelines.resolution import check_delivery_gate, tile_size_gate_flag
 
         tile_ref = tile_size_gate_flag(op_bundle.to_provenance()["operating_point"])
         gate = check_delivery_gate({"tile_size": tile_ref} if tile_ref is not None else {})
         if not gate.ok:
             job.status = "failed"
+            tile_desc = f"{resolved_tile}px" if resolved_tile is not None else "no resolvable size"
             job.error = (
                 f"inference refused: unvalidated measurement dimension(s) {list(gate.unvalidated)}. "
-                f"This run tiles at {resolved_tile}px, a fabricated fallback: the checkpoint records "
-                "no training tile geometry and no tile size was stated for this run, so the counts "
-                "it would produce rest on a scale nothing justifies. Run untiled, or use a "
-                "checkpoint whose training tile geometry was persisted."
+                f"This run's tile scale ({tile_desc}) has no real basis: the checkpoint records no "
+                "training tile geometry and no tile size was stated for this run, so the counts it "
+                "would produce rest on nothing that justifies them. Run untiled, or use a checkpoint "
+                "whose training tile geometry was persisted, or pass an explicit tile size."
             )
             logger.warning("inference job %s refused by the delivery gate: %s",
                            job.job_id, job.error)
@@ -316,7 +321,7 @@ def _worker(job: InferenceJob) -> None:
                 break
             results = predictor.predict_batch(
                 [img],
-                tile=job.tile,
+                tile=resolved_tile_bool,
                 tile_size=resolved_tile,
                 overlap=resolved_overlap,
                 global_nms_iou=job.iou,
@@ -365,10 +370,8 @@ class LaunchInferencePayload(BaseModel):
     dataset_root: str
     model_name: str
     date: str | None = None
-    # tiling + conf/iou default to the one shared source so the GUI and the MCP agent produce the
-    # same count off the same checkpoint; tiling drives the count most of all.
-    # None (default) is a documented fallback, not an implicit True: distinguished
-    # from an explicit caller choice so the job's provenance can say which one happened.
+    # None (default) derives tiling from the checkpoint's own training geometry in the worker,
+    # distinct from an explicit caller choice, so the job's provenance can say which happened.
     tile: bool | None = None
     # conf/iou/slice_h/slice_w/overlap are all None by default: an omitted
     # field is a real "let the platform derive it" request, distinguished from an explicit choice
@@ -434,15 +437,8 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         raise HTTPException(409, str(exc)) from exc
     resolved_output_dir = str(bucket_dir)
 
-    # Resolve the None sentinel once, here: InferenceJob.tile stays a concrete
-    # bool everywhere else (behavior + provenance both read it), with tile_source carrying which
-    # case this was. Note the meaning of "explicit" differs by door on purpose: the MCP tool's
-    # `tile` distinguishes an agent that supplied the kwarg from one that omitted it; here it
-    # distinguishes a request body that carried the field from one that didn't. Since the GUI's
-    # checkbox is a controlled input with no "unset" state, every real launch is the breeder's
-    # explicit choice, even when it matches the default. This is a deliberate difference in what
-    # "explicit" means per door, not a labeling bug.
-    resolved_tile = DEFAULT_TILED if payload.tile is None else payload.tile
+    # job.tile carries the caller's raw choice (None = derive from the checkpoint's training
+    # geometry, resolved in the worker), never resolved here; the GUI checkbox has no "unset" state.
     tile_source = "explicit" if payload.tile is not None else "default"
     # conf/iou: no checkpoint-derivation concept applies (unlike tile_size): an omitted value
     # falls back to the same shared defaults resolution.py names, matching the MCP door.
@@ -459,7 +455,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         checkpoint_path=payload.checkpoint_path,
         images_dir=str(images_dir),
         output_dir=resolved_output_dir,
-        tile=resolved_tile,
+        tile=payload.tile,
         tile_source=tile_source,
         conf=resolved_conf,
         iou=resolved_iou,
