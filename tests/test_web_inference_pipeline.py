@@ -228,3 +228,46 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
     assert captured["tile"] is True          # the breeder's own checkbox choice is honored
     assert job.tile is True
     assert job.tile_source == "explicit"     # never silently overridden to "default" anymore
+
+
+def test_web_worker_refuses_a_tile_scale_taken_from_the_untiled_training_frame(tmp_path, monkeypatch):
+    """A checkpoint whose only geometry is its own uniform untiled training frame does justify a
+    tile edge, but never an independently validated one, and this door has no acknowledgement
+    channel. It refuses before the pass rather than writing counts at a scale nothing validated."""
+    pytest.importorskip("fastapi")
+    from PIL import Image
+
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+    captured = {}
+
+    class FakeNativeFramePredictor:
+        task = "detection"
+        train_tile_size = None
+        train_native_size = [64, 64]
+
+        def __init__(self, checkpoint_path=None, **kwargs):
+            pass
+
+        def predict_batch(self, paths, **kw):
+            captured["ran"] = True
+            return []
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeNativeFramePredictor)
+
+    job = InferenceJob(
+        job_id="t4", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        output_dir=str(tmp_path / "out"), tile=True, tile_source="explicit", conf=0.25, iou=0.7,
+        slice_hw=(640, 640), overlap=0.2, postprocess="nms",
+    )
+    _worker(job)
+
+    assert job.status == "failed"
+    assert "tile scale" in job.error
+    assert "ran" not in captured
