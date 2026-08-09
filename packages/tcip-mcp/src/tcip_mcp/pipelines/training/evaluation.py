@@ -1226,15 +1226,16 @@ def run_full_frame_evaluation(
     (``use_tiled_inference=False``) full-frame single-pass path is that model's correct delivery
     gate (same untiled regime end to end), and is the one to call instead of this function.
 
-    ``tile_size``/``overlap`` are resolved by the same precedence
-    ``run_inference`` uses, explicit > the checkpoint's own persisted training geometry > a
-    documented default, via the shared ``resolve_tile_geometry``. Unlike the exploratory
-    ``run_inference``, this is the delivery-gating call: an unresolvable ``tile_size`` (no explicit
-    value and nothing persisted on the checkpoint) raises rather than silently fabricating 640, since
-    a wrong tile scale here is a wrong number that gates a phenotype, not just a wrong preview.
-    ``overlap`` alone falling back to a default does not raise, a checkpoint trained with no
-    tiling overlap convention at all has no persisted overlap analog, which is a legitimate fact,
-    not a missing derivation; only ``tile_size``'s absence changes the object count's scale.
+    ``tile_size``/``overlap`` are resolved by the same precedence ``run_inference`` uses, explicit >
+    the checkpoint's own persisted training geometry > no real basis at all, via the shared
+    ``resolve_tile_geometry``. Unlike the exploratory ``run_inference``, this is the delivery-gating
+    call: a ``tile_size`` with no real basis (not ``"explicit"``/``"derived"``, e.g. no explicit
+    value and nothing persisted on the checkpoint, or a not-independently-validated basis like the
+    native-size-ratio tier) raises rather than silently fabricating one, since a wrong tile
+    scale here is a wrong number that gates a phenotype, not just a wrong preview. ``overlap`` alone
+    falling back to a default does not raise, a checkpoint trained with no tiling overlap convention
+    at all has no persisted overlap analog, which is a legitimate fact, not a missing derivation;
+    only ``tile_size``'s absence changes the object count's scale.
 
     This is a box metric (``iou_type="bbox"``): it requests boxes-only tiled inference
     (``predict_tiled(require_masks=False)``), so an instance_seg checkpoint is gated here on its
@@ -1252,19 +1253,22 @@ def run_full_frame_evaluation(
 
     resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
         predictor, tile_size=tile_size, overlap=overlap)
-    if tile_size_source == "default":
+    # Only "explicit"/"derived" are a real basis here: "unavailable" (nothing to derive from) and
+    # "native_ratio" (a real basis to tile at all, but never independently validated) both refuse.
+    if tile_size_source not in ("explicit", "derived"):
         raise ValueError(
             f"Cannot resolve a trustworthy tile_size for {ckpt_path}: no explicit tile_size was "
-            "passed and the checkpoint carries no persisted training tile geometry. This is the "
-            "delivery-grade gating path (report this to gate a delivery); it refuses to silently "
-            "score at a fabricated default rather than the model's real training scale. If this "
-            "checkpoint was trained without tiling, call evaluate_model with "
-            "use_tiled_inference=False instead, since that untiled regime is its correct delivery "
-            "gate, with no scale to reconcile. If you have genuinely derived (or intend to derive, "
-            "e.g. from this dataset's object-size distribution vs. image resolution, per "
-            "'Parameters: derive, don't pin') a tile scale for this checkpoint, pass it explicitly "
-            "via the tiling= dict (and overlap, if known); it is not cross-checked against the "
-            "checkpoint's actual training scale, so state it deliberately, not as a guess."
+            "passed and the checkpoint carries no persisted training tile geometry with an "
+            "independently validated basis. This is the delivery-grade gating path (report this "
+            "to gate a delivery); it refuses to silently score at a fabricated or unvalidated "
+            "scale rather than the model's real training scale. If this checkpoint was trained "
+            "without tiling, call evaluate_model with use_tiled_inference=False instead, since "
+            "that untiled regime is its correct delivery gate, with no scale to reconcile. If you "
+            "have genuinely derived (or intend to derive, e.g. from this dataset's object-size "
+            "distribution vs. image resolution, per 'Parameters: derive, don't pin') a tile scale "
+            "for this checkpoint, pass it explicitly via the tiling= dict (and overlap, if known); "
+            "it is not cross-checked against the checkpoint's actual training scale, so state it "
+            "deliberately, not as a guess."
         )
     tile_size, overlap = resolved_tile, resolved_overlap
 
