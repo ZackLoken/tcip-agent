@@ -21,6 +21,7 @@ __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
     "crop_pad_tile", "image_dimensions", "list_logical_images", "load_image",
     "load_multiband", "pad_tile", "pil_to_tensor", "resolve_image_source", "stem_of",
+    "to_pil_if_faithful",
 ]
 
 
@@ -204,6 +205,23 @@ def crop_pad_tile(img, x: int, y: int, tile_size: int, w: int, h: int):
     return pad_tile(crop, tile_size)
 
 
+def to_pil_if_faithful(arr):
+    """An ``[H, W, C]`` uint8 ndarray with 1, 3, or 4 channels as a PIL image (mode L, RGB,
+    RGBA; a single channel is squeezed); anything else is returned unchanged.
+
+    The one conversion the loaders share, so uint8 pixels reach the PIL-only augmentation chain
+    whatever container they decoded from, while dtypes and band counts PIL has no faithful mode
+    for stay ndarray.
+    """
+    if not isinstance(arr, np.ndarray):
+        return arr
+    if arr.dtype != np.uint8 or arr.ndim != 3 or arr.shape[2] not in (1, 3, 4):
+        return arr
+    if arr.shape[2] == 1:
+        return Image.fromarray(arr[:, :, 0], mode="L")
+    return Image.fromarray(arr, mode="RGB" if arr.shape[2] == 3 else "RGBA")
+
+
 def pil_to_tensor(img) -> torch.Tensor:
     """Convert a PIL Image or H×W[×C] array to a float32 ``[C, H, W]`` tensor in ``[0, 1]``.
 
@@ -224,10 +242,13 @@ def pil_to_tensor(img) -> torch.Tensor:
 def load_image(path: "str | Path | BandGroupRef", num_channels: int = 3):
     """Open an image honoring ``num_channels``.
 
-    Returns a ``PIL.Image`` for 1/3/4-channel raster images (so the PIL augmentation
-    pipeline keeps working), or an ``[H, W, C]`` ndarray for multi-band inputs
-    (``.npy`` / ``.npz`` / multi-band GeoTIFF, or a :class:`BandGroupRef`). An RGB file requested
-    as 1 channel is converted to grayscale; as 3, kept RGB.
+    Returns a ``PIL.Image`` wherever PIL has a faithful mode for the decoded pixels: photographic
+    formats at 1/3/4 channels, and any array container (``.npy`` / ``.npz`` / GeoTIFF / a
+    :class:`BandGroupRef`) whose pixels come back uint8 with 1, 3, or 4 channels
+    (:func:`to_pil_if_faithful`), so the PIL-only augmentation chain applies to those regardless
+    of container. Everything else (uint16/float rasters, other band counts) stays an
+    ``[H, W, C]`` ndarray. An RGB file requested as 1 channel is converted to grayscale; as 3,
+    kept RGB.
 
     Reads through ``raster_source``: which backend decodes a source is that module's own dispatch,
     so a frame this returns and one ``image_dimensions`` measures can never come from two
@@ -236,7 +257,7 @@ def load_image(path: "str | Path | BandGroupRef", num_channels: int = 3):
     with raster_source.open_raster(path, num_channels) as src:
         if isinstance(src, raster_source.PhotographicSource):
             return src.image
-        return src.read_region(Rect(0, 0, src.width, src.height))[0]
+        return to_pil_if_faithful(src.read_region(Rect(0, 0, src.width, src.height))[0])
 
 
 def load_multiband(path: "str | Path | BandGroupRef", num_channels: int) -> np.ndarray:
