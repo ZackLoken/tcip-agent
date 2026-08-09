@@ -5,13 +5,14 @@
       "args": ["run", "-n", "tcip-agent", "--no-capture-output", "python", "-m", "tcip_mcp"]
     },
     "claude-context": {
-      "command": "C:\\Users\\zack\\anaconda3\\envs\\tcip-agent\\claude-context-mcp.cmd",
+      "command": "C:\\Users\\zack\\Documents\\GitHub\\tcip-agent\\.claude\\hooks\\claude_context_launch.cmd",
       "env": {
         "EMBEDDING_PROVIDER": "Ollama",
         "OLLAMA_HOST": "http://127.0.0.1:11434",
         "EMBEDDING_MODEL": "nomic-embed-text",
         "MILVUS_ADDRESS": "http://127.0.0.1:19530",
-        "HYBRID_MODE": "true"
+        "HYBRID_MODE": "true",
+        "CLAUDE_CONTEXT_BACKGROUND_SYNC": "false"
       }
     }
   }
