@@ -21,6 +21,8 @@ export function defaultTrainingRequest(datasetRoot: string | null, subject: stri
     "this dataset's objects are relative to the full-frame resolution (inspect_project, " +
     "scan_dataset and validate_data_quality all report on the data) and decide from that " +
     "whether to train on tiles or on whole frames, then tell me which you chose and why. " +
+    "If you train tiled on full-width strip-layout rasters read windowed, also consider the " +
+    "sampler choice: shuffled tile access forces repeated strip decodes there. " +
     "Let me know once it's running so I can watch it here."
   );
 }
