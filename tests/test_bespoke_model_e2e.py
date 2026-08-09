@@ -160,7 +160,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert overfit["passed"], overfit["issue"]
 
     records = records_over_loader(predictor.model, val_loader, torch.device("cpu"), "detection")
-    bundle = resolve_operating_point("catkin", dataset_hash="test",
+    bundle = resolve_operating_point("catkin", tiled=True, dataset_hash="test",
                                      calibration_records=records, holdout_records=records)
     assert "conf" in bundle.params                          # operating point resolved over bespoke outputs
 
