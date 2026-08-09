@@ -199,6 +199,130 @@ def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
     assert val_ds is None  # single group -> no leakage-free val possible
 
 
+def test_auto_train_val_single_source_untiled_still_no_val(tmp_path: Path):
+    """A single-image detection source with tiling absent must still degrade to (train_ds, None)
+    exactly as before the spatial route existed: there is no tiling geometry to block-split by."""
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    _save_png(images_dir / "src_0_0.png")
+    json_io.write_annotations(
+        str(labels_dir / "src_0_0.json"),
+        [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+        IMG, IMG, keep_empty=True,
+    )
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                "subject": "catkin", "auto_val": True}
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is None
+    assert not hasattr(train_ds, "tile_size")
+
+
+def _big_single_source(root: Path, width: int, height: int) -> tuple[Path, Path, str]:
+    """One large detection source with a scatter of small boxes, real width/height in its
+    label JSON: a single-image dataset large enough to hold a spatial train/val split."""
+    images_dir = root / "images"
+    labels_dir = root / "labels"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    stem = "mosaic"
+    from torchvision.utils import save_image
+    save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
+    boxes = [
+        Annotation(subject="catkin", geometry=BBox(x, y, x + 20, y + 20))
+        for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)
+    ]
+    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
+    return images_dir, labels_dir, stem
+
+
+def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
+    """A single tiled detection source derives a real, disjoint spatial val split instead of
+    degrading to no validation: the tiling=tiling leak this closes."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+    assert train_ds.tile_size == 128 and val_ds.tile_size == 128
+    assert train_ds.num_samples > 0 and val_ds.num_samples > 0
+    assert set(train_ds.tile_entries).isdisjoint(set(val_ds.tile_entries))
+    assert data_cfg["split"]["resolved_group_by"] == "spatial_strip"
+    manifest = data_cfg["split"]["spatial_manifest"]
+    assert manifest["train_identities"] and manifest["val_identities"]
+    assert set(manifest["train_identities"]).isdisjoint(set(manifest["val_identities"]))
+    assert all(i.startswith(f"{stem}::strip_") for i in manifest["train_identities"])
+    assert manifest["kept_test_tiles"] > 0
+
+
+def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions_in_tiling(
+    tmp_path: Path,
+):
+    """A caller's tiling dict carrying its own keep_regions (meaningless in the automatic
+    single-source route, which derives its own) must never collide with the derived
+    keep_regions kwarg the spatial split passes explicitly."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2,
+                  "keep_regions": [(0, 0, 100, 100)]},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+
+
+def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
+    """Two stems whose default tile_prefix grouping collapses to one group starve val (too few
+    groups, not too few stems); the retry at stem-level grouping must still populate both sides."""
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    stems = ["mosaicA_0_0", "mosaicA_1_1"]
+    for stem in stems:
+        _save_png(images_dir / f"{stem}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"{stem}.json"),
+            [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+            IMG, IMG, keep_empty=True,
+        )
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                "subject": "catkin", "auto_val": True,
+                "split": {"val_ratio": 0.5, "seed": 1}}
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+    assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
+    assert sorted(train_ds.stems + val_ds.stems) == sorted(stems)
+    assert data_cfg["split"]["resolved_group_by"] == "stem"
+
+
+def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path: Path):
+    """A caller-supplied group_key_map that starves val is a deliberate leakage policy, not a
+    data limitation: the retry must never silently discard it for stem-level grouping."""
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    stems = ["mosaicA_0_0", "mosaicA_1_1"]
+    for stem in stems:
+        _save_png(images_dir / f"{stem}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"{stem}.json"),
+            [Annotation(subject="catkin", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+            IMG, IMG, keep_empty=True,
+        )
+    group_key_map = {s: "one_group_for_everything" for s in stems}
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                "subject": "catkin", "auto_val": True,
+                "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map}}
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is None  # the explicit map still collapses everything into one group
+    assert data_cfg["split"]["resolved_group_by"] == "explicit_map"
+
+
 def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     images_dir, labels_dir, _ = _detection_dataset(tmp_path / "ds")
     data_cfg = {
