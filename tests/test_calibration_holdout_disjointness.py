@@ -87,7 +87,7 @@ def test_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeyp
         json.dumps({"train": ["train_a", "train_b"], "group_by": "external"}), encoding="utf-8")
 
     cal, hold = _good_dense_op_records()
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="exp_ext")
     conf = b.get("conf")
@@ -109,7 +109,7 @@ def test_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
     (exp_dir / "split.json").write_text(
         json.dumps({"train": ["c_a", "other_stem"], "group_by": "external"}), encoding="utf-8")
 
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=_op_records("c"),
                                 holdout_records=_op_records("h", shift=3.0),
                                 experiment_id="exp_ext2")
@@ -302,7 +302,7 @@ def test_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
                          "detections": [_entry([0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], 0.05)]},
     }}
     bundle = resolve_operating_point_from_review(
-        review_state, "catkin", group_by="stem", experiment_id="exp_review",
+        review_state, "catkin", tiled=True, group_by="stem", experiment_id="exp_review",
         bucket_identities=[_IDENTITY])
     td = bundle.get("conf").sweep["train_disjointness"]
     assert td["leaked_groups"] == ["srcA"]  # matched despite the .jpg extension on the review id
