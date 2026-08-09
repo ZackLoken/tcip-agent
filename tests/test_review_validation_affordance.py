@@ -178,16 +178,24 @@ def _write_shard(review_dir: Path, name: str, detections: list, *, gt_preexistin
         encoding="utf-8")
 
 
-def _write_sidecar(pred_dir: Path, identity: dict, *, generation_conf: float | None = None) -> None:
+def _write_sidecar(pred_dir: Path, identity: dict, *, generation_conf: float | None = None,
+                   tile_size_op: dict | None = None) -> None:
+    # "tiled" is always stamped, matching a real bucket's sidecar, so the route's tiled_vals
+    # resolution has a real value to read, never None; these tests aren't about tiling.
+    op: dict = {"tiled": {"value": False}}
+    if generation_conf is not None:
+        # The conf the bucket's predictions were actually generated/floored at: the route reads
+        # this straight off the sidecar (never re-typed) to build staged_conf_floor.
+        op["conf"] = {"value": generation_conf}
+    if tile_size_op is not None:
+        op["tiled"] = {"value": True}
+        op["tile_size"] = tile_size_op
     sidecar = {
         "checkpoint_sha256": identity["checkpoint_sha256"],
         "experiment_id": identity["experiment_id"],
         "validated": False,
+        "operating_point": op,
     }
-    if generation_conf is not None:
-        # The conf the bucket's predictions were actually generated/floored at: the route reads
-        # this straight off the sidecar (never re-typed) to build staged_conf_floor.
-        sidecar["operating_point"] = {"conf": {"value": generation_conf}}
     (pred_dir / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
 
 
@@ -221,7 +229,8 @@ def _make_project(tmp_path: Path, *, floored: bool, producer_identity: dict = _I
 
 
 def _make_dense_reviewed_project(tmp_path: Path, *, n_images: int = 6, gt_preexisting: bool = True,
-                                 producer_identity: dict = _IDENTITY) -> tuple[str, str]:
+                                 producer_identity: dict = _IDENTITY,
+                                 tile_size_op: dict | None = None) -> tuple[str, str]:
     """A project with ``n_images`` completed-review images (>= 2 per side of the locked cal/holdout
     split, since ``_make_project``'s 2-image fixture cannot clear the non-degeneracy floor: it can
     only ever produce a single holdout image) and a realistic staged conf floor: every verdict
@@ -252,7 +261,8 @@ def _make_dense_reviewed_project(tmp_path: Path, *, n_images: int = 6, gt_preexi
                    conf_threshold=conf_threshold),
         ], gt_preexisting=gt_preexisting)
         (pred_dir / f"{name}.json").write_text(json.dumps({"objects": []}), encoding="utf-8")
-    _write_sidecar(pred_dir, producer_identity, generation_conf=conf_threshold)
+    _write_sidecar(pred_dir, producer_identity, generation_conf=conf_threshold,
+                  tile_size_op=tile_size_op)
     return str(proj), str(pred_dir)
 
 
@@ -289,6 +299,32 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is True
     assert sc["validated_reference"] == "reviewer_confirmed_annotations"
+
+
+def test_route_never_upgrades_a_native_ratio_tile_size_to_persisted_geometry(client, tmp_path: Path):
+    """A bucket produced by the native-size ratio tier stamps tile_size with
+    source="derived" (the same source a real persisted-training-geometry stamp uses) but
+    validated_against=false: the two bases are distinguishable only by validated_against, never
+    by source alone. This route re-derives tile_size_source off the bucket's own sidecar to
+    thread through resolve_operating_point_from_review; if it read the bare source field it
+    would silently re-resolve a native-ratio bucket as validated persisted geometry the moment a
+    breeder reviews it, defeating the platform's own decision that native-ratio never clears a
+    delivery gate on its own."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
+
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path, tile_size_op={
+        "value": 128, "source": "derived",
+        "derived_from": "native-size ratio (not an independently validated geometry basis)",
+        "validated_against": VALIDATED_FALSE, "requires_validation": True,
+        "validation_kind": "geometry",
+    })
+    resp = client.post("/api/review/validate_reference", json={
+        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+    assert resp.status_code == 200, resp.text
+    sc = _read_sidecar(pred_dir)
+    restamped = sc["operating_point"]["tile_size"]
+    assert restamped["validated_against"] == VALIDATED_FALSE
+    assert restamped["value"] == 128
 
 
 def test_route_refuses_conf_censored_and_stamps_honest_placeholder(client, tmp_path: Path):
