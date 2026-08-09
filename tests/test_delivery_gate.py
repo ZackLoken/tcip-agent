@@ -497,14 +497,59 @@ def test_export_predictions_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_
     assert (out / "a.json").exists()  # the honestly-flagged provisional bucket still wrote
 
 
+def test_export_predictions_images_dir_gates_before_the_pass_not_after(tmp_path, monkeypatch):
+    """DECIDED #1: the images_dir regime's gate runs before the (expensive) pass, the same
+    ordering the raster_path regime already had, not only after run_inference already ran it.
+    A real checkpoint whose only basis is the native-ratio tier (a real but never-shippable
+    basis) must refuse without ever reaching the model's own forward pass; GenericPredictor's
+    predict_batch is monkeypatched to raise if called at all, so this proves the skip, not just
+    that no bucket got written."""
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    from tcip_mcp.pipelines.inference import generic_predictor as gp_mod
+    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.tools import inference_tools as itools
+
+    def _never_called(*a, **kw):
+        raise AssertionError("predict_batch must not run: the pre-pass gate should have refused")
+
+    monkeypatch.setattr(gp_mod.GenericPredictor, "predict_batch", _never_called)
+
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                    "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                    "task": "detection"}
+    model = build_model({"model_source": model_source})
+    ckpt = tmp_path / "m.pt"
+    torch.save({
+        "model_source": model_source, "model_state_dict": model.state_dict(),
+        "config": {"data": {"train_native_size": [64, 64]}, "augmentation": {}},
+    }, str(ckpt))
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    arr = np.zeros((64, 64, 3), dtype=np.uint8)
+    Image.fromarray(arr).save(images_dir / "a.png")
+
+    out = tmp_path / "preds"
+    r = itools.export_predictions(str(ckpt), str(images_dir), str(out), conf_threshold=0.0,
+                                  tile=True)
+    assert "error" in r
+    assert not out.exists()
+
+
 # ── the GUI inference worker gates the bucket it persists, same as export_predictions ──
 
 def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=None,
-                              slice_source="default"):
+                              slice_source="default", tile_source="explicit"):
     """Run the web Inference tab's own worker over one image and return ``(job, output_dir)``.
 
     ``train_tile_size`` is the checkpoint's own persisted training geometry, absent when the
     checkpoint recorded none; ``slice_source="explicit"`` is a caller-stated tile edge.
+    ``tile_source`` defaults to ``"explicit"`` (every prior caller here passes a concrete
+    ``tile`` bool); pass ``"default"`` alongside ``tile=None`` to exercise the GUI launch route's
+    own "no tile field" case, where the worker derives the bool from the checkpoint itself.
     """
     pytest.importorskip("fastapi")
     from PIL import Image
@@ -536,7 +581,7 @@ def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=No
     out_dir = tmp_path / "out"
     job = InferenceJob(
         job_id="gate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
-        output_dir=str(out_dir), tile=tile, tile_source="explicit", conf=0.25, iou=0.7,
+        output_dir=str(out_dir), tile=tile, tile_source=tile_source, conf=0.25, iou=0.7,
         slice_hw=(512, 512), overlap=0.2, slice_source=slice_source,
     )
     _worker(job)
@@ -592,6 +637,38 @@ def test_gui_inference_worker_never_gates_an_untiled_run_on_tile_size(tmp_path, 
     job, out_dir = _run_gui_inference_worker(tmp_path, monkeypatch, tile=False)
     assert job.status == "completed"
     assert (out_dir / "img.json").exists()
+    assert _sidecar_tile_reference(out_dir) is None  # never entered the gate at all
+
+
+def test_gui_launch_with_no_tile_field_derives_from_the_checkpoint_not_a_default(
+        tmp_path, monkeypatch):
+    """The GUI's launch payload omits ``tile`` on a real launch with the checkbox retired
+    (routes/inference.py's ``LaunchInferencePayload.tile`` stays ``None``); the worker must derive
+    the bool from the checkpoint's own persisted training geometry at that point, the same as the
+    MCP door's ``run_inference``, never fall back to always-tiled. A checkpoint that trained tiled
+    must still tile when the field is unset."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
+
+    job, out_dir = _run_gui_inference_worker(
+        tmp_path, monkeypatch, tile=None, tile_source="default", train_tile_size=224)
+    assert job.status == "completed"
+    assert (out_dir / "img.json").exists()
+    op = json.loads((out_dir / "operating_point.json").read_text())["operating_point"]
+    assert op["tiled"]["value"] is True
+    assert _sidecar_tile_reference(out_dir) == VALIDATED_PERSISTED_GEOMETRY
+
+
+def test_gui_launch_with_no_tile_field_and_no_checkpoint_geometry_stays_untiled(
+        tmp_path, monkeypatch):
+    """The mirror case, and the one a fixed ``DEFAULT_TILED=True`` used to get silently wrong: a
+    checkpoint with no persisted training geometry, launched with the tile field unset, must run
+    untiled rather than tiling at a scale nothing justifies."""
+    job, out_dir = _run_gui_inference_worker(
+        tmp_path, monkeypatch, tile=None, tile_source="default")
+    assert job.status == "completed"
+    assert (out_dir / "img.json").exists()
+    op = json.loads((out_dir / "operating_point.json").read_text())["operating_point"]
+    assert op["tiled"]["value"] is False
     assert _sidecar_tile_reference(out_dir) is None  # never entered the gate at all
 
 
