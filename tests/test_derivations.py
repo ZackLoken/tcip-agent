@@ -241,6 +241,24 @@ def test_run_inference_dry_run_reports_operating_point(tmp_path):
     assert op["tiled"] is True and op["tile_size"] == 640
 
 
+def test_run_inference_dry_run_unset_tile_is_pending_not_a_default(tmp_path):
+    """Once tiled also derives from the checkpoint's own training geometry, an unset ``tile`` in a
+    dry run (which never loads the checkpoint) can't be resolved to a concrete bool: it must report
+    a genuine pending derivation, the same convention tile_size/overlap already use for the
+    checkpoint-derived dimensions, never a fabricated True/False."""
+    from tcip_mcp.tools.inference_tools import run_inference
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")  # dry_run never loads it
+    res = run_inference(str(ckpt), images_dir=str(tmp_path), dry_run=True)
+    assert res["dry_run"] is True
+    op = res["operating_point"]
+    assert op["tiled"] == "pending-checkpoint-derivation"
+    assert op["tiled_source"] == "pending-checkpoint-derivation"
+    assert op["cross_tile_nms"] == "pending-checkpoint-derivation"
+    assert op["tile_size"] == "pending-checkpoint-derivation"
+    assert op["overlap"] == "pending-checkpoint-derivation"
+
+
 def test_write_class_map_defaults_into_the_dataset(tmp_path):
     """No output_path: the registry lands at the dataset's canonical classes.json."""
     from tcip_mcp.tools.annotation_tools import write_class_map
