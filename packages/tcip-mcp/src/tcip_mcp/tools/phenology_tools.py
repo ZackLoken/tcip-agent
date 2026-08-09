@@ -648,9 +648,9 @@ def compute_phenology(
             the un-trustworthiness travels with the delivery.
 
     A bucket produced by a tiled run also gates on its ``tile_size``: the tile edge scales the
-    per-image counts the positive fraction is built from, so a fabricated fallback with no persisted
-    training geometry and no explicit caller override refuses here, the same way an uncalibrated conf
-    does. Buckets from untiled runs are never gated on it.
+    per-image counts the positive fraction is built from, so a run with no persisted training
+    geometry and no explicit caller override refuses here, the same way an uncalibrated conf does.
+    Buckets from untiled runs are never gated on it.
 
     Returns a summary. Measurement-integrity guard: if no bucket, anywhere in the delivery, ever
     classified along the trait's positive-class axis, the positive fraction is not a valid measurement
@@ -798,11 +798,8 @@ def compute_phenology(
     # Carry the majority-date read-semantics marker with the delivery: whether the trait's "most in
     # state" mapping to a milestone crossing is still provisional (breeders to confirm), read from the
     # spec. The column name derives from the spec too, matching phenology_csv_columns.
-    # operating_point_validated is the count operating point's own column, and the tile scale is a
-    # dimension of that same operating point with no column of its own. A tile scale that only
-    # reached delivery through acknowledge_unvalidated therefore floors it: otherwise a CSV whose
-    # counts were produced at a fabricated tile edge would read fully validated on its only
-    # count-side stamp.
+    # The tile scale is a dimension of the same count operating point with no column of its own, so
+    # a tile scale that only reached delivery via acknowledge_unvalidated floors this column too.
     stamp = {
         "operating_point_conf": operating_point_conf,
         "operating_point_validated": (VALIDATED_FALSE if "tile_size" in gate.unvalidated
