@@ -104,7 +104,7 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_the_old_snap_would_have_mis
     assert old["conf"] == pytest.approx(0.05)         # snapped to the nearest grid point, not 0.9
     assert old["count_bias_mean"] == pytest.approx(0.0)  # ...which misleadingly reads as unbiased
 
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
     hb = conf.sweep["holdout_bias"]
@@ -138,7 +138,7 @@ def test_exact_conf_eval_admits_a_reference_the_old_snap_would_have_unfairly_fai
     assert old["conf"] == pytest.approx(0.89)          # snapped to the nearest grid point, not 0.9
     assert old["count_bias_mean"] == pytest.approx(2.0)  # ...which reads as an over-tolerance bias
 
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
     hb = conf.sweep["holdout_bias"]
@@ -172,7 +172,7 @@ def _tp_zero_bias_zero_records(id_prefix: str, *, n_images: int = 10, objects_pe
 def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
     cal = _tp_zero_bias_zero_records("c")
     hold = _tp_zero_bias_zero_records("h")
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.0)
     conf = b.get("conf")
     hb = conf.sweep["holdout_bias"]
@@ -199,7 +199,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     strict = TraitSpec(name="catkin", count_objective=COUNT_UNBIASED, count_error_tolerance=0.5,
                        count_bias_tolerance_frac=1.0, delivers=CATKIN.delivers)
     monkeypatch.setattr(OP, "get_trait", lambda name: strict)
-    b_strict = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b_strict = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                        holdout_records=hold, staged_conf_floor=0.01)
     strict_sweep = b_strict.get("conf").sweep
     assert strict_sweep["holdout_bias"]["count_error_p90"] == pytest.approx(1.0)
@@ -208,7 +208,7 @@ def test_dispersion_gate_skipped_when_unauthored_gates_when_authored(monkeypatch
     # The same fixture, under a trait that has never authored count_error_tolerance (CATKIN), the
     # dispersion term is skipped entirely, not gated on a platform-invented number.
     monkeypatch.setattr(OP, "get_trait", lambda name: CATKIN)
-    b_default = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b_default = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                         holdout_records=hold, staged_conf_floor=0.01)
     default_sweep = b_default.get("conf").sweep
     assert default_sweep["count_error_tolerance"] is None
@@ -228,7 +228,7 @@ def test_count_bias_tolerance_frac_source_platform_default_vs_trait(monkeypatch)
                          shift=5.0, miss_pattern=[0] * n_images, fp_pattern=[0] * n_images, score=0.9)
 
     monkeypatch.setattr(OP, "get_trait", lambda name: CATKIN)
-    b_default = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b_default = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                         holdout_records=hold, staged_conf_floor=0.01)
     default_sweep = b_default.get("conf").sweep
     assert default_sweep["count_bias_tolerance_frac"] == pytest.approx(0.01)
@@ -237,7 +237,7 @@ def test_count_bias_tolerance_frac_source_platform_default_vs_trait(monkeypatch)
     authored = TraitSpec(name="catkin", count_objective=COUNT_UNBIASED,
                          count_bias_tolerance_frac=0.2, delivers=CATKIN.delivers)
     monkeypatch.setattr(OP, "get_trait", lambda name: authored)
-    b_trait = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b_trait = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                       holdout_records=hold, staged_conf_floor=0.01)
     trait_sweep = b_trait.get("conf").sweep
     assert trait_sweep["count_bias_tolerance_frac"] == pytest.approx(0.2)
@@ -251,18 +251,18 @@ def test_all_negative_calibration_or_holdout_refused():
     all_negative = [{"width": 400, "height": 400, "image_id": f"n_{i}", "gt": [], "dt": []}
                     for i in range(3)]
 
-    b1 = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=all_negative,
+    b1 = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=all_negative,
                                  holdout_records=real, staged_conf_floor=0.0)
     assert "insufficient_calibration_gt" in b1.get("conf").sweep["failures"]
 
-    b2 = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=real,
+    b2 = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=real,
                                  holdout_records=all_negative, staged_conf_floor=0.0)
     assert "insufficient_holdout_gt" in b2.get("conf").sweep["failures"]
 
 
 def test_single_image_holdout_fails_the_non_degeneracy_floor_alone():
     hold_one = [_records("h", shift=3.0)[0]]
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=hold_one, staged_conf_floor=0.3)
     sweep = b.get("conf").sweep
     assert sweep["holdout_bias"]["n_images"] == 1
@@ -273,7 +273,7 @@ def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degene
     # n=2 clears the non-degeneracy floor but the mean+SE equivalence criterion still correctly
     # refuses it: a bare mean check would have passed this, since the per-image biases [+1, -1]
     # cancel exactly in the mean.
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=_records("h", shift=3.0), staged_conf_floor=0.3)
     sweep = b.get("conf").sweep
     assert sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)
@@ -317,9 +317,9 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
 
     # Padded or not, the same real disagreement gets the same verdict: the padding carries no
     # evidence about count bias and so cannot buy any statistical confidence.
-    b_padded = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
+    b_padded = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                        holdout_records=hold_real + padding, staged_conf_floor=0.3)
-    b_bare = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
+    b_bare = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                      holdout_records=hold_real, staged_conf_floor=0.3)
     assert b_padded.get("conf").sweep["holdout_bias"]["n_images"] == 10
     assert b_padded.get("conf").sweep["holdout_bias"]["n_present"] == 2
@@ -332,7 +332,7 @@ def test_zero_verdict_padding_cannot_dilute_the_gate_but_the_predicate_still_ref
     # filter-then-recompute on a shrunk sample), and the failure now names the coverage requirement
     # rather than leaving the illegitimacy to be inferred from the numbers.
     covered = lambda r: not r.get("padded")  # noqa: E731
-    b_covered = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
+    b_covered = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                         holdout_records=hold_real + padding, staged_conf_floor=0.3,
                                         adjudication_covered=covered)
     sweep = b_covered.get("conf").sweep
@@ -350,7 +350,7 @@ def test_detection_f1_objective_picks_f1_max_and_labels_it_accordingly(monkeypat
     f1_trait = TraitSpec(name="catkin", count_objective=DETECTION_F1, delivers=CATKIN.delivers)
     monkeypatch.setattr(OP, "get_trait", lambda name: f1_trait)
 
-    b = OP.resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records())
+    b = OP.resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records())
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.0)  # F1-max pick for this fixture (recall-max, low conf)
     assert conf.derived_from == "F1-max center-match sweep"
@@ -362,7 +362,7 @@ def test_presence_objective_deliberately_shares_the_f1_max_picker_and_label(monk
     presence_trait = TraitSpec(name="catkin", count_objective=PRESENCE, delivers=CATKIN.delivers)
     monkeypatch.setattr(OP, "get_trait", lambda name: presence_trait)
 
-    b = OP.resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records())
+    b = OP.resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records())
     conf = b.get("conf")
     assert conf._raw == pytest.approx(0.0)
     assert conf.derived_from == "F1-max center-match sweep"  # same label as DETECTION_F1, deliberately
@@ -374,7 +374,7 @@ def test_f1_max_label_gets_the_review_suffix_when_review_confirmed(monkeypatch):
     f1_trait = TraitSpec(name="catkin", count_objective=DETECTION_F1, delivers=CATKIN.delivers)
     monkeypatch.setattr(OP, "get_trait", lambda name: f1_trait)
 
-    b = OP.resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records(),
+    b = OP.resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records(),
                                    validated_reference=VALIDATED_REVIEW_CONFIRMED)
     assert b.get("conf").derived_from == "F1-max center-match sweep over review verdicts"
 
@@ -413,7 +413,7 @@ def test_cap_saturated_frac_excludes_records_with_no_flag():
 def test_cap_saturation_is_surfaced_but_never_gates():
     cal = [dict(r, cap_hit=True) for r in _records("c")]  # every calibration record hit the cap
     hold = _records("h", shift=3.0)
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.3)
     sweep = b.get("conf").sweep
     assert sweep["calibration_cap_saturated_frac"] == pytest.approx(1.0)
@@ -423,7 +423,7 @@ def test_cap_saturation_is_surfaced_but_never_gates():
 # ── Cross-cutting: named-failure architecture ───────────────────────────────
 
 def test_passed_holdout_is_exactly_the_absence_of_named_failures():
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=_records("c"),
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=_records("c"),
                                 holdout_records=_records("h", shift=3.0), staged_conf_floor=0.3)
     sweep = b.get("conf").sweep
     assert sweep["passed_holdout"] == (not sweep["failures"])
@@ -514,7 +514,7 @@ def test_same_noisy_detector_at_a_smaller_reference_size_correctly_fails_equival
     hold = dense_records(n_images=n, objects_per_image=obj, id_prefix="h", shift=5.0,
                          miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
 
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.01)
     conf = b.get("conf")
     assert conf.sweep["holdout_bias"]["count_bias_mean"] == pytest.approx(0.0)  # same clean mean...
@@ -542,7 +542,7 @@ def test_same_noisy_detector_reference_size_fixed_but_density_varied_crosses_adm
                             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
         hold = dense_records(n_images=n, objects_per_image=obj, id_prefix="h", shift=5.0,
                              miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.9)
-        return resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+        return resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                        holdout_records=hold, staged_conf_floor=0.01)
 
     sparse = _run(30)
