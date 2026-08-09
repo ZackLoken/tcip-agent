@@ -253,7 +253,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
     return str(ckpt)
 
 
-def test_predict_tiled_from_reader_matches_full_array_predict_tiled(tmp_path: Path) -> None:
+def test_predict_tiled_windowed_source_matches_full_array_predict_tiled(tmp_path: Path) -> None:
     """The load-bearing correctness check: the windowed-read tiling path and the existing
     full-array ``predict_tiled`` path must produce bit-identical full-mosaic-pixel-space
     detections for the same checkpoint and the same raster, not merely both run without error.
@@ -271,7 +271,7 @@ def test_predict_tiled_from_reader_matches_full_array_predict_tiled(tmp_path: Pa
 
     windowed = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
     with open_raster(path, arr.shape[-1]) as reader:
-        win_result = windowed.predict_tiled_from_reader(
+        win_result = windowed.predict_tiled(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
 
     assert win_result["width"] == full_result["width"] == arr.shape[1]
@@ -300,7 +300,7 @@ def _bespoke_instance_seg_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_
     return str(ckpt)
 
 
-def test_predict_tiled_from_reader_and_predict_tiled_produce_matching_tiled_masks(tmp_path: Path) -> None:
+def test_predict_tiled_windowed_source_and_predict_tiled_produce_matching_tiled_masks(tmp_path: Path) -> None:
     """Both tiled entry points carry masks for a multi-tile instance_seg case, in the tiled
     (tile-local-patch + full-image-offset) shape documented on ``predict_tiled``, and the windowed
     path agrees with the full-array path detection-for-detection, masks included."""
@@ -317,7 +317,7 @@ def test_predict_tiled_from_reader_and_predict_tiled_produce_matching_tiled_mask
 
     windowed = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
-        win_result = windowed.predict_tiled_from_reader(
+        win_result = windowed.predict_tiled(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
 
     assert "masks" in full_result and "masks" in win_result
@@ -333,7 +333,7 @@ def test_predict_tiled_from_reader_and_predict_tiled_produce_matching_tiled_mask
         np.testing.assert_allclose(fm["mask_patch"], wm["mask_patch"], rtol=1e-5, atol=1e-6)
 
 
-def test_predict_tiled_from_reader_require_masks_false_carries_no_masks_key(tmp_path: Path) -> None:
+def test_predict_tiled_windowed_source_require_masks_false_carries_no_masks_key(tmp_path: Path) -> None:
     """The boxes-only opt-out still works on the windowed path: no ``masks`` key at all, not an
     empty one, mirroring ``predict_tiled``'s own opt-out contract."""
     pytest.importorskip("torch")
@@ -346,13 +346,13 @@ def test_predict_tiled_from_reader_require_masks_false_carries_no_masks_key(tmp_
 
     predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
-        result = predictor.predict_tiled_from_reader(
+        result = predictor.predict_tiled(
             reader, tile_size=TILE, overlap=0.2, require_masks=False)
     assert "masks" not in result
     assert {"boxes", "scores", "labels", "count", "tiles"} <= set(result)
 
 
-def test_predict_tiled_from_reader_tiled_mask_polygon_exports_at_correct_offset(tmp_path: Path) -> None:
+def test_predict_tiled_windowed_source_tiled_mask_polygon_exports_at_correct_offset(tmp_path: Path) -> None:
     """A tiled instance_seg detection's mask round-trips through ``write_predictions_json`` to a
     polygon positioned in full-mosaic pixel space, not left at its tile-local offset."""
     pytest.importorskip("torch")
@@ -368,7 +368,7 @@ def test_predict_tiled_from_reader_tiled_mask_polygon_exports_at_correct_offset(
 
     predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
-        result = predictor.predict_tiled_from_reader(
+        result = predictor.predict_tiled(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
     assert result["count"] > 0, "fixture assumes at least one surviving detection"
 
@@ -392,7 +392,7 @@ def test_predict_tiled_from_reader_tiled_mask_polygon_exports_at_correct_offset(
     assert min(ys) == pytest.approx(4 + offset_y, abs=1.0)
 
 
-def test_predict_tiled_from_reader_channel_mismatch_refuses() -> None:
+def test_predict_tiled_windowed_source_channel_mismatch_refuses() -> None:
     """A model's declared ``in_chans`` disagreeing with the raster's own band count must refuse
     rather than silently truncate/pad the band count the model was trained on. A bare predictor
     (no real checkpoint) is enough: the refusal happens before any tile is read or any forward
@@ -415,15 +415,15 @@ def test_predict_tiled_from_reader_channel_mismatch_refuses() -> None:
     p.in_chans = 3
 
     with pytest.raises(ValueError, match="channel"):
-        p.predict_tiled_from_reader(_FakeReader())
+        p.predict_tiled(_FakeReader())
 
 
-def test_predict_tiled_from_reader_reaches_real_tiling_for_instance_seg_with_and_without_masks() -> None:
+def test_predict_tiled_windowed_source_reaches_real_tiling_for_instance_seg_with_and_without_masks() -> None:
     """instance_seg masks thread through the windowed-read path the same as the full-array
     ``predict_tiled`` path: neither ``require_masks=True`` (the default, masks collected) nor
     ``require_masks=False`` (the boxes-only opt-out) refuses outright, both reach the real tile
     loop, which then fails on the fake reader's own ``AssertionError`` rather than anything raised
-    by ``predict_tiled_from_reader`` itself."""
+    by ``predict_tiled`` itself."""
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
@@ -441,13 +441,13 @@ def test_predict_tiled_from_reader_reaches_real_tiling_for_instance_seg_with_and
     p.model_source = None
 
     with pytest.raises(AssertionError):
-        p.predict_tiled_from_reader(_FakeReader())
+        p.predict_tiled(_FakeReader(), tile_size=32)
 
     with pytest.raises(AssertionError):
-        p.predict_tiled_from_reader(_FakeReader(), require_masks=False)
+        p.predict_tiled(_FakeReader(), tile_size=32, require_masks=False)
 
 
-def test_predict_tiled_from_reader_refuses_non_detection_task() -> None:
+def test_predict_tiled_windowed_source_refuses_non_detection_task() -> None:
     """Unlike ``predict_tiled``, there is no untiled ``predict()`` fallback for a windowed
     reader (the whole point is the raster can't be decoded whole), so a non-detection task must
     refuse outright rather than attempt one."""
@@ -467,7 +467,7 @@ def test_predict_tiled_from_reader_refuses_non_detection_task() -> None:
     p.in_chans = 3
 
     with pytest.raises(ValueError, match="detection"):
-        p.predict_tiled_from_reader(_FakeReader())
+        p.predict_tiled(_FakeReader())
 
 
 # ── Per-detection plant assignment ───────────────────────────────────────
