@@ -1,7 +1,8 @@
 """Delivery-grade evaluation runs in a different regime than inference: it resolves tile geometry
 via the same shared ``resolve_tile_geometry`` ``run_inference`` uses (refusing rather than
-fabricating 640/0.2 when nothing is resolvable), honors ``max_dets`` verbatim on both regimes with
-a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path, and records
+scoring at an ungrounded scale when nothing is resolvable), honors ``max_dets`` verbatim on both
+regimes with a per-image ``cap_hit``/``max_dets_cap_saturated_frac`` signal on the gating path, and
+records
 ``tiled``'s provenance (``raw_operating_point``/``resolve_operating_point``) to distinguish an
 explicit caller choice from a documented default, mirroring the existing
 ``tile_size``/``tile_size_source`` pattern. See ``test_detection_measurement_integrity.py`` for the
@@ -128,6 +129,34 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
     assert captured["max_dets"] == 7
 
 
+def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path, monkeypatch):
+    """A checkpoint path (not a run id) carries its own stamped config["data"] the same way a run
+    id's in-memory config does: evaluate_model must not silently lose tiling/subject reuse just
+    because the caller passed a path instead of a run id."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    captured: dict = {}
+
+    def _fake(ckpt, images_dir, labels_dir, output_dir, **kw):
+        captured.update(kw)
+        return {"eval_regime": "full-frame-tiled-inference"}
+
+    monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _fake)
+    images_dir, labels_dir = _det_dataset(tmp_path)
+    ckpt = tmp_path / "model.pt"
+    torch.save({"config": {"data": {"tiling": {"tile_size": 384, "overlap": 0.15},
+                                    "subject": "catkin", "attribute": None}}}, ckpt)
+
+    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+                   use_tiled_inference=True)
+    # subject wasn't passed explicitly; it resolves from the checkpoint's own stamped config, the
+    # same reuse a run id already gets, not silently None for a bare checkpoint path.
+    assert captured["subject"] == "catkin"
+    assert captured["tile_size"] == 384
+    assert captured["overlap"] == 0.15
+
+
 def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
     """evaluate_model is an @mcp.tool() surface that returns {"error": ...} for every other
     failure: a bare raise from run_full_frame_evaluation would surface as an MCP exception
@@ -216,16 +245,16 @@ def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness()
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     # A truthy tile_size with no source claim defaults to "default", not silently "derived".
-    b_default = resolve_operating_point("catkin", dataset_hash=None, tile_size=640)
+    b_default = resolve_operating_point("catkin", tiled=True, dataset_hash=None, tile_size=640)
     assert b_default.get("tile_size").source == "default"
 
     b_derived = resolve_operating_point(
-        "catkin", dataset_hash=None, tile_size=224, tile_size_source="derived")
+        "catkin", tiled=True, dataset_hash=None, tile_size=224, tile_size_source="derived")
     assert b_derived.get("tile_size").source == "derived"
     assert b_derived.get("tile_size")._raw == 224
 
     b_explicit = resolve_operating_point(
-        "catkin", dataset_hash=None, tile_size=512, tile_size_source="explicit")
+        "catkin", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit")
     assert b_explicit.get("tile_size").source == "explicit"
 
 
