@@ -335,19 +335,19 @@ def test_derives_tile_size_from_checkpoint(tmp_path, monkeypatch):
     assert r["overlap"] == pytest.approx(0.1) and r["overlap_source"] == "derived"
 
 
-def test_foreign_checkpoint_falls_back_to_default_with_warning(tmp_path, monkeypatch):
+def test_foreign_checkpoint_with_no_geometry_refuses_explicit_tile(tmp_path, monkeypatch):
+    """A checkpoint with no persisted training tile geometry has no real basis to tile at: an
+    explicit tile=True with no explicit tile_size either must refuse (naming the missing basis),
+    never silently fabricate a scale to proceed on."""
     from tcip_mcp.tools.inference_tools import run_inference
-    from tcip_mcp.pipelines.resolution import DEFAULT_TILE_SIZE
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
-    captured = _stub_inference(monkeypatch)  # no train geometry
+    _stub_inference(monkeypatch)  # no train geometry
     r = run_inference(str(ckpt), image_paths=[_one_image(tmp_path)], device="cpu",
                       tile=True, tile_size=None)
-    assert captured["tile_size"] == DEFAULT_TILE_SIZE
-    assert r["operating_point"]["tile_size"]["source"] == "default"
-    assert "no training tile geometry" in r["warning"]
-    assert r["overlap"] == pytest.approx(0.2) and r["overlap_source"] == "default"
+    assert "error" in r
+    assert "tile_size" in r["error"]
 
 
 # ======================================================================
@@ -358,7 +358,7 @@ def test_foreign_checkpoint_falls_back_to_default_with_warning(tmp_path, monkeyp
 
 def test_gate_refuses_unresolvable_tile_geometry(tmp_path):
     """A checkpoint with no persisted tiling and no explicit override must refuse the delivery
-    gate rather than silently score it at a fabricated 640/0.2, on the path the docstring calls
+    gate rather than silently score it at an ungrounded scale, on the path the docstring calls
     "the number that gates a phenotype delivery"."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
@@ -388,7 +388,7 @@ def test_gate_refuses_unresolvable_tile_geometry(tmp_path):
 
 def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
     """The checkpoint's own persisted training geometry (already sitting on the predictor object)
-    governs the gate instead of a pinned 640/0.2, avoiding a scale mismatch (~2.9x for this
+    governs the gate instead of an arbitrary fixed scale, avoiding a scale mismatch (~2.9x for this
     checkpoint) between the geometry the gate assumes and the geometry the model was trained at."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
@@ -726,7 +726,7 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_dense_cal_holdout()
-    bundle = resolve_operating_point("catkin", dataset_hash="H",
+    bundle = resolve_operating_point("catkin", tiled=True, dataset_hash="H",
                                      calibration_records=cal, holdout_records=hold,
                                      staged_conf_floor=0.01)
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
@@ -805,7 +805,7 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     img = _one_image(tmp_path)
     json_io.write_annotations(str(tmp_path / f"{Path(img).stem}.json"),
                               [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 100, 100)
-    bundle = resolve_operating_point("catkin", dataset_hash="H",
+    bundle = resolve_operating_point("catkin", tiled=True, dataset_hash="H",
                                      calibration_records=_op_records("c"),
                                      holdout_records=_op_records("h", shift=3.0))
     monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
@@ -879,8 +879,10 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
             self.train_overlap = 0.2
 
         def predict_batch(self, paths, tile=False, tile_size=None, overlap=None,
-                          tile_batch_size=96, global_nms_iou=None, postprocess="nms"):
-            calls.append({"tile": tile, "tile_size": tile_size, "overlap": overlap})
+                          tile_batch_size=96, global_nms_iou=None, postprocess="nms",
+                          tile_resize=None):
+            calls.append({"tile": tile, "tile_size": tile_size, "overlap": overlap,
+                          "tile_resize": tile_resize})
             # tiled finds two boxes/img; untiled finds none, so a sweep over untiled records differs.
             boxes = [[10, 10, 40, 40], [100, 100, 130, 130]] if tile else []
             scores = [0.9, 0.6] if tile else []
@@ -901,16 +903,15 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
     assert all(c["tile"] is True for c in calls)
     assert all(c["tile_size"] == 64 for c in calls)
     assert len({c["overlap"] for c in calls}) == 1
+    # Including any train-time resize: calibrating at a geometry the delivery pass does not run at
+    # would resolve the conf against a scale the shipped count never sees.
+    assert len({c["tile_resize"] for c in calls}) == 1
 
 
-def test_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_derived(
-        tmp_path, monkeypatch):
-    """resolve_operating_point must not infer
-    "derived" from mere truthiness of tile_size: a checkpoint with no persisted geometry, whose
-    tile_size falls back to the fabricated DEFAULT_TILE_SIZE, must not get stamped "derived
-    from persisted training geometry" on the calibrated (potentially held-out-validated) bundle.
-    The real source computed by resolve_tile_geometry travels through _calibrate_operating_point
-    into resolve_operating_point, so a fabricated fallback is honestly stamped "default"."""
+def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monkeypatch):
+    """A checkpoint with no persisted geometry has no real basis to tile at: an explicit tile=True
+    with no explicit tile_size refuses before the (expensive) calibration pass ever runs, never
+    silently calibrates (or ships) against a fabricated scale."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -936,13 +937,8 @@ def test_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_derived
             self.train_tile_size = None
             self.train_overlap = None
 
-        def predict_batch(self, paths, tile=False, tile_size=None, overlap=None,
-                          tile_batch_size=96, global_nms_iou=None, postprocess="nms"):
-            boxes = [[10, 10, 40, 40], [100, 100, 130, 130]] if tile else []
-            scores = [0.9, 0.6] if tile else []
-            labels = [1, 1] if tile else []
-            return [{"image": p, "width": 128, "height": 128, "boxes": boxes,
-                     "scores": scores, "labels": labels, "count": len(boxes)} for p in paths]
+        def predict_batch(self, paths, **kw):
+            raise AssertionError("must refuse before any predictor pass, calibration included")
 
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _NoGeometryStub())
     monkeypatch.chdir(tmp_path)
@@ -951,9 +947,8 @@ def test_calibrated_bundle_does_not_falsely_stamp_fabricated_geometry_as_derived
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=True,
                       trait="catkin", calibration_labels_dir=str(labels_dir))
-    ts = r["operating_point"]["tile_size"]
-    assert ts["value"] == 640  # the fabricated fallback (DEFAULT_TILE_SIZE), real value, unchanged
-    assert ts["source"] == "default"  # honestly labeled, not "derived" despite being truthy
+    assert "error" in r
+    assert "tile_size" in r["error"]
 
 
 def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch):
