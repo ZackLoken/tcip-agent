@@ -21,6 +21,14 @@ describe("defaultTrainingRequest", () => {
     expect(text).toContain("tiles or on whole frames");
     expect(text).not.toMatch(/\d+\s*(px|pixels)/);
   });
+
+  it("raises the sampler choice as a layout condition, not a size or a named sampler", () => {
+    const text = defaultTrainingRequest(null, null);
+    expect(text).toContain("sampler choice");
+    expect(text).toContain("strip-layout");
+    expect(text).not.toMatch(/tile_locality/);
+    expect(text).not.toMatch(/large (raster|mosaic|image)/i);
+  });
 });
 
 describe("defaultSweepRequest", () => {
