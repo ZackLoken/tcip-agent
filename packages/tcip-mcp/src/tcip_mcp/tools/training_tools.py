@@ -1639,7 +1639,14 @@ def evaluate_model(
     if not Path(ckpt).is_file():
         return {"error": f"Checkpoint not found: {ckpt}"}
 
-    run_data_cfg = (run.config.get("data", {}) or {}) if run is not None else {}
+    # A bare checkpoint path (run is None) carries its own stamped config["data"] too, read the
+    # same light way a run id's in-memory config already is, so both paths agree.
+    if run is not None:
+        run_data_cfg = run.config.get("data", {}) or {}
+    else:
+        from tcip_mcp.model_registry import read_checkpoint_data_config
+
+        run_data_cfg = read_checkpoint_data_config(ckpt)
     run_tiling = run_data_cfg.get("tiling")
     # The eval scope's subject/attribute: caller-supplied wins, else the producing run's config, so
     # the name-based GT reads through the same id map the run trained with.
@@ -1654,11 +1661,8 @@ def evaluate_model(
         # An explicit caller max_dets is honored verbatim (no rescuing sentinel);
         # None resolves to the delivery-grade default (dense full-frame scenes aren't truncated).
         resolved_max_dets = DEFAULT_MAX_DETS if max_dets is None else max_dets
-        # tile_size/overlap pass through as None-if-absent, run_full_frame_evaluation
-        # itself resolves them from the checkpoint's persisted training geometry (or refuses) rather
-        # than this wrapper silently defaulting to 640/0.2. Thread the merge settings through too,
-        # evaluating at a derived (non-default) NMS is exactly the point of this path; dropping them
-        # silently re-pins 0.3.
+        # tile_size/overlap pass through as None-if-absent: run_full_frame_evaluation itself
+        # resolves them from persisted training geometry (or refuses), never this wrapper fabricating.
         try:
             return run_full_frame_evaluation(
                 ckpt, images_dir, labels_dir, str(Path(ckpt).parent),
