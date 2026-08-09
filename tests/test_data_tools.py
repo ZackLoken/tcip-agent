@@ -139,3 +139,80 @@ def test_make_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Pat
     result = make_splits(str(root), output_path=str(out), group_by="not_a_real_key")
     assert "error" in result
     assert not out.exists() or not (out / "split_manifest.json").is_file()
+
+
+def _single_source_dataset(root: Path, width: int, height: int) -> Path:
+    from PIL import Image
+
+    images_dir = root / "images"
+    labels_dir = root / "annotations"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    Image.new("RGB", (width, height), (128, 128, 128)).save(images_dir / "mosaic.jpg")
+    json_io.write_annotations(
+        labels_dir / "mosaic.json", [Annotation(subject="catkin", geometry=BBox(19, 13, 45, 51))],
+        width, height,
+    )
+    return root
+
+
+def test_make_splits_spatial_requires_tile_size_and_overlap(tmp_path: Path):
+    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
+    result = make_splits(str(root), spatial=True)
+    assert "error" in result and "tile_size" in result["error"]
+
+
+def test_make_splits_spatial_refuses_multi_source_folder(tmp_path: Path):
+    root = _multi_source_dataset(tmp_path / "ds")
+    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2)
+    assert "error" in result and "single-stem" in result["error"]
+
+
+def test_make_splits_spatial_refuses_materialize(tmp_path: Path):
+    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
+    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2, materialize=True)
+    assert "error" in result and "materialize" in result["error"]
+
+
+def test_make_splits_spatial_writes_strip_identity_manifest(tmp_path: Path):
+    import json
+
+    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
+    out = tmp_path / "m"
+    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2,
+                         train_ratio=0.75, val_ratio=0.25, test_ratio=0.0,
+                         seed=1, output_path=str(out))
+    assert "error" not in result
+    assert result["group_by"] == "spatial_strip"
+    assert result["splits"]["train"] > 0 and result["splits"]["val"] > 0
+
+    train_ids = json.loads((out / "train.json").read_text())
+    val_ids = json.loads((out / "val.json").read_text())
+    assert train_ids and val_ids
+    assert set(train_ids).isdisjoint(set(val_ids))
+    assert all(i.startswith("mosaic::strip_") for i in train_ids + val_ids)
+
+    manifest = json.loads((out / "split_manifest.json").read_text())
+    assert manifest["group_by"] == "spatial_strip"
+    assert manifest["spatial"]["train_identities"] == train_ids
+
+
+def test_make_splits_spatial_three_way(tmp_path: Path):
+    import json
+
+    root = _single_source_dataset(tmp_path / "ds", 4000, 3000)
+    out = tmp_path / "m3"
+    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2,
+                         train_ratio=0.7, val_ratio=0.2, test_ratio=0.1,
+                         seed=1, output_path=str(out))
+    assert "error" not in result
+    assert all(result["splits"][name] > 0 for name in ("train", "val", "test"))
+    for name in ("train", "val", "test"):
+        assert (out / f"{name}.json").is_file()
+
+    train_ids = set(json.loads((out / "train.json").read_text()))
+    val_ids = set(json.loads((out / "val.json").read_text()))
+    test_ids = set(json.loads((out / "test.json").read_text()))
+    assert train_ids.isdisjoint(val_ids)
+    assert train_ids.isdisjoint(test_ids)
+    assert val_ids.isdisjoint(test_ids)
