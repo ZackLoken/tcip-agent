@@ -23,12 +23,14 @@ splits), annotation-balanced, and deterministic in ``seed``.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import logging
 import random
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
@@ -87,6 +89,30 @@ def count_label_lines(labels_dir: str | Path, stem: str) -> int:
     if not jp.is_file():
         return 0
     return len(json_io.read_annotations(str(jp)))
+
+
+def image_extent_from_labels(labels_dir: str | Path, stem: str) -> tuple[int, int] | None:
+    """``(width, height)`` a stem's per-image label JSON records, or ``None`` when the file is
+    missing, unreadable, or carries no positive width/height.
+
+    The label file already carries the frame its boxes were authored against (the json_io
+    schema's top-level ``width``/``height``), so a caller that needs an image's pixel extent for
+    split geometry reads it here rather than decoding the image. This is the same field
+    :class:`~tcip_mcp.pipelines.data.datasets.TiledDetectionDataset` treats as authoritative for
+    its own authored-vs-decoded frame check, so a split derived from this extent and a tiled
+    dataset later built over the same stem agree on the frame by construction.
+    """
+    p = Path(labels_dir) / f"{stem}.json"
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    w, h = int(data.get("width", 0) or 0), int(data.get("height", 0) or 0)
+    return (w, h) if w > 0 and h > 0 else None
 
 
 def group_balanced_split(
@@ -245,6 +271,333 @@ def resolve_group_key_fn(
             "or supply group_key_map."
         )
     return GROUP_KEY_FNS[group_by]
+
+
+# -- spatial (within-image) strip split ---------------------------------------
+
+_SPATIAL_IDENTITY_SEP = "::"
+
+
+def spatial_strip_identity(stem: str, region_label: str) -> str:
+    """A spatial split's per-region membership identity for one tile's source stem.
+
+    ``region_label`` names the contiguous pixel-space strip a tile fell into (e.g.
+    ``"strip_x_2"``). A manifest that lists this instead of the bare stem never reads a
+    within-image split as the same stem appearing on more than one side:
+    :func:`stem_of_spatial_identity` is the one place that identity is parsed back.
+    """
+    return f"{stem}{_SPATIAL_IDENTITY_SEP}{region_label}"
+
+
+def stem_of_spatial_identity(identity: str) -> str:
+    """The bare stem inside a :func:`spatial_strip_identity` string, for a leak check that only
+    cares which source image a split member came from, not which region. An identity with no
+    separator (not one this module produced) is returned unchanged."""
+    idx = identity.rfind(_SPATIAL_IDENTITY_SEP)
+    return identity[:idx] if idx != -1 else identity
+
+
+@dataclass(frozen=True)
+class SpatialStripSplit:
+    """A within-image train/val(/test) split: the image partitioned into contiguous
+    pixel-space strips along one axis, each strip assigned whole to one side, with a buffer
+    band excluded at every boundary between differently-assigned strips.
+
+    A square block grid couples how finely a ratio can be hit to how much boundary a buffer
+    removes: fewer, larger blocks minimize discard but leave too little assignment
+    granularity to land near a requested split, while enough blocks for precision multiplies
+    boundary count (and therefore discard) with it. Striping along one axis decouples the
+    two, and at ``stripes_per_split=1`` (the default) each side is exactly one contiguous
+    region: the fewest possible boundaries, so discard is minimized and concentrates at the
+    internal cuts between sides rather than scattering through the interior. Regions are
+    ordered largest-share-first from the axis center outward, so a small side faces at most
+    one differently-assigned neighbor rather than being sandwiched between two; each boundary
+    is shrunk from one side only (enough on its own to guarantee ``>= buffer`` separation), so
+    the image-edge-facing side of the outermost two regions is never shrunk at all. Raising
+    ``stripes_per_split`` splits each side into that many separate, scattered pieces instead,
+    trading some of that minimal discard for spreading each side across the image (guarding
+    against a side correlating with a spatial gradient along the axis); ``discard_ceiling``
+    caps how many pieces actually get used regardless of how many were asked for, since
+    boundary cost scales with piece count, not with how finely the tile lattice itself could
+    be subdivided.
+
+    ``regions`` maps each split name to its list of half-open pixel rects (already merged
+    where two same-split strips landed adjacent, and buffer-shrunk on any side bordering a
+    different-split neighbor): :class:`TiledDetectionDataset`'s ``keep_regions`` consumes
+    these directly. ``realized_fractions`` is each side's kept tile count over the total kept
+    across every side (post-buffer), not the requested fractions.
+    """
+
+    width: int
+    height: int
+    tile_size: int
+    overlap: float
+    stride: int
+    axis: str
+    buffer: int
+    seed: int
+    split_names: tuple[str, ...]
+    requested_fractions: tuple[float, ...]
+    stripes_per_split: int
+    discard_ceiling: float
+    regions: dict[str, list[tuple[int, int, int, int]]]
+    region_bounds: list[tuple[str, int, int]]
+    total_tiles: int
+    tiles_dropped_past_extent: int
+    tiles_dropped_outside_regions: int
+    kept_tiles: dict[str, int]
+    realized_fractions: dict[str, float]
+    realized_discard_fraction: float
+
+    def _region_index_for(self, tile_x: int, tile_y: int) -> int | None:
+        """Index into ``region_bounds`` for a kept tile at ``(tile_x, tile_y)``, or ``None``
+        when this position falls in a dropped gap (buffer band or past-extent) rather than
+        fully inside any region. The one containment lookup every split-membership query
+        (identity, split name) shares."""
+        pos = tile_x if self.axis == "x" else tile_y
+        starts = [start for _, start, _ in self.region_bounds]
+        idx = bisect.bisect_right(starts, pos) - 1
+        if idx < 0:
+            return None
+        _, start, end = self.region_bounds[idx]
+        return idx if (start <= pos and pos + self.tile_size <= end) else None
+
+    def split_name_for(self, tile_x: int, tile_y: int) -> str | None:
+        """Which split (``"train"``/``"val"``/``"test"``/...) a kept tile at ``(tile_x,
+        tile_y)`` belongs to, or ``None`` when it falls in a dropped gap."""
+        idx = self._region_index_for(tile_x, tile_y)
+        return None if idx is None else self.region_bounds[idx][0]
+
+    def identity_for(self, stem: str, tile_x: int, tile_y: int) -> str | None:
+        """The manifest identity for a kept tile at ``(tile_x, tile_y)``, or ``None`` when
+        this position falls in a dropped gap (buffer band or past-extent) rather than fully
+        inside any region."""
+        idx = self._region_index_for(tile_x, tile_y)
+        if idx is None:
+            return None
+        return spatial_strip_identity(stem, f"strip_{self.axis}_{idx}")
+
+
+def _center_out_order(slots: list[tuple[str, float]], seed: int) -> list[tuple[str, float]]:
+    """Order slots by descending share, largest first, then placed axis-center-out: each next
+    (smaller) slot alternately extends the left or right end of the growing arrangement.
+
+    A share sandwiched between two differently-assigned neighbors needs buffer margin on both
+    sides at once, so the slot least likely to survive that is the smallest one, exactly the
+    one a uniform-random order can still place mid-axis. Center-out puts the largest share
+    (the most likely to have enough raw lattice positions to absorb a two-sided margin) in the
+    middle and tapers outward, so every other slot faces at most one differently-assigned
+    neighbor. ``seed`` only breaks ties among equal shares; which cardinal side a given split
+    lands on has no bearing on discard or ratio fit, so it is not itself randomized.
+    """
+    rng = random.Random(seed)
+    indexed = list(enumerate(slots))
+    rng.shuffle(indexed)
+    indexed.sort(key=lambda p: -p[1][1])
+    ordered = [item for _, item in indexed]
+    left: list[tuple[str, float]] = []
+    right: list[tuple[str, float]] = []
+    for i, item in enumerate(ordered):
+        (right if i % 2 == 0 else left).append(item)
+    return list(reversed(left)) + right
+
+
+def _strip_regions(
+    positions: list[int], tile_size: int, buffer: int,
+    split_names: tuple[str, ...], fractions: tuple[float, ...],
+    seed: int, discard_ceiling: float, stripes_per_split: int,
+) -> list[tuple[str, int, int]]:
+    """Merged, buffer-shrunk ``(name, start, end)`` pixel regions along one axis, in axis
+    order, cut and shrunk in the discrete tile-origin lattice rather than continuous pixel
+    space: a region with positive pixel width could otherwise miss the stride-spaced lattice
+    entirely and contain zero real tile origins.
+
+    Two independent knobs: ``stripes_per_split`` sets how many separate, scattered pieces a
+    side gets (capped by ``discard_ceiling``, the maximum share of the axis a buffer band
+    between differing sides may consume, so asking for more pieces never buys precision at
+    unbounded discard cost); the fraction each side targets sets its total share of the axis
+    directly. At the default of one piece per side, every side is one contiguous region, the
+    fewest possible boundaries (``len(split_names) - 1``), and only the *outermost* two
+    regions' image-edge-facing sides go unshrunk, so discard concentrates at the internal
+    boundaries between sides rather than scattering through the interior; more pieces trade
+    some of that back for scattering each side across the image (guarding against a side
+    correlating with a spatial gradient along the axis), a choice left to the caller.
+    """
+    n = len(positions)
+    axis_span = positions[-1] + tile_size - positions[0]
+    n_splits = len(split_names)
+    max_stripes = max(1, int(discard_ceiling * axis_span / max(1, n_splits * buffer)))
+    stripes = max(1, min(stripes_per_split, max_stripes))
+
+    slots: list[tuple[str, float]] = []
+    for name, frac in zip(split_names, fractions):
+        slots.extend([(name, frac / stripes)] * stripes)
+    slots = _center_out_order(slots, seed)
+
+    raw: list[tuple[str, int, int]] = []
+    cursor = 0.0
+    for i, (name, share) in enumerate(slots):
+        end_f = n if i == len(slots) - 1 else cursor + share * n
+        start_idx, end_idx = int(round(cursor)), max(int(round(end_f)), int(round(cursor)))
+        raw.append((name, start_idx, end_idx))
+        cursor = end_f
+
+    merged: list[tuple[str, int, int]] = []
+    for name, start_idx, end_idx in raw:
+        if merged and merged[-1][0] == name:
+            merged[-1] = (name, merged[-1][1], end_idx)
+        else:
+            merged.append((name, start_idx, end_idx))
+    merged = [(name, s, e) for name, s, e in merged if e > s]
+
+    # A boundary is shrunk from one side only (the higher-index region's left edge, against
+    # its neighbor's raw end): that alone already guarantees >= buffer separation.
+    shrunk: list[tuple[str, int, int]] = []
+    for i, (name, s, e) in enumerate(merged):
+        if i > 0 and merged[i - 1][0] != name:
+            neighbor_end_pixel = positions[merged[i - 1][2] - 1] + tile_size
+            while s < e and positions[s] < neighbor_end_pixel + buffer:
+                s += 1
+        if e > s:
+            shrunk.append((name, s, e))
+
+    return [(name, positions[s], positions[e - 1] + tile_size) for name, s, e in shrunk]
+
+
+def spatial_strip_split(
+    width: int, height: int, tile_size: int, overlap: float, *,
+    fractions: tuple[float, ...], seed: int,
+    split_names: tuple[str, ...] = ("train", "val", "test"),
+    buffer: int | None = None, discard_ceiling: float = 0.05, stripes_per_split: int = 1,
+) -> SpatialStripSplit:
+    """Split one image's own tile lattice into disjoint pixel-space strips, one side per name.
+
+    Unlike :func:`group_balanced_split` (which partitions whole source images), this
+    partitions the tiles *of a single image*, for the case where there are too few source
+    images to hold one out whole: a strip is train, val, or test instead of a stem.
+
+    The tile lattice comes from :func:`~tcip_mcp.pipelines.data.tiling.tile_positions` at the
+    training stride (never re-derived), so the regions this returns tile the same grid a
+    :class:`TiledDetectionDataset` built at this ``tile_size``/``overlap`` will actually
+    index. The split runs along whichever axis (width or height) offers more distinct tile
+    positions, for the finest achievable ratio precision; at the default
+    ``stripes_per_split=1`` each requested split is one contiguous region, minimizing discard
+    and concentrating it at the internal cuts between sides. A higher ``stripes_per_split``
+    (capped by ``discard_ceiling``, see :class:`SpatialStripSplit`) instead scatters each side
+    across several seeded-shuffled positions along the axis, trading discard for a guard
+    against any one side correlating with a spatial gradient in the field.
+
+    ``buffer`` (pixels) is the minimum gap kept around every boundary between two
+    differently-assigned strips: an explicit value below ``tile_size`` is refused, since a
+    smaller gap cannot guarantee a kept tile on one side never shares pixels or immediate
+    context with a kept tile on another, including under ``overlap > 0``. Omitted, it
+    defaults to ``tile_size``.
+
+    ``fractions`` must be non-negative and sum to 1.0, matching ``split_names`` in length; a
+    zero fraction drops that name from the split entirely (fewer than two non-zero fractions
+    is refused, nothing to split). Raises ``ValueError`` when no tile fits fully inside the
+    image extent at this ``tile_size``, or when the derived strip layout leaves any requested,
+    non-zero-fraction side with zero kept tiles.
+    """
+    from tcip_mcp.pipelines.data.tiling import compute_stride, tile_positions, tile_within_extent
+
+    if len(fractions) != len(split_names):
+        raise ValueError(
+            f"fractions ({len(fractions)}) and split_names ({len(split_names)}) must be the "
+            "same length."
+        )
+    if any(f < 0 for f in fractions):
+        raise ValueError(f"fractions must be non-negative, got {fractions}.")
+    if abs(sum(fractions) - 1.0) > 1e-6:
+        raise ValueError(f"fractions must sum to 1.0, got {fractions} (sum={sum(fractions)}).")
+    if tile_size <= 0:
+        raise ValueError(f"tile_size must be positive, got {tile_size}.")
+    if buffer is None:
+        buffer = tile_size
+    elif buffer < tile_size:
+        raise ValueError(
+            f"buffer ({buffer}) must be at least tile_size ({tile_size}): a smaller buffer "
+            "cannot guarantee a kept tile on one side never shares pixels or immediate context "
+            "with a kept tile on another, including under overlap > 0."
+        )
+
+    active_names = tuple(n for n, f in zip(split_names, fractions) if f > 0)
+    active_fracs = tuple(f for f in fractions if f > 0)
+    if len(active_names) < 2:
+        raise ValueError(
+            f"at least two non-zero fractions are needed for a spatial split, got {fractions}."
+        )
+
+    stride = compute_stride(tile_size, overlap)
+    lattice = tile_positions(height, width, tile_size, stride)
+    total_tiles = len(lattice)
+    if total_tiles == 0:
+        raise ValueError(f"no tile position fits a {width}x{height} image at tile_size={tile_size}.")
+
+    in_extent = [(tx, ty) for tx, ty in lattice
+                 if tile_within_extent(tx, ty, tile_size, width, height)]
+    tiles_dropped_past_extent = total_tiles - len(in_extent)
+    if not in_extent:
+        raise ValueError(
+            f"no tile fits fully inside the {width}x{height} image extent at tile_size="
+            f"{tile_size} (every tile position needs edge padding); a spatial split needs at "
+            "least one fully-real tile to assign."
+        )
+
+    xs = sorted({tx for tx, _ in in_extent})
+    ys = sorted({ty for _, ty in in_extent})
+    axis = "x" if len(xs) >= len(ys) else "y"
+    positions = xs if axis == "x" else ys
+
+    region_bounds = _strip_regions(
+        positions, tile_size, buffer, active_names, active_fracs, seed, discard_ceiling,
+        stripes_per_split,
+    )
+    if len({name for name, _, _ in region_bounds}) < len(active_names):
+        raise ValueError(
+            f"no strip layout at buffer={buffer} leaves every requested split {active_names} "
+            f"with a non-empty region on a {width}x{height} image at tile_size={tile_size}; "
+            "try a smaller buffer, fewer stripes_per_split, fewer splits, or a larger image."
+        )
+
+    kept: dict[str, int] = {name: 0 for name in active_names}
+    dropped_outside = 0
+    starts = [start for _, start, _ in region_bounds]
+    for tx, ty in in_extent:
+        pos = tx if axis == "x" else ty
+        idx = bisect.bisect_right(starts, pos) - 1
+        name, start, end = region_bounds[idx] if idx >= 0 else (None, 0, 0)
+        if name is not None and start <= pos and pos + tile_size <= end:
+            kept[name] += 1
+        else:
+            dropped_outside += 1
+
+    if any(kept[name] == 0 for name in active_names):
+        raise ValueError(
+            f"the derived strip layout leaves at least one requested split with zero kept "
+            f"tiles on a {width}x{height} image at tile_size={tile_size}, buffer={buffer}: "
+            f"kept={kept}. Try a smaller buffer, fewer stripes_per_split, or a larger image."
+        )
+
+    regions: dict[str, list[tuple[int, int, int, int]]] = {name: [] for name in active_names}
+    for name, start, end in region_bounds:
+        rect = (start, 0, end, height) if axis == "x" else (0, start, width, end)
+        regions[name].append(rect)
+
+    total_kept = sum(kept.values()) or 1
+    tiles_within_extent = len(in_extent)
+    return SpatialStripSplit(
+        width=width, height=height, tile_size=tile_size, overlap=overlap, stride=stride,
+        axis=axis, buffer=buffer, seed=seed, split_names=split_names,
+        requested_fractions=fractions, stripes_per_split=stripes_per_split,
+        discard_ceiling=discard_ceiling, regions=regions, region_bounds=region_bounds,
+        total_tiles=total_tiles, tiles_dropped_past_extent=tiles_dropped_past_extent,
+        tiles_dropped_outside_regions=dropped_outside,
+        kept_tiles=kept, realized_fractions={n: kept[n] / total_kept for n in active_names},
+        realized_discard_fraction=dropped_outside / tiles_within_extent,
+    )
+
+
 
 
 def cal_holdout_split(
