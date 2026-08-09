@@ -322,7 +322,7 @@ def test_golden_validated_flag_path_calibrated_no_holdout_is_false():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     # Calibrated but never held-out-measured -> validated=false, not shippable.
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=_sweep_records("c"))
     assert b.get("conf").validated_against == "false"
     assert b.is_shippable is False
@@ -336,7 +336,7 @@ def test_golden_duplicate_content_holdout_is_false():
     """
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    b = resolve_operating_point("catkin", dataset_hash="h1",
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=_sweep_records("c"),
                                 holdout_records=_sweep_records("h"))
     conf = b.get("conf")
@@ -350,23 +350,21 @@ def test_golden_duplicate_content_holdout_is_false():
 # ══════════════════════════════════════════════════════════════════════════
 
 def test_golden_consolidated_operating_point_defaults():
-    # operating_point.py must not carry a second, divergent copy of the
-    # inference operating-point knobs (_DEFAULT_CROSS_TILE_NMS=0.5, _DEFAULT_MAX_DETS=300,
-    # _DEFAULT_CONF_PLACEHOLDER=0.5, _DEFAULT_TILE_SIZE=640): a second copy would let the same
-    # model+images give a different count by entry door. Every operating-point
-    # fallback resolves to resolution.py's single source of truth.
+    # operating_point.py must not carry a second, divergent copy of the inference operating-point
+    # knobs (a second copy would let the same model+images give a different count by entry door).
     from tcip_mcp.pipelines import operating_point as OP
     from tcip_mcp.pipelines import resolution as R
     from tcip_mcp.pipelines.inference import generic_predictor as GP
     from tcip_mcp.pipelines.training import evaluation as EV
     from tcip_mcp.tools import training_tools as TT
 
-    # resolution.py: the shared inference operating-point defaults.
+    # resolution.py: the shared inference operating-point defaults. tile_size/tiled carry no such
+    # shared fallback constant at all (a caller derives/states them explicitly), nothing to pin here.
     assert R.DEFAULT_CONF == 0.5
     assert R.DEFAULT_NMS_IOU == 0.3
     assert R.DEFAULT_MAX_DETS == 1000
-    assert R.DEFAULT_TILE_SIZE == 640
-    assert R.DEFAULT_TILED is True
+    assert not hasattr(R, "DEFAULT_TILE_SIZE")
+    assert not hasattr(R, "DEFAULT_TILED")
 
     # operating_point.py: the private _DEFAULT_* copies are gone; the module now imports the
     # shared constants (same objects), proving one source of truth.
@@ -374,21 +372,22 @@ def test_golden_consolidated_operating_point_defaults():
     assert not hasattr(OP, "_DEFAULT_MAX_DETS")
     assert not hasattr(OP, "_DEFAULT_CONF_PLACEHOLDER")
     assert not hasattr(OP, "_DEFAULT_TILE_SIZE")
+    assert not hasattr(OP, "DEFAULT_TILE_SIZE")
     assert OP.DEFAULT_MAX_DETS is R.DEFAULT_MAX_DETS
     assert OP.DEFAULT_NMS_IOU is R.DEFAULT_NMS_IOU
-    assert OP.DEFAULT_TILE_SIZE is R.DEFAULT_TILE_SIZE
 
-    # The consolidated fallbacks flow through to a resolved bundle with no calibration/overrides:
-    # cross_tile_nms == the shared NMS-IoU (was 0.5), max_dets == the shared cap (was 300).
-    b = OP.resolve_operating_point("catkin", dataset_hash=None)
+    # The consolidated fallbacks flow through a resolved bundle with no calibration/overrides.
+    # tile_size has no fallback to flow through at all here (no explicit/derived basis): None.
+    b = OP.resolve_operating_point("catkin", tiled=True, dataset_hash=None)
     assert b.get("cross_tile_nms")._raw == R.DEFAULT_NMS_IOU  # 0.3, was 0.5
     assert b.get("max_dets")._raw == R.DEFAULT_MAX_DETS        # 1000, was 300
-    assert b.get("tile_size")._raw == R.DEFAULT_TILE_SIZE
-    assert b.get("tiled")._raw is R.DEFAULT_TILED
+    assert b.get("tile_size")._raw is None
+    assert b.get("tiled")._raw is True
 
-    # generic_predictor tile/NMS fallbacks now reference the shared constants (was a hardcoded 224/0.3).
+    # generic_predictor's own tiling primitive fabricates no tile_size default either (None,
+    # caller must resolve a real basis first); NMS still shares the platform default.
     gp_sig = inspect.signature(GP.GenericPredictor.predict_tiled)
-    assert gp_sig.parameters["tile_size"].default == R.DEFAULT_TILE_SIZE
+    assert gp_sig.parameters["tile_size"].default is None
     assert gp_sig.parameters["global_nms_iou"].default == R.DEFAULT_NMS_IOU
 
     # training_tools.evaluate_model: max_dets is no longer a plain 100 default
