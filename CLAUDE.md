@@ -115,6 +115,15 @@ workflows (GNSS+sequence, barcode/QR, others); do not infer "how the platform's 
 works" from a single code comment or one project's setup. Ask, or check with the domain expert,
 before generalizing.
 
+Grepping is not the only way to check a claim, and it is not the first one to reach for. Before a
+consumer sweep ("what else calls this", "what else re-derives this store") or any exploratory
+read of unfamiliar code, run `mcp__claude-context__search_code` first: semantic search finds
+concept-shaped matches literal grep misses, and grep then pins the exact file:line citation. This
+applies to your own direct reads, not only to briefs handed to a subagent; a session that skips
+this and reaches only for grep has skipped a verification step, not merely a convenience. The
+index is rebuilt at each phase/session end, so it reflects the last committed state and lags
+uncommitted worktree edits; freshly written or uncommitted code is grep-only regardless.
+
 A test that guards a fix must be observed failing without it. Extract the baseline and run the
 new test against it (`python scripts/prove_test_fails_before.py <testfile> -k <expr>`): the baseline
 is the commit immediately before the change, not the phase's start. A test that passes there guards
@@ -276,12 +285,6 @@ longer fragments `.tcip/`.
   bloat, not tool shortage. Add a tool only for an audit seam, long-running
   infrastructure, or domain knowledge the agent lacks.
 - Crop traits are controlled vocabulary in `.github/skills/crops/`; verify there before asserting.
-- Search with both engines: the claude-context semantic index (`mcp__claude-context__search_code`)
-  alongside grep, and give subagent briefs the same instruction. Semantic search finds
-  concept-shaped matches (consumers of a mechanism, "anything else that re-derives this") that a
-  literal grep misses; grep stays the authority for exact file:line citations. The index is
-  rebuilt at each phase/session end, so it reflects the last committed state and lags uncommitted
-  worktree edits; freshly written code is grep-only.
 - Match surrounding code style. (Comment/emphasis style is a global rule, see global `CLAUDE.md`;
   this bullet is this repo's own elaboration of it, not a duplicate; read both.)
 - **Every piece of prose this repo ships is for whoever reads it next, never a changelog of the work
