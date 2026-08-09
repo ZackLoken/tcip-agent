@@ -25,6 +25,14 @@ jobs:
           key: pip-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
           restore-keys: pip-${{ runner.os }}-
 
+      # mypy's own incremental cache; mypy invalidates individual file entries itself, so
+      # restoring the closest prior run's cache is always safe, never stale.
+      - uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ github.sha }}
+          restore-keys: mypy-${{ runner.os }}-
+
       - name: Install CPU-only torch
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
