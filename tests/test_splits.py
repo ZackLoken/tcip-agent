@@ -13,9 +13,14 @@ from tcip_mcp.pipelines.data.splits import (
     cal_holdout_split,
     count_lines,
     group_balanced_split,
+    image_extent_from_labels,
     resolve_group_key_fn,
     resolve_locked_cal_holdout_split,
+    spatial_strip_identity,
+    spatial_strip_split,
+    stem_of_spatial_identity,
 )
+from tcip_mcp.pipelines.data.tiling import compute_stride, tile_positions, tile_within_extent
 
 
 def test_default_group_key_strips_tile_offset():
@@ -177,3 +182,120 @@ def test_resolve_locked_cal_holdout_split_force_redraw_records_history():
     # Re-running with the same (now-locked) policy and no force_redraw returns it unchanged.
     third = resolve_locked_cal_holdout_split(stems, identity_hash="redraw-test", seed=2)
     assert third == second
+
+
+# --- spatial_strip_split ---
+
+def _kept_tiles(split, width, height):
+    """Every kept tile's rect, tagged with the side it was assigned to via ``split_name_for``,
+    recomputed independently of the split's own kept-tile counters."""
+    stride = compute_stride(split.tile_size, split.overlap)
+    lattice = tile_positions(height, width, split.tile_size, stride)
+    in_extent = [(tx, ty) for tx, ty in lattice
+                if tile_within_extent(tx, ty, split.tile_size, width, height)]
+    by_name: dict[str, list[tuple[int, int, int, int]]] = {name: [] for name in split.regions}
+    for tx, ty in in_extent:
+        name = split.split_name_for(tx, ty)
+        if name is not None:
+            by_name[name].append((tx, ty, tx + split.tile_size, ty + split.tile_size))
+    return by_name
+
+
+def test_spatial_strip_split_admits_valid_work():
+    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), seed=3)
+    assert split.kept_tiles["train"] > 0
+    assert split.kept_tiles["val"] > 0
+    assert 0.0 < split.realized_fractions["val"] < 1.0
+
+
+def test_spatial_strip_split_accounts_for_every_tile():
+    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), seed=3)
+    total = (sum(split.kept_tiles.values())
+             + split.tiles_dropped_past_extent + split.tiles_dropped_outside_regions)
+    assert total == split.total_tiles
+
+
+def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
+    width, height = 4000, 3000
+    split = spatial_strip_split(width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0), seed=5)
+    by_name = _kept_tiles(split, width, height)
+    train, val = by_name["train"], by_name["val"]
+    assert train and val
+    for tx0, ty0, tx1, ty1 in train:
+        for vx0, vy0, vx1, vy1 in val:
+            gap_x = max(vx0 - tx1, tx0 - vx1, 0)
+            gap_y = max(vy0 - ty1, ty0 - vy1, 0)
+            # Never overlapping, offset on some axis; that offset is the real gap.
+            assert gap_x > 0 or gap_y > 0
+            assert max(gap_x, gap_y) >= split.buffer
+
+
+def test_spatial_strip_split_deterministic():
+    a = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=11)
+    b = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=11)
+    assert a == b
+
+
+def test_spatial_strip_split_buffer_defaults_to_tile_size():
+    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), seed=1)
+    assert split.buffer == 320
+
+
+def test_spatial_strip_split_explicit_buffer_below_tile_size_refuses():
+    with pytest.raises(ValueError, match="buffer"):
+        spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), seed=1, buffer=100)
+
+
+def test_spatial_strip_split_refuses_when_no_tile_fits_extent():
+    with pytest.raises(ValueError, match="no tile fits"):
+        spatial_strip_split(100, 100, 320, 0.2, fractions=(0.8, 0.2, 0.0), seed=1)
+
+
+def test_spatial_strip_split_refuses_when_geometry_is_too_tight():
+    # An image barely larger than one tile: nothing survives the buffer margin on a second side.
+    with pytest.raises(ValueError, match="no strip layout"):
+        spatial_strip_split(340, 340, 320, 0.2, fractions=(0.8, 0.2, 0.0), seed=1)
+
+
+def test_spatial_strip_split_fractions_must_sum_to_one():
+    with pytest.raises(ValueError, match="sum to 1.0"):
+        spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.2, 0.2), seed=1)
+
+
+def test_spatial_strip_split_three_way_populates_every_side():
+    split = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=3)
+    assert split.kept_tiles["train"] > 0
+    assert split.kept_tiles["val"] > 0
+    assert split.kept_tiles["test"] > 0
+
+
+def test_spatial_strip_split_realized_fractions_stay_near_requested():
+    # A generous but real tolerance: catches a regression to arbitrary quantization, not
+    # merely "nonzero on every side".
+    split = spatial_strip_split(16000, 12000, 320, 0.2, fractions=(0.7, 0.2, 0.1), seed=3)
+    for name, requested in zip(split.split_names, split.requested_fractions):
+        assert abs(split.realized_fractions[name] - requested) < 0.05
+
+
+def test_spatial_strip_identity_roundtrip():
+    identity = spatial_strip_identity("mosaic_north_02", "strip_x_1")
+    assert identity == "mosaic_north_02::strip_x_1"
+    assert stem_of_spatial_identity(identity) == "mosaic_north_02"
+
+
+def test_stem_of_spatial_identity_passes_through_a_non_spatial_string():
+    assert stem_of_spatial_identity("plain_stem_0_0") == "plain_stem_0_0"
+
+
+def test_image_extent_from_labels(tmp_path):
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir()
+    json_io.write_annotations(
+        str(labels_dir / "mosaic1.json"),
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 4000, 3000,
+    )
+    assert image_extent_from_labels(labels_dir, "mosaic1") == (4000, 3000)
+    assert image_extent_from_labels(labels_dir, "missing") is None
