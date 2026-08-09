@@ -242,9 +242,8 @@ def export_aggregated_csv(
     so the count operating point's validity is read from each ``operating_point.json`` sidecar and
     floored against ``measurement_validated``. A bucket produced by a tiled run gates on its
     ``tile_size`` too, the same operating point's other gating dimension: the tile edge scales the
-    per-image counts this per-plant value aggregates, so a fabricated fallback with no persisted
-    training geometry and no explicit caller override refuses here. Untiled buckets are never gated
-    on it.
+    per-image counts this per-plant value aggregates, so a run with no persisted training geometry
+    and no explicit caller override refuses here. Untiled buckets are never gated on it.
 
     For an ordinal/regression trait, pass both ``pred_dirs`` (the buckets holding
     ``ordinal_operating_point.json``/``regression_operating_point.json``, written by
@@ -345,10 +344,8 @@ def export_aggregated_csv(
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
-    # The single measurement_validated column must reflect the floor across every gated dimension:
-    # with acknowledge_unvalidated a fabricated tile scale can still reach here, and stamping the
-    # count operating point's own (possibly real) reference alone would report a partially
-    # acknowledged-provisional delivery as fully validated.
+    # The column must reflect the floor across every gated dimension: with acknowledge_unvalidated
+    # an ungrounded tile scale can still reach here, misreporting a partial delivery as validated.
     stamp["measurement_validated"] = (VALIDATED_FALSE if gate.unvalidated
                                       else gate.stamp["measurement"])
     fieldnames = [
