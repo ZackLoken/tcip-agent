@@ -812,17 +812,31 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     # back to "default" regardless of what the buckets actually carry. A single bucket's own
     # stamp is used; a mixed set of sources across buckets is not resolvable to one fact, so it
     # falls back to the honest default.
+    from tcip_mcp.pipelines.resolution import VALIDATED_EXPLICIT_GEOMETRY, VALIDATED_PERSISTED_GEOMETRY
+
     tile_sizes = {((sc.get("operating_point") or {}).get("tile_size") or {}).get("value")
                   for sc in sidecars.values()}
-    tile_size_sources = {((sc.get("operating_point") or {}).get("tile_size") or {}).get("source")
-                         for sc in sidecars.values()}
+    # From validated_against, not the bare source field, which a native-ratio edge shares with a
+    # real persisted one: reading source alone would silently re-validate native-ratio on review.
+    tile_size_valid_refs = {
+        ((sc.get("operating_point") or {}).get("tile_size") or {}).get("validated_against")
+        for sc in sidecars.values()}
     tiled_vals = {((sc.get("operating_point") or {}).get("tiled") or {}).get("value")
                  for sc in sidecars.values()}
     tiled_sources = {((sc.get("operating_point") or {}).get("tiled") or {}).get("source")
                      for sc in sidecars.values()}
     review_tile_size = next(iter(tile_sizes)) if len(tile_sizes) == 1 else None
-    review_tile_size_source = (next(iter(tile_size_sources)) if len(tile_size_sources) == 1
-                               and review_tile_size is not None else "default")
+    review_tile_size_valid_ref = (
+        next(iter(tile_size_valid_refs)) if len(tile_size_valid_refs) == 1
+        and review_tile_size is not None else None)
+    if review_tile_size_valid_ref == VALIDATED_PERSISTED_GEOMETRY:
+        review_tile_size_source = "derived"
+    elif review_tile_size_valid_ref == VALIDATED_EXPLICIT_GEOMETRY:
+        review_tile_size_source = "explicit"
+    elif review_tile_size is not None:
+        review_tile_size_source = "native_ratio"
+    else:
+        review_tile_size_source = "default"
     review_tiled = next(iter(tiled_vals)) if len(tiled_vals) == 1 else None
     review_tiled_source = (next(iter(tiled_sources)) if len(tiled_sources) == 1
                            and review_tiled is not None else "default")
