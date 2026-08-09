@@ -60,6 +60,7 @@ VISION_AGENT_PLAN.md
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.testmondata
 *.cover
 htmlcov/
 .coverage
