@@ -109,6 +109,34 @@ def resolve_model_identity(
     return {"checkpoint": ckpt.stem, "sha256": sha, "experiment_id": exp}
 
 
+def read_checkpoint_data_config(checkpoint_path: str | Path) -> dict:
+    """The checkpoint's own stamped ``config["data"]`` (tiling/subject/attribute/id_map/...).
+
+    Read via ``weights_only=True`` (the same safe partial read :func:`resolve_model_identity` uses
+    for ``experiment_id``), without a full model rebuild: a light config sniff for a caller that
+    only needs the training-run facts already stamped on the checkpoint, not its weights. ``{}`` for
+    a checkpoint with no ``config`` key, or one that fails even this safe read (logged, not raised):
+    a foreign/raw checkpoint legitimately carries neither.
+    """
+    ckpt = Path(checkpoint_path)
+    if not ckpt.is_file():
+        return {}
+    try:
+        import torch  # local checkpoint the caller is deliberately reading
+
+        payload = torch.load(ckpt, map_location="cpu", weights_only=True)
+        if isinstance(payload, dict):
+            data_cfg = (payload.get("config") or {}).get("data")
+            if isinstance(data_cfg, dict):
+                return data_cfg
+    except Exception as exc:
+        logger.warning(
+            "could not read config[\"data\"] from checkpoint %s (%s); treating it as carrying "
+            "none, the same honest fallback a genuinely-foreign checkpoint gets.", ckpt, exc,
+        )
+    return {}
+
+
 class ModelRegistry:
     """Simple file-based model registry in .tcip/models/."""
 
