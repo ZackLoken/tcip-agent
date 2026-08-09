@@ -126,7 +126,7 @@ def test_resolve_operating_point_defaults_unrecorded_count_objective_instead_of_
 
     _write_spec(tmp_path, "undecided", {"delivers": ["leaf_length"]})
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
-    bundle = OP.resolve_operating_point("undecided", dataset_hash="h1", calibration_records=[])
+    bundle = OP.resolve_operating_point("undecided", tiled=True, dataset_hash="h1", calibration_records=[])
     param = bundle.params["count_objective"]
     assert param._raw == COUNT_UNBIASED
     assert param.source == "default"
@@ -140,7 +140,7 @@ def test_resolve_operating_point_stamps_explicit_count_objective_as_trait_author
 
     _write_spec(tmp_path, "decided", {"delivers": ["leaf_length"], "count_objective": "detection_f1"})
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
-    bundle = OP.resolve_operating_point("decided", dataset_hash="h1", calibration_records=[])
+    bundle = OP.resolve_operating_point("decided", tiled=True, dataset_hash="h1", calibration_records=[])
     param = bundle.params["count_objective"]
     assert param._raw == "detection_f1"
     assert param.derived_from == "trait-authored"
@@ -152,7 +152,7 @@ def test_resolve_operating_point_refuses_unregistered_count_objective(tmp_path: 
     _write_spec(tmp_path, "custom", {"delivers": ["leaf_length"], "count_objective": "a_brand_new_objective"})
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
     with pytest.raises(ValueError, match="no registered picker"):
-        OP.resolve_operating_point("custom", dataset_hash="h1", calibration_records=[])
+        OP.resolve_operating_point("custom", tiled=True, dataset_hash="h1", calibration_records=[])
 
 
 def test_config_spec_every_registered_objective_is_accepted(tmp_path: Path):
