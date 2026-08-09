@@ -157,7 +157,7 @@ def test_review_confirmed_fails_closed_without_a_staged_conf_floor():
     # With no staged_conf_floor asserted, even a geometrically perfect reference cannot validate:
     # the honest default, not a silent pass. Same fixture as the passing case above.
     b = resolve_operating_point_from_review(_good_review_state(), "catkin",
-                                            bucket_identities=[_IDENTITY_A])
+                                            tiled=True, bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
     assert b.is_shippable is False
@@ -167,7 +167,7 @@ def test_review_confirmed_fails_closed_without_a_staged_conf_floor():
 def test_conf_censored_review_reference_refused_when_picked_conf_at_or_below_the_staged_floor():
     # The asserted floor sits at the picked conf: the sweep could not have seen anything below
     # it, so it must refuse even though the split is disjoint and the counts genuinely agree.
-    b = resolve_operating_point_from_review(_good_review_state(), "catkin", staged_conf_floor=0.95,
+    b = resolve_operating_point_from_review(_good_review_state(), "catkin", tiled=True, staged_conf_floor=0.95,
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
@@ -311,7 +311,7 @@ def test_previously_unlabeled_session_with_marked_misses_can_still_validate():
     # tolerance.
     state = _dense_review_state(gt_preexisting=False, miss_pattern=[1] * N_IMAGES,
                                 fp_pattern=[2] * N_IMAGES, objects_per_image=250)
-    b = resolve_operating_point_from_review(state, "catkin", staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(state, "catkin", tiled=True, staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
@@ -323,7 +323,7 @@ def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly():
     # object, must fail with an honest reason naming the new tool rather than falling through to
     # the generic "counts didn't agree" message.
     state = _dense_review_state(gt_preexisting=False, fp_pattern=[1] * N_IMAGES)
-    b = resolve_operating_point_from_review(state, "catkin", staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(state, "catkin", tiled=True, staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
@@ -333,7 +333,7 @@ def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly():
 def test_gt_backed_session_passes_unaffected_by_the_coverage_gate():
     # A genuinely GT-backed review session (gt_preexisting=True, the default) must still pass,
     # unaffected by the adjudication-coverage gate.
-    b = resolve_operating_point_from_review(_good_review_state(), "catkin", staged_conf_floor=0.01,
+    b = resolve_operating_point_from_review(_good_review_state(), "catkin", tiled=True, staged_conf_floor=0.01,
                                             bucket_identities=[_IDENTITY_A])
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
