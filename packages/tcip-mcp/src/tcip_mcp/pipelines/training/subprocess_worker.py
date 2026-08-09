@@ -29,11 +29,16 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict) -> None:
+def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
+                                    replace: bool = False,
+                                    train_native_size: list | None = None) -> None:
     """Best-effort: patch the effective tiling geometry into the durable experiment record's
-    own ``config.json``, a small merge, not a rewrite. Never sinks the run if the experiment
-    directory doesn't exist (experiment tracking is best-effort throughout this path, same as
-    every other write in it)."""
+    own ``config.json``, a small patch of the data section, not a rewrite. ``replace`` swaps
+    the tiling record wholesale instead of merging: an untiled run's record must not keep a
+    stale requested ``tile_size`` a merge would leave behind. ``train_native_size``, when
+    stamped, lands beside it. Never sinks the run if the experiment directory doesn't exist
+    (experiment tracking is best-effort throughout this path, same as every other write in
+    it)."""
     try:
         from tcip_mcp.experiments import experiments_dir
         from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction
@@ -43,7 +48,13 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict) -> Non
             return
         with file_transaction(exp_config_path):
             cfg = json.loads(exp_config_path.read_text())
-            cfg.setdefault("data", {}).setdefault("tiling", {}).update(tiling_cfg)
+            data_cfg = cfg.setdefault("data", {})
+            if replace:
+                data_cfg["tiling"] = dict(tiling_cfg)
+            else:
+                data_cfg.setdefault("tiling", {}).update(tiling_cfg)
+            if train_native_size is not None:
+                data_cfg["train_native_size"] = list(train_native_size)
             atomic_write_json(exp_config_path, cfg)
     except Exception:
         logger.warning("tiling geometry patch-back failed for %s", experiment_id, exc_info=True)
@@ -125,16 +136,22 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
 def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resume_from: str) -> None:
     """The training body, identical in substance to running synchronously in-process, just
     executing in this dedicated process instead."""
+    from tcip_mcp.pipelines.raster_source import configure_gdal_cache
     from tcip_mcp.pipelines.training.generic_trainer import (
-        attach_run, seeded_loader_kwargs, task_collate,
+        attach_run, seeded_loader_kwargs, stamp_effective_data_geometry, task_collate,
     )
     from tcip_mcp.tools.training_tools import _auto_train_val, _dataset_identity, _persist_split_manifest
+
+    # This is its own process entry point: without this the whole run reads through GDAL's
+    # stock cache default instead of the platform budget the server/backend entry points set.
+    configure_gdal_cache()
 
     config = json.loads(Path(config_path).read_text())
     run_obj = attach_run(run_id, config, output_dir)
 
     model_source = config.get("model_source", {})
-    data_cfg = config.get("data", {})
+    # setdefault, not get: the geometry stamp below mutates this dict and must land in config.
+    data_cfg = config.setdefault("data", {})
     train_cfg = config.get("training", {})
     # Task drives collate + measurement routing: the bespoke model_source declares it, falling
     # back to the data section.
@@ -162,28 +179,24 @@ def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resu
         data_cfg["id_map"] = dict(_run_id_map)
         _patch_experiment_config_id_map(experiment_id, _run_subject, _run_attribute, _run_id_map)
 
-    # Resolve the effective tiling geometry (the 224/0.2 defaults used when the tiling dict
-    # omitted them, not just caller-pinned values), only knowable once the dataset is actually
-    # built, so patched into the durable experiment record here rather than before launch.
-    tiling_cfg = data_cfg.get("tiling")
-    if tiling_cfg and tiling_cfg.get("enabled", True):
-        eff_tile = getattr(train_ds, "tile_size", None)
-        eff_overlap = getattr(train_ds, "overlap", None)
-        if eff_tile is not None:
-            tiling_cfg["tile_size"] = int(eff_tile)
-        if eff_overlap is not None:
-            tiling_cfg["overlap"] = float(eff_overlap)
-        _patch_experiment_config_tiling(experiment_id, tiling_cfg)
+    # The effective input geometry is only knowable once the dataset is actually built, so it
+    # is stamped here (into the config every checkpoint embeds) and mirrored to the experiment.
+    stamped = stamp_effective_data_geometry(data_cfg, train_ds)
+    _patch_experiment_config_tiling(experiment_id, stamped["tiling"],
+                                    replace=stamped["tiling_replaced"],
+                                    train_native_size=stamped["train_native_size"])
 
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from torch.utils.data import DataLoader
 
-    sampler = build_sampler(config.get("sampler", "random"), train_ds)
-    # Seed the loader's shuffle/worker RNG from the run's own (parent-resolved) seed, the
-    # same value set_seed uses, so a resumed run's data order is reproducible too.
-    loader_kwargs = seeded_loader_kwargs(config.get("seed"))
     batch_size = train_cfg.get("batch_size", 2)
     num_workers = train_cfg.get("num_workers", 0)
+    # Seeds the loader's shuffle/worker RNG from the run's own seed and scales each worker's
+    # own GDAL cache share by num_workers.
+    loader_kwargs = seeded_loader_kwargs(config.get("seed"), num_workers=num_workers)
+    # Built after the loader context is known: read order depends on the worker regime too.
+    sampler = build_sampler(config.get("sampler", "random"), train_ds,
+                            num_workers=num_workers, batch_size=batch_size)
     train_loader = DataLoader(
         train_ds, batch_size=batch_size,
         shuffle=(sampler is None), sampler=sampler,
