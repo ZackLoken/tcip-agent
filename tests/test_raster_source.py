@@ -491,6 +491,36 @@ def test_a_gdal_source_accounts_no_resident_pixels(tmp_path: Path) -> None:
         assert src.resident_bytes == 0
 
 
+def test_a_photographic_source_accounts_its_peak_resident_frames(tmp_path: Path) -> None:
+    """read_region materializes an ndarray copy beside the PIL frame; the pool records
+    resident_bytes once at insert, so the value must already cover that peak, and it must not
+    change after the copy exists or the pool's byte accounting drifts."""
+    path, _ = _photographic(tmp_path)
+    with open_raster(path, 3) as src:
+        frame_bytes = src.width * src.height * src.num_channels * src.dtype.itemsize
+        before = src.resident_bytes
+        src.read_region(Rect(0, 0, src.width, src.height))
+        assert src.resident_bytes == before
+        assert src.resident_bytes >= 2 * frame_bytes
+
+
+@pytest.mark.parametrize("name", sorted(_BACKENDS))
+def test_opens_windowed_names_the_backends_that_open_without_decoding(
+        tmp_path: Path, name: str) -> None:
+    """Only GDAL-served rasters and memory-mapped .npy open without a whole decode; an eager
+    open of anything else would decode every pixel at construction time."""
+    build, _backend = _BACKENDS[name]
+    source, num_channels = build(tmp_path)
+    expected = name in ("gdal_tiff", "npy")
+    assert raster_source.opens_windowed(source, num_channels) is expected
+
+
+def test_opens_windowed_answers_false_for_an_unopenable_tiff(tmp_path: Path) -> None:
+    path = tmp_path / "broken.tif"
+    path.write_bytes(b"II*\x00garbage")
+    assert raster_source.opens_windowed(path, 3) is False
+
+
 # ── Reads that were always valid and must stay so ────────────────────────
 
 
