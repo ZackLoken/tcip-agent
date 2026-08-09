@@ -94,7 +94,7 @@ def test_no_staged_conf_floor_asserted_fails_closed():
     # Identical geometry to the passing case above, but the caller never asserts a floor, so this
     # must fail closed (the honest default), not silently validate.
     cal, hold = _cal_holdout(fp_score=0.05)
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold)
     conf = b.get("conf")
     assert conf.validated_against == "false"
@@ -107,7 +107,7 @@ def test_reference_truncated_above_the_picked_conf_is_refused():
     # Same geometry as the passing case, but the asserted floor sits at the picked conf, so the
     # sweep could not have seen anything below it, and it must refuse even though the holdout bias is 0.
     cal, hold = _cal_holdout(fp_score=0.05)
-    b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.95)
     conf = b.get("conf")
     assert conf.validated_against == "false"
