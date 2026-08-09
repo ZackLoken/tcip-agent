@@ -65,6 +65,51 @@ def test_run_inference_tile_flag(tmp_path):
     assert len(r2["results"]) == 1  # non-tiled path still works
 
 
+def test_predict_tiled_whole_decode_channel_mismatch_refuses(tmp_path):
+    """The channel-count refusal promoted to the whole-decode path (:class:`predict_tiled`'s path/
+    ``BandGroupRef`` source kind, not just the windowed-reader kind) must be built on
+    ``derivations.probe_channels`` (the file's own real band count, independently probed), never on
+    ``load_image``'s output: ``load_image(path, self.in_chans)`` is already told what channel count
+    to coerce toward before it returns anything, so comparing against its own output would never
+    actually catch a mismatch. A real 5-band ``.npy`` file against a 3-``in_chans`` predictor is the
+    proof: this must raise before any tile is read, not silently route/coerce the file to 3 bands."""
+    import numpy as np
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+
+    arr = np.zeros((128, 128, 5), dtype=np.uint8)
+    path = tmp_path / "five_band.npy"
+    np.save(path, arr)
+
+    p = GenericPredictor.__new__(GenericPredictor)
+    p.task = "detection"
+    p.score_threshold = 0.0
+    p.max_dets = None
+    p.in_chans = 3
+
+    with pytest.raises(ValueError, match="channel"):
+        p.predict_tiled(str(path), tile_size=TILE)
+
+
+def test_predict_tiled_whole_decode_admits_a_photographic_rgba_file_at_in_chans_3(tmp_path):
+    """The rail must admit valid work, not only reject invalid work: an ordinary RGBA PNG (any
+    photo with an alpha channel, common) has no real 4-vs-3 mismatch, since ``load_image``'s own
+    PIL conversion coerces it to RGB before the model ever sees it, the same as the untiled
+    ``predict``/``predict_batch`` paths already do. ``probe_channels`` alone can't see that
+    coercion (it reads the file's raw, uncoerced mode), so the promoted refusal must not fire here
+    or every alpha-channel photo would abort a tiled run that untiled inference handles fine."""
+    from PIL import Image
+
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+
+    ckpt = _detection_checkpoint(tmp_path)
+    path = tmp_path / "rgba.png"
+    Image.new("RGBA", (128, 128), (10, 20, 30, 255)).save(path)
+
+    pred = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    result = pred.predict_tiled(str(path), tile_size=TILE)
+    assert result["width"] == 128 and result["height"] == 128
+
+
 def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path):
     """When the checkpoint's own config carries a recorded id_map (stamped at train time by
     subprocess_worker.py), run_inference's decode/record map uses it, never re-derived from a
