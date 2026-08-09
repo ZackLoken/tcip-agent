@@ -259,7 +259,7 @@ def assign_detections_to_plants(
 ) -> list[DetectionAssignment]:
     """One :class:`DetectionAssignment` per box in a ``predict_tiled``-shaped ``detections`` result
     (``{"boxes": [[x1, y1, x2, y2], ...], ...}`` in full-mosaic pixel space, as returned by
-    :meth:`GenericPredictor.predict_tiled` / ``predict_tiled_from_reader``).
+    :meth:`GenericPredictor.predict_tiled` for either of its source kinds).
 
     Each detection's own location is its box centroid ``((x1+x2)/2, (y1+y2)/2)``: the point the
     detector's own geometry most directly stands for, resolved to (lat, lon) via
