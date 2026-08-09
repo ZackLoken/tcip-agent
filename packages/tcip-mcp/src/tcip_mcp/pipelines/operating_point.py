@@ -400,8 +400,10 @@ def _train_disjointness(experiment_id: str | None, cal_ids: set, hold_ids: set) 
     that's always available regardless of grouping: exact stem-set overlap between the training
     run's own stems and the calibration/holdout stem set (``leaked_stems``). ``group_check``
     records how much of the check was group-level: ``"performed"`` (every stem grouped),
-    ``"partial"`` (some stems fell back to exact-stem), or ``"not_performed"`` (no group policy
-    resolved at all, wholly exact-stem). A leak found by either mechanism blocks ``passed``.
+    ``"partial"`` (some stems fell back to exact-stem), ``"not_performed"`` (no group policy
+    resolved at all, wholly exact-stem), or ``"spatial_strip"`` (a within-image split, checked
+    by source stem underneath each region identity). A leak found by either mechanism blocks
+    ``passed``.
     """
     if experiment_id is None:
         return {"checked": False, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
@@ -422,10 +424,23 @@ def _train_disjointness(experiment_id: str | None, cal_ids: set, hold_ids: set) 
         # anything to compare, so this is genuinely unresolvable, not merely ungrouped.
         return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
 
-    from tcip_mcp.pipelines.data.splits import GROUP_KEY_FNS, resolve_group_key_fn
+    from tcip_mcp.pipelines.data.splits import (
+        GROUP_KEY_FNS, resolve_group_key_fn, stem_of_spatial_identity,
+    )
 
     cal_hold_stems = sorted(cal_ids | hold_ids)
     group_by = split.get("group_by")
+
+    if group_by == "spatial_strip":
+        # train_stems are per-region identities, not bare stems; only a same-source reference is
+        # caught here (region-level overlap against the reserved test area is not checked yet).
+        train_source_stems = {stem_of_spatial_identity(s) for s in train_stems}
+        leaked_groups = sorted(train_source_stems & set(cal_hold_stems))
+        return {
+            "checked": True, "unresolvable": False, "leaked_groups": leaked_groups,
+            "leaked_stems": [], "group_check": "spatial_strip",
+        }
+
     persisted_map = split.get("group_key_map") if group_by == "explicit_map" else None
 
     covered_train: list[str] = []
